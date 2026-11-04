@@ -43,19 +43,49 @@
 #            tool's refusal of an update older than 8 days is the backstop for a
 #            run that never failed loudly.
 #
-# THE KEY.  The App "Shekel updates" (Contents and Pull requests read and
-# write, installed on Shekel alone; ruling plan#2448), its private key the
-# UPDATE_APP_KEY secret of the deployment environment ``update``, whose
-# deployment branches are main alone (ruling plan#2472), and its Client ID
-# the UPDATE_APP_CLIENT_ID repository variable.  GitHub refuses a job that
-# names the environment on any other ref, so only a run on main reaches the
-# key, whatever a branch's copy of this file says; each keyed run leaves a
-# deployment record.  GitHub's own action mints an installation token for
-# one job, scoped to this repository and those two permissions, and revokes
-# it when the job ends, as CI's landing job mints the tracker's (ruling
-# balance:R-BAL311).  Only the mint is handed the key and only the step that
-# uses it the token.  The workflow's own GITHUB_TOKEN could not do this: a
-# pull request it opens or a queue entry it makes starts no workflow run.
+# THE KEY.  The App "Shekel updates" (Contents, Pull requests and Workflows
+# read and write, installed on Shekel alone; rulings plan#2448, plan#2807),
+# its private key the UPDATE_APP_KEY secret of the deployment environment
+# ``update``, whose deployment branches are main alone (ruling plan#2472),
+# and its Client ID the UPDATE_APP_CLIENT_ID repository variable.  GitHub
+# refuses a job that names the environment on any other ref, so only a run on
+# main reaches the key, whatever a branch's copy of this file says; each keyed
+# run leaves a deployment record.  GitHub's own action mints an installation
+# token for one job, scoped to this repository and to Contents and Pull
+# requests alone, and revokes it when the job ends, as CI's landing job mints
+# the tracker's (ruling balance:R-BAL311).  Only the mint is handed the key
+# and only the step that uses it the token.  The workflow's own GITHUB_TOKEN
+# could not do this: a pull request it opens or a queue entry it makes starts
+# no workflow run.
+#
+# Those two permissions are what each job was measured to need, act by act,
+# on a public probe repository whose dev carried a copy of dev's ruleset
+# (plan#2769, 2026-11-04; ruling plan#2477).  Without Contents write GitHub
+# refused the publish its first tree and a branch delete, and without Pull
+# requests write its pull requests' opening and refresh; it moved its branch
+# across a workflow edit on dev with Workflows held by neither its token nor
+# the App.  The queue's ``enqueuePullRequest`` was refused under every set
+# tried without Contents write, Merge queues write among them, and accepted
+# under Contents write, with or without Pull requests write, after which
+# GitHub's merge queue merged each pull request so queued.  Its comments and
+# retargets were refused under every set tried without Pull requests write.
+# No read either job makes needs a permission, the repository being public:
+# under the metadata alone, each read what the developer's own token read in
+# every field the job uses, check results and commit statuses included.
+#
+# WORKFLOWS (ruling plan#2807).  GitHub puts a pull request that edits a file
+# under .github/workflows/, as Dependabot's Actions updates do, in the merge
+# queue only when the App holds Workflows: it reads the App's installation
+# there, not the token, so a token asking for Contents and Pull requests alone
+# was refused while the App lacked Workflows and queued one once the App held
+# it (measured; one adding a composite action under .github/actions/ was
+# queued while the App lacked it).  A token without Workflows cannot write a
+# workflow file itself, through the API or by a push, while the App holds it
+# (measured): so no token either job mints can, and only the key could mint
+# one that can.
+# That GitHub reads the App here is measured, not documented; were it to read
+# the token instead, the queue would fail on such a pull request, which the
+# alert reports, and queue nothing it should not.
 #
 # WHOSE CODE.  GitHub runs a schedule only from main, so this workflow runs
 # from the release that brings it: refresh runs dev's refresh, publish and

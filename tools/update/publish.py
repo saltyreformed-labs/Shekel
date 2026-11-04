@@ -79,9 +79,9 @@ _PROPOSING = (LOCK, PYPROJECT)
 #: A page of the pull requests closed unmerged into ``dev`` from one branch, newest first,
 #: each with its head, whether it came from a fork, and who closed it last
 #: (``timelineItems(last: 1)``: the newest close, with no page of a pull request's events to
-#: walk).  It is read under the token's Pull requests permission, as the queue reads its
-#: pull requests' timelines (:mod:`tools.update.queue`); whether a GraphQL read needs it is
-#: not documented (GitHub's permissions for Apps list REST alone, read 2026-11-03).
+#: walk).  Like every read the publish and the queue make, it needs none of the token's
+#: permissions, the repository being public (measured, ``.github/workflows/updates.yml``,
+#: THE KEY).
 _CLOSED = """query($owner: String!, $name: String!, $branch: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     pullRequests(headRefName: $branch, baseRefName: "%s", states: CLOSED, first: 100,

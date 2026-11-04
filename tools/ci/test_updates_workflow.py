@@ -89,9 +89,10 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
         key is and which GitHub refuses a job on any ref but main (ruling plan#2472); each holds
         exactly its keys, so no job-level ``env`` or ``defaults`` reaches its steps; it checks
         out the workflow's own commit; the key goes to the mint alone, narrowed to the two
-        permissions the App holds, no other step naming a secret by attribute or by index
-        (``secrets['UPDATE_APP_KEY']``), and the token to the one step after it, which runs the
-        job's module."""
+        permissions each job was measured to need, Workflows never among them (``updates.yml``,
+        THE KEY; rulings plan#2477, plan#2807), no other step naming a secret by attribute or by
+        index (``secrets['UPDATE_APP_KEY']``), and the token to the one step after it, which runs
+        the job's module."""
         jobs = self._workflow()["jobs"]
         assert {name: job["environment"] for name, job in jobs.items()
                 if "environment" in job} == dict.fromkeys(KEYED, "update")

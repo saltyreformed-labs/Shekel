@@ -55,7 +55,10 @@
 # longest runs are every successful job of every run of this workflow created
 # 2026-10-01 to 2026-10-30, on ubuntu-24.04 (212 runs, every attempt, read
 # from GitHub's jobs API; a job GitHub lists again, unchanged, under a re-run
-# attempt counts once), each job's figure on its own limit's line.
+# attempt counts once), each job's figure on its own limit's line.  Re-checked
+# on ubuntu-26.04 with every install uncached (run 41845380601, 2026-11-04):
+# each job took under half its limit, and the image job, with no run before
+# it, is sized from that one.
 
 name: CI
 
@@ -587,7 +590,7 @@ jobs:
   # and no psycopg-c are each refused.
   image:
     runs-on: ubuntu-26.04
-    timeout-minutes: 10  # no run of its own; the release build's longest of 200, cache on: 3.38 min
+    timeout-minutes: 5  # longest of 1 run: 1.35 min (run 41845380601)
     env:
       # The local name the build loads the image under; it is never pushed.
       IMAGE: shekel:ci

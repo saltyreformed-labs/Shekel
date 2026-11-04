@@ -284,8 +284,8 @@ def test_every_step_needing_it_is_named_however_far_down_and_past_the_step_hande
 
 
 def test_a_step_waiting_on_a_pause_pulls_nothing_else_it_needs():
-    """C needs H and E: pulling E would bring C no nearer while H is paused, so E takes its own
-    turn, at #3 here, and is not moved ahead of B."""
+    """Ruling plan#2823: C needs H and E, and E keeps its own turn, at #3 here, and is not moved
+    ahead of B."""
     cards = _cards(_card(1, blocked_by=(2, 4)), _card(3), _card(4), _card(2, priority="On hold"))
     assert _handed_out([1, 3, 4, 2], cards) == [3, 4]
 

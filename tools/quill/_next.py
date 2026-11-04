@@ -20,8 +20,9 @@ closes.  With nothing to hand out for it, the next step takes its turn.
 **A pause is never pulled through.**  A step On hold has no turn and is never handed out, and a
 leaf inherits a pause from a step above it (:func:`_state.held_at`).  A step that needs one waits
 (ruling plan#1830: "waits, and the tool says so"): it is named, with what it waits on
-(:class:`Waiting`).  Nothing else it needs is pulled ahead, each of those keeping its own turn: the
-developer has chosen that the step not go on yet, so what it needs gains no urgency from it.
+(:class:`Waiting`).  Nothing else it needs is pulled ahead, each of those keeping its own turn
+(ruling plan#2823): the developer has chosen that the step not go on yet, so what it needs gains
+no urgency from it, and it moves up at once when the mark is lifted.
 
 ``--arc`` hands out the first step of that arc in the same walk, so it never hands out another
 arc's step, and a step needing one simply passes.  Split out of :mod:`_state`, which On hold would

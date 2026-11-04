@@ -65,7 +65,9 @@ figures stay out of the repository (ruling R-BAL132): keep the report in the han
 
 Exit status: 0 every difference is an expected one and every control fired; 1 a source cell, a
 cell or an account total is UNEXPLAINED, each named in the report; 2 the run measured nothing (a
-control did not fire, or the run's own read disagreed with the suite's).
+control did not fire, the run's own read disagreed with the suite's, or the worked-out read
+refused an owner, each named in the report; or the run could not start or crashed part way, its
+traceback on standard error, ``exit_status``).
 Outside pytest's collection, like its ``verify_*`` siblings.
 """
 
@@ -87,6 +89,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
 # above; there is no import order that resolves ``app`` before it runs.
 # pylint: disable=wrong-import-position
+from tests.manual import exit_status
+
+exit_status.arm(__name__)
+
 import time_machine
 from sqlalchemy import or_, select
 
@@ -694,8 +700,8 @@ def measure(report):
             fired = fired and controls[1]
     say(*control_lines)
     if not control_lines or not fired:
-        say("!  a control did not fire, or none ran: this run measured "
-            "nothing")
+        say("!  a control did not fire, none ran, or an owner was not read: "
+            "this run measured nothing")
         return 2
     return status
 
@@ -710,7 +716,9 @@ def _measure_scenario(scenario, skipped, say):
 
     Returns:
         ``(how many things are UNEXPLAINED, (control lines, all fired) or
-        None when no control ran)``.
+        None when no control ran)``.  An owner the read refuses is no
+        difference, so nothing is UNEXPLAINED of it, and the run still exits 2
+        (nothing of that owner was measured), as when its controls cannot run.
     """
     try:
         calendar = calendar_for(scenario.user_id)
@@ -718,7 +726,7 @@ def _measure_scenario(scenario, skipped, say):
     except (PayCalendarError, ValueError) as exc:
         say(f"!  owner {scenario.user_id}, scenario {scenario.id}: the "
             f"worked-out read REFUSED: {exc}")
-        return 1, None
+        return 0, ([f"   scenario {scenario.id} not read: {exc}"], False)
     outcome = compare(ledger, skipped)
     say(*outcome.lines)
     unexplained = outcome.unexplained

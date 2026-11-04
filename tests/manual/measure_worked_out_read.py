@@ -38,7 +38,8 @@ folder.  Outside pytest's collection, like its ``verify_*`` siblings.
 
 Exit status: 0 every owner was measured and each read's count held across its reads; 1 a count
 moved between two reads of the same records (named in the report); 2 the read or the calendar
-refused an owner (named in the report), so that owner was not measured.
+refused an owner (named in the report), so that owner was not measured, or the run could not
+start or crashed part way (its traceback on standard error, ``exit_status``).
 """
 
 import argparse
@@ -58,6 +59,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
 # above; there is no import order that resolves ``app`` before it runs.
 # pylint: disable=wrong-import-position
+from tests.manual import exit_status
+
+exit_status.arm(__name__)
+
 import time_machine
 
 from app import create_app, ref_cache

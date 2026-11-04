@@ -59,7 +59,8 @@ path.
 
 Exit status: 0 every pair byte-identical and every control as it must be; 1 a pair parts (each
 difference one the report must name and explain); 2 nothing was measured: the bench, a deploy,
-an instrument run or a control failed, or the run could not write or read a file, each named.
+an instrument run or a control failed, or the run could not write or read a file, each named, or
+it crashed (``exit_status``).
 """
 
 import pathlib
@@ -74,6 +75,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
 # above; there is no import order that resolves ``tools`` before it runs.
 # pylint: disable=wrong-import-position
+from tests.manual import exit_status
+
+exit_status.arm(__name__)
+
 import psycopg
 
 from tests.manual import _dump_runs

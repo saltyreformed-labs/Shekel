@@ -28,7 +28,8 @@ app logged while it ran).  Keep ``--out`` in the handoff folder: production figu
 the repository (ruling R-BAL132), and a commit or pull request cites the path.
 
 Exit status: the harness's (0, 1 or 2, as its docstring says); 2 also when the bench could not
-be made or its teardown left something, or the deploy step refused the copy.
+be made or its teardown left something, the deploy step refused the copy, or this run or the
+harness crashed or was killed (``exit_status``).
 """
 
 import argparse
@@ -43,6 +44,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
 # above; there is no import order that resolves ``tools`` before it runs.
 # pylint: disable=wrong-import-position
+from tests.manual import exit_status
+
+exit_status.arm(__name__)
+
 from tools.rehearsal import bench, rows
 
 #: The harness, as a path inside the measured worktree.
@@ -91,7 +96,7 @@ def run(dump, out, revision):
                 environment, stdout=log, cwd=state.worktree,
             )
             log.write(measured.stderr)
-        return measured.returncode
+        return exit_status.measurement_status(measured.returncode)
 
 
 def main(argv=None):

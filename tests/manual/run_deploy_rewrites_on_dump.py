@@ -89,7 +89,7 @@ the baseline pair is byte-identical; 1 the journals, a table or the baseline pai
 difference a figure this leaf moves, a question for the developer), a harness run found
 something UNEXPLAINED, or a probe found the read's count moved between two reads; 2 nothing was
 measured: the bench, a deploy, the gate, a control, a harness run, a probe or a baseline failed,
-or the run itself could not write or read a file, each named.
+or the run itself could not write or read a file, each named, or it crashed (``exit_status``).
 """
 
 import pathlib
@@ -104,6 +104,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
 # above; there is no import order that resolves ``tools`` before it runs.
 # pylint: disable=wrong-import-position
+from tests.manual import exit_status
+
+exit_status.arm(__name__)
+
 import psycopg
 
 from tests.manual import _dump_runs
@@ -540,18 +544,18 @@ def _measure_copies(urls, measuring, say):
     """Run head's harness on base's and head's copies, and its probe on every copy.
 
     Returns:
-        The highest exit status among them.
+        The highest exit status among them (``exit_status.measurement_status``).
     """
     status = 0
     for label in ("base", "head"):
         measured = _measured(_HARNESS, urls[label], f"harness_on_{label}",
                              measuring)
         say(f"head's harness on {label}'s copy: exit {measured}")
-        status = max(status, measured)
+        status = max(status, exit_status.measurement_status(measured))
     for label, url in urls.items():
         measured = _measured(_PROBE, url, f"read_{label}", measuring)
         say(f"head's probe on the {label} copy: exit {measured}")
-        status = max(status, measured)
+        status = max(status, exit_status.measurement_status(measured))
     return status
 
 

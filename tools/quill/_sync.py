@@ -1,6 +1,7 @@
 """What a pass of ``quill sync``'s producer decides over, and its writes of each card's state:
 ONE producer, which ``sync`` runs over every card (:func:`every_card`) and ``watch`` over the
-cards a moved branch names (:func:`decided_over`, :mod:`_watch`).
+cards a moved branch names (:func:`decided_over`, :mod:`_watch`), and which ``quill next`` asks
+how far ``sync`` is behind (:func:`behind`).
 
 A pass decides each step's, finding's and task's open or closed state from git
 (:func:`_state.sync_plan`) and writes each change (:func:`write_states`); the board's Status is

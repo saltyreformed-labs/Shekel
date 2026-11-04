@@ -50,6 +50,9 @@ Usage, with production's locale pinned as ``scripts/test.sh`` pins it::
         --dump <pg_dump -Fc file> --out <a directory that does not exist yet> \\
         --base <the commit the card was claimed from> [--head <commit, default HEAD>]
 
+A commit with no ``uv.lock`` is refused, exit 2: the bench builds a side's venv from its lock
+(ruling plan#2404).
+
 It writes into ``--out``: ``run.txt`` (each deploy's verdict, each pair's and each control's),
 and per instrument and side ``<instrument>_<side>.json`` with its ``_log.txt``, a pair that
 parts as ``<instrument>.diff``, and per control ``control_<side>_<plant>.json`` with its

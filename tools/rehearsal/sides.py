@@ -7,11 +7,12 @@ kit reaches a side, so an operator's ``DATABASE_URL_APP``, ``VALKEY_PASSWORD`` o
 ``SHEKEL_FAKE_TODAY`` cannot.  Two things production gives the app are read from the side's own
 tree (:func:`image_environment`), so a cut that changes them is measured with it: every ``ENV``
 of its ``Dockerfile`` but ``PATH``, and the ``TZ`` its production compose file pins.  The
-rate-limit store is not among them: no side serves a request, and the app names its store in its
-own code (plan#2634), needing only the store's password to make its app, so every side is given
-one no store holds (:data:`_UNHELD_PASSWORD`).  That the store serves the app is graded
-elsewhere: on every pull request against the real store, and at a release by its check after
-the deploy (ruling plan#2473).
+rate-limit store is not among them: neither probe serves a request, and the app names its store
+in its own code (plan#2634), needing only the store's password to make its app, so every side is
+given one no store holds (:data:`_UNHELD_PASSWORD`).  A harness that renders pages in this
+environment turns the limiter off first (``tests/manual/verify_render_surfaces.py``).  That the
+store serves the app is graded elsewhere: on every pull request against the real store, and at a
+release by its check after the deploy (ruling plan#2473).
 
 THE CLOCK IS PINNED at ONE instant for every side: noon of the dump's civil day in base's zone,
 computed once a run (:func:`pinned_instant`), so a run that crosses midnight deploys every side

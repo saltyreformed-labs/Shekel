@@ -13,6 +13,9 @@ measure there.  What they share is here, once:
   :data:`~tests.manual.run_pinned.IMPORTED` line), so a pair that reads alike cannot be one
   tree's code measured twice;
 * **a pair's comparison** (:func:`parted`), byte for byte.
+
+``run_worked_out_ledger_on_dump.py`` measures one side with no pair, and takes only that side's
+environment from here (:func:`side_environment`).
 """
 
 import argparse

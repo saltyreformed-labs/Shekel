@@ -37,7 +37,7 @@ and 2 when it cannot open the script, so neither reads as a refusal.
 
 **It is READ-ONLY under production's configuration, as the release kit runs
 it** (``FLASK_ENV=production``, in the side environment
-``tools/rehearsal/rows.py`` builds): ``create_app`` writes nothing on that
+``tools/rehearsal/sides.py`` builds): ``create_app`` writes nothing on that
 start, and :func:`main` opens its transaction ``READ ONLY``, so the database
 refuses any write the measure might send, and rolls it back on the way out.
 **Under the development configuration it is not**: with ``FLASK_ENV`` unset or

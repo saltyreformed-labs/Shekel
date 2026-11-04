@@ -36,7 +36,6 @@ harness crashed or was killed (``exit_status``).
 """
 
 import argparse
-import os
 import pathlib
 import secrets
 import sys
@@ -51,8 +50,9 @@ from tests.manual import exit_status
 
 exit_status.arm(__name__)
 
+from tests.manual import _dump_runs
 from tools.rehearsal import bench
-from tools.rehearsal.sides import deploy, image_environment, side_environment
+from tools.rehearsal.sides import deploy, image_environment
 
 #: The harness, as a path inside the measured worktree.
 _HARNESS = pathlib.Path("tests") / "manual" / "verify_worked_out_ledger.py"
@@ -110,12 +110,8 @@ def run(dump, out, revision):
         )
         if refused is not None:
             return 2
-        environment = {
-            **side_environment(state, state.url, secret),
-            "PATH": os.pathsep.join((str(pathlib.Path(sys.executable).parent),
-                                     "/usr/bin", "/bin")),
-        }
-        return _measure(state, environment, moment, out)
+        return _measure(
+            state, _dump_runs.side_environment(state, state.url, secret), moment, out)
 
 
 def main(argv=None):

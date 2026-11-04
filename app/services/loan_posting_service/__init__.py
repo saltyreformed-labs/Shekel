@@ -57,7 +57,7 @@ keep working unchanged:
   one reconcile), the loan-GLOBAL all-scenarios sync, the duplicate translation,
   and the historical backfill.
 * :mod:`._linked_ledger` -- the grouped reads over a loan's linked ledger the
-  sync's E1a checks and the display's configured-loan guard are built on.
+  sync's E1a checks are built on.
 * :mod:`._display` -- the loan-detail page's two surfaces, both read off the
   walk.  This package answers no balance: the two sum-of-postings balance
   readers it once held (``confirmed_loan_balance_at`` /

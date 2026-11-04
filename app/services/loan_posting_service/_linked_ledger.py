@@ -1,11 +1,7 @@
 """Shared read primitives over a loan's linked-ledger postings.
 
-The low-level queries the display's configured-loan guard in :mod:`._display`
-and the sync's E1a checks in :mod:`._sync` are built on:
+The low-level queries the sync's E1a checks in :mod:`._sync` are built on:
 
-* :func:`_has_opening_posting` -- the "is this loan configured in this scenario"
-  sentinel a posting read guards on before it trusts a ``$0.00`` (an
-  unconfigured loan answers ``None``, not a misleading zero).
 * :func:`_visible_nets` -- the one grouped ``(entry_date, net)`` load that is the
   posted side of the checked-projection assert (plan step E1a).
 * :func:`_movement_nets_by_date` -- the per-``(loan-side movement, entry_date)``
@@ -27,49 +23,9 @@ from datetime import date
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import PostingKindEnum, PostingSourceEnum
+from app.enums import PostingSourceEnum
 from app.extensions import db
 from app.models.journal_entry import JournalEntry, Posting
-
-
-def _has_opening_posting(linked_ledger_id: int, scenario_id: int) -> bool:
-    """Return whether an OPENING leg is posted on a loan's linked ledger.
-
-    The configured-loan test the ``None`` sentinel rests on.  A loan gets
-    exactly one OPENING-kind leg on its linked ledger per scenario -- the
-    origination anchor correction, whose ``owed_before`` is zero and whose
-    linked leg is ``-original_principal`` (always non-zero for a real loan, so
-    always posted; ``ledger_lines._loan_anchors._loan_anchor_correction_target``).  Its
-    absence means the loan is not configured in this scenario (no
-    :class:`~app.models.loan_params.LoanParams`, or a what-if the opening was
-    never posted into), which the reader reports as ``None`` -- routing the
-    caller to its needs-setup path, never to a misleading ``$0``.
-
-    Scoped to the linked ledger so the opening's OTHER leg (the
-    ``+original_principal`` on the per-loan opening-equity account, same kind) is
-    not what matches; scoped to the scenario so a loan opened in the baseline
-    does not read as configured in a what-if it was never posted into.
-
-    Args:
-        linked_ledger_id: The loan's linked ledger account id
-            (:func:`app.services.posting_service._ledger_account_for`).
-        scenario_id: The budget scenario to scope to.
-
-    Returns:
-        ``True`` when an OPENING-kind posting exists on the linked ledger in the
-        scenario, else ``False``.
-    """
-    opening_kind_id = ref_cache.posting_kind_id(PostingKindEnum.OPENING)
-    return db.session.query(
-        db.session.query(Posting.id)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            Posting.ledger_account_id == linked_ledger_id,
-            Posting.posting_kind_id == opening_kind_id,
-            JournalEntry.scenario_id == scenario_id,
-        )
-        .exists()
-    ).scalar()
 
 
 def _linked_posting_nets(

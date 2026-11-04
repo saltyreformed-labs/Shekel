@@ -168,8 +168,10 @@ class LoanLedgerWalk:
         ``LoanParams`` walks to (the N1 guard): the loan writers return on it
         before they read what is posted (``loan_posting_service``'s
         ``reconcile_loan_corrections`` and ``_assert_checked_projection``),
-        and the worked-out read asks it of each loan to decide whether the
-        owner's pay calendar is loaded (``ledger_lines.worked_out_lines``).
+        the worked-out read asks it of each loan to decide whether the
+        owner's pay calendar is loaded (``ledger_lines.worked_out_lines``),
+        and the loan page's two measured surfaces hide on it
+        (``loan_posting_service``'s ``_configured_loan_walk``).
         """
         return not self.anchor_corrections and not self.payment_splits
 

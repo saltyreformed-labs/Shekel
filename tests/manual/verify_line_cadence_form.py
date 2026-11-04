@@ -61,8 +61,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-import verify_recurrence_form as shared
-from verify_recurrence_form import (
+import _recurrence_form_checks as shared
+from _recurrence_form_checks import (
     DEV_BASE_URL,
     POST_SPACING_SECONDS,
     SESSION_STATE,

@@ -61,8 +61,8 @@ def test_production_holding_the_workflow_with_no_way_to_read_its_runs_judges_not
 
 
 def test_the_update_is_the_newest_run_whose_publish_succeeded(repo):
-    """A day's run of the queue alone, whose publish was skipped, is no update; the Monday
-    run behind it is, read from main's listing of the update workflow."""
+    """A day's run of the queue and the due job, whose publish was skipped, is no update; the
+    Monday run behind it is, read from main's listing of the update workflow."""
     runs = Runs(daily(3, _ago(days=1)), monday(2, _ago(days=2)), monday(1, _ago(days=9)))
     update = read(repo.root, _held(repo), NOW, runs.actions)
     assert update.published == Published(_ago(days=2), "https://github.com/o/n/actions/runs/2")

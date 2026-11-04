@@ -82,6 +82,22 @@ def test_gh_is_handed_the_issue_on_its_input_and_prints_the_link(tmp_path, monke
     assert json.loads((tmp_path / "gh.input").read_text(encoding="utf-8")) == body
 
 
+def test_gh_is_handed_a_change_to_an_issue_by_its_number(tmp_path, monkeypatch):
+    """Given an issue's number, the real sender runs one PATCH of that issue, the JSON on its
+    input, and answers what it printed (the due job's write, ruling plan#2829)."""
+    gh = tmp_path / "gh"
+    gh.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "$0.args"\ncat > "$0.input"\necho {_LINK}\n',
+                  encoding="utf-8")
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    done = alert.sent("owner/shekel", {"body": "a list"}, 9)
+    assert (done.returncode, done.stdout, done.stderr) == (0, _LINK + "\n", "")
+    assert (tmp_path / "gh.args").read_text(encoding="utf-8").splitlines() == [
+        "api", "repos/owner/shekel/issues/9", "--method", "PATCH", "--input", "-",
+        "--jq", ".html_url"]
+    assert json.loads((tmp_path / "gh.input").read_text(encoding="utf-8")) == {"body": "a list"}
+
+
 def test_the_module_runs_with_no_package_installed():
     """Run as its job runs it, by an interpreter given no installed package (``-S``; ``-E``
     so no variable of this run's puts one back), the module imports and answers: a failed

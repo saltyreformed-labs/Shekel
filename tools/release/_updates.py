@@ -12,8 +12,8 @@ of them started in attempt 1), so neither the run's ``created_at`` nor its
 ``run_started_at`` dates the refresh: a re-run that does not repeat the refresh moves the
 second and not the refresh's start.  A week with nothing to move still runs the publish,
 which publishes nothing and succeeds, so a quiet week is no stopped update; a run whose
-refresh or publish failed, and a day's run of the queue alone, whose publish is skipped, are
-none.  A commit the update made would date it too, but a quiet week makes none.
+refresh or publish failed, and a day's run of the queue and the due job, whose publish is
+skipped, are none.  A commit the update made would date it too, but a quiet week makes none.
 
 **Read with no credential**: the repository is public, and GitHub serves its Actions runs to
 anyone (measured 2026-10-31: answered 200, 60 reads an hour per address), so the read goes

@@ -2,10 +2,10 @@
 repository titled for the day, which mentions him, links the run and names each job's result.
 
 **It installs nothing** (plan#2481).  Its job (``.github/workflows/updates.yml``'s ``alert``,
-run when the refresh, the publish or the queue failed) runs this module on the runner's own
-Python with the standard library alone (``python3 -S``, which puts no installed package on
-the path), and the runner's own ``gh`` sends the issue.  The other three jobs each install the
-lock, a pull of uv from ghcr.io and downloads of its Python and the packages, so a failure
+run when the refresh, the publish, the queue or the release-due job failed) runs this module on
+the runner's own Python with the standard library alone (``python3 -S``, which puts no installed
+package on the path), and the runner's own ``gh`` sends the issue.  The other jobs each install
+the lock, a pull of uv from ghcr.io and downloads of its Python and the packages, so a failure
 there would otherwise stop the one job that reports it.  The ubuntu-26.04 image holds Python
 3.14.4 and GitHub CLI 2.103.2 (runner-images ``ubuntu26/20261026.180``'s list, read
 2026-11-01).  It holds only the workflow's own token, widened to ``issues: write`` for its one
@@ -36,8 +36,8 @@ from datetime import UTC, date, datetime
 
 from tools.update.app import DEVELOPER, REPOSITORY_VARIABLE, unset
 
-#: The variable holding the workflow's own token, which the alert's job widens to ``issues:
-#: write``: the one ``gh`` reads first.
+#: The variable holding the workflow's own token, which the alert's job and the due job each
+#: widen to ``issues: write``: the one ``gh`` reads first.
 ISSUE_TOKEN_VARIABLE = "GH_TOKEN"
 
 
@@ -50,12 +50,15 @@ def issue(day: date, run: str, results: Sequence[tuple[str, str]]) -> dict[str, 
                     "Close this issue once what failed is fixed (ruling plan#2466)."}
 
 
-def sent(repository: str, body: dict[str, str]) -> subprocess.CompletedProcess:
-    """``body`` posted as an issue of ``repository`` by the runner's ``gh``, with the token in
-    the environment: one ``gh api`` POST of the JSON on its input, which prints the new
-    issue's link, or exits 1 saying why on its stderr, ``gh: <message> (HTTP <status>)``
-    (measured 2026-11-01 with gh 2.102.1)."""
-    return subprocess.run(["gh", "api", f"repos/{repository}/issues", "--method", "POST",
+def sent(repository: str, body: dict[str, str],
+         number: int | None = None) -> subprocess.CompletedProcess:
+    """``body`` posted as a new issue of ``repository`` by the runner's ``gh``, or as a change
+    to its issue ``number``, with the token in the environment: one ``gh api`` POST or PATCH of
+    the JSON on its input, which prints the issue's link, or exits 1 saying why on its stderr,
+    ``gh: <message> (HTTP <status>)`` (the POST measured 2026-11-01 with gh 2.102.1)."""
+    issues = f"repos/{repository}/issues"
+    return subprocess.run(["gh", "api", *((issues, "--method", "POST") if number is None else
+                                          (f"{issues}/{number}", "--method", "PATCH")),
                            "--input", "-", "--jq", ".html_url"],
                           input=json.dumps(body), capture_output=True, text=True, check=False)
 

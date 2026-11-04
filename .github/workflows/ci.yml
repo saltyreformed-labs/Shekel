@@ -256,8 +256,9 @@ jobs:
       # ``tools/split`` (the proved test-file split; step balance:X-er, ruling
       # R-BAL301), ``tools/rehearsal`` (the release rehearsal kit; step X-cx's
       # K1, rulings R-BAL314 and R-BAL315) and ``tools/update`` (the weekly
-      # dependency update: the Monday lock refresh, its publish and the daily
-      # queue, which updates.yml runs; rulings plan#2351, plan#2449).  A job
+      # dependency update: the Monday lock refresh, its publish, the daily
+      # queue and the daily issue saying a release is due, which updates.yml
+      # runs; rulings plan#2351, plan#2449, plan#2829).  A job
       # of its own, beside
       # lint and the shards rather than ahead of them.  ``yaml`` (PyYAML, in
       # the lock's dev group) is what ``tools/ci/test_ci_workflow.py`` reads

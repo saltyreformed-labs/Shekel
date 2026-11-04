@@ -32,8 +32,18 @@
 #            it enters), that is red at its head, or that GitHub removed from
 #            the merge queue at its head, which waits for a new head (rulings
 #            plan#2450, plan#2467, plan#2468).
-#   alert    when the refresh, the publish or the queue failed: opens an issue in
-#            this repository mentioning the developer, linking the run and naming
+#   due      every day: says a release is due (rulings plan#2829, plan#2876, which
+#            deliver balance:R-BAL296's weekly release).  One issue, found by its
+#            exact title each run, mentions the developer and lists what a release
+#            of dev would move once dev and main pin different versions in any file;
+#            it follows that list, opens no second issue while it is open, and closes
+#            once a release carries them (tools/update/due.py).  It holds only the
+#            workflow's own token, widened to issues for this job alone, and runs
+#            main's own code with the landing group, which quill's door imports.  It
+#            fetches the tips of main and dev itself: its checkout holds the run's own
+#            commit of main, an old one on a re-run, and no dev.
+#   alert    when the refresh, the publish, the queue or the due job failed: opens an
+#            issue in this repository mentioning the developer, linking the run and naming
 #            each job's result (tools/update/alert.py; ruling plan#2466).  It
 #            holds only the workflow's own token, widened to issues for this job
 #            alone, and installs nothing: main's own code on the runner's Python
@@ -88,8 +98,8 @@
 # alert reports, and queue nothing it should not.
 #
 # WHOSE CODE.  GitHub runs a schedule only from main, so this workflow runs
-# from the release that brings it: refresh runs dev's refresh, publish and
-# queue main's own code.  A branch's copy of this file never reaches the
+# from the release that brings it: refresh runs dev's refresh, publish,
+# queue and due main's own code.  A branch's copy of this file never reaches the
 # key: that is GitHub's rule (THE KEY), not this file's.  Within a run on
 # main, this file keeps other code from the key: each keyed job checks out
 # the workflow's own commit, and the refresh, which runs dev's code and
@@ -98,15 +108,16 @@
 # where the environment would refuse its publish as a red run.
 #
 # WHEN.  The refresh at 11:17 UTC on Mondays (07:17 New York in summer), after
-# Dependabot's 06:00 New York run; the queue at 13:47 UTC every day, so the
-# Monday pull requests' checks have finished by its run.  Both off the top of
+# Dependabot's 06:00 New York run; the queue and the due job at 13:47 UTC every
+# day, so the Monday pull requests' checks have finished by the queue's run, and
+# what it lands is read as due the next day.  Both times off the top of
 # the hour, when GitHub may drop queued scheduled runs.  A job's condition
 # names its schedule as the trigger list spells it
 # (tools/ci/test_updates_workflow.py holds the two equal).
 #
 # THE TIME LIMITS (rulings plan#2761, plan#2762, plan#2765).  Every step of
-# the refresh, the publish and the queue carries a ``timeout-minutes`` of its
-# own.  A step cut off by its own limit is marked failed (actions/runner's
+# the refresh, the publish, the queue and the due job carries a
+# ``timeout-minutes`` of its own.  A step cut off by its own limit is marked failed (actions/runner's
 # StepsRunner.cs, read 2026-11-03), so its job fails and the alert opens its
 # issue.  A job cut off by its own limit is cancelled (GitHub's workflow
 # syntax: the limit is how long GitHub lets a job run "before GitHub
@@ -279,8 +290,34 @@ jobs:
           UPDATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
         run: python -m tools.update.queue
 
+  due:
+    if: github.ref == 'refs/heads/main' && github.event.schedule == '47 13 * * *'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout code
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the lock
+        timeout-minutes: 5
+        uses: $/.github/actions/install-lock
+        with:
+          install: landing
+
+      - name: Open, update or close the issue saying a release is due
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m tools.update.due
+
   alert:
-    needs: [refresh, publish, queue]
+    needs: [refresh, publish, queue, due]
     if: failure()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -300,6 +337,7 @@ jobs:
           REFRESH: ${{ needs.refresh.result }}
           PUBLISH: ${{ needs.publish.result }}
           QUEUE: ${{ needs.queue.result }}
+          DUE: ${{ needs.due.result }}
         run: >-
           python3 -S -m tools.update.alert "${RUN}"
-          "refresh=${REFRESH}" "publish=${PUBLISH}" "queue=${QUEUE}"
+          "refresh=${REFRESH}" "publish=${PUBLISH}" "queue=${QUEUE}" "due=${DUE}"

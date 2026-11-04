@@ -43,11 +43,14 @@ Each name, and who reads it:
   (``_production``; rulings ``balance:R-BAL362`` and ``R-BAL400``).  ``IgnoreFileError``:
   ``tools/release.release``, which reports an ignore file holding a pattern Docker refuses as
   a listing made of nothing, and its tests.
-- ``pinned``, ``Pin`` and ``pins_versions``: ``tools/release._changes``, for the versions a
-  release moves in the files that pin versions, each side read by the lock reader and the line
-  patterns the landing check reads a move with (``_versions``; ruling plan#2351).  ``NotVersions``:
+- ``versions_moved`` and ``Moved``: ``tools/release._changes``, for the versions a release moves
+  in the files that pin versions, each side read by the lock reader and the line patterns the
+  landing check reads a move with (``_versions``; ruling plan#2351).  ``NotVersions``:
   ``tools/release.release``, which reports a pinned file it cannot read (a lock that is no
-  TOML, a link) as a listing made of nothing, and its tests.
+  TOML, a link) as a listing made of nothing, and its tests; ``tools/update.due`` too, as a
+  read it failed.  ``versions_waiting`` and ``Moved``, and ``fetch``, which it reads the two
+  tips with first: ``tools/update.due``, for the versions a release of ``dev`` would move, which
+  it lists to the developer (ruling plan#2829).
 - ``lock_change``, ``LockChange``, ``lock_unversioned``, ``ceiling``, ``Move`` and ``LOCK``:
   ``tools/update.refresh``, the Monday lock refresh, which holds back each package whose
   move needs a card (a move across a major, below its next major; a move changing what the
@@ -76,7 +79,8 @@ Each name, and who reads it:
   which reports a failed read of the tracker, or App credentials it cannot use, as a
   release judged on nothing; ``described``, by which it prints that failure, as every
   printer of one does: one line, naming the read it cut short (plan#1809).  ``GitHubError``
-  and ``described``: ``tools/update.queue`` too, for a read or a write GitHub refused.
+  and ``described``: ``tools/update.queue`` too, for a read or a write GitHub refused;
+  ``described``: ``tools/update.due`` too, for a read it failed.
 - ``FakeTracker`` and ``OutsideLink``: ``tools/release``'s tests, which drive the card
   reader against quill's own in-memory tracker, a card's link to an issue outside the
   tracker built as quill's read builds one.  The fake's cost, accepted so quill keeps ONE
@@ -93,6 +97,7 @@ from tools.quill._git import (
     MarkerConflict,
     card_of,
     changes,
+    fetch,
     marker_changes,
     markers_in,
     merged_tree,
@@ -113,8 +118,8 @@ from tools.quill._versions import (
     LOCK,
     LockChange,
     Move,
+    Moved,
     NotVersions,
-    Pin,
     Reason,
     canonical,
     ceiling,
@@ -122,9 +127,9 @@ from tools.quill._versions import (
     lock_moves,
     lock_pins,
     lock_unversioned,
-    pinned,
-    pins_versions,
     unversioned_between,
+    versions_moved,
+    versions_waiting,
 )
 
 __all__ = [
@@ -140,10 +145,10 @@ __all__ = [
     "LockChange",
     "MarkerConflict",
     "Move",
+    "Moved",
     "NotVersions",
     "OWNED",
     "OutsideLink",
-    "Pin",
     "Reason",
     "Tracker",
     "TrackerError",
@@ -156,6 +161,7 @@ __all__ = [
     "described",
     "dropped",
     "dropped_above",
+    "fetch",
     "leaves_below",
     "lock_change",
     "lock_moves",
@@ -166,9 +172,9 @@ __all__ = [
     "merged_tree",
     "owner",
     "paged",
-    "pinned",
-    "pins_versions",
     "reading",
     "unversioned_between",
+    "versions_moved",
+    "versions_waiting",
     "with_closure",
 ]

@@ -204,8 +204,7 @@ def production_lines(base: str, cut: str, found: Changes) -> list[str]:
         lines += [f"  {path}" for path in found.unowned]
     if found.versions:
         lines.append(f"versions moved ({len(found.versions)}), from the base's to the cut's:")
-        lines += [f"  {moved.path}: {moved.what} {', '.join(moved.old) or 'none'} -> "
-                  f"{', '.join(moved.new) or 'none'}" for moved in found.versions]
+        lines += [f"  {moved}" for moved in found.versions]
     lines.append(f"verdict: {len(found.net)} of production's files change; {len(changing)} "
                  f"of {len(found.pulls)} pull requests change them, {len(found.unowned)} "
                  "by none (exit 0)")

@@ -79,15 +79,26 @@ without any ``pyproject.toml`` edit (pillow ``12.3.0`` to ``13.0.0`` through
 ``qrcode[pil]``, measured 2026-10-30 at plan#2325).  A version this module cannot read moves
 no version it can vouch for, so it is refused.
 
-**What one side pins** (:func:`pinned`, read by the release tool's listing of the versions a
-release moves, ``tools/release/_changes.py``) asks nothing of what a change moves, since a
-release carries cards' own edits to these files beside the versions an update moved: each
+**What one side pins** (:func:`pinned`, read by :func:`versions_moved`) asks nothing of what a
+change moves, since a release carries cards' own edits to these files beside the versions an
+update moved: each
 package the lock holds at its version, a lock forked by environment pinning each version a
 name holds, and each line of any other such file that pins one, by what it pins and its
 version as the line spells it, the tag's version through the digest
 (``3.14-slim@sha256:<digest>``) or the commit through the release (``<commit> # v7.0.1``).
 A line pinning by any other form (a tag alone, a tag naming no version, an action of this
 repository's own) pins none this module reads.
+
+**What a release would move** (:func:`versions_moved`, each :class:`Moved`) is what each side
+pins, compared over the files that differ.  The release tool's listing of a release's versions
+reads production's (``tools/release/_changes.py``), and :func:`versions_waiting`, the question
+the daily job's mention of a release (``tools/update/due.py``) and ``quill next`` both ask of
+``dev`` against ``main`` (rulings plan#2829, plan#2876), reads the whole tree: ``main`` runs its
+own copy of every workflow, so a version only they pin still waits for a release.  A pinning
+file one side holds no copy of pins every version against none there, so while ``main`` holds
+no lock (until the first release of plan#1183) every locked package reads as waiting: true, as
+a release would bring them all, and never a list anyone is shown, since the job reaches
+``main`` in that same release.
 
 **What a lock change does to versions alone** (:func:`lock_moves`) is :func:`lock_change`'s
 reading with no judgment: the Monday refresh's reading of each lock it makes from an edited
@@ -106,7 +117,7 @@ from functools import partial
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
-from tools.ci.gitcmd import git
+from tools.ci.gitcmd import DEV, MAIN, git, tracking
 from tools.quill._production import DOCKERFILE, differences, tree
 
 #: The lock every install reads (ruling ``balance:R-BAL294``).
@@ -839,3 +850,71 @@ def pinned(root: Path, path: str, held: str | None) -> frozenset[Pin]:
         return lock_pins(text)
     return frozenset(Pin(pin["what"], _version(pin))
                      for pin in map(rule.line.fullmatch, text.split("\n")) if pin is not None)
+
+
+@dataclass(frozen=True)
+class Moved:
+    """One thing whose versions a release moves in a file that pins versions: ``what`` (a
+    package, an image, an action) in ``path``, at each version the release's base pins it at
+    (``old``) and each its cut does (``new``), each sorted, empty where that side pins it at
+    none."""
+
+    path: str
+    what: str
+    old: tuple[str, ...]
+    new: tuple[str, ...]
+
+    def __str__(self) -> str:
+        """How a listing names it, ``none`` for a side that pins it at none."""
+        return (f"{self.path}: {self.what} {', '.join(self.old) or 'none'} -> "
+                f"{', '.join(self.new) or 'none'}")
+
+
+def _by_what(pins: Iterable[Pin]) -> dict[str, tuple[str, ...]]:
+    """The versions ``pins`` holds, by what each pins, each sorted."""
+    found: dict[str, list[str]] = {}
+    for pin in pins:
+        found.setdefault(pin.what, []).append(pin.version)
+    return {what: tuple(sorted(versions)) for what, versions in found.items()}
+
+
+def _differing(root: Path, path: str, was: str | None, now: str | None) -> tuple[Moved, ...]:
+    """Each thing whose versions differ in ``path`` between ``was`` and ``now``, its mode and
+    object at the base and at the cut (as :func:`differences` gives them), by what it is.
+
+    Raises:
+        NotVersions: when either side is no file, or a lock that is no TOML or holds a package
+            with no name.
+        tools.ci.gitcmd.GitError: when git cannot read either.
+    """
+    old, new = (_by_what(pinned(root, path, held)) for held in (was, now))
+    return tuple(Moved(path, what, old.get(what, ()), new.get(what, ()))
+                 for what in sorted(old.keys() | new.keys()) if old.get(what) != new.get(what))
+
+
+def versions_moved(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
+                   ) -> tuple[Moved, ...]:
+    """Each version a release moves, by path and then by what it is, ``changed`` holding each
+    path of the files read (:func:`differences`) where the cut differs from the base, with its
+    mode and object in each.
+
+    Raises:
+        NotVersions: as :func:`_differing` raises it.
+        tools.ci.gitcmd.GitError: when git cannot read either side of a file.
+    """
+    return tuple(moved for path, (was, now) in changed.items() if pins_versions(path)
+                 for moved in _differing(root, path, was, now))
+
+
+def versions_waiting(root: Path) -> tuple[Moved, ...]:
+    """Each version a release of ``dev`` into ``main`` would move, in every file of the tree
+    that pins versions, as this clone's remote-tracking references hold the two
+    (:func:`~tools.ci.gitcmd.tracking`; it fetches nothing): none when no release is due for a
+    version (rulings plan#2829, plan#2876).
+
+    Raises:
+        NotVersions: as :func:`versions_moved` raises it.
+        tools.ci.gitcmd.GitError: when git cannot read either branch.
+    """
+    return versions_moved(root, differences(tree(root, tracking(MAIN)),
+                                            tree(root, tracking(DEV))))

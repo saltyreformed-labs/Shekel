@@ -203,13 +203,14 @@ def monday(number: int, created: datetime, publish: str = "success",
     skipped; its latest attempt started at ``started`` and its refresh at ``refreshed``
     (:func:`workflow_run`)."""
     return workflow_run(number, created, {REFRESH: "success", JOB: publish,
-                                          "queue": "skipped"}, started, refreshed)
+                                          "queue": "skipped", "due": "skipped"},
+                        started, refreshed)
 
 
 def daily(number: int, created: datetime) -> tuple[dict, list]:
-    """A day's run of the queue alone: the refresh and the publish skipped."""
+    """A day's run of the queue and the due job: the refresh and the publish skipped."""
     return workflow_run(number, created, {REFRESH: "skipped", JOB: "skipped",
-                                          "queue": "success"})
+                                          "queue": "success", "due": "success"})
 
 
 class Runs:

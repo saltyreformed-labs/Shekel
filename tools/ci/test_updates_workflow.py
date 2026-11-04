@@ -52,8 +52,8 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
 
     def test_the_refresh_reads_dev_and_sees_no_secret(self):
         """The refresh checks out ``dev`` and names no secret, variable or mint; no job but the
-        alert widens the workflow's read-only token, and the alert only to issues (ruling
-        plan#2466)."""
+        alert and the due job widens the workflow's read-only token, and each only to issues
+        (rulings plan#2466, plan#2829)."""
         workflow = self._workflow()
         refresh = workflow["jobs"]["refresh"]
         text = yaml.safe_dump(refresh)
@@ -61,15 +61,16 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
         assert refresh["steps"][0]["with"] == {"ref": "dev", "persist-credentials": False}
         assert workflow["permissions"] == {"contents": "read"}
         assert {name: job["permissions"] for name, job in workflow["jobs"].items()
-                if "permissions" in job} == {"alert": {"contents": "read", "issues": "write"}}
+                if "permissions" in job} == dict.fromkeys(("alert", "due"), {
+                    "contents": "read", "issues": "write"})
 
     def test_a_failed_job_opens_an_issue_with_the_workflow_s_own_token(self):
-        """The alert runs when the refresh, the publish or the queue failed, holding no secret,
-        variable or mint: main's own code, given the workflow's token and each job's result
-        (ruling plan#2466), in two steps, the checkout and the alert, so it installs nothing
-        and runs on the standard library alone (``-S``; plan#2481)."""
+        """The alert runs when the refresh, the publish, the queue or the due job failed,
+        holding no secret, variable or mint: main's own code, given the workflow's token and
+        each job's result (ruling plan#2466), in two steps, the checkout and the alert, so it
+        installs nothing and runs on the standard library alone (``-S``; plan#2481)."""
         alert = self._workflow()["jobs"]["alert"]
-        assert alert["needs"] == ["refresh", "publish", "queue"]
+        assert alert["needs"] == ["refresh", "publish", "queue", "due"]
         assert alert["if"] == "failure()"
         text = yaml.safe_dump(alert)
         assert "secrets." not in text and "vars." not in text and MINT not in text
@@ -83,6 +84,22 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
             **{job.upper(): f"${{{{ needs.{job}.result }}}}" for job in alert["needs"]}}
         assert step["run"] == ('python3 -S -m tools.update.alert "${RUN}" ' + " ".join(
             f'"{job}=${{{job.upper()}}}"' for job in alert["needs"]))
+
+    def test_the_due_job_holds_only_the_workflow_s_token(self):
+        """The due job holds exactly its keys, so no job-level ``env`` or ``defaults`` reaches its
+        steps, and no secret, variable, mint or environment (ruling plan#2829): main's own code,
+        which fetches the two tips itself with no credential, with the landing group, which
+        quill's door imports, and the workflow's token to its one step."""
+        due = self._workflow()["jobs"]["due"]
+        assert set(due) == {"if", "runs-on", "timeout-minutes", "permissions", "steps"}
+        text = yaml.safe_dump(due)
+        assert "secrets." not in text and "vars." not in text and MINT not in text
+        checkout, install, step = due["steps"]
+        assert checkout["uses"].startswith("actions/checkout@")
+        assert checkout["with"] == {"persist-credentials": False}
+        assert install["with"] == {"install": "landing"} and "env" not in install
+        assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+        assert step["run"] == "python -m tools.update.due"
 
     def test_each_keyed_job_runs_mains_code_and_hands_its_token_to_one_step(self):
         """Each keyed job, and no other, names the environment ``update``, whose secret the
@@ -118,11 +135,11 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
                 assert "steps.token" not in yaml.safe_dump(step), (name, step)
 
     def test_each_job_runs_only_from_main_on_the_schedule_its_condition_names(self):
-        """The refresh on Monday's schedule or a dispatch, the queue on the daily one, each
-        only from main, so a dispatch from a branch runs nothing (the environment, not these
-        conditions, keeps the key from a branch's code); the publish only after the refresh;
-        and one run at a time, each waiting for the one before, never cancelling it, so a
-        dispatch never races Monday's publish, nor the queue a publish."""
+        """The refresh on Monday's schedule or a dispatch, the queue and the due job on the
+        daily one, each only from main, so a dispatch from a branch runs nothing (the
+        environment, not these conditions, keeps the key from a branch's code); the publish only
+        after the refresh; and one run at a time, each waiting for the one before, never
+        cancelling it, so a dispatch never races Monday's publish, nor the queue a publish."""
         workflow = self._workflow()
         on = workflow.get(True, workflow.get("on"))
         monday, daily = (entry["cron"] for entry in on["schedule"])
@@ -132,7 +149,8 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
         assert " ".join(jobs["refresh"]["if"].split()) == (
             f"{main} && (github.event_name == 'workflow_dispatch' || "
             f"github.event.schedule == '{monday}')")
-        assert jobs["queue"]["if"] == f"{main} && github.event.schedule == '{daily}'"
+        for name in ("queue", "due"):
+            assert jobs[name]["if"] == f"{main} && github.event.schedule == '{daily}'", name
         assert jobs["publish"]["needs"] == "refresh" and "if" not in jobs["publish"]
         assert workflow["concurrency"] == {"group": "updates", "cancel-in-progress": False}
 

@@ -23,18 +23,17 @@ the sum of the pull requests' own changes would miss it.
 **And each version it moves** (:attr:`Changes.versions`, ruling plan#2351): a change moving
 pinned versions alone lands with no card, so no card the approval question names carries it.
 Each file that pins versions the release changes is read on each side for what it pins
-(:func:`tools.quill.door.pinned`), by the lock reader and the line patterns the landing check
-reads a move with (``tools/quill/_versions.py``), and never asked whether the change is
+(:func:`tools.quill.door.versions_moved`), by the lock reader and the line patterns the landing
+check reads a move with (``tools/quill/_versions.py``), and never asked whether the change is
 version-only: a release carries cards' own edits to the Dockerfile and the lock beside what an
 update moved.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.quill.door import Pin, changed, pinned, pins_versions
+from tools.quill.door import Moved, changed, versions_moved
 from tools.release._model import first_parent_line
 
 
@@ -47,19 +46,6 @@ class Change:
     sha: str
     subject: str
     paths: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class Moved:
-    """One thing whose versions a release moves in a file production runs that pins
-    versions: ``what`` (a package, an image, an action) in ``path``, at each version
-    production built from the base pins it at (``old``) and each production built from the
-    cut does (``new``), each sorted, empty where that side pins it at none."""
-
-    path: str
-    what: str
-    old: tuple[str, ...]
-    new: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -80,29 +66,6 @@ class Changes:
         return tuple(path for path in self.net if path not in owned)
 
 
-def _by_what(pins: Iterable[Pin]) -> dict[str, tuple[str, ...]]:
-    """The versions ``pins`` holds, by what each pins, each sorted."""
-    found: dict[str, list[str]] = {}
-    for pin in pins:
-        found.setdefault(pin.what, []).append(pin.version)
-    return {what: tuple(sorted(versions)) for what, versions in found.items()}
-
-
-def _moved(root: Path, path: str, was: str | None, now: str | None) -> tuple[Moved, ...]:
-    """Each thing whose versions differ in ``path`` between ``was`` and ``now``, its mode and
-    object in production built from the base and from the cut (as :func:`changed` gives
-    them), by what it is.
-
-    Raises:
-        tools.quill.door.NotVersions: when either side is no file, or a lock that is no TOML
-            or holds a package with no name.
-        tools.ci.gitcmd.GitError: when git cannot read either.
-    """
-    old, new = (_by_what(pinned(root, path, held)) for held in (was, now))
-    return tuple(Moved(path, what, old.get(what, ()), new.get(what, ()))
-                 for what in sorted(old.keys() | new.keys()) if old.get(what) != new.get(what))
-
-
 def changes(root: Path, base: str, cut: str) -> Changes:
     """What the release ``<base>..<cut>`` changes of what production runs, each pull
     request's own part of it, and each version it moves.
@@ -110,7 +73,7 @@ def changes(root: Path, base: str, cut: str) -> Changes:
     Raises:
         tools.quill.door.IgnoreFileError: when an ignore file at the base, the cut or either
             side of a merge holds a pattern Docker refuses.
-        tools.quill.door.NotVersions: as :func:`_moved` raises it.
+        tools.quill.door.NotVersions: as :func:`tools.quill.door.versions_moved` raises it.
         tools.ci.gitcmd.GitError: when git cannot read the range or a commit.
     """
     production = changed(root, base, cut)
@@ -118,6 +81,4 @@ def changes(root: Path, base: str, cut: str) -> Changes:
     pulls = tuple(Change(sha, subject,
                          tuple(path for path in changed(root, f"{sha}^1", sha) if path in net))
                   for sha, subject in first_parent_line(root, base, cut))
-    versions = tuple(moved for path, (was, now) in production.items() if pins_versions(path)
-                     for moved in _moved(root, path, was, now))
-    return Changes(net, pulls, versions)
+    return Changes(net, pulls, versions_moved(root, production))

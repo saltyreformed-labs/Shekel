@@ -79,9 +79,7 @@ from sqlalchemy.orm import Query
 from sqlalchemy.sql.expression import ColumnElement
 
 from app.extensions import db
-from app.models.account import Account
 from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
@@ -708,62 +706,3 @@ def _period_ids_with_unbalanced_ledger(period_ids: list[int]) -> set[int]:
         .all()
     )
     return {row[0] for row in rows}
-
-
-def posted_totals(user_id: int) -> "dict[tuple[int, int], Decimal]":
-    """Return the owner's posted total per ``(scenario_id, ledger_account_id)``.
-
-    **What "Remove earlier paychecks" must leave unchanged** (plan step
-    ``pay_calendar:C21``, ruling **R-PC114**, amending **R-PC109**).  That
-    door deletes paychecks whose journal entries the ``CASCADE`` takes, then
-    re-files what the posted ledger rebuilds from the owner's records (loan
-    and account openings, true-ups) through Reset's two re-syncs; it asks
-    this before and after, and is refused -- rolled back -- if any total
-    moved.  Grouped by SCENARIO as well as ledger account, because journal
-    entries are scenario-scoped and a move in one scenario must not be
-    cancelled by another's.  It lives here because this is where a period's
-    ledger is read: the ledger-model fence (W9908) admits this module and
-    not the gates.
-
-    Args:
-        user_id: The owning user's id.
-
-    Returns:
-        The summed ``account_postings.amount`` per key, for every key the
-        owner's entries touch.
-    """
-    return {
-        (scenario_id, ledger_account_id): total
-        for scenario_id, ledger_account_id, total in (
-            db.session.query(
-                JournalEntry.scenario_id, Posting.ledger_account_id,
-                db.func.sum(Posting.amount),
-            )
-            .join(Posting, Posting.journal_entry_id == JournalEntry.id)
-            .filter(JournalEntry.user_id == user_id)
-            .group_by(JournalEntry.scenario_id, Posting.ledger_account_id)
-            .all()
-        )
-    }
-
-
-def ledger_account_names(ledger_account_ids) -> "list[str]":
-    """Return the names a refusal gives *ledger_account_ids*, distinct and sorted.
-
-    A ledger account paired with one of the owner's accounts is named as that
-    account, because the owner knows "Checking" and not its chart rows; one
-    paired with none is named as itself.
-
-    Args:
-        ledger_account_ids: ``budget.ledger_accounts.id`` values.
-
-    Returns:
-        The names, each once, alphabetical.
-    """
-    rows = (
-        db.session.query(LedgerAccount.name, Account.name)
-        .outerjoin(Account, Account.id == LedgerAccount.account_id)
-        .filter(LedgerAccount.id.in_(list(ledger_account_ids)))
-        .all()
-    )
-    return sorted({account or ledger for ledger, account in rows if account or ledger})

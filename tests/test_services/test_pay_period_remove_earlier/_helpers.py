@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from functools import partial
 
 import pytest
 
@@ -12,11 +13,14 @@ from app import ref_cache
 from app.enums import BusinessDayShiftEnum, TxnTypeEnum
 from app.exceptions import PayPeriodRemovalRefused
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry
+from app.models.journal_entry import JournalEntry, Posting
 from app.models.pay_era import PayEra
+from app.models.scenario import Scenario
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import pay_period_admin
+from app.services.ledger_lines import worked_out_lines
+from app.services.pay_calendar import calendar_for
 from tests._test_helpers import (
     all_periods,
     make_cadence_rule,
@@ -117,6 +121,54 @@ def _entries_in(period_ids):
     return _db.session.query(JournalEntry.id, JournalEntry.source_kind_id).filter(
         JournalEntry.pay_period_id.in_(list(period_ids)),
     ).all()
+
+
+def _stored_totals(user_id):
+    """Return the owner's stored total per ``(scenario_id, ledger_account_id)``.
+
+    Read here since ruling plan#2517 deleted the door's own reader
+    (``pay_period_locks.posted_totals``): nothing but a test asks it now, and
+    it goes with the store.  Grouped by SCENARIO as well as ledger account,
+    because journal entries are scenario-scoped and a move in one scenario
+    must not be cancelled by another's.
+    """
+    return {
+        (scenario_id, ledger_account_id): total
+        for scenario_id, ledger_account_id, total in (
+            _db.session.query(
+                JournalEntry.scenario_id, Posting.ledger_account_id,
+                _db.func.sum(Posting.amount),
+            )
+            .join(Posting, Posting.journal_entry_id == JournalEntry.id)
+            .filter(JournalEntry.user_id == user_id)
+            .group_by(JournalEntry.scenario_id, Posting.ledger_account_id)
+        )
+    }
+
+
+def _worked_out_lines_of(user_id):
+    """Return every worked-out line of the owner's as ``(scenario_id, line)``."""
+    return [
+        (scenario_id, line)
+        for (scenario_id,) in _db.session.query(Scenario.id).filter_by(user_id=user_id)
+        for line in worked_out_lines(
+            user_id, scenario_id, partial(calendar_for, user_id),
+        )
+    ]
+
+
+def _worked_out_totals(user_id):
+    """Return the owner's worked-out total per ``(scenario_id, chart key)``.
+
+    What the removal must leave as it was (ruling plan#2517), whatever
+    paycheck each line files in.  A key whose lines net to ``$0.00`` is left
+    out, as a key with no line: both hold no money.
+    """
+    totals = {}
+    for scenario_id, line in _worked_out_lines_of(user_id):
+        key = (scenario_id, line.key)
+        totals[key] = totals.get(key, Decimal("0.00")) + line.amount
+    return {key: total for key, total in totals.items() if total != 0}
 
 
 def _held(user_id, first_kept):

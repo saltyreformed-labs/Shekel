@@ -12,7 +12,7 @@ migration gives the fact its one home on ``ref.recurrence_units``:
   application's ``MONTHS_PER_YEAR``), NULL for ``period`` and ``week``, which
   are not measured in months at all.  Under
   ``ck_recurrence_units_positive_months``: the engine walks it as a ``range``
-  step, where a zero is a stride that never advances.
+  step and divides twelve by it, and a zero raises from both.
 * ``has_day_of_month boolean NOT NULL GENERATED ALWAYS AS (months_per_unit IS
   NOT NULL) STORED``: the flag a rule's CHECKs will read, generated so it
   cannot disagree with the stride the engine walks.

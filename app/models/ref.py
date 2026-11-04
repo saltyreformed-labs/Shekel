@@ -305,6 +305,11 @@ class RecurrenceUnit(db.Model):
     the flag a rule's CHECKs read and the stride the engine walks are one fact
     and cannot disagree.  It was a code table until that step, which a CHECK
     on ``budget.recurrence_rules`` could not see.
+
+    **A span is a fact about the calendar, not a setting.**  Nothing in the
+    application writes one and this table is not audited, so a hand edit leaves
+    no record and moves every rule on the unit from the next restart; only one
+    that flips the flag under a rule is refused.
     """
 
     __tablename__ = "recurrence_units"

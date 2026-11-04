@@ -50,7 +50,9 @@ honest cadence existed for it, and it resolved to the same inert value as
 Plan step R2e-3 deleted it: "does not recur" is NO RULE naming the definition,
 on either template kind, which never reaches this module at all.
 
-Pure: no Flask, no ORM, no clock, no database.  Its two inputs are the
+No Flask, no ORM, no clock, and no database read: what a unit's reference row
+states comes from the reference cache, loaded once per process (ruling
+plan#2748).  Its two inputs are the
 authored spec and the owner's
 :class:`~app.services.pay_calendar.PayCalendar`, so every derivation below can
 be exercised at exact dates.

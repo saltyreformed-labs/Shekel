@@ -393,8 +393,8 @@ def seed_reference_data(session: Session, *, verbose: bool = False) -> None:
        correctly on next seed; missing rows are INSERTed.
     3. The non-AccountType ref tables from ``_REF_TABLE_SEEDS``.
        Existing rows are left alone; only missing rows are INSERTed.
-       Status carries non-name columns (booleans) -- those entries
-       are dicts; everything else is name-only.
+       An entry with non-name columns (``Status``'s booleans,
+       ``RecurrenceUnit``'s month span) is a dict; the rest are name-only.
 
     Idempotent by design: calling this twice in a row produces no
     duplicates and (modulo metadata refreshes on existing
@@ -538,8 +538,9 @@ def _seed_other_ref_tables(
     Driven by ``_REF_TABLE_SEEDS``.  Existing rows are left untouched, so
     there is no in-place metadata refresh as in step 2.  Dict entries
     carry the non-name columns -- ``Status``'s three migration-managed
-    runtime booleans, and ``StatementSource``'s ``display_name``, which
-    the statement upload form renders; every other entry is name-only.
+    runtime booleans, ``RecurrenceUnit``'s ``months_per_unit``, and
+    ``StatementSource``'s ``display_name``, which the statement upload form
+    renders; every other entry is name-only.
 
     **The consequence of "left untouched" is a real seam and it is
     graded rather than trusted**: editing a non-name value here changes

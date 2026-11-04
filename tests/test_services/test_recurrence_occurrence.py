@@ -2080,7 +2080,8 @@ class TestRefusals:
         table for the reference row, so there is no second name left to
         compare and the property is asserted over the two READERS instead:
         for every unit, the flag says a day exactly where the stride answers.
-        It fails the moment either reads a separate list again.
+        A separate list that agrees passes here; ``test_recurrence_unit_months``
+        changes the row to grade each reader.
 
         The refusal itself is not untested -- ``months_per_step`` still refuses
         a unit with no month span, asserted on the function directly by

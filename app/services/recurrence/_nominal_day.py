@@ -20,7 +20,9 @@ refusal both value types hold at construction
 **The dependency runs ONE way**: this module imports :mod:`._frequency` and
 nothing of :mod:`._resolution`, which imports it.
 
-Pure: no Flask, no ORM, no clock, no database.
+No Flask, no ORM, no clock, and no database read: what a unit's reference row
+states comes from the reference cache, loaded once per process (ruling
+plan#2748).
 """
 import calendar as calendar_module
 from datetime import date

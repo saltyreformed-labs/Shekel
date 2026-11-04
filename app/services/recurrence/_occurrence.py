@@ -258,7 +258,9 @@ the one containing the occurrence, so rent due 1 August is paid from the 17
 July paycheck rather than the 31 July one.  D20 closed on the measurement and
 that capability carries its own ledger row.
 
-Pure: no Flask, no ORM, no clock, no database.
+No Flask, no ORM, no clock, and no database read: what a unit's reference row
+states comes from the reference cache, loaded once per process (ruling
+plan#2748).
 """
 from collections.abc import Iterator
 from datetime import date

@@ -262,8 +262,8 @@ def _build_ref_specs(ref_models) -> list[_RefSpec]:
 def _load_row_meta(db_session, ref_models, unavailable: list[str]) -> None:
     """Load the per-row caches the spec loop's ``name -> id`` map cannot carry.
 
-    Each is a dedicated query keyed by the table's PK, so a reader holding a
-    stored ``*_id`` branches on a cached column without a name compare.  Split
+    Each is a dedicated query, so a reader holding a stored ``*_id`` or an
+    enum member branches on a cached column without a name compare.  Split
     out of :func:`init` at plan step plan#2302, when the third of them took
     that function past pylint's branch ceiling; the three bodies are as they
     stood there.

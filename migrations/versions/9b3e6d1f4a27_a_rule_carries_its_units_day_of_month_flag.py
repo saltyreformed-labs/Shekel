@@ -33,8 +33,11 @@ Measured on the production dump of 2026-11-03, carried to this revision by
 each; the 12 period rules carrying a ceiling are legal and stay.  The backfill
 added one audit row per rule, 57.
 
-The downgrade drops the four objects and restores no cleared value: the row
-never read one, and ``system.audit_log`` holds what the UPDATE replaced.
+The downgrade drops the four objects and restores no cleared value.  No
+occurrence or figure read one.  The edit form did, prefilling a stored ceiling
+or nominal day it could carry onto a later change of unit, which is one more
+reason the value goes.  ``system.audit_log`` holds what the UPDATE replaced for
+its retention window (``AUDIT_RETENTION_DAYS``, 365 days by default).
 
 Self-contained dependency policy: this migration imports nothing from ``app``.
 

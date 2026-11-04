@@ -18,9 +18,11 @@ this test's own clone: the downgrade takes all three objects away, the
 upgrade puts back exactly the spans the seed states, and its refusal over a
 database missing a calendar row is FIRED rather than left as the one path a
 green suite never runs.  And what the ENGINE reads: ``ref_cache`` answers
-each unit's span and flag off the row, and the occurrence stride follows a
-span changed in the database, which is the ruling's whole claim -- the code
-holds no second copy to answer from.
+each unit's span and flag off the row, and the stride, the yearly count and
+the day-of-month predicate each follow a span changed in the database, which
+is the ruling's claim: the code holds no second copy of them.  The describer's
+words are outside it: it names ``(MONTH, 3)`` "Quarterly" for what a month
+means, and a span edit is no supported act (``RecurrenceUnit``'s docstring).
 """
 from decimal import Decimal
 from unittest.mock import patch
@@ -134,7 +136,7 @@ class TestTheSpanCheck:
     """``ck_recurrence_units_positive_months``."""
 
     def test_a_zero_span_is_refused(self, app, db):
-        """A zero stride would walk a ``range`` that never advances."""
+        """A zero span would raise from the ``range`` its stride walks."""
         with app.app_context():
             with pytest.raises(sqlalchemy.exc.IntegrityError) as exc:
                 db.session.execute(sqlalchemy.text(
@@ -236,6 +238,27 @@ class TestTheEngineReadsTheRow:
                 db.session.rollback()
                 ref_cache.init(db.session)
             assert _months.months_per_step(RecurrenceUnitEnum.YEAR, 1) == 12
+
+    def test_the_flag_follows_a_span_changed_on_the_row(self, app, db):
+        """A week given a span names a day of the month, and the predicate says so.
+
+        The one way to show the predicate holds no list of its own: a literal
+        ``(MONTH, YEAR)`` agrees with the row on every other case here.  No rule
+        names the week unit on this clone, so the key admits the flip.
+        """
+        with app.app_context():
+            assert not has_day_of_month_coordinate(RecurrenceUnitEnum.WEEK)
+            db.session.execute(sqlalchemy.text(
+                "UPDATE ref.recurrence_units SET months_per_unit = 1 "
+                "WHERE name = 'week'"
+            ))
+            ref_cache.init(db.session)
+            try:
+                assert has_day_of_month_coordinate(RecurrenceUnitEnum.WEEK)
+            finally:
+                db.session.rollback()
+                ref_cache.init(db.session)
+            assert not has_day_of_month_coordinate(RecurrenceUnitEnum.WEEK)
 
     def test_the_yearly_count_follows_a_span_changed_on_the_row(self, app, db):
         """A yearly span of 24 is half a unit a year (finding plan#2801).

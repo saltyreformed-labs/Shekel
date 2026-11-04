@@ -237,7 +237,8 @@ def _author(
     #
     # **The WHOLE table since plan step R7c-c**: six columns, every one of them
     # a value a caller states, and no encoding beside them -- seven since plan
-    # step salary:R15-a added the per-month ceiling.  They are written
+    # step salary:R15-a added the per-month ceiling, with the carried unit flag
+    # below the one column no caller states since plan#2302.  They are written
     # from the ONE ``resolve`` call above, whose cadence has already been
     # through
     # :func:`~app.services.recurrence._frequency.canonical_cadence` -- so

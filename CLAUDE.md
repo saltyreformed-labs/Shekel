@@ -344,12 +344,13 @@ hardening, and prod-override-sync conventions auto-load via `.claude/rules/deplo
 the single source of truth for what to do next** (R-BAL170). Every step, finding, ruling and
 question is one card, `plan#N`, and every read and write goes through quill (Common Commands). The
 board holds the steps and questions in the order the developer drags them (R-BAL177);
-**the next step is `python -m tools.quill.quill next`'s answer.** A card's spec is its body, and a
-review reads its edits since the work started (`/charter`, R-BAL174). A step split into leaves holds
-them as sub-issues, and a piece of work inside a card's one pull request is a task under it (Git
-Workflow). Whether a card SHIPPED is git's answer, never the card's state: its done file
-`plan/ships/N` in the merge of `dev` and `main` (R-BAL359), from which `quill sync` writes each
-card's state.
+**the next step is `python -m tools.quill.quill next`'s answer**: Priority Urgent, then High, then
+that order, a step's unfinished prerequisites just ahead of it, and never a step On hold (rulings
+plan#1831, plan#1832). A card's spec is its body, and a review reads its edits since the work
+started (`/charter`, R-BAL174). A step split into leaves holds them as sub-issues, and a piece of
+work inside a card's one pull request is a task under it (Git Workflow). Whether a card SHIPPED is
+git's answer, never the card's state: its done file `plan/ships/N` in the merge of `dev` and `main`
+(R-BAL359), from which `quill sync` writes each card's state.
 
 Every card but a task carries its arc (a task's is its card's). Each arc's argument, the reasoning
 behind its steps, stays in its own document: `docs/audits/balance_architecture/README.md` (balance),

@@ -49,7 +49,9 @@ step's Effort too, which ``effort`` refuses to set on a split step (ruling plan#
 ``sync`` runs every three hours on this host (``shekel-plan-sync.timer``, its units' sources in
 ``/opt/docker/scripts``) from its own clone ``~/projects/shekel-plan-sync`` at dev's tip; a run
 that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``
-says when sync is behind.  ``watch`` runs every minute from the same clone, never beside
+says when sync is behind.  ``next`` hands out Urgent, then High, then the board's order, a step's
+unfinished prerequisites just ahead of it, never one On hold (rulings plan#1830, plan#1831,
+plan#1832; :mod:`_next`).  ``watch`` runs every minute from the same clone, never beside
 ``sync`` (``shekel-plan-watch.timer``): the same producer over each card whose branch moved
 since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
 :mod:`_watch`).  ``answer`` answers the developer's comments on a card, and ``next``
@@ -160,8 +162,10 @@ from tools.quill._command import (
 )
 from tools.quill._exits import Refused, exit_status
 from tools.quill._export import cmd_export
+from tools.quill._fields import ON_HOLD
 from tools.quill._filing import cmd_file
 from tools.quill._github import CredentialsError, GitHubError
+from tools.quill._next import next_step
 from tools.quill._show import cmd_show
 from tools.quill._state import (
     STALE_CLAIM,
@@ -178,7 +182,6 @@ from tools.quill._state import (
     left_bare,
     never_offered,
     never_split,
-    next_step,
     outside_reports,
     release_hint,
     resolved,
@@ -214,8 +217,10 @@ CONNECT = partial(Tracker.connect, PLAN)
 # -- next, claim, release -----------------------------------------------------
 
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
-    """The first open step in the board's order that is unclaimed, unshipped and unblocked;
-    then how far ``sync`` is behind, what it cannot offer that a person must act on, and last,
+    """The step :func:`_next.next_step` hands out, Urgent, then High, then the board's order, each
+    step's unfinished prerequisites just ahead of it, and never one On hold; then how far ``sync``
+    is behind, what it cannot offer that a person must act on, each step waiting on one On hold,
+    by name (ruling plan#1830, plan#1820's spec), and last,
     after every line no further read can cost, each claimed card, and each task under one,
     holding a comment of the developer's that no answer of quill's has followed (plan#1822,
     ruling plan#1924, :func:`_comments.unanswered_lines`).
@@ -246,6 +251,9 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
                  if never_split(card, cards, shipped) else
                  f"place it with `quill move plan#{card.number} --after plan#M` (or the board "
                  "lags a fresh write)"))
+    for wait in answer.waiting:
+        print(f"WAITING: {_label(wait.step)} needs what is {ON_HOLD}: "
+              f"{' and '.join(map(_label, wait.on))}")
     for claim in stale_claims(reads.claims, datetime.now(UTC)):
         print(f"STALE CLAIM: plan#{claim.card} on {holder(claim)}: no commit for more than "
               f"{STALE_CLAIM.days} days -- {release_hint(claim)} keeps its work and frees it")
@@ -267,7 +275,9 @@ def cmd_claim(args, tracker: Tracker, root: Path,
     order, unless they are filed already (ruling plan#1875): decided before the push
     (:func:`_filing.finishing_filings`), written after it.  Refused, with nothing written,
     for what is no work to claim (work shown done that a revert unshipped says to sync
-    first); while ``card/N`` holds a claim (:func:`_claimed_again`); while ``origin`` holds
+    first); for what is never offered (:func:`_state.never_offered`: On hold, ruling plan#1832,
+    among its reasons); while ``card/N`` holds a claim (:func:`_claimed_again`); while
+    ``origin`` holds
     a ``card/N`` already merged, which a create-only push cannot replace; while this clone
     already has a branch of that name, which the check-out would collide with; and for what
     the filing of a finishing task refuses.  The claim line is printed once the push lands,

@@ -2,8 +2,8 @@
 first act claims its step (step plan#1824, ruling plan#1835).
 
 The developer runs it in a new terminal, from the root of any checkout of the code
-repository, naming the lane and, until the board can hand out what he wants first
-(plan#1820), its step::
+repository, naming the lane and, to choose a step other than the one ``quill next`` hands
+out, that step::
 
     .venv/bin/python -m tools.quill.lane NAME [plan#N]
 

@@ -193,9 +193,9 @@ CASCADE (ruling plan#2784, which deleted the route guard that kept an account
 holding postings off that path).  **That can leave a single leg in the store,
 and this is why it is allowed.**  A correction books both legs on the account's
 own rows, so its entry loses both.  A movement's entry has its other leg on a
-category or on the owner's Transfers in transit, and a transfer delete outlives
-those entries with ``journal_entries.transaction_entry_id`` SET NULL, so that
-leg stays, single, beside its reversal's.  The balanced trigger has no DELETE
+category or on the owner's Transfers in transit, and it outlives the movement
+with ``journal_entries.transaction_entry_id`` SET NULL, so that leg stays,
+single, beside its reversal's.  The balanced trigger has no DELETE
 arm and the running app holds no DELETE on the journal, so nothing refuses it
 and nothing could remove the entry; no reader or deploy hook reads a leg no
 movement links, and X-ew's third leaf (plan#2516) deletes the store.  The

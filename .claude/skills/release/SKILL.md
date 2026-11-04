@@ -26,14 +26,15 @@ everything with a person or a judgment in it is here.
   session reads its hooks from its own worktree when it starts (measured 2026-10-26):
 
   ```bash
-  cd ~/projects/shekel-release && git fetch --prune origin && git merge --ff-only origin/dev && claude "/release"
+  cd ~/projects/shekel-release && git fetch --prune origin && git merge --ff-only origin/dev && { [ ! -L .venv ] || rm .venv; } && uv sync --locked && claude "/release"
   ```
 
   It runs this skill to the end and stops. A session building a card does not run it: it gives Josh
   that line and does not start the release. The worktree is made once, by `git worktree add
-  ~/projects/shekel-release dev` (git refuses while another worktree holds `dev`) and `ln -s
-  ~/projects/Shekel/.venv ~/projects/shekel-release/.venv`. Never in `~/projects/Shekel`, which
-  stays clean on `main` because production's deploy script is a symlink into it (trap u).
+  ~/projects/shekel-release dev` (git refuses while another worktree holds `dev`), and that line
+  keeps its venv its own, on `dev`'s lock (ruling plan#2828): it removes a link an earlier release
+  left, as `uv sync` writes through one into the main checkout's venv. Never in `~/projects/Shekel`,
+  which stays clean on `main` because production's deploy script is a symlink into it (trap u).
 - **The auto-mode classifier can refuse an act outright, even one Josh's word already covers**
   (10-20: inside the approved release, a copy into `/opt/docker/shekel` as 'Production Deploy';
   after it, a repository settings change as 'Permission Grant'; and under his standing merge
@@ -206,9 +207,9 @@ echo "kit <its directory>: <the kit's command> $DUMP" >> "$R/rehearsal.txt"
 ```
 
 One such block per kit, each headed by its directory and command. A rehearsal of
-a driver or library change needs each side's own venv; the shared venv tracks the dev tip (trap
-k). A kit that fails is a STOP: the release is not put to Josh as rehearsed; report the failing
-grade to the lane.
+a driver or library change needs each side's own venv; this worktree's holds `dev`'s lock alone
+(trap k). A kit that fails is a STOP: the release is not put to Josh as rehearsed; report the
+failing grade to the lane.
 
 **What a lane writing a kit is told:**
 
@@ -402,6 +403,18 @@ git -C ~/projects/Shekel fetch origin && git -C ~/projects/Shekel merge --ff-onl
 `~/projects/Shekel` must be clean on `main` before its fast-forward. A change to `deploy/`, or to
 `scripts/_container_lib.sh`, which the deploy script sources from beside it (R-BAL254), is live from
 this moment: `shekel-deploy` runs that checkout's copy (trap u).
+
+Then that checkout's venv, at every release: the edit hooks in every worktree (ruling plan#1848) and
+the tracker's sync service run it, and each lane has its own for the rest (ruling plan#2828).
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+uv sync --locked --directory ~/projects/Shekel; echo "exit=$?"
+```
+
+Where a card this release carries names another sync in `docs/runbook.md` 2.6, that one runs in its
+place. Production reads nothing in this venv, so a failure holds nothing of the deploy: name it in
+the record (step 13) with uv's own words.
 
 Then `dev`. No one can push to `dev` (ruleset `dev-queue`, whose bypass list is empty, R-BAL322),
 so `main` reaches it as a pull request from `main` through `dev`'s merge queue, as CLAUDE.md's Git

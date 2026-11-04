@@ -64,7 +64,8 @@
 #                        ``scripts/private_cluster.py``: where the rootless
 #                        socket and the per-run socket directory are, and the
 #                        two sanctions for a non-rootless daemon (its
-#                        docstring says how each is read).
+#                        docstring says how each is read).  CI also stops
+#                        the venv's sync below: CI's install has built it.
 #     READINESS_TIMEOUT_SECONDS  Cap on the readiness wait, read by
 #                        ``scripts/private_cluster.py``.  Default: 15.
 #     TEST_DB_IMAGE      An image to use INSTEAD of building and verifying
@@ -97,10 +98,14 @@
 #     refuses to start under anything but production's locale (ruling
 #     recurrence:R-R92), so the suite -- and CI, which runs it through here --
 #     always runs under that locale.
+#     VIRTUAL_ENV and PATH are EXPORTED too, outside CI where the tree holds
+#     ``uv.lock``, naming this tree's venv over any value the caller had (the
+#     block above ``docker``'s check says why).
 #
 # Exit codes:
 #     Whatever pytest returns, in the ordinary case.  A bootstrap failure
-#     exits 2 without running pytest: no python interpreter, no docker, a
+#     exits 2 without running pytest: no python interpreter, no uv or a sync
+#     that fails, no docker, a
 #     daemon that is not rootless or cannot be reached, a socket path over
 #     the kernel's 107-byte limit or not UTF-8, an image that cannot be
 #     prepared, a container name docker refuses, a cluster that does not
@@ -138,6 +143,52 @@ if [ -z "$_PYTHON" ]; then
     echo "[test.sh] needs a python interpreter to prepare the test-db image." >&2
     exit 2
 fi
+
+# THE SUITE RUNS WHAT THIS TREE'S LOCK NAMES (ruling plan#2828).  A lane has a
+# venv of its own, built from its own ``uv.lock`` (``tools/quill/lane.py`` makes
+# a new lane's), and this keeps it on that lock through every merge; what that
+# costs is in docs/testing-standards.md, Test Run Guidelines.  This block and the
+# lock reach a lane in one merge, so a lane before the lock keeps its link because
+# its wrapper has no such block; here, a tree with no lock has nothing to build from.
+#
+# A LINK IS REMOVED, NEVER FOLLOWED.  An older lane's ``.venv`` links the main
+# checkout's, and uv syncs through a link into its target (measured 2026-11-04,
+# on scratch venvs), which is the venv the edit hooks, the tracker's sync and
+# every lane still before the lock read.  ``rm`` of the link leaves that target
+# whole (measured with it); a dangling link goes the same way, which uv refuses
+# (``File exists``).  ``-f``, as two runs started together can both see the link.
+#
+# ``VIRTUAL_ENV`` AND ``PATH`` NAME THE TREE'S VENV FROM HERE ON.  A session an
+# older lane's start began holds the main checkout's venv first on ``PATH``, and
+# the ``pytest`` below is found on ``PATH``, so replacing the link alone would
+# still run the main checkout's pytest over that venv's packages: stopping at
+# ``import valkey`` (measured 2026-11-04).
+#
+# CI IS LEFT ALONE: ``.github/actions/install-lock`` is CI's one installer and has
+# already built the job's venv, so there is nothing here for this to sync.
+if [ -f "${_REPO_ROOT}/uv.lock" ] \
+    && ! "$_PYTHON" "${_REPO_ROOT}/scripts/private_cluster.py" on-ci; then
+    if ! command -v uv >/dev/null 2>&1; then
+        echo "[test.sh] needs uv, which is not on PATH, to build .venv from uv.lock." >&2
+        exit 2
+    fi
+    if [ -L "${_REPO_ROOT}/.venv" ]; then
+        rm -f -- "${_REPO_ROOT}/.venv"
+        echo "[test.sh] removed the link at ${_REPO_ROOT}/.venv:" \
+            "this tree holds uv.lock, so it gets a venv of its own." >&2
+    fi
+    VIRTUAL_ENV="${_REPO_ROOT}/.venv"
+    PATH="${VIRTUAL_ENV}/bin:${PATH}"
+    export VIRTUAL_ENV PATH
+    if ! uv sync --locked --quiet --directory "$_REPO_ROOT"; then
+        echo "[test.sh] uv sync --locked failed in ${_REPO_ROOT} (uv's own words" \
+            "are above), so no test ran, and .venv is not usable until it succeeds:" \
+            "put right what uv names, then run this again." >&2
+        exit 2
+    fi
+    _PYTHON="${VIRTUAL_ENV}/bin/python"
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
     echo "[test.sh] needs docker, which is not on PATH." >&2
     exit 2
@@ -222,8 +273,8 @@ fi
 # is live and proceeds.  Nothing to acquire, nothing to release, nothing to go
 # stale, and no run that cannot start because somebody forgot to release.
 #
-# **The CWD locates a peer; the ARGV does not.**  Every worktree on this host
-# shares ONE venv at the main checkout, so a peer's pytest reads
+# **The CWD locates a peer; the ARGV does not.**  A lane still before the lock
+# links the main checkout's venv, so its pytest reads
 # ``/home/josh/projects/Shekel/.venv/bin/pytest`` in its command line whatever
 # tree it is testing.  Reading ``/proc/<pid>/cwd`` was already the doctrine's
 # rule for killing by PID; it is the same rule for naming a peer, and an

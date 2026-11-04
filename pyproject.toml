@@ -148,8 +148,9 @@ dev = [
     # accepts at all (developer ruling R-BAL332, 2026-10-20).  0.2.79 is
     # excluded by name; 0.3.x is a new 0.x major, so it moves only by an
     # edit here, judged by polyglot-lint.  Two rumdl versions can reject each
-    # other's formatting, so after a move run ``uv sync`` before a Markdown
-    # commit, or a stale venv fails it.
+    # other's formatting, so after a move sync the venv before a Markdown
+    # commit, or a stale venv fails it: ``./scripts/test.sh`` syncs it, and
+    # replaces a ``.venv`` link, which a bare ``uv sync`` writes through.
     "rumdl>=0.2.78,<0.3.0,!=0.2.79",
     # Runs the local hooks in ``.pre-commit-config.yaml`` before each commit,
     # mirroring the CI gate for commits made outside a Claude Code session;

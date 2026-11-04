@@ -93,7 +93,8 @@ which python    # Should show ~/projects/budget-app/.venv/bin/python
 
 The repository's `uv.lock` is the one statement of every pinned version. `uv sync --locked` (above)
 installs exactly what it pins, the runtime packages plus the test, lint and build tools, and refuses
-a lock that no longer matches `pyproject.toml`; run it again after a pull that moves the lock. This
+a lock that no longer matches `pyproject.toml`; run it again after a pull that moves the lock. In a
+worktree whose `.venv` is a link, remove the link first: uv writes through one into its target. This
 page used to carry a copy of the pins, and the copy went stale.
 
 ### Environment File

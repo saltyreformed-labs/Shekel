@@ -93,12 +93,12 @@ _hooklib_dir="${BASH_SOURCE[0]%/*}"
 # what made the worktree fix above a regression before review caught it
 # (2026-09-04).
 #
-# **Worktrees borrow the main checkout's venv and have none of their own.**
-# Measured 2026-09-04 across the eight worktrees on this machine: a real .venv
-# in the primary, a SYMLINK to it in one worktree, and nothing in the other
-# six. .gitignore ignores .venv, so a worktree never acquires one by checkout;
-# `tools.quill.lane` links one into each lane it makes (plan#1824). A linked
-# .venv borrows the main checkout's too; it is not an exception.
+# **The gates' toolchain is the main checkout's, whatever a worktree holds.** A
+# worktree may hold a venv of its own (`tools.quill.lane` builds each new lane's,
+# and scripts/test.sh replaces an older lane's link; ruling plan#2828), a link to
+# the main checkout's, or nothing, as .gitignore ignores .venv and a worktree
+# never acquires one by checkout. So the one venv every session is sure to find
+# is the main checkout's, which each release syncs (`/release` step 8).
 #
 # **So the answer is git's, never the launch directory's** (ruling plan#1848,
 # finding plan#1849). Until 2026-10-27 this answered CLAUDE_PROJECT_DIR, on

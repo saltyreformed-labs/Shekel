@@ -28,6 +28,12 @@ this file has not loaded; a change here updates that mirror in the same commit.
   every container on it. Start the isolated one with
   `systemctl --user start docker.service`; `SHEKEL_ALLOW_HOST_DOCKER=1` accepts the churn
   deliberately, and CI sanctions its own throwaway daemon.
+- **It runs what the tree's lock names** (ruling plan#2828). Where the tree holds `uv.lock`,
+  outside CI, it removes a `.venv` that is a link (an older lane's, never followed, since uv
+  writes through one into the main checkout's venv), runs `uv sync --locked` before each run, and
+  puts that venv first on `PATH`. A sync that fails stops it, exit 2, with no test run. A lane
+  before the lock keeps its link, as its wrapper has no such step. The edit hooks stay on the main
+  checkout's venv (ruling plan#1848).
 - **It also defaults to `-m "not docker"`, which DESELECTS the container-spawning
   `tests/test_deploy` tests** -- deselected, not skipped, so they leave NO line in the
   report and a green run says nothing about them; CI's shards pass `-m ""` to the wrapper
@@ -50,9 +56,10 @@ this file has not loaded; a change here updates that mirror in the same commit.
   to CI's clock rather than this host's -- the dated table is `docs/testing-standards.md`, Test
   Run Guidelines). So the
   wrapper REPORTS rather than serialises: it prints any
-  other live pytest with its worktree and proceeds. **Read the cwd, never the argv** -- every
-  worktree here shares one venv, so a peer's command line names the main checkout whatever
-  tree it is testing. Waiting is a courtesy you owe a peer's gating run, not a protocol.
+  other live pytest with its worktree and proceeds. **Read the cwd, never the argv** -- a lane
+  still before the lock links the main checkout's venv, so its command line names the main
+  checkout whatever tree it is testing. Waiting is a courtesy you owe a peer's gating run, not a
+  protocol.
 - **Zero tolerance:** every batch must end in `<N> passed`. Any `failed`,
   `errors`, or unexpected `xfailed` blocks a "done" report -- investigate, do not
   dismiss as "pre-existing" (rule 4). Show the actual pass/fail summary as evidence.

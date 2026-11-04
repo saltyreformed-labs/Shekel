@@ -246,8 +246,8 @@ python -m tools.quill.quill sync                      # write every card's state
 python -m tools.quill.quill release plan#N            # free a claim, keeping its work
 
 # A new lane, run in a new terminal from a checkout's root (no venv need be active): a worktree
-# ~/projects/shekel-NAME detached at origin/dev, and a session in it, the venv active, whose
-# first act claims plan#N (or `next`'s step)
+# ~/projects/shekel-NAME detached at origin/dev with a venv built from its own lock, and a session
+# in it, that venv active, whose first act claims plan#N (or `next`'s step)
 .venv/bin/python -m tools.quill.lane NAME [plan#N]
 ```
 
@@ -329,6 +329,10 @@ live in `docs/testing-standards.md` (Test Run Guidelines). **The wrapper default
 from the report rather than appearing as skips, so a green local run is not a claim about them; CI
 runs the wrapper in six shards with `-m ""` and executes them all. Single test:
 `./scripts/test.sh tests/path/test_file.py::test_name -v`.
+
+**A suite runs what its tree's lock names** (ruling plan#2828; `.claude/rules/testing.md`): outside
+CI the wrapper replaces a `.venv` link and syncs first. `uv sync` by hand writes through a link.
+
 **A migration needs no manual template rebuild**: the template is baked into the image and the
 wrapper re-verifies it on EVERY invocation, rebuilding when the key moved
 (`scripts/build_test_db_image.py`).

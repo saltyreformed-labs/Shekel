@@ -839,9 +839,38 @@ plan#2633). Host-run `flask run` runs the limiter in memory, always, since dev's
 on a socket the dev app shares (ruling plan#2619); the containerized dev app runs its own
 configuration, `development-container`, on that socket (ruling plan#2651).
 
+**The main checkout's venv, at `/release` step 8.** This release is the first whose `main` holds a
+lock to move that venv to, and this block runs in place of that step's plain sync, because a lane
+still before the lock links the venv and needs `redis`, which the lock does not name:
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+uv sync --locked --inexact --directory ~/projects/Shekel; echo "exit=$?"
+```
+
+The next release's plain sync removes `redis`, a week on, and by then a lane has merged `dev`.
+Production reads nothing in this venv, so step 3 has nothing to put back here.
+
+Measured 2026-11-04 on a scratch copy of it, with `dev` at `7dc2ece23` as the tree before the lock.
+A plain `uv sync --locked` added `valkey`, moved 15 versions (pillow 12.3.0 to 13.0.0 the one major,
+jactionlint 2.4.0 back to 2.3.0) and removed `redis`, and it kept pip. That tree's suite
+(`not docker`) then gave 1 failed, 17,883 passed:
+`test_a_missing_ref_row_is_seeded_back_and_committed` stopped at
+`'redis' prerequisite not available`. With `--inexact` that test passed, `tools/quill`, `tools/ci`,
+`tools/release` and `tools/split` passed, and `pylint app/` held 10.00 under the lock's pylint
+4.1.3. `./scripts/test.sh` run from `~/projects/Shekel` syncs without `--inexact` and drops `redis`;
+a lane before the lock then meets that one failure, which merging `dev` ends.
+
 Between plan#1183's landing in `dev` and its release, the dev stack runs `main`'s Redis, and a dev
 app started from a `dev` worktree names a Valkey socket that nothing serves: its rate-limited routes
 fail until the release.
+
+In the same window each lane moves onto a venv of its own as it merges `dev` (ruling plan#2828):
+`./scripts/test.sh` replaces its `.venv` link once its tree holds `uv.lock`, and its `.venv/bin`
+commands run the link until then. `tools.quill.lane` run from `~/projects/Shekel` is `main`'s, which
+still links, so a lane started then is replaced the same way. The edit hooks stay on the main
+checkout's venv until `/release` step 8, its versions behind the lock's (pylint 4.1.2 against 4.1.3
+on 2026-11-04).
 
 **Measured 2026-11-02**, of the blocks as they stand, on a throwaway stack on the rootless daemon:
 `main`'s two compose files (`fc9dcfba7`, the files production holds) with production's image

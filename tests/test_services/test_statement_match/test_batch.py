@@ -30,7 +30,7 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import StatusEnum, TxnTypeEnum
+from app.enums import LedgerAccountKindEnum, StatusEnum, TxnTypeEnum
 from app.exceptions import ValidationError
 from app.extensions import db as _db
 from app.models.statement_line_skip import StatementLineSkip
@@ -42,6 +42,7 @@ from app.services import (
     status_seam,
     transaction_service,
 )
+from app.services.ledger_lines import account_counter_key
 from app.services.posting_reads import PostingError
 from app.services.row_valuation import settled_figure
 from app.services.statement_match import (
@@ -61,7 +62,7 @@ from app.services.statement_match._outcome import FiledMerchant
 # module reaches into it, which is the allowance every sibling here takes.
 from app.services.statement_match import _create  # pylint: disable=protected-access
 
-from tests._ledger_reads import nets_by_key_and_day
+from tests._ledger_reads import linked_key_of, nets_by_key_and_day
 from tests._test_helpers import (
     an_entered_day,
     purchases_of,
@@ -1367,6 +1368,21 @@ class TestABatchBooksWhatTheSameActsBookOneAtATime:
             assert as_a_batch["transactions"] == singly["transactions"]
             assert as_a_batch["entries"] == singly["entries"]
             assert as_a_batch["ledger"] == singly["ledger"]
+            # The figures, or that comparison could hold between two empty
+            # ledgers.  The bank's day is the seed's assertion day, so Checking's
+            # own line nets nothing there (the assertion takes the -279.96 back
+            # as a true-up): the money shows on its counter, Electricity 180.00
+            # + Water corrected onto it 42.00 + the swipe 57.96 = 279.96 moved
+            # off Anchor equity.  Three days on, the purchase re-dated to where
+            # it posted.  Water's old day holds nothing.
+            cash = linked_key_of(_db.session, seed_user["account"].id)
+            equity = account_counter_key(
+                LedgerAccountKindEnum.ANCHOR_EQUITY, seed_user["account"].id,
+            )
+            day = seed_user["bootstrap_period"].start_date
+            assert singly["ledger"][(equity, day)] == Decimal("-279.96")
+            assert singly["ledger"][(cash, day + timedelta(days=3))] == Decimal("-31.00")
+            assert (cash, day + timedelta(days=4)) not in singly["ledger"]
 
 
 class TestOnePressMintsOneEnvelopePerAnswerPerPeriod:
@@ -1805,6 +1821,11 @@ class TestConvergingMovesTheSameMoneyAsNotConverging:
         assert converged["balances"] == separate["balances"]
         assert converged["entries"] == separate["entries"]
         assert converged["ledger"] == separate["ledger"]
+        # The figures, or that comparison could hold between two empty ledgers:
+        # each purchase books its own line on the day its line posted.
+        cash = linked_key_of(_db.session, seed_user["account"].id)
+        assert separate["ledger"][(cash, day)] == Decimal("-30.00")
+        assert separate["ledger"][(cash, later)] == Decimal("-45.00")
 
 
 class TestThePassHoldsONEAmountBasis:

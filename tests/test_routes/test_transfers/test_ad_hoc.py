@@ -324,6 +324,7 @@ class TestAdHoc:
                 return sorted(net_posted_by_day(transfer_family_movement_ids(xfer.id)))
 
             days_before = _ledger_days()
+            assert days_before == [settled_a_week_ago]
             side_days_before = {
                 account_id: transfer_side_record(
                     db.session, xfer.id, account_id,

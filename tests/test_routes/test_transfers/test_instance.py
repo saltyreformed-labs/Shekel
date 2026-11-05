@@ -113,6 +113,7 @@ class TestTransferInstance:
 
             before = _state()
             assert all(p is not None for p in before[0])
+            assert before[1] == [settled_at]
 
             response = auth_client.patch(
                 f"/transfers/instance/{xfer.id}",

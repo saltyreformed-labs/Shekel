@@ -14,6 +14,7 @@ from app.services.balance_at import BalanceContext
 from app.utils.dates import display_today
 
 from tests._ledger_reads import (
+    account_net,
     family_movement_ids,
     linked_key_of,
     movement_nets_by_date,
@@ -537,9 +538,13 @@ class TestSettleDayLifecycle:
                 "a Projected row was given a settle day -- the PATCH setattr "
                 "loop is writing the column the seam owns (finding N-185)"
             )
-            assert self._line_days_for(txn.id) == [], (
-                "a Projected row booked on the ledger"
-            )
+            # Asked of the account, never of the row's movements: a Projected
+            # row holds no record, and a read of no movement answers nothing
+            # whatever the ledger holds.  Checking holds its seeded $1,000.00
+            # opening and no line of this row's.
+            assert account_net(
+                db.session, txn.account_id, txn.scenario_id,
+            ) == Decimal("1000.00"), "a Projected row booked on the ledger"
 
     def test_a_future_settle_day_is_refused_and_moves_no_money(
         self, app, auth_client, seed_user, seed_periods_today,

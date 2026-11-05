@@ -12,6 +12,7 @@ from app.models.transfer import Transfer
 from app.services import transfer_service
 from app.utils.dates import display_today
 from tests._ledger_reads import (
+    account_net,
     linked_key_of,
     linked_net_by_date,
     net_posted_by_day,
@@ -658,9 +659,13 @@ class TestTransferActualBox:
             assert self._side_records(xfer.id) == (None, None), (
                 "the refused day wrote a record"
             )
-            assert net_posted_by_day(
-                transfer_family_movement_ids(xfer.id),
-            ) == {}, "the refused day posted money"
+            # Asked of the account, never of the pair's movements: a $0.00
+            # close holds no record, and a read of no movement answers nothing
+            # whatever the ledger holds.  Checking holds its seeded $1,000.00
+            # opening and no line of this pair's.
+            assert account_net(
+                db.session, xfer.from_account_id, seed_user["scenario"].id,
+            ) == Decimal("1000.00"), "the refused day posted money"
 
             version = db.session.get(Transfer, xfer.id).version_id
             repair = auth_client.patch(

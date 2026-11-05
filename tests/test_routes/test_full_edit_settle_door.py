@@ -251,9 +251,19 @@ class TestTheDropdownBooksWhatTheRowCost:
             assert settled_contribution(dropdown_row) == settled_contribution(button_row)
             assert settled_figure(dropdown_row) == settled_figure(button_row)
             assert dropdown_row.status_id == button_row.status_id
-            assert _cash_leg(
-                dropdown_id, seed_user["account"].id,
-            ) == _cash_leg(button_id, seed_user["account"].id)
+            # The close books nothing of its own (ruling R-BAL77), so two $0.00
+            # legs would agree whatever either door did: the ledger half compares
+            # what each row books once its purchase is dated.
+            for row in (dropdown_row, button_row):
+                [purchase] = row.purchases
+                entry_service.update_entry(
+                    purchase.id, seed_user["user"].id,
+                    settle_day=an_entered_day(display_today()),
+                )
+            db.session.commit()
+            booked = _cash_leg(dropdown_id, seed_user["account"].id)
+            assert booked == _cash_leg(button_id, seed_user["account"].id)
+            assert booked != Decimal("0")
 
     def test_an_entry_less_envelope_still_books_its_budget(
         self, app, db, auth_client, seed_user, seed_periods_today,

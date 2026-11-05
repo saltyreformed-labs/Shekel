@@ -91,10 +91,8 @@ as the Step-2 / Step-3 oracles.  The SPLIT VALUES are pinned by the first and th
     the ledger, so an on-schedule agreement / off-schedule divergence pins the
     split VALUE that the internal reconciliation identities (structural, see
     ``_assert_loan_reconciles``) cannot; and
-  * **independent cross-table queries** -- the ledger side
-    (``_independent_loan_linked_net`` / ``_per_loan_correction_net``) reads
-    ``account_postings`` through a different join shape than the
-    ``posting_service`` readers, and the source side
+  * **independent cross-table queries** -- the ledger side is the worked-out read
+    (``tests/_ledger_reads.py``, plan step plan#2913) and the source side
     (``_independent_settled_income_cash``) reads ``transfers`` and their loan-side
     records in ``transaction_entries``.  This pins the
     READERS (a scenario-scope or ledger-resolution bug in ``account_posting_total``

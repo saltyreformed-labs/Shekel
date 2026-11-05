@@ -19,8 +19,10 @@ from app.services.ledger_lines import loan_key
 from tests._ledger_reads import ledger_net
 from tests._stored_ledger import (
     loan_correction_entries,
+    stored_account_net,
     stored_loan_balance_at,
     stored_loan_balance_map,
+    stored_per_loan_net,
 )
 from tests._test_helpers import (
     create_loan_account,
@@ -42,12 +44,10 @@ from ._helpers import (
     _make_loan,
     _resolved_at,
     _settle,
-    _independent_loan_linked_net,
     _per_loan_correction_net,
     _resolver_balance,
     _ledger_balance,
     _posted_balance,
-    _posted_period_map,
     _assert_loan_reconciles,
 )
 
@@ -671,8 +671,10 @@ class TestBackfillEqualsGoForward:
             _settle(seed_user, loan, seed_periods[_P2], amount=Decimal("1000.00"))
             db.session.commit()
 
-            forward_linked = _independent_loan_linked_net(loan.id, scenario_id)
-            forward_per_loan = _per_loan_correction_net(loan.id, scenario_id)
+            # The store's own act, so its own figures: the read follows the
+            # records and never saw the clearing.  Goes with the store.
+            forward_linked = stored_account_net(loan.id, scenario_id)
+            forward_per_loan = stored_per_loan_net(loan.id, scenario_id)
             # Opening (-250000) + true-up (+150000) + principal (500 + 502.50).
             assert forward_linked == Decimal("-98997.50")
             # Interest (500 + 497.50) + opening-equity legs (+100000).
@@ -681,17 +683,13 @@ class TestBackfillEqualsGoForward:
 
             # Reproduce the pre-wiring state (no loan postings), then backfill.
             _clear_all_loan_postings()
-            assert _per_loan_correction_net(loan.id, scenario_id) == Decimal("0")
+            assert stored_per_loan_net(loan.id, scenario_id) == Decimal("0")
             loan_posting_service.backfill_all_loan_postings()
             db.session.commit()
 
             # The backfilled nets equal the go-forward nets, and the sweep ties.
-            assert _independent_loan_linked_net(
-                loan.id, scenario_id,
-            ) == forward_linked
-            assert _per_loan_correction_net(
-                loan.id, scenario_id,
-            ) == forward_per_loan
+            assert stored_account_net(loan.id, scenario_id) == forward_linked
+            assert stored_per_loan_net(loan.id, scenario_id) == forward_per_loan
             _assert_loan_reconciles(loan, scenario_id, _AS_OF)
 
     def test_reader_reads_none_before_backfill_then_matches_resolver_after(

@@ -8,15 +8,13 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import NamedTuple
 
-from app import ref_cache
 from app.enums import LedgerAccountClassEnum
 from app.extensions import db as _db
 from app.models.account import Account, AccountAnchorHistory
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.services import account_posting_service, ledger_report_service
 
-from tests._ledger_reads import ledger_net
+from tests._ledger_reads import scenario_lines, trial_balance
+from tests._stored_ledger import entries_violating_balance
 from tests._test_helpers import observed_day_of
 
 
@@ -81,14 +79,11 @@ def _noon(year: int, month: int, day: int) -> datetime:
 # ---------------------------------------------------------------------------
 #
 # These re-derive each statement figure from scratch so the oracle is a genuine
-# second opinion: the balance-sheet totals are re-summed by ledger-account CLASS
-# straight from ``account_postings`` (a different path than the reader's
-# per-source attribution), signed by a test-local debit-normal set, with
-# retained earnings derived here -- so a bug shared by the reader's attribution
-# and presentation cannot reproduce these numbers.  The trial-balance and
-# per-entry-balance checks mirror the sibling oracles; the duplication is
-# DELIBERATE -- each oracle keeps its OWN independent queries so it stays a
-# self-contained second opinion.
+# second opinion: the balance-sheet totals are re-summed by chart CLASS off the
+# worked-out read (``tests/_ledger_reads.py``, plan step plan#2913; a different
+# path than the reader's per-source attribution), signed by a test-local
+# debit-normal set, with retained earnings derived here -- so a bug shared by the
+# reader's attribution and presentation cannot reproduce these numbers.
 
 # The accounting sign convention, restated INDEPENDENTLY of
 # ``ref_cache.ledger_class_is_debit_normal`` (which the reader signs by): a
@@ -102,51 +97,37 @@ _DEBIT_NORMAL = frozenset({
 
 
 def _class_debit_nets(
-    user_id: int, scenario_id: int, through: date | None = None,
-) -> dict[int, Decimal]:
-    """Return ``{class_id: debit_net}`` over a user's postings in a scenario.
+    scenario_id: int, through: date | None = None,
+) -> dict[LedgerAccountClassEnum, Decimal]:
+    """Return ``{class: debit_net}`` over the worked-out lines of a scenario.
 
-    Joins ``account_postings`` -> ``journal_entries`` (owner + scenario) ->
-    ``ledger_accounts`` (for the class) and sums the signed ``amount`` grouped by
-    ledger-account class.  Optionally bounded to entries dated at or before
-    *through* (an entry-date fold, valid as an as-of reader only for the
-    noon-UTC fixtures where ``entry_date`` equals the attribution date).  Keyed
-    off the class directly, so it never touches the reader's source-bucket
-    attribution.
+    Sums the signed ``amount`` of the scenario owner's lines grouped by their
+    chart key's class.  Optionally bounded to lines dated at or before *through*
+    (an entry-date fold, valid as an as-of reader only for the noon-UTC fixtures
+    where ``entry_date`` equals the attribution date).  Keyed off the class
+    directly, so it never touches the reader's source-bucket attribution.
 
     Args:
-        user_id: The owner whose ledger to read.
-        scenario_id: The budget scenario to scope to.
+        scenario_id: The budget scenario; its owner is the ledger's.
         through: An inclusive ``entry_date`` bound, or ``None`` for full
             position.
 
     Returns:
-        ``{ledger_account_class_id: summed debit net}`` over the nonempty
-        classes.
+        ``{chart class: summed debit net}`` over the nonempty classes.
     """
-    query = (
-        _db.session.query(
-            LedgerAccount.class_id,
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0")),
-        )
-        .select_from(Posting)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(
-            JournalEntry.user_id == user_id,
-            JournalEntry.scenario_id == scenario_id,
-        )
-    )
-    if through is not None:
-        query = query.filter(JournalEntry.entry_date <= through)
-    return dict(query.group_by(LedgerAccount.class_id).all())
+    nets: dict[LedgerAccountClassEnum, Decimal] = {}
+    for line in scenario_lines(_db.session, scenario_id):
+        if through is None or line.entry_date <= through:
+            ledger_class = line.key.ledger_class
+            nets[ledger_class] = nets.get(ledger_class, Decimal("0")) + line.amount
+    return nets
 
 
 class _IndependentSheet(NamedTuple):
-    """A balance sheet re-derived from raw postings, signed independently.
+    """A balance sheet re-derived from the worked-out lines, signed independently.
 
     The second opinion the reader's ``BalanceSheetReport`` must match (built by
-    :func:`_independent_bs`): each class total re-summed from ``account_postings``
+    :func:`_independent_bs`): each class total re-summed from the lines
     by class and signed from :data:`_DEBIT_NORMAL`, with retained earnings
     derived from the Income + Expense debit nets and the mechanical ledger net
     summed raw.  A plain value holder, compared field by field against the
@@ -155,13 +136,13 @@ class _IndependentSheet(NamedTuple):
     Attributes:
         assets: The Asset-class natural total.
         liabilities: The Liability-class natural total.
-        equity_ledger: The Equity-class natural total (posted equity accounts
-            only, excluding the derived retained earnings).
+        equity_ledger: The Equity-class natural total (equity lines only,
+            excluding the derived retained earnings).
         retained_earnings: The derived retained earnings (negated Income +
             Expense debit net).
         equity: ``equity_ledger + retained_earnings`` -- the reader's Equity
             section total.
-        ledger_net: The raw debit-positive net of every posting (zero for a
+        ledger_net: The raw debit-positive net of every line (zero for a
             balanced ledger).
     """
 
@@ -174,22 +155,20 @@ class _IndependentSheet(NamedTuple):
 
 
 def _independent_bs(
-    user_id: int, scenario_id: int, through: date | None = None,
+    scenario_id: int, through: date | None = None,
 ) -> _IndependentSheet:
-    """Return the balance sheet re-derived from raw postings (see :class:`_IndependentSheet`).
+    """Return the balance sheet re-derived from the lines (see :class:`_IndependentSheet`).
 
-    Groups the user's postings in the scenario by ledger-account class
+    Groups the owner's lines in the scenario by chart class
     (:func:`_class_debit_nets`), signs each class from the test-local
     :data:`_DEBIT_NORMAL` set (NOT the ref-cache flag the reader signs by), and
     derives retained earnings from the Income + Expense debit nets -- a genuine
     second opinion on classification, signing, and the retained-earnings close.
     """
-    nets = _class_debit_nets(user_id, scenario_id, through)
+    nets = _class_debit_nets(scenario_id, through)
 
     def _debit(class_enum: LedgerAccountClassEnum) -> Decimal:
-        return nets.get(
-            ref_cache.ledger_account_class_id(class_enum), Decimal("0"),
-        )
+        return nets.get(class_enum, Decimal("0"))
 
     def _natural(class_enum: LedgerAccountClassEnum) -> Decimal:
         debit = _debit(class_enum)
@@ -211,85 +190,40 @@ def _independent_bs(
 
 
 def _windowed_equity_corrections(
-    user_id: int, scenario_id: int, first_day: date, last_day: date,
+    scenario_id: int, first_day: date, last_day: date,
 ) -> Decimal:
     """Return the natural Equity-class net attributed inside a calendar window.
 
     The equity corrections (anchor openings / true-ups) whose ``entry_date``
     falls in ``[first_day, last_day]``, summed as their debit nets and NEGATED
     into natural (credit-normal) terms -- the articulation identity's
-    "windowed equity corrections" term, computed here from raw postings so the
-    articulation test relates three independently-obtained quantities.  Equity
-    accounts receive only sourceless corrections (dated by ``entry_date``), so an
+    "windowed equity corrections" term, computed here from the worked-out lines
+    so the articulation test relates three independently-obtained quantities.
+    Equity lines are only sourceless corrections (dated by ``entry_date``), so an
     entry-date fold is the correct window.
 
     Args:
-        user_id: The owner whose ledger to read.
-        scenario_id: The budget scenario to scope to.
+        scenario_id: The budget scenario; its owner is the ledger's.
         first_day: The inclusive first day of the window.
         last_day: The inclusive last day of the window.
 
     Returns:
         The window's Equity-class natural total as a ``Decimal``.
     """
-    equity_debit = (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0")),
-        )
-        .select_from(Posting)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(
-            JournalEntry.user_id == user_id,
-            JournalEntry.scenario_id == scenario_id,
-            LedgerAccount.class_id == ref_cache.ledger_account_class_id(
-                LedgerAccountClassEnum.EQUITY,
-            ),
-            JournalEntry.entry_date >= first_day,
-            JournalEntry.entry_date <= last_day,
-        )
-        .scalar()
+    return -sum(
+        (
+            line.amount for line in scenario_lines(_db.session, scenario_id)
+            if line.key.ledger_class is LedgerAccountClassEnum.EQUITY
+            and first_day <= line.entry_date <= last_day
+        ),
+        Decimal("0"),
     )
-    return -equity_debit
-
-
-def _trial_balance() -> Decimal:
-    """Return ``SUM(account_postings.amount)`` over the whole ledger (zero when balanced)."""
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0")),
-        )
-        .scalar()
-    )
-
-
-def _entries_violating_balance() -> list[tuple[int, Decimal, int]]:
-    """Return ``(entry_id, leg_sum, leg_count)`` for every malformed entry.
-
-    A well-formed double-entry has ``leg_sum == 0`` and ``leg_count >= 2``; any
-    row returned violates the deferred balanced trigger's invariant, re-checked
-    from the ORM side.
-    """
-    rows = (
-        _db.session.query(
-            Posting.journal_entry_id,
-            _db.func.sum(Posting.amount),
-            _db.func.count(Posting.id),
-        )
-        .group_by(Posting.journal_entry_id)
-        .all()
-    )
-    return [
-        (entry_id, leg_sum, leg_count)
-        for entry_id, leg_sum, leg_count in rows
-        if leg_sum != 0 or leg_count < 2
-    ]
 
 
 def _assert_ledger_self_consistent() -> None:
-    """Assert every entry balances and the whole-DB trial balance is zero."""
-    assert _entries_violating_balance() == []
-    assert _trial_balance() == Decimal("0")
+    """Assert every stored entry balances and the read's trial balance is zero."""
+    assert entries_violating_balance() == []
+    assert trial_balance(_db.session) == Decimal("0")
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +324,7 @@ def _checking_at_its_opening(user_id):
     return sheet
 
 
-def _assert_reader_matches_independent(user_id, scenario_id, sheet, through=None):
+def _assert_reader_matches_independent(scenario_id, sheet, through=None):
     """Assert the reader's sheet equals the independent re-derivation.
 
     Ties the reader's section totals, retained earnings, and two-part tie-out to
@@ -398,7 +332,7 @@ def _assert_reader_matches_independent(user_id, scenario_id, sheet, through=None
     classification / signing / retained-earnings bug is caught even where a
     hand-computed literal is not spelled out for every line.
     """
-    independent = _independent_bs(user_id, scenario_id, through)
+    independent = _independent_bs(scenario_id, through)
     assert sheet.assets.total == independent.assets
     assert sheet.liabilities.total == independent.liabilities
     assert _find_line(

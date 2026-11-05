@@ -14,6 +14,11 @@ from app.models.journal_entry import JournalEntry, Posting
 from app.models.transaction_entry import TransactionEntry
 from app.services import ledger_account_service, transaction_service
 from app.services.settle_day import SettleDay
+from tests._ledger_reads import (
+    family_movement_ids,
+    scenario_lines,
+    transfer_family_movement_ids,
+)
 from tests._stored_ledger import (
     family_journal_filter,
     linked_ledger_account,
@@ -129,13 +134,11 @@ def _entries_for_transaction(transaction_id):
 
 
 def _period_nets(entries):
-    """Return ``{pay_period_id: {ledger_account_id: net}}`` over *entries*.
+    """Return ``{pay_period_id: {ledger_account_id: net}}`` over stored *entries*.
 
-    The per-period reconciliation view the R2 attribution tests assert on:
-    an INDEPENDENT re-grouping of the entries' legs by the entry's pay period
-    and the leg's ledger account (never the service's own
-    ``_posting_write.posted_by_period``), so the tests re-derive the nets the production
-    reconcile must have produced.
+    A re-grouping of what a writer returned, by the entry's pay period and the
+    leg's ledger account: the writer's own output, so it goes with the store.
+    :func:`_period_nets_of_movements` is the worked-out view.
     """
     nets: dict[int, dict] = {}
     for entry in entries:
@@ -152,30 +155,31 @@ def _period_nets(entries):
     return nets
 
 
-def _period_nets_for_transaction(transaction_id):
-    """Per-period, per-ledger nets over a transaction's journal entries."""
-    return _period_nets(_entries_for_transaction(transaction_id))
+def _period_nets_of_movements(movement_ids, scenario_id):
+    """Return ``{pay_period_id: {chart key: net}}`` over the lines of *movement_ids*.
 
-
-def _period_nets_for_transfer(transfer_id):
-    """Per-period, per-ledger nets over a transfer's journal entries."""
-    return _period_nets(_entries_for_transfer(transfer_id))
-
-
-def _ledger_total(ledger_account_id):
-    """Return the net of all posting legs on one ledger account.
-
-    Sums ``account_postings.amount`` directly by ledger account id -- the
-    counter-account (category / fallback) analog of
-    ``posting_service.account_posting_total``, which keys off a REAL account's
-    linked ledger and so cannot be pointed at a category ledger account.
+    The per-period view the R2 attribution tests assert on, off the worked-out
+    read.  The read holds no ``$0.00`` line, so a reverted row's paycheck is
+    simply absent: what the store held as a pair netting to nothing there.
     """
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .filter(Posting.ledger_account_id == ledger_account_id)
-        .scalar()
+    wanted = set(movement_ids)
+    nets: dict[int, dict] = {}
+    for line in scenario_lines(_db.session, scenario_id):
+        if line.movement_id in wanted:
+            per_key = nets.setdefault(line.pay_period_id, {})
+            per_key[line.key] = per_key.get(line.key, Decimal("0.00")) + line.amount
+    return nets
+
+
+def _period_nets_for_transaction(transaction_id, scenario_id):
+    """Per-period, per-key nets over the lines of a transaction's family."""
+    return _period_nets_of_movements(family_movement_ids(transaction_id), scenario_id)
+
+
+def _period_nets_for_transfer(transfer_id, scenario_id):
+    """Per-period, per-key nets over the lines of both sides' records."""
+    return _period_nets_of_movements(
+        transfer_family_movement_ids(transfer_id), scenario_id,
     )
 
 

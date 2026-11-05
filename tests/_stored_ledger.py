@@ -413,6 +413,34 @@ def stored_account_net(account_id, scenario_id):
     )
 
 
+def stored_per_loan_net(loan_account_id, scenario_id):
+    """Return the net of a loan's per-loan chart rows' legs in a scenario.
+
+    Keyed on ``ledger_accounts.loan_account_id``: the loan's interest, escrow,
+    refund and opening-equity rows, which carry ``account_id IS NULL``.
+
+    Args:
+        loan_account_id: The loan's account id.
+        scenario_id: The scenario to scope to.
+
+    Returns:
+        The signed net as a ``Decimal`` (``Decimal("0")`` when none posted).
+    """
+    return (
+        db.session.query(
+            db.func.coalesce(db.func.sum(Posting.amount), Decimal("0"))
+        )
+        .select_from(Posting)
+        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
+        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
+        .filter(
+            LedgerAccount.loan_account_id == loan_account_id,
+            JournalEntry.scenario_id == scenario_id,
+        )
+        .scalar()
+    )
+
+
 def stored_trial_balance():
     """Return ``SUM(account_postings.amount)`` over the whole stored ledger."""
     return (
@@ -554,10 +582,8 @@ def stored_loan_balance_at(loan_account_id, scenario_id, as_of):
     :mod:`app.services.ledger_report_service`, so the sum-of-postings
     balance-at-T had no production caller left -- its only remaining job was to be
     the counterparty the fold and the resolver are graded against.  An oracle's
-    window belongs on the oracle's side: the reconciliation suite already states
-    the rule (``_independent_loan_linked_net`` reads through a DIFFERENT join
-    shape than the production readers "so the two cannot share a lookup bug"), and
-    a window living here cannot be re-exported into a screen.
+    window belongs on the oracle's side: a window living here cannot be re-exported
+    into a screen.
 
     Two deliberate differences from the deleted reader, both stated so a caller is
     not surprised:

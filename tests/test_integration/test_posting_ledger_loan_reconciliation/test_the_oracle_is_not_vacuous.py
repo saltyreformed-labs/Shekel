@@ -9,10 +9,16 @@ import pytest
 from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingKindEnum
 from app.extensions import db as _db
+from app.services.ledger_lines import LOAN_KINDS
 from app.utils.money import accrue_monthly_interest
+from tests import _ledger_reads
+from tests._ledger_reads import trial_balance
 from tests._stored_ledger import (
     find_loan_ledger_account,
     loan_correction_entries,
+    stored_account_net,
+    stored_per_loan_net,
+    stored_trial_balance,
 )
 
 from ._helpers import (
@@ -21,10 +27,8 @@ from ._helpers import (
     _make_loan,
     _resolved_at,
     _settle,
-    _independent_loan_linked_net,
     _per_loan_correction_net,
     _independent_settled_income_cash,
-    _trial_balance,
     _resolver_balance,
     _ledger_balance,
     _posted_balance,
@@ -43,19 +47,23 @@ class TestOracleIsNotVacuous:
     def test_superseding_invariant_catches_a_tampered_actual(
         self, app, db, seed_user, seed_periods,
     ):
-        """Tampering a payment's actual cash breaks the loan-aware invariant.
+        """Tampering a payment's actual cash leaves the STORE behind the records.
 
-        A reconciled $1,000 payment has linked net +500, income cash +1,000, and
-        non-principal corrections +500, so ``linked == income - non_principal``
-        holds.  Forcing the TRANSFER's settled figure -- the cash its loan
-        side's record moved, stored once on the transfer since plan step
-        balance:X-bi-6-4d-2 (its 4d-4 half; the record carried it before, and
-        the income shadow before that, ruling R-BAL167 class 4) -- to 9,999
-        via raw SQL (no re-sync) pushes the income cash to
-        +9,999 while the posted ledger is
-        unchanged -- so ``income - non_principal`` becomes 9,499, no longer the
-        +500 linked net.  The superseding invariant the sweep relies on now FAILS,
-        proving it is a real comparison, not one that passes unconditionally.
+        A reconciled $1,000 payment has a stored linked net of -99,500.00
+        (opening -250,000 + true-up +150,000 + principal +500), income cash
+        +1,000 and non-principal 100,500.00 (interest 500 + opening equity
+        100,000), so ``linked == income - non_principal`` holds.  Forcing the
+        TRANSFER's settled figure -- the cash its loan side's record moved,
+        stored once on the transfer since plan step balance:X-bi-6-4d-2 (its
+        4d-4 half; the record carried it before, and the income shadow before
+        that, ruling R-BAL167 class 4) -- to 9,999 via raw SQL (no re-sync)
+        pushes the income cash to +9,999 while the stored ledger is unchanged --
+        so ``income - non_principal`` becomes -90,501.00, no longer the -99,500.00
+        linked net.  A stale stored figure is the store's own state: the
+        worked-out read follows the record, so the sweep's arm (a), the store
+        against the read, is what names the drift.  This goes with the store;
+        :meth:`test_the_superseding_invariant_catches_a_wrong_read` grades the
+        invariant on the read.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -65,8 +73,8 @@ class TestOracleIsNotVacuous:
             )
             db.session.commit()
 
-            linked = _independent_loan_linked_net(loan.id, scenario_id)
-            non_principal = _per_loan_correction_net(loan.id, scenario_id)
+            linked = stored_account_net(loan.id, scenario_id)
+            non_principal = stored_per_loan_net(loan.id, scenario_id)
             income = _independent_settled_income_cash(loan.id, scenario_id)
             # Reconciled before tampering.
             assert linked == income - non_principal
@@ -90,25 +98,79 @@ class TestOracleIsNotVacuous:
                 loan.id, scenario_id,
             )
             assert tampered_income == Decimal("9999.00")  # source drifted
-            assert _independent_loan_linked_net(
+            assert stored_account_net(
                 loan.id, scenario_id,
-            ) == linked  # ledger unchanged
-            # The invariant the sweep checks now fails -- the drift is caught.
+            ) == linked  # stored ledger unchanged
+            # The stored invariant now fails -- the drift shows.
             assert linked != tampered_income - non_principal
             # Drive the REAL production-wide sweep helper (not just the inline
-            # re-derivation above) so a regression that broke the helper itself --
-            # e.g. one that stopped comparing the income cash -- would fail here.
-            # ``match`` pins the SUPERSEDING invariant's message specifically, so a
-            # future edit that weakened THAT comparison but left some other assertion
-            # (a non-empty guard, the trial balance) firing under tamper no longer
-            # keeps this test green -- the tooth cannot be lost undetected (L-1).
+            # re-derivation above).  ``match`` pins arm (a)'s message: the read
+            # follows the tampered record, and only the store does not.
+            with pytest.raises(AssertionError, match="account_posting_total"):
+                _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+
+    def test_the_superseding_invariant_catches_a_wrong_read(
+        self, app, db, seed_user, seed_periods, monkeypatch,
+    ):
+        """A read that loses a loan's component lines breaks the loan-aware invariant.
+
+        A reconciled $1,000 payment reads linked -99,500.00 = income cash 1,000.00 -
+        non-principal 100,500.00 (interest 500 + opening equity 100,000).  A read
+        dropping every loan component line answers non-principal 0.00 with the
+        linked net unmoved, and 1,000.00 - 0.00 is no longer -99,500.00, so the
+        sweep FAILS.  ``match`` pins the SUPERSEDING invariant's message
+        specifically, so a future edit that weakened THAT comparison but left some
+        other assertion firing cannot keep this test green (L-1).
+        """
+        with app.app_context():
+            scenario_id = seed_user["scenario"].id
+            loan = _make_loan(seed_user)
+            _settle(seed_user, loan, seed_periods[_P1], amount=Decimal("1000.00"))
+            db.session.commit()
+            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            assert _per_loan_correction_net(
+                loan.id, scenario_id,
+            ) == Decimal("100500.00")
+
+            real_read = _ledger_reads.worked_out_lines
+            monkeypatch.setattr(_ledger_reads, "worked_out_lines", lambda *args: [
+                line for line in real_read(*args) if line.key.kind not in LOAN_KINDS
+            ])
+
+            assert _per_loan_correction_net(
+                loan.id, scenario_id,
+            ) == Decimal("0.00")
             with pytest.raises(AssertionError, match="non-principal corrections"):
                 _assert_loan_reconciles(loan, scenario_id, _AS_OF)
 
-    def test_trial_balance_catches_an_injected_leg(
+    def test_the_trial_balance_catches_a_wrong_read(
+        self, app, db, seed_user, seed_periods, monkeypatch,
+    ):
+        """A read that loses a payment's interest line pushes the trial balance off zero.
+
+        A $1,000 payment on the $100,000 balance at 6% splits $500.00 onto the
+        loan's interest line (100,000 x 0.06 / 12).  A read dropping that line
+        leaves 0 - 500 = -500.00, so the trial-balance ``= 0`` assertion is a real
+        check on the read.
+        """
+        with app.app_context():
+            loan = _make_loan(seed_user)
+            _settle(seed_user, loan, seed_periods[_P1], amount=Decimal("1000.00"))
+            db.session.commit()
+            assert trial_balance(db.session) == Decimal("0.00")
+
+            real_read = _ledger_reads.worked_out_lines
+            monkeypatch.setattr(_ledger_reads, "worked_out_lines", lambda *args: [
+                line for line in real_read(*args)
+                if line.key.kind is not LedgerAccountKindEnum.LOAN_INTEREST
+            ])
+
+            assert trial_balance(db.session) == Decimal("-500.00")
+
+    def test_stored_trial_balance_catches_an_injected_leg(
         self, app, db, seed_user, seed_periods,
     ):
-        """Injecting one extra leg on a correction pushes the trial balance off zero.
+        """Injecting one extra leg on a correction pushes the stored trial balance off zero.
 
         A balanced book has trial balance 0.00.  Inserting one unmatched +50 leg
         onto the correction entry (raw SQL, flushed but never committed so the
@@ -123,7 +185,7 @@ class TestOracleIsNotVacuous:
                 seed_user, loan, seed_periods[_P1], amount=Decimal("1000.00"),
             )
             db.session.commit()
-            assert _trial_balance() == Decimal("0.00")
+            assert stored_trial_balance() == Decimal("0.00")
 
             # Inject one extra, unmatched leg onto the correction entry, on the
             # loan's interest ledger.  Flush (not commit) makes it visible; the
@@ -144,8 +206,8 @@ class TestOracleIsNotVacuous:
             })
             db.session.flush()
 
-            assert _trial_balance() == Decimal("50.00")  # 0.00 + 50.00
-            assert _trial_balance() != Decimal("0.00")
+            assert stored_trial_balance() == Decimal("50.00")  # 0.00 + 50.00
+            assert stored_trial_balance() != Decimal("0.00")
 
             # Discard the injected leg; the deferred trigger never fires.
             db.session.rollback()

@@ -284,7 +284,7 @@ class TestTheLedgerBooksItToUncategorized:
         line, salary, allowance = _payroll(seed_user)
         assert _uncategorized_net(
             seed_user, LedgerAccountClassEnum.INCOME,
-        ) is None
+        ) == Decimal("0.00")
 
         _submit(
             seed_user, lines=[line], transactions=[salary, allowance],

@@ -16,7 +16,7 @@ from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
 from app.services import account_posting_service, posting_service, status_seam
 from app.services.ledger_lines import account_counter_key
-from tests._ledger_reads import ledger_net
+from tests._ledger_reads import account_net, ledger_net
 from tests._stored_ledger import linked_ledger_account
 from tests._test_helpers import (
     create_account_of_type,
@@ -25,7 +25,6 @@ from tests._test_helpers import (
 )
 
 from ._helpers import (
-    _independent_linked_ledger_sum,
     _latest_assertion,
     _independent_post_assertion_source_effect,
     _assert_account_anchors_reconcile,
@@ -126,9 +125,9 @@ class TestAbsoluteInvariantPerAccount:
             latest_asserted_day, latest_anchor = _latest_assertion(savings.id)
             assert latest_anchor == Decimal("350.00")
 
-            # (a) hand-computed literal == independent ledger-table query.
-            assert _independent_linked_ledger_sum(
-                savings.id, scenario_id,
+            # (a) hand-computed literal == the worked-out read.
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("250.00")
             # (b) independent source query == the hand-computed post-assertion
             #     effect (only the T+3h spend rides on top).

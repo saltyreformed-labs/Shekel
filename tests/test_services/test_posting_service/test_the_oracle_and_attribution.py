@@ -8,9 +8,10 @@ from datetime import date
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import StatusEnum
+from app.enums import LedgerAccountClassEnum, StatusEnum
 from app.extensions import db as _db
 from app.services import posting_service, status_seam, transfer_service
+from app.services.ledger_lines import category_key, linked_key
 from app.utils.dates import display_today
 from tests._test_helpers import (
     add_txn,
@@ -216,10 +217,11 @@ class TestPeriodAttribution:
             legs = _legs_by_ledger(reversal.id)
             assert legs[cash_ledger] == Decimal("100.00")
 
-            # Period P nets to zero per ledger account; F holds nothing.
-            per_period = _period_nets_for_transaction(txn.id)
-            assert per_period[period.id][cash_ledger] == Decimal("0.00")
-            assert moved_to.id not in per_period
+            # P holds $0.00 on every key and F holds nothing: the read holds no
+            # $0.00 line, so neither paycheck is here.
+            assert _period_nets_for_transaction(
+                txn.id, seed_user["scenario"].id,
+            ) == {}
 
             # A later re-settle posts into the NEW period alone, dated the day
             # the user re-settled it on -- the seam's stamp.  It dated at the
@@ -235,9 +237,18 @@ class TestPeriodAttribution:
             _db.session.commit()
             assert resettle.pay_period_id == moved_to.id
             assert resettle.entry_date == display_today()
-            per_period = _period_nets_for_transaction(txn.id)
-            assert per_period[period.id][cash_ledger] == Decimal("0.00")
-            assert per_period[moved_to.id][cash_ledger] == Decimal("-100.00")
+            # P still at $0.00, so absent; F carries the re-settle.
+            assert _period_nets_for_transaction(
+                txn.id, seed_user["scenario"].id,
+            ) == {
+                moved_to.id: {
+                    linked_key(seed_user["account"]): Decimal("-100.00"),
+                    category_key(
+                        seed_user["categories"]["Groceries"].id,
+                        LedgerAccountClassEnum.EXPENSE,
+                    ): Decimal("100.00"),
+                },
+            }
 
     def test_transfer_revert_and_move_reverses_into_the_original_period(
         self, app, db, seed_user, seed_periods, savings,
@@ -288,8 +299,8 @@ class TestPeriodAttribution:
                 checking_ledger: Decimal("100.00"),
                 transit_ledger: Decimal("-100.00"),
             }
-            per_period = _period_nets_for_transfer(transfer.id)
-            assert per_period[period.id][savings_ledger] == Decimal("0.00")
-            assert per_period[period.id][checking_ledger] == Decimal("0.00")
-            assert per_period[period.id][transit_ledger] == Decimal("0.00")
-            assert moved_to.id not in per_period
+            # P holds $0.00 on both real keys and transit, and F holds nothing:
+            # the read holds no $0.00 line, so neither paycheck is here.
+            assert _period_nets_for_transfer(
+                transfer.id, seed_user["scenario"].id,
+            ) == {}

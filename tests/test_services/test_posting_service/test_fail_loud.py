@@ -13,14 +13,16 @@ from app.extensions import db as _db
 from app.models.journal_entry import JournalEntry
 from app.services import posting_service, transfer_legs
 from app.services._posting_write import _emit_balanced_entry, _PostingLeg
+from app.services.ledger_lines import transit_key
 from app.services.posting_service import PostingError
+from tests._ledger_reads import ledger_net
 from tests._test_helpers import (
     add_txn,
     create_settled_transfer,
     refused_by_database_rule,
 )
 
-from ._helpers import _ledger_id, _transit_ledger_id, _legs_by_ledger, _scenario_id, _ledger_total
+from ._helpers import _ledger_id, _transit_ledger_id, _legs_by_ledger, _scenario_id
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +133,9 @@ class TestFailLoud:
                 in transfer_legs.transfer_family_movements(transfer)
             ])
             _db.session.commit()
-            assert _ledger_total(transit_ledger) == Decimal("0.00")
+            assert ledger_net(
+                _db.session, transit_key(), _scenario_id(seed_user),
+            ) == Decimal("0.00")
             # Remove the to-side's record via raw SQL, around the service: a
             # record is no longer deleted with anything (R-CC54; rule-5
             # re-expression, developer-confirmed 2026-09-23), and it is the
@@ -150,7 +154,9 @@ class TestFailLoud:
                 checking_ledger: Decimal("-100.00"),
                 transit_ledger: Decimal("100.00"),
             }
-            assert _ledger_total(transit_ledger) == Decimal("100.00")
+            assert ledger_net(
+                _db.session, transit_key(), _scenario_id(seed_user),
+            ) == Decimal("100.00")
             # The missing side posted nothing: Savings sits on its opening.
             assert posting_service.account_posting_total(
                 savings.id, _scenario_id(seed_user),

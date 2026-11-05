@@ -165,7 +165,7 @@ class TestRichFixtureStatements:
             assert sheet.tie_out.in_balance is True
 
             # --- Independent second opinion + whole-ledger self-consistency.
-            _assert_reader_matches_independent(user_id, scenario_id, sheet)
+            _assert_reader_matches_independent(scenario_id, sheet)
             _assert_ledger_self_consistent()
 
 
@@ -290,5 +290,5 @@ class TestLoanInterestEscrowInStatements:
                 loan.id, scenario_id,
             ) == Decimal("-99600.00")
 
-            _assert_reader_matches_independent(user_id, scenario_id, sheet)
+            _assert_reader_matches_independent(scenario_id, sheet)
             _assert_ledger_self_consistent()

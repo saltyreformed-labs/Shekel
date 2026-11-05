@@ -12,7 +12,9 @@ from app.enums import LedgerAccountClassEnum, PostingKindEnum, PostingSourceEnum
 from app.extensions import db as _db
 from app.models.journal_entry import Posting
 from app.services import posting_service, status_seam
+from app.services.ledger_lines import category_key
 from app.utils.dates import display_today
+from tests._ledger_reads import ledger_net
 from tests._test_helpers import (
     add_txn,
     an_entered_day,
@@ -27,7 +29,6 @@ from ._helpers import (
     _scenario_id,
     _entries_for_transaction,
     _period_nets,
-    _ledger_total,
     _add_txn_entry,
     _resolve_category_ledger,
 )
@@ -448,10 +449,6 @@ class TestTransactionReversal:
                 status_enum=StatusEnum.DONE, category_key="Groceries",
             )
             _db.session.commit()
-            groceries_ledger = _resolve_category_ledger(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            ).id
-
             posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
@@ -461,7 +458,14 @@ class TestTransactionReversal:
             [_reversal] = posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
-            assert _ledger_total(groceries_ledger) == Decimal("0.00")
+            assert ledger_net(
+                _db.session,
+                category_key(
+                    seed_user["categories"]["Groceries"].id,
+                    LedgerAccountClassEnum.EXPENSE,
+                ),
+                _scenario_id(seed_user),
+            ) == Decimal("0.00")
             assert posting_service.account_posting_total(
                 seed_user["account"].id, _scenario_id(seed_user),
             ) == Decimal("1000.00")
@@ -496,9 +500,6 @@ class TestTransactionReversal:
                 status_enum=StatusEnum.DONE, category_key="Groceries",
             )
             _db.session.commit()
-            a_ledger = _resolve_category_ledger(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            ).id
 
             # 1. Settle in category A.
             posting_service.sync_transaction_postings(txn)
@@ -525,11 +526,20 @@ class TestTransactionReversal:
             posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
-            b_ledger = _resolve_category_ledger(
-                seed_user, "Rent", LedgerAccountClassEnum.EXPENSE,
-            ).id
-            assert _ledger_total(a_ledger) == Decimal("0.00")
-            assert _ledger_total(b_ledger) == Decimal("100.00")
+            assert ledger_net(
+                _db.session,
+                category_key(
+                    seed_user["categories"]["Groceries"].id, LedgerAccountClassEnum.EXPENSE,
+                ),
+                _scenario_id(seed_user),
+            ) == Decimal("0.00")
+            assert ledger_net(
+                _db.session,
+                category_key(
+                    seed_user["categories"]["Rent"].id, LedgerAccountClassEnum.EXPENSE,
+                ),
+                _scenario_id(seed_user),
+            ) == Decimal("100.00")
             assert posting_service.account_posting_total(
                 seed_user["account"].id, _scenario_id(seed_user),
             ) == Decimal("1000.00")
@@ -583,8 +593,20 @@ class TestTransactionReversal:
             assert cash_ledger not in legs
             assert sum(legs.values()) == Decimal("0.00")
             # Net books: A zero, B carries the expense, cash on its anchor.
-            assert _ledger_total(a_ledger) == Decimal("0.00")
-            assert _ledger_total(b_ledger) == Decimal("100.00")
+            assert ledger_net(
+                _db.session,
+                category_key(
+                    seed_user["categories"]["Groceries"].id, LedgerAccountClassEnum.EXPENSE,
+                ),
+                _scenario_id(seed_user),
+            ) == Decimal("0.00")
+            assert ledger_net(
+                _db.session,
+                category_key(
+                    seed_user["categories"]["Rent"].id, LedgerAccountClassEnum.EXPENSE,
+                ),
+                _scenario_id(seed_user),
+            ) == Decimal("100.00")
             assert posting_service.account_posting_total(
                 seed_user["account"].id, _scenario_id(seed_user),
             ) == Decimal("1000.00")

@@ -12,6 +12,8 @@ from app.enums import PostingKindEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
 from app.models.journal_entry import Posting
 from app.services import posting_service, transfer_legs, transfer_service
+from app.services.ledger_lines import transit_key
+from tests._ledger_reads import ledger_net
 from tests._test_helpers import create_account_of_type, create_settled_transfer
 from app.services.amount_ownership import state_own_amount
 from app.models.amount_ownership import AmountOwnership
@@ -24,7 +26,6 @@ from ._helpers import (
     _covering_movement_of_side,
     _legs_by_ledger,
     _scenario_id,
-    _ledger_total,
 )
 
 
@@ -115,7 +116,9 @@ class TestSyncSettlePostsBalancedEntry:
             assert sum(from_legs.values()) == Decimal("0.00")
             assert sum(to_legs.values()) == Decimal("0.00")
             # Transit nets to zero across the pair.
-            assert _ledger_total(transit_ledger) == Decimal("0.00")
+            assert ledger_net(
+                _db.session, transit_key(), _scenario_id(seed_user),
+            ) == Decimal("0.00")
             # Exactly two entries for the transfer.
             assert len(_entries_for_transfer(transfer.id)) == 2
 
@@ -157,7 +160,9 @@ class TestSyncSettlePostsBalancedEntry:
                 mortgage_ledger: Decimal("250.00"),
                 transit_ledger: Decimal("-250.00"),
             }
-            assert _ledger_total(transit_ledger) == Decimal("0.00")
+            assert ledger_net(
+                _db.session, transit_key(), _scenario_id(seed_user),
+            ) == Decimal("0.00")
 
     def test_settle_uses_effective_amount_not_transfer_amount(
         self, app, db, seed_user, savings,
@@ -404,7 +409,9 @@ class TestSyncReversal:
             assert posting_service.account_posting_total(
                 savings.id, _scenario_id(seed_user),
             ) == Decimal("100.00")
-            assert _ledger_total(transit_ledger) == Decimal("0.00")
+            assert ledger_net(
+                _db.session, transit_key(), _scenario_id(seed_user),
+            ) == Decimal("0.00")
             # Four entries survive (append-only correction, never an edit).
             assert len(_entries_for_transfer(transfer.id)) == 4
 
@@ -464,7 +471,7 @@ class TestSyncReversal:
             assert posting_service.settled_transfer_effect(
                 savings.id, scenario_id,
             ) == Decimal("150.00")
-            assert _ledger_total(_transit_ledger_id(seed_user)) == Decimal("0.00")
+            assert ledger_net(_db.session, transit_key(), scenario_id) == Decimal("0.00")
             # Six entries: settle, reverse, re-settle -- two sides each.
             assert len(_entries_for_transfer(transfer.id)) == 6
 

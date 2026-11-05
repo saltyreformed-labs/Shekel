@@ -17,8 +17,9 @@ from app.services import account_posting_service, anchor_service, cash_ledger, p
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.utils.dates import display_today
 from app.services.ledger_lines import account_counter_key
-from tests._ledger_reads import ledger_net
+from tests._ledger_reads import account_net, ledger_net, trial_balance
 from tests._stored_ledger import (
+    entries_violating_balance,
     ledger_account_of_kind,
     linked_ledger_account,
 )
@@ -29,11 +30,8 @@ from tests._test_helpers import (
 )
 
 from ._helpers import (
-    _independent_linked_ledger_sum,
     _latest_assertion,
     _independent_post_assertion_source_effect,
-    _trial_balance,
-    _entries_violating_balance,
     _assert_account_anchors_reconcile,
     _origin_instant,
     _assert_balance_at,
@@ -333,10 +331,10 @@ class TestBackDatedTrueUpReBasesTheLedger:
             ).outcome
 
             assert outcome is AnchorTrueUpOutcome.COMMITTED
-            # The ledger lands on the LATEST anchor, read through the
-            # independent join rather than the service's own total.
-            assert _independent_linked_ledger_sum(
-                savings.id, scenario_id,
+            # The ledger lands on the LATEST anchor, read off the records
+            # rather than the service's own total.
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("900.00")
             # ...and through the seam's own reader, which resolves the ledger
             # row first, so a shared lookup bug cannot satisfy both.
@@ -344,8 +342,8 @@ class TestBackDatedTrueUpReBasesTheLedger:
                 savings.id, scenario_id,
             ) == Decimal("900.00")
             # Ledger-wide self-checks: nothing was double-posted or stranded.
-            assert _trial_balance() == Decimal("0.00")
-            assert _entries_violating_balance() == []
+            assert trial_balance(_db.session) == Decimal("0.00")
+            assert entries_violating_balance() == []
             _assert_account_anchors_reconcile(scenario_id)
 
     def test_back_dating_below_the_opening_re_designates_it_and_reconciles(
@@ -416,11 +414,11 @@ class TestBackDatedTrueUpReBasesTheLedger:
 
             # The ledger is unmoved by the re-designation: still the latest
             # anchor, still balanced, still reconciling across the scenario.
-            assert _independent_linked_ledger_sum(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("1000.00")
-            assert _trial_balance() == Decimal("0.00")
-            assert _entries_violating_balance() == []
+            assert trial_balance(_db.session) == Decimal("0.00")
+            assert entries_violating_balance() == []
             _assert_account_anchors_reconcile(scenario_id)
 
             # The source KIND flipped with the flag, and it is graded by the NET

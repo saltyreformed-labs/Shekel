@@ -6,38 +6,33 @@ from datetime import timedelta
 from decimal import Decimal
 
 from app.extensions import db
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.transfer import Transfer
 from app.services import transfer_service
 from app.utils.dates import display_today
-from tests._stored_ledger import transfer_family_journal_filter
+from tests._ledger_reads import scenario_lines, transfer_family_movement_ids
 from app.models.amount_ownership import AmountOwnership
 
 
 def _ledger_nets_for_transfer(transfer_id):
-    """Return ``{ledger_account_id: net}`` over a transfer's posted legs.
+    """Return ``{chart key: net}`` over the lines a transfer's records book.
 
-    Reads the posted side the way the reconcile does -- summed per ledger
-    account across every journal entry the transfer wrote -- so a leg that has
-    been reversed to zero drops out rather than showing as two rows.
+    Summed per chart account across both sides' records, so a key both sides
+    cancel on (Transfers in transit, once both have cleared) drops out rather
+    than showing as a $0.00 line.  A loan payment's split comes from the loan's
+    walk and no record, so it is not among them.
 
     Args:
-        transfer_id: The transfer whose postings to sum.
+        transfer_id: The transfer whose lines to sum.
 
     Returns:
-        The non-zero nets, keyed by ledger account id.
+        The non-zero nets, keyed by :class:`~app.services.ledger_lines.ChartKey`.
     """
-    rows = (
-        db.session.query(Posting.ledger_account_id, Posting.amount)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(transfer_family_journal_filter(transfer_id))
-        .all()
-    )
+    records = set(transfer_family_movement_ids(transfer_id))
+    scenario_id = db.session.get(Transfer, transfer_id).scenario_id
     nets = {}
-    for ledger_account_id, amount in rows:
-        nets[ledger_account_id] = nets.get(
-            ledger_account_id, Decimal("0"),
-        ) + amount
+    for line in scenario_lines(db.session, scenario_id):
+        if line.movement_id in records:
+            nets[line.key] = nets.get(line.key, Decimal("0")) + line.amount
     return {key: net for key, net in nets.items() if net != 0}
 
 

@@ -436,7 +436,7 @@ class TestTheStoreIsReFiled:
             )
             added_first = head[0].id
             assert set(nets) == {added_first}, "the opening's money sits in the head"
-            totals = _stored_totals(user_id)
+            totals = worked_out_totals(_db.session, user_id)
 
             assert pay_period_admin.remove_earlier_pay_periods(
                 user_id, seed_periods[0].id,
@@ -448,7 +448,7 @@ class TestTheStoreIsReFiled:
             assert _source_nets_by_period(
                 seed_user["account"], PostingSourceEnum.ACCOUNT_OPENING,
             ) == {seed_periods[0].id: nets[added_first]}
-            assert _stored_totals(user_id) == totals
+            assert worked_out_totals(_db.session, user_id) == totals
 
     def test_a_loans_opening_filed_in_an_added_paycheck_goes_back(
         self, app, db, seed_user, seed_periods,
@@ -470,7 +470,7 @@ class TestTheStoreIsReFiled:
             nets = _source_nets_by_period(loan, PostingSourceEnum.LOAN_OPENING)
             added_first = head[0].id
             assert set(nets) == {added_first}, "the loan opening's money sits in the head"
-            totals = _stored_totals(user_id)
+            totals = worked_out_totals(_db.session, user_id)
 
             assert pay_period_admin.remove_earlier_pay_periods(
                 user_id, seed_periods[0].id,
@@ -480,7 +480,7 @@ class TestTheStoreIsReFiled:
             assert _source_nets_by_period(loan, PostingSourceEnum.LOAN_OPENING) == {
                 seed_periods[0].id: nets[added_first],
             }
-            assert _stored_totals(user_id) == totals
+            assert worked_out_totals(_db.session, user_id) == totals
 
     def test_a_self_cancelling_pair_goes_with_its_paycheck(
         self, app, db, seed_user, seed_periods,

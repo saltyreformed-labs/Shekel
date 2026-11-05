@@ -195,10 +195,10 @@ class TestScenarioAndOwnerIsolation:
             assert income1.expense.total == Decimal("60.00")
             assert income2.expense.total == Decimal("80.00")
             _assert_reader_matches_independent(
-                user1, seed_user["scenario"].id, sheet1,
+                seed_user["scenario"].id, sheet1,
             )
             _assert_reader_matches_independent(
-                user2, seed_second_user["scenario"].id, sheet2,
+                seed_second_user["scenario"].id, sheet2,
             )
             _assert_ledger_self_consistent()
 

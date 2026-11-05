@@ -10,12 +10,9 @@ Covers audit findings:
     BAL-653  Compose images pinned by tag alone (ledger finding, plan step X-em;
              :class:`TestEveryComposeImageIsPinnedByDigest`, which lists the
              compose files with ``git ls-files``)
-    plan#2703  The source build's image named as its own and never pulled (a ruling;
-             :class:`TestTheSourceBuildRunsItsOwnBuild`)
 
 The artifacts under audit are the multi-stage Dockerfile, the
 production compose override at ``deploy/docker-compose.prod.yml``,
-``scripts/deploy.sh`` (Cosign sign + verify wrappers),
 ``.github/workflows/docker-publish.yml`` (CI signing pipeline),
 and ``.gitignore`` (private-key exclusion).  Since plan step balance:X-dj
 it also holds the runtime stage to psycopg's C implementation (ruling
@@ -52,11 +49,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 DOCKER_COMPOSE = REPO_ROOT / "docker-compose.yml"
 DEV_COMPOSE = REPO_ROOT / "docker-compose.dev.yml"
-BUILD_COMPOSE = REPO_ROOT / "docker-compose.build.yml"
 PROD_COMPOSE_OVERRIDE = REPO_ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 GITIGNORE = REPO_ROOT / ".gitignore"
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy.sh"
 DEPLOY_README = REPO_ROOT / "deploy" / "README.md"
 DOCKER_PUBLISH_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-publish.yml"
 
@@ -698,12 +693,12 @@ class TestDockerfilePreservesC34Invariants:
     def test_healthcheck_present(self, text: str) -> None:
         """The HEALTHCHECK directive survives the C-36 refresh.
 
-        Composer and entrypoint depend on the health endpoint to
-        gate the rolling restart in scripts/deploy.sh.
+        A container run from the image reports a health status even with
+        no compose file's ``healthcheck:`` over it.
         """
         assert "HEALTHCHECK" in text, (
-            "Dockerfile lost its HEALTHCHECK directive; deploy.sh's "
-            "wait_for_health() relies on /health responding."
+            "Dockerfile lost its HEALTHCHECK directive; a container run from "
+            "the image with no compose healthcheck would report no health."
         )
 
 
@@ -1048,16 +1043,6 @@ PINNED_ELSEWHERE = frozenset({
     ("docker-compose.yml", "app"),
     ("deploy/docker-compose.prod.yml", "app"),
 })
-#: The images a compose file builds on the host and never pulls, each as ``(compose file,
-#: service)``: the source build's (ruling plan#2703).  A digest pins bytes a registry serves,
-#: and these are built here and never fetched; :class:`TestTheSourceBuildRunsItsOwnBuild`
-#: holds each to building, never pulling and a ``localhost/`` name.
-BUILT_HERE = frozenset({
-    ("docker-compose.build.yml", "app"),
-})
-#: The prefix of a name no registry serves: a reference whose first part is ``localhost``
-#: names a registry on the host itself, and a source-build host runs none.
-LOCAL_IMAGE_PREFIX = "localhost/"
 
 
 def _compose_images() -> tuple[list[str], dict[tuple[str, str], str]]:
@@ -1081,99 +1066,23 @@ def _compose_images() -> tuple[list[str], dict[tuple[str, str], str]]:
 class TestEveryComposeImageIsPinnedByDigest:
     """Every image a compose file names is ``name:tag@sha256:<digest>``, so a push to a tag
     cannot change what a ``docker compose up`` runs (finding BAL-653): the tag says which
-    version, the digest pins its bytes.  The app's is pinned elsewhere, and the source
-    build's is built on the host."""
+    version, the digest pins its bytes.  The app's is pinned elsewhere."""
 
     def test_every_image_names_its_tag_and_digest(self) -> None:
-        """Each compose image but the app's and the source build's carries a tag and a sha256
-        digest; the census found the compose files production, dev and the build use, and the
-        exempt lines are still where the exemptions say, so neither can pass by reading
-        nothing."""
+        """Each compose image but the app's carries a tag and a sha256 digest; the census
+        found the compose files production and dev use, and the exempt lines are still where
+        the exemptions say, so neither can pass by reading nothing."""
         files, images = _compose_images()
-        assert {"docker-compose.yml", "docker-compose.dev.yml", "docker-compose.build.yml",
+        assert {"docker-compose.yml", "docker-compose.dev.yml",
                 "deploy/docker-compose.prod.yml"} <= set(files), files
-        assert PINNED_ELSEWHERE | BUILT_HERE <= images.keys(), sorted(images)
+        assert PINNED_ELSEWHERE <= images.keys(), sorted(images)
         unpinned = {f"{name} {service}": image for (name, service), image in images.items()
-                    if (name, service) not in PINNED_ELSEWHERE | BUILT_HERE
+                    if (name, service) not in PINNED_ELSEWHERE
                     and not TAG_AND_DIGEST_PATTERN.match(image)}
         assert not unpinned, (
             f"compose images pinned by tag alone: {unpinned}.  Pin each as "
             "``name:tag@sha256:<digest>``, the digest the multi-arch index's, read with "
             "``docker buildx imagetools inspect name:tag`` (finding BAL-653).")
-
-
-class TestTheSourceBuildRunsItsOwnBuild:
-    """The source build's image has a name of its own and is never pulled (ruling plan#2703).
-    Under the published name, ``ghcr.io/saltyreformed-labs/shekel:latest``, one name held two
-    images: every ``docker compose up`` over the base file and ``docker-compose.build.yml``
-    pulled GHCR's image over the build ``scripts/deploy.sh`` had just made and ran it, the
-    base file's ``pull_policy: always`` surviving the overlay (measured 2026-11-02, compose
-    5.6.1)."""
-
-    def test_each_image_built_here_builds_never_pulls_and_has_no_registry(self) -> None:
-        """Each service :data:`BUILT_HERE` exempts from the digest census, in its own file,
-        builds its image, never pulls it, and names it under :data:`LOCAL_IMAGE_PREFIX`, so
-        the exemption covers only an image built on the host under a name no pull of a
-        published image can reach."""
-        wrong = {}
-        for name, service in sorted(BUILT_HERE):
-            with (REPO_ROOT / name).open(encoding="utf-8") as fh:
-                spec = yaml.safe_load(fh)["services"][service]
-            if not ("build" in spec and spec.get("pull_policy") == "never"
-                    and str(spec.get("image", "")).startswith(LOCAL_IMAGE_PREFIX)):
-                wrong[f"{name} {service}"] = spec
-        assert not wrong, (
-            f"a compose service the digest census exempts as built here does not build, "
-            f"never pull, and name a {LOCAL_IMAGE_PREFIX!r} image: {wrong}.  Under a "
-            "registry's name a pull replaces the build (ruling plan#2703).")
-
-    @pytest.mark.docker
-    def test_the_merged_source_build_never_pulls_the_app(self) -> None:
-        """Compose's own merge of the base file and the overlay names the app by the
-        overlay's image and never pulls it: the base file's ``pull_policy: always`` does not
-        survive, which a reading of the overlay alone cannot see."""
-        if not _docker_available():
-            pytest.skip("docker not available; cannot run docker compose config")
-        with BUILD_COMPOSE.open(encoding="utf-8") as fh:
-            built = yaml.safe_load(fh)["services"]["app"]["image"]
-        result = subprocess.run(
-            ["docker", "compose", "--env-file", "/dev/null", "-f", str(DOCKER_COMPOSE),
-             "-f", str(BUILD_COMPOSE), "config"],
-            capture_output=True, text=True, timeout=DOCKER_SUBPROCESS_TIMEOUT_S, check=False,
-            cwd=str(REPO_ROOT),
-            # Synthetic values for the base file's required interpolations; ``config``
-            # only renders the merge, so none reaches a container.
-            env={"PATH": "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin",
-                 "POSTGRES_PASSWORD": "test-postgres-password", "SECRET_KEY": "a" * 32,
-                 "APP_ROLE_PASSWORD": "test-app-role-password",
-                 "SHEKEL_VALKEY_PASSWORD": "test-valkey-password"},
-        )
-        assert result.returncode == 0, (
-            f"docker compose config failed for the base file and the build overlay:\n"
-            f"  stdout: {result.stdout}\n  stderr: {result.stderr}")
-        app = yaml.safe_load(result.stdout)["services"]["app"]
-        merged = (app.get("image"), app.get("pull_policy"), "build" in app)
-        assert merged == (built, "never", True), (
-            f"the merged source build's app is {app.get('image')!r}, pull policy "
-            f"{app.get('pull_policy')!r}, build {app.get('build')!r}, where the overlay builds "
-            f"{built!r} and never pulls it: an ``up`` would fetch its image from a registry "
-            "before running it, or run another image (ruling plan#2703).")
-
-    def test_deploy_script_names_the_base_file_and_the_overlay(self) -> None:
-        """``scripts/deploy.sh``'s ``COMPOSE_FILES``, the files its compose calls name, are the
-        base file and the overlay, read by bash itself: without the overlay, ``build app``
-        builds nothing (``No services to build``, exit 0) and ``up`` runs GHCR's image."""
-        assignment = re.search(r"^COMPOSE_FILES=\(.*\)$",
-                               DEPLOY_SCRIPT.read_text(encoding="utf-8"), re.MULTILINE)
-        assert assignment is not None, "scripts/deploy.sh assigns no COMPOSE_FILES=(...) line"
-        result = subprocess.run(
-            ["bash", "-c", assignment.group(0) + '; printf "%s\\n" "${COMPOSE_FILES[@]}"'],
-            capture_output=True, text=True, check=True, timeout=DOCKER_SUBPROCESS_TIMEOUT_S,
-        )
-        expected = ["-f", DOCKER_COMPOSE.name, "-f", BUILD_COMPOSE.name]
-        assert result.stdout.split("\n")[:-1] == expected, (
-            f"scripts/deploy.sh's COMPOSE_FILES is {result.stdout.split()}, not {expected}: "
-            "its build and up would not run the overlay's build (ruling plan#2703).")
 
 
 class TestDevComposeRunsProductionsImages:
@@ -1199,165 +1108,8 @@ class TestDevComposeRunsProductionsImages:
 
 
 # ──────────────────────────────────────────────────────────────────
-# F-155: Cosign sign + verify wired into deploy.sh and CI.
+# F-155: Cosign signing wired into CI.
 # ──────────────────────────────────────────────────────────────────
-
-
-class TestDeployScriptCosignWrappers:
-    """scripts/deploy.sh defines sign + verify functions and calls
-    both before swapping the running container.  Audit finding
-    F-155 / Commit C-36.
-    """
-
-    @pytest.fixture(scope="class")
-    @classmethod
-    def text(cls) -> str:
-        """Return the full deploy.sh source as a string."""
-        return DEPLOY_SCRIPT.read_text(encoding="utf-8")
-
-    def test_script_parses_cleanly(self) -> None:
-        """``bash -n`` accepts the script (no syntax errors).
-
-        All other tests in this class assume the script is parseable.
-        """
-        result = subprocess.run(
-            ["bash", "-n", str(DEPLOY_SCRIPT)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"bash -n failed for {DEPLOY_SCRIPT}:\n"
-            f"  stdout: {result.stdout}\n  stderr: {result.stderr}"
-        )
-
-    def test_defines_sign_image_function(self, text: str) -> None:
-        """``sign_image()`` exists and references cosign.
-
-        Asserts on the function definition specifically (not just any
-        ``cosign sign`` substring) so a regression that removes the
-        function but leaves a comment matching the keyword still fails.
-        """
-        assert re.search(r"^sign_image\(\)\s*\{", text, re.MULTILINE), (
-            "scripts/deploy.sh does not define ``sign_image()``; the "
-            "C-36 cosign signing wrapper is missing."
-        )
-        # The function body must call ``cosign sign``.
-        sign_block = re.search(
-            r"sign_image\(\)\s*\{(.+?)^\}", text,
-            re.MULTILINE | re.DOTALL,
-        )
-        assert sign_block is not None
-        assert "cosign sign" in sign_block.group(1), (
-            "sign_image() body does not call ``cosign sign``; the "
-            "wrapper is a no-op."
-        )
-
-    def test_defines_verify_image_signature_function(self, text: str) -> None:
-        """``verify_image_signature()`` exists and calls cosign verify."""
-        assert re.search(
-            r"^verify_image_signature\(\)\s*\{", text, re.MULTILINE,
-        ), (
-            "scripts/deploy.sh does not define "
-            "``verify_image_signature()``; the C-36 cosign verify "
-            "wrapper is missing."
-        )
-        verify_block = re.search(
-            r"verify_image_signature\(\)\s*\{(.+?)^\}", text,
-            re.MULTILINE | re.DOTALL,
-        )
-        assert verify_block is not None
-        assert "cosign verify" in verify_block.group(1), (
-            "verify_image_signature() body does not call ``cosign verify``"
-        )
-
-    def test_main_calls_sign_before_verify_before_restart(self, text: str) -> None:
-        """main() calls ``sign_image`` then ``verify_image_signature``
-        then ``restart_app`` in source order.
-
-        Ordering invariant: signing must precede verification (verify
-        exercises the just-emitted signature, catching key mismatches
-        before the swap), and verification must precede restart (so an
-        unverifiable image never reaches the running container).
-        """
-        # Find the main() function block.
-        main_match = re.search(
-            r"^main\(\)\s*\{(.+?)^\}", text,
-            re.MULTILINE | re.DOTALL,
-        )
-        assert main_match is not None, "no main() in deploy.sh"
-        main_body = main_match.group(1)
-
-        sign_call = re.search(r"^\s*sign_image\b", main_body, re.MULTILINE)
-        verify_call = re.search(
-            r"^\s*verify_image_signature\b", main_body, re.MULTILINE,
-        )
-        restart_call = re.search(
-            r"^\s*restart_app\b", main_body, re.MULTILINE,
-        )
-
-        assert sign_call is not None, (
-            "main() does not call sign_image()"
-        )
-        assert verify_call is not None, (
-            "main() does not call verify_image_signature()"
-        )
-        assert restart_call is not None, (
-            "main() does not call restart_app() (regression in the "
-            "core deploy flow, not just the cosign wrapping)"
-        )
-
-        # Source-order assertions.
-        assert sign_call.start() < verify_call.start(), (
-            "main() calls verify_image_signature() BEFORE sign_image(); "
-            "verify must exercise the just-produced signature so a "
-            "key/verifier mismatch surfaces before the swap."
-        )
-        assert verify_call.start() < restart_call.start(), (
-            "main() calls restart_app() BEFORE "
-            "verify_image_signature(); an unverifiable image would "
-            "be deployed to the running container."
-        )
-
-    def test_skip_cosign_flag_is_documented(self, text: str) -> None:
-        """``--skip-cosign`` appears in the usage block and the
-        argument parser.  Operators need an emergency-bypass path.
-        """
-        assert "--skip-cosign" in text, (
-            "scripts/deploy.sh does not declare a --skip-cosign flag; "
-            "operators have no way to bypass cosign in an emergency."
-        )
-        # The argument parser case statement must handle the flag.
-        assert re.search(
-            r'--skip-cosign\)\s*\n\s*SKIP_COSIGN=true',
-            text,
-        ), (
-            "scripts/deploy.sh's argument parser does not set "
-            "SKIP_COSIGN=true on --skip-cosign; the flag is documented "
-            "but inert."
-        )
-
-    def test_cosign_required_env_var_handled(self, text: str) -> None:
-        """The script reads COSIGN_REQUIRED so steady-state ops can
-        promote warnings to errors via .env without changing the
-        invocation.
-        """
-        assert "COSIGN_REQUIRED" in text, (
-            "scripts/deploy.sh does not reference COSIGN_REQUIRED; "
-            "operators cannot enforce cosign in steady-state without "
-            "passing a flag on every invocation."
-        )
-
-    def test_cosign_public_key_default_points_to_deploy(self, text: str) -> None:
-        """COSIGN_PUBLIC_KEY defaults to ``deploy/cosign.pub`` so a
-        committed verifier key auto-applies without operator config.
-        """
-        assert "deploy/cosign.pub" in text, (
-            "scripts/deploy.sh does not default COSIGN_PUBLIC_KEY to "
-            "deploy/cosign.pub; operators would have to set the path "
-            "explicitly even when using the committed key."
-        )
 
 
 class TestDockerPublishWorkflowSignsImage:
@@ -1474,9 +1226,8 @@ class TestDockerPublishWorkflowSignsImage:
 
 class TestGitignoreExcludesCosignKeys:
     """.gitignore excludes cosign private key files so a careless
-    ``git add cosign.key`` in the repo root cannot leak the signing
-    key.  The PUBLIC key (deploy/cosign.pub) is exempted -- verifiers
-    need it.
+    ``git add cosign.key`` in the repo root cannot leak a signing
+    key.
     """
 
     @pytest.fixture(scope="class")
@@ -1541,8 +1292,6 @@ class TestDeployReadmeDocumentsRotation:
         (
             "SHEKEL_IMAGE_DIGEST",
             "cosign verify",
-            "cosign generate-key-pair",
-            "deploy/cosign.pub",
             "F-060",
             "F-155",
             "C-36",

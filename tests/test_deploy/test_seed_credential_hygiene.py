@@ -20,7 +20,6 @@ tests/test_routes/test_auth.py::TestRegistrationToggle (existing).
 from __future__ import annotations
 
 import re
-import subprocess
 import textwrap
 from pathlib import Path
 
@@ -457,7 +456,6 @@ class TestDockerignoreCoverage:
         "scripts/vendor_google_fonts.py",
         "scripts/backup.sh",
         "scripts/restore.sh",
-        "scripts/deploy.sh",
         "scripts/retire_stale_containers.sh",
         # Host-side cert generator for shared-mode Postgres TLS
         # (audit finding F-154 / Commit C-37).  Runs once on the

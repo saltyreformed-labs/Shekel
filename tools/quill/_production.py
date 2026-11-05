@@ -56,9 +56,9 @@ another way (``python -m scripts.check_tax_law``), one relative to a step's
 ``working-directory:``, a directory named whose files run (``python tools/pkg``), a file a
 tool reads with no name written, a file a named one loads in turn, and the rest of a line
 after a ``#`` that follows whitespace inside quotes, which it reads as a comment.
-``docker-compose.dev.yml``, ``docker-compose.build.yml``, ``cloudflared/config.yml`` (a
-template the host's copy differs from) and the other workflows, which only test, are none
-of production's, nor an action that only they load or a file that only they name.
+``docker-compose.dev.yml``, ``cloudflared/config.yml`` (a template the host's copy differs
+from) and the other workflows, which only test, are none of production's, nor an action that
+only they load or a file that only they name.
 
 **What production does not hold** (:func:`outside`, :func:`changed_outside`) is the rest of
 each commit's tree, each side read at its own commit, so a file that crosses the line between

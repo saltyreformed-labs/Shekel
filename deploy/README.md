@@ -184,29 +184,18 @@ the maintainer's homelab layout) supplies the value.
 ### Updating the digest
 
 1. Build and push a new image. CI (`.github/workflows/docker-publish.yml`) runs on every push to
-   `main` and prints the digest in the "Image digest" workflow step output. For local builds via
-   `scripts/deploy.sh`, the script prints the digest after `cosign sign` succeeds.
+   `main` and prints the digest in the "Image digest" workflow step output.
 
-2. Verify the signature on the new digest before pinning it. The command depends on which signing
-   path produced the image:
+2. Verify the signature on the new digest before pinning it. CI signs keyless, through sigstore's
+   OIDC flow, so there is no key to keep:
 
-   - CI keyless OIDC (default for `main` branch pushes):
-
-     ```bash
-     cosign verify \
-         --certificate-identity-regexp \
-         '^https://github\.com/saltyreformed-labs/Shekel/\.github/workflows/docker-publish\.yml@refs/heads/main$' \
-         --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-         ghcr.io/saltyreformed-labs/shekel@sha256:<digest>
-     ```
-
-   - Local maintainer key (`deploy/cosign.pub`):
-
-     ```bash
-     cosign verify \
-         --key deploy/cosign.pub \
-         ghcr.io/saltyreformed-labs/shekel@sha256:<digest>
-     ```
+   ```bash
+   cosign verify \
+       --certificate-identity-regexp \
+       '^https://github\.com/saltyreformed-labs/Shekel/\.github/workflows/docker-publish\.yml@refs/heads/main$' \
+       --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+       ghcr.io/saltyreformed-labs/shekel@sha256:<digest>
+   ```
 
 3. Once the verify succeeds, edit the host `.env`:
 
@@ -235,26 +224,6 @@ the maintainer's homelab layout) supplies the value.
 Restore the previous digest by editing `.env` and running steps 4-5 above. Because every successful
 deploy records the digest in the host's `.env`, the on-host file is itself the rollback log; commit
 your `.env` changes to a private operator-only repo if you need an audit trail.
-
-### Cosign keypair (local-build path)
-
-When using `scripts/deploy.sh` for local builds, generate a Cosign keypair once per host:
-
-```bash
-cd /opt/shekel
-cosign generate-key-pair
-mv cosign.pub deploy/cosign.pub
-# Move the private key to a path outside the repo and chmod 600 it.
-chmod 600 cosign.key
-mv cosign.key /etc/shekel/cosign.key
-```
-
-Commit `deploy/cosign.pub` to the repo. Set the `COSIGN_PRIVATE_KEY` path in the host `.env` so
-`scripts/deploy.sh` can find it. The private key file MUST NOT be checked into git (`.gitignore`
-already excludes `cosign.key*`).
-
-For CI builds, no keypair is needed: the workflow uses sigstore's keyless OIDC flow, so the
-maintainer just verifies with the `--certificate-identity-regexp` form above.
 
 ## See Also
 

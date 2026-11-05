@@ -129,12 +129,9 @@
 # audit fix and any downstream Cosign verification.
 #
 # Operator workflow:
-#   1. After CI (or scripts/deploy.sh in local-build mode) builds
-#      and signs a new image, capture the digest the build emits.
-#      For CI builds the digest is in the ``Build & Publish Docker
-#      Image`` workflow's "Image digest" step output; for local
-#      builds, scripts/deploy.sh prints the digest after a
-#      successful ``cosign sign``.
+#   1. After CI builds and signs a new image, capture the digest it
+#      emits, in the ``Build & Publish Docker Image`` workflow's
+#      "Image digest" step output.
 #   2. On the host, edit /opt/docker/shekel/.env and set:
 #        SHEKEL_IMAGE_DIGEST=sha256:abc123...
 #      (the value INCLUDES the ``sha256:`` prefix; the ``image:``

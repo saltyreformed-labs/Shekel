@@ -574,7 +574,8 @@ class RecurrenceSpec:  # pylint: disable=too-many-instance-attributes
             *nominal_day*, on a unit with no month coordinate, and where the
             date does not fit it
             (:func:`~._month_coordinate._require_weekday_reading_pair`), so
-            ``ck_recurrence_rules_weekday_reading`` and
+            ``ck_recurrence_rules_weekday_reading``,
+            ``ck_recurrence_rules_weekday_reading_unit`` and
             ``ck_recurrence_rules_one_month_reading`` are never what refuses
             one.
     """

@@ -3,7 +3,8 @@
 Plan step recurrence:R8-c, rulings plan#2668 (amending R-R25) and plan#2670.
 The revision drops ``budget.recurrence_weekday_anchors`` -- refusing to while
 it holds a row -- and adds ``budget.recurrence_rules.weekday_reading`` under
-``ck_recurrence_rules_weekday_reading`` and
+``ck_recurrence_rules_weekday_reading``,
+``ck_recurrence_rules_weekday_reading_unit`` (ruling plan#2704) and
 ``ck_recurrence_rules_one_month_reading``.  Its downgrade refuses while any rule
 is read by its weekday, then restores the empty table with its audit trigger.
 
@@ -12,8 +13,9 @@ message through a stub bind, with no database.  :class:`TestTheDDL` runs the
 revision's own ``downgrade()`` and ``upgrade()`` against the test database --
 built at head, and a clone of its own per test -- and proves both refusals,
 the drop, the restore and the restored trigger FIRING on real DDL.  What the
-two CHECKs refuse is graded in
-``test_recurrence_rule_constraints.TestTheWeekdayReadingIsHeldToItsDate``.
+CHECKs refuse is graded in
+``test_recurrence_rule_constraints.TestTheWeekdayReadingIsHeldToItsDate`` and,
+for the unit, ``test_a_rule_is_held_to_its_unit.TestTheWeekdayReadingIsHeldToTheUnit``.
 """
 from datetime import date
 from types import SimpleNamespace
@@ -141,8 +143,8 @@ def _schema_objects(session) -> dict[str, bool]:
         session: The test ``db.session``.
 
     Returns:
-        ``{object: present}`` for the column, both CHECKs, the table and its
-        audit trigger.
+        ``{object: present}`` for the column, its three CHECKs, the table and
+        its audit trigger.
     """
     def present(sql, **params):
         return session.execute(text(sql), params).scalar_one() == 1
@@ -156,6 +158,10 @@ def _schema_objects(session) -> dict[str, bool]:
         "reading check": present(
             "SELECT count(*) FROM pg_constraint WHERE conname = :n",
             n="ck_recurrence_rules_weekday_reading",
+        ),
+        "unit check": present(
+            "SELECT count(*) FROM pg_constraint WHERE conname = :n",
+            n="ck_recurrence_rules_weekday_reading_unit",
         ),
         "arc check": present(
             "SELECT count(*) FROM pg_constraint WHERE conname = :n",
@@ -176,13 +182,13 @@ def _schema_objects(session) -> dict[str, bool]:
 
 #: Head: the column and its CHECKs, no table.
 _AT_HEAD = {
-    "column": True, "reading check": True, "arc check": True,
+    "column": True, "reading check": True, "unit check": True, "arc check": True,
     "table": False, "trigger": False,
 }
 
 #: The revision below: the table and its trigger, no column.
 _BELOW = {
-    "column": False, "reading check": False, "arc check": False,
+    "column": False, "reading check": False, "unit check": False, "arc check": False,
     "table": True, "trigger": True,
 }
 
@@ -204,7 +210,7 @@ def _audit_trigger_count(session) -> int:
 class TestTheDDL:
     """The revision's own DDL, run: refuse, restore, refuse, drop."""
 
-    def test_head_carries_the_column_and_both_checks_and_no_table(self, app, db):
+    def test_head_carries_the_column_and_its_checks_and_no_table(self, app, db):
         """The upgrade is what the test database was built through."""
         with app.app_context():
             assert _schema_objects(db.session) == _AT_HEAD

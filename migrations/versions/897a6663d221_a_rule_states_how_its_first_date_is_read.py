@@ -14,6 +14,9 @@ date is read).
         + weekday_reading VARCHAR(10) NULL      'from_start' | 'from_end'
         + ck_recurrence_rules_weekday_reading   the value, and the position
                                                 each value needs of starts_on
+        + ck_recurrence_rules_weekday_reading_unit
+                                                only on a unit with a day of
+                                                the month
         + ck_recurrence_rules_one_month_reading never beside nominal_day
     budget.recurrence_weekday_anchors           DROPPED, with its audit trigger
 
@@ -44,11 +47,16 @@ naming them refuses any third value as well.  The exclusive arc with
 ``nominal_day`` is its own CHECK: a nominal day reads the date by its clamped
 day of the month, and one date is read one way (R-R25).
 
-**The unit half stays at the door**: only a MONTH or YEAR rule has a month
-coordinate, and which unit a row names is a ``ref`` id, so the refusal is
-``app.services.recurrence._month_coordinate._require_weekday_reading_pair``'s,
-as ``nominal_day``'s and ``max_per_month``'s unit halves are their doors'.
-plan#2302 moves all three into the database.
+**The unit half reads the flag below this revision** (ruling plan#2704): only a
+MONTH or YEAR rule has a month coordinate, and which unit a row names is a
+``ref`` id, so ``ck_recurrence_rules_weekday_reading_unit`` reads
+``unit_has_day_of_month``, the flag ``9b3e6d1f4a27`` carries onto the row under
+a composite key for ``nominal_day``'s and ``max_per_month``'s unit CHECKs.  It
+lands here rather than in a revision of its own because it is one more rule of
+this one column, so the column never exists without it.  The column opens all
+NULL, so no stored row can fail it and no census runs first.
+``app.services.recurrence._month_coordinate._require_weekday_reading_pair``
+still answers first; this holds a writer that never reaches it.
 
 **The table goes unwritten.**  ``budget.recurrence_weekday_anchors`` was
 created empty at plan step R2b to hold ``(nth_week, weekday)`` and never gained
@@ -104,6 +112,9 @@ _WEEKDAY_READING_CHECK = (
     "EXTRACT(day FROM (date_trunc('month', starts_on::timestamp) "
     "+ INTERVAL '1 month - 1 day')))"
 )
+
+#: Only a unit with a day of the month reads a weekday of a month.
+_WEEKDAY_READING_UNIT_CHECK = "weekday_reading IS NULL OR unit_has_day_of_month"
 
 #: The exclusive arc: one date is read one way.
 _ONE_MONTH_READING_CHECK = "weekday_reading IS NULL OR nominal_day IS NULL"
@@ -209,6 +220,10 @@ def upgrade():
         _WEEKDAY_READING_CHECK, schema="budget",
     )
     op.create_check_constraint(
+        "ck_recurrence_rules_weekday_reading_unit", "recurrence_rules",
+        _WEEKDAY_READING_UNIT_CHECK, schema="budget",
+    )
+    op.create_check_constraint(
         "ck_recurrence_rules_one_month_reading", "recurrence_rules",
         _ONE_MONTH_READING_CHECK, schema="budget",
     )
@@ -219,6 +234,10 @@ def downgrade():
     refuse_weekday_readings(op.get_bind())
     op.drop_constraint(
         "ck_recurrence_rules_one_month_reading", "recurrence_rules",
+        type_="check", schema="budget",
+    )
+    op.drop_constraint(
+        "ck_recurrence_rules_weekday_reading_unit", "recurrence_rules",
         type_="check", schema="budget",
     )
     op.drop_constraint(

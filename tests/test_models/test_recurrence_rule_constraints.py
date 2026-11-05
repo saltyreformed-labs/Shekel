@@ -36,7 +36,9 @@ carries the reason for the wait and pins the state it now refuses.
 ``ck_recurrence_rules_weekday_reading`` (the column's two values, and the
 position each needs of ``starts_on``) and
 ``ck_recurrence_rules_one_month_reading`` (never beside ``nominal_day``);
-:class:`TestTheWeekdayReadingIsHeldToItsDate` drives every edge of both.
+:class:`TestTheWeekdayReadingIsHeldToItsDate` drives every edge of both.  The
+third, on the unit, is graded with its two twins in
+``test_a_rule_is_held_to_its_unit``.
 
 Every rule here is built COLUMN BY COLUMN rather than through
 ``recurrence.author_rule``, and deliberately: the door refuses each of these

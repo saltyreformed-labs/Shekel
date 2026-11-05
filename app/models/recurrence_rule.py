@@ -28,9 +28,10 @@ are dates read by their weekday, and the week number and weekday come from
 **One column is CARRIED rather than authored, and a key holds it** (plan step
 plan#2302, ruling plan#2748).  ``unit_has_day_of_month`` is the unit's own
 ``ref.recurrence_units.has_day_of_month`` on this row, because a PostgreSQL
-CHECK reads only the row it checks and two of the pairings here turn on which
+CHECK reads only the row it checks and three of the pairings here turn on which
 kind of unit the rule names: a per-month ceiling needs a unit that can repeat
-within a month, and a nominal day needs a unit with a day to clamp.
+within a month, a nominal day needs a unit with a day to clamp, and a weekday
+reading needs a unit with a month to read the weekday in.
 ``fk_recurrence_rules_unit_day_of_month`` holds the copy to the unit, so a row
 whose flag disagrees with its unit is refused rather than reconciled.
 
@@ -274,13 +275,8 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
         # must name which value it is checking, and a CHECK comparing a ref id
         # to a literal would tie the table to a seed (the reason the
         # ``max_per_month`` paragraph above gives).  The two arms are also the
-        # whole domain, so a third value fails both.  The UNIT half -- only a
-        # month-measured cadence has a month coordinate -- names a ref id for
-        # that same reason, so it is held at the door and at construction
-        # (``recurrence._month_coordinate._require_weekday_reading_pair``), as
-        # ``nominal_day``'s and ``max_per_month``'s are; plan#2302 moves all
-        # three here.  IMMUTABLE expressions only, for the reason the
-        # ``nominal_day`` CHECK above gives.
+        # whole domain, so a third value fails both.  IMMUTABLE expressions
+        # only, for the reason the ``nominal_day`` CHECK above gives.
         db.CheckConstraint(
             "weekday_reading IS NULL "
             "OR (weekday_reading = 'from_start' "
@@ -290,6 +286,17 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
             "EXTRACT(day FROM (date_trunc('month', starts_on::timestamp) "
             "+ INTERVAL '1 month - 1 day')))",
             name="ck_recurrence_rules_weekday_reading",
+        ),
+        # Only a unit with a day of the month has a month to read a weekday in
+        # (ruling plan#2704), which the CHECK above cannot say: it holds the
+        # position, and Thu 2026-01-15 fits ``'from_start'`` on a weekly rule as
+        # well as on a monthly one.
+        # ``recurrence._month_coordinate._require_weekday_reading_pair`` answers
+        # first; this guards the writer that never sees it, as the nominal
+        # day's twin above does.
+        db.CheckConstraint(
+            "weekday_reading IS NULL OR unit_has_day_of_month",
+            name="ck_recurrence_rules_weekday_reading_unit",
         ),
         # The EXCLUSIVE ARC ruling R-R25 put on this table: a nominal day reads
         # the first occurrence by its clamped day of the month and a weekday
@@ -504,7 +511,8 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
     # its day of the month, which is every rule stored before plan step
     # recurrence:R8-c and every rule whose unit has no month coordinate:
     # absence is the discriminator and ``ck_recurrence_rules_weekday_reading``
-    # constrains presence, the discipline ``nominal_day`` keeps one column up.
+    # and ``ck_recurrence_rules_weekday_reading_unit`` constrain presence, the
+    # discipline ``nominal_day`` keeps one column up.
     # A string because the CHECK above names the values; the write door
     # stores the member's value and the read door reads the member back.
     weekday_reading = db.Column(db.String(10), nullable=True)

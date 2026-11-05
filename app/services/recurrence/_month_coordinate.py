@@ -501,6 +501,12 @@ def _require_weekday_reading_pair(
       read from the start, a 17th read from the end).  The refusal NAMES the
       set, as the nominal day's does.
 
+    Each refusal answers in front of a CHECK that holds a writer never reaching
+    it: ``ck_recurrence_rules_one_month_reading`` for the arc, and
+    ``ck_recurrence_rules_weekday_reading`` and
+    ``ck_recurrence_rules_weekday_reading_unit`` (ruling plan#2704) for the date
+    and the unit.
+
     Args:
         unit: The cadence unit.
         starts_on: The rule's first occurrence.

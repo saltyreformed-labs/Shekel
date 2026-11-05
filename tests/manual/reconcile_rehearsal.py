@@ -28,12 +28,14 @@ presses, in the order the doors force:
    TWO presses of its full edit, Status to Projected and then the card's Cancel button, because
    the cancel door takes only a Projected row and every one of these is Paid; and each envelope
    line deleted by its X.  **The line list renders no X under a Paid envelope**
-   (``purchases_closed`` in ``grid/_transaction_entries.html``), and 6 of the sheet's 7 lines
+   (``purchases_closed`` in ``grid/_transaction_entries.html``), and the sheet's lines can
    sit under one, so on ruling **plan#2439** such a line is removed as that list's own notice
    says: Status to Projected, the X, the card's Paid button, then "Money moved on" set back to
    the day the envelope carried.  Measured 2026-10-31 on copies of the acts-1-16 restore: the
    round trip moves no other line, re-dates only the envelope's own settle day, and with the
-   day typed back ends exactly where a DELETE of the line alone does.  **A Projected row's
+   day typed back ends exactly where a DELETE of the line alone does, but for an envelope a
+   balance check closed, whose day then reads as typed with no link (ruling plan#2892).
+   **A Projected row's
    card shows those two doors as BUTTONS**, and its Status selector only under "More options"
    (:func:`_press_on_card`), so the run presses the buttons the owner sees.
 

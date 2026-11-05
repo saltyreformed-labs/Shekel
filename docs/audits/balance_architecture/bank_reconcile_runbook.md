@@ -1,10 +1,10 @@
 # Runbook: the bank reconcile (Checking against SECU)
 
-**STATUS: NOT YET PERFORMED.** Written 2026-10-31 by task plan#2371 of plan step
-**balance:X-bk-2** (plan#1192); its task plan#2373 rehearses it on a same-day copy, has the
-developer perform it on production, and re-measures. Its blocks were run end to end on
-2026-10-31 against copies of production's dump of 2026-10-30 15:24 (How this was rehearsed,
-below).
+**STATUS: PERFORMED on production 2026-11-04** (The performance, below). Written 2026-10-31 by
+task plan#2371 of plan step **balance:X-bk-2** (plan#1192); its task plan#2373 rehearsed it on a
+same-day copy, had the developer perform it on production, and re-measured. Its blocks were first
+run end to end on 2026-10-31 against copies of production's dump of 2026-10-30 15:24 (How this was
+rehearsed, below).
 
 ## What this is
 
@@ -28,14 +28,17 @@ movement the disagreement list leaves unanswered, on rulings
   line, closing it again, and typing back the day it closed on;
 * **plan#2892**: so does a line under an envelope a balance check closed, whose day then reads as
   typed and which no longer names that balance check. Neither moves any figure (How this was
-  rehearsed, below).
+  rehearsed, below);
+* **plan#2895**: "never moved" names only what the two exports could not find. The owner confirmed
+  each removal on 2026-11-04: most are copies of a row the bank import added, and the rest are
+  rows he had marked Paid in place of cancelling them.
 
 **Where the figures are (ruling R-BAL249).** This file names every act by its ROLE. Every figure
 to check, every row's name and every place on screen is on the PERFORMANCE SHEET the rehearsal
 writes into the handoff folder, derived from the same-day copy and the two exports. **Perform
 from the sheet of the same day's rehearsal, and from nowhere else.** Each act on it is headed
 `## Act N:` and says where it is (`Where`, the page, and from act 2 on `FIND`, how to reach it on
-screen), what to type (`TYPE`), tick (`TICK`) or press (`PRESS`), and what the rehearsal saw land
+screen), what to type (`TYPE`), tick (`TICK`), press (`PRESS`) or delete (`DELETE`), and what the rehearsal saw land
 (`LANDED`).
 
 **Done when** (plan#1192's done test, as rulings plan#2343 and plan#2433 amended it): after the
@@ -492,6 +495,21 @@ failed, with the three outputs, before performing anything more.
   production's `app/`, as deployed; the Reconcile page's refusal of Done while records run past
   the last statement (ruling plan#2346, finding BAL-651) ships with plan#1192's pull request.
 * **The lines past the books' last day** are left for the owner, above.
+
+---
+
+## The performance
+
+**2026-11-04, 21:52 to 22:06 EST, by the owner through the app**, from the sheet of the run stamped
+`2026-11-04_212658`, with production at `fc9dcfba7` and the harness at `fbaa90a25`: 18 acts, being
+the import (import 14), 1 match (transfer 328), 9 cancels and 7 deletes. The acts differ from the
+dump of 2026-10-30 because the owner's reconcile of 2026-10-31 had already answered its 5 timing
+pairs. The POST block printed `SAME CODE` and all three "AS REHEARSED" lines: the check's output and
+the list as rehearsed, and the balance file byte-identical. On Checking's 220 books days the list
+went from 40 disagreeing to 30, each apart by exactly the card items (plan#2348) and the held-back
+act (plan#2436) on it. Two days past the latest balance are set apart, and one disagrees, by the
+line the sheet leaves for the owner. The two dumps and every output are in the handoff folder
+`balance-2026-11-04/xbk2/`.
 
 ---
 

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from app import ref_cache
-from app.enums import StatusEnum
+from app.enums import SettledDayBasisEnum, StatusEnum
 from app.extensions import db
 from app.models.account import Account
 from app.models.statement_import import (
@@ -486,9 +486,10 @@ def envelope_state(txn_id: int, gone: "frozenset[int]") -> dict:
     The envelope's status, its settle day with the day's basis and clearing
     link, and each of its lines but those the sheet deletes (*gone*) by its
     figure, days, basis, link and whether it is matched: the reopen and
-    re-close of ruling plan#2439 pass through all of them, and the ruling was
-    made on their ending exactly as they began.  The envelope's own state is
-    ``None`` once it is gone (:func:`_live_row`).
+    re-close of ruling plan#2439 pass through all of them.  Each line must end
+    exactly as it began; the envelope's own state ends as
+    :func:`_row_after_the_delete` says.  It is ``None`` once it is gone
+    (:func:`_live_row`).
     """
     txn = _live_row(txn_id)
     others = db.session.execute(db.select(TransactionEntry).where(
@@ -506,13 +507,38 @@ def envelope_state(txn_id: int, gone: "frozenset[int]") -> dict:
     }
 
 
+def _row_after_the_delete(before_row: list) -> list:
+    """Return what a delete must leave of an envelope's own state, in JSON form.
+
+    An open envelope takes the delete alone, so it stands as it was.  A closed
+    one goes through the round trip of ruling plan#2439, and ends on its status
+    and its day with the day reading as the owner typed it and no link to a
+    balance check, the reopen having cleared the link.  **Ruling plan#2892** took
+    that for an envelope a balance check closed, whose day kind and link therefore
+    change; an envelope whose day was typed and carries no link ends exactly as
+    it began.
+
+    Args:
+        before_row: The envelope's ``[status, day, day's basis, link]``, read
+            before the act.
+    """
+    status, settled_on, _, _ = before_row
+    if settled_on is None:
+        return before_row
+    return [
+        status, settled_on,
+        ref_cache.settled_day_basis_id(SettledDayBasisEnum.ENTERED), None,
+    ]
+
+
 def delete_problems(
     txn_id: int, entry_id: int, gone: "frozenset[int]", before: dict,
 ) -> "list[str]":
     """Return why removing line *entry_id* has not landed, or moved what it may not.
 
-    The line is gone; the envelope's own state is *before*'s, and so is each
-    line *before* holds.  A line *before* does not hold is not graded here: the
+    The line is gone; the envelope's own state is
+    :func:`_row_after_the_delete`'s, and each line *before* holds is as it held
+    it.  A line *before* does not hold is not graded here: the
     import files new lines into an open envelope (measured 2026-10-30: three
     into row 2402), and a snapshot taken before it cannot hold them.
 
@@ -528,9 +554,10 @@ def delete_problems(
     after = jsonable(envelope_state(txn_id, gone))
     if after["row"] is None:
         return problems + [f"the delete of line {entry_id}: envelope {txn_id} is gone"]
-    if after["row"] != before["row"]:
+    expected = _row_after_the_delete(before["row"])
+    if after["row"] != expected:
         problems.append(f"the delete of line {entry_id}: envelope {txn_id} moved from "
-                        f"{before['row']} to {after['row']}")
+                        f"{before['row']} to {after['row']}, not {expected}")
     moved = sorted(line for line, state in before["lines"].items()
                    if after["lines"].get(line) != state)
     if moved:

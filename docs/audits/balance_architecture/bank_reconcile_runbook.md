@@ -24,8 +24,11 @@ movement the disagreement list leaves unanswered, on rulings
 * **plan#2433**: SECU's 2026-04-22 Van Loan line is held back, because matching it moves the
   payment onto the day Van Loan's books open, which no door can move; step **plan#2436**
   performs it;
-* **plan#2439**: a line under a Paid envelope comes off by reopening the envelope, pressing the
-  line's X, closing it again, and typing back the day it closed on.
+* **plan#2439**: a line under a Paid envelope comes off by reopening the envelope, deleting the
+  line, closing it again, and typing back the day it closed on;
+* **plan#2892**: so does a line under an envelope a balance check closed, whose day then reads as
+  typed and which no longer names that balance check. Neither moves any figure (How this was
+  rehearsed, below).
 
 **Where the figures are (ruling R-BAL249).** This file names every act by its ROLE. Every figure
 to check, every row's name and every place on screen is on the PERFORMANCE SHEET the rehearsal
@@ -256,7 +259,7 @@ It shows as:
   opened before a save that landed since. **After every save on a grid card, look at the
   cell**. A press of Paid or a Status save refused as out of date instead leaves the card
   OPEN, redrawn under a YELLOW banner with a triangle beginning "Nothing was saved";
-* on a purchase's X, the purchase still in the Purchases list after the confirm, under a banner
+* on deleting a purchase, the purchase still in the Purchases list after the confirm, under a banner
   in the list: RED with an octagon and the reason, or YELLOW with a triangle saying the entry
   or the list was changed by another action;
 * anywhere, a press that seems to do nothing at all: a row or line already gone answers "Not
@@ -288,7 +291,7 @@ rehearsed.
   top row, and Status only under **More options**, which no act here opens: the acts press those
   two buttons instead. An envelope's card also lists its purchases under **Purchases**, each with
   its day bought (month/day), its description and its figure (unsigned); under a settled
-  envelope the list renders no X and says to set Status to Projected first.
+  envelope the list shows no delete button (an X icon) and says to set Status to Projected first.
 * **The Reconcile page** is the **Reconcile** button on Checking's Import statements page
   (Accounts, Checking, **Import statements**). Its tabs are To explain, Explained, Filed by
   rules, Transfers and Skipped; the sheet's `FIND` line names the card's tab. A card is SECU's
@@ -376,19 +379,20 @@ Cancel door takes only a Projected row, so a Paid row goes back to Projected fir
 `FIND` the envelope on Checking's grid and click its amount.
 
 * **Under a Paid envelope** (the sheet's act says TYPE Status: Projected first): set **Status**
-  to **Projected**, **Save**; click the amount again. Under **Purchases**, press the **X** of the
-  purchase the sheet names, and confirm "Delete this entry?". Click the amount again and press
+  to **Projected**, **Save**; click the amount again. Under **Purchases**, delete the purchase the
+  sheet names with its X icon, and confirm "Delete this entry?". Click the amount again and press
   the green **Paid** on the card's top row, **not** the red **Cancel** beside it; the cell
   redraws as settled. Click the amount again, set **Money moved on** to the day the sheet gives,
   **Save**.
-* **Under an envelope still Projected**: press the X of the purchase the sheet names, and
+* **Under an envelope still Projected**: delete the purchase the sheet names with its X icon, and
   confirm.
 
 *Success:* the purchase is gone from the list, and a reopened envelope reads Paid with Money
 moved on the sheet's day. *Why:* the line is a purchase neither export holds (ruling plan#2359),
 and under a Paid envelope it comes off by ruling plan#2439's round trip: measured 2026-10-31,
 with the day typed back it ends exactly where a delete of the line alone does, and moves no other
-line.
+line. An envelope a balance check closed ends there too but for two records (ruling plan#2892): its
+day reads as typed, and it no longer names that balance check.
 
 ---
 
@@ -445,7 +449,8 @@ check opens the copy read-only first.
 
 * **The CHECK** grades the post-state on production's copy: every act's own arm again (the
   import by its digest, imported once, each match, each Cancelled row, each envelope as it
-  stood with only its line gone), every card item and the held-back act unmoved since the
+  stood with only its line gone, and a reopened envelope's day reading as typed with no link to a
+  balance check), every card item and the held-back act unmoved since the
   snapshot (a movement's day, figure and match; a line's match), and the done test. A failing
   arm prints a `FAILED:` line naming its act and the row, line or envelope, and so does an arm
   whose row or envelope is gone. `CHECK DIFFERS` with no `FAILED:` line is either the act
@@ -617,6 +622,17 @@ rendered; the post-state and the check, task plan#2416). Its door-driving half i
   **Not
   graded**: a shorter hole inside one download's span, a payment credit past the edge, SECU's
   own tail, and what the owner says was asked for beyond the month the lines are held to.
+* **2026-11-04, an envelope a balance check closed** (task plan#2894, ruling plan#2892): on a restore
+  of production's dump of that evening, whose owner's balance check of 10-31 had closed the
+  envelope holding the last delete. The round trip ended it on the same status and day, its day
+  reading as typed instead of as set at a balance check, and with no link to that balance check.
+  On a second copy with those two put back by hand, all 10 accounts, 536 grid cells and 7,504
+  daily balances were byte-identical, and so was the disagreement list; the seven pages compared
+  differed only in security tokens and, on the grid, in the order of that envelope's purchases made
+  on one day, which the second copy's restore reshuffled (step plan#2289). The check now
+  grades a reopened envelope as the round trip leaves it. Two controls on the performed copy, each
+  written in the database: the day a day early, and the retype skipped (today's day, as Paid writes
+  it), each failed the check on that envelope; put back, it completed.
 * **Two measured traps the harness answers**: the rate limiter answered the rehearsal's 31st
   full-edit open inside a minute with a 429 (a person's pace never reaches it, and the rehearsal
   turns it off: `door_rehearsal.connect`), and the Reconcile page answers a refused card with a

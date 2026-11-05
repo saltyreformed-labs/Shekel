@@ -556,7 +556,7 @@ def _delete(run: Run, number: int, row: dict, gone: "frozenset[int]") -> None:
     txn_id, entry_id = row["transaction_id"], row["entry_id"]
     page = f"/transactions/{txn_id}/entries"
     closed_on = run.read(_closed_on, txn_id)
-    door = f"{page} (the envelope's lines: X)"
+    door = f"{page} (the envelope's lines: delete)"
     if closed_on is not None:
         door = f"/transactions/{txn_id}/full-edit (Status, Money moved on) and {door}"
     run.sheet.act(number, f"Delete {named(row)}", door)
@@ -568,9 +568,9 @@ def _delete(run: Run, number: int, row: dict, gone: "frozenset[int]") -> None:
     assert not button["vals"].get("shown_lines"), \
         f"the X on line {entry_id} would free bank line(s) {button['vals']['shown_lines']}"
     # The list prints a purchase's own figure, which is unsigned.
-    run.sheet.say(f"- PRESS the X of the purchase \"{row['line']}\" bought "
+    run.sheet.say(f"- DELETE the purchase \"{row['line']}\" bought "
                   f"{row['purchased_on']} for {abs(Decimal(row['amount']))}, under Purchases, "
-                  "and confirm")
+                  "with its X icon, and confirm")
     run.operator.press(button)
     if closed_on is not None:
         _press_on_card(run, txn_id, "mark-done",
@@ -579,8 +579,8 @@ def _delete(run: Run, number: int, row: dict, gone: "frozenset[int]") -> None:
         _save_full_edit(run, txn_id, "settled_on", closed_on.isoformat())
     problems = run.read(delete_problems, txn_id, entry_id, gone, before)
     assert not problems, "\n".join(problems)
-    run.sheet.say(f"- LANDED: envelope line {entry_id} deleted; envelope {txn_id} and its "
-                  "other lines stand as they did")
+    run.sheet.say(f"- LANDED: envelope line {entry_id} deleted; envelope {txn_id} holds its "
+                  "status and day, and its other lines stand as they did")
 
 
 def _left(run: Run) -> None:

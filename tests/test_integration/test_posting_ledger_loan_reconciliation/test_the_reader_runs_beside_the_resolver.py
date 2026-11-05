@@ -522,16 +522,18 @@ class TestReaderParallelRunAgainstResolver:
     def test_reader_is_scenario_scoped_and_none_when_unopened(
         self, app, db, seed_user, seed_periods,
     ):
-        """The reader reads each scenario's own balance, and None where unopened.
+        """The reader reads each scenario's own balance, and never another's.
 
         On-schedule payments net independently per scenario: the baseline gets one
         (balance 100,000 - one principal) and the what-if two (100,000 - two
         principals), each reading its OWN balance == its OWN resolver, the what-if's
         second payment lowering only the what-if (neither leaks into the other).  A
-        THIRD scenario the loan was never opened into has no OPENING posting, so the
-        reader returns ``None`` -- routing a read-switch caller to needs-setup,
-        never a misleading $0 or another scenario's balance (the M2 latent
-        multi-scenario guard, plan Section 4).
+        THIRD scenario the writers never opened holds no payment and no OPENING
+        posting.  The store's reader returns ``None`` there, the worked-out read
+        the loan's own anchor, because it answers whichever scenario it is asked
+        (``ledger_lines._worked_out`` names the difference; no route creates a
+        second scenario).  Neither is a misleading $0 or another scenario's
+        balance (the M2 latent multi-scenario guard, plan Section 4).
         """
         with app.app_context():
             baseline = seed_user["scenario"]
@@ -576,8 +578,10 @@ class TestReaderParallelRunAgainstResolver:
             assert baseline_reader == _ANCHOR_BALANCE - (
                 scheduled_pi - Decimal("500.00")
             )
-            # A scenario the loan was never opened into -> None (needs-setup),
-            # never the baseline's balance or a bare $0.  Both readers agree.
+            # A scenario the writers never opened: the store reads None, the
+            # read the $100,000.00 anchor no payment has reduced.  Neither is
+            # the baseline's balance or a bare $0.
+            assert _posted_balance(loan.id, unopened.id) == Decimal("100000.00")
             assert stored_loan_balance_at(
                 loan.id, unopened.id, _AS_OF,
             ) is None
@@ -656,8 +660,8 @@ class TestReaderParallelRunAgainstResolver:
             _settle(seed_user, loan, seed_periods[2], amount=scheduled_pi)
             db.session.commit()
 
-            # The two GENESIS producers agree, as they always must -- the posted
-            # ledger is a projection of the same walk.
+            # The whole read and the read bounded at _AS_OF: one walk, so this
+            # grades only the window's bound, which no line here is dated past.
             ledger = _ledger_balance(loan.id, scenario_id)
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             reader = _posted_balance(loan.id, scenario_id)

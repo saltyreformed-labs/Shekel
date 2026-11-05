@@ -446,6 +446,10 @@ def family_movement_ids(txn):
     R-BAL80).  A revert keeps the mirror un-dated (ruling R-BAL61), so a reverted
     row's family still names it, and it books nothing.
 
+    Flushes first, because a movement only the session holds has no id yet, and
+    a ``None`` among the ids would match every correction line, whose
+    ``movement_id`` is ``None``.
+
     Args:
         txn: The :class:`~app.models.transaction.Transaction`, or its id.
 
@@ -454,7 +458,10 @@ def family_movement_ids(txn):
         the books before it.
     """
     row = txn if isinstance(txn, Transaction) else db.session.get(Transaction, txn)
-    return [] if row is None else [movement.id for movement in row.entries]
+    if row is None:
+        return []
+    db.session.flush()
+    return [movement.id for movement in row.entries]
 
 
 def transfer_family_movement_ids(transfer_id):
@@ -509,7 +516,9 @@ def period_nets_of_movements(movement_ids, scenario_id):
     """Return ``{pay_period_id: {chart key: net}}`` over the lines of *movement_ids*.
 
     The read holds no ``$0.00`` line, so a reverted row's paycheck is simply
-    absent: what the store held as a pair netting to nothing there.
+    absent: what the store held as a pair netting to nothing there.  Lines that
+    cancel keep their key at ``$0.00`` (a settled transfer's two legs on
+    transit), where :func:`movement_nets_by_key` drops it.
 
     Args:
         movement_ids: The movements (:func:`family_movement_ids`,

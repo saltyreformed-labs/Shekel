@@ -244,7 +244,6 @@ class TestRevertedTransactionReconcilesAtZero:
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
-            user_id = seed_user["user"].id
             checking = seed_user["account"]
             period = seed_user["bootstrap_period"]
 

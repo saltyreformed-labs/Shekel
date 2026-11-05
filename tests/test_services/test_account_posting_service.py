@@ -1833,6 +1833,7 @@ class TestSyncEntryPoints:
                 )
             )
             assert loan.id not in resynced
+            assert_ledger_parity(_db.session, scenario_id)
 
     def test_resync_user_posts_every_non_loan_account(
         self, app, db, seed_user,

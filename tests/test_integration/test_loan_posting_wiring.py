@@ -538,11 +538,18 @@ class TestNonLoanTransferIgnored:
         it named the side by the income shadow, which no longer exists, and
         counted the entries linking that shadow's row id, which no split has
         carried since ruling **R-BAL102**.
+
+        The owner holds a loan with a settled payment too: the read books a
+        split only for a loan, so with none here "no split line" would hold
+        whatever it did with the savings transfer.
         """
         with app.app_context():
+            scenario_id = seed_user["scenario"].id
             savings = create_account_of_type(
                 seed_user, db.session, "Savings", "Wiring Savings",
             )
+            loan = _make_loan(seed_user)
+            _settle(seed_user, loan, seed_periods[_P2])
             db.session.commit()
             xfer = create_settled_transfer(
                 seed_user, db.session, seed_user["account"], savings,
@@ -553,14 +560,16 @@ class TestNonLoanTransferIgnored:
             assert loan_correction_lines(
                 db.session, xfer.id, savings.id,
             ) == []
-            # And no loan_payment line exists for this owner at all.
+            # The owner's loan_payment lines are all the loan's own.
             loan_payment_source = ref_cache.posting_source_id(
                 PostingSourceEnum.LOAN_PAYMENT,
             )
-            assert not [
-                line for line in scenario_lines(db.session, seed_user["scenario"].id)
+            assert {
+                line.key.record_id
+                for line in scenario_lines(db.session, scenario_id)
                 if line.source_kind_id == loan_payment_source
-            ]
+            } == {loan.id}
+            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestRouteChokepointWiring:

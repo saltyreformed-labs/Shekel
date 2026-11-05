@@ -21,6 +21,7 @@ from app.services import (
 )
 from app.exceptions import NotFoundError, ValidationError
 from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import account_net
 from tests._test_helpers import add_anchor_history, create_loan_account
 from app.models.amount_ownership import AmountOwnership
 
@@ -773,8 +774,11 @@ class TestMovingATransferBetweenAccounts:
             )
             xfer = _create_basic_transfer(td)
             db.session.flush()
-            before = _ledger_nets_for_transfer(xfer.id)
-            assert before == {}, "setup: a projected transfer posts nothing"
+            # A projected transfer holds no record, so asking its records could
+            # answer nothing whatever the ledger held: ask the account.
+            assert account_net(
+                db.session, td["account"].id, td["scenario"].id,
+            ) == Decimal("1000.00"), "setup: a projected transfer moves nothing"
 
             transfer_service.update_transfer(
                 xfer.id, td["user"].id,

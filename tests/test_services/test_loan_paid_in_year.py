@@ -316,7 +316,6 @@ class TestPaidInYearChips:
         its own total -- a leak would sum them (1497.50).
         """
         with app.app_context():
-            baseline = seed_user["scenario"]
             whatif = Scenario(
                 user_id=seed_user["user"].id, name="What-if", is_baseline=False,
             )

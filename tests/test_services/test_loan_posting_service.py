@@ -2968,13 +2968,14 @@ class TestPostedLoanBalanceSums:
     def test_window_is_scenario_scoped_and_none_off_scenario(
         self, app, db, seed_user, seed_periods,
     ):
-        """The window isolates scenarios; a scenario with no opening reads None.
+        """The window isolates scenarios; a scenario with no payment reads its anchor.
 
         A $1,000 payment settled in the baseline auto-posts the opening, true-up,
         and split there only (a what-if with no payment is neither in the payment
-        set nor the baseline).  The baseline reads 99500.00; the what-if -- which
-        holds no opening -- reads ``None``, never a misleading $0 or the
-        baseline's balance.
+        set nor the baseline).  The baseline reads 99500.00.  The what-if holds
+        no opening on the store, whose window reads ``None``, and the worked-out
+        read answers the loan's anchor, 100000.00.  Neither is a misleading $0
+        or the baseline's balance.
         """
         with app.app_context():
             baseline = seed_user["scenario"]
@@ -2994,6 +2995,9 @@ class TestPostedLoanBalanceSums:
             assert posted_loan_balance_at(
                 loan.id, baseline.id, _AS_OF,
             ) == Decimal("99500.00")
+            assert posted_loan_balance_at(
+                loan.id, whatif.id, _AS_OF,
+            ) == Decimal("100000.00")
             assert stored_loan_balance_at(
                 loan.id, whatif.id, _AS_OF,
             ) is None

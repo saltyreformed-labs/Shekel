@@ -34,6 +34,7 @@ from tests._ledger_reads import (
     account_net,
     ledger_net,
     linked_key_of,
+    posted_loan_balance_at,
     scenario_lines,
 )
 from tests._stored_ledger import stored_loan_balance_at
@@ -646,5 +647,15 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
             income = _leg_again(income)
             assert row_valuation.settled_contribution(parent_of(income)) == Decimal("0")
             without_movement = _read()
-            assert without_movement[0] != with_movement[0]
-            assert without_movement[1] == with_movement[1]
+            # A $1,000.00 loan at 5%, which the $1,910.95 paid off.  At the
+            # $0.00 close nothing paid it, and the missed installment charges
+            # 1000 x 0.05 / 12 = 4.17: 1,004.17 owed.
+            assert with_movement[0] == Decimal("0.00")
+            assert without_movement[0] == Decimal("1004.17")
+            # The records came off past every writer, so the store, which
+            # nothing re-synced, reads what it read.  The worked-out ledger
+            # follows the records to the position.
+            assert without_movement[1] == with_movement[1] == Decimal("0.00")
+            assert posted_loan_balance_at(
+                loan.id, scenario_id, as_of,
+            ) == Decimal("1004.17")

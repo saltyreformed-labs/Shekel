@@ -229,8 +229,8 @@ class TestTheDropdownBooksWhatTheRowCost:
         Two identically-shaped rows: one settled through the popover's Status
         dropdown, one through the grid's Mark Paid button.  Both must land on
         $48.98 with the same ledger effect.  Asserted as an EQUALITY between
-        the two doors rather than against a constant, so a future change that
-        moves both together still passes and a change that moves one fails.
+        the two doors, so a change that moves one fails, and the ledger half
+        states its figure too, because two doors booking nothing would agree.
         """
         with app.app_context():
             via_dropdown = _gas_envelope(seed_user, seed_periods_today[3])
@@ -263,7 +263,7 @@ class TestTheDropdownBooksWhatTheRowCost:
             db.session.commit()
             booked = _cash_leg(dropdown_id, seed_user["account"].id)
             assert booked == _cash_leg(button_id, seed_user["account"].id)
-            assert booked != Decimal("0")
+            assert booked == Decimal("-48.98")
 
     def test_an_entry_less_envelope_still_books_its_budget(
         self, app, db, auth_client, seed_user, seed_periods_today,

@@ -284,9 +284,7 @@ class TestLoanNotYetOriginated:
         originated.
         """
         # pylint: disable=import-outside-toplevel
-        from tests._test_helpers import (
-            create_account_of_type, create_settled_transfer, settle_instant_on,
-        )
+        from tests._test_helpers import create_account_of_type, create_settled_transfer
 
         with app.app_context():
             periods = seed_periods
@@ -684,8 +682,7 @@ class TestBrokenLoanFailsLoud:
         """
         # pylint: disable=import-outside-toplevel
         from tests._test_helpers import (
-            clear_loan_ledger, create_settled_transfer, settle_instant_on,
-            unseeded_replay_balance,
+            clear_loan_ledger, create_settled_transfer, unseeded_replay_balance,
         )
 
         with app.app_context():

@@ -85,6 +85,7 @@ from app.services.recurrence._month_coordinate import (
     weekday_reading_of,
     weekday_shape,
 )
+from app.services.recurrence._nominal_day import offerable_nominal_days
 from app.services.recurrence._offer import AuthorableCadence
 from app.utils.dates import DAYS_PER_WEEK
 
@@ -338,6 +339,12 @@ _END_BOUND_COPY: dict[str, tuple[str, str | None]] = {
     ),
 }
 
+
+#: What the "repeating on" control calls reading a date by its own day, the
+#: option it starts on.  This is the words' one home:
+#: :attr:`PickerModel.same_day_label` hands them to the template, and
+#: :func:`month_reading_choices` to a refusal that lists what a date allows.
+_SAME_DAY_LABEL = "the same day of the month"
 
 #: What each NOMINAL DAY is called on the form.
 #:
@@ -620,6 +627,47 @@ def month_reading_from_token(token: str) -> MonthReading | None:
     )
 
 
+def month_reading_choices(
+    unit: RecurrenceUnitEnum, starts_on: date,
+) -> dict[MonthReading, str]:
+    """Return every way *starts_on* may be read, in the control's words and order.
+
+    **What the "repeating on" control offers for one date, as one value**: the
+    same day of the month, the clamped month-end days the date leaves open
+    (:func:`~app.services.recurrence.offerable_nominal_days`), then the weekday
+    readings it allows (:func:`weekday_reading_choices`).  Those two are what a
+    rendered control enables its options from, and the schema refuses a choice
+    by its absence here and lists the rest of this in the sentence (ruling
+    plan#2909), so a refusal cannot name a choice the control lacks or omit one
+    it has.
+
+    Every date a cadence measured in months can take has at least two entries,
+    its own day and one weekday reading: the 1st-28th is the fourth such weekday
+    or earlier, and the 29th-31st falls in its month's last week.
+
+    Args:
+        unit: The cadence unit.
+        starts_on: The rule's first occurrence.
+
+    Returns:
+        ``{reading: label}`` in the control's order -- ``{}`` for a cadence
+        with no day of the month, beside which the control is not offered.
+    """
+    if not has_day_of_month_coordinate(unit):
+        return {}
+    return {
+        MonthReading(): _SAME_DAY_LABEL,
+        **{
+            MonthReading(nominal_day=day): _NOMINAL_DAY_LABELS[day]
+            for day in offerable_nominal_days(unit, starts_on)
+        },
+        **{
+            MonthReading(weekday_reading=reading): label
+            for reading, label in weekday_reading_choices(unit, starts_on).items()
+        },
+    }
+
+
 @dataclass(frozen=True)
 class EndBoundOption:
     """One shape a closing bound can take, worded for the form's mode select.
@@ -733,6 +781,11 @@ class PickerModel:
     end_bounds: tuple["EndBoundOption", ...]
     units: tuple["CadenceOption", ...]
     placements: tuple["CadenceOption", ...]
+
+    @property
+    def same_day_label(self) -> str:
+        """Return what the "repeating on" control's first option is called."""
+        return _SAME_DAY_LABEL
 
 
 def picker_model(cadences: tuple[AuthorableCadence, ...]) -> PickerModel:
@@ -862,6 +915,7 @@ __all__ = [
     "WeekdayReadingOption",
     "cadence_options",
     "end_bound_options",
+    "month_reading_choices",
     "month_reading_from_token",
     "nominal_day_options",
     "picker_model",

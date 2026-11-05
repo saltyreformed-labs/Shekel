@@ -54,10 +54,11 @@ from app.routes._redirect_target import RedirectTarget
 #:   the schema and reached the generic prompt.
 #: * ``repeats_on`` -- ``validate_repeats_on_fits_the_start``, plan step
 #:   R7c-b as ``nominal_day``, renamed at recurrence:R8-c when the control
-#:   began offering weekday readings too.  Its message names the choices the
-#:   chosen date allows ("Apr 30, 2026 cannot mean day 30...", "Starting on
-#:   Nov 30, 2026, this can repeat on the same day of the month or on the
-#:   last Monday."), and no other layer says it, so the whole refusal was
+#:   began offering weekday readings too.  Its message names every choice the
+#:   chosen date allows, or says a schedule with no day of the month has none
+#:   (ruling plan#2909: "Apr 15, 2026 cannot mean day 30. Starting on that
+#:   date, this can repeat on the same day of the month or on the third
+#:   Wednesday."), and no other layer says it, so the whole refusal was
 #:   inaudible.
 #:
 #: **Those last three are the same defect a third, fourth and fifth time**, and

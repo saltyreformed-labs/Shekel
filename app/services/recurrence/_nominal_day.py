@@ -100,13 +100,14 @@ def is_offerable_nominal_day(
 ) -> bool:
     """Return whether the pair is consistent, WITHOUT raising.
 
-    :func:`_require_nominal_day_pair`'s question asked by a validator rather
-    than by a write door, the same split
+    :func:`_require_nominal_day_pair`'s question asked where the answer is not
+    a broken invariant, the same split
     :func:`~app.services.recurrence.is_authorable` records for the cadence: the
-    door raises because reaching it with a contradictory pair is a broken
-    invariant, while a SUBMISSION carrying one is bad input to refuse with a
-    field error naming the control.  Built on the same set, so the schema and
-    the door cannot disagree about it.
+    door raises, while a re-authored rule whose start moved drops a stored day
+    the new date no longer leaves open (``_reading``).  Built on the set the
+    form's schema reads too
+    (:func:`~app.services.recurrence.month_reading_choices`), so the three
+    cannot disagree about it.
 
     Args:
         unit: The cadence unit.

@@ -45,7 +45,7 @@ from app.schemas.validation._helpers import (
 from app.utils.digit_strings import MAX_INTEGER_COLUMN
 
 if TYPE_CHECKING:
-    from app.services.recurrence import WeekdayReading
+    from app.services.recurrence import MonthReading
 
 
 #: The field error for a chosen cadence with no first occurrence beside it.
@@ -518,77 +518,44 @@ def require_end_bound_after_start(data):
     )
 
 
-def _require_offerable_nominal_day(
-    unit: RecurrenceUnitEnum, starts_on: date, nominal_day: int,
+def _require_offerable_reading(
+    unit: RecurrenceUnitEnum, starts_on: date, reading: "MonthReading",
 ) -> None:
-    """Refuse a nominal day *starts_on* leaves no room for.
+    """Refuse a "repeating on" choice *starts_on* does not allow.
 
     See :meth:`RecurrenceFormFieldsMixin.validate_repeats_on_fits_the_start`.
 
     Args:
         unit: The submitted cadence unit.
         starts_on: The submitted first occurrence.
-        nominal_day: The submitted clamped day.
+        reading: The submitted :class:`~app.services.recurrence.MonthReading`.
 
     Raises:
-        ValidationError: The date does not leave *nominal_day* open.
+        ValidationError: The date does not allow *reading*.
     """
     # Pylint: ``import-outside-toplevel`` -- see
     # :meth:`RecurrenceUnitField._member_for`.
     from app.services.recurrence import (  # pylint: disable=import-outside-toplevel
-        is_offerable_nominal_day,
-        offerable_nominal_days,
+        month_reading_choices,
     )
 
-    if is_offerable_nominal_day(unit, starts_on, nominal_day):
-        return
-    offerable = offerable_nominal_days(unit, starts_on)
-    raise ValidationError(
-        f"{starts_on:%b %-d, %Y} cannot mean day {nominal_day}. "
-        + (
-            f"Starting on that date, this can only repeat on "
-            f"{' or '.join(str(day) for day in offerable)}."
-            if offerable else
-            "That date already says which day this repeats on, so there "
-            "is nothing else for it to mean."
-        ),
-        field_name=RECURRENCE_REPEATS_ON_KEY,
-    )
-
-
-def _require_offerable_weekday_reading(
-    unit: RecurrenceUnitEnum, starts_on: date, reading: "WeekdayReading",
-) -> None:
-    """Refuse a weekday reading *starts_on* cannot be read by.
-
-    See :meth:`RecurrenceFormFieldsMixin.validate_repeats_on_fits_the_start`.
-
-    Args:
-        unit: The submitted cadence unit.
-        starts_on: The submitted first occurrence.
-        reading: The submitted :class:`~app.services.recurrence.WeekdayReading`.
-
-    Raises:
-        ValidationError: The pair contradicts itself.
-    """
-    # Pylint: ``import-outside-toplevel`` -- see
-    # :meth:`RecurrenceUnitField._member_for`.
-    from app.services.recurrence import (  # pylint: disable=import-outside-toplevel
-        weekday_reading_choices,
-    )
-
-    choices = weekday_reading_choices(unit, starts_on)
+    choices = month_reading_choices(unit, starts_on)
     if reading in choices:
         return
+    day = reading.nominal_day
+    if not choices:
+        named = "a weekday of the month" if day is None else f"day {day}"
+        raise ValidationError(
+            f"A paycheck or weekly schedule has no day of the month, so it "
+            f"cannot repeat on {named}. Choose a monthly or yearly schedule.",
+            field_name=RECURRENCE_REPEATS_ON_KEY,
+        )
+    *earlier, last = choices.values()
+    offered = f"this can repeat on {', on '.join(earlier)} or on {last}."
     raise ValidationError(
-        (
-            f"Starting on {starts_on:%b %-d, %Y}, this can repeat on the same "
-            f"day of the month or on {' or '.join(choices.values())}."
-            if choices else
-            "A paycheck or weekly schedule has no day of the month, so it "
-            "cannot repeat on a weekday of the month. Choose a monthly or "
-            "yearly schedule."
-        ),
+        f"Starting on {starts_on:%b %-d, %Y}, {offered}" if day is None else
+        f"{starts_on:%b %-d, %Y} cannot mean day {day}. "
+        f"Starting on that date, {offered}",
         field_name=RECURRENCE_REPEATS_ON_KEY,
     )
 
@@ -883,16 +850,17 @@ class RecurrenceFormFieldsMixin(RecurrenceCadenceFieldsMixin):
           ``ck_recurrence_rules_nominal_day``: the day must EXCEED the date's
           own, and the date's own day must be what clamping it into that
           month produces.  ``starts_on=2026-04-15&repeats_on=30`` is the
-          shape: 30 is in the domain, April 15 was never clamped.  Asked
-          through :func:`~app.services.recurrence.is_offerable_nominal_day`.
+          shape: 30 is in the domain, April 15 was never clamped.
         * **A weekday reading** (plan step recurrence:R8-c) -- the date must
           be one the reading can read (no fifth from the start, ruling
           plan#2670; the last such weekday from the end), on a unit measured
-          in months.  Asked through
-          :func:`~app.services.recurrence.offerable_weekday_readings`, the
-          producer the control is enabled from and the write door refuses
-          against, and answered with the choices the date DOES allow, in the
-          control's own words.
+          in months.
+
+        Both are asked through
+        :func:`~app.services.recurrence.month_reading_choices`, built on the
+        producers the control is enabled from and the write door refuses
+        against, and answered with every choice the date DOES allow, in the
+        control's own words (ruling plan#2909).
 
         Skipped unless the submission states all three.  A form that names no
         cadence authors no rule; one that omits ``starts_on`` leaves the stored
@@ -912,12 +880,7 @@ class RecurrenceFormFieldsMixin(RecurrenceCadenceFieldsMixin):
         reading = data.get(RECURRENCE_REPEATS_ON_KEY)
         if unit is None or starts_on is None or reading is None:
             return
-        if reading.nominal_day is not None:
-            _require_offerable_nominal_day(unit, starts_on, reading.nominal_day)
-        if reading.weekday_reading is not None:
-            _require_offerable_weekday_reading(
-                unit, starts_on, reading.weekday_reading,
-            )
+        _require_offerable_reading(unit, starts_on, reading)
 
     @validates_schema
     def validate_recurrence_states_a_start(self, data, **kwargs):

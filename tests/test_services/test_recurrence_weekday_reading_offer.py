@@ -28,6 +28,7 @@ from app.services.recurrence import (
     MonthReading,
     WeekdayReading,
     describe,
+    month_reading_choices,
     month_reading_from_token,
     offerable_weekday_readings,
     stored_month_reading,
@@ -277,6 +278,73 @@ class TestTheChoicesADateAllows:
     def test_a_unit_with_no_month_coordinate_allows_none(self, unit):
         """A weekly or paycheck cadence reads no weekday of a month."""
         assert weekday_reading_choices(unit, date(2026, 11, 17)) == {}
+
+
+class TestEveryChoiceADateAllows:
+    """``month_reading_choices``: the whole control for one date, in its order."""
+
+    @pytest.mark.parametrize("day,expected", [
+        (date(2026, 4, 15), [
+            (MonthReading(), "the same day of the month"),
+            (MonthReading(weekday_reading=_FROM_START), "the third Wednesday"),
+        ]),
+        (date(2026, 4, 30), [
+            (MonthReading(), "the same day of the month"),
+            (MonthReading(nominal_day=31), "the last day of the month"),
+            (MonthReading(weekday_reading=_FROM_END), "the last Thursday"),
+        ]),
+        (date(2026, 1, 31), [
+            (MonthReading(), "the same day of the month"),
+            (MonthReading(weekday_reading=_FROM_END), "the last Saturday"),
+        ]),
+        (date(2027, 2, 28), [
+            (MonthReading(), "the same day of the month"),
+            (MonthReading(nominal_day=29), "the 29th"),
+            (MonthReading(nominal_day=30), "the 30th"),
+            (MonthReading(nominal_day=31), "the last day of the month"),
+            (MonthReading(weekday_reading=_FROM_START), "the fourth Sunday"),
+            (MonthReading(weekday_reading=_FROM_END), "the last Sunday"),
+        ]),
+        (date(2028, 2, 29), [
+            (MonthReading(), "the same day of the month"),
+            (MonthReading(nominal_day=30), "the 30th"),
+            (MonthReading(nominal_day=31), "the last day of the month"),
+            (MonthReading(weekday_reading=_FROM_END), "the last Tuesday"),
+        ]),
+    ], ids=["mid_month", "month_end", "a_31st", "common_feb_28", "leap_day"])
+    def test_the_hand_picked_dates(self, day, expected):
+        """Each entry in the control's words, in the order it lists them."""
+        assert list(month_reading_choices(_MONTH, day).items()) == expected
+
+    @pytest.mark.parametrize("unit", [_MONTH, RecurrenceUnitEnum.YEAR])
+    def test_every_date_of_three_years(self, unit):
+        """The same day first, the days a clamp left open, then the weekdays.
+
+        The open days are counted here by hand, off the calendar: a date
+        leaves them open only as its month's last day, and they run above it
+        to 31.  At least two entries is the promise the refusal's list leans
+        on, so the sentence always reads "on X or on Y".
+        """
+        for day in _days(date(2026, 1, 1), date(2028, 12, 31)):
+            month_length = calendar.monthrange(day.year, day.month)[1]
+            open_days = range(day.day + 1, 32) if day.day == month_length else ()
+
+            assert list(month_reading_choices(unit, day)) == [
+                MonthReading(),
+                *(MonthReading(nominal_day=open_day) for open_day in open_days),
+                *(
+                    MonthReading(weekday_reading=reading)
+                    for reading in offerable_weekday_readings(unit, day)
+                ),
+            ], day
+            assert len(month_reading_choices(unit, day)) >= 2, day
+
+    @pytest.mark.parametrize(
+        "unit", [RecurrenceUnitEnum.WEEK, RecurrenceUnitEnum.PERIOD],
+    )
+    def test_a_unit_with_no_day_of_the_month_allows_none(self, unit):
+        """The control is not offered there, so not even its default is a choice."""
+        assert month_reading_choices(unit, date(2026, 4, 30)) == {}
 
 
 class TestTheStoredReading:

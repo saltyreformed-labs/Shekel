@@ -1,4 +1,4 @@
-"""The "repeating on" field's weekday half at the schema door (plan step recurrence:R8-c).
+"""The "repeating on" field at the schema door (plan step recurrence:R8-c, ruling plan#2909).
 
 ``repeats_on`` replaced ``nominal_day`` when the control began offering the
 weekday readings beside the clamped month-end days (rulings plan#2668 and
@@ -15,7 +15,10 @@ Swept over every schema that declares the field: the two template kinds'
 create and update forms and the payroll line's (salary:R18-c), because the
 rule is inherited and an override that lost it would let the same POST
 through one door and not another.  Tue 2026-11-17 is the third Tuesday of
-November 2026 (3, 10, 17); Mon 2026-11-30 its fifth and last Monday.
+November 2026 (3, 10, 17); Mon 2026-11-30 its fifth and last Monday.  Apr 1
+2026 is a Wednesday, so Apr 15 is the third and Apr 30 the last Thursday (2,
+9, 16, 23, 30); Jan 31 2026 is a Saturday, in a month that clamps nothing; Feb
+29 2028 is a Tuesday, the fifth of its month, which holds no 30th or 31st.
 """
 from datetime import date
 
@@ -154,7 +157,7 @@ class TestAWeekdayReadingTheDateRefuses:
 
     @_SCHEMAS
     def test_a_fifth_monday_cannot_be_read_from_the_start(self, app, schema_cls):
-        """No fifth (plan#2670): the 30th offers its day or the last Monday."""
+        """No fifth (plan#2670): the 30th offers its day, the month's last or the last Monday."""
         with app.app_context():
             messages = _refusal(
                 schema_cls, _submission(_LAST_MONDAY, "from_start"),
@@ -163,7 +166,8 @@ class TestAWeekdayReadingTheDateRefuses:
         assert messages == {
             "repeats_on": [
                 "Starting on Nov 30, 2026, this can repeat on the same day of "
-                "the month or on the last Monday.",
+                "the month, on the last day of the month or on the last "
+                "Monday.",
             ],
         }
 
@@ -181,6 +185,85 @@ class TestAWeekdayReadingTheDateRefuses:
                 "the month or on the third Tuesday.",
             ],
         }
+
+
+class TestANominalDayTheDateRefuses:
+    """The same list behind the day it could not mean (ruling plan#2909)."""
+
+    @_SCHEMAS
+    @pytest.mark.parametrize("starts_on,repeats_on,message", [
+        (
+            date(2026, 4, 15), "30",
+            "Apr 15, 2026 cannot mean day 30. Starting on that date, this can "
+            "repeat on the same day of the month or on the third Wednesday.",
+        ),
+        (
+            date(2026, 4, 30), "30",
+            "Apr 30, 2026 cannot mean day 30. Starting on that date, this can "
+            "repeat on the same day of the month, on the last day of the "
+            "month or on the last Thursday.",
+        ),
+        (
+            date(2026, 1, 31), "31",
+            "Jan 31, 2026 cannot mean day 31. Starting on that date, this can "
+            "repeat on the same day of the month or on the last Saturday.",
+        ),
+        (
+            date(2028, 2, 29), "29",
+            "Feb 29, 2028 cannot mean day 29. Starting on that date, this can "
+            "repeat on the same day of the month, on the 30th, on the last "
+            "day of the month or on the last Tuesday.",
+        ),
+    ], ids=["mid_month", "month_end", "a_month_that_clamps_nothing", "leap_day"])
+    def test_the_sentence_lists_every_choice_the_date_allows(
+        self, app, schema_cls, starts_on, repeats_on, message,
+    ):
+        """Word for word: the ruling's two, and the short and long of the list."""
+        with app.app_context():
+            messages = _refusal(schema_cls, _submission(starts_on, repeats_on))
+
+        assert messages == {"repeats_on": [message]}
+
+    @_SCHEMAS
+    @pytest.mark.parametrize(
+        "unit", [RecurrenceUnitEnum.PERIOD, RecurrenceUnitEnum.WEEK],
+    )
+    def test_a_schedule_with_no_day_of_the_month_lists_nothing(
+        self, app, schema_cls, unit,
+    ):
+        """The control is not offered there, so the sentence names the units that do.
+
+        One key is read because a payroll line refuses a weekly unit in its
+        own right, beside this.
+        """
+        with app.app_context():
+            messages = _refusal(
+                schema_cls, _submission(_LAST_MONDAY, "31", unit=unit),
+            )
+
+        assert messages["repeats_on"] == [
+            "A paycheck or weekly schedule has no day of the month, so it "
+            "cannot repeat on day 31. Choose a monthly or yearly schedule.",
+        ]
+
+    @_SCHEMAS
+    def test_the_controls_default_beside_a_paycheck_is_no_statement(self, app, schema_cls):
+        """A blank control states no reading, so a paycheck rule still loads.
+
+        The same day of the month is no choice beside a paycheck
+        (``month_reading_choices`` is empty there), and what keeps it from
+        being refused is that the empty token never reaches the rule: it is
+        dropped as an untouched input.
+        """
+        with app.app_context():
+            loaded = schema_cls().load(
+                _submission(
+                    _THIRD_TUESDAY, "", unit=RecurrenceUnitEnum.PERIOD,
+                ),
+                partial=True,
+            )
+
+        assert "repeats_on" not in loaded
 
 
 class TestTheOldKeyIsGone:

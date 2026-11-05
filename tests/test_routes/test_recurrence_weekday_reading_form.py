@@ -268,6 +268,80 @@ class TestTheFormStoresAndWalksTheReading:
         assert _due_dates(template) == _THIRD_TUESDAYS
 
 
+@pytest.mark.usefixtures("seed_periods")
+class TestTheRefusalListsWhatTheControlOffers:
+    """Ruling plan#2909: the sentence and the rendered options are one list.
+
+    Thu 2026-04-30 is April's last day and its fifth and last Thursday (2, 9,
+    16, 23, 30), so it offers its day, the month's last and the last Thursday.
+    """
+
+    _APR_30 = date(2026, 4, 30)
+    _MESSAGE = (
+        "Starting on Apr 30, 2026, this can repeat on the same day of the "
+        "month, on the last day of the month or on the last Thursday."
+    )
+
+    def test_the_sentence_names_each_option_the_form_enables(
+        self, auth_client, seed_user,
+    ):
+        """The labels read off the page, then the sentence that page's form earns.
+
+        ``from_start`` is the option Apr 30 leaves disabled, so a browser with
+        the page as rendered cannot post it: this submission is crafted.
+        """
+        template = _create_through_the_form(
+            auth_client, seed_user, self._APR_30, "31",
+        )
+        control = repeats_on_control(
+            auth_client.get(f"/templates/{template.id}/edit").data.decode(),
+        )
+
+        assert [
+            option["label"] for option in control.options
+            if not option["disabled"]
+        ] == [
+            "the same day of the month",
+            "the last day of the month",
+            "the last Thursday",
+        ]
+
+        resp = auth_client.post(
+            f"/templates/{template.id}",
+            data=_edit_form_as_posted(
+                auth_client, template, repeats_on="from_start",
+            ),
+            follow_redirects=True,
+        )
+
+        assert resp.status_code == 200
+        assert self._MESSAGE in resp.data.decode()
+        assert _rule_columns(template) == (self._APR_30, 31, None)
+
+    def test_a_stored_third_tuesday_moved_to_a_month_end_with_no_script(
+        self, auth_client, seed_user,
+    ):
+        """The path the old sentence failed on: it omitted the month's last day.
+
+        Nothing resets the control with no script, so the date moves and the
+        stored reading posts beside it.  Nothing is saved.
+        """
+        template = _create_a_third_tuesday_rule(auth_client, seed_user)
+
+        resp = auth_client.post(
+            f"/templates/{template.id}",
+            data=_edit_form_as_posted(
+                auth_client, template, starts_on=self._APR_30.isoformat(),
+            ),
+            follow_redirects=True,
+        )
+
+        assert resp.status_code == 200
+        assert self._MESSAGE in resp.data.decode()
+        assert _rule_columns(template) == (_THIRD_TUESDAY, None, "from_start")
+        assert _due_dates(template) == _THIRD_TUESDAYS
+
+
 def _preview(auth_client, starts_on, repeats_on):
     """Return the preview fragment's period lines for a monthly rule.
 

@@ -462,7 +462,7 @@
         <select id="repeats_on" name="repeats_on" class="form-select"
                 {{ '' if has_choices and not selected.locked else 'disabled' }}>
           <option value="" {{ 'selected' if selected.reading.token == '' else '' }}>
-            the same day of the month
+            {{ picker.same_day_label }}
           </option>
           {% for option in picker.nominal_days %}
           <option value="{{ option.token }}" data-day="{{ option.day }}"

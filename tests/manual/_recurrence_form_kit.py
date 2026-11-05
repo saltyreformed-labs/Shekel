@@ -65,7 +65,10 @@ MARK = "ZZVERIFY-RECURRENCE"
 #: 2026-11-02 at plan#2680, which added the weekday drives: one whole run
 #: (``VERIFY_WRITE=1``) makes 136 preview fetches; a run started within the
 #: hour after other runs met 132 preview 429s through every preview check,
-#: and the same code passed every check in a fresh window.  Run it once an
+#: and the same code passed every check in a fresh window.  Measured again
+#: 2026-11-05 at plan#2935, with every loan arm running on a copy holding a
+#: payment-less loan and a one-time transfer into it: 185 fetches, so a drive
+#: adding more than 15 would meet 429s in a fresh window too.  Run it once an
 #: hour; the preview route's counter is
 #: ``LIMITS:LIMITER/<ip>/templates.preview_recurrence/200/1/hour`` in the
 #: dev Redis, its length the fetches still in the window.

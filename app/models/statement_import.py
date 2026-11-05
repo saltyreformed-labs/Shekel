@@ -386,7 +386,7 @@ class BankStatementLine(AccountScopedMixin, db.Model):
     INSERTED ahead of a recorded one.  A re-import now reconciles a
     ``(posted_on, amount)`` GROUP as a set -- by this source's own id, then by
     the wording this source wrote, then by count against the lines another
-    source showed (``statement_import._record._reconcile``) -- and mints an
+    source showed (``statement_import._plan._reconcile``) -- and mints an
     ordinal only for a line it has decided is new
     (:func:`app.services.statement_import.fresh_ordinals`).  What this key
     still guarantees is that every recorded line has a distinct, stable
@@ -641,17 +641,17 @@ class StatementLineSighting(db.Model):
         external_id  -- this source's own id for the line (an OFX ``FITID``,
                         the feed's ``id``), or ``None``.  CORROBORATION that
                         this source's next import pairs on first
-                        (``statement_import._record._reconcile``), never the
+                        (``statement_import._plan._reconcile``), never the
                         line's identity: a source that has one still cannot
                         claim it on two lines of one account -- the door
                         refuses a file restating a held id on another day or
-                        amount (``_record._refuse_moved_ids``) -- and one that
+                        amount (``_plan._refuse_moved_ids``) -- and one that
                         has none is not thereby unidentifiable.
         running_balance -- the balance this source stated after the line, or
                         ``None`` where the export carries none.  A prefix sum
                         over the source's LISTING order, which is why two
                         sightings of one line may legitimately disagree
-                        (``_record._refuse_restatement``); what verifies an
+                        (``_plan._refuse_restatement``); what verifies an
                         import against itself is the chain inside one file
                         (``statement_import.verify_running_balance``).
         source_category -- the source's OWN category string, kept as
@@ -711,7 +711,7 @@ class StatementLineSighting(db.Model):
     # **Eager and VIEWONLY**: every reader that holds a sighting asks which
     # import it belongs to -- to order the sightings of one line
     # (:attr:`BankStatementLine.current`) and to know which SOURCE showed it
-    # (``_record._reconcile`` pairs within a source) -- so a lazy load here is
+    # (``_plan._reconcile`` pairs within a source) -- so a lazy load here is
     # one statement per sighting on every list surface (finding **N-309**);
     # and viewonly because :attr:`line` already persists ``account_id`` and
     # two relationships writing one column would contend.  No relationship

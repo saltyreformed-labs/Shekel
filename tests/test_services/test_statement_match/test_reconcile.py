@@ -1050,7 +1050,7 @@ class TestTheHeroReportsADayBOTHRecordsCanSpeakFor:
     measures and expects.
     """
 
-    def _agreement(self, days, account_id=1, opened_on=None):
+    def _agreement(self, days, account_id=1, opened_on=None, last_record_on=None):
         """Return an agreement over hand-built days.
 
         Args:
@@ -1065,6 +1065,10 @@ class TestTheHeroReportsADayBOTHRecordsCanSpeakFor:
                 books hold movement on, as :meth:`_day` builds it.  A case
                 building a day before the books open, or the opening day
                 itself, passes the day it built them around.
+            last_record_on: The books' last record, or ``None`` -- which every
+                hand-built day being quiet makes the default.  A case about
+                records running past the last statement (finding
+                **BAL-651**) passes the day they run to.
 
         Returns:
             The :class:`~app.services.bank_agreement.BankAgreement`.
@@ -1089,6 +1093,7 @@ class TestTheHeroReportsADayBOTHRecordsCanSpeakFor:
                 days[0].day - timedelta(days=1) if opened_on is None
                 else opened_on
             ),
+            last_record_on=last_record_on,
             runs=[RecordedRun(days[0].day, days[-1].day, None, ())],
             days=list(days),
         )
@@ -1221,6 +1226,55 @@ class TestTheHeroReportsADayBOTHRecordsCanSpeakFor:
         page = _page(seed_user, Tab.TO_EXPLAIN, agreement=agreement)
 
         assert page.hero.unpriced_after == 0
+        assert page.is_done is True
+
+    def test_records_past_the_last_statement_REFUSE_done_and_are_named(
+        self, app, db, seed_user,
+    ):
+        """Finding **BAL-651**, ruling plan#2346: not Done until a statement prices them.
+
+        The statement prices Aug 19, where the books agree to the cent, and the
+        books' last record is Aug 21, so the comparison draws Aug 20 and Aug 21
+        unpriced.  Before the fix it ended on Aug 19 and read Done.  The page
+        says how far it is priced and how far the records run.
+        """
+        an_envelope(seed_user)
+        db.session.commit()
+        agreement = self._agreement([
+            self._day(date(2026, 8, 19), "2459.60", "2459.60"),
+            self._day(date(2026, 8, 20), None, "2459.60"),
+            self._day(date(2026, 8, 21), None, "2459.60"),
+        ], account_id=seed_user["account"].id,
+            last_record_on=date(2026, 8, 21))
+
+        page = _page(seed_user, Tab.TO_EXPLAIN, agreement=agreement)
+
+        assert page.hero.off_by == Decimal("0.00")
+        assert page.hero.to_explain == 0
+        assert page.hero.day == date(2026, 8, 19)
+        assert page.hero.unpriced_after == 2
+        assert page.hero.records_through == date(2026, 8, 21)
+        assert page.is_done is False
+
+    def test_records_ending_ON_the_priced_day_are_not_named(
+        self, app, db, seed_user,
+    ):
+        """The mirror: a statement reaching the last record is Done, and names none.
+
+        The books' last record is the priced day itself, so no record waits
+        on a statement and the hero's ``records_through`` is ``None``.
+        """
+        an_envelope(seed_user)
+        db.session.commit()
+        agreement = self._agreement([
+            self._day(date(2026, 8, 19), "2459.60", "2459.60"),
+            self._day(date(2026, 8, 20), "2459.60", "2459.60"),
+        ], account_id=seed_user["account"].id,
+            last_record_on=date(2026, 8, 20))
+
+        page = _page(seed_user, Tab.TO_EXPLAIN, agreement=agreement)
+
+        assert page.hero.records_through is None
         assert page.is_done is True
 
     def test_a_pass_and_an_agreement_for_two_accounts_are_REFUSED(

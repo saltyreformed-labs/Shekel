@@ -185,6 +185,8 @@ def _fake_template(
             interval_n=interval_n,
             starts_on=_SCHEDULE_START,
             nominal_day=None,
+            # Read off every row by ``recurrence_spec`` since plan#2676.
+            weekday_reading=None,
             placement_id=ref_cache.period_placement_id(
                 PeriodPlacementEnum.CONTAINING_DATE,
             ),

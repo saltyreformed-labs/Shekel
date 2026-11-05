@@ -841,12 +841,12 @@ def loan_payment_due_date(
     graded the two equal on all 46 live rules before dropping the column -- so
     this is the same precondition stated over the columns that survive.
 
-    **"Dated from its occurrence" is no longer the same fact** (plan step
-    recurrence:R8-b).  A weekly rule's rows are dated on their occurrences too,
-    while ``scheduling_day_of_month`` answers ``None`` for it: a weekly date is
-    no monthly installment, so such a rule fails this precondition as a
-    pay-period one does, though its rows carry their own dates rather than a
-    payday.
+    **"Dated from its occurrence" is no longer the same fact** (plan steps
+    recurrence:R8-b and R8-c).  The rows of a weekly rule and of one read by its
+    weekday ("the third Tuesday") are dated on their occurrences too, while
+    ``scheduling_day_of_month`` answers ``None`` for both: neither fires on one
+    day of every month, so such a rule fails this precondition as a pay-period
+    one does, though its rows carry their own dates rather than a payday.
 
     The loan payment-transfer flow guarantees it: ``app/routes/loan/
     payment_transfer.py`` derives the cadence through

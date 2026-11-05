@@ -145,8 +145,8 @@ _MUST_BE_HEARD_WITH_A_CADENCE = (
         },
     ),
     (
-        "Apr 15, 2026 cannot mean day 30. That date already says which day "
-        "this repeats on, so there is nothing else for it to mean.",
+        "Apr 15, 2026 cannot mean day 30. Starting on that date, this can "
+        "repeat on the same day of the month or on the third Wednesday.",
         lambda: {
             "recurrence_unit": str(
                 ref_cache.recurrence_unit_id(RecurrenceUnitEnum.MONTH),
@@ -158,7 +158,7 @@ _MUST_BE_HEARD_WITH_A_CADENCE = (
             ),
             "interval_n": "1",
             "starts_on": "2026-04-15",
-            "nominal_day": "30",
+            "repeats_on": "30",
         },
     ),
     # The per-month ceiling's one authored refusal (plan step salary:R15-a):

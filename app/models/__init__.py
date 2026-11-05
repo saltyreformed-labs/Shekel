@@ -55,9 +55,6 @@ from app.models.anchor_release import (
 )
 from app.models.category import Category
 from app.models.recurrence_rule import RecurrenceRule
-from app.models.recurrence_anchors import (
-    RecurrenceWeekdayAnchor,
-)
 from app.models.scenario import Scenario
 from app.models.transaction_template import TransactionTemplate
 from app.models.transaction import Transaction
@@ -162,7 +159,6 @@ __all__ = [
     "AnchorReleaseImmutableError",
     "Category",
     "RecurrenceRule",
-    "RecurrenceWeekdayAnchor",
     "Scenario",
     "TransactionTemplate",
     "Transaction",

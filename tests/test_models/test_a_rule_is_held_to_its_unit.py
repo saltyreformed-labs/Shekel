@@ -1,5 +1,7 @@
 """
-Shekel Budget App -- a rule's ceiling and nominal day are held to its unit (plan#2302)
+Shekel Budget App -- a rule's ceiling, nominal day and weekday reading are held to its unit
+
+Plan step plan#2302, and ruling plan#2704 for the weekday reading.
 
 Migration ``9b3e6d1f4a27`` carries the unit's ``has_day_of_month`` onto
 ``budget.recurrence_rules`` and holds the row to it::
@@ -11,6 +13,12 @@ Migration ``9b3e6d1f4a27`` carries the unit's ``has_day_of_month`` onto
                             max_per_month IS NULL OR NOT unit_has_day_of_month
     ck_recurrence_rules_nominal_day_unit
                             nominal_day IS NULL OR unit_has_day_of_month
+
+Migration ``897a6663d221`` adds the third rule of the same shape beside the column
+it restrains, a revision above the flag::
+
+    ck_recurrence_rules_weekday_reading_unit
+                            weekday_reading IS NULL OR unit_has_day_of_month
 
 **Rows here are built column by column**, as in
 ``test_recurrence_rule_constraints``: the door refuses each of these pairs before
@@ -44,6 +52,7 @@ from app.services.pay_calendar import calendar_for
 from app.services.recurrence import (
     RecurrenceResolutionError,
     RecurrenceSpec,
+    WeekdayReading,
     author_rule,
     build_transient_rule,
     reauthor_rule,
@@ -53,6 +62,7 @@ from tests._test_helpers import (
     load_migration_module,
     run_migration_callable,
 )
+from tests.test_models._rule_unit_flag import rewind_weekday_reading
 
 _MIGRATION = load_migration_module(
     "9b3e6d1f4a27_a_rule_carries_its_units_day_of_month_flag.py",
@@ -61,6 +71,7 @@ _MIGRATION = load_migration_module(
 _KEY = "fk_recurrence_rules_unit_day_of_month"
 _CEILING_CHECK = "ck_recurrence_rules_max_per_month_unit"
 _NOMINAL_DAY_CHECK = "ck_recurrence_rules_nominal_day_unit"
+_WEEKDAY_READING_CHECK = "ck_recurrence_rules_weekday_reading_unit"
 
 #: What each unit's flag must be, written out by hand.
 _FLAG = {
@@ -75,6 +86,15 @@ _REPEATING_UNITS = (RecurrenceUnitEnum.PERIOD, RecurrenceUnitEnum.WEEK)
 #: A date that genuinely lost its day, so ``ck_recurrence_rules_nominal_day``
 #: passes and whatever refuses the pair is the unit half under test.
 _CLAMPED = {"starts_on": date(2026, 4, 30), "nominal_day": 31}
+
+#: Each reading on a date it fits, so ``ck_recurrence_rules_weekday_reading``
+#: passes and whatever refuses the row is the unit half under test.  Thu Jan 15
+#: 2026 is the third Thursday (1, 8, 15); Thu Jan 29 2026 is the last, its next
+#: Thursday being Feb 5.
+_READ_BY_WEEKDAY = {
+    "from_start": {"starts_on": date(2026, 1, 15), "weekday_reading": "from_start"},
+    "from_end": {"starts_on": date(2026, 1, 29), "weekday_reading": "from_end"},
+}
 
 
 def _rule(seed_user, db, unit, **overrides):
@@ -176,6 +196,40 @@ class TestTheNominalDayIsHeldToTheUnit:
             _assert_refused_by(db, _KEY, unit)
 
 
+class TestTheWeekdayReadingIsHeldToTheUnit:
+    """``ck_recurrence_rules_weekday_reading_unit``: a weekday of a month needs a month."""
+
+    @pytest.mark.parametrize("reading", list(_READ_BY_WEEKDAY))
+    @pytest.mark.parametrize("unit", _REPEATING_UNITS)
+    def test_a_repeating_unit_refuses_one(self, app, db, seed_user, unit, reading):
+        """A row the door never sees: a weekly rule read as its month's third Thursday."""
+        with app.app_context():
+            _rule(seed_user, db, unit, **_READ_BY_WEEKDAY[reading])
+            _assert_refused_by(db, _WEEKDAY_READING_CHECK, (unit, reading))
+
+    @pytest.mark.parametrize("reading", list(_READ_BY_WEEKDAY))
+    @pytest.mark.parametrize("unit", _CALENDAR_UNITS)
+    def test_a_calendar_unit_holds_one(self, app, db, seed_user, unit, reading):
+        """The positive control: without it a CHECK refusing every value passes."""
+        with app.app_context():
+            rule = _rule(seed_user, db, unit, **_READ_BY_WEEKDAY[reading])
+            db.session.flush()
+            assert rule.id is not None, (unit, reading)
+
+    @pytest.mark.parametrize("reading", list(_READ_BY_WEEKDAY))
+    @pytest.mark.parametrize("unit", _REPEATING_UNITS)
+    def test_lying_about_the_flag_meets_the_key(
+        self, app, db, seed_user, unit, reading,
+    ):
+        """A false flag passes the CHECK, so the key must be what refuses it."""
+        with app.app_context():
+            _rule(
+                seed_user, db, unit, unit_has_day_of_month=True,
+                **_READ_BY_WEEKDAY[reading],
+            )
+            _assert_refused_by(db, _KEY, (unit, reading))
+
+
 class TestTheFlagIsHeldToTheUnit:
     """``fk_recurrence_rules_unit_day_of_month``, from both of its sides."""
 
@@ -274,6 +328,18 @@ class TestTheDoorsAnswerFirst:
                 RecurrenceResolutionError, match="nominal_day 31 cannot sit",
             ):
                 RecurrenceSpec(user_id=1, unit=unit, **_CLAMPED)
+
+    @pytest.mark.parametrize("unit", _REPEATING_UNITS)
+    def test_a_spec_refuses_a_weekday_reading_on_a_repeating_unit(self, app, unit):
+        """``_require_weekday_reading_pair`` refuses the value at construction."""
+        with app.app_context():
+            with pytest.raises(
+                RecurrenceResolutionError, match="no day-of-month coordinate",
+            ):
+                RecurrenceSpec(
+                    user_id=1, unit=unit, starts_on=date(2026, 1, 15),
+                    weekday_reading=WeekdayReading.FROM_START,
+                )
 
 
 @pytest.mark.usefixtures("seed_periods")
@@ -391,13 +457,19 @@ def _plant(db, seed_user, unit, starts_on, **values):
 
 @pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheMigration:
-    """``9b3e6d1f4a27`` over this test's own clone, in both directions."""
+    """``9b3e6d1f4a27`` over this test's own clone, in both directions.
+
+    Alembic undoes the newest first, so each case rewinds ``897a6663d221`` before
+    it drives this revision: that revision's unit CHECK names the flag, and
+    PostgreSQL drops a CHECK with a column it names.
+    """
 
     def test_down_removes_the_four_objects_and_up_restores_them_exactly(
         self, app, db, capsys,
     ):
         """Down touches nothing else; up puts back the same definitions, NOT NULL."""
         with app.app_context():
+            rewind_weekday_reading(db.session)
             before_columns, before_constraints = _rule_table_state(db)
             assert before_columns["unit_has_day_of_month"] == "NO"
 
@@ -420,6 +492,7 @@ class TestTheMigration:
     def test_the_backfill_gives_each_rule_its_units_flag(self, app, db, seed_user):
         """Rules on all four units, flagless before, each take their own unit's."""
         with app.app_context():
+            rewind_weekday_reading(db.session)
             run_migration_callable(_MIGRATION.downgrade, db.session)
             planted = {
                 unit: _plant(db, seed_user, unit, date(2026, 1, 15))
@@ -443,6 +516,7 @@ class TestTheMigration:
         """Four unholdable values cleared and printed; the two legal ones untouched."""
         april_30 = date(2026, 4, 30)
         with app.app_context():
+            rewind_weekday_reading(db.session)
             run_migration_callable(_MIGRATION.downgrade, db.session)
             month_ceiling = _plant(
                 db, seed_user, RecurrenceUnitEnum.MONTH, april_30, max_per_month=2,
@@ -508,6 +582,7 @@ class TestTheMigration:
     ):
         """The three-step rule's refusal, fired with the backfill made a no-op."""
         with app.app_context():
+            rewind_weekday_reading(db.session)
             run_migration_callable(_MIGRATION.downgrade, db.session)
             _plant(db, seed_user, RecurrenceUnitEnum.MONTH, date(2026, 1, 15))
 

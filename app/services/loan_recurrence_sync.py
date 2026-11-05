@@ -461,16 +461,26 @@ def loan_cadence_spec(
     its spec from the value instead; see that function for the derivation and
     for why one producer answers both.
 
+    **It states the loan's WHOLE month coordinate, the weekday reading
+    included** (plan step recurrence:R8-c, ruling **R-R96**).  The loan's
+    coordinate is its contract day, ``payment_day``; a reading carried across
+    from the rule would go on walking "the third Tuesday" beside a first
+    installment on the contract day -- or, on a date it does not fit, be
+    refused at construction -- so it is replaced with ``None``, the day of the
+    month, exactly as ``nominal_day`` is replaced with the loan's own.
+
     Args:
         spec: The rule's current authored state.
         params: The loan's :class:`~app.models.loan_params.LoanParams`.
 
     Returns:
-        *spec* with ``starts_on`` and ``nominal_day`` replaced.
+        *spec* with ``starts_on``, ``nominal_day`` and ``weekday_reading``
+        replaced.
     """
     start = loan_cadence_start(spec.unit, params)
     return replace(
         spec, starts_on=start.starts_on, nominal_day=start.nominal_day,
+        weekday_reading=None,
     )
 
 

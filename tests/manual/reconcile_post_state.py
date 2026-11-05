@@ -514,16 +514,20 @@ def _row_after_the_delete(before_row: list) -> list:
     one goes through the round trip of ruling plan#2439, and ends on its status
     and its day with the day reading as the owner typed it and no link to a
     balance check, the reopen having cleared the link.  **Ruling plan#2892** took
-    that for an envelope a balance check closed, whose day kind and link therefore
-    change; an envelope whose day was typed and carries no link ends exactly as
-    it began.
+    that for an envelope a balance check closed, whose day was ASSERTED there,
+    and only for that: any other envelope must end exactly as it began, so a
+    day the bank showed that ends as typed fails, and is a question for the
+    owner.
 
     Args:
         before_row: The envelope's ``[status, day, day's basis, link]``, read
             before the act.
+
+    Returns:
+        The same four, as the act must leave them.
     """
-    status, settled_on, _, _ = before_row
-    if settled_on is None:
+    status, settled_on, basis, _ = before_row
+    if basis != ref_cache.settled_day_basis_id(SettledDayBasisEnum.ASSERTED):
         return before_row
     return [
         status, settled_on,

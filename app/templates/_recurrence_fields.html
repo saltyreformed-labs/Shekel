@@ -436,24 +436,22 @@
        (``repeats_on``), so a nominal day beside a weekday reading
        (ck_recurrence_rules_one_month_reading) is a pair no form can post.
 
-       The COPY is the server's and the option set is fixed.  A nominal day's
-       label is static; a weekday reading's depends on the date being typed,
-       so each weekday option carries EVERY phrase it can show
-       (``data-labels``, keyed by where a date sits) beside the window that
-       says which dates it reads (``data-counts-from-end``,
-       ``data-last-week``, the same table offerable_weekday_readings reads).
-       recurrence_form.js picks the phrase and enables the options the date
-       allows; it words nothing and holds no rule, and the write door refuses
-       any pair it gets wrong.  What the server decides at render is which
-       options the stored date allows (``day_choices``, ``weekday_choices``),
-       so the form is correct before any script runs.
+       The COPY and the rules are the server's and the option set is fixed.
+       Each option carries ``data-places``, what offerable_nominal_days or
+       offerable_weekday_readings answers at every place a date can sit in a
+       month.  A nominal day's label is static; a weekday reading's depends on
+       the date being typed, so that option also carries EVERY phrase it can
+       show (``data-labels``, keyed by the week its ``data-places`` answers).
+       recurrence_form.js looks the typed date up, enables the options it
+       finds and shows the phrase; it words nothing and holds no rule, and the
+       write door refuses any pair it gets wrong.  What the server decides at
+       render is which options the stored date allows (``day_choices``,
+       ``weekday_choices``), so the form is correct before any script runs.
 
        Hidden AND disabled together when there is nothing to ask -- a cadence
        with no day of a month, or a blank date: a hidden control still
        submits, and a stale choice beside a date it does not fit is exactly
-       what the CHECKs refuse.  Each nominal-day option carries ``data-day``
-       so the script can enable the ones above the chosen day without knowing
-       what any of them are called. #}
+       what the CHECKs refuse. #}
     {% set has_choices = selected.day_choices or selected.weekday_choices %}
     <div class="col-auto {{ '' if has_choices else 'd-none' }}"
          id="field-repeats-on">
@@ -465,7 +463,8 @@
             {{ picker.same_day_label }}
           </option>
           {% for option in picker.nominal_days %}
-          <option value="{{ option.token }}" data-day="{{ option.day }}"
+          <option value="{{ option.token }}"
+            data-places="{{ option.places_json }}"
             {{ 'selected' if selected.reading.token == option.token else '' }}
             {{ '' if option.day in selected.day_choices else 'disabled' }}>
             {{ option.label }}
@@ -473,8 +472,7 @@
           {% endfor %}
           {% for option in picker.weekday_readings %}
           <option value="{{ option.token }}"
-            data-counts-from-end="{{ 'true' if option.counts_from_end else 'false' }}"
-            data-last-week="{{ option.last_week }}"
+            data-places="{{ option.places_json }}"
             data-labels="{{ option.labels_json }}"
             {{ 'selected' if selected.reading.token == option.token else '' }}
             {{ '' if option.token in selected.weekday_choices else 'disabled' }}>

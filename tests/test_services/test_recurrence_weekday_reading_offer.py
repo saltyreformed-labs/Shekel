@@ -30,11 +30,13 @@ from app.services.recurrence import (
     describe,
     month_reading_choices,
     month_reading_from_token,
+    offerable_nominal_days,
     offerable_weekday_readings,
     stored_month_reading,
     weekday_reading_choices,
     weekday_reading_options,
 )
+from app.services.recurrence._month_coordinate import week_of_month
 from app.services.recurrence._picker import nominal_day_options
 from tests.test_services.test_recurrence_occurrence import resolved_value
 
@@ -169,16 +171,34 @@ class TestTheTokensRoundTrip:
 
 
 class TestTheWeekdayOptions:
-    """``weekday_reading_options``: every phrase each option can show, and its window."""
+    """``weekday_reading_options``: every phrase each option can show, and where."""
 
-    def test_one_option_per_reading_from_start_first_with_its_window(self):
-        """The window is the table the offer set reads (``WEEKDAY_READING_WINDOWS``)."""
-        options = weekday_reading_options()
+    def test_one_option_per_reading_from_start_first(self):
+        """In the table's order, the one the control lists them in."""
+        assert [option.token for option in weekday_reading_options()] == [
+            "from_start", "from_end",
+        ]
 
-        assert [
-            (option.token, option.counts_from_end, option.last_week)
-            for option in options
-        ] == [("from_start", False, 4), ("from_end", True, 1)]
+    def test_from_the_start_reads_the_first_twenty_eight_days_of_any_month(self):
+        """Each at its week, the 1st-7th the first, and nothing past the 28th (plan#2670)."""
+        places = json.loads(_option(_FROM_START).places_json)
+
+        assert places == {
+            f"{length}-{day}": (day - 1) // 7 + 1
+            for length in (28, 29, 30, 31)
+            for day in range(1, 29)
+        }
+        assert places["31-17"] == 3
+
+    def test_from_the_end_reads_the_last_seven_days_of_any_month(self):
+        """Each as the first counted back: Feb 22-28, Apr 24-30, Jan 25-31."""
+        places = json.loads(_option(_FROM_END).places_json)
+
+        assert places == {
+            f"{length}-{day}": 1
+            for length in (28, 29, 30, 31)
+            for day in range(length - 6, length + 1)
+        }
 
     def test_from_the_start_words_twenty_eight_dates(self):
         """Four weeks of seven weekdays, keyed ``"<week>-<weekday>"``."""
@@ -215,7 +235,7 @@ class TestTheWeekdayOptions:
         for key, label in json.loads(option.labels_json).items():
             week, weekday = (int(part) for part in key.split("-"))
             starts_on = _november_2026(
-                week, weekday, from_end=option.counts_from_end,
+                week, weekday, from_end=reading is _FROM_END,
             )
             assert starts_on.weekday() == weekday, key
             cadence = describe(resolved_value(
@@ -236,7 +256,8 @@ class TestTheChoicesADateAllows:
         The week is counted by hand -- the 1st-7th is the first, the
         15th-21st the third -- and each label is also the script's phrase at
         that date's key in :attr:`labels_json`, so the rendered form and the
-        typed date say one thing.
+        typed date say one thing.  :class:`TestWhatTheScriptLooksUp` grades
+        the lookup that reaches that key.
         """
         start_labels = json.loads(_option(_FROM_START).labels_json)
         end_labels = json.loads(_option(_FROM_END).labels_json)
@@ -278,6 +299,51 @@ class TestTheChoicesADateAllows:
     def test_a_unit_with_no_month_coordinate_allows_none(self, unit):
         """A weekly or paycheck cadence reads no weekday of a month."""
         assert weekday_reading_choices(unit, date(2026, 11, 17)) == {}
+
+
+class TestWhatTheScriptLooksUp:
+    """What ``recurrence_form.js`` finds for a date is what the producers answer."""
+
+    def test_every_date_of_a_century(self):
+        """The script's lookups, replayed in order over 2000-2100: 36,890 dates.
+
+        ``syncRepeatsOn`` keys ``data-places`` by the month's length and the
+        day, and a weekday option's answer with the weekday keys its phrase.
+        Whatever it finds for a date must be the producers' answer about THAT
+        date, which is what a table built from one month of each length claims.
+        """
+        days = {
+            option.day: json.loads(option.places_json)
+            for option in nominal_day_options()
+        }
+        weeks = {
+            reading: json.loads(_option(reading).places_json)
+            for reading in WeekdayReading
+        }
+        labels = {
+            reading: json.loads(_option(reading).labels_json)
+            for reading in WeekdayReading
+        }
+        century = _days(date(2000, 1, 1), date(2100, 12, 31))
+        assert len(century) == 36890
+        for day in century:
+            place = f"{calendar.monthrange(day.year, day.month)[1]}-{day.day}"
+            allowed = offerable_weekday_readings(_MONTH, day)
+
+            assert tuple(
+                nominal for nominal, places in days.items() if place in places
+            ) == offerable_nominal_days(_MONTH, day), day
+            assert tuple(
+                reading for reading, places in weeks.items() if place in places
+            ) == allowed, day
+            for reading in allowed:
+                week = weeks[reading][place]
+                assert week == week_of_month(
+                    day, counts_from_end=reading is _FROM_END,
+                ), day
+                assert labels[reading][f"{week}-{day.weekday()}"] == (
+                    weekday_reading_choices(_MONTH, day)[reading]
+                ), day
 
 
 class TestEveryChoiceADateAllows:

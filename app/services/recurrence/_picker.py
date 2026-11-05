@@ -365,6 +365,30 @@ _NOMINAL_DAY_LABELS: dict[int, str] = {
     31: "the last day of the month",
 }
 
+#: The first of one month of each length a month can have, by that length.
+_A_MONTH_OF_EACH_LENGTH: dict[int, date] = {
+    28: date(2027, 2, 1),
+    29: date(2028, 2, 1),
+    30: date(2026, 4, 1),
+    31: date(2026, 1, 1),
+}
+
+#: Every place a date can sit in a month, as ``("<lastDay>-<day>", a date there)``.
+#:
+#: **How the script reads the server's rules rather than restating them** (rule
+#: 14).  Which readings a date allows turns on its day and its month's length
+#: and on nothing else about it
+#: (:func:`~app.services.recurrence.offerable_nominal_days`,
+#: :func:`~app.services.recurrence.offerable_weekday_readings`), so asking the
+#: producers about these dates answers for every date there is, and an option
+#: carries the answers (``data-places``) for ``recurrence_form.js`` to look up.
+#: Rendered rather than fetched: the form must be right before any script runs.
+_PLACES: tuple[tuple[str, date], ...] = tuple(
+    (f"{length}-{day}", first.replace(day=day))
+    for length, first in _A_MONTH_OF_EACH_LENGTH.items()
+    for day in range(1, length + 1)
+)
+
 
 @dataclass(frozen=True)
 class NominalDayOption:
@@ -380,10 +404,14 @@ class NominalDayOption:
     Attributes:
         day: The nominal day, 29-31.
         label: The human copy.
+        places_json: Where the option reads a date, for the script to look up:
+            a JSON object holding a key from :data:`_PLACES` for each place
+            that producer leaves this day open at, ``{"30-30": true, ...}``.
     """
 
     day: int
     label: str
+    places_json: str
 
     @property
     def token(self) -> str:
@@ -403,13 +431,23 @@ def nominal_day_options() -> tuple[NominalDayOption, ...]:
     renders them all and enables the ones
     :func:`~app.services.recurrence.offerable_nominal_days` names.  That is
     what lets the script re-enable them as the user edits the date without
-    holding any copy of its own.
+    holding any copy of its wording or its rule: each option carries that
+    producer's answer at every place (:data:`_PLACES`), asked of the ``MONTH``
+    unit because the script consults them only beside a unit with a day of the
+    month, and every such unit gets the one answer.
 
     Returns:
         One :class:`NominalDayOption` per day, ascending.
     """
     return tuple(
-        NominalDayOption(day=day, label=label)
+        NominalDayOption(
+            day=day,
+            label=label,
+            places_json=json.dumps({
+                key: True for key, place in _PLACES
+                if day in offerable_nominal_days(RecurrenceUnitEnum.MONTH, place)
+            }),
+        )
         for day, label in sorted(_NOMINAL_DAY_LABELS.items())
     )
 
@@ -426,26 +464,26 @@ class WeekdayReadingOption:
 
     **Worded per date by the SERVER, and the script picks the words.**
     "The third Tuesday" depends on the date the user is still typing, so the
-    option carries every phrase it can show, keyed by where a date sits, and
-    the window that says which dates it reads.  ``recurrence_form.js`` counts
-    the typed date's week from the window's end and shows the phrase at that
-    key; it states no copy and no rule (the template's rule, every other
-    string on this form included).
+    option carries where it reads a date and every phrase it can show there.
+    ``recurrence_form.js`` looks the typed date's place up and shows the phrase
+    at the week it finds; it counts no week and states no copy and no rule (the
+    template's rule, every other string on this form included).
 
     Attributes:
         token: What the option posts, the reading's stored value.
-        counts_from_end: The window's end
-            (:class:`~app.services.recurrence._month_coordinate.WeekdayReadingWindow`).
-        last_week: The latest week, counted from that end, this reading reads.
+        places_json: Where the option reads a date, for the script to look up:
+            a JSON object holding a key from :data:`_PLACES` for each place
+            :func:`~app.services.recurrence.offerable_weekday_readings` allows
+            this reading at, its value the date's week counted from this
+            reading's end, ``{"30-17": 3, ...}``.
         labels_json: Every phrase the option can show, as a JSON object keyed
-            ``"<week>-<weekday>"`` -- the date's week counted from that end
-            and its :meth:`datetime.date.weekday` index (0 = Monday) --
+            ``"<week>-<weekday>"`` -- that week and the date's
+            :meth:`datetime.date.weekday` index (0 = Monday) --
             ``{"3-1": "the third Tuesday", ...}``.
     """
 
     token: str
-    counts_from_end: bool
-    last_week: int
+    places_json: str
     labels_json: str
 
 
@@ -474,7 +512,9 @@ def weekday_reading_options() -> tuple[WeekdayReadingOption, ...]:
     :data:`~app.services.recurrence._month_coordinate.WEEKDAY_READING_WINDOWS`
     -- the table :func:`~app.services.recurrence.offerable_weekday_readings`
     reads -- so a reading is offerable and worded together or neither, and
-    the script is handed the same window the write door refuses against.
+    the script is handed that producer's answers, the ones the write door
+    refuses against, asked of the ``MONTH`` unit for the reason
+    :func:`nominal_day_options` gives.
 
     Returns:
         One option per reading, from-start first.
@@ -482,8 +522,13 @@ def weekday_reading_options() -> tuple[WeekdayReadingOption, ...]:
     return tuple(
         WeekdayReadingOption(
             token=MonthReading(weekday_reading=reading).token,
-            counts_from_end=window.counts_from_end,
-            last_week=window.last_week,
+            places_json=json.dumps({
+                key: week_of_month(place, counts_from_end=window.counts_from_end)
+                for key, place in _PLACES
+                if reading in offerable_weekday_readings(
+                    RecurrenceUnitEnum.MONTH, place,
+                )
+            }),
             labels_json=json.dumps({
                 f"{week}-{weekday}": _weekday_label(reading, week, weekday)
                 for week in range(1, window.last_week + 1)
@@ -619,7 +664,7 @@ def month_reading_from_token(token: str) -> MonthReading | None:
     """
     offered = (
         MonthReading(),
-        *(MonthReading(nominal_day=option.day) for option in nominal_day_options()),
+        *(MonthReading(nominal_day=day) for day in sorted(_NOMINAL_DAY_LABELS)),
         *(MonthReading(weekday_reading=reading) for reading in WeekdayReading),
     )
     return next(
@@ -760,7 +805,7 @@ class PickerModel:
             the ones the chosen date leaves open, so the script re-enables them
             as the user edits that date without holding any copy of the wording.
         weekday_readings: The weekday readings the same control offers, each
-            with its window and every phrase it can show (plan step
+            with where it reads a date and every phrase it can show (plan step
             recurrence:R8-c), for the same reason.
         units: One option per UNIT, for the unit ``<select>``.  The MONTH unit
             has two offered readings and must render one entry, or the user is

@@ -11,6 +11,7 @@ amount-only edit posted as ``{"amount": ...}`` alone would never
 carry the start and the preselected reading that the real one does, and a
 preselection the page got wrong would pass it.
 """
+import json
 import re
 from html.parser import HTMLParser
 
@@ -87,20 +88,24 @@ def repeats_on_control(page):
 
 
 def weekday_token(page, *, counts_from_end):
-    """Return the token the page's weekday option for one window posts.
+    """Return the token the page's weekday option for one end of the month posts.
+
+    The option is identified by what it reads, off its ``data-places``: in a
+    31-day month the 31st is read only as the last such weekday (there is no
+    fifth, ruling plan#2670), and the 1st only as the first.
 
     Args:
         page: The rendered page.
-        counts_from_end: Which window's option: the month's last such weekday
+        counts_from_end: Which end's option: the month's last such weekday
             (``True``) or the weekday counted from its start.
 
     Returns:
         The option's ``value``.
     """
-    flag = "true" if counts_from_end else "false"
+    place = "31-31" if counts_from_end else "31-1"
     (option,) = [
         option for option in repeats_on_control(page).options
-        if option["data"].get("counts-from-end") == flag
+        if place in json.loads(option["data"].get("places", "{}"))
     ]
     return option["value"]
 

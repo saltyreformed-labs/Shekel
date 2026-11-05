@@ -112,8 +112,8 @@ def _offered_days(page) -> list[str]:
 
     Offered means neither hidden nor disabled: ``syncRepeatsOn`` sets the two
     together, and a check on one would pass an option the script left half
-    on.  Only the DAY options (``data-day``) are read; the weekday readings
-    beside them are :func:`_recurrence_form_weekday._offered`'s.
+    on.  Only the DAY options (the ones posting digits) are read; the weekday
+    readings beside them are :func:`_recurrence_form_weekday._offered`'s.
 
     Args:
         page: The Playwright page.
@@ -123,7 +123,7 @@ def _offered_days(page) -> list[str]:
     """
     return page.evaluate(
         """() => Array.from(document.getElementById('repeats_on').options)
-              .filter(o => o.hasAttribute('data-day') && !o.hidden && !o.disabled)
+              .filter(o => /^\\d+$/.test(o.value) && !o.hidden && !o.disabled)
               .map(o => o.value)"""
     )
 

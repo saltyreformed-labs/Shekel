@@ -152,7 +152,7 @@ function initRecurrenceForm() {
   var repeatsOnWrap = document.getElementById('field-repeats-on');
   var repeatsOn = document.getElementById('repeats_on');
 
-  // Days in a week: the calendar fact a weekday option's window counts in.
+  // Days in a week: what shifts getDay()'s Sunday-0 to the server's Monday-0.
   var DAYS_PER_WEEK = 7;
 
   // The "Ends" control (plan step R7b-3): a mode select and the value inputs
@@ -420,13 +420,14 @@ function initRecurrenceForm() {
     if (text) help.textContent = text;
   }
 
-  // The calendar facts of ``value`` (an ISO date string) this file reads, or
-  // null when it is not a date at all: its day, its month's last day (day 0
-  // of the NEXT month), and its weekday as a Python ``date.weekday()`` index
-  // (0 = Monday), which is how the server keys a weekday option's labels --
-  // JavaScript's getDay() counts from Sunday.  These are the only calendar
-  // facts this file computes; the DAY a rule fires on is never computed
-  // here, and neither is any amount.
+  // Where ``value`` (an ISO date string) sits, or null when it is not a date at
+  // all: ``place`` is the key an option's ``data-places`` is written under,
+  // "<month's last day>-<day>" (the last day is day 0 of the NEXT month), and
+  // ``weekday`` a Python ``date.weekday()`` index (0 = Monday), which keys a
+  // weekday option's phrase -- JavaScript's getDay() counts from Sunday.
+  // Parsing the date and shifting that index are the only calendar work in this
+  // file: which readings a date allows, which week it sits in and the DAY a rule
+  // fires on are the server's, and so is any amount.
   function calendarFacts(value) {
     var parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
     if (!parts) return null;
@@ -434,46 +435,33 @@ function initRecurrenceForm() {
     var month = parseInt(parts[2], 10);
     var day = parseInt(parts[3], 10);
     return {
-      day: day,
-      lastDay: new Date(year, month, 0).getDate(),
+      place: new Date(year, month, 0).getDate() + '-' + day,
       weekday: (new Date(year, month - 1, day).getDay() + DAYS_PER_WEEK - 1) %
         DAYS_PER_WEEK
     };
   }
 
-  // Whether a weekday option reads the date ``facts`` describe, and in which
-  // words: the option's window (``data-counts-from-end``, ``data-last-week``,
-  // the server's table) counts the date's week from one end of its month, and
-  // its ``data-labels`` hold the phrase for every week and weekday.  Null when
-  // the window does not reach the date.
-  function weekdayLabel(opt, facts) {
-    var fromEnd = opt.getAttribute('data-counts-from-end') === 'true';
-    var lastWeek = parseInt(opt.getAttribute('data-last-week') || '', 10);
-    var week = Math.floor(
-      (fromEnd ? facts.lastDay - facts.day : facts.day - 1) / DAYS_PER_WEEK
-    ) + 1;
-    if (Number.isNaN(lastWeek) || week > lastWeek) return null;
-    var labels = {};
+  // The JSON object an option's attribute holds, as the server wrote it.
+  function optionTable(opt, attribute) {
     try {
-      labels = JSON.parse(opt.getAttribute('data-labels') || '{}');
+      return JSON.parse(opt.getAttribute(attribute) || '{}');
     } catch (_err) {
-      labels = {};
+      return {};
     }
-    return labels[week + '-' + facts.weekday] || null;
   }
 
   // Show the "repeating on" control wherever the chosen date can be read more
   // than one way, and enable exactly the readings it allows.
   //
-  // The SAME rules the server applies, read off the options the server
-  // rendered rather than restated: a nominal day (offerable_nominal_days)
-  // needs the date to BE its month's last day and the day to be larger than
-  // it; a weekday reading (offerable_weekday_readings) needs the date inside
-  // its window, and shows the phrase the server wrote for where the date
-  // sits ("the third Tuesday").  The copy is the template's and the option
-  // set is fixed, so this file states no wording and no domain -- and the
-  // write door refuses any pair it gets wrong, which is what keeps this an
-  // affordance rather than a rule.
+  // The rules are the server's, looked up rather than restated: each option's
+  // ``data-places`` holds what its producer (offerable_nominal_days,
+  // offerable_weekday_readings) answers at every place a date can sit in a
+  // month, and an option reads the date exactly when its place is there.  A
+  // weekday option's answer is the date's week, which with the weekday keys the
+  // phrase the server wrote in ``data-labels`` ("the third Tuesday").  The copy
+  // is the template's and the option set is fixed, so this file states no
+  // wording and no domain -- and the write door refuses any pair it gets wrong,
+  // which is what keeps this an affordance rather than a rule.
   //
   // ``hasDayCoordinate`` is the offer's has_day_of_month_coordinate, which is
   // keyed on the UNIT -- never the (unit, placement) pair's "is a ROW dated
@@ -501,15 +489,10 @@ function initRecurrenceForm() {
     var any = false;
     Array.prototype.forEach.call(repeatsOn.options, function(opt) {
       if (opt.value === '') return;
-      var mine = false;
-      var label = null;
-      if (facts !== null && opt.hasAttribute('data-day')) {
-        mine = facts.day === facts.lastDay &&
-          parseInt(opt.getAttribute('data-day'), 10) > facts.day;
-      } else if (facts !== null && opt.hasAttribute('data-last-week')) {
-        label = weekdayLabel(opt, facts);
-        mine = label !== null;
-        if (mine) opt.textContent = label;
+      var answer = facts === null ? undefined : optionTable(opt, 'data-places')[facts.place];
+      var mine = answer !== undefined;
+      if (mine && opt.hasAttribute('data-labels')) {
+        opt.textContent = optionTable(opt, 'data-labels')[answer + '-' + facts.weekday];
       }
       opt.hidden = !mine;
       opt.disabled = !mine;

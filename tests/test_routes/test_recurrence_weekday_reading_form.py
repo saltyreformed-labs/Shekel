@@ -5,10 +5,10 @@ is ONE ``<select>`` (``repeats_on``) offering the same day of the month, the
 clamped month-end days and, since this step, the weekday counted from the
 month's start ("the third Tuesday") and the month's last such weekday.  A
 weekday option's words depend on the date being typed, so it carries every
-phrase it can show and the window saying which dates it reads;
-``recurrence_form.js`` picks the phrase and enables the option, which
-rendered HTML cannot see (``tests/manual/verify_recurrence_form.py``,
-plan#2680, grades that half).
+phrase it can show and what the producer answers at every place a date can
+sit in a month; ``recurrence_form.js`` looks the date up, picks the phrase and
+enables the option, which rendered HTML cannot see
+(``tests/manual/verify_recurrence_form.py``, plan#2680, grades that half).
 
 **What these cases post is what the template emits.**  The create case posts
 the weekday token read off the rendered option, and every edit case posts the
@@ -24,6 +24,7 @@ Tuesdays of 2026, counted off a calendar: Jan 20, Feb 17, Mar 17, Apr 21, May
 19, Jun 16, Jul 21, Aug 18.  Read by its day instead, a rule from Jan 20 fires
 on the 20th of every month.
 """
+import json
 import re
 from datetime import date
 
@@ -129,8 +130,8 @@ def _edit_form_as_posted(auth_client, template, **changes):
 class TestTheControlRendersTheWeekdayOptions:
     """What the server renders, before any script runs."""
 
-    def test_the_create_form_carries_both_weekday_options_and_their_windows(self, auth_client):
-        """Both options, each with the window and every phrase the script picks from.
+    def test_the_create_form_carries_what_the_script_looks_up(self, auth_client):
+        """Each option with what its producer answers, and each weekday's every phrase.
 
         The create form opens on no cadence, so the row is hidden and every
         option but the default is disabled until a cadence with a day of the
@@ -143,13 +144,14 @@ class TestTheControlRendersTheWeekdayOptions:
         ]
         assert "d-none" in control.container_classes
         expected = {option.token: option for option in weekday_reading_options()}
-        for token, window in (("from_start", ("false", "4")), ("from_end", ("true", "1"))):
+        for token in ("from_start", "from_end"):
             option = control.by_value[token]
-            assert (
-                option["data"]["counts-from-end"], option["data"]["last-week"],
-            ) == window
+            assert option["data"]["places"] == expected[token].places_json
             assert option["data"]["labels"] == expected[token].labels_json
             assert option["disabled"] and option["label"] == ""
+        assert json.loads(control.by_value["31"]["data"]["places"]) == {
+            "28-28": True, "29-29": True, "30-30": True,
+        }
 
     def test_the_edit_form_preselects_the_stored_reading_in_its_words(
         self, auth_client, seed_user,

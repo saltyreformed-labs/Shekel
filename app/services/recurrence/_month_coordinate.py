@@ -276,9 +276,9 @@ class WeekdayReadingWindow:
     month, counted from ONE end, and it reads only a date that every month
     holds at that place.  Both readings are that one shape -- "the last
     Friday" is the first Friday counted back from the end -- so the offer set
-    asks one question of each (:func:`offerable_weekday_readings`) and the
-    form's script interprets the same two numbers rather than holding a rule
-    of its own (``recurrence_form.js``, ``syncRepeatsOn``).
+    asks one question of each (:func:`offerable_weekday_readings`), and the
+    form's script looks that function's answers up rather than holding a rule
+    of its own (``_picker._PLACES``; ``recurrence_form.js``, ``syncRepeatsOn``).
 
     Attributes:
         counts_from_end: Whether the week is counted back from the month's
@@ -450,8 +450,9 @@ def offerable_weekday_readings(
     * **From the end** when the date is its month's last such weekday, within
       a week of the month's end.
 
-    Both are read off :data:`WEEKDAY_READING_WINDOWS`, the table the form's
-    script is handed too, so the browser and this function apply one rule.
+    Both are read off :data:`WEEKDAY_READING_WINDOWS`.  The form's script is
+    handed this function's answers at every place a date can sit in a month
+    (``_picker._PLACES``), so the browser and the write door apply one rule.
 
     A 22nd-28th that is also within a week of the end offers both, and they
     are different cadences: Fri 2027-01-22 is the fourth Friday and Jan 29

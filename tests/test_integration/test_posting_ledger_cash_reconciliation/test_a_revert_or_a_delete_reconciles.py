@@ -12,17 +12,18 @@ import pytest
 from app import ref_cache
 from app.enums import LedgerAccountClassEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
+from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
 from app.models.account import AccountAnchorHistory
 from app.models.transaction_entry import TransactionEntry
 from app.services import posting_service, status_seam, transaction_service
-from app.services.ledger_lines import category_key
+from app.services.ledger_lines import category_key, linked_key
 from app.utils.balance_predicates import balance_excluded_status_ids
-from tests._ledger_reads import account_net, ledger_net
-from tests._stored_ledger import (
-    family_journal_filter,
-    linked_ledger_account,
+from tests._ledger_reads import (
+    account_net,
+    family_movement_ids,
+    ledger_net,
+    period_nets_of_movements,
 )
 from tests._test_helpers import (
     add_txn,
@@ -182,10 +183,11 @@ class TestRevertAndMoveReconciles:
                 },
             ).status_code == 200
             _assert_full_reconciliation(scenario_id)
-            # The reversal landed in the ORIGINAL period: P nets to zero per
-            # ledger account, and F holds no entries at all yet.
+            # A reverted row books nothing: P and F each hold no line.  That the
+            # STORED reversal landed in the original period is the sweep's parity
+            # arm.
             assert _period_ledger_nets(txn_id, original.id) == {}
-            assert not _entry_ids_in_period(txn_id, moved_to.id)
+            assert _period_ledger_nets(txn_id, moved_to.id) == {}
 
             assert auth_client.patch(
                 f"/transactions/{txn_id}",
@@ -194,54 +196,22 @@ class TestRevertAndMoveReconciles:
             _assert_full_reconciliation(scenario_id)
 
             # F carries exactly the re-settled split; P still nets to zero.
-            # (LINKED-kind lookup: a bare-account_id .scalar() would raise
-            # MultipleResultsFound beside the Step-5 anchor-equity twin.)
-            cash_ledger = linked_ledger_account(
-                _db.session, seed_user["account"].id,
-            ).id
             moved_nets = _period_ledger_nets(txn_id, moved_to.id)
-            assert moved_nets[cash_ledger] == Decimal("-50.00")
+            assert moved_nets[linked_key(seed_user["account"])] == Decimal("-50.00")
             assert sum(moved_nets.values()) == Decimal("0.00")
             assert _period_ledger_nets(txn_id, original.id) == {}
 
 
 def _period_ledger_nets(transaction_id, pay_period_id):
-    """Return ``{ledger_account_id: net}`` for one transaction in one period.
+    """Return ``{chart key: net}`` for one transaction in one period, off the read.
 
-    Zero nets are dropped, so a period whose entries fully cancel (an
-    original + its reversal) returns ``{}`` -- the R2 attribution tests'
-    "nets to zero per ledger account" shape.  Independent of the service's
-    own per-period reader (a direct grouped query).
+    A period the row books nothing in returns ``{}``.  Scoped by the row's own
+    scenario.
     """
-    rows = (
-        _db.session.query(
-            Posting.ledger_account_id, _db.func.sum(Posting.amount),
-        )
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            family_journal_filter(transaction_id),
-            JournalEntry.pay_period_id == pay_period_id,
-        )
-        .group_by(Posting.ledger_account_id)
-        .all()
-    )
-    return {
-        ledger_id: net for ledger_id, net in rows if net != 0
-    }
-
-
-def _entry_ids_in_period(transaction_id, pay_period_id):
-    """Return the journal-entry ids a transaction holds in one period."""
-    return [
-        entry_id for (entry_id,) in (
-            _db.session.query(JournalEntry.id)
-            .filter(
-                family_journal_filter(transaction_id),
-                JournalEntry.pay_period_id == pay_period_id,
-            )
-            .all()
-        )
-    ]
+    scenario_id = _db.session.get(Transaction, transaction_id).scenario_id
+    return period_nets_of_movements(
+        family_movement_ids(transaction_id), scenario_id,
+    ).get(pay_period_id, {})
 
 
 # ---------------------------------------------------------------------------
@@ -573,11 +543,9 @@ class TestASettledEnvelopesUndatedPurchasePostsNothing:
             assert ledger_net(
                 _db.session, groceries_counter, scenario_id,
             ) == Decimal("0.00")
-            assert (
-                _db.session.query(JournalEntry)
-                .filter(family_journal_filter(txn_id))
-                .count()
-            ) == 0
+            assert period_nets_of_movements(
+                family_movement_ids(txn_id), scenario_id,
+            ) == {}
 
 
 # ---------------------------------------------------------------------------

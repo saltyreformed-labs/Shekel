@@ -16,7 +16,7 @@ from app.services import ledger_account_service, transaction_service
 from app.services.settle_day import SettleDay
 from tests._ledger_reads import (
     family_movement_ids,
-    scenario_lines,
+    period_nets_of_movements,
     transfer_family_movement_ids,
 )
 from tests._stored_ledger import (
@@ -138,7 +138,7 @@ def _period_nets(entries):
 
     A re-grouping of what a writer returned, by the entry's pay period and the
     leg's ledger account: the writer's own output, so it goes with the store.
-    :func:`_period_nets_of_movements` is the worked-out view.
+    :func:`tests._ledger_reads.period_nets_of_movements` is the worked-out view.
     """
     nets: dict[int, dict] = {}
     for entry in entries:
@@ -155,30 +155,14 @@ def _period_nets(entries):
     return nets
 
 
-def _period_nets_of_movements(movement_ids, scenario_id):
-    """Return ``{pay_period_id: {chart key: net}}`` over the lines of *movement_ids*.
-
-    The per-period view the R2 attribution tests assert on, off the worked-out
-    read.  The read holds no ``$0.00`` line, so a reverted row's paycheck is
-    simply absent: what the store held as a pair netting to nothing there.
-    """
-    wanted = set(movement_ids)
-    nets: dict[int, dict] = {}
-    for line in scenario_lines(_db.session, scenario_id):
-        if line.movement_id in wanted:
-            per_key = nets.setdefault(line.pay_period_id, {})
-            per_key[line.key] = per_key.get(line.key, Decimal("0.00")) + line.amount
-    return nets
-
-
 def _period_nets_for_transaction(transaction_id, scenario_id):
     """Per-period, per-key nets over the lines of a transaction's family."""
-    return _period_nets_of_movements(family_movement_ids(transaction_id), scenario_id)
+    return period_nets_of_movements(family_movement_ids(transaction_id), scenario_id)
 
 
 def _period_nets_for_transfer(transfer_id, scenario_id):
     """Per-period, per-key nets over the lines of both sides' records."""
-    return _period_nets_of_movements(
+    return period_nets_of_movements(
         transfer_family_movement_ids(transfer_id), scenario_id,
     )
 

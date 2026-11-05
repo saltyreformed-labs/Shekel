@@ -6,10 +6,11 @@ from datetime import date
 from decimal import Decimal
 
 from app.models.pay_period import PayPeriod
-from app.services import ledger_report_service, posting_service
+from app.services import ledger_report_service
 from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 
+from tests._ledger_reads import account_net
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_with_trueup,
@@ -286,8 +287,8 @@ class TestLoanInterestEscrowInStatements:
             assert sheet.tie_out.in_balance is True
 
             # The production loan helper agrees on the linked liability net.
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                db.session, loan.id, scenario_id,
             ) == Decimal("-99600.00")
 
             _assert_reader_matches_independent(scenario_id, sheet)

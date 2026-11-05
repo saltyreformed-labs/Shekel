@@ -14,13 +14,17 @@ from app.enums import LedgerAccountKindEnum, PostingKindEnum, PostingSourceEnum
 from app.extensions import db as _db
 from app.models.account import AccountAnchorHistory
 from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
 from app.services import account_posting_service, posting_service, transfer_service
 from app.services.ledger_lines import account_counter_key, linked_key
 from tests import _ledger_reads
-from tests._ledger_reads import account_net, trial_balance
+from tests._ledger_reads import (
+    account_net,
+    correction_net_in_period,
+    linked_key_of,
+    trial_balance,
+)
 from tests._stored_ledger import (
     ledger_account_of_kind,
     linked_ledger_account,
@@ -336,11 +340,11 @@ class TestScenarioAndOwnerIsolation:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                savings1.id, scenario1,
+            assert account_net(
+                _db.session, savings1.id, scenario1,
             ) == Decimal("340.00")
-            assert posting_service.account_posting_total(
-                savings2.id, scenario2,
+            assert account_net(
+                _db.session, savings2.id, scenario2,
             ) == Decimal("820.00")
             # A Posting has no user_id; ownership is normalized onto the entry.
             assert not hasattr(Posting, "user_id")
@@ -635,35 +639,15 @@ class TestOracleIsNotVacuous:
 
 
 def _transfer_net_in_period(account_id, scenario_id, period_id) -> Decimal:
-    """Sum an account's transfer-cash LINKED-ledger legs in one pay period.
+    """Return the transfer cash on an account's own line in one pay period.
 
-    The transfer cash on *account_id*'s linked ledger -- entries of the
-    ``transfer_movement`` source, one per side's covering movement since plan
-    step ``balance:X-bi-6-3`` (it read entries carrying a ``transfer_id``
-    while the cash was one entry per transfer) -- scoped to a single
-    ``pay_period_id``, so a settled period move can be checked to have moved
-    the effect (R2): the old period nets to zero and the new period carries
+    Scoped to a single paycheck, so a settled period move can be checked to have
+    moved the effect (R2): the old period nets to zero and the new period carries
     it.
     """
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .select_from(Posting)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(
-            LedgerAccount.account_id == account_id,
-            LedgerAccount.kind_id == ref_cache.ledger_account_kind_id(
-                LedgerAccountKindEnum.LINKED,
-            ),
-            JournalEntry.scenario_id == scenario_id,
-            JournalEntry.pay_period_id == period_id,
-            JournalEntry.source_kind_id == ref_cache.posting_source_id(
-                PostingSourceEnum.TRANSFER_MOVEMENT,
-            ),
-        )
-        .scalar()
+    return correction_net_in_period(
+        _db.session, linked_key_of(_db.session, account_id), scenario_id,
+        PostingSourceEnum.TRANSFER_MOVEMENT, period_id,
     )
 
 
@@ -704,8 +688,8 @@ class TestSettledTransferAttributionMutation:
                 seed_user["bootstrap_period"], amount=Decimal("150.00"),
             )
             db.session.commit()
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("350.00")
             _assert_account_anchors_reconcile(scenario_id)
 
@@ -723,8 +707,8 @@ class TestSettledTransferAttributionMutation:
             assert _transfer_net_in_period(
                 savings.id, scenario_id, period2.id,
             ) == Decimal("150.00")
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("350.00")
             _assert_account_anchors_reconcile(scenario_id)
 
@@ -767,8 +751,8 @@ class TestSettledTransferAttributionMutation:
                 seed_user["bootstrap_period"], amount=Decimal("150.00"),
             )
             db.session.commit()
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("350.00")
             _assert_account_anchors_reconcile(scenario_id)
 
@@ -783,11 +767,11 @@ class TestSettledTransferAttributionMutation:
             db.session.commit()
 
             # Pre-assertion now: absorbed into the openings, nothing on top.
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("200.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             latest_asserted_day, _latest = _latest_assertion(savings.id)
             assert _independent_post_assertion_source_effect(

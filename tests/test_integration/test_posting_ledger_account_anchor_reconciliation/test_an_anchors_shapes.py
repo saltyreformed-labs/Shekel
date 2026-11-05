@@ -9,19 +9,22 @@ from decimal import Decimal
 
 import pytest
 
-from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
 from app.services import account_posting_service, anchor_service, cash_ledger, posting_service
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.utils.dates import display_today
-from app.services.ledger_lines import account_counter_key
-from tests._ledger_reads import account_net, ledger_net, trial_balance
+from app.services.ledger_lines import account_counter_key, linked_key
+from tests._ledger_reads import (
+    account_net,
+    ledger_net,
+    source_lines,
+    source_net,
+    trial_balance,
+)
 from tests._stored_ledger import (
     entries_violating_balance,
     ledger_account_of_kind,
-    linked_ledger_account,
 )
 from tests._test_helpers import (
     create_account_of_type,
@@ -80,8 +83,8 @@ class TestPreAnchorAbsorption:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("500.00")
             # The OPENING books the account's opening equity ($500.00, the
             # stored fact) and the $200.00 the records moved books separately
@@ -93,23 +96,10 @@ class TestPreAnchorAbsorption:
             # which conflated capital brought on with a correction to it -- and
             # that conflation is why a BACK-DATED assertion could re-elect the
             # whole figure.*
-            linked = linked_ledger_account(db.session, savings.id)
-            opening_source = ref_cache.posting_source_id(
+            assert source_net(
+                db.session, linked_key(savings), scenario_id,
                 PostingSourceEnum.ACCOUNT_OPENING,
-            )
-            opening_net = (
-                db.session.query(
-                    _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-                )
-                .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-                .filter(
-                    Posting.ledger_account_id == linked.id,
-                    JournalEntry.scenario_id == scenario_id,
-                    JournalEntry.source_kind_id == opening_source,
-                )
-                .scalar()
-            )
-            assert opening_net == Decimal("500.00")
+            ) == Decimal("500.00")
             # Nothing rides on top: the spend is pre-assertion.
             latest_asserted_day, _latest = _latest_assertion(savings.id)
             assert _independent_post_assertion_source_effect(
@@ -154,26 +144,14 @@ class TestSameDayAnchorMerge:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("550.00")
-            # Exactly ONE true-up entry survives the same-day merge.
-            linked = linked_ledger_account(db.session, savings.id)
-            trueup_source = ref_cache.posting_source_id(
+            # Exactly ONE true-up line survives the same-day merge.
+            assert len(source_lines(
+                db.session, linked_key(savings), scenario_id,
                 PostingSourceEnum.ACCOUNT_TRUEUP,
-            )
-            trueup_entries = (
-                db.session.query(JournalEntry.id)
-                .join(Posting, Posting.journal_entry_id == JournalEntry.id)
-                .filter(
-                    Posting.ledger_account_id == linked.id,
-                    JournalEntry.scenario_id == scenario_id,
-                    JournalEntry.source_kind_id == trueup_source,
-                )
-                .distinct()
-                .all()
-            )
-            assert len(trueup_entries) == 1
+            )) == 1
             _assert_account_anchors_reconcile(scenario_id)
 
 
@@ -212,8 +190,8 @@ class TestNegativelyAnchoredLiability:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                card.id, scenario_id,
+            assert account_net(
+                _db.session, card.id, scenario_id,
             ) == Decimal("-620.00")
             assert ledger_net(
                 db.session,
@@ -250,8 +228,8 @@ class TestZeroDeltaBooksNothing:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                zero.id, scenario_id,
+            assert account_net(
+                _db.session, zero.id, scenario_id,
             ) == Decimal("0.00")
             assert ledger_account_of_kind(
                 db.session, zero.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
@@ -429,24 +407,13 @@ class TestBackDatedTrueUpReBasesTheLedger:
             # so the old day still has opening-kind entries and only their SUM
             # says they cancelled.  A first version of this assertion looked at
             # the days alone and reported both, which grades nothing.
-            linked = linked_ledger_account(db.session, savings.id)
-            opening_source = ref_cache.posting_source_id(
-                PostingSourceEnum.ACCOUNT_OPENING,
-            )
-            opening_by_day = dict(
-                db.session.query(
-                    JournalEntry.entry_date,
-                    db.func.coalesce(db.func.sum(Posting.amount), Decimal("0")),
+            opening_by_day = {
+                line.entry_date: line.amount
+                for line in source_lines(
+                    db.session, linked_key(savings), scenario_id,
+                    PostingSourceEnum.ACCOUNT_OPENING,
                 )
-                .join(Posting, Posting.journal_entry_id == JournalEntry.id)
-                .filter(
-                    Posting.ledger_account_id == linked.id,
-                    JournalEntry.scenario_id == scenario_id,
-                    JournalEntry.source_kind_id == opening_source,
-                )
-                .group_by(JournalEntry.entry_date)
-                .all()
-            )
+            }
             # The OPENING stays where the books opened, carrying the stored
             # opening equity ($1,000.00); the back-dated day gets no opening
             # entry at all.  Nothing is reversed, because nothing was
@@ -457,15 +424,7 @@ class TestBackDatedTrueUpReBasesTheLedger:
             # $250.00 corrects the books DOWN by $750.00 and the original
             # $1,000.00 assertion corrects them back UP by $750.00.  Their sum
             # is what keeps the account on $1,000.00.
-            trueup_source = ref_cache.posting_source_id(
+            assert source_net(
+                db.session, linked_key(savings), scenario_id,
                 PostingSourceEnum.ACCOUNT_TRUEUP,
-            )
-            assert db.session.query(
-                db.func.coalesce(db.func.sum(Posting.amount), Decimal("0"))
-            ).join(
-                JournalEntry, Posting.journal_entry_id == JournalEntry.id,
-            ).filter(
-                Posting.ledger_account_id == linked.id,
-                JournalEntry.scenario_id == scenario_id,
-                JournalEntry.source_kind_id == trueup_source,
-            ).scalar() == Decimal("0.00")
+            ) == Decimal("0.00")

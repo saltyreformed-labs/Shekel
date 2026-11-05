@@ -34,16 +34,19 @@ import pytest
 from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry
 from app.models.scenario import Scenario
 from app.services import (
     loan_anchor_service,
-    posting_service,
     transfer_service,
 )
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.ledger_lines import loan_key
-from tests._ledger_reads import ledger_net
+from tests._ledger_reads import (
+    account_net,
+    ledger_net,
+    loan_correction_lines,
+    scenario_lines,
+)
 from tests._stored_ledger import loan_correction_entries
 from tests._test_helpers import (
     create_account_of_type,
@@ -123,14 +126,14 @@ class TestSettleWiringAutoPosts:
                 loan_correction_entries(db.session, xfer.id, loan.id),
             ) == 1
             # Genesis: opening (-250000) + true-up (+150000) + principal (+500).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-99500.00")
             assert ledger_net(
                 db.session, _interest_key(loan), scenario_id,
             ) == Decimal("500.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("0.00")
 
     def test_settle_with_actual_amount_splits_from_actual_cash(
@@ -170,8 +173,8 @@ class TestSettleWiringAutoPosts:
                 "no Refund leg -- the split did not read the overpaying actual"
             )
             # Paid off: opening (-250000) + true-up (+249700) + principal (+300).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("0.00")
 
 
@@ -199,8 +202,8 @@ class TestRevertAndDeletePostFullCashReversal:
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
             # Opening (-250000) + true-up (+150000) + principal (+500).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-99500.00")
 
             transfer_service.update_transfer(
@@ -210,13 +213,13 @@ class TestRevertAndDeletePostFullCashReversal:
             db.session.commit()
 
             # Full cash reversal: Checking back to exactly its 1000 opening.
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             # Payment correction + cash reversed; opening + true-up remain, so the
             # loan returns to the trued-up baseline -(verified 100000).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
             assert ledger_net(
                 db.session, _interest_key(loan), scenario_id,
@@ -249,12 +252,12 @@ class TestRevertAndDeletePostFullCashReversal:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             # Opening + true-up remain; only the payment correction is reversed.
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
             assert ledger_net(
                 db.session, interest_key, scenario_id,
@@ -276,13 +279,13 @@ class TestRevertAndDeletePostFullCashReversal:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             # Payment correction reversed; opening + true-up remain, so the loan
             # returns to the trued-up baseline -(verified 100000).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
 
     def test_delete_resplits_downstream_payments(
@@ -354,16 +357,16 @@ class TestRestoreWiring:
             loan = _make_loan(seed_user)
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-99500.00")
 
             transfer_service.delete_transfer(
                 xfer.id, seed_user["user"].id, soft=True,
             )
             db.session.commit()
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
 
             transfer_service.restore_transfer(xfer.id, seed_user["user"].id)
@@ -374,8 +377,8 @@ class TestRestoreWiring:
                 assert transfer_side_record(
                     _db.session, xfer.id, account_id,
                 ) is None, "a restored plan holds no payment record"
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
 
 
@@ -407,8 +410,8 @@ class TestTrueUpWiring:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("997.50")
-            checking_before = posting_service.account_posting_total(
-                checking.id, scenario_id,
+            checking_before = account_net(
+                _db.session, checking.id, scenario_id,
             )
             assert checking_before == Decimal("-1000.00")
 
@@ -422,8 +425,8 @@ class TestTrueUpWiring:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("950.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == checking_before
 
     def test_trueup_syncs_every_scenario(
@@ -539,22 +542,17 @@ class TestNonLoanTransferIgnored:
             )
             db.session.commit()
 
-            assert loan_correction_entries(
+            assert loan_correction_lines(
                 db.session, xfer.id, savings.id,
             ) == []
-            # And no loan_payment entry exists for this owner at all.
+            # And no loan_payment line exists for this owner at all.
             loan_payment_source = ref_cache.posting_source_id(
                 PostingSourceEnum.LOAN_PAYMENT,
             )
-            count = (
-                db.session.query(JournalEntry)
-                .filter_by(
-                    user_id=seed_user["user"].id,
-                    source_kind_id=loan_payment_source,
-                )
-                .count()
-            )
-            assert count == 0
+            assert not [
+                line for line in scenario_lines(db.session, seed_user["scenario"].id)
+                if line.source_kind_id == loan_payment_source
+            ]
 
 
 class TestRouteChokepointWiring:
@@ -700,7 +698,7 @@ class TestRouteChokepointWiring:
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
             # Not resolvable yet -> no correction at settle.
-            assert loan_correction_entries(db.session, xfer.id, loan.id) == []
+            assert loan_correction_lines(db.session, xfer.id, loan.id) == []
 
             resp = auth_client.post(
                 f"/accounts/{loan.id}/loan/setup",

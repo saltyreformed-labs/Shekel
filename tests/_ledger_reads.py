@@ -170,6 +170,44 @@ def trial_balance(db_session):
     )
 
 
+def source_lines(db_session, key, scenario_id, source_enum):
+    """Return the lines one source kind books on chart account *key* in a scenario.
+
+    Args:
+        db_session: The test ``db.session``.
+        key: The chart account.
+        scenario_id: The scenario.
+        source_enum: The :class:`~app.enums.PostingSourceEnum` member.
+
+    Returns:
+        The :class:`~app.services.ledger_lines.LedgerLine` list, empty when the
+        source books nothing there.
+    """
+    source_kind_id = ref_cache.posting_source_id(source_enum)
+    return [
+        line for line in scenario_lines(db_session, scenario_id)
+        if line.key == key and line.source_kind_id == source_kind_id
+    ]
+
+
+def source_net(db_session, key, scenario_id, source_enum):
+    """Return the net of :func:`source_lines`.
+
+    Args:
+        db_session: The test ``db.session``.
+        key: The chart account.
+        scenario_id: The scenario.
+        source_enum: The :class:`~app.enums.PostingSourceEnum` member.
+
+    Returns:
+        The signed net as a ``Decimal``; ``$0.00`` when the source books nothing.
+    """
+    return sum(
+        (line.amount for line in source_lines(db_session, key, scenario_id, source_enum)),
+        _ZERO,
+    )
+
+
 def correction_net_in_period(db_session, key, scenario_id, source_enum, period_id):
     """Return one source kind's net on chart account *key* in ONE paycheck.
 
@@ -189,13 +227,11 @@ def correction_net_in_period(db_session, key, scenario_id, source_enum, period_i
     Returns:
         The signed net as a ``Decimal``; ``$0.00`` when the period holds none.
     """
-    source_kind_id = ref_cache.posting_source_id(source_enum)
     return sum(
         (
-            line.amount for line in scenario_lines(db_session, scenario_id)
-            if line.key == key
-            and line.pay_period_id == period_id
-            and line.source_kind_id == source_kind_id
+            line.amount
+            for line in source_lines(db_session, key, scenario_id, source_enum)
+            if line.pay_period_id == period_id
         ),
         _ZERO,
     )
@@ -467,6 +503,29 @@ def transfer_side_movement_ids(transfer_id, account_id):
             TransactionEntry.account_id == account_id,
         )
     ]
+
+
+def period_nets_of_movements(movement_ids, scenario_id):
+    """Return ``{pay_period_id: {chart key: net}}`` over the lines of *movement_ids*.
+
+    The read holds no ``$0.00`` line, so a reverted row's paycheck is simply
+    absent: what the store held as a pair netting to nothing there.
+
+    Args:
+        movement_ids: The movements (:func:`family_movement_ids`,
+            :func:`transfer_family_movement_ids`).
+        scenario_id: The scenario.
+
+    Returns:
+        The nets; empty when the movements book nothing.
+    """
+    wanted = set(movement_ids)
+    nets = {}
+    for line in scenario_lines(db.session, scenario_id):
+        if line.movement_id in wanted:
+            per_key = nets.setdefault(line.pay_period_id, {})
+            per_key[line.key] = per_key.get(line.key, _ZERO) + line.amount
+    return nets
 
 
 def net_posted_by_day(movement_ids):

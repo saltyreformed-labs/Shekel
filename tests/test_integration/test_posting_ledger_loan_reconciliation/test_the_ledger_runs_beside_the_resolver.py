@@ -16,7 +16,11 @@ from app.models.loan_features import RateHistory
 from app.models.scenario import Scenario
 from app.services import loan_ledger, loan_loaders, loan_posting_service, posting_service
 from app.services.ledger_lines import loan_key
-from tests._ledger_reads import ledger_net
+from tests._ledger_reads import (
+    account_net,
+    ledger_net,
+    loan_correction_lines,
+)
 from tests._stored_ledger import (
     loan_correction_entries,
     stored_account_net,
@@ -171,8 +175,8 @@ class TestParallelRunAgainstResolver:
             # Non-vacuity: the genesis linked total is opening (-250000) + true-up
             # (+150000) + the real principal (scheduled P&I - round(100000*0.005)
             # = -500.00 interest), i.e. principal - _ANCHOR_BALANCE.
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == scheduled_pi - Decimal("500.00") - _ANCHOR_BALANCE
             assert len(
                 loan_correction_entries(db.session, xfer.id, loan.id),
@@ -262,8 +266,8 @@ class TestParallelRunAgainstResolver:
             # The ledger's real balance, hand-computed.
             assert ledger == Decimal("99500.00")
             # Genesis: opening (-250000) + true-up (+150000) + principal (+500).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-99500.00")
             # They DIVERGE, and the ledger (short paydown) owes MORE.
             assert ledger != resolver
@@ -293,8 +297,8 @@ class TestParallelRunAgainstResolver:
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             assert ledger == Decimal("98500.00")
             # Genesis: opening (-250000) + true-up (+150000) + principal (+1500).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-98500.00")
             # They DIVERGE, and the ledger (extra paydown) owes LESS.
             assert ledger != resolver
@@ -348,8 +352,8 @@ class TestParallelRunAgainstResolver:
             # The hand-computed post-step balance -- the shared-kernel teeth.
             assert ledger == Decimal("99495.00")
             assert reader == Decimal("99495.00")
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-99495.00")
             # The resolver books scheduled principal at each rate; short payments
             # mean it owes LESS -- divergence survives the rate step.
@@ -392,7 +396,7 @@ class TestParallelRunAgainstResolver:
             )
             assert len(splits) == 1
             assert splits[0].interest == Decimal("1250.00")
-            assert loan_correction_entries(db.session, xfer.id, loan.id) != []
+            assert loan_correction_lines(db.session, xfer.id, loan.id) != []
 
             # Post the opening + true-up (the read-switch corrections): the
             # ONE sync since plan step ``balance:X-bi-6-3`` (the anchor-only
@@ -404,8 +408,8 @@ class TestParallelRunAgainstResolver:
             # -(linked net) reproduces the resolver's anchor, which subsumes P1.
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             assert resolver == _ANCHOR_BALANCE  # 100000.00
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == -_ANCHOR_BALANCE  # -100000.00, no pre-anchor pollution
 
 
@@ -440,7 +444,7 @@ class TestSupersedesCashInvariantForLoans:
             _settle(seed_user, loan, seed_periods[_P1], amount=Decimal("1000.00"))
             db.session.commit()
 
-            linked = posting_service.account_posting_total(loan.id, scenario_id)
+            linked = account_net(_db.session, loan.id, scenario_id)
             cash_effect = posting_service.settled_transfer_effect(
                 loan.id, scenario_id,
             )
@@ -508,8 +512,8 @@ class TestRichFixtureFullSweep:
                 loan, LedgerAccountKindEnum.LOAN_REFUND, scenario_id,
             ) == Decimal("895.00")
             # Paid off: opening (-250000) + true-up (+249000) + principal (+1000).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("0.00")
             # Per-loan net = non-principal (1000) + opening-equity legs (+1000,
             # the negatives of opening -250000 + true-up +249000).
@@ -567,11 +571,11 @@ class TestScenarioAndOwnerIsolation:
             db.session.commit()
 
             # Each scenario nets -99500 in isolation -- never -199000.
-            assert posting_service.account_posting_total(
-                loan.id, baseline.id,
+            assert account_net(
+                _db.session, loan.id, baseline.id,
             ) == Decimal("-99500.00")
-            assert posting_service.account_posting_total(
-                loan.id, whatif.id,
+            assert account_net(
+                _db.session, loan.id, whatif.id,
             ) == Decimal("-99500.00")
             _assert_loan_reconciles(loan, baseline.id, _AS_OF)
             _assert_loan_reconciles(loan, whatif.id, _AS_OF)
@@ -603,11 +607,11 @@ class TestScenarioAndOwnerIsolation:
             scenario2 = seed_second_user["scenario"].id
             # Genesis linked net = opening (-250000) + true-up (+150000) + real
             # principal: owner 1 -> -99500 (+500), owner 2 -> -98500 (+1500).
-            assert posting_service.account_posting_total(
-                loan1.id, scenario1,
+            assert account_net(
+                _db.session, loan1.id, scenario1,
             ) == Decimal("-99500.00")
-            assert posting_service.account_posting_total(
-                loan2.id, scenario2,
+            assert account_net(
+                _db.session, loan2.id, scenario2,
             ) == Decimal("-98500.00")
 
             # Ownership is normalized onto the journal entry, not the posting.

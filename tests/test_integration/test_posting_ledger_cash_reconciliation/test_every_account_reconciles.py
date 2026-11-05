@@ -25,10 +25,15 @@ from app.models.transaction_entry import TransactionEntry
 from app.services import ledger_account_service, posting_service, transaction_service
 from app.services.ledger_lines import ChartKey, category_key, owner_bucket_key
 from app.utils.balance_predicates import settled_status_ids
-from tests._ledger_reads import account_net, ledger_net, trial_balance
+from tests._ledger_reads import (
+    account_net,
+    family_movement_ids,
+    ledger_net,
+    period_nets_of_movements,
+    trial_balance,
+)
 from tests._stored_ledger import (
     entries_violating_balance,
-    family_journal_filter,
     stored_ledger_net,
 )
 from tests._ledger_parity import LedgerParityDifference
@@ -118,18 +123,12 @@ def _assert_every_settled_transaction_posts(user_id: int) -> None:
     )
     for txn in settled:
         if _signed_cash_effect(txn) == 0:
-            # A zero-effect settled row (all-credit envelope) posts nothing.
+            # A zero-effect settled row (all-credit envelope) books nothing.
             continue
         # The row's FAMILY (plan step X-bi-3a): a covered bill's money is
-        # posted under its covering movement, not under the row.
-        entry_count = (
-            _db.session.query(JournalEntry)
-            .filter(family_journal_filter(txn))
-            .count()
-        )
-        assert entry_count >= 1, (
-            f"settled transaction {txn.id} with a nonzero effect posted no "
-            f"journal entry"
+        # booked under its covering movement, not under the row.
+        assert period_nets_of_movements(family_movement_ids(txn), txn.scenario_id), (
+            f"settled transaction {txn.id} with a nonzero effect books no line"
         )
 
 
@@ -527,14 +526,10 @@ class TestEverySettledTransactionPosts:
             all_credit_id = all_credit.id
 
             _assert_every_settled_transaction_posts(user_id)
-            # The zero-effect FAMILY posted nothing (no silent spurious entry):
-            # a row posts nothing of its own since plan step X-bi-4a, so a
-            # ``transaction_id`` read alone would be true of every row here.
-            assert (
-                _db.session.query(JournalEntry)
-                .filter(family_journal_filter(all_credit_id))
-                .count()
-            ) == 0
+            # The zero-effect FAMILY books nothing (no silent spurious line).
+            assert period_nets_of_movements(
+                family_movement_ids(all_credit_id), scenario_id,
+            ) == {}
             _assert_full_reconciliation(scenario_id)
 
 

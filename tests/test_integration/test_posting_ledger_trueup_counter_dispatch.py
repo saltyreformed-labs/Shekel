@@ -31,7 +31,6 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import bindparam
 
 from app import ref_cache
 from app.enums import (
@@ -40,6 +39,7 @@ from app.enums import (
     PostingSourceEnum,
 )
 from app.extensions import db as _db
+from app.models.account import Account
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
 from app.services import account_posting_service, ledger_report_service
@@ -48,13 +48,11 @@ from app.utils.dates import display_today
 from app.services.pay_calendar import calendar_for
 from app.services.ledger_lines import (
     account_counter_key,
+    chart_record_type,
     linked_key,
 )
-from tests._ledger_reads import ledger_net
-from tests._stored_ledger import (
-    ledger_account_of_kind,
-    linked_ledger_account,
-)
+from tests._ledger_reads import ledger_net, owner_worked_out_lines
+from tests._stored_ledger import ledger_account_of_kind
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
@@ -78,57 +76,27 @@ _TRUE_UP_COUNTER_BY_TYPE = [
 
 
 def _correction_legs(account_id, source_kind):
-    """Return ``{(kind name, class name): net}`` over one correction family.
+    """Return ``{(kind name, class name): net}`` of one correction kind on an account.
 
-    A test-authored read of the posted ledger: every leg of every
-    ``account_opening`` / ``account_trueup`` entry that touches ANY of the
-    account's own chart rows, grouped by the KIND and CLASS of the chart row it
-    landed in.  Reads the chart's ``kind_id`` / ``class_id`` back through
-    ``ref`` NAMES deliberately -- the app is forbidden to branch on those
-    strings, which is exactly what makes them a second opinion here.
-
-    **Scoped to the account's ROWS, not its linked row**, for the reason the
-    reader under test is: a re-point delta touches only counter rows, so a
-    linked-scoped oracle would be blind to exactly the entries this module
-    exists to check.
+    Off the worked-out read, over every key whose record is the account: its own
+    line and its correction counters, because a re-typed true-up moves only the
+    counter side.  A cell netting ``$0.00`` is left out.  Named by the enums' string
+    values so a case states the row it means.
     """
-    entry_ids = (
-        _db.session.query(Posting.journal_entry_id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(LedgerAccount.account_id == account_id)
-    )
-    rows = (
-        _db.session.execute(_db.text("""
-            SELECT k.name, c.name, SUM(p.amount)
-            FROM budget.account_postings p
-            JOIN budget.journal_entries je ON p.journal_entry_id = je.id
-            JOIN budget.ledger_accounts la ON p.ledger_account_id = la.id
-            JOIN ref.ledger_account_kinds k ON la.kind_id = k.id
-            JOIN ref.ledger_account_classes c ON la.class_id = c.id
-            JOIN ref.posting_sources s ON je.source_kind_id = s.id
-            WHERE s.name = :source AND je.id IN :entry_ids
-            GROUP BY k.name, c.name
-        """).bindparams(
-            # Expanded by SQLAlchemy into one bind per id, the spelling the two
-            # data-boundary migrations use: psycopg 3 binds server-side and
-            # cannot spread one tuple parameter into an ``IN`` list the way
-            # psycopg2's client-side interpolation did (plan step
-            # balance:X-dj).  An empty list is a valid, empty ``IN``.
-            bindparam(
-                "entry_ids", [row[0] for row in entry_ids.all()], expanding=True,
-            ),
-            source=source_kind.value,
-        ))
-        .all()
-    )
-    return {(kind, klass): net for kind, klass, net in rows if net != 0}
+    source_kind_id = ref_cache.posting_source_id(source_kind)
+    owner_id = _db.session.get(Account, account_id).user_id
+    nets = {}
+    for _scenario_id, line in owner_worked_out_lines(_db.session, owner_id):
+        if (
+            line.source_kind_id == source_kind_id
+            and chart_record_type(line.key) is Account
+            and line.key.record_id == account_id
+        ):
+            cell = (line.key.kind.value, line.key.ledger_class.value)
+            nets[cell] = nets.get(cell, Decimal("0")) + line.amount
+    return {cell: net for cell, net in nets.items() if net != 0}
 
 
-# How long after its opening every fixture true-up is observed.  The opening
-# itself is three days back (:func:`_opened_account`), so the true-up lands on
-# ``display_today() - 2`` -- inside the reported window on every clock the
-# suite runs at, and never in the future, which a balance sheet as-of today
-# would exclude whole.
 _TRUE_UP_DAYS_AFTER_OPENING = 1
 
 
@@ -191,20 +159,13 @@ def _true_up(account, balance, days_after_opening=None):
 
 
 def account_asset_class_name(account):
-    """Return the linked ledger row's CLASS name for *account* (Asset/Liability).
+    """Return the class name of *account*'s own line.
 
-    Read off the posted chart rather than re-derived, so a case asserting on a
-    correction's legs states the class the row actually carries instead of
-    assuming Asset -- which the negatively-anchored liability shapes elsewhere
-    in this suite would falsify.
+    So a case asserting on a correction's legs states the class the line actually
+    carries instead of assuming Asset -- which the negatively-anchored liability
+    shapes elsewhere in this suite would falsify.
     """
-    linked = linked_ledger_account(_db.session, account.id)
-    return (
-        _db.session.query(LedgerAccount)
-        .filter_by(id=linked.id)
-        .one()
-        .ledger_account_class.name
-    )
+    return linked_key(account).ledger_class.value
 
 
 def _fund_before_the_opening(seed_user, account, amount):

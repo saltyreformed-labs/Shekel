@@ -16,8 +16,7 @@ from app.enums import (
     StatusEnum,
 )
 from app.extensions import db
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
+from app.models.journal_entry import JournalEntry
 from app.models.transaction_entry import TransactionEntry
 from app.services import (
     balance_at,
@@ -30,15 +29,14 @@ from app.services import (
 from app.services.cash_ledger import settled_cash_facts
 from app.services.transfer_legs import parent_of
 from app.services.settle_day import SettleDay
+from app.services.ledger_lines import transit_key
 from tests._ledger_reads import (
+    account_net,
     ledger_net,
     linked_key_of,
+    scenario_lines,
 )
-from tests._stored_ledger import (
-    linked_ledger_account,
-    stored_loan_balance_at,
-    transit_ledger_account,
-)
+from tests._stored_ledger import stored_loan_balance_at
 from tests._test_helpers import (
     create_loan_account,
     create_savings_account,
@@ -145,26 +143,19 @@ class TestAPaycheckIsCoveredInItsOwnDirection:
             after = ledger_net(db.session, cash, txn.scenario_id)
             assert after - before == Decimal("2572.78")
             movement = _only_movement(txn)
-            legs = (
-                db.session.query(Posting, LedgerAccount)
-                .join(JournalEntry, JournalEntry.id == Posting.journal_entry_id)
-                .join(LedgerAccount, LedgerAccount.id == Posting.ledger_account_id)
-                .filter(JournalEntry.transaction_entry_id == movement.id)
-                .all()
-            )
-            cash_row = linked_ledger_account(db.session, txn.account_id)
-            assert {leg.ledger_account_id: leg.amount for leg, _ in legs} == {
-                cash_row.id: Decimal("2572.78"),
-                next(
-                    account.id for _, account in legs if account.id != cash_row.id
-                ): Decimal("-2572.78"),
+            lines = [
+                line for line in scenario_lines(db.session, txn.scenario_id)
+                if line.movement_id == movement.id
+            ]
+            [counter] = {line.key for line in lines} - {cash}
+            assert len(lines) == 2
+            assert {line.key: line.amount for line in lines} == {
+                cash: Decimal("2572.78"),
+                counter: Decimal("-2572.78"),
             }
             income_kind = ref_cache.posting_kind_id(PostingKindEnum.INCOME)
-            assert {leg.posting_kind_id for leg, _ in legs} == {income_kind}
-            counter = next(account for _, account in legs if account.id != cash_row.id)
-            assert counter.class_id == ref_cache.ledger_account_class_id(
-                LedgerAccountClassEnum.INCOME,
-            )
+            assert {line.posting_kind_id for line in lines} == {income_kind}
+            assert counter.ledger_class is LedgerAccountClassEnum.INCOME
 
     def test_a_revert_un_dates_it_and_the_ledger_moves_back(
         self, app, seed_user, seed_periods,
@@ -324,7 +315,7 @@ class TestATransferIsCoveredOnBothLegs:
             accounts = (seed_user["account"], savings)
             scenario_id = seed_user["scenario"].id
             before = {
-                account.id: posting_service.account_posting_total(account.id, scenario_id)
+                account.id: account_net(db.session, account.id, scenario_id)
                 for account in accounts
             }
             _xfer, expense, income = _settled_pair(
@@ -332,20 +323,17 @@ class TestATransferIsCoveredOnBothLegs:
             )
             movement_ids = [_only_movement(leg).id for leg in (expense, income)]
             after = {
-                account.id: posting_service.account_posting_total(account.id, scenario_id)
+                account.id: account_net(db.session, account.id, scenario_id)
                 for account in accounts
             }
             assert after[accounts[0].id] - before[accounts[0].id] == Decimal("-500.00")
             assert after[savings.id] - before[savings.id] == Decimal("500.00")
             # ONE entry per MOVEMENT.
             assert len(_movement_entries(movement_ids)) == 2
-            transit = transit_ledger_account(db.session, seed_user["user"].id)
-            assert db.session.query(
-                db.func.coalesce(db.func.sum(Posting.amount), 0)
-            ).filter(Posting.ledger_account_id == transit.id).scalar() == 0
+            assert ledger_net(db.session, transit_key(), scenario_id) == Decimal("0.00")
             for account in accounts:
                 opening = Decimal(str(cash_ledger.resolve_anchor(account).balance))
-                assert posting_service.account_posting_total(account.id, scenario_id) == (
+                assert account_net(db.session, account.id, scenario_id) == (
                     opening
                     + posting_service.settled_transfer_effect(account.id, scenario_id)
                     + posting_service.posted_purchase_effect(account.id, scenario_id)
@@ -365,14 +353,14 @@ class TestATransferIsCoveredOnBothLegs:
             account_ids = (seed_user["account"].id, savings.id)
             scenario_id = seed_user["scenario"].id
             before = {
-                account_id: posting_service.account_posting_total(account_id, scenario_id)
+                account_id: account_net(db.session, account_id, scenario_id)
                 for account_id in account_ids
             }
             xfer, expense, income = _settled_pair(
                 seed_user, seed_periods[0], to_account=savings,
             )
             movement_ids = [_only_movement(leg).id for leg in (expense, income)]
-            assert posting_service.account_posting_total(savings.id, scenario_id) != before[savings.id]
+            assert account_net(db.session, savings.id, scenario_id) != before[savings.id]
             transfer_service.update_transfer(
                 xfer.id, seed_user["user"].id,
                 status_id=ref_cache.status_id(StatusEnum.PROJECTED),
@@ -390,7 +378,7 @@ class TestATransferIsCoveredOnBothLegs:
                 assert survivor.reconciled_by_id is None
                 assert leg.transfer.settled_figure == Decimal("500.00")
             assert {
-                account_id: posting_service.account_posting_total(account_id, scenario_id)
+                account_id: account_net(db.session, account_id, scenario_id)
                 for account_id in account_ids
             } == before
 

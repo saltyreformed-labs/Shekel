@@ -43,7 +43,6 @@ from app.enums import (
 )
 from app.exceptions import ValidationError
 from app.extensions import db
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.transaction import Transaction
 from app.services import (
     anchor_service,
@@ -63,8 +62,8 @@ from app.utils.log_events import (
 from tests._ledger_reads import (
     ledger_net,
     linked_key_of,
+    source_lines,
 )
-from tests._stored_ledger import linked_ledger_account
 from tests._test_helpers import (
     create_account_of_type,
     generate_row_of,
@@ -759,25 +758,20 @@ class TestTheCardsGapClosesByThePayment:
                 cash_ledger.governing_anchor(card.id),
             )
             assert statement.observed_on == _OBSERVED_ON
-            card_ledger = linked_ledger_account(db.session, card.id).id
+            card_key = linked_key_of(db.session, card.id)
             checking_ledger = linked_key_of(db.session, checking_id)
 
             def correction():
-                """The 1/10 assertion's OWN posted correction: its true-up legs dated 1/10."""
-                return (
-                    db.session.query(
-                        db.func.coalesce(db.func.sum(Posting.amount), Decimal("0.00")),
-                    )
-                    .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-                    .filter(
-                        Posting.ledger_account_id == card_ledger,
-                        JournalEntry.scenario_id == scenario_id,
-                        JournalEntry.entry_date == _OBSERVED_ON,
-                        JournalEntry.source_kind_id == ref_cache.posting_source_id(
+                """The 1/10 assertion's OWN correction: its true-up lines dated 1/10."""
+                return sum(
+                    (
+                        line.amount for line in source_lines(
+                            db.session, card_key, scenario_id,
                             PostingSourceEnum.ACCOUNT_TRUEUP,
-                        ),
-                    )
-                    .scalar()
+                        )
+                        if line.entry_date == _OBSERVED_ON
+                    ),
+                    Decimal("0.00"),
                 )
 
             checking_facts = settled_cash_facts(checking_id, scenario_id)

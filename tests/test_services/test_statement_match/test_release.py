@@ -73,6 +73,7 @@ from app.services.statement_match._release import (  # pylint: disable=protected
     planned_removals,
 )
 
+from tests._ledger_reads import account_net
 from tests._test_helpers import an_entered_day, typed
 
 from ._builders import (
@@ -139,9 +140,7 @@ def _balance_on(seed_user, day):
 
 def _posted_total(seed_user):
     """Return what the posted ledger says this account holds."""
-    return posting_service.account_posting_total(
-        seed_user["account"].id, seed_user["scenario"].id,
-    )
+    return account_net(db.session, seed_user["account"].id, seed_user["scenario"].id)
 
 
 def _a_swipe(seed_user, *, amount="-57.96", offset=5, sequence=0):

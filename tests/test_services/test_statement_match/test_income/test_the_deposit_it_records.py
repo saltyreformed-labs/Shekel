@@ -6,17 +6,22 @@ from datetime import timedelta
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import AmountSourceEnum, LedgerAccountClassEnum, SettledDayBasisEnum, TxnTypeEnum
+from app.enums import (
+    AmountSourceEnum,
+    LedgerAccountClassEnum,
+    LedgerAccountKindEnum,
+    SettledDayBasisEnum,
+    TxnTypeEnum,
+)
 
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.statement_match import StatementMatchCreation, StatementMatchMember
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from app.services import statement_match
 from app.services.statement_match import review_set
 
-from tests._stored_ledger import family_journal_filter
+from app.services.ledger_lines import linked_key, owner_bucket_key
+from tests._ledger_reads import family_movement_ids, ledger_net, movement_nets_by_key
 from tests.test_services.test_statement_match._builders import a_later_period, a_scope
 from tests._test_helpers import (
     last_covered_day,
@@ -179,51 +184,22 @@ class TestItMovesTheMoney:
 
         recorded = _record(seed_user, line)
 
-        # **Named by ACCOUNT, never grouped by ``is_owner_bucket``.**  This owner
-        # holds more than one non-fallback ledger account -- the checking ASSET
-        # and a ``Checking -- Opening`` EQUITY row among them -- so a grouping
-        # by that flag reads the same whether the debit lands on the cash
-        # account or on opening equity, and only one of those is this door
-        # booking a deposit.  Measured on the developer's own dev database
-        # 2026-08-27, where a hand true-up posts a second entry doing exactly
-        # that reversal.
+        # **Named by KEY.**  This owner holds more than one chart account beside
+        # the bucket, the checking ASSET and its opening EQUITY among them, and
+        # only the cash line is this door booking a deposit.
         # The row's FAMILY (plan step X-bi-3b): a settled paycheck's money is
-        # posted under its covering movement, as a bill's is since X-bi-3a,
-        # so the read widens to the family and the figures stand.
-        legs = dict(
-            db.session.query(
-                LedgerAccount.id, db.func.sum(Posting.amount),
-            )
-            .join(Posting, Posting.ledger_account_id == LedgerAccount.id)
-            .join(JournalEntry, JournalEntry.id == Posting.journal_entry_id)
-            .filter(family_journal_filter(recorded.transaction_id))
-            .group_by(LedgerAccount.id)
-            .all()
-        )
-        cash = (
-            db.session.query(LedgerAccount.id)
-            .filter(
-                LedgerAccount.account_id == seed_user["account"].id,
-                LedgerAccount.class_id == ref_cache.ledger_account_class_id(
-                    LedgerAccountClassEnum.ASSET,
-                ),
-            )
-            .scalar()
-        )
-        bucket = (
-            db.session.query(LedgerAccount.id)
-            .filter(
-                LedgerAccount.user_id == seed_user["user"].id,
-                LedgerAccount.is_owner_bucket.is_(True),
-                LedgerAccount.class_id == ref_cache.ledger_account_class_id(
-                    LedgerAccountClassEnum.INCOME,
-                ),
-            )
-            .scalar()
-        )
-        # Debit-positive: the CHECKING ASSET gains 0.15 and Uncategorized
-        # Income is credited the same.  Two legs and no others.
-        assert legs == {cash: Decimal("0.15"), bucket: Decimal("-0.15")}
+        # booked under its covering movement.  Debit-positive: the CHECKING
+        # ASSET gains 0.15 and Uncategorized Income is credited the same.  Two
+        # lines and no others.
+        assert movement_nets_by_key(
+            db.session, family_movement_ids(recorded.transaction_id),
+            seed_user["scenario"].id,
+        ) == {
+            linked_key(seed_user["account"]): Decimal("0.15"),
+            owner_bucket_key(
+                LedgerAccountKindEnum.FALLBACK, LedgerAccountClassEnum.INCOME,
+            ): Decimal("-0.15"),
+        }
 
     def test_it_books_to_the_per_owner_UNCATEGORIZED_INCOME_account(
         self, app, db, seed_user,
@@ -232,31 +208,19 @@ class TestItMovesTheMoney:
 
         Asserted over the LEDGER rather than the row, because the row carrying
         no category is only half the claim: what makes the mechanism real is
-        that ``posting_service`` sends such a row's counter leg to the
-        per-(owner, class) fallback -- and INCOME is the class this door is the
-        first writer of.
+        that the ledger books such a row's counter line on the per-(owner,
+        class) fallback -- and INCOME is the class this door is the first
+        writer of.
         """
         line = _a_deposit(seed_user, amount="0.15")
 
         _record(seed_user, line)
 
-        account = (
-            db.session.query(LedgerAccount)
-            .filter(
-                LedgerAccount.user_id == seed_user["user"].id,
-                LedgerAccount.is_owner_bucket.is_(True),
-                LedgerAccount.class_id == ref_cache.ledger_account_class_id(
-                    LedgerAccountClassEnum.INCOME,
-                ),
-            )
-            .one()
-        )
-        net = (
-            db.session.query(db.func.sum(Posting.amount))
-            .filter(Posting.ledger_account_id == account.id)
-            .scalar()
-        )
-        assert net == Decimal("-0.15")
+        assert ledger_net(
+            db.session,
+            owner_bucket_key(LedgerAccountKindEnum.FALLBACK, LedgerAccountClassEnum.INCOME),
+            seed_user["scenario"].id,
+        ) == Decimal("-0.15")
 
 
 class TestTheLineStopsBeingUnexplained:

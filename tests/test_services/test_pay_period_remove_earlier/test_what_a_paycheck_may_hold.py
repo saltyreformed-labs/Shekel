@@ -14,7 +14,6 @@ import pytest
 from app import ref_cache
 from app.enums import PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
 from app.models.pay_stub import PayStub
 from app.models.transaction import Transaction
@@ -32,6 +31,7 @@ from app.services.ledger_lines import linked_key
 from app.models.amount_ownership import AmountOwnership
 from tests._ledger_reads import (
     owner_worked_out_lines,
+    source_lines,
     worked_out_totals,
 )
 from tests._ledger_parity import (
@@ -73,26 +73,16 @@ def _ledger_ids_of(account):
     ]
 
 
-def _source_nets_by_period(account, source):
-    """Return ``{period_id: net}`` of *source*'s entries on *account*'s own ledger row.
+def _source_nets_by_period(scenario_id, account, source):
+    """Return ``{period_id: net}`` of *source*'s lines on *account*'s own line.
 
-    Nets that are zero are left out: a re-sync that re-files an entry leaves
-    the old one and its reversal in the paycheck they were filed in.
+    Nets that are zero are left out: a paycheck holding none of the source's
+    money is not an answer.
     """
-    own = _ledger_ids_of(account)[0]
-    return {
-        period_id: net
-        for period_id, net in _db.session.query(
-            JournalEntry.pay_period_id, _db.func.sum(Posting.amount),
-        )
-        .join(Posting, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            Posting.ledger_account_id == own,
-            JournalEntry.source_kind_id == ref_cache.posting_source_id(source),
-        )
-        .group_by(JournalEntry.pay_period_id)
-        if net != 0
-    }
+    nets = {}
+    for line in source_lines(_db.session, linked_key(account), scenario_id, source):
+        nets[line.pay_period_id] = nets.get(line.pay_period_id, Decimal("0.00")) + line.amount
+    return {period_id: net for period_id, net in nets.items() if net != 0}
 
 
 def _two_ledger_ids(seed_user):
@@ -431,8 +421,9 @@ class TestTheStoreIsReFiled:
             db.session.commit()
             opening = ref_cache.posting_source_id(PostingSourceEnum.ACCOUNT_OPENING)
             assert opening in {kind for _id, kind in _entries_in({head[0].id})}
+            scenario = seed_user["scenario"].id
             nets = _source_nets_by_period(
-                seed_user["account"], PostingSourceEnum.ACCOUNT_OPENING,
+                scenario, seed_user["account"], PostingSourceEnum.ACCOUNT_OPENING,
             )
             added_first = head[0].id
             assert set(nets) == {added_first}, "the opening's money sits in the head"
@@ -446,9 +437,11 @@ class TestTheStoreIsReFiled:
             # Re-filed INTO THE NEW FIRST PAYCHECK (R-PC114's words), and
             # nowhere else, with every total as it was.
             assert _source_nets_by_period(
-                seed_user["account"], PostingSourceEnum.ACCOUNT_OPENING,
+                scenario, seed_user["account"], PostingSourceEnum.ACCOUNT_OPENING,
             ) == {seed_periods[0].id: nets[added_first]}
             assert worked_out_totals(_db.session, user_id) == totals
+            # The removal's re-sync re-filed the stored copy with it.
+            assert_ledger_parity(db.session, scenario)
 
     def test_a_loans_opening_filed_in_an_added_paycheck_goes_back(
         self, app, db, seed_user, seed_periods,
@@ -467,7 +460,8 @@ class TestTheStoreIsReFiled:
             db.session.commit()
             loan_opening = ref_cache.posting_source_id(PostingSourceEnum.LOAN_OPENING)
             assert loan_opening in {kind for _id, kind in _entries_in({head[0].id})}
-            nets = _source_nets_by_period(loan, PostingSourceEnum.LOAN_OPENING)
+            scenario = seed_user["scenario"].id
+            nets = _source_nets_by_period(scenario, loan, PostingSourceEnum.LOAN_OPENING)
             added_first = head[0].id
             assert set(nets) == {added_first}, "the loan opening's money sits in the head"
             totals = worked_out_totals(_db.session, user_id)
@@ -477,10 +471,12 @@ class TestTheStoreIsReFiled:
             ) == 2
             db.session.commit()
 
-            assert _source_nets_by_period(loan, PostingSourceEnum.LOAN_OPENING) == {
+            assert _source_nets_by_period(scenario, loan, PostingSourceEnum.LOAN_OPENING) == {
                 seed_periods[0].id: nets[added_first],
             }
             assert worked_out_totals(_db.session, user_id) == totals
+            # The removal's re-sync re-filed the stored copy with it.
+            assert_ledger_parity(db.session, scenario)
 
     def test_a_self_cancelling_pair_goes_with_its_paycheck(
         self, app, db, seed_user, seed_periods,

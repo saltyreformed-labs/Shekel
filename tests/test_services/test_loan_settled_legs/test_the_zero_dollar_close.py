@@ -8,7 +8,6 @@ from decimal import Decimal
 
 from app.enums import LedgerAccountKindEnum
 from app.extensions import db
-from app.models.journal_entry import Posting
 from app.services import loan_loaders
 from app.services.loan_ledger import (
     LoanCalendars,
@@ -18,11 +17,8 @@ from app.services.loan_ledger import (
     payment_visible_on,
     walk_loan_ledger,
 )
-from app.services.posting_service import _ledger_account_for
-from tests._stored_ledger import (
-    find_loan_ledger_account,
-    loan_correction_entries_at,
-)
+from app.services.ledger_lines import linked_key, loan_key
+from tests._ledger_reads import loan_correction_lines_at
 from tests._test_helpers import (
     create_loan_account,
     create_settled_transfer,
@@ -109,20 +105,15 @@ class TestAZeroDollarCloseIsDatedByTheInstallmentItSkips:
             scenario_id = seed_user["scenario"].id
             period_id = seed_periods[_PERIOD].id
 
-            [entry] = loan_correction_entries_at(
+            lines = loan_correction_lines_at(
                 db.session, loan.id, scenario_id, period_id, _DUE,
             )
-            interest_row = find_loan_ledger_account(
-                db.session, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-            )
-            assert dict(
-                db.session.query(Posting.ledger_account_id, Posting.amount)
-                .filter(Posting.journal_entry_id == entry.id)
-            ) == {
-                _ledger_account_for(loan.id).id: Decimal("-500.00"),
-                interest_row.id: Decimal("500.00"),
+            assert len(lines) == 2
+            assert {line.key: line.amount for line in lines} == {
+                linked_key(loan): Decimal("-500.00"),
+                loan_key(LedgerAccountKindEnum.LOAN_INTEREST, loan.id): Decimal("500.00"),
             }
-            assert loan_correction_entries_at(
+            assert loan_correction_lines_at(
                 db.session, loan.id, scenario_id, period_id, _CLOSED_ON,
             ) == []
 
@@ -225,20 +216,15 @@ class TestAnOffDayZeroDollarCloseIsDatedByItsIntervalsInstallment:
             )
 
             period_id = seed_periods[_PERIOD].id
-            [entry] = loan_correction_entries_at(
+            lines = loan_correction_lines_at(
                 db.session, loan.id, scenario_id, period_id, installment,
             )
-            interest_row = find_loan_ledger_account(
-                db.session, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-            )
-            assert dict(
-                db.session.query(Posting.ledger_account_id, Posting.amount)
-                .filter(Posting.journal_entry_id == entry.id)
-            ) == {
-                _ledger_account_for(loan.id).id: Decimal("-500.00"),
-                interest_row.id: Decimal("500.00"),
+            assert len(lines) == 2
+            assert {line.key: line.amount for line in lines} == {
+                linked_key(loan): Decimal("-500.00"),
+                loan_key(LedgerAccountKindEnum.LOAN_INTEREST, loan.id): Decimal("500.00"),
             }
-            assert loan_correction_entries_at(
+            assert loan_correction_lines_at(
                 db.session, loan.id, scenario_id, period_id, due,
             ) == []
 

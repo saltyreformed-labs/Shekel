@@ -16,9 +16,10 @@ from app.services import (
     account_posting_service,
     loan_posting_service,
     pay_period_admin,
-    posting_service,
 )
+from app.services.ledger_lines import linked_key
 from scripts.integrity_check import check_referential_integrity
+from tests._ledger_reads import account_net, source_lines
 from tests._test_helpers import (
     rhythm_of,
     all_periods,
@@ -54,6 +55,15 @@ _LOAN_RATE = Decimal("0.06000")
 
 
 _LOAN_GENESIS_NET = Decimal("-100000.00")
+
+
+def _genesis_filed_in(db_session, loan, scenario_id):
+    """Return the paychecks a loan's opening and true-up lines are filed in."""
+    return {
+        line.pay_period_id
+        for source in (PostingSourceEnum.LOAN_OPENING, PostingSourceEnum.LOAN_TRUEUP)
+        for line in source_lines(db_session, linked_key(loan), scenario_id, source)
+    }
 
 
 def _loan_genesis_entries(db_session, user_id):
@@ -121,8 +131,8 @@ class TestResetResyncsLoanGenesis:
             before = _loan_genesis_entries(db.session, user_id)
             assert len(before) == 2
             assert {e.pay_period_id for e in before} <= old_ids
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                db.session, loan.id, scenario_id,
             ) == _LOAN_GENESIS_NET
 
             new_periods = pay_period_admin.reset_pay_periods(
@@ -137,8 +147,9 @@ class TestResetResyncsLoanGenesis:
             after = _loan_genesis_entries(db.session, user_id)
             assert len(after) == 2
             assert {e.pay_period_id for e in after} == {new_periods[0].id}
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert _genesis_filed_in(db.session, loan, scenario_id) == {new_periods[0].id}
+            assert account_net(
+                db.session, loan.id, scenario_id,
             ) == _LOAN_GENESIS_NET
             assert_pay_period_invariants(db.session, user_id)
             assert all(r.passed for r in check_referential_integrity(db.session))
@@ -224,8 +235,8 @@ class TestResetResyncsLoanGenesis:
                 )
 
             before = _fingerprint()
-            net_before = posting_service.account_posting_total(
-                loan.id, scenario_id,
+            net_before = account_net(
+                db.session, loan.id, scenario_id,
             )
             assert before, "no genesis entry was posted, so nothing is graded"
             assert net_before == _LOAN_GENESIS_NET
@@ -242,8 +253,8 @@ class TestResetResyncsLoanGenesis:
                 "genesis entry, so the order R-R38 puts them in is NOT "
                 "order-independent"
             )
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                db.session, loan.id, scenario_id,
             ) == net_before
             assert all(r.passed for r in check_referential_integrity(db.session))
 
@@ -285,8 +296,8 @@ class TestResetResyncsAccountOpenings:
             scenario_id = seed_user["scenario"].id
             checking_id = seed_user["account"].id
             _seed_old_schedule(db.session, seed_user)
-            assert posting_service.account_posting_total(
-                checking_id, scenario_id,
+            assert account_net(
+                db.session, checking_id, scenario_id,
             ) == Decimal("1000.00")
 
             pay_period_admin.reset_pay_periods(
@@ -341,8 +352,14 @@ class TestResetResyncsAccountOpenings:
             earliest = min(rebuilt, key=lambda p: derived_span(p).period_index)
             assert derived_span(earliest).period_index == 0
             assert openings[0].pay_period_id == earliest.id
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert {
+                line.pay_period_id for line in source_lines(
+                    db.session, linked_key(checking), scenario_id,
+                    PostingSourceEnum.ACCOUNT_OPENING,
+                )
+            } == {earliest.id}
+            assert account_net(
+                db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             assert_pay_period_invariants(db.session, user_id)
             assert all(r.passed for r in check_referential_integrity(db.session))

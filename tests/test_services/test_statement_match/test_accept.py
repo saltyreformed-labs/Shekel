@@ -32,8 +32,6 @@ from app.enums import (
 )
 from app.exceptions import ValidationError
 from app.extensions import db
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.transaction import Transaction
 from app.models.statement_match import StatementMatch, StatementMatchMember
 from app.services import (
@@ -47,7 +45,9 @@ from app.services.balance_at import BalanceContext
 from app.services.row_valuation import settled_figure
 from app.services.statement_match import MatchSubmission
 
-from tests._stored_ledger import family_journal_filter
+from app.services.ledger_lines import linked_key
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import family_movement_ids, movement_nets_by_date
 from tests._test_helpers import (
     an_entered_day,
     an_observed_day,
@@ -95,41 +95,20 @@ def _balance_on(seed_user, day):
 
 
 def _posted_cash_by_day(db, txn, account):
-    """Return what *txn* posts to *account*'s cash leg, netted per civil day.
-
-    **NETTED, not listed, because this ledger is APPEND-ONLY.**  A correction
-    does not move a journal entry: measured 2024-01-06 -> 2024-01-10 on a real
-    settle, it writes a REVERSAL at the old day and a fresh posting at the new
-    one, so three entries stand over two days.  A test asserting *which days
-    carry an entry* would call that a leftover posting and be wrong; what says
-    the money moved is that the old day's postings SUM to zero.
+    """Return what *txn* books on *account*'s own line, netted per civil day.
 
     Args:
         db: The session fixture.
-        txn: The transaction whose postings to read.
-        account: The account whose cash leg to read.
+        txn: The transaction whose movements to read.
+        account: The account whose own line to read.
 
     Returns:
-        ``{entry_date: net}`` over the days this row posts on, days netting to
-        zero omitted -- so the answer is the days the row actually MOVES cash.
+        ``{entry_date: net}`` over the days this row moves cash, a day the
+        money left holding nothing.
     """
-    rows = (
-        db.session.query(
-            JournalEntry.entry_date, db.func.sum(Posting.amount),
-        )
-        .join(Posting, Posting.journal_entry_id == JournalEntry.id)
-        .join(
-            LedgerAccount,
-            LedgerAccount.id == Posting.ledger_account_id,
-        )
-        .filter(
-            family_journal_filter(txn),
-            LedgerAccount.account_id == account.id,
-        )
-        .group_by(JournalEntry.entry_date)
-        .all()
+    return movement_nets_by_date(
+        db.session, family_movement_ids(txn), linked_key(account), txn.scenario_id,
     )
-    return {row[0]: row[1] for row in rows if row[1] != 0}
 
 
 def _submit(
@@ -2107,12 +2086,10 @@ class TestARedatedSettleLeavesNoPostingBehind:
     ):
         """The same fact read from the LEDGER rather than from a balance.
 
-        A balance is one sum over everything, so a leftover posting here and a
-        missing one there can cancel inside it; the journal, read per day and
-        per account, cannot hide either.  **The ledger is append-only**, so
-        what says the money moved is that the old day nets to zero -- measured,
-        a correction writes a reversal at the old day and a posting at the new,
-        three entries over two days.
+        A balance is one sum over everything, so a leftover line here and a
+        missing one there can cancel inside it; the ledger, read per day and per
+        account, cannot hide either.  What says the money moved is that the old
+        day holds nothing.
         """
         period = seed_user["bootstrap_period"]
         guessed = period.start_date + timedelta(days=1)
@@ -2137,6 +2114,8 @@ class TestARedatedSettleLeavesNoPostingBehind:
         assert _posted_cash_by_day(db, txn, account) == {
             bank_day: Decimal("-180.00"),
         }
+        # The match's re-sync moved the stored copy too.
+        assert_ledger_parity(db.session, txn.scenario_id)
 
 
 class TestTheBankCanCONFIRMADayThePanelOnlyBOUNDED:

@@ -528,6 +528,70 @@ def period_nets_of_movements(movement_ids, scenario_id):
     return nets
 
 
+def movement_nets_by_key(db_session, movement_ids, scenario_id):
+    """Return the net *movement_ids* book on each chart account in a scenario.
+
+    Args:
+        db_session: The test ``db.session``.
+        movement_ids: The movements (:func:`family_movement_ids`,
+            :func:`transfer_family_movement_ids`).
+        scenario_id: The scenario.
+
+    Returns:
+        ``{chart key: net}``, only keys carrying a non-zero net.
+    """
+    wanted = set(movement_ids)
+    nets = {}
+    for line in scenario_lines(db_session, scenario_id):
+        if line.movement_id in wanted:
+            nets[line.key] = nets.get(line.key, _ZERO) + line.amount
+    return {key: net for key, net in nets.items() if net != 0}
+
+
+def movement_nets_by_date(db_session, movement_ids, key, scenario_id):
+    """Return the net *movement_ids* book on chart account *key*, per day.
+
+    The read holds no reversal, so a re-dated row reads as its one day, where
+    the store held a reversal on the old day and a posting on the new.
+
+    Args:
+        db_session: The test ``db.session``.
+        movement_ids: The movements (:func:`family_movement_ids`,
+            :func:`transfer_family_movement_ids`).
+        key: The chart account.
+        scenario_id: The scenario.
+
+    Returns:
+        ``{entry_date: net}``, only days carrying a non-zero net.
+    """
+    wanted = set(movement_ids)
+    nets = {}
+    for line in scenario_lines(db_session, scenario_id):
+        if line.key == key and line.movement_id in wanted:
+            nets[line.entry_date] = nets.get(line.entry_date, _ZERO) + line.amount
+    return {day: net for day, net in nets.items() if net != 0}
+
+
+def nets_by_key_and_day(db_session, scenario_id):
+    """Return a scenario's net per chart account and day, to compare two runs.
+
+    A key names an account or a category, never a stored chart row, so a row a
+    run mints and a rollback removes leaves nothing here to differ on.
+
+    Args:
+        db_session: The test ``db.session``.
+        scenario_id: The scenario.
+
+    Returns:
+        ``{(chart key, entry_date): net}``, only cells carrying a non-zero net.
+    """
+    nets = {}
+    for line in scenario_lines(db_session, scenario_id):
+        cell = (line.key, line.entry_date)
+        nets[cell] = nets.get(cell, _ZERO) + line.amount
+    return {cell: net for cell, net in nets.items() if net != 0}
+
+
 def net_posted_by_day(movement_ids):
     """Return ``{day: net magnitude}`` over the lines of one source's movements.
 

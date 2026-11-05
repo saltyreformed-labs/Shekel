@@ -61,6 +61,7 @@ from app.services.statement_match._outcome import FiledMerchant
 # module reaches into it, which is the allowance every sibling here takes.
 from app.services.statement_match import _create  # pylint: disable=protected-access
 
+from tests._ledger_reads import nets_by_key_and_day
 from tests._test_helpers import (
     an_entered_day,
     purchases_of,
@@ -1201,22 +1202,8 @@ class TestABatchBooksWhatTheSameActsBookOneAtATime:
             " ORDER BY t.name, e.description, e.amount"
         )).all()
         # The LEDGER, not just the projection.  A balance can agree while the
-        # postings underneath it differ, and the posting writer is what the
-        # settle verbs reach through -- so the ledger is where a re-dated
-        # settle leaving its old posting behind would show up.
-        #
-        # **Keyed by the chart row's NAME, never its id**, which is the lesson
-        # ``tests/manual/verify_statement_baseline.py`` states for itself: a
-        # chart row minted by a run has an id the other run never had, and it
-        # would diff as a moved line where the money did not move.
-        postings = app_db.session.execute(_db.text(
-            "SELECT l.name, e.entry_date, COALESCE(SUM(p.amount), 0)"
-            "  FROM budget.account_postings p"
-            "  JOIN budget.journal_entries e ON e.id = p.journal_entry_id"
-            "  JOIN budget.ledger_accounts l ON l.id = p.ledger_account_id"
-            " GROUP BY l.name, e.entry_date"
-            " ORDER BY l.name, e.entry_date"
-        )).all()
+        # lines underneath it differ, so the ledger is where a re-dated settle
+        # leaving money on its old day would show up.
         return {
             "balances": {
                 day.isoformat(): str(
@@ -1226,7 +1213,7 @@ class TestABatchBooksWhatTheSameActsBookOneAtATime:
             },
             "transactions": [tuple(str(v) for v in row) for row in rows],
             "entries": [tuple(str(v) for v in row) for row in entries],
-            "postings": [tuple(str(v) for v in row) for row in postings],
+            "ledger": nets_by_key_and_day(app_db.session, seed_user["scenario"].id),
         }
 
     @staticmethod
@@ -1379,7 +1366,7 @@ class TestABatchBooksWhatTheSameActsBookOneAtATime:
             assert as_a_batch["balances"] == singly["balances"]
             assert as_a_batch["transactions"] == singly["transactions"]
             assert as_a_batch["entries"] == singly["entries"]
-            assert as_a_batch["postings"] == singly["postings"]
+            assert as_a_batch["ledger"] == singly["ledger"]
 
 
 class TestOnePressMintsOneEnvelopePerAnswerPerPeriod:
@@ -1757,14 +1744,6 @@ class TestConvergingMovesTheSameMoneyAsNotConverging:
             "  FROM budget.transaction_entries e"
             " ORDER BY e.amount, e.settled_on"
         )).all()
-        postings = _db.session.execute(_db.text(
-            "SELECT l.name, e.entry_date, SUM(p.amount)"
-            "  FROM budget.account_postings p"
-            "  JOIN budget.journal_entries e ON e.id = p.journal_entry_id"
-            "  JOIN budget.ledger_accounts l ON l.id = p.ledger_account_id"
-            " GROUP BY l.name, e.entry_date"
-            " ORDER BY l.name, e.entry_date"
-        )).all()
         return {
             "balances": {
                 day.isoformat(): str(
@@ -1773,7 +1752,7 @@ class TestConvergingMovesTheSameMoneyAsNotConverging:
                 for day in days
             },
             "entries": [tuple(str(v) for v in row) for row in entries],
-            "postings": [tuple(str(v) for v in row) for row in postings],
+            "ledger": nets_by_key_and_day(_db.session, seed_user["scenario"].id),
         }
 
     def test_the_two_paths_book_the_same_money(self, app, db, seed_user):
@@ -1825,7 +1804,7 @@ class TestConvergingMovesTheSameMoneyAsNotConverging:
 
         assert converged["balances"] == separate["balances"]
         assert converged["entries"] == separate["entries"]
-        assert converged["postings"] == separate["postings"]
+        assert converged["ledger"] == separate["ledger"]
 
 
 class TestThePassHoldsONEAmountBasis:

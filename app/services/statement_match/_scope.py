@@ -55,6 +55,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import TYPE_CHECKING
 
 from app.exceptions import ValidationError
 from app.services import pay_calendar
@@ -62,7 +63,6 @@ from app.services.cash_ledger import (
     AmountBasis,
     CashOpeningFact,
     account_opening_fact,
-    baseline_amount_basis,
     reject_line_before_books_open,
 )
 
@@ -71,6 +71,9 @@ from ._destinations import destinations_for
 from ._creations import PurchaseDestination
 from ._offers import BankLine
 from ._subjects import Candidates
+
+if TYPE_CHECKING:
+    from app.services.balance_at import BalanceContext
 
 
 def impossible_days_refusal(line: BankLine) -> str:
@@ -247,6 +250,15 @@ class ReviewScope:
             no act this package performs writes a salary profile, a payday, a
             loan parameter or an escrow line.  It holds no per-row answer, so
             :func:`~._valuation.repriced` still re-reads every row it values.
+
+            **A card's worked-out payment is the one exception** (plan#2859):
+            its price is read off the pass's memoized fold of the card, so
+            an act that settles one payment leaves the others priced as they
+            stood before it.  That figure cannot be booked: a transfer's settle
+            prices from a pass of its own, and
+            :func:`~._accept._reject_drifted_under_the_act` compares what each
+            member booked with the bank's line, so such an act is refused
+            by name rather than recorded.
         opening: The account's governing
             :class:`~app.services.cash_ledger.CashOpeningFact` -- the day its
             books open and the equity they open holding (plan step
@@ -386,13 +398,15 @@ class ReviewScope:
         reject_line_before_books_open(self.opening, posted_on, subject)
 
     @classmethod
-    def build(cls, owner_id: int, account_id: int) -> "ReviewScope":
+    def build(cls, ctx: "BalanceContext", account_id: int) -> "ReviewScope":
         """Derive the scope for one pass over one account.
 
         The expensive call in the app's whole import path, made once.
 
         Args:
-            owner_id: The user the caller proved owns the account.
+            ctx: The route's read pass, built for the user the caller proved
+                owns the account.  Its calendar and its basis are this scope's,
+                and it names the owner (plan#2859).
             account_id: The account whose statement is being reviewed.
 
         Returns:
@@ -400,14 +414,14 @@ class ReviewScope:
 
         Raises:
             PayCalendarError: From
-                :func:`~app.services.pay_calendar.calendar_for`, when the owner
-                has paydays and no resolvable cadence.  Fails loud rather than
+                :meth:`~app.services.balance_at.BalanceContext.calendar`, when
+                the owner has paydays and no resolvable cadence.  Fails loud rather than
                 rendering as a designed refusal: a matcher cannot bound a row
                 without the calendar that says which paycheck it is budgeted
                 in, and answering anyway is the unbounded state finding
                 **N-312** records.
             BaselineMissingError: From
-                :func:`~app.services.scenario_resolver.require_baseline_scenario`,
+                :meth:`~app.services.balance_at.BalanceContext.amounts`,
                 answered by the application-level handler that renders the
                 setup-recovery page (ruling **R-BW**).  The RAISING form is
                 right here on that ruling's own criterion: this pass's answer
@@ -425,10 +439,10 @@ class ReviewScope:
                 money whose level nothing states, which is the fabrication
                 that loader exists to refuse.
         """
-        calendar = pay_calendar.calendar_for(owner_id)
-        # ONE basis for the pass (plan step X-au-j, finding **N-309**).  The
-        # BASELINE pin and its Phase-1 deferral are stated once, in
-        # ``cash_ledger.baseline_amount_basis``; it matches the ground
+        calendar = ctx.calendar()
+        # ONE basis for the pass (plan step X-au-j, finding **N-309**): the
+        # read pass's own, which holds the BASELINE pin and whose deriver prices
+        # a card's worked-out payment (plan#2859).  The pin matches the ground
         # ``_candidates._transaction_candidates`` already gives for not
         # filtering the candidate scan on ``scenario_id``.
         #
@@ -438,9 +452,9 @@ class ReviewScope:
         # screen counts.  Unreachable today, and NOT the same answer the
         # reconcile panel gives -- said here because a first draft of this
         # comment claimed both passes "fail loud" and only one does.
-        basis = baseline_amount_basis(owner_id)
+        basis = ctx.amounts()
         return cls(
-            owner_id=owner_id,
+            owner_id=ctx.user_id,
             account_id=account_id,
             calendar=calendar,
             basis=basis,

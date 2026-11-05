@@ -114,8 +114,8 @@ class Statement:
 
     Attributes:
         calendar: The owner's :class:`~app.services.pay_calendar.PayCalendar`,
-            resolved by the ROUTE and threaded (this package holds no read pass
-            of its own).  It answers two questions here: whose rows may be
+            resolved by the ROUTE and threaded (this package builds no read
+            pass).  It answers two questions here: whose rows may be
             offered or settled (:attr:`owner_id`), and which span each offered
             row is budgeted in (:func:`attributed_on`).
         account_id: The cash account whose balance was asserted.

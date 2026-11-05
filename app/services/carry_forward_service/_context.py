@@ -172,7 +172,19 @@ def _build_carry_forward_context(source_period_id, target_period_id,
     # Its loan calendars are its own, as its pricer's memo was before plan step
     # recurrence:R25: the pass's are private to it, with no accessor that
     # would hand out a memo keyed by a bare loan id (BalanceContext).
-    basis = amount_basis(balance_ctx.paychecks(), scenario_id, LoanCalendars())
+    #
+    # **It holds the pass's price of a card's worked-out payment** (plan#2859),
+    # so the preview names the row's figure as it stands before the move: moved,
+    # the row counts its new paycheck's money too, and that paycheck's total
+    # stays what the card owes.  That answer is the
+    # pass's scenario's, so the deriver itself refuses a row of any other
+    # (``balance_at._card_payment_doors.card_payment_price``): what a card's
+    # payment means in a carried non-baseline scenario is the same undecided
+    # question the docstring names.
+    basis = amount_basis(
+        balance_ctx.paychecks(), scenario_id, LoanCalendars(),
+        card_payments=balance_ctx.amounts().card_payments,
+    )
 
     if source_period_id == target_period_id:
         return _CarryForwardContext(

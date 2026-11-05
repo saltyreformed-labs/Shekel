@@ -553,11 +553,10 @@ def derived_paycheck_pricing(user_id: int) -> PaycheckPricing:
     """Return a pricer for a producer that holds NO read pass.
 
     **The interim that goes when every producer holds its pass, stated as
-    such.**  Twelve call sites build an amount basis from an owner and a
-    scenario with no :class:`~app.services.balance_at.BalanceContext` in reach
-    -- the two settle doors, the row re-render helpers, the two
-    template-conflict choosers, the companion, reconcile and statement-match
-    scopes, the spending report, the credit workflow and the profile archive
+    such.**  Five call sites build an amount basis from an owner and a scenario
+    with no :class:`~app.services.balance_at.BalanceContext` in reach -- the
+    row settle door, the transaction template chooser, the companion, the
+    credit workflow and the profile archive
     (greppable as ``cash_ledger.derived_amount_basis``; ledger row
     **BAL-491**, owned by balance:X-i6) -- and until each takes its pass,
     this is the pricer their basis is built over: :func:`paycheck_pricing` with

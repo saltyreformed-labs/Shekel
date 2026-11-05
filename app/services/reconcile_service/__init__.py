@@ -78,7 +78,7 @@ It is the owner's pay CALENDAR -- which answers both whose rows these are and
 which span each is budgeted in -- the account whose balance was asserted, and
 the governing assertion.  It lives in :mod:`._rows` because the shared scope is
 what reads it, and it is exported because the ROUTE builds it: this package
-holds no read pass, so the calendar is resolved at the HTTP boundary and
+builds no read pass, so the calendar is resolved at the HTTP boundary and
 threaded, which is the layer rule ``pay_calendar:C11`` states.  Before that
 step the three facts travelled as loose arguments, each arm rebuilt the value,
 and the write half held a fourth copy inside

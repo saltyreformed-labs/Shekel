@@ -278,7 +278,9 @@ def _spending_figures(user_id):
         f"{w.window_type}:{w.year}:{w.month}:{w.period_id}": _guard(
             f"spending {w}",
             lambda w=w: _plain(
-                spending_report_service.compute_spending_report(user_id, w, user_settings=None),
+                spending_report_service.compute_spending_report(
+                    BalanceContext.build(user_id), w, user_settings=None,
+                ),
             ),
         )
         for w in windows

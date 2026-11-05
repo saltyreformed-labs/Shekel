@@ -12,6 +12,7 @@ from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services import account_service, reconcile_service, status_seam, transaction_service
 from app.services.pay_calendar import PayCalendar, calendar_for
+from tests._test_helpers import outstanding_set_of
 from tests._test_helpers import (
     an_entered_day,
     create_account_of_type,
@@ -74,7 +75,7 @@ class TestTheOutstandingSet:
         """Return the ids the reader offers for the seed user's account."""
         return [
             purchase.entry_id
-            for group in reconcile_service.outstanding_set(_reconciled(seed_user)).groups
+            for group in outstanding_set_of(_reconciled(seed_user)).groups
             for purchase in group.purchases
         ]
 
@@ -371,7 +372,7 @@ class TestTheOutstandingSet:
             on_the_card = _reconciled(seed_user, account_id=card.id)
             offered = [
                 (group.key, purchase.entry_id)
-                for group in reconcile_service.outstanding_set(on_the_card).groups
+                for group in outstanding_set_of(on_the_card).groups
                 for purchase in group.purchases
             ]
             assert offered == [(txn.id, swipe.id)]
@@ -569,7 +570,7 @@ class TestARefundIsAnOutstandingPurchaseAndTheTallyNETS:
             refund = _outstanding_debit(txn, seed_user, amount="-45.00")
             db.session.commit()
 
-            offered = reconcile_service.outstanding_set(_reconciled(seed_user))
+            offered = outstanding_set_of(_reconciled(seed_user))
 
             assert sorted(self._listed(seed_user)) == sorted(
                 [charge.id, refund.id],
@@ -606,7 +607,7 @@ class TestARefundIsAnOutstandingPurchaseAndTheTallyNETS:
                 setattr(entry, column, value)
             db.session.commit()
 
-            offered = reconcile_service.outstanding_set(_reconciled(seed_user))
+            offered = outstanding_set_of(_reconciled(seed_user))
 
             assert self._listed(seed_user) == []
             assert offered.purchase_count == 0
@@ -617,7 +618,7 @@ class TestARefundIsAnOutstandingPurchaseAndTheTallyNETS:
         """Return the ids the reader offers -- the same read as the class above."""
         return [
             purchase.entry_id
-            for group in reconcile_service.outstanding_set(
+            for group in outstanding_set_of(
                 _reconciled(seed_user),
             ).groups
             for purchase in group.purchases
@@ -729,7 +730,7 @@ class TestTheScopeIsTheCALENDARsNotTheTables:
 
             offered = {
                 group.settle.key
-                for group in reconcile_service.outstanding_set(
+                for group in outstanding_set_of(
                     reconcile_service.Statement(
                         self._short_calendar(seed_user, seed_periods[1].id),
                         seed_user["account"].id,
@@ -760,7 +761,7 @@ class TestTheScopeIsTheCALENDARsNotTheTables:
 
             offered = {
                 group.settle.key
-                for group in reconcile_service.outstanding_set(
+                for group in outstanding_set_of(
                     _reconciled(seed_user, observed_on=date(2026, 1, 20)),
                 ).groups
                 if group.settle is not None
@@ -785,7 +786,7 @@ class TestTheScopeIsTheCALENDARsNotTheTables:
             _make_entry(later, seed_user["user"], amount="30.00")
             db.session.commit()
 
-            groups = reconcile_service.outstanding_set(
+            groups = outstanding_set_of(
                 reconcile_service.Statement(
                     self._short_calendar(seed_user, seed_periods[1].id),
                     seed_user["account"].id,

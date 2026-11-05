@@ -25,8 +25,8 @@ from app.enums import SettledDayBasisEnum
 from app.exceptions import NotFoundError
 from app.models.account import Account
 from app.models.transfer import Transfer
+from app.services.balance_at import BalanceContext
 from app.services.cash_ledger import (
-    derived_amount_basis,
     amounts_by_key,
     resolve_transfer_amount,
     settled_amounts_by_key,
@@ -143,12 +143,15 @@ def fragment_amounts(item: PlanItem) -> RenderAmounts:
 
     **A transfer side's fragment asks it too** (ruling **plan#1983**): the
     same three producers over one item, keyed by the side and valued by its
-    parent, with the basis pinned off the PARENT's owner and scenario -- for
-    a row its own columns (``fk_transactions_owner_account`` holds its owner
-    equal to its account's, which this read until then), for a side its
-    transfer's, which is what makes the basis right for the item being
-    priced whichever door called.  ``leg_fragment_amounts`` was this
-    function spelled again for a leg until that ruling.
+    parent, with the read pass opened for the PARENT's owner -- for a row its
+    own column (``fk_transactions_owner_account`` holds its owner equal to its
+    account's, which this read until then), for a side its transfer's, which is
+    what makes the pass right for the item being priced whichever door called.
+    ``leg_fragment_amounts`` was this function spelled again for a leg until
+    that ruling.  **The pass's scenario is the owner's baseline**, so a row of
+    another refuses (``resolve_transaction_amount``), as the pages that draw
+    these cells load no other; nothing writes such a row in Phase 1
+    (``cash_ledger.baseline_amount_basis``).
 
     Args:
         item: The row or transfer side the fragment renders.
@@ -167,14 +170,17 @@ def fragment_amounts(item: PlanItem) -> RenderAmounts:
     # whole pay-period set.  Measured on the 2026-09-02 production clone: 8
     # statements, and one basis, for one row.
     #
-    # It is not threaded from a read pass because a FRAGMENT has none: this is
-    # the one-row render path, reached by an HTMX swap that loaded nothing else.
-    # A pass-shaped caller (the grid, the fold, the reconcile panel) already
-    # builds one basis for everything it loaded, which is what findings N-228 /
-    # N-268 / N-309 are about; this is the shape those findings do not cover
-    # and the cost is one derivation rather than one per row.
+    # It opens its own read pass because a FRAGMENT is handed none: this is the
+    # one-row render path, reached by an HTMX swap that loaded nothing else.  It
+    # needs a pass rather than a bare basis because a card's worked-out payment
+    # is priced off the pass's fold (plan#2859), and it is opened here, after
+    # whatever the door wrote, so it reads that write.  A pass-shaped caller
+    # (the grid, the fold, the reconcile panel) already builds one basis for
+    # everything it loaded, which is what findings N-228 / N-268 / N-309 are
+    # about; this is the shape those findings do not cover and the cost is one
+    # derivation rather than one per row.
     parent = parent_of(item)
-    basis = derived_amount_basis(parent.user_id, parent.scenario_id)
+    basis = BalanceContext.build(parent.user_id).amounts()
     return RenderAmounts(
         budgets=amounts_by_key([item], basis),
         settled=settled_amounts_by_key([item]),
@@ -230,28 +236,30 @@ def transfer_budgets(xfer: Transfer) -> "dict[int, Decimal]":
     **SINGLE-ROW reads only.**  Plan step X-au-f-2 gave a loan payment's PARENT
     its producer (ruling **R-BAL10**), so this now builds a read pass and one
     call per row is what an N+1 would look like.  A transfer that owns its
-    figure or reads its definition's series still costs no query -- the basis
-    resolves nothing until a rule asks it -- and only a DERIVE-mode loan
-    payment reaches the loan.  The one batch surface -- the grid, which since leaf ``X-bi-6-1``
+    figure or reads its definition's series costs the pass's baseline lookup
+    and no more -- the basis resolves nothing until a rule asks it -- only a
+    DERIVE-mode loan payment reaches the loan, and only a card's worked-out
+    payment folds the card.  The one batch surface -- the grid, which since leaf ``X-bi-6-1``
     draws a transfer's LEGS off the parent -- prices them through
     :func:`~app.services.cash_ledger.amounts_by_key` with the page's
     own basis (``routes/grid/_items.build_amount_maps``), the same resolver
     this calls; every parent-transfer render site here is a one-row HTMX
     swap.
 
-    **The basis is BUILT here rather than threaded, exactly as the transaction
-    twin builds one** (:func:`fragment_amounts`, whose comment carries the
-    argument): a FRAGMENT has no read pass to take one from -- it is reached by
-    an HTMX swap that loaded nothing else -- and a pass-shaped caller builds
-    one basis for everything it loaded instead.  It is pinned off the
-    transfer's OWN columns, which is what makes it right for the row being
-    priced whichever site called.
+    **The read pass is OPENED here rather than threaded, exactly as the
+    transaction twin opens one** (:func:`fragment_amounts`, whose comment
+    carries the argument): a FRAGMENT is handed no pass -- it is reached by an
+    HTMX swap that loaded nothing else -- and a pass-shaped caller builds one
+    basis for everything it loaded instead.  Its owner is the transfer's OWN
+    column, which is what makes it right for the row being priced whichever
+    site called; its scenario is the owner's baseline, and a card's worked-out
+    payment in any other refuses rather than answering from that baseline.
 
     Args:
         xfer: The transfer the fragment renders.  It states no ownership rule of
-            its own and needs none: it reads ``user_id`` and ``scenario_id``
-            only to pin the basis to the transfer's own columns and, on the
-            OWN arm, issues no query at all, so there is nothing here to
+            its own and needs none: it reads ``user_id`` only to open the pass
+            for the transfer's own owner and, on the OWN arm, the pass's
+            baseline lookup is all it costs, so there is nothing here to
             scope.  Every caller is a transfers-blueprint render (the quick
             edit, the full-edit popover, :func:`render_transfer_cell`) handed
             a transfer its door loaded for the owner (``_get_owned_transfer``,
@@ -268,10 +276,11 @@ def transfer_budgets(xfer: Transfer) -> "dict[int, Decimal]":
         AmountUnresolvable: From the resolver, for a transfer whose rule cannot
             answer.  A refusal is never a fallback (see
             :mod:`app.services.cash_ledger._amount_source`).
+        BaselineMissingError: The owner has no baseline scenario (ruling R-BW).
     """
     return {
         xfer.id: resolve_transfer_amount(
-            xfer, derived_amount_basis(xfer.user_id, xfer.scenario_id),
+            xfer, BalanceContext.build(xfer.user_id).amounts(),
         ),
     }
 
@@ -702,8 +711,8 @@ def render_transfer_cell(xfer: Transfer, **extra: Any) -> str:
 
     Raises:
         AmountUnresolvable: From :func:`transfer_budgets`, for a transfer whose
-            rule cannot answer.  Unreachable while every transfer owns its
-            figure; the leaves after this one are what give it a population.
+            rule cannot answer.
+        BaselineMissingError: The owner has no baseline scenario (ruling R-BW).
     """
     amounts = transfer_settlement_amounts(xfer, current_user.id)
     return render_template(
@@ -810,6 +819,7 @@ def render_transaction_cell(item: PlanItem, **extra: Any) -> str:
     Raises:
         AmountUnresolvable: From the resolver, for a parent whose rule cannot
             answer (:func:`fragment_amounts`).
+        BaselineMissingError: The owner has no baseline scenario (ruling R-BW).
     """
     amounts = fragment_amounts(item)
     return render_template(

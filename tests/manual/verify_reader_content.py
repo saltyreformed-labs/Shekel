@@ -169,7 +169,7 @@ def _snapshot_user(user_id: int, today: date) -> dict:
         )
         out["spending"][f"{year}-{month:02d}"] = _plain(
             spending_report_service.compute_spending_report(
-                user_id, window, user_settings=settings,
+                BalanceContext.build(user_id), window, user_settings=settings,
             ),
         )
     for year in years:
@@ -178,7 +178,7 @@ def _snapshot_user(user_id: int, today: date) -> dict:
         )
         out["spending"][str(year)] = _plain(
             spending_report_service.compute_spending_report(
-                user_id, window, user_settings=settings,
+                BalanceContext.build(user_id), window, user_settings=settings,
             ),
         )
     return out

@@ -53,7 +53,7 @@ from app.models.transfer_template import TransferTemplate
 from app.routes._recurrence_conflict_chooser import RecurrenceConflictKind
 from app.routes._redirect_target import RedirectTarget
 from app.services import transfer_recurrence
-from app.services.cash_ledger import derived_amount_basis, resolve_transfer_amount
+from app.services.cash_ledger import resolve_transfer_amount
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
 from app.utils.auth_helpers import get_or_404
@@ -247,11 +247,14 @@ TRANSFER_TEMPLATE_KIND = RecurrenceConflictKind(
     # A transfer's amount rule, as a one-argument callable and the exact twin of
     # the transaction kind's.  It passed the resolver BARE until plan step
     # X-au-f-2, under a comment claiming a parent transfer needs no basis --
-    # made false by R-BAL10; pinned off the row, one row at a time -- so N
-    # conflicted loan payments resolve their loan N times, bounded by the
-    # conflicted set and free for every other kind (the basis is lazy).
+    # made false by R-BAL10; a read pass per row (plan#2859), so N conflicted
+    # loan payments resolve their loan N times, bounded by the conflicted set,
+    # and every other kind pays the pass's baseline lookup alone (the basis is
+    # lazy).  No route brings a card's worked-out payment here today, the
+    # chooser drawing on a changed price series and that definition having none,
+    # and this basis would price one rather than refuse it if one did.
     resolve_amount=lambda row: resolve_transfer_amount(
-        row, derived_amount_basis(row.user_id, row.scenario_id),
+        row, BalanceContext.build(row.user_id).amounts(),
     ),
     regenerate_fn=transfer_recurrence.regenerate_for_template,
     preview_fn=transfer_recurrence.preview_regeneration_for_template,

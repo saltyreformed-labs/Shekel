@@ -308,14 +308,21 @@ def outstanding_transfers(
             derive-mode payment -- finding **N-269** reintroduced one tier up,
             exactly as N-295's impact column predicted.
 
-    **Every leg is offered** (ruling **R-BAL235**, developer 2026-10-08,
-    "Offer and settle it", retiring **R-BAL148**'s warning): a leg is priced
+    **Every leg worth something is offered** (ruling **R-BAL235**, developer
+    2026-10-08, "Offer and settle it", retiring **R-BAL148**'s warning): a leg
+    is priced
     off its transfer (``transaction_service.settle_amount`` of
     ``transfer_legs.parent_of(leg)``, ruling **plan#1983**), never its twin
     rows, so a transfer whose twin was
     deleted behind the app's back is priced and ticked like any other.  The
     warning the panel printed for one went with the refusal it caught (plan
     step ``balance:X-bi-6-4d-2``).
+
+    **A leg worth ``$0.00`` is not offered** (plan#2859), as the statement
+    review offers none (``statement_match._leg_valuation.leg_candidate``).  Only
+    a card's worked-out payment with nothing owed prices there, and it has no
+    money for a bank to have taken: its tick would be refused, whole save and
+    all (ruling **R-CC125**), and it alone would hold the true-up's prompt open.
 
     Returns:
         One :class:`~._offers.OutstandingGroup` per offered leg, in
@@ -324,12 +331,15 @@ def outstanding_transfers(
     """
     groups = []
     for leg in ARM.load(statement, None).values():
+        amount = transaction_service.settle_amount(
+            transfer_legs.parent_of(leg), basis,
+        )
+        if amount == 0:
+            continue
         offer = OutstandingTransaction(
             key=leg.cell_key,
             attributed_on=_rows.attributed_on(statement, leg.transfer),
-            amount=transaction_service.settle_amount(
-                transfer_legs.parent_of(leg), basis,
-            ),
+            amount=amount,
             # Always the whole figure: a leg can hold no PURCHASE (its one
             # possible entry is the seam's covering movement, written when it
             # settles and kept un-dated across a revert), so there is no card

@@ -10590,6 +10590,29 @@ def amount_basis_for_scenario(scenario_id):
     return derived_amount_basis(scenario.user_id, scenario_id)
 
 
+def outstanding_set_of(statement):
+    """Return the reconcile panel's offers for *statement*, off a fresh read pass.
+
+    What the panel's route does (``routes.accounts.reconcile``), for the owner
+    the statement's calendar names, so a test holds no pass across its writes.
+
+    Args:
+        statement: The :class:`~app.services.reconcile_service.Statement`.
+
+    Returns:
+        The :class:`~app.services.reconcile_service.OutstandingSet`.
+    """
+    # Pylint: ``import-outside-toplevel`` -- this module imports no app or ORM
+    # symbols at top level (its collection-time-safety convention).
+    # pylint: disable=import-outside-toplevel
+    from app.services import reconcile_service
+    from app.services.balance_at import BalanceContext
+
+    return reconcile_service.outstanding_set(
+        statement, BalanceContext.build(statement.owner_id),
+    )
+
+
 def count_amount_bases(monkeypatch):
     """Return a list that records every ``AmountBasis`` CONSTRUCTION.
 

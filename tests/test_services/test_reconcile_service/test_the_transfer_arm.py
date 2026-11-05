@@ -19,6 +19,7 @@ from app.services import (
     transfer_service,
 )
 from app.utils.log_events import EVT_TRANSFERS_RECONCILED
+from tests._test_helpers import outstanding_set_of
 from tests._test_helpers import (
     linked_ledger_account,
     linked_net_by_date,
@@ -235,7 +236,7 @@ class TestTheTransferArm:
         with app.app_context():
             transfer = self._transfer_out(seed_user, seed_periods)
 
-            groups = reconcile_service.outstanding_set(_reconciled(seed_user)).groups
+            groups = outstanding_set_of(_reconciled(seed_user)).groups
             block = next(
                 group for group in groups
                 if group.key == (transfer.id, seed_user["account"].id)
@@ -270,11 +271,11 @@ class TestTheTransferArm:
             )
             db.session.commit()
 
-            outgoing = reconcile_service.outstanding_set(_reconciled(seed_user))
+            outgoing = outstanding_set_of(_reconciled(seed_user))
             assert outgoing.payment_total >= Decimal("75.00")
             assert outgoing.deposit_count == 0
 
-            incoming = reconcile_service.outstanding_set(
+            incoming = outstanding_set_of(
                 _reconciled(seed_user, account_id=savings.id),
             )
             assert incoming.deposit_count == 1
@@ -749,7 +750,7 @@ class TestWhatATickBooks:
             )
             db.session.commit()
 
-            result = reconcile_service.outstanding_set(_reconciled(seed_user))
+            result = outstanding_set_of(_reconciled(seed_user))
             assert result.deposit_count == 1
             assert result.deposit_total == Decimal("1958.87")
             assert result.payment_count == 0
@@ -777,7 +778,7 @@ class TestWhatATickBooks:
             _make_entry(txn, seed_user["user"], amount="60.00")
             db.session.commit()
 
-            result = reconcile_service.outstanding_set(_reconciled(seed_user))
+            result = outstanding_set_of(_reconciled(seed_user))
             assert result.purchase_count == 2
             assert result.purchase_total == Decimal("100.00")
             assert result.payment_count == 1

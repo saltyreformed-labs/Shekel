@@ -38,6 +38,7 @@ from app.services import (
     template_amount_service,
     transfer_service,
 )
+from app.services.balance_at import BalanceContext
 from app.services.cash_flow_set import AttributionSpan, CashFlowSet, Paychecks
 from app.services.pay_calendar import PayCalendar
 from app.utils.dates import display_today
@@ -222,7 +223,7 @@ class TestBreakdown:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             assert report.hero.spent_total == Decimal("2000.00")
@@ -260,7 +261,7 @@ class TestBreakdown:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             auto = _group(report, "Auto")
@@ -300,7 +301,7 @@ class TestBreakdown:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             home = _group(report, "Home")
@@ -348,7 +349,7 @@ class TestBreakdown:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             assert report.hero.spent_total == Decimal("500.00")
@@ -370,7 +371,7 @@ class TestBreakdown:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id,
+                BalanceContext.build(seed_user["user"].id),
                 SpendingWindow(window_type="month", month=1, year=2026),
                 user_settings=None,
             )
@@ -394,7 +395,7 @@ class TestBreakdown:
             db.session.commit()
 
             february = compute_spending_report(
-                seed_user["user"].id,
+                BalanceContext.build(seed_user["user"].id),
                 SpendingWindow(window_type="month", month=2, year=2026),
                 user_settings=None,
             )
@@ -402,7 +403,7 @@ class TestBreakdown:
             assert february.breakdown[0].items[0].item_name == "Rent"
 
             january = compute_spending_report(
-                seed_user["user"].id,
+                BalanceContext.build(seed_user["user"].id),
                 SpendingWindow(window_type="month", month=1, year=2026),
                 user_settings=None,
             )
@@ -435,7 +436,7 @@ class TestSurprises:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             rows = report.surprises.rows
@@ -461,7 +462,7 @@ class TestSurprises:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             assert len(report.surprises.rows) == _MAX_SURPRISES
@@ -488,7 +489,7 @@ class TestHero:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[1]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[1]),
                 user_settings=None,
             )
             assert report.hero.spent_total == Decimal("1500.00")
@@ -503,7 +504,7 @@ class TestHero:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             assert report.hero.vs_prior.baseline is None
@@ -521,7 +522,7 @@ class TestHero:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[1]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[1]),
                 user_settings=None,
             )
             assert report.hero.vs_prior.baseline == Decimal("0")
@@ -543,7 +544,7 @@ class TestHero:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[6]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[6]),
                 user_settings=None,
             )
             assert report.hero.vs_average.baseline == Decimal("350.00")
@@ -557,7 +558,7 @@ class TestHero:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             assert report.hero.vs_average.baseline is None
@@ -584,7 +585,7 @@ class TestHero:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             timing = report.hero.payment_timing
@@ -838,7 +839,7 @@ class TestTheChartReadsTheDerivedOrdinal:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id,
+                BalanceContext.build(seed_user["user"].id),
                 SpendingWindow(window_type="pay_period",
                                period_id=foreign[5].id),
                                user_settings=None,
@@ -899,7 +900,7 @@ class TestTheChartReadsTheDerivedOrdinal:
             with _pay_period_selects(db.engine) as selects, \
                     pay_periods_hydrated() as hydrated:
                 compute_spending_report(
-                    seed_user["user"].id, _pp_window(seed_periods[9]),
+                    BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[9]),
                     user_settings=None,
                 )
 
@@ -994,7 +995,7 @@ class TestSeries:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[2]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[2]),
                 user_settings=None,
             )
             series = report.series
@@ -1025,7 +1026,7 @@ class TestSeries:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id,
+                BalanceContext.build(seed_user["user"].id),
                 SpendingWindow(window_type="month", month=3, year=2026),
                 user_settings=None,
             )
@@ -1056,7 +1057,7 @@ class TestSeries:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id,
+                BalanceContext.build(seed_user["user"].id),
                 SpendingWindow(window_type="year", year=2026),
                 user_settings=None,
             )
@@ -1088,7 +1089,7 @@ class TestSeries:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id,
+                BalanceContext.build(seed_user["user"].id),
                 SpendingWindow(window_type="month", month=3, year=2026),
                 user_settings=None,
             )
@@ -1123,7 +1124,7 @@ class TestDeltas:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[1]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[1]),
                 user_settings=None,
             )
             assert [g.group_name for g in report.breakdown] == ["Home", "Auto"]
@@ -1164,7 +1165,7 @@ class TestDeltas:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[1]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[1]),
                 user_settings=None,
             )
             home = _group(report, "Home")
@@ -1190,7 +1191,7 @@ class TestDeltas:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[1]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[1]),
                 user_settings=None,
             )
             rows = report.changes
@@ -1221,7 +1222,7 @@ class TestDeltas:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[1]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[1]),
                 user_settings=None,
             )
             assert [r.item_name for r in report.changes] == [
@@ -1248,7 +1249,7 @@ class TestDeltas:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             tied = [
@@ -1323,7 +1324,7 @@ class TestScopeAndContracts:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             assert report.scope.account_id == seed_user["account"].id
@@ -1341,7 +1342,7 @@ class TestScopeAndContracts:
         """
         with app.app_context():
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             assert report is not None
@@ -1364,7 +1365,7 @@ class TestScopeAndContracts:
                 return_value=None,
             ):
                 report = compute_spending_report(
-                    seed_user["user"].id, _pp_window(seed_periods[0]),
+                    BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                     user_settings=None,
                 )
             assert report is None
@@ -1372,14 +1373,14 @@ class TestScopeAndContracts:
     def test_none_when_no_baseline_scenario(self, app, seed_user, seed_periods):
         """No baseline scenario -> None (empty state, not a crash)."""
         with app.app_context():
-            with patch(
-                "app.services.spending_report_service.get_baseline_scenario",
-                return_value=None,
-            ):
-                report = compute_spending_report(
-                    seed_user["user"].id, _pp_window(seed_periods[0]),
-                    user_settings=None,
-                )
+            report = compute_spending_report(
+                BalanceContext(
+                    user_id=seed_user["user"].id, scenario=None,
+                    as_of=display_today(),
+                ),
+                _pp_window(seed_periods[0]),
+                user_settings=None,
+            )
             assert report is None
 
     def test_invalid_window_raises(self, app, seed_user):
@@ -1388,7 +1389,7 @@ class TestScopeAndContracts:
         with app.app_context():
             with pytest.raises(ValueError, match="Invalid window_type"):
                 compute_spending_report(
-                    seed_user["user"].id,
+                    BalanceContext.build(seed_user["user"].id),
                     SpendingWindow(window_type="bogus"),
                     user_settings=None,
                 )
@@ -1440,7 +1441,7 @@ class TestTheReportReadsTheCashFlowSet:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             assert report.hero.spent_total == Decimal("545.00")
@@ -1467,7 +1468,7 @@ class TestTheReportReadsTheCashFlowSet:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id,
+                BalanceContext.build(seed_user["user"].id),
                 SpendingWindow(window_type="month", month=1, year=2026),
                 user_settings=None,
             )
@@ -1539,7 +1540,7 @@ class TestTheReportReadsTheCashFlowSet:
             )
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             assert report.hero.spent_total == Decimal("165.00")
@@ -1565,11 +1566,11 @@ class TestTheReportReadsTheCashFlowSet:
             db.session.commit()
 
             with_layer = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=settings,
             )
             without = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
             assert with_layer.scope.account_name == "Rainy Day"
@@ -1669,7 +1670,7 @@ class TestATransferIsALegOfItsParent:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(period), user_settings=None,
+                BalanceContext.build(seed_user["user"].id), _pp_window(period), user_settings=None,
             )
             assert report.hero.spent_total == Decimal("240.00")
             [group] = report.breakdown
@@ -1763,7 +1764,7 @@ class TestATransferIsALegOfItsParent:
             # No row is seeded, so the one list is the legs (ruling plan#2218).
             assert by_period == [] and by_span == []
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(period), user_settings=None,
+                BalanceContext.build(seed_user["user"].id), _pp_window(period), user_settings=None,
             )
             assert report.hero.spent_total == Decimal("0")
             assert report.surprises.rows == []
@@ -1801,7 +1802,7 @@ class TestATransferIsALegOfItsParent:
             assert settled_contribution(parent_of(leg)) == Decimal("0")
             assert leg.settled_on is None and leg.days_paid_before_due is None
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(period), user_settings=None,
+                BalanceContext.build(seed_user["user"].id), _pp_window(period), user_settings=None,
             )
             assert report.hero.spent_total == Decimal("0")
             assert report.hero.payment_timing is None
@@ -1824,7 +1825,7 @@ class TestATransferIsALegOfItsParent:
             )
             db.session.commit()
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(period), user_settings=None,
+                BalanceContext.build(seed_user["user"].id), _pp_window(period), user_settings=None,
             )
             assert report.hero.payment_timing is None
 
@@ -1834,7 +1835,7 @@ class TestATransferIsALegOfItsParent:
             )
             db.session.commit()
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(period), user_settings=None,
+                BalanceContext.build(seed_user["user"].id), _pp_window(period), user_settings=None,
             )
             assert report.hero.payment_timing == {
                 "total_bills_paid": 1, "paid_on_time": 1, "paid_late": 0,
@@ -1875,7 +1876,7 @@ class TestATransferIsALegOfItsParent:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(period), user_settings=None,
+                BalanceContext.build(seed_user["user"].id), _pp_window(period), user_settings=None,
             )
 
             assert report.hero.payment_timing == {
@@ -2555,7 +2556,7 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
             db.session.commit()
 
             report = compute_spending_report(
-                seed_user["user"].id, _pp_window(seed_periods[0]),
+                BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
 

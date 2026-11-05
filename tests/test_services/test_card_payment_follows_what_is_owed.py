@@ -21,13 +21,11 @@ from decimal import Decimal
 
 from app import ref_cache
 from app.enums import (
-    AmountSourceEnum,
     CardPaymentModeEnum,
     SettledDayBasisEnum,
     StatusEnum,
 )
 from app.extensions import db
-from app.models.amount_ownership import AmountOwnership
 from app.services.balance_at import BalanceContext, balance_at, cash_balance_at
 from app.services.balance_at._cash_fold import assembled_fold
 from app.services.balance_at._cash_periods import period_view_of
@@ -368,21 +366,16 @@ class TestCappedAtWhatIsOwed:
     ):
         """Paid Jan 20 for $800, so owed on Jan 26 is $0.00 only because of it.
 
-        Its plan is what the card asked of it: owed on Jan 26 with its own $800
-        taken back out is $800, so min($800, $800) = $800.00, never $0.00.
-        **A plant**, as in :mod:`.test_card_payment_price`, until the settle door
-        holds a read pass (plan#2859).
+        Its plan is what the card asked of it: its own $800 is no money it counts
+        against itself, so min($800, $800) = $800.00, never $0.00.
+        Settled through the door while still worked out (plan#2859).
         """
         card = _card(seed_user)
         _on_the_card(seed_user, card, seed_periods[0], "800.00", date(2026, 1, 3))
         template = _scheduled(seed_user, card)
         row = _row(template, _JAN_27)
-        _type_over(row, "800.00")
         _settle(row, date(2026, 1, 20))
-        row.amount_ownership = AmountOwnership.derived(
-            ref_cache.amount_source_id(AmountSourceEnum.TEMPLATE),
-        )
-        db.session.commit()
+        assert row.settled_figure == Decimal("800.00")
 
         assert _price(template, _JAN_27, date(2026, 1, 21)) == Decimal("800.00")
 

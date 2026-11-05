@@ -241,13 +241,14 @@ def derived_amount_basis(user_id: int, scenario_id: int) -> AmountBasis:
     """Return an :class:`AmountBasis` for a producer that holds NO read pass.
 
     **The interim that goes when every producer holds its pass, and its name
-    is that census.**  Twelve call sites reach here because no
-    :class:`~app.services.balance_at.BalanceContext` is in reach -- the two
-    settle doors, the row re-render helpers (two), the two template-conflict
-    choosers, the credit workflow, the spending report, the profile archive,
-    and the companion, reconcile and statement-match scopes through
-    :func:`baseline_amount_basis` -- and the pricer it is built over derives
-    the owner's calendar on the first paycheck priced
+    is that census.**  Five call sites reach here, re-counted at plan#2859, which
+    moved every door that can price a card's worked-out payment onto a pass
+    (a basis from here refuses one): the row settle door, the transaction
+    template chooser, the credit workflow, the profile archive, and the
+    companion through :func:`baseline_amount_basis`.  Each prices a
+    :class:`~app.models.transaction.Transaction`, never a transfer.  The
+    pricer it is built over derives the owner's calendar on the first paycheck
+    priced
     (:func:`~app.services.income_service.derived_paycheck_pricing`), which is
     exactly what :func:`amount_basis` itself did for every caller until plan
     step salary:C12.  So this costs what that cost and refuses what that
@@ -276,20 +277,18 @@ def derived_amount_basis(user_id: int, scenario_id: int) -> AmountBasis:
 def baseline_amount_basis(user_id: int) -> AmountBasis:
     """Return the BASELINE scenario's :class:`AmountBasis` for *user_id*.
 
-    **One statement of the Phase-1 scenario pin, because three surfaces make
-    it** (plan step X-au-j): the reconcile panel, the statement-match review
-    pass and the companion card each price rows the app does not filter by
-    ``scenario_id``, so each must say WHICH scenario it prices under.  Spelled
-    per site -- as it was until an adversarial review counted three -- that is
-    three edits when what-if scenarios land, on a pin whose whole failure mode
-    is two surfaces pricing under DIFFERENT scenarios, which is exactly what
-    :func:`resolve_transaction_amount` refuses a row for.
+    **The Phase-1 scenario pin for a surface holding no read pass** (plan step
+    X-au-j): the companion card prices rows the app does not filter by
+    ``scenario_id``, so it must say WHICH scenario it prices under.  The
+    reconcile panel and the statement-match review pass made the same pin
+    here until plan#2859 moved each onto its read pass, which holds the same
+    baseline, so two surfaces still cannot price under DIFFERENT scenarios,
+    which is exactly what :func:`resolve_transaction_amount` refuses a row for.
 
     Phase 1 is baseline-only: the only two scenario writers
     (``registration_service.register_user``, ``baseline_service``) both write a
     baseline under ``uq_scenarios_one_baseline``, so an account fully isolates
-    a row set today.  When that changes, every caller of this and every scope
-    it prices take the same operating scenario in ONE edit.
+    a row set today.
 
     It RAISES rather than answering ``None`` (ruling **R-BW**): a pass that
     cannot name its scenario has no honest figure to publish, and the

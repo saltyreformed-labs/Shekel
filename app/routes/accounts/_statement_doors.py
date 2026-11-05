@@ -54,6 +54,7 @@ from app.utils.log_events import (
     EVT_STATEMENT_BATCH_APPLIED,
     log_event,
 )
+from app.services.balance_at import BalanceContext
 from app.services.statement_match import (
     NEW_ENVELOPE,
     Consent,
@@ -318,7 +319,9 @@ def fragment_door(  # pylint: disable=too-many-arguments
         # **Read AFTER the write, and only on the path that wrote** -- built
         # here as a thunk rather than a value so nothing derives a second pass
         # on the refusal arms, where the request's own is what must be shown.
-        reread=lambda: ReviewScope.build(current_user.id, account_id),
+        reread=lambda: ReviewScope.build(
+            BalanceContext.build(current_user.id), account_id,
+        ),
         log_message=f"user_id=%d failed to {act} on account %d",
         log_args=(current_user.id, account_id),
         db_error_message=db_error_message,

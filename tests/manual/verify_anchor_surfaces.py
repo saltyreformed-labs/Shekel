@@ -178,6 +178,7 @@ def _account_surfaces(account, balance_ctx):
                     balance_ctx.calendar(), account.id,
                     cash_ledger.governing_anchor(account.id),
                 ),
+                balance_ctx,
             ),
         ),
         "home_equity": _guarded(

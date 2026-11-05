@@ -50,7 +50,7 @@ from decimal import Decimal
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import posting_service
-from app.services.cash_ledger import baseline_amount_basis
+from app.services.balance_at import BalanceContext
 from app.services.match_press import Press, Shown
 from app.services.pay_calendar import DerivedPeriod, FiledRow
 from app.services.transfer_legs import key_order
@@ -318,7 +318,9 @@ def _summarise(groups: "tuple[OutstandingGroup, ...]") -> OutstandingSet:
     )
 
 
-def outstanding_set(statement: _rows.Statement) -> OutstandingSet:
+def outstanding_set(
+    statement: _rows.Statement, ctx: BalanceContext,
+) -> OutstandingSet:
     """Return what this account has not been seen to have paid for, grouped.
 
     The reconcile panel's list.  It asks each arm what it still owes against
@@ -383,10 +385,13 @@ def outstanding_set(statement: _rows.Statement) -> OutstandingSet:
             not independent facts, and the same value is what the WRITE half
             takes (:class:`ReconcileSubmission`) -- so the offer set and the
             tick cannot describe different statements.
+        ctx: The route's read pass for the statement's owner, whose basis prices
+            every offer (plan#2859).  It holds a card's fold, so a route that
+            has just written opens a fresh one.
 
     Raises:
         BaselineMissingError: From
-            :func:`~app.services.scenario_resolver.require_baseline_scenario`,
+            :meth:`~app.services.balance_at.BalanceContext.amounts`,
             answered by the application-level handler that renders the
             setup-recovery page (ruling **R-BW**).  The RAISING form is right
             on that ruling's own criterion: the panel prices every offer from
@@ -418,18 +423,17 @@ def outstanding_set(statement: _rows.Statement) -> OutstandingSet:
     # tier up, which ``amount_basis``'s own docstring names, and N-295 records
     # it at these two call sites by name.
     #
-    # The BASELINE pin and its Phase-1 deferral are stated ONCE, in
-    # ``cash_ledger.baseline_amount_basis`` -- three surfaces make the same
-    # pin and spelling it at each was three places to edit when what-if
-    # scenarios land.  It matches the ground ``_rows.outstanding_scope`` gives
-    # for not filtering the offer set on ``scenario_id``.
+    # It is the read pass's own (plan#2859), which holds the BASELINE pin and
+    # whose deriver prices a card's worked-out payment.  The pin matches the
+    # ground ``_rows.outstanding_scope`` gives for not filtering the offer set
+    # on ``scenario_id``.
     #
     # **A foreign-scenario row would RAISE out of this panel**, where the
     # review pass one package over reports it instead (``_settle_price.settle_price``
     # catches ``AmountUnresolvable`` and drops the row into ``unpriceable``).
     # The two passes answer it differently on purpose and neither is reachable
     # today; stated so the next reader does not assume symmetry.
-    basis = baseline_amount_basis(statement.owner_id)
+    basis = ctx.amounts()
     # The purchase and transaction arms union on the parent ROW's id: both key
     # a ``budget.transactions`` id, so an envelope's purchases and its close
     # meet in one block.

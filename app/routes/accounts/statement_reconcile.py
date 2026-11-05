@@ -299,9 +299,11 @@ def _reconcile_context(account, scope, tab, answer: _Answer, opened) -> dict:
     show_all = asked_for_everything()
     page = reconcile_page(
         scope,
-        # **The route builds the balance pass**, which is the rule every read
-        # pass in this project is held to: only a route builds a
-        # ``BalanceContext``, and ``bank_agreement`` needs one.
+        # **The route builds the balance pass**, which is the rule a read pass
+        # is held to: a route builds a ``BalanceContext``, or a writer for
+        # itself, and ``bank_agreement`` needs one.  It is not the pass the
+        # scope was built from, because a scope keeps what it read and not the
+        # pass, so this render opens two.
         bank_agreement.bank_agreement(
             account, balance_at.BalanceContext.build(scope.owner_id),
         ),
@@ -437,7 +439,11 @@ def statement_reconcile(account_id):
     return render_template(
         "accounts/statement_reconcile.html",
         **_reconcile_context(
-            account, ReviewScope.build(current_user.id, account_id), tab,
+            account,
+            ReviewScope.build(
+                balance_at.BalanceContext.build(current_user.id), account_id,
+            ),
+            tab,
             _Answer(), opened,
         ),
     )
@@ -483,7 +489,9 @@ def apply_statement_reconcile(account_id):
     # rule ``BalanceContext`` is held to -- and this one serves three
     # purposes: the door applies against it, either failure arm renders from
     # it, and the receipt's offer reads its destinations off it.
-    scope = ReviewScope.build(current_user.id, account_id)
+    scope = ReviewScope.build(
+        balance_at.BalanceContext.build(current_user.id), account_id,
+    )
 
     payload, silent = reconcile_payload(request.form)
     # **The open card is read from THIS body, before the door** (plan step
@@ -665,7 +673,9 @@ def state_reconcile_merchant_rules(account_id):
     # calendar, the candidates or their prices, and ``review_set`` re-reads the
     # rules themselves.  That is a closed argument over one table rather than
     # an enumeration over an open set of writers.
-    scope = ReviewScope.build(current_user.id, account_id)
+    scope = ReviewScope.build(
+        balance_at.BalanceContext.build(current_user.id), account_id,
+    )
     # **This door's form is the receipt's offer and carries no card**, so an
     # ``?open=`` on it is priced from the proposal, as the GET is.
     render = _answering(account, tab, None, opened_ask(asked_to_open()))
@@ -719,7 +729,9 @@ def statement_reconcile_match(account_id, line_id):
         it.
     """
     account = load_cash_account_or_404(account_id)
-    scope = ReviewScope.build(current_user.id, account_id)
+    scope = ReviewScope.build(
+        balance_at.BalanceContext.build(current_user.id), account_id,
+    )
     review = review_set(scope)
 
     # **The line is found in the PASS rather than queried for**, so a

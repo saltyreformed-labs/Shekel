@@ -21,7 +21,6 @@ import pytest
 
 from app import ref_cache
 from app.enums import (
-    AmountSourceEnum,
     CardPaymentModeEnum,
     SettledDayBasisEnum,
     StatusEnum,
@@ -550,20 +549,15 @@ class TestARowOutsideThePlanStillAnswers:
         """Paid Jan 10 for $500: inside the Jan 15 balance, so it comes back out.
 
         Read without that, the row that cleared the card would price itself at
-        $0.00.  **A plant** until the settle door holds a read pass (plan#2859):
-        settled while typed over, then handed back to the definition.
+        $0.00.  Settled through the door while still worked out (plan#2859).
         """
         card = _card(seed_user)
         _spent(seed_user, card, seed_periods[0], "500.00", date(2026, 1, 5))
         template = _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE)
         row = _row(template, date(2026, 1, 16))
-        _type_over(row, "500.00")
         _settle(row, date(2026, 1, 10))
-        row.amount_ownership = AmountOwnership.derived(
-            ref_cache.amount_source_id(AmountSourceEnum.TEMPLATE),
-        )
-        db.session.commit()
         assert transfer_amount_rule(row) is AmountRule.CARD_PAYMENT
+        assert row.settled_figure == Decimal("500.00")
 
         assert _price(template, date(2026, 1, 16), date(2026, 1, 12)) == (
             Decimal("500.00")

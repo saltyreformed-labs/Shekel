@@ -40,6 +40,7 @@ from app.services import (
     tax_report_service,
     tax_withholding_service,
 )
+from app.services.balance_at import BalanceContext
 from app.services.calendar_service import CalendarAccountNotResolvableError
 from app.services.pay_calendar import calendar_for
 
@@ -352,7 +353,8 @@ def spending_tab():
         window_type="month", month=month, year=year,
     )
     report = spending_report_service.compute_spending_report(
-        current_user.id, window, user_settings=current_user.settings,
+        BalanceContext.build(current_user.id), window,
+        user_settings=current_user.settings,
     )
 
     return render_template(

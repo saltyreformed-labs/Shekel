@@ -42,6 +42,7 @@ from app.services import (
     status_seam,
     transaction_service,
 )
+from app.services.balance_at import BalanceContext
 from app.services.posting_reads import PostingError
 from app.services.row_valuation import settled_figure
 from app.services.statement_match import (
@@ -1867,7 +1868,7 @@ class TestThePassHoldsONEAmountBasis:
 
             built = count_amount_bases(monkeypatch)
             scope = statement_match.ReviewScope.build(
-                seed_user["user"].id, seed_user["account"].id,
+                BalanceContext.build(seed_user["user"].id), seed_user["account"].id,
             )
 
             assert len(scope.candidates.rows) >= 8, (

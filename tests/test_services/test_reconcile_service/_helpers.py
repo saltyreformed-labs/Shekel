@@ -13,6 +13,7 @@ from app.models.transaction_entry import TransactionEntry
 from app.models.transaction_template import TransactionTemplate
 from app.services import cash_ledger, reconcile_service
 from app.services.pay_calendar import calendar_for
+from tests._test_helpers import outstanding_set_of
 from tests._test_helpers import (
     figure_source_columns,
     generate_row_of,
@@ -178,7 +179,7 @@ def _transaction_arm_offered(seed_user, observed_on=_OBSERVED_ON):
     """Return ``{offer key: offer}`` for the seed user's account (a row's id, a leg's pair)."""
     return {
         group.settle.key: group.settle
-        for group in reconcile_service.outstanding_set(
+        for group in outstanding_set_of(
             _reconciled(seed_user, observed_on=observed_on),
         ).groups
         if group.settle is not None

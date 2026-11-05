@@ -253,7 +253,7 @@ def _spending(user_id, account_id):
             f"spending:{year}-{month}",
             lambda y=year, m=month: spending_report_service
             .compute_spending_report(
-                user_id,
+                BalanceContext.build(user_id),
                 spending_report_service.SpendingWindow(
                     window_type="month", period_id=None, month=m, year=y,
                 ),

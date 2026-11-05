@@ -7,6 +7,7 @@ from decimal import Decimal
 from app.models.transaction import Transaction
 from app.services import account_service, cash_ledger, reconcile_service, status_seam
 from app.utils.log_events import EVT_TRANSACTIONS_RECONCILED
+from tests._test_helpers import outstanding_set_of
 from tests._test_helpers import an_entered_day, count_amount_bases, create_account_of_type
 from tests._test_helpers import create_transfer
 from app.services.row_valuation import settled_figure
@@ -369,7 +370,7 @@ class TestTheSectionsAndTheOrder:
 
     @staticmethod
     def _resolved(seed_user):
-        return reconcile_service.outstanding_set(_reconciled(seed_user))
+        return outstanding_set_of(_reconciled(seed_user))
 
     def test_each_arm_TAGS_its_kind_and_income_is_a_DEPOSIT(
         self, app, db, seed_user, seed_periods, seed_entry_template,
@@ -554,7 +555,7 @@ class TestThePanelHoldsONEAmountBasis:
 
             offers = {
                 group.settle.key: group.settle
-                for group in reconcile_service.outstanding_set(_reconciled(seed_user)).groups
+                for group in outstanding_set_of(_reconciled(seed_user)).groups
                 if group.settle is not None
             }
 

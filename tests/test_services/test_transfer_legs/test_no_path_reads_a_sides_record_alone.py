@@ -65,6 +65,7 @@ from app.services.statement_match._valuation import repriced
 from app.services.transfer_legs import preload_side_records, transfer_side_leg
 from app.services.transfer_legs._leg import side_movements_key
 from app.utils.dates import display_today
+from tests._test_helpers import outstanding_set_of
 from tests._test_helpers import (
     create_settled_transfer,
     create_transfer,
@@ -904,7 +905,7 @@ class TestAReconcileFetchesItsTransfersRecordsOnce:
             checking_id = seed_user["account"].id
 
             with _side_record_fetches() as fetches:
-                groups = reconcile_service.outstanding_set(
+                groups = outstanding_set_of(
                     _reconciled(seed_user, observed_on=display_today()),
                 ).groups
 

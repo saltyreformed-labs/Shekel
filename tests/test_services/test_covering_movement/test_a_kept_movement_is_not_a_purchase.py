@@ -30,6 +30,7 @@ from app.services.entry_service._sums import build_entry_lists_dict, build_entry
 from app.services.pay_calendar import FiledRow, calendar_for
 from app.services.reconcile_service._rows import wholly_spent_by
 from app.services.settle_day import SettleDay
+from tests._test_helpers import outstanding_set_of
 from tests._test_helpers import create_savings_account, generate_row_of, planted_basis, typed
 
 from ._helpers import _bill, _settle, _revert, _only_movement, _legs_of, _settled_pair
@@ -109,7 +110,7 @@ class TestAKeptMovementIsNotAPurchase:
             assert survivor.purchased_on <= statement.observed_on
             offered = {
                 group.key: group.purchases
-                for group in reconcile_service.outstanding_set(statement).groups
+                for group in outstanding_set_of(statement).groups
             }
             assert offered.get(envelope.id, ()) == (), (
                 "the reverted envelope is offered as a ROW at most, never its close"

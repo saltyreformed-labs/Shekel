@@ -52,6 +52,7 @@ from app.services import (
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
 from app.services.settle_day import SettleDay, recorded_settle_day
+from tests._test_helpers import outstanding_set_of
 from tests._test_helpers import (
     create_transfer,
     generate_row_of,
@@ -167,7 +168,7 @@ class TestALegIsKeyedApartFromARow:
                 seed_user, seed_periods[0], bill.id, _savings(seed_user),
             )
 
-            groups = reconcile_service.outstanding_set(
+            groups = outstanding_set_of(
                 _reconciled(seed_user),
             ).groups
             by_key = {group.key: group for group in groups}
@@ -454,7 +455,7 @@ class TestTheBlockReadsTheLeg:
             db.session.commit()
 
             (block,) = [
-                group for group in reconcile_service.outstanding_set(
+                group for group in outstanding_set_of(
                     _reconciled(seed_user),
                 ).groups
                 if group.key == (transfer.id, seed_user["account"].id)
@@ -484,7 +485,7 @@ class TestTheBlockReadsTheLeg:
             )
             db.session.commit()
 
-            groups = reconcile_service.outstanding_set(
+            groups = outstanding_set_of(
                 _reconciled(seed_user, savings.id),
             ).groups
             by_key = {group.key: group for group in groups}

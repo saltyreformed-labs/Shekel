@@ -11,6 +11,7 @@ Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes.
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from app.exceptions import AmountUnresolvable
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 
@@ -26,6 +27,12 @@ def card_payment_price(xfer: Transfer, ctx: "BalanceContext") -> Decimal:
     What :meth:`~._context.BalanceContext.amounts` hands the amount model, and
     the one answer every reader of the row reads.
 
+    **The scenario is refused here as well as in the amount model**, because
+    only this function knows which scenario the fold is.  The amount model's
+    check compares the row with the BASIS, and carry-forward's basis names the
+    scenario it carries within while holding this deriver: a row of that
+    scenario passes the check, and this pass would answer from its own rows.
+
     Args:
         xfer: The row: a transfer into the card, on any status.
         ctx: The read pass whose fold of the card answers.
@@ -35,9 +42,17 @@ def card_payment_price(xfer: Transfer, ctx: "BalanceContext") -> Decimal:
 
     Raises:
         ForeignAccountError: The card belongs to another owner.
-        AmountUnresolvable: See
-            :meth:`~._card_payment.CardPayments.price_of`.
+        BaselineMissingError: This pass has no baseline scenario.
+        AmountUnresolvable: The row is in another scenario than this pass, or
+            see :meth:`~._card_payment.CardPayments.price_of`.
     """
+    if xfer.scenario_id != ctx.scenario_id:
+        raise AmountUnresolvable(
+            f"Transfer {xfer.id} is in scenario {xfer.scenario_id} and this "
+            f"read pass folds scenario {ctx.scenario_id}. A card works out its "
+            "payment from one scenario's rows, so answering here would price "
+            "it from another's."
+        )
     return assembled_fold(xfer.to_account, ctx).card_payments.price_of(xfer)
 
 

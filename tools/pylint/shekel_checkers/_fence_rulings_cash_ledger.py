@@ -127,8 +127,8 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # folds, dates, sums, or reads an anchor.
     "amount_basis",
     # Its BASELINE-pinned form (plan step X-au-j): the same constructor
-    # with the Phase-1 scenario pin resolved, stated once for the three
-    # surfaces that make it.  Non-producer for the identical reason --
+    # with the Phase-1 scenario pin resolved, for the one surface left that
+    # makes it and holds no read pass.  Non-producer for the identical reason --
     # it resolves nothing, folds nothing, and reads no anchor.
     "baseline_amount_basis",
     # Its PASS-LESS form (plan step salary:C12, ledger row P63): the same

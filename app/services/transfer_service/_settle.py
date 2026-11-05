@@ -67,7 +67,7 @@ Architecture (``CLAUDE.md``):
 """
 
 from app.models.transfer import Transfer
-from app.services.cash_ledger import derived_amount_basis
+from app.services.balance_at import BalanceContext
 from app.services.match_press import Press
 from app.services.stated_figure import StatedFigure
 from app.services import status_seam, transaction_service
@@ -234,6 +234,8 @@ def settle(
         ValidationError: On a transfer no door may settle
             (``transaction_service.reject_unsettleable``: a deleted one), or
             from the status seam's own transition and settle-day refusals.
+        BaselineMissingError: The owner has no baseline scenario, so this
+            settle's read pass has nothing to price under (ruling **R-BW**).
     """
     transaction_service.reject_unsettleable(transfer)
 
@@ -242,7 +244,15 @@ def settle(
     # X-f2-c3 -- by the arm's correction predicate, by the dispatch's own
     # predicate, and by its fallback -- and each asking is a ``Transfer`` query
     # plus, for a derive-mode payment, a loan-basis resolve and an escrow load.
-    basis = derived_amount_basis(transfer.user_id, transfer.scenario_id)
+    #
+    # **A read pass of its own, opened per settle** (plan#2859; a writer may,
+    # the developer's ruling of 2026-08-16): a card's worked-out payment is
+    # priced off the card's fold, and this door runs in loops
+    # (``reconcile_service._transfers``, ``statement_match._moving``).  A pass
+    # is a memo for one read, so one handed down would answer the second tick
+    # from the fold as it stood before the first.  Nothing is resolved until a
+    # rule asks, so a plain transfer pays the pass's baseline lookup alone.
+    basis = BalanceContext.build(transfer.user_id).amounts()
     # Off the TRANSFER, the parent both legs are priced as (ruling
     # plan#1983) -- never its side's record, never a twin row (plan step
     # ``balance:X-bi-6-4d-2``): a twin's status is no longer kept, and a twin

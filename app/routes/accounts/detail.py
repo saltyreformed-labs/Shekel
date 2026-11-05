@@ -543,6 +543,7 @@ def _cash_detail_context(account: Account, ctx: BalanceContext) -> dict:
         **reconcile_context(
             account, panel=panel_id(account.id),
             statement=reconcile_statement(account, calendar),
+            ctx=ctx,
         ),
     }
 

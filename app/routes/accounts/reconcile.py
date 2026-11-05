@@ -64,6 +64,7 @@ from app.routes.accounts._cash_page import (
 from app.schemas.validation import ShownLinesSchema
 from app.schemas.validation.transactions import MarkDoneSchema
 from app.services import cash_ledger, reconcile_service
+from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import PayCalendar, calendar_for
 from app.utils.auth_helpers import require_owner
 from app.utils.digit_strings import parse_row_id, parse_row_ids
@@ -286,6 +287,30 @@ _PARTIAL_MESSAGE = (
 )
 
 
+def _panel_after_the_save(
+    account: Account, statement: "reconcile_service.Statement | None",
+) -> dict:
+    """Return the panel's context for the POST's answer, off a FRESH read pass.
+
+    The ONE place the POST reads the offer set, for a save that committed and
+    for one that rolled back: the offers are priced from a pass opened here,
+    after the write, so a card's worked-out payment reads the state the panel
+    now describes (plan#2859).
+
+    Args:
+        account: The owned, attached account.
+        statement: The request's one statement (finding **N-222**), or ``None``
+            for an account carrying no assertion, where no save ran.
+
+    Returns:
+        The template context (:func:`reconcile_context`).
+    """
+    return reconcile_context(
+        account, panel=panel_id(account.id), statement=statement,
+        ctx=BalanceContext.build(current_user.id),
+    )
+
+
 def _refusal(
     account: Account, statement: "reconcile_service.Statement",
     message: str,
@@ -326,9 +351,7 @@ def _refusal(
         render_template(
             "accounts/_reconcile_panel.html",
             error=message,
-            **reconcile_context(
-                account, panel=panel_id(account.id), statement=statement,
-            ),
+            **_panel_after_the_save(account, statement),
         ),
         400,
         {"Shekel-Designed-Fragment": "1"},
@@ -389,8 +412,8 @@ def reconcile_statement(
     **The calendar comes from the caller and is not resolved here**, for
     :func:`governing_statement`'s reason: the cash detail page already holds one
     on its read pass (``ctx.calendar()``), and a second derivation inside one
-    render is two answers to "what are this owner's paydays".  This package
-    holds no read pass of its own, so the HTTP tier is where that read belongs
+    render is two answers to "what are this owner's paydays".  That package
+    builds no read pass, so the HTTP tier is where that read belongs
     (``pay_calendar:C11``).
 
     An account carrying NO assertion answers ``None`` -- there is nothing for an
@@ -417,6 +440,7 @@ def reconcile_statement(
 def reconcile_context(
     account: Account, panel: str,
     statement: "reconcile_service.Statement | None",
+    ctx: BalanceContext,
 ) -> dict:
     """Assemble the reconcile panel's context for one account.
 
@@ -441,6 +465,12 @@ def reconcile_context(
             of two answers inside one request -- with a write in between them,
             which is when two answers become a wrong one.  ``None`` for an
             account carrying no assertion at all.
+        ctx: The read pass the panel's offers are priced from (plan#2859).
+            **Unlike the statement, it does not cross a write**: a card's
+            worked-out payment is priced off the pass's fold, and a fold
+            memoized before a save would offer what the save just changed.  So
+            the POST opens a fresh one for its answer
+            (:func:`_panel_after_the_save`).
 
     Returns:
         The template context.  ``outstanding`` is an
@@ -455,7 +485,7 @@ def reconcile_context(
     outstanding = (
         reconcile_service.OutstandingSet.empty()
         if statement is None
-        else reconcile_service.outstanding_set(statement)
+        else reconcile_service.outstanding_set(statement, ctx)
     )
     return {
         "account": account,
@@ -543,12 +573,14 @@ def prompt_fragment(
     # fragment is appended to a true-up's response, whose write door holds no
     # pay calendar and whose other draws open read passes of their own, so
     # nothing on that path holds one to thread: this is where the one read of
-    # it happens.
+    # it happens, off a pass opened after that write.
+    ctx = BalanceContext.build(current_user.id)
     context = reconcile_context(
         account, panel="reconcile-panel-modal",
         statement=reconcile_service.Statement(
-            calendar_for(current_user.id), account.id, governing,
+            ctx.calendar(), account.id, governing,
         ),
+        ctx=ctx,
     )
     if context["outstanding"].is_empty:
         return ""
@@ -580,13 +612,13 @@ def reconcile_panel(account_id):
     transactions.
     """
     account = load_cash_account_or_404(account_id)
+    ctx = BalanceContext.build(current_user.id)
     return render_template(
         "accounts/_reconcile_panel.html",
         **reconcile_context(
             account, panel=panel_id(account.id),
-            statement=reconcile_statement(
-                account, calendar_for(current_user.id),
-            ),
+            statement=reconcile_statement(account, ctx.calendar()),
+            ctx=ctx,
         ),
     )
 
@@ -669,9 +701,7 @@ def record_reconciliation(account_id):
         # raised, because it is a legitimate empty state.
         return render_template(
             "accounts/_reconcile_panel.html",
-            **reconcile_context(
-                account, panel=panel_id(account.id), statement=None,
-            ),
+            **_panel_after_the_save(account, None),
         )
 
     rows = reconcile_service.TickForm.ROW
@@ -738,9 +768,7 @@ def record_reconciliation(account_id):
         render_template(
             "accounts/_reconcile_panel.html",
             error=notice,
-            **reconcile_context(
-                account, panel=panel_id(account.id), statement=statement,
-            ),
+            **_panel_after_the_save(account, statement),
         ),
         200,
         {"HX-Trigger": "balanceChanged"},

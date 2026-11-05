@@ -60,6 +60,7 @@ from app.utils.log_events import (
     EVT_SETTLEMENTS_RECONCILED,
     EVT_TRANSACTIONS_RECONCILED,
 )
+from tests._test_helpers import outstanding_set_of
 from tests._test_helpers import (
     create_account_of_type,
     generate_row_of,
@@ -146,7 +147,7 @@ def _groups(seed_user, account_id, observed_on=_OBSERVED_ON):
     """Return ``{block key: block}`` of *account_id*'s panel."""
     return {
         group.key: group
-        for group in reconcile_service.outstanding_set(
+        for group in outstanding_set_of(
             _statement(seed_user, account_id, observed_on),
         ).groups
     }
@@ -385,7 +386,7 @@ class TestTheOffersWording:
                 card,
             )
 
-            outstanding = reconcile_service.outstanding_set(
+            outstanding = outstanding_set_of(
                 _statement(seed_user, card.id),
             )
             group = {g.key: g for g in outstanding.groups}[txn.id]

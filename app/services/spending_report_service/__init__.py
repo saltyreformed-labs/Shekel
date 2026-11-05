@@ -86,9 +86,7 @@ or a template names, so no consumer reaches into a submodule.
 from app.models.user import UserSettings
 from app.services import spending_analysis
 from app.services.account_resolver import resolve_cash_flow_set
-from app.services.cash_ledger import derived_amount_basis
-from app.services.pay_calendar import calendar_for
-from app.services.scenario_resolver import get_baseline_scenario
+from app.services.balance_at import BalanceContext
 from app.services.transfer_legs import PlanItem
 
 from ._breakdown import _build_breakdown, _build_changes, _totals_by_category
@@ -134,14 +132,14 @@ __all__ = [
 
 
 def compute_spending_report(
-    user_id: int,
+    ctx: BalanceContext,
     window: SpendingWindow,
     *,
     user_settings: UserSettings | None,
 ) -> SpendingReport | None:
-    """Compute the Spending surface dataset for *user_id* over *window*.
+    """Compute the Spending surface dataset for *ctx*'s owner over *window*.
 
-    Resolves the owner's cash-flow set and baseline scenario, then builds
+    Resolves the owner's cash-flow set, reads the pass's scenario, then builds
     the trailing window series, the category breakdown with
     window-over-window deltas, the By-change rows, the estimate surprises,
     and the hero band over the chosen window's settled expenses.  The
@@ -161,7 +159,8 @@ def compute_spending_report(
     where they got the empty state.
 
     Args:
-        user_id: The owning user (scopes every query).
+        ctx: The route's read pass (plan#2859).  Its owner scopes every query,
+            and its scenario, its calendar and its basis are this report's.
         window: The chosen :class:`SpendingWindow`.
         user_settings: The owner's ``UserSettings`` row, or ``None`` when
             they have none -- the saved-default layer the primary reads.
@@ -190,16 +189,15 @@ def compute_spending_report(
         window.window_type, window.period_id, window.month, window.year,
     )
 
-    cash_flow = resolve_cash_flow_set(user_id, user_settings)
+    cash_flow = resolve_cash_flow_set(ctx.user_id, user_settings)
     if cash_flow is None:
         return None
-    scenario = get_baseline_scenario(user_id)
-    if scenario is None:
+    if ctx.scenario is None:
         return None
 
     ids = _ScopeIds(
-        cash_flow=cash_flow, scenario_id=scenario.id,
-        calendar=calendar_for(user_id),
+        cash_flow=cash_flow, scenario_id=ctx.scenario_id,
+        calendar=ctx.calendar(),
     )
     resolved = _resolve_window(ids, window)
     txns = _window_transactions(ids, resolved)
@@ -246,12 +244,12 @@ def compute_spending_report(
         # ``row_valuation.settled_contribution``, which answers a settled
         # row from its SETTLEMENT record and never reaches the amount
         # model, so this is the package's only basis and costs no query
-        # (both of its derivations are lazy).
+        # (its derivations are lazy).
         #
-        # It is built at the call rather than carried on ``_ScopeIds``
+        # It is read at the call rather than carried on ``_ScopeIds``
         # beside the calendar, which is where a SECOND consumer would want
         # it -- the calendar rides there for exactly that reason (C2-f1).
         # With one consumer there is nothing yet to keep in step; the day a
         # second appears in this package it belongs on the scope object.
-        surprises=_build_surprises(txns, derived_amount_basis(user_id, scenario.id)),
+        surprises=_build_surprises(txns, ctx.amounts()),
     )

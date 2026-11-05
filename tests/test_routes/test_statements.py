@@ -31,6 +31,7 @@ from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.user import User, UserSettings
 from app.services import auth_service, entry_service, statement_match
+from app.services.balance_at import BalanceContext
 from app.services.statement_import import bank_levels
 from app.services.statement_match import NEW_ENVELOPE, Verb
 from app.utils.log_events import (
@@ -1898,7 +1899,7 @@ class TestTheDeletePost:
         )
         db.session.flush()
         scope = statement_match.ReviewScope.build(
-            seed_user["user"].id, seed_user["account"].id,
+            BalanceContext.build(seed_user["user"].id), seed_user["account"].id,
         )
         statement_match.accept_match(
             a_submission(scope, lines=[line], transactions=[txn]),

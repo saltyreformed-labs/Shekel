@@ -38,6 +38,7 @@ from app.models.statement_import import (
 )
 from app.models.transaction_entry import TransactionEntry
 from app.models.transaction_template import TransactionTemplate
+from app.services.balance_at import BalanceContext
 from app.services.cash_ledger import derived_amount_basis
 from app.services import statement_match
 from app.services.statement_match import (
@@ -934,7 +935,8 @@ def a_scope(seed_user, account=None):
         The :class:`~app.services.statement_match.ReviewScope`.
     """
     return ReviewScope.build(
-        seed_user["user"].id, (account or seed_user["account"]).id,
+        BalanceContext.build(seed_user["user"].id),
+        (account or seed_user["account"]).id,
     )
 
 

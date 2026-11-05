@@ -9,6 +9,7 @@ from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import account_service, reconcile_service, status_seam
 from app.services.pay_calendar import calendar_for
+from tests._test_helpers import outstanding_set_of
 from tests._test_helpers import generate_row_of, last_covered_day, make_expense_template
 
 from ._helpers import (
@@ -58,7 +59,7 @@ class TestTheSetIsGroupedByItsParent:
 
     @staticmethod
     def _resolve(seed_user, observed_on=_OBSERVED_ON):
-        return reconcile_service.outstanding_set(
+        return outstanding_set_of(
             _reconciled(seed_user, observed_on=observed_on),
         )
 
@@ -468,7 +469,7 @@ class TestTheTransactionArm:
             db.session.commit()
             other_id = seed_second_user["user"].id
 
-            assert reconcile_service.outstanding_set(
+            assert outstanding_set_of(
                 _reconciled(seed_user, owner_id=other_id),
             ).groups == ()
             assert reconcile_service.record_reconciliation(
@@ -504,7 +505,7 @@ class TestTheTransactionArm:
             )
             db.session.commit()
 
-            assert reconcile_service.outstanding_set(
+            assert outstanding_set_of(
                 _reconciled(seed_user, account_id=other.id),
             ).groups == ()
             assert reconcile_service.record_reconciliation(

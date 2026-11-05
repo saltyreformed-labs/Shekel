@@ -87,6 +87,7 @@ from app.services.statement_import import (
     record_statement,
     recorded_span,
 )
+from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import PayCalendarError
 from app.services.statement_match import (
     RECEIPT_LIMIT,
@@ -636,7 +637,9 @@ def import_statement(account_id):
             The :class:`~app.services.statement_match.RuleFiling`.
         """
         try:
-            scope = ReviewScope.build(current_user.id, account.id)
+            scope = ReviewScope.build(
+                BalanceContext.build(current_user.id), account.id,
+            )
         except (PayCalendarError, BaselineMissingError):
             _logger.warning(
                 "user_id=%d imported into account %d and the standing rules "

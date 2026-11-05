@@ -683,7 +683,11 @@ def repriced(
             way.  Nothing an accept act does -- settling rows, creating
             purchases -- writes a salary profile, a payday or a loan
             parameter, which is the same argument that lets the calendar
-            beside it be shared across the pass.
+            beside it be shared across the pass.  **A card's worked-out payment
+            is the one exception** (plan#2859): its price is read off the
+            pass's memoized fold, so it stays what it was when the pass first
+            folded the card, and what refuses a stale one is
+            :func:`~._accept._reject_drifted_under_the_act`.
         account_id: The pass's account (:class:`~._scope.ReviewScope`), the
             screen a SETTLEMENT is re-read for (:func:`settlement_candidate`:
             its partition and its label) -- so a payment re-pointed onto

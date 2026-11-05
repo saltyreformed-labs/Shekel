@@ -12,13 +12,13 @@ row STORED its figure, so archiving moved nothing.  A declared row is priced by
 its DEFINITION, and once no active profile names that definition the
 salary-linked refinement stops applying: amount rule 3 answers instead, from the
 one price version ``routes/salary/profiles.delete_profile`` opens the template's
-series at -- the ``default_amount`` scalar, which
-``template_amount_service.is_salary_linked_template`` documents as *vestigial*
-for exactly this kind of template.  A scalar cannot express a paycheck: measured
-on the 2026-09-02 production clone, archiving re-priced 50 of 59 rows and moved
-the projected balance by **-$9,677.24**, because those rows range from
-``$2,483.19`` to ``$3,328.41`` and every one of them would have become
-``$2,572.78``.
+series at -- today's paycheck since plan step X-bp, and until then the
+template's ``default_amount`` scalar, a copy of the paycheck as of the last
+salary save that the same step dropped.  One figure cannot express a paycheck per
+period: measured on the 2026-09-02 production clone, when that version was the
+scalar, archiving re-priced 50 of 59 rows and moved the projected balance by
+**-$9,677.24**, because those rows range from ``$2,483.19`` to ``$3,328.41``
+and every one of them would have become ``$2,572.78``.
 
 **The remedy is the act a SETTLE already performs, one tier up.**  A settle
 records what a row was worth at the moment its money moved, because the
@@ -84,12 +84,13 @@ def archive_profile(profile) -> int:
     ``is_active = False`` is already visible to it (that predicate's own
     docstring records why it reads the relationship rather than issuing a
     query).  Resolving after the flag would therefore resolve every row through
-    amount rule 3 and freeze the very ``default_amount`` this exists to avoid.
+    amount rule 3 and freeze each at the series' one price, the very figure
+    this exists to avoid.
 
     Every DECLARED row of the profile's template is frozen, whatever its status
     -- not the projected ones alone.  A settled row's plan is a derivation like
-    any other (ruling **R-JB**) and it re-prices to the same vestigial scalar,
-    so leaving it would restate what a received paycheck was expected to be.
+    any other (ruling **R-JB**) and it re-prices to the same one price, so
+    leaving it would restate what a received paycheck was expected to be.
     Measured 2026-09-02: **+$627.13 over production's eight settled paychecks,
     of which SEVEN move** -- ``$2,483.19 -> $2,572.78``, ``+$89.59`` each --
     while the eighth already sits at the scalar and moves ``$0.00``.  None of
@@ -100,8 +101,8 @@ def archive_profile(profile) -> int:
     its producer and freezing it would store a figure nobody computed.  **What
     then happens to such a row is worse rather than neutral, and an adversarial
     review of this step corrected a claim here that said otherwise**: it stays
-    declared, and after the archive amount rule 3 answers it from the vestigial
-    scalar -- a loud ``AmountUnresolvable`` becomes a silent figure.  It is
+    declared, and after the archive amount rule 3 answers it from the series'
+    one price -- a loud ``AmountUnresolvable`` becomes a silent figure.  It is
     ``$0.00`` today because no code path constructs a non-baseline scenario
     (``auth_service.py`` and ``baseline_service.py`` both pass
     ``is_baseline=True``), which is a FACT from finding **N-253** rather than

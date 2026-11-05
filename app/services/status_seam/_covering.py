@@ -823,7 +823,7 @@ def _follow_assertion(row: Transaction) -> None:
       kept movement (re-submitted, cancelled, reactivated): nothing moves.
 
     The ledger is the door's.  An un-dated movement posts nothing
-    (``_posting_purchases.purchase_posts`` needs a day), so the family
+    (``ledger_lines.purchase_posts`` needs a day), so the family
     reconcile every revert door runs after the seam reverses whatever the
     movement had posted -- the one walk, which reversed the parent's own leg
     beside it through ``X-bi-3e`` and posts nothing for the row since

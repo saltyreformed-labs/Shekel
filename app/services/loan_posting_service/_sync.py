@@ -322,11 +322,13 @@ def _assert_checked_projection(
     ledger's per-``entry_date`` nets exactly: same dates, same amounts, in
     posting space (a posted net is the negated owed delta).  Anything else
     means the posted ledger is no longer a faithful projection of the loan's
-    source facts, and every reader of the general ledger -- the statements,
-    the reconciliation oracle, the payment-history table -- is looking at a
-    lie.  Raising HERE, inside the write transaction, turns that lie into a
-    rollback at the write that caused it instead of a silent divergence found
-    months later (finding B-5's invariant, open since the archived audits).
+    source facts.  No screen reads it any more (the statements and the
+    payment-history table read the worked-out ledger since plan#2515), so what
+    this holds is the store's agreement with that ledger, until X-ew's third
+    leaf deletes both.  Raising HERE, inside the write transaction, turns a
+    difference into a rollback at the write that caused it instead of a silent
+    divergence found months later (finding B-5's invariant, open since the
+    archived audits).
 
     The comparison is per DATE because a right amount at a wrong date is
     still a wrong ledger: the fold counts each event from its ``entry_date``
@@ -365,7 +367,7 @@ def _assert_checked_projection(
             fold's delta -- the projection is broken and the write must not
             commit.
     """
-    if not walk.anchor_corrections and not walk.payment_splits:
+    if walk.is_empty:
         return
     expected: dict[date, Decimal] = {}
     for visible_on, delta in dated_deltas(walk):

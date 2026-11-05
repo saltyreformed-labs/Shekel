@@ -4,9 +4,10 @@ Plan step **C3c** (``docs/audits/balance_architecture/README.md``).  Direct unit
 coverage of the balance seam's ONE loan-interest producer, which replaced the
 ledger-reader-plus-schedule HYBRID that lived in ``tax_report_service``
 (``_compute_mortgage_interest`` / ``_loan_year_interest``, both deleted).  The LIVE
-Schedule-A wiring and hand-computed value stay in ``test_tax_report_service.py``
-(``TestScheduleAMortgageInterest``); these pin the producer's INTERNALS the live
-value test alone does not reach:
+Schedule-A wiring and hand-computed value stay in the ``test_tax_report_service``
+package (``TestScheduleAMortgageInterest``, in
+``test_degrades_households_and_schedule_a.py``); these pin the producer's INTERNALS
+the live value test alone does not reach:
 
 * the SETTLED (past) interest is the FOLD's actual per-payment figure -- correct
   for an off-schedule payment where the schedule replay is not -- attributed to

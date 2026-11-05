@@ -434,11 +434,9 @@ def remove_earlier():
     **Every refusal is a flash, and nothing is left staged**: an
     id that is not the owner's (``PayPeriodUnresolved``, one message for "no
     such" and "not yours", as at truncate), a paycheck holding money or money
-    dated inside the removed ones (**R-PC109**), a removal taking every
-    payday of the earliest pay rhythm (**R-PC110**), and one that would
-    change a posted total the ledger's re-syncs do not rebuild (**R-PC114**)
-    -- the last three ``PayPeriodRemovalRefused``: R-PC109's before the door
-    writes, R-PC110's and R-PC114's after it rolls back its own savepoint.
+    dated inside the removed ones (**R-PC109**), and a removal taking every
+    payday of the earliest pay rhythm (**R-PC110**) -- the last two
+    ``PayPeriodRemovalRefused``, each raised before the door writes.
     The catch is that class and not
     the generic ``ValidationError``, because both ledger re-syncs run below
     it: a refusal of theirs is a defect to surface, not advice to flash.

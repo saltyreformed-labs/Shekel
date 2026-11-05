@@ -409,7 +409,7 @@ class RaiseUpdateSchema(RaiseCreateSchema):
 class PaycheckLineCreateSchema(RecurrenceFormFieldsMixin, BaseSchema):
     """Validates POST data for adding a payroll line to a salary profile.
 
-    **A line of any of the four kinds since plan step salary:R18-b** (ruling
+    **A line of any kind since plan step salary:R18-b** (ruling
     **R-SAL38**): ``paycheck_line_kind_id`` names its position in the
     paycheck's waterfall, and the one rule that differs by side --
     ``target_account_id``, the account a DEDUCTION funds -- is

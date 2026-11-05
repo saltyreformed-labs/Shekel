@@ -35,7 +35,6 @@ def _make_template(seed_user, *, name="Payment"):
         from_account_id=seed_user["account"].id,
         to_account_id=savings.id,
         name=name,
-        default_amount=Decimal("1500.00"),
     )
     db.session.add(template)
     db.session.flush()

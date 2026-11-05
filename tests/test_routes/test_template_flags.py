@@ -16,7 +16,11 @@ from app.extensions import db
 from app.models.ref import TransactionType
 from app.models.transaction_template import TransactionTemplate
 from app.schemas.validation import TemplateCreateSchema, TemplateUpdateSchema
-from tests._test_helpers import cadence_payload, make_cadence_rule
+from tests._test_helpers import (
+    cadence_payload,
+    make_cadence_rule,
+    state_template_price,
+)
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 
 
@@ -53,12 +57,15 @@ def _make_template(seed_user, name="Test Template",
         category_id=category.id,
         transaction_type_id=txn_type_obj.id,
         name=name,
-        default_amount=Decimal("100.00"),
         is_envelope=track,
         companion_visible=companion,
     )
     db.session.add(template)
     db.session.flush()
+    # Its price, through the one write door as the create route states it:
+    # the Recurring page prices a definition by its series since plan step
+    # X-bp.
+    state_template_price(template, Decimal("100.00"))
     if recurs:
         make_cadence_rule(template, EVERY_PERIOD)
     db.session.commit()
@@ -85,7 +92,7 @@ def _base_form_data(seed_user, txn_type="Expense", **overrides):
     )
     data = {
         "name": "Test Template",
-        "default_amount": "100.00",
+        "amount": "100.00",
         "category_id": seed_user["categories"]["Rent"].id,
         "transaction_type_id": txn_type_obj.id,
         "account_id": seed_user["account"].id,
@@ -696,7 +703,7 @@ class TestFlagSchemaValidation:
         schema = TemplateCreateSchema()
         data = schema.load({
             "name": "Test",
-            "default_amount": "50.00",
+            "amount": "50.00",
             "category_id": "1",
             "transaction_type_id": str(expense_id),
             "account_id": "1",
@@ -710,7 +717,7 @@ class TestFlagSchemaValidation:
         schema = TemplateCreateSchema()
         data = schema.load({
             "name": "Test",
-            "default_amount": "50.00",
+            "amount": "50.00",
             "category_id": "1",
             "transaction_type_id": "1",
             "account_id": "1",
@@ -724,7 +731,7 @@ class TestFlagSchemaValidation:
         schema = TemplateCreateSchema()
         errors = schema.validate({
             "name": "Test",
-            "default_amount": "50.00",
+            "amount": "50.00",
             "category_id": "1",
             "transaction_type_id": "1",
             "account_id": "1",
@@ -785,7 +792,7 @@ class TestEnvelopeOnlyOnExpenseSchema:
         with pytest.raises(_ValidationError) as exc_info:
             schema.load({
                 "name": "Bad",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": "1",
                 "transaction_type_id": str(income_id),
                 "account_id": "1",
@@ -810,7 +817,7 @@ class TestEnvelopeOnlyOnExpenseSchema:
         schema = TemplateCreateSchema()
         data = schema.load({
             "name": "Groceries",
-            "default_amount": "200.00",
+            "amount": "200.00",
             "category_id": "1",
             "transaction_type_id": str(expense_id),
             "account_id": "1",
@@ -830,7 +837,7 @@ class TestEnvelopeOnlyOnExpenseSchema:
         # Omit is_envelope -- defaults to False via load_default.
         data = schema.load({
             "name": "Salary",
-            "default_amount": "3000.00",
+            "amount": "3000.00",
             "category_id": "1",
             "transaction_type_id": str(income_id),
             "account_id": "1",
@@ -897,7 +904,7 @@ class TestEnvelopeOnlyOnExpenseSchema:
         schema = TemplateCreateSchema()
         errors = schema.validate({
             "name": "Bad",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "category_id": "1",
             "transaction_type_id": str(income_id),
             "account_id": "1",

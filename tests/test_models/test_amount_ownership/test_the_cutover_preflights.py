@@ -53,7 +53,6 @@ def _plain_template(seed_user):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=expense.id,
         name="X-au-e Rent",
-        default_amount=Decimal("7.77"),
     )
     db.session.add(template)
     db.session.flush()

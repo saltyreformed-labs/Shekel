@@ -409,7 +409,7 @@ class TestTheClosingBalancePartition:
 
         A source dated the assertion's own civil day is subsumed by its reset
         -- the same ``fact.reconciled_through.covers(sources[i][0])`` boundary
-        ``account_posting_service.walk_account_ledger`` applies, so the read fold
+        ``ledger_lines.walk_account_ledger`` applies, so the read fold
         and the posted ledger partition one boundary rather than two.
         """
         account, scenario = seed_user["account"], seed_user["scenario"]

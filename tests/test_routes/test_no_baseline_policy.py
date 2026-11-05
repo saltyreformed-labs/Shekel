@@ -125,6 +125,7 @@ from tests._test_helpers import (
     make_appreciating_account,
     make_investment_account,
     make_salary_profile,
+    state_template_price,
 )
 # The world builders and the registry live in ``tests/conftest.py`` beside the
 # worker-database plumbing they drive.  Importing them from there is safe and
@@ -237,7 +238,8 @@ _CONVERTER_TOKEN = re.compile(r"<(?:[^<>:]+:)?([^<>:]+)>")
 #: (``period`` was id 6) was caught.
 #: The two doors reading two different tables is ALSO graded on the doors, in each
 #: blueprint's own ``TestTemplateUpdate::test_edit_template_form`` --
-#: ``tests/test_routes/test_templates.py`` and ``test_transfers/test_templates.py``.  **The
+#: ``tests/test_routes/test_templates/test_the_edit_form_the_chooser_and_renames.py``
+#: and ``test_transfers/test_templates.py``.  **The
 #: two are not equally strong and the difference was measured** (2026-08-30):
 #: the transfers one asserts ``b"Monthly Savings"``, which only its own row
 #: supplies, while the templates one asserts ``b"Rent"``, which its fixture
@@ -392,7 +394,6 @@ def _build_baseline_less_owner(db):
         from_account_id=seed_user["account"].id,
         to_account_id=hysa.id,
         name="Policy Transfer Definition",
-        default_amount=Decimal("200.00"),
     )
     db.session.add(xfer_template)
     # A transcribed pay stub (plan step salary:S11-b), for
@@ -451,6 +452,10 @@ def _build_baseline_less_owner(db):
         Decimal("50.00"), name="Policy Transfer",
     )
     db.session.flush()
+    # The transfer definition's price, through the one write door as its
+    # create route states it: ``/templates`` prices a definition by its series
+    # since plan step X-bp, and rule 3 needs no baseline to do it.
+    state_template_price(xfer_template, Decimal("200.00"))
 
     scenario = db.session.get(Scenario, seed_user["scenario"].id)
     scenario.is_baseline = False
@@ -1300,7 +1305,7 @@ class TestTheHandlerItself:
         """
         ids = baseline_less_owner
         base = {
-            "default_amount": "150.00",
+            "amount": "150.00",
             "from_account_id": ids["checking"],
             "to_account_id": ids["hysa"],
             "category_id": str(ids["rent_category"]),

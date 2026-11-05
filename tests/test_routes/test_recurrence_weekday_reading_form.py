@@ -80,7 +80,7 @@ def _create_through_the_form(auth_client, seed_user, starts_on, repeats_on):
     expense = db.session.query(TransactionType).filter_by(name="Expense").one()
     resp = auth_client.post("/templates", data={
         "name": _NAME,
-        "default_amount": "25.00",
+        "amount": "25.00",
         "category_id": seed_user["categories"]["Rent"].id,
         "transaction_type_id": expense.id,
         "account_id": seed_user["account"].id,
@@ -209,7 +209,7 @@ class TestTheFormStoresAndWalksTheReading:
         resp = auth_client.post(
             f"/templates/{template.id}",
             data=_edit_form_as_posted(
-                auth_client, template, default_amount="30.00",
+                auth_client, template, amount="30.00",
             ),
         )
 

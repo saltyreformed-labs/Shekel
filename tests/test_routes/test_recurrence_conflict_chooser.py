@@ -30,7 +30,7 @@ class TestParseConflictDecisions:
     def test_no_marker_returns_none(self):
         """A first-time edit submit (no chooser marker) parses to None, so the
         route knows to render the chooser rather than resolve."""
-        form = MultiDict({"default_amount": "10.00"})
+        form = MultiDict({"amount": "10.00"})
         assert parse_conflict_decisions(form) is None
 
     def test_marker_parses_valid_decisions_and_drops_malformed(self):
@@ -43,7 +43,7 @@ class TestParseConflictDecisions:
             "conflict_decision_9": "use",
             "conflict_decision_x": "use",     # non-integer id -> dropped
             "conflict_decision_7": "bogus",   # invalid value -> dropped
-            "default_amount": "10.00",
+            "amount": "10.00",
         })
         assert parse_conflict_decisions(form) == {5: "keep", 9: "use"}
 

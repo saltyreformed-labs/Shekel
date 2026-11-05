@@ -15,11 +15,13 @@ does with plain data:
   retained row that was dropped on the way out would be a silent no-op
   (plan step R10-a).
 
-What it does with a template-backed profile end to end -- the re-priced
-template amount, the regenerated rows -- is graded where the doors are:
-``tests/test_routes/test_salary/`` for the salary page and
+What it does with a template-backed profile end to end -- the regenerated
+rows -- is graded where the doors are: ``tests/test_routes/test_salary/`` for
+the salary page and
 ``tests/test_routes/test_retirement.py::TestTheRailSavesARaisesEndYear`` for
-the rail, both of which observe the template's amount move.
+the rail.  Both observed the template's amount move until plan step X-bp,
+which deleted the re-statement (:meth:`TestTheServiceTakesThePassAndReturnsWhatItKept.test_it_prices_no_paycheck_and_states_no_amount`);
+they read the paycheck a fresh pass prices instead.
 """
 
 from decimal import Decimal
@@ -29,7 +31,7 @@ from sqlalchemy.exc import DataError
 
 from app.exceptions import RecurrenceConflict
 from app.extensions import db
-from app.services import salary_regeneration
+from app.services import salary_regeneration, template_amount_service
 from app.services.balance_at import BalanceContext
 from tests._test_helpers import make_salary_profile
 
@@ -49,7 +51,6 @@ def _linked_profile(seed_user, db_session):
         category_id=next(iter(seed_user["categories"].values())).id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
         name="Paycheck",
-        default_amount=Decimal("11.11"),
     )
     db_session.add(template)
     db_session.flush()
@@ -112,9 +113,32 @@ class TestTheServiceTakesThePassAndReturnsWhatItKept:
             retained = salary_regeneration.regenerate_salary_transactions(ctx, profile)
 
             assert retained == []
-            assert profile.template.default_amount != Decimal("11.11"), (
-                "the template's amount was not re-stated at today's net"
-            )
+
+    def test_it_prices_no_paycheck_and_states_no_amount(
+        self, app, db, seed_user, seed_periods_today, monkeypatch,
+    ):
+        """The regeneration redraws rows and writes no figure (plan step X-bp).
+
+        It re-stated the template's ``default_amount`` at today's net until
+        X-bp, a copy nothing read once the Recurring and savings pages, the
+        edit page and the archive priced today's paycheck themselves, and the
+        same step dropped the column.  So the pass's pricer is never asked
+        for and no price version is written: a salary profile's template
+        states no amount.
+        """
+        with app.app_context():
+            profile = _linked_profile(seed_user, db.session)
+            db.session.commit()
+
+            def _never(*_args, **_kwargs):
+                raise AssertionError("the regeneration priced a paycheck")
+
+            monkeypatch.setattr(BalanceContext, "paychecks", _never)
+            ctx = BalanceContext.build(seed_user["user"].id)
+
+            assert salary_regeneration.regenerate_salary_transactions(ctx, profile) == []
+            db.session.flush()
+            assert template_amount_service.amount_versions(profile.template) == []
 
     def test_a_profile_with_no_template_is_left_alone(
         self, app, db, seed_user, seed_periods_today, monkeypatch,

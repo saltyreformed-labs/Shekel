@@ -162,12 +162,11 @@ def a_transaction(
             category_id=category_id,
             transaction_type_id=type_id,
             name=name,
-            default_amount=Decimal(amount),
             is_envelope=is_envelope,
         )
         db.session.add(definition)
         db.session.flush()
-        state_template_price(definition)
+        state_template_price(definition, Decimal(amount))
         # The definition first, then the cadence onto it (plan step R-F6).
         make_every_period_rule(db.session, definition)
         txn = generate_row_of(

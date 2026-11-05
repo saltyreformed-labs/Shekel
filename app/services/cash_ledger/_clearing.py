@@ -99,10 +99,11 @@ class ClearableLine(Protocol):
     """What :class:`StatementCoverage` needs to know about one line.
 
     The two facts, and nothing else: when the money moved, and which statement
-    was recorded as showing it.  Four types satisfy it as they stand --
+    was recorded as showing it.  Three types satisfy it as they stand --
     :class:`~app.models.transaction.Transaction`,
-    :class:`~app.models.transaction_entry.TransactionEntry`,
-    :class:`~._events.CashSourceFact` and the posted walk's own source record --
+    :class:`~app.models.transaction_entry.TransactionEntry` and
+    :class:`~._events.CashSourceFact`, where the posted walk's own source record
+    was a fourth until plan task plan#2525 deleted that walk's loaders --
     so the rule is asked of the row itself rather than of two loose arguments a
     caller could swap or forget (plan Section 8: an argument a caller can get
     wrong is a defect, not a contract).
@@ -124,12 +125,14 @@ class StatementCoverage:
 
     Built once per account from its assertion facts
     (:func:`statement_coverage`) and asked per line.  It is the ONE
-    implementation of ruling R-FL's rule, for both balance walks, the entry
-    reservation and the entry list's indicator -- the same "one implementation
-    rather than a convention" property :class:`~._amounts.ReconciledThrough`
-    was built for, over the fact that replaced its guess.
+    implementation of ruling R-FL's rule, for the cash walk (one walk since
+    plan task plan#2525, the posted ledger's corrections framing the read
+    fold's replay), the entry reservation and the entry list's indicator --
+    the same "one implementation rather than a convention" property
+    :class:`~._amounts.ReconciledThrough` was built for, over the fact that
+    replaced its guess.
 
-    **It answers WHICH assertion, not merely WHETHER**, because the walks need
+    **It answers WHICH assertion, not merely WHETHER**, because the walk needs
     the first: an assertion's correction is ``asserted balance - the sum of what
     it cleared``, so a line assigned to the wrong assertion moves two
     corrections even when the day-level balance survives.
@@ -351,7 +354,8 @@ def statement_coverage(
     """Return the clearing rule for an account, from its assertion facts.
 
     Takes the facts rather than an account id, so a caller already holding them
-    -- both walks load them to replay -- pays no second query, and a caller that
+    -- a :class:`~._walk.CashLedgerWalk`, whose ``coverage`` this is -- pays no
+    second query, and a caller that
     does not (:func:`~._events.coverage_for`) has exactly one place that turns
     an id into them.
 

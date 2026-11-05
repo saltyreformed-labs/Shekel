@@ -163,9 +163,11 @@ _OWNING_ARC_COLUMNS = frozenset({
 #: the unit, so the stored ceiling is the resolver's and not the request's.
 #: ``weekday_reading`` ARRIVED at plan step recurrence:R8-c on the footing of
 #: ``nominal_day`` beside it: the door writes the resolved value's.
+#: ``unit_has_day_of_month`` ARRIVED at plan step plan#2302, off the same
+#: resolved unit.
 _DERIVED_COLUMNS = (
-    "interval_n", "unit_id", "placement_id", "shift_id", "starts_on",
-    "nominal_day", "weekday_reading", "max_per_month",
+    "interval_n", "unit_id", "unit_has_day_of_month", "placement_id", "shift_id",
+    "starts_on", "nominal_day", "weekday_reading", "max_per_month",
 )
 
 #: The two columns the DATABASE assigns, which no caller may author: the
@@ -540,6 +542,9 @@ class TestTheAuthoredSurfaceIsWholeAndClosed:
             assert derived_columns(rule) == {
                 "interval_n": resolved.interval_n,
                 "unit_id": ref_cache.recurrence_unit_id(resolved.unit),
+                "unit_has_day_of_month": (
+                    ref_cache.recurrence_unit_has_day_of_month(resolved.unit)
+                ),
                 "placement_id": ref_cache.period_placement_id(
                     resolved.placement,
                 ),

@@ -536,7 +536,6 @@ class TestTheOwnerTravelsWithTheRowThroughItsWriters:
                 category_id=seed_second_user["categories"]["Groceries"].id,
                 transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
                 name="Owner key generation",
-                default_amount=Decimal("40.00"),
             )
             db.session.add(template)
             db.session.flush()

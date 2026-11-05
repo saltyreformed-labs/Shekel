@@ -337,7 +337,7 @@ class PayStubOneOff(db.Model):
 
     Fork 8b, "Keep it as a one-off": a line that appeared on one stub only (a
     bonus, a one-time adjustment) is stored on the stub under its own name and
-    one of the four paycheck-line kinds (``ref.paycheck_line_kinds``).  What that
+    one of the five paycheck-line kinds (``ref.paycheck_line_kinds``).  What that
     meant for pricing was the ruling's, verbatim: *"That stub then matches no
     normal paycheck, so it prices a paycheck only when no stub with matching
     lines exists, and the formulas price the one-off out."*  Ruling

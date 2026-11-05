@@ -383,7 +383,6 @@ with app.app_context():
         name="Van extra principal (planted)",
         from_account_id=van.from_account_id,
         to_account_id=van.to_account_id,
-        default_amount=Decimal("50.00"),
         is_active=True,
     )
     db.session.add(second)

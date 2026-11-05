@@ -160,8 +160,8 @@ def definition_recurs(template) -> bool:
     owner has stopped.  The unarchive door flips the flag before its pass
     runs, so the restored definition recurs again by the same rule.  Two
     more readers inherit the same answer, by the same rule: the
-    carry-forward's prediction (``_generate.can_generate_in_period``) says an
-    archived envelope's definition would generate nothing, so a leftover is
+    carry-forward's prediction (``_generate.rows_to_generate_in_period``)
+    says an archived envelope's definition would generate nothing, so a leftover is
     CREATED as its own row rather than generated from a stopped definition;
     and a salary regeneration (``salary_regeneration``) over a profile whose
     template was archived writes nothing where it revived rows.

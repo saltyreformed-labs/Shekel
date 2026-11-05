@@ -22,7 +22,11 @@ against this same walk per date, and a display-side second grade was a
 checker.  The paid-in-year chips moved OFF the postings onto the fold at step
 C6c (:func:`app.services.balance_at.loan_interest_paid_in_year` /
 :func:`~app.services.balance_at.loan_principal_paid_in_year`), so this module
-no longer answers them.  Reads only -- no writes, no commit.
+no longer answers them.
+
+**Whether a surface shows is the walk's answer too** (plan task plan#2779):
+:func:`_configured_loan_walk`, the one gate both ask.  This module reads no
+stored ledger row.  Reads only -- no writes, no commit.
 """
 
 from dataclasses import dataclass
@@ -31,11 +35,7 @@ from decimal import Decimal
 
 from app.services.installment_calendar import installment_paid_by
 from app.services.loan_ledger import LoanLedgerWalk, walk_loan_ledger
-from app.services.loan_loaders import load_loan_params
-from app.services.posting_service import _ledger_account_for
 from app.utils.money import round_money
-
-from ._linked_ledger import _has_opening_posting
 
 
 @dataclass(frozen=True)
@@ -162,10 +162,11 @@ def confirmed_loan_payment_history(
     refund excluded from all three (see :class:`LoanPaymentHistoryRow`).
 
     Returns ``None`` when the loan has no
-    :class:`~app.models.loan_params.LoanParams` or no OPENING
-    posting in the scenario (unconfigured / un-backfilled), so the caller hides
-    the section rather than showing a misleading empty table -- the same fallback
-    contract as the balance reader beside it.
+    :class:`~app.models.loan_params.LoanParams`, the same fallback contract as
+    the scorecard beside it (:func:`_configured_loan_walk`).  A configured loan
+    reads ``[]`` until a payment of its in the scenario is confirmed, a scenario
+    holding none of its payments included: the loan's opening is a term of the
+    loan, not of a scenario.  The page hides ``[]`` exactly as it hides ``None``.
 
     Reads only -- no writes, no commit.
 
@@ -179,14 +180,12 @@ def confirmed_loan_payment_history(
 
     Returns:
         The chronological confirmed payment rows (possibly empty for a configured
-        loan with no confirmed payment yet), or ``None`` when the ledger cannot
-        answer for this loan / scenario.
+        loan with no confirmed payment yet), or ``None`` when the account is not
+        a configured loan.
 
     Raises:
         ValueError: If *as_of* is after ``date.today()`` (out of the confirmed
             reader's domain -- a future date is a forward projection).
-        PostingError: If the loan account has no linked ledger account (from
-            :func:`~app.services.posting_service._ledger_account_for`).
     """
     if as_of > date.today():
         raise ValueError(
@@ -235,32 +234,25 @@ def confirmed_loan_payment_history(
 def _configured_loan_walk(
     loan_account_id: int, scenario_id: int,
 ) -> LoanLedgerWalk | None:
-    """Walk a CONFIGURED loan's ledger, or return ``None`` when it cannot answer.
+    """Walk a CONFIGURED loan's ledger, or return ``None`` when it has no terms.
 
-    The entry guard behind the payment-history table
-    (:func:`confirmed_loan_payment_history`): a configured loan
-    (:class:`~app.models.loan_params.LoanParams`) with an OPENING posting in the
-    scenario, then the ONE walk.  ``None`` when the ledger cannot answer -- no
-    params, or no opening posting -- so the surface hides on the identical
-    condition the balance reader beside it hides on.
+    The one gate behind both surfaces (:func:`confirmed_loan_payment_history`,
+    :func:`loan_balance_anchor_history`), so they hide on one condition: the
+    loan's own walk opened.  A loan with no
+    :class:`~app.models.loan_params.LoanParams` walks to nothing
+    (:attr:`~app.services.loan_ledger.LoanLedgerWalk.is_empty`); any other opens
+    at its synthesized origination, in every scenario.
 
     Args:
         loan_account_id: The loan account to walk.
-        scenario_id: The budget scenario to scope to.
+        scenario_id: The budget scenario the payments live in.
 
     Returns:
         The loan's :class:`~app.services.loan_ledger.LoanLedgerWalk`, or
-        ``None`` when the loan is unconfigured / not opened in the scenario.
-
-    Raises:
-        PostingError: If the loan account has no linked ledger account.
+        ``None`` when the account carries no terms.
     """
-    if load_loan_params(loan_account_id) is None:
-        return None
-    linked = _ledger_account_for(loan_account_id)
-    if not _has_opening_posting(linked.id, scenario_id):
-        return None
-    return walk_loan_ledger(loan_account_id, scenario_id)
+    walk = walk_loan_ledger(loan_account_id, scenario_id)
+    return None if walk.is_empty else walk
 
 
 def loan_balance_anchor_history(
@@ -308,13 +300,12 @@ def loan_balance_anchor_history(
         The chronological anchor drift rows (origination first), or ``None`` when
         the account is not a configured loan.
     """
-    if load_loan_params(loan_account_id) is None:
+    walk = _configured_loan_walk(loan_account_id, scenario_id)
+    if walk is None:
         return None
     corrections = [
         correction
-        for correction in walk_loan_ledger(
-            loan_account_id, scenario_id,
-        ).anchor_corrections
+        for correction in walk.anchor_corrections
         if correction.anchor.anchor_date <= as_of
     ]
     return [

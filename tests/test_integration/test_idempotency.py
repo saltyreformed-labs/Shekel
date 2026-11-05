@@ -62,7 +62,6 @@ def _create_profile(seed_user):
         category_id=cat.id,
         transaction_type_id=income_type.id,
         name="Day Job",
-        default_amount=Decimal("2884.62"),
     )
     db.session.add(template)
     db.session.flush()
@@ -126,7 +125,7 @@ class TestTemplateDoubleSubmit:
 
             data = {
                 "name": "Monthly Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 "category_id": seed_user["categories"]["Rent"].id,
                 "transaction_type_id": expense_type.id,
                 "account_id": seed_user["account"].id,

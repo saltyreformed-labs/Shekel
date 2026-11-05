@@ -2,13 +2,15 @@
 Shekel Budget App -- Recurring-definition amount versions (budget schema)
 
 The effective-dated price history of a recurring definition's amount.  A
-transaction template and a transfer template each carry ONE stated amount
+transaction template and a transfer template each carried ONE stated amount
 (``default_amount``), a scalar with no time dimension: when a subscription's
-price rises the old figure is overwritten, so the app cannot say what the
-definition cost last March and a price change retroactively rewrites every
+price rose the old figure was overwritten, so the app could not say what the
+definition cost last March and a price change retroactively rewrote every
 past projection.  :class:`TemplateAmountVersion` is that amount as a dated
-SERIES instead -- rule 1 of ruling **R-FI**, "every financial quantity that
-varies over time is a dated series resolved as-of".
+SERIES instead, and since plan step X-bp dropped the scalar (rulings R-IY,
+R-BAL16) the only place a price is stated -- rule 1 of ruling **R-FI**,
+"every financial quantity that varies over time is a dated series resolved
+as-of".
 
 **Supersession, not ranges.**  A version is in effect from its
 ``effective_date`` until the NEXT version of the same template supersedes it,
@@ -38,7 +40,7 @@ amount somebody STATED.  A template whose amount is DERIVED gets no series at
 all, because building a price history over a derived quantity manufactures a
 history nobody ever stated: a salary-linked transaction template (the paycheck
 calculator prices each row) and a derive-mode loan-payment transfer template
-(``default_amount`` is a stored snapshot of P&I plus escrow) are both excluded.
+(amount rule 4 computes its P&I plus escrow from the loan) are both excluded.
 :func:`app.services.template_amount_service.owns_its_amount` is the single
 predicate, and :func:`app.services.template_amount_service.set_amount` is the
 single write door.

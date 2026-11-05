@@ -119,7 +119,6 @@ def _definition(seed_user, loan, base, *, name, cadence=None, bind=True):
         from_account_id=seed_user["account"].id,
         to_account_id=loan.id,
         name=name,
-        default_amount=base,
     )
     db.session.add(template)
     db.session.flush()

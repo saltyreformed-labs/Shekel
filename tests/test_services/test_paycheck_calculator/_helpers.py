@@ -250,7 +250,7 @@ class FakeProfile:
 
     **It holds no pay stub**, so every paycheck here is priced by the tax
     formulas alone; pricing from a stub (plan step salary:S11-c-2c) is
-    ``test_paycheck_stub_pricing.py``'s, on real rows.
+    the ``test_paycheck_stub_pricing`` package's, on real rows.
 
     **It names an owner** (``user_id``, :data:`_STAND_IN_OWNER` by default),
     because ``payroll_basis`` derives the calendar for the profile's owner.

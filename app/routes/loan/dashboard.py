@@ -589,10 +589,10 @@ def _build_measured_context(account, balance_ctx: BalanceContext, current_year):
     ``None`` for a cold posting cache and hid the chip; the loan-detail page
     renders only for a configured loan, so the chips always show the real figure.
 
-    The payment history and the anchor scorecard still read the posting ledger and
-    still return ``None`` for an un-backfilled loan; the template gates those two
-    on truthiness, so ``[]`` (an originated loan with no confirmed payment yet)
-    hides them exactly as ``None`` does.
+    The payment history and the anchor scorecard read the loan's ledger walk and
+    return ``None`` for an account with no terms; the template gates those two on
+    truthiness, so ``[]`` (an originated loan with no confirmed payment yet) hides
+    them exactly as ``None`` does.
 
     Args:
         account: The loan account (its ``id`` scopes the history / anchor readers;

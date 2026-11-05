@@ -74,7 +74,6 @@ def _generated_transfer(seed_user, seed_periods, series="500.00"):
         from_account_id=seed_user["account"].id,
         to_account_id=savings.id,
         name="Sinking Fund Contribution",
-        default_amount=Decimal(series),
     )
     _db.session.add(template)
     _db.session.flush()

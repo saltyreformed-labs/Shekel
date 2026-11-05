@@ -39,7 +39,9 @@ from flask_login import current_user
 
 from app.exceptions import RecurrenceConflict
 from app.extensions import db
+from app.services import template_amount_service
 from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import stated_price
 from app.services.generation_schedule import GenerationSchedule
 from app.services.recurrence_engine import definition_recurs
 from app.services.pay_calendar import FiledRow, PayCalendar
@@ -321,10 +323,13 @@ class ConflictChooserContext:
         choices: The conflicted rows, already shaped and ordered
             (:func:`_build_conflict_choices`).
         template_name: The edited template's new name (framing sentence).
-        new_amount: The template's new amount, the framing sentence's figure:
-            the definition's price did change, and that is what the page is
-            asking about.  It is NOT the "Use" side's figure for either kind --
-            "use" hands a row back to its definition (ruling **R-JD**).
+        new_amount: The price the edit stated, as of *effective_from*: the
+            framing sentence's figure, because the definition's price did
+            change and that is what the page is asking about.  It was the
+            NEWEST stated price until plan step X-bp, which is a different
+            figure whenever a later price is scheduled.  It is NOT the "Use"
+            side's figure for either kind -- "use" hands a row back to its
+            definition (ruling **R-JD**).
         effective_from: The edit's effective date (framing sentence).
         action_url: Where Apply posts (the same update endpoint).
         cancel_url: Where Cancel returns (the list), abandoning the edit.
@@ -453,18 +458,29 @@ class PreEditTemplateState:
     of flags.  Both fields are read only by
     :func:`regenerate_or_conflict_chooser`, and each answers a "did X move"
     question that the template's post-edit state alone cannot: by the time
-    that function runs, the route's ``setattr`` loop and
+    that function runs, the amount's write door and
     :func:`resolve_recurrence_rule_for_update` have already overwritten both.
 
     Bundled rather than passed as two arguments because the second one takes
     the function past pylint's five-argument threshold, and because the next
     such gate belongs here rather than as a seventh parameter.
 
+    **The amount half is the price HISTORY, not the newest price** (plan
+    step X-bp, an edge case decided under ruling **R-BAL207**).  It was
+    ``default_amount``, the newest stated price, and the newest price is not
+    what an edit changes when a later one is already scheduled: a price
+    stated under it reprices every row between the two dates and leaves the
+    newest where it was, so the chooser stayed shut over hand-edited rows
+    the edit had just repriced.  The doors that capture an image AFTER their
+    write (the standing payment's sync, the unarchive) state no price, so
+    their image is the series as it stands and the chooser never asks there.
+
     Attributes:
-        amount: The template's ``default_amount`` before the edit.  The
-            conflict chooser is offered only when the new amount differs --
-            it presents a keep-vs-use AMOUNT decision, so an edit that did
-            not move the amount has nothing to ask about.
+        series: The template's price history before the edit, as values
+            (:func:`~app.services.template_amount_service.series_image`).
+            The conflict chooser is offered only when the edit changed it:
+            it asks whether hand-edited rows follow the definition's price,
+            so an edit that stated no new price has nothing to ask about.
         had_recurrence_rule: Whether the template named a recurrence rule
             before the edit.  Distinguishes "the user just cleared the
             recurrence" -- which MUST re-drive the generated instances -- from
@@ -474,7 +490,7 @@ class PreEditTemplateState:
             it.
     """
 
-    amount: Decimal
+    series: tuple[tuple[date, Decimal], ...]
     had_recurrence_rule: bool
 
 
@@ -483,7 +499,6 @@ def regenerate_or_conflict_chooser(
     before: PreEditTemplateState,
     effective_from: date,
     kind: RecurrenceConflictKind,
-    amount_drives_instances: bool,
 ) -> Response | None:
     """Regenerate a template's future rows, diverting to the conflict chooser.
 
@@ -493,9 +508,9 @@ def regenerate_or_conflict_chooser(
     regenerates the non-overridden future instances via
     ``kind.regenerate_fn``.  When the edit collides with
     hand-edited (override / soft-deleted) upcoming instances the regeneration
-    raises; the branch then depends on the submit and on whether this edit is
-    a real per-instance AMOUNT change (the chooser only offers a keep-vs-use
-    AMOUNT decision):
+    raises; the branch then depends on the submit and on whether this edit
+    changed the definition's PRICE HISTORY (the chooser only offers a
+    keep-vs-use AMOUNT decision):
 
       * Apply (chooser decisions present): resolve each conflicted instance
         per the user's keep/use choice, then return ``None`` so the caller
@@ -503,18 +518,33 @@ def regenerate_or_conflict_chooser(
         the same for both kinds since plan step X-au-f: the row is handed
         back to its definition and priced from the series on its own due date
         (ruling **R-JD**).
-      * First submit of an amount-changing edit (``amount_drives_instances``,
-        the template STILL recurs, and ``default_amount`` differs from
-        ``before.amount``): render the chooser, ROLL BACK the pending edit
-        (nothing is persisted), and return the chooser
-        :class:`~flask.Response` for the caller to return.
-      * Any other conflicting edit -- a rename / rule / flag change, or a
-        salary-linked template whose ``default_amount`` does not drive its
-        instance amounts -- leaves the overrides as the regeneration
+      * First submit of an edit that changed the price history (the template
+        STILL recurs, and its series differs from ``before.series``): render
+        the chooser, naming the price the edit stated as of
+        *effective_from*, ROLL BACK the pending edit (nothing is persisted),
+        and return the chooser :class:`~flask.Response` for the caller to
+        return.
+      * Any other conflicting edit -- a rename / rule / flag change, or an
+        edit to a definition whose amount is WORKED OUT (a salary profile's
+        paycheck, a derive-mode loan payment), whose series the amount's
+        write door never writes -- leaves the overrides as the regeneration
         preserved them and returns ``None`` so the caller commits.  This
         keep-silently branch is deliberate: nothing the user can see changed
         for those instances, so no prompt and no flash (the service still
         logs the override / delete counts for forensics).
+
+    **No flag says whether the amount drives the rows, since plan step X-bp**
+    (an edge case decided under ruling **R-BAL207**).  The transaction route
+    passed ``amount_drives_instances=False`` for a salary-linked template and
+    the transfer doors passed ``True`` always, so a derive-mode loan
+    payment's edit asked "You changed it to $X" over a hand-edited payment
+    while every row of it reads the loan's own figure.  The series answers
+    both kinds: an edit of a definition that does not own its amount states
+    no price, because both update doors refuse a typed amount for one
+    (``_amount_version_actions.refuse_a_typed_worked_out_amount``) before
+    the write door, which raises for one
+    (``template_amount_service.set_amount``).  So its edit never changes the
+    series and the question is never asked.
 
     **A CLEARED recurrence regenerates too**, and the guard that skipped it
     was the second half of a live defect (see
@@ -569,22 +599,17 @@ def regenerate_or_conflict_chooser(
     Args:
         template: The edited template (its field updates already applied).
         before: The template's pre-edit state
-            (:class:`PreEditTemplateState`) -- its amount and whether it
-            named a recurrence rule.  Both are already overwritten on
+            (:class:`PreEditTemplateState`) -- its price history and whether
+            it named a recurrence rule.  Both are already overwritten on
             *template* by the time this runs.
         effective_from: The edit's effective date.
         kind: The per-kind config (:class:`RecurrenceConflictKind`).
-        amount_drives_instances: Whether ``default_amount`` actually drives
-            this template's generated instance amounts.  ``False`` for a
-            salary-linked template (paycheck-calculated per period), which
-            suppresses the chooser so a vestigial ``default_amount`` edit
-            never mis-states a paycheck.  Transfers always pass ``True``.
 
     Returns:
         The chooser response to short-circuit to, or ``None`` to proceed to
         commit (no scenario, a template that neither has nor had a recurrence
-        rule, no conflict, a non-amount edit, an edit that cleared the
-        recurrence, or a conflict already resolved from Apply).
+        rule, no conflict, an edit that stated no new price, an edit that
+        cleared the recurrence, or a conflict already resolved from Apply).
     """
     # ONE read pass for the edit: it pins the owner, the day and the baseline
     # scenario, and its calendar is the one derivation the regeneration
@@ -623,9 +648,8 @@ def regenerate_or_conflict_chooser(
             # change silently did nothing and said "some upcoming instances
             # were hand-edited" over no instances.
             (conflict.overridden or conflict.deleted)
-            and amount_drives_instances
             and definition_recurs(template)
-            and template.default_amount != before.amount
+            and template_amount_service.series_image(template) != before.series
         ):
             chooser = render_recurrence_conflict_chooser(
                 ConflictChooserContext(
@@ -639,7 +663,18 @@ def regenerate_or_conflict_chooser(
                         conflict, kind, ctx.calendar(),
                     ),
                     template_name=template.name,
-                    new_amount=template.default_amount,
+                    # The price the edit STATED, as of the date it stated it
+                    # from (plan step X-bp) -- not the newest, which a later
+                    # scheduled price holds.  The series changed, which only
+                    # the write door does and only for a definition owning
+                    # its amount, so the rule answers rather than refusing.
+                    new_amount=stated_price(
+                        template, effective_from,
+                        subject=(
+                            f"{type(template).__name__} {template.id}'s price "
+                            f"from {effective_from.isoformat()}"
+                        ),
+                    ),
                     effective_from=effective_from,
                     action_url=url_for(
                         kind.update_endpoint, template_id=template.id,

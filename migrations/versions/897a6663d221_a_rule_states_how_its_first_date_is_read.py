@@ -76,7 +76,14 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '897a6663d221'
-down_revision = '0703995c8536'
+# The head of ``dev`` at ``f52607f8c``, measured on this branch after its merge
+# (229 revisions, one head, by alembic.script.ScriptDirectory).  It was
+# ``0703995c8536`` at authoring, until PR #651 landed ``9b3e6d1f4a27``, and it
+# must stay above that revision: ``ck_recurrence_rules_weekday_reading_unit``
+# reads the flag it carries.  Another lane landing a revision first makes two
+# heads, which git merges cleanly and ``flask db upgrade`` refuses: re-point
+# this at the measured head as the last edit before the pull request.
+down_revision = '9b3e6d1f4a27'
 branch_labels = None
 depends_on = None
 

@@ -66,7 +66,7 @@ class TestTheRevision:
     def test_revision_and_down_revision(self):
         """revision / down_revision pin the migration into the chain."""
         assert _MIGRATION.revision == "897a6663d221"
-        assert _MIGRATION.down_revision == "0703995c8536"
+        assert _MIGRATION.down_revision == "9b3e6d1f4a27"
 
     def test_it_is_reviewed(self):
         """A dropped table carries the ``Review:`` line the rules require."""

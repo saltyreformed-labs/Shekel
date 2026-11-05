@@ -597,7 +597,6 @@ class TestAccountArchive:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Monthly Savings",
-                default_amount=Decimal("200.00"),
                 is_active=True,
             )
             db.session.add(template)

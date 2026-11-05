@@ -16,6 +16,8 @@ from datetime import date, datetime, timezone
 import pytest
 from decimal import Decimal
 
+from app import ref_cache
+from app.enums import PaycheckLineKindEnum
 from app.extensions import db
 from app.models.ref import Status, TransactionType
 from app.models.mixins import reject_settle_instant
@@ -481,6 +483,15 @@ class TestCategoryDisplayName:
 # ── PaycheckBreakdown computed totals ────────────────────────────────
 
 
+def _kind(member):
+    """Return *member*'s ``ref.paycheck_line_kinds`` id for a hand-built priced line.
+
+    A priced line names the kind it was priced as, required since plan step
+    salary:S11-e (ledger row SAL-597), so a display fake names one too.
+    """
+    return ref_cache.paycheck_line_kind_id(member)
+
+
 class TestPaycheckBreakdownTotals:
     """Tests for the section totals on PaycheckBreakdown.
 
@@ -502,8 +513,14 @@ class TestPaycheckBreakdownTotals:
             ),
             deductions=DeductionBreakdown(
                 pre_tax=[
-                    PricedLine(name="401k", amount=Decimal("250.00")),
-                    PricedLine(name="HSA", amount=Decimal("100.00")),
+                    PricedLine(
+                        name="401k", amount=Decimal("250.00"),
+                        paycheck_line_kind_id=_kind(PaycheckLineKindEnum.PRE_TAX_DEDUCTION),
+                    ),
+                    PricedLine(
+                        name="HSA", amount=Decimal("100.00"),
+                        paycheck_line_kind_id=_kind(PaycheckLineKindEnum.PRE_TAX_DEDUCTION),
+                    ),
                 ],
             ),
         )
@@ -522,8 +539,14 @@ class TestPaycheckBreakdownTotals:
             ),
             deductions=DeductionBreakdown(
                 post_tax=[
-                    PricedLine(name="Roth IRA", amount=Decimal("200.00")),
-                    PricedLine(name="Life Insurance", amount=Decimal("25.00")),
+                    PricedLine(
+                        name="Roth IRA", amount=Decimal("200.00"),
+                        paycheck_line_kind_id=_kind(PaycheckLineKindEnum.POST_TAX_DEDUCTION),
+                    ),
+                    PricedLine(
+                        name="Life Insurance", amount=Decimal("25.00"),
+                        paycheck_line_kind_id=_kind(PaycheckLineKindEnum.POST_TAX_DEDUCTION),
+                    ),
                 ],
             ),
         )
@@ -590,10 +613,16 @@ class TestPaycheckBreakdownTotals:
             ),
             deductions=DeductionBreakdown(
                 pre_tax=[
-                    PricedLine(name="401k", amount=Decimal("200.00")),
+                    PricedLine(
+                        name="401k", amount=Decimal("200.00"),
+                        paycheck_line_kind_id=_kind(PaycheckLineKindEnum.PRE_TAX_DEDUCTION),
+                    ),
                 ],
                 post_tax=[
-                    PricedLine(name="Roth", amount=Decimal("50.00")),
+                    PricedLine(
+                        name="Roth", amount=Decimal("50.00"),
+                        paycheck_line_kind_id=_kind(PaycheckLineKindEnum.POST_TAX_DEDUCTION),
+                    ),
                 ],
             ),
         )
@@ -658,7 +687,10 @@ class TestPaycheckBreakdownTotals:
             ),
             deductions=DeductionBreakdown(
                 pre_tax=[
-                    PricedLine(name="401k", amount=Decimal("1500.00")),
+                    PricedLine(
+                        name="401k", amount=Decimal("1500.00"),
+                        paycheck_line_kind_id=_kind(PaycheckLineKindEnum.PRE_TAX_DEDUCTION),
+                    ),
                 ],
             ),
         )

@@ -40,48 +40,30 @@ says move the shared leaf rather than spell it twice, so the pair lives in
 the date-utility leaf below both, and every reader of this module's names
 -- ``_occurrence``, ``_frequency``, ``_resolution`` -- is unchanged.
 
-Pure: no Flask, no ORM, no clock, no database.
+**Which units are measured in months, and how many, is NOT stated here** since
+plan step plan#2302 (ruling plan#2748).  It was: a ``_MONTHS_PER_UNIT`` table
+(month 1, year 12) and the ``MONTH_SPANNING_UNITS`` tuple taken from its keys,
+the one statement every refusal of a unit pairing derived from.  A CHECK on
+``budget.recurrence_rules`` cannot read a code table, so that step moved the
+fact onto the unit's reference row (``ref.recurrence_units.months_per_unit``),
+where the database GENERATES the day-of-month flag from it, and
+:func:`months_per_step` reads the row through :mod:`app.ref_cache`.
+
+No Flask, no ORM, no clock, and no database read: the unit's span comes from
+the reference cache, loaded once per process.
 """
 from collections.abc import Callable, Iterator
 from datetime import date
 
+from app import ref_cache
 from app.enums import RecurrenceUnitEnum
 from app.exceptions import ShekelError
 from app.utils.dates import (
     CALENDAR_DATE_MAX,
-    MONTHS_PER_YEAR,
     clamped_day,
     month_on_or_before,
     month_ordinal,
 )
-
-#: How many MONTHS one of each calendar unit spans.
-#:
-#: ``PERIOD`` and ``WEEK`` are absent because they are not month-based at all --
-#: :func:`months_per_step` refuses them rather than answering a plausible
-#: number, which is the disposition every other partial function in this
-#: package takes over an enum.
-_MONTHS_PER_UNIT: dict[RecurrenceUnitEnum, int] = {
-    RecurrenceUnitEnum.MONTH: 1,
-    RecurrenceUnitEnum.YEAR: MONTHS_PER_YEAR,
-}
-
-#: The units measured in whole months, and therefore the only ones that fire on
-#: a DAY of the month.
-#:
-#: **The one statement of that class**, and an adversarial review of plan step
-#: R7b-1 is why it is here rather than beside its reader.  ``_resolution``
-#: carried its own ``(MONTH, YEAR)`` tuple; the two were extensionally equal,
-#: nothing made them so, and the ONLY way to reach
-#: :class:`MonthStepError` from either caller was to drive them apart -- which
-#: is what a test had to monkeypatch to exercise the refusal at all.  A guard
-#: whose entire reachability condition is "two hand-written sets disagree" is
-#: the fence this project removes rather than tests.
-#:
-#: Firing on a day of the month is not a second fact about a unit: a cadence
-#: measured in months has a day-of-month coordinate and one measured in
-#: paychecks or weeks does not.
-MONTH_SPANNING_UNITS: tuple[RecurrenceUnitEnum, ...] = tuple(_MONTHS_PER_UNIT)
 
 
 class MonthStepError(ShekelError):
@@ -89,8 +71,9 @@ class MonthStepError(ShekelError):
 
     A broken invariant rather than user input: :func:`months_per_step` is asked
     only for a cadence its caller has already routed to the calendar family, so
-    a unit arriving here without a month span means the router and this table
-    disagree about which units are calendar units.
+    a unit arriving here without a month span is a caller that routed a
+    paycheck or week cadence without asking the unit's day-of-month flag,
+    which the database generates from the same span (ruling plan#2748).
 
     **A :class:`~app.exceptions.ShekelError`, and an adversarial review of plan
     step R7b-1 is why.**  It was a bare ``ValueError``, which put it outside the
@@ -117,6 +100,11 @@ def months_per_step(unit: RecurrenceUnitEnum, interval_n: int) -> int:
     Both of those callers route to it on a calendar unit and CONVERT the
     refusal below into their own module's error; see :class:`MonthStepError`.
 
+    The span is the unit's reference row's (``ref_cache.recurrence_unit_months``,
+    ruling plan#2748), and so is the day-of-month flag that routes a caller
+    here: the database generates the flag from this span, so a unit that names
+    a day of the month has a stride by construction.
+
     Args:
         unit: The cadence unit.  Must be a calendar unit.
         interval_n: How many *unit*\\ s pass between occurrences.
@@ -128,7 +116,7 @@ def months_per_step(unit: RecurrenceUnitEnum, interval_n: int) -> int:
     Raises:
         MonthStepError: When *unit* is not measured in months.
     """
-    months = _MONTHS_PER_UNIT.get(unit)
+    months = ref_cache.recurrence_unit_months(unit)
     if months is None:
         raise MonthStepError(
             f"recurrence unit {unit!r} has no reading in months, so it has no "
@@ -209,8 +197,6 @@ def walk_months(
 
 
 __all__ = [
-    "MONTHS_PER_YEAR",
-    "MONTH_SPANNING_UNITS",
     "MonthStepError",
     "clamped_day",
     "month_ordinal",

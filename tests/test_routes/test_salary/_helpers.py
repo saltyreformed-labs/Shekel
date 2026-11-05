@@ -52,7 +52,6 @@ def _create_profile(seed_user):
         category_id=cat.id,
         transaction_type_id=income_type.id,
         name="Day Job",
-        default_amount=Decimal("75000.00") / 26,
         is_active=True,
     )
     db.session.add(template)
@@ -129,7 +128,6 @@ def _create_other_user_profile():
         category_id=cat.id,
         transaction_type_id=income_type.id,
         name="Other Job",
-        default_amount=Decimal("60000.00") / 26,
         is_active=True,
     )
     db.session.add(template)
@@ -358,7 +356,6 @@ def _create_second_user_salary_profile(second_user_data):
         category_id=cat.id,
         transaction_type_id=income_type.id,
         name="Other Job",
-        default_amount=Decimal("60000.00") / 26,
         is_active=True,
     )
     db.session.add(template)
@@ -409,7 +406,6 @@ def _create_inactive_profile(seed_user, name="Old Job"):
         category_id=cat.id,
         transaction_type_id=income_type.id,
         name=name,
-        default_amount=Decimal("40000.00") / 26,
         is_active=False,
     )
     db.session.add(template)

@@ -44,6 +44,8 @@ from app.routes._commit_helpers import (
 )
 from app.routes._amount_version_actions import (
     AmountVersionAction,
+    edit_form_amount,
+    refuse_a_typed_worked_out_amount,
     withdraw_amount_version,
 )
 from app.services.balance_at import BalanceContext
@@ -96,10 +98,10 @@ logger = logging.getLogger(__name__)
 # Field allowlist for the transfer-template update route: which submitted
 # form fields may be written back to the template via setattr.
 #
-# ``default_amount`` is deliberately absent since plan step X-au-a: the amount
-# is a dated SERIES as well as a column, and
-# ``template_amount_service.set_amount`` is the one door that moves both
-# together.  A setattr here would move one without the other.
+# The amount (the form's ``amount``, ``default_amount`` until plan step X-bp)
+# is deliberately absent since plan step X-au-a: the amount is a dated SERIES,
+# a definition's only price since X-bp dropped the column, and
+# ``template_amount_service.set_amount`` is its one write door.
 #
 # ``is_active`` is deliberately absent since plan step R7d-g-3 (plan ledger
 # row **REC-525**), for the reason the transaction twin
@@ -199,7 +201,7 @@ def new_transfer_template():
         # A template that does not exist yet has no amount history; passed so
         # the shared form never references an undefined value.
         amount_history_rows=[],
-        amount_today=None,
+        form_amount=None,
         amount_version_delete_endpoint="transfers.delete_amount_version",
     )
 
@@ -346,6 +348,10 @@ def create_transfer_template():
         redirect=new_form,
     )
 
+    # The form's Amount is ``amount`` since plan step X-bp, which is not a
+    # column: it is the price the series opens at below, the definition's
+    # only price.
+    amount = data.pop("amount")
     template = TransferTemplate(
         user_id=current_user.id,
         **data,
@@ -370,12 +376,14 @@ def create_transfer_template():
     if isinstance(rule, Response):
         return rule
 
-    # Open the amount's dated series at today (plan step X-au-a).  The
-    # constructor above also carries the figure because the column is NOT NULL;
-    # this call is what makes the SERIES exist, and plan step X-bp removes the
-    # redundancy by removing the column.
+    # Open the amount's dated series at today (plan step X-au-a).  The series
+    # is this definition's only price: no transfer it makes stores a figure,
+    # and plan step X-bp dropped the template's ``default_amount`` copy
+    # (rulings **R-IY**, **R-BAL16**), so the constructor above carries none.
+    # A template whose series never opened makes transfers ``_stated_amount``
+    # REFUSES.
     template_amount_service.set_amount(
-        template, template.default_amount, effective_on=display_today(),
+        template, amount, effective_on=display_today(),
     )
 
     # Create the initial transfer instance(s) for the new template: a single
@@ -403,9 +411,13 @@ def edit_transfer_template(template_id):
 
     accounts = account_service.list_active_accounts(current_user.id)
     categories = category_service.list_active_categories(current_user.id)
-    # The form's ONE read pass (plan step R7d-f); both readers below take the
-    # standing identity off its loan-resolution memo, the second for free.
+    # The form's ONE read pass (plan step R7d-f); the recurrence controls and
+    # the destination locks take the standing identity off its loan-resolution
+    # memo, the second for free, and a loan-tracking payment is priced by it.
     pass_ctx = BalanceContext.build(current_user.id)
+    # The owner's day, once, for the history panel and the Amount box; see
+    # the transaction twin (plan#2732).
+    today = display_today()
 
     return render_template(
         "transfers/form.html",
@@ -428,16 +440,13 @@ def edit_transfer_template(template_id):
         periods=[],
         current_period=None,
         # The amount's dated history (plan step X-au-a), precomputed into
-        # display rows.  Empty for a DERIVE-mode loan payment, whose
-        # ``default_amount`` is a P&I + escrow snapshot and which therefore has
-        # no series at all.
+        # display rows.  Empty for a DERIVE-mode loan payment, whose amount
+        # the loan works out, even where it holds a series from a manual era.
         amount_history_rows=template_amount_service.build_amount_history(
-            template, display_today(),
+            template, today,
         ),
-        # What the definition costs NOW; see the transaction twin.
-        amount_today=template_amount_service.current_amount(
-            template, display_today(),
-        ),
+        # The Amount box or the worked-out line; see the transaction twin.
+        form_amount=edit_form_amount(template, pass_ctx, today),
         amount_version_delete_endpoint="transfers.delete_amount_version",
     )
 
@@ -526,9 +535,10 @@ def update_transfer_template(template_id):
     # template's single Transfer is an ordinary auto-generated row, so a
     # rename would otherwise delete it -- which is exactly what a
     # ``Once``-ruled transfer suffered until plan step R2e-3 made it
-    # rule-less (defect D16).
+    # rule-less (defect D16).  ``series`` lets the chooser ask only when the
+    # edit changed the price history (plan step X-bp).
     before = PreEditTemplateState(
-        amount=template.default_amount,
+        series=template_amount_service.series_image(template),
         had_recurrence_rule=template.recurs,
     )
 
@@ -583,10 +593,15 @@ def update_transfer_template(template_id):
     # (F-24): the helper dispatches the existing-rule (mutate in place) vs
     # no-existing-rule (build + link) branches and pops every recurrence key
     # from ``data``.
-    end_bound, refusal = settle_destination_for_update(
-        template, data,
-        end_bound=end_bound, pass_ctx=pass_ctx, redirect=edit_form,
-    )
+    #
+    # Ahead of both, a typed amount on a derive-mode loan payment is refused:
+    # it states no price, and its form shows no Amount box (ruling plan#2694).
+    refusal = refuse_a_typed_worked_out_amount(template, data, edit_form)
+    if refusal is None:
+        end_bound, refusal = settle_destination_for_update(
+            template, data,
+            end_bound=end_bound, pass_ctx=pass_ctx, redirect=edit_form,
+        )
     if refusal is None:
         refusal = resolve_recurrence_rule_for_update(
             template,
@@ -602,8 +617,8 @@ def update_transfer_template(template_id):
 
     _apply_update_fields(template, data)
 
-    # State the amount through its one write door, which moves the scalar and
-    # the dated series together (plan step X-au-a).  ``effective_from`` is the
+    # State the amount through its one write door, the dated series' (plan
+    # step X-au-a).  ``effective_from`` is the
     # form's "Amount effective from" date, which also bounds the regeneration
     # below -- ONE value, applied by two different predicates (the series reads
     # a transfer's DUE date, the sweep its pay PERIOD's end).  Finding
@@ -616,9 +631,9 @@ def update_transfer_template(template_id):
     # transfers it reaches decides nothing about money: a transfer it declares
     # resolves by its own due date.  Absent from a partial update means the
     # amount was not restated.
-    if "default_amount" in data:
+    if "amount" in data:
         template_amount_service.set_amount(
-            template, data["default_amount"], effective_on=effective_from,
+            template, data["amount"], effective_on=effective_from,
         )
 
     # Flush template changes first so name-uniqueness violations are caught
@@ -725,9 +740,10 @@ def _regenerate_and_commit_template(
         template: The TransferTemplate whose field changes are already staged
             in the session.
         before: The template's pre-edit state
-            (:class:`~app.routes._recurrence_form_helpers.PreEditTemplateState`)
-            -- its amount gates the chooser and its ``had_recurrence_rule``
-            gates the sweep; see :func:`regenerate_or_conflict_chooser`.
+            (:class:`~app.routes._recurrence_conflict_chooser.PreEditTemplateState`)
+            -- its price history gates the chooser and its
+            ``had_recurrence_rule`` gates the sweep; see
+            :func:`~app.routes._recurrence_conflict_chooser.regenerate_or_conflict_chooser`.
         effective_from: Date from which regeneration applies.
         template_id: The template's id, used for redirect kwargs and logging.
         stranding: The route's

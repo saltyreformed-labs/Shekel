@@ -31,7 +31,7 @@ every one of them, whatever their date.  Its output is therefore a function of
 the loan's data ALONE -- which is what makes it re-derivable -- and deciding
 which facts have HAPPENED as of a date belongs to a reader (the seam's fold).  The
 cash ledger's walk
-(:func:`app.services.account_posting_service.walk_account_ledger`) has taken no
+(:func:`app.services.ledger_lines.walk_account_ledger`) has taken no
 as-of since Step 3; the loan half caught up at step A3 (``4e46a0a8``).
 
 **The same walk carries the loan's PROJECTIONS when the seam appends them**
@@ -51,15 +51,21 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.models.loan_params import LoanParams
 from app.services import loan_loaders
-from app.services.loan_loaders import LoanAnchorFact
+from app.services.loan_loaders import LoanAnchorFact, LoanRecords
 
-from ._calendars import LoanCalendars
+from ._calendars import LoanCalendars, build_loan_calendar
 from ._events import confirmed_shadows_through, loan_event_stream
 from ._replay import LoanEventStream, PaymentOutcome, replay_loan_events
 from ._visible import anchor_visible_on
 
 _ZERO_MONEY = Decimal("0.00")
+
+# The stream of a loan carrying no ``LoanParams`` (the N1 guard): no charge, no
+# payment, no reset.  One value, so the ledger's walks and a pass's walk cannot
+# disagree on what an unconfigured loan walks to.
+_NO_TERMS_STREAM = LoanEventStream(charges=(), payments=(), resets=())
 
 
 @dataclass(frozen=True)
@@ -154,6 +160,21 @@ class LoanLedgerWalk:
             outcome for outcome in self.payment_splits if outcome.is_projected
         ]
 
+    @property
+    def is_empty(self) -> bool:
+        """Whether the walk holds no anchor and no payment, so books nothing.
+
+        The ONE statement of the empty walk, the one a loan with no
+        ``LoanParams`` walks to (the N1 guard): the loan writers return on it
+        before they read what is posted (``loan_posting_service``'s
+        ``reconcile_loan_corrections`` and ``_assert_checked_projection``),
+        the worked-out read asks it of each loan to decide whether the
+        owner's pay calendar is loaded (``ledger_lines.worked_out_lines``),
+        and the loan page's two measured surfaces hide on it
+        (``loan_posting_service``'s ``_configured_loan_walk``).
+        """
+        return not self.anchor_corrections and not self.payment_splits
+
 
 def replay_loan_stream(
     stream: LoanEventStream, extra_per_period: Decimal = _ZERO_MONEY,
@@ -210,17 +231,20 @@ def load_loan_stream(
     scenario_id: int,
     terms: LoanCalendars,
     *,
-    visible_by: date | None = None,
+    visible_by: date,
 ) -> LoanEventStream:
-    """Load a loan's recorded facts into its :class:`~._replay.LoanEventStream`.
+    """Load a loan's facts visible by a day into its :class:`~._replay.LoanEventStream`.
 
-    The LOAD half of :func:`walk_loan_ledger`, public since plan step
-    recurrence:R16-c-1 so the seam's per-pass walk can take the facts VISIBLE
-    by its ``as_of`` (ruling **R-R91**) and replay them; the ledger's walk
-    takes every fact.  Nothing here reads the clock.
+    The seam's per-pass walk's load, public since plan step
+    recurrence:R16-c-1 so that walk can take the facts VISIBLE by its
+    ``as_of`` (ruling **R-R91**) and replay them.  It was
+    :func:`walk_loan_ledger`'s load half too, with no bound, until plan task
+    plan#2649 moved the ledger's walk onto the one load of every loan's
+    records (:func:`_ledger_walks`), which takes every fact.  Nothing here
+    reads the clock.
 
-    **The visibility bound, stated once.**  With *visible_by* a date, a
-    payment enters iff its cash had moved by it -- its SETTLED day, the one
+    **The visibility bound, stated once.**  A payment enters iff its cash
+    had moved by *visible_by* -- its SETTLED day, the one
     clock (:func:`._events.confirmed_shadows_through`, the same set the
     balance readers count as confirmed) -- and an assertion iff its own date
     has arrived (:func:`._visible.anchor_visible_on`), EXCEPT the opening,
@@ -246,10 +270,11 @@ def load_loan_stream(
     and this is the ledger's own stream.
 
     **"Every production pass" is a CENSUS, not a construction** (2026-09-30,
-    plan step recurrence:R16-c-2's ruling R-R117): this function has two
-    callers, :func:`walk_loan_ledger` (no bound) and the seam's per-pass walk
-    (``BalanceContext.loan_walk``, bounded by the pass's ``as_of``), and every
-    production pass is built at today.  The census rests on what no code
+    plan step recurrence:R16-c-2's ruling R-R117): this function's one caller
+    is the seam's per-pass walk (``BalanceContext.loan_walk``, bounded by the
+    pass's ``as_of``; :func:`walk_loan_ledger` was the other, with no bound,
+    until plan task plan#2649), and every production pass is built at
+    today.  The census rests on what no code
     enforces: ``BalanceContext.build`` accepts any ``as_of``; the tax report's
     display-timezone today equals the server's only while production pins its
     timezone; and a write request built just before midnight could meet a
@@ -268,15 +293,14 @@ def load_loan_stream(
     **The loan's params and calendar come from the caller's pass**
     (:class:`._calendars.LoanCalendars`, plan step recurrence:R25), so a pass
     that also prices the loan's payments reads the SAME calendar its charges
-    are built from (ruling **R-R105**); the ledger's own walk hands a fresh
-    one.
+    are built from (ruling **R-R105**).
 
     Args:
         loan_account_id: The loan account whose facts to load.
         scenario_id: The budget scenario the payments live in.
         terms: The read pass's :class:`._calendars.LoanCalendars`.
-        visible_by: ``None`` for every recorded fact (the ledger's walk); a
-            date for the facts a pass reading on that day has seen.
+        visible_by: The day the pass reads on: the facts a pass reading on
+            that day has seen enter.
 
     Returns:
         The loan's recorded stream -- EMPTY (no charge, no payment, no reset)
@@ -288,14 +312,13 @@ def load_loan_stream(
     if params is None:
         # Not a configured loan yet (e.g. a payment settled before its
         # LoanParams was created); nothing to walk until it is resolvable.
-        return LoanEventStream(charges=(), payments=(), resets=())
+        return _NO_TERMS_STREAM
     # The origination anchor is SYNTHESIZED from the immutable params, so a
     # configured loan ALWAYS has at least one fact -- the old "no anchor
     # events" degenerate-fixture guard is structurally unreachable now.
     anchor_facts = [
         fact for fact in loan_loaders.load_loan_anchor_facts(params)
-        if visible_by is None
-        or fact.is_opening
+        if fact.is_opening
         or anchor_visible_on(fact.anchor_date) <= visible_by
     ]
 
@@ -314,15 +337,9 @@ def load_loan_stream(
     # relationship (plan step balance:X-bl-2a), and the shadow's ENTRIES it
     # loaded while the shadow was the payment are not read.  The name
     # ``shadows`` is the shadow era's.
-    shadows = (
-        loan_loaders.settled_income_legs(
-            loan_account_id, scenario_id, options=(),
-        )
-        if visible_by is None
-        else confirmed_shadows_through(
-            loan_account_id, scenario_id, visible_by,
-            calendar.origination_date, calendar.payment_day,
-        )
+    shadows = confirmed_shadows_through(
+        loan_account_id, scenario_id, visible_by,
+        calendar.origination_date, calendar.payment_day,
     )
     return loan_event_stream(anchor_facts, shadows, calendar)
 
@@ -373,6 +390,10 @@ def walk_loan_ledger(
     contract time) -- so a later escrow or rate change never re-splits a past
     payment.  Reads only (no writes, no commit).
 
+    A door over :func:`_ledger_walks`, the one assembly
+    :func:`walk_loan_ledgers` runs over every loan an owner holds (plan task
+    plan#2649): its params loaded here, its records in that one load.
+
     Args:
         loan_account_id: The loan account whose ledger to walk.
         scenario_id: The budget scenario the payments live in.
@@ -384,8 +405,95 @@ def walk_loan_ledger(
         guard); a configured loan always walks, since its origination anchor is
         synthesized.
     """
-    return replay_loan_stream(
-        load_loan_stream(loan_account_id, scenario_id, LoanCalendars()),
+    return _ledger_walks(
+        {loan_account_id: loan_loaders.load_loan_params(loan_account_id)},
+        scenario_id,
+    )[loan_account_id]
+
+
+def walk_loan_ledgers(
+    loan_account_ids: list[int], scenario_id: int,
+) -> dict[int, LoanLedgerWalk]:
+    """Return each loan's ledger walk, every loan's terms and records loaded once.
+
+    :func:`walk_loan_ledger` for many loans (plan task plan#2649, ruling
+    **plan#2623**): the loans' terms are loaded in one statement
+    (:func:`app.services.loan_loaders.load_loans_params`) and every kind of
+    record the walks fold once for all of them
+    (:func:`app.services.loan_loaders.load_loan_records`), so the statements
+    do not grow with the number of loans.  Each walk is the one
+    :func:`walk_loan_ledger` answers for its loan, by the same assembly.
+
+    **The terms are read by the loans' ids, never off ``Account.loan_params``**
+    (finding plan#2691): a relationship already loaded on an account is not
+    re-read by a later query, so terms written by their ``account_id`` after
+    that load (``routes/loan/params``' setup does) were missed and the loan
+    walked to nothing.  Reading them as the one-loan door reads them leaves
+    no caller anything to hold.
+
+    Args:
+        loan_account_ids: The loan accounts to walk.  One carrying no
+            ``LoanParams`` walks to nothing, as :func:`walk_loan_ledger`'s does.
+        scenario_id: The budget scenario the payments live in.
+
+    Returns:
+        ``{loan account id: its LoanLedgerWalk}``, one per id handed in.
+    """
+    terms = loan_loaders.load_loans_params(loan_account_ids)
+    return _ledger_walks(
+        {account_id: terms.get(account_id) for account_id in loan_account_ids},
+        scenario_id,
+    )
+
+
+def _ledger_walks(
+    terms: dict[int, LoanParams | None], scenario_id: int,
+) -> dict[int, LoanLedgerWalk]:
+    """Return each loan's ledger walk, from its terms and the loans' one load.
+
+    The ONE assembly of a ledger walk, for one loan or many: the configured
+    loans' records are loaded together
+    (:func:`app.services.loan_loaders.load_loan_records`), each loan's
+    calendar built from its own by the one builder
+    (:func:`._calendars.build_loan_calendar`), its stream mapped by the one
+    stream builder (:func:`._events.loan_event_stream`) over every recorded
+    fact, and the stream replayed (:func:`replay_loan_stream`).  A loan
+    carrying no terms walks the empty stream (the N1 guard).
+
+    Args:
+        terms: ``{loan account id: its LoanParams, or None}``.
+        scenario_id: The budget scenario the payments live in.
+
+    Returns:
+        ``{loan account id: its LoanLedgerWalk}``, one per key of *terms*.
+    """
+    records = loan_loaders.load_loan_records(
+        [params for params in terms.values() if params is not None],
+        scenario_id,
+    )
+    return {
+        account_id: replay_loan_stream(
+            _NO_TERMS_STREAM if params is None
+            else _ledger_stream(params, records[account_id]),
+        )
+        for account_id, params in terms.items()
+    }
+
+
+def _ledger_stream(params: LoanParams, records: LoanRecords) -> LoanEventStream:
+    """Return a configured loan's stream: every recorded fact, mapped once.
+
+    Args:
+        params: The loan's terms.
+        records: Its records (:class:`app.services.loan_loaders.LoanRecords`).
+
+    Returns:
+        The loan's recorded :class:`~._replay.LoanEventStream`.
+    """
+    return loan_event_stream(
+        records.anchor_facts,
+        records.settled,
+        build_loan_calendar(params, records.rate_changes, records.escrow_lines),
     )
 
 

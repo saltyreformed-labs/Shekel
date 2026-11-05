@@ -311,15 +311,13 @@ class TestAccountHardDelete:
             assert b"permanently deleted" in resp.data
             assert db.session.get(Account, acct_id) is None
 
-    def test_hard_delete_nonzero_anchor_archives_instead(
+    def test_hard_delete_nonzero_anchor_deletes_it(
         self, app, auth_client, seed_user, db,
     ):
-        """A non-zero-anchor account is archive-only (Step-5 Guard 5).
+        """A non-zero-anchor account holding nothing else is deleted.
 
-        The accepted behavior change (plan Section 3.5): the $5000 opening
-        correction posted at create time is immutable posting-ledger
-        history, so the hard delete archives the account instead --
-        identical to the shipped loan behavior.
+        Ruling plan#2784: the $5000 opening books both its halves on the
+        account's own lines, so it goes with the account.
         """
         with app.app_context():
             savings = _create_savings_account(
@@ -332,11 +330,9 @@ class TestAccountHardDelete:
                 follow_redirects=True,
             )
             assert resp.status_code == 200
-            assert b"posting-ledger history" in resp.data
-            assert b"archived instead" in resp.data
-            reloaded = db.session.get(Account, acct_id)
-            assert reloaded is not None
-            assert reloaded.is_active is False
+            assert b"cannot be permanently deleted" not in resp.data
+            assert b"permanently deleted" in resp.data
+            assert db.session.get(Account, acct_id) is None
 
     def test_hard_delete_account_with_history(
         self, app, auth_client, seed_user, db, seed_periods_today,
@@ -371,24 +367,18 @@ class TestAccountHardDelete:
             assert reloaded is not None
             assert reloaded.is_active is False
 
-    def test_hard_delete_configured_loan_is_archived_not_deleted(
+    def test_hard_delete_configured_loan_holding_only_its_opening_is_deleted(
         self, app, auth_client, seed_user, db, seed_periods_today,
     ):
-        """C-5A.5-24: a CONFIGURED loan is archived, never hard-deleted (Guard 5).
+        """C-5A.5-24: a configured loan holding only its opening is deleted.
 
-        Configuring a loan opens its genesis posting ledger in the same
-        transaction as the ``LoanParams`` insert (``loan.create_params``), so a
-        configured loan ALWAYS carries ledger postings -- and Guard 5
-        (``archive_helpers.account_has_ledger_postings``) archives any account that
-        does.  A configured loan is therefore not hard-deletable in production, and
-        this test previously asserted the opposite: it passed only because its
-        fixture never opened the ledger, a state production cannot reach.
+        Ruling plan#2784: a loan's opening and true-ups book on its own lines, so
+        they go with it, and its per-loan chart rows are cleared ahead of their
+        RESTRICT key.
 
-        The flash assertion is deliberately DISCRIMINATING.  The old one --
-        ``b"permanently deleted" in resp.data`` -- passes on the ARCHIVE message
-        too, because that message reads "...cannot be permanently deleted. It has
-        been archived instead."  It was a vacuous assertion: it could not have
-        failed either way.
+        The flash assertion is deliberately DISCRIMINATING: ``b"permanently
+        deleted"`` alone also passes on the ARCHIVE message, which reads "...cannot
+        be permanently deleted. It has been archived instead."
         """
         with app.app_context():
             acct = create_loan_account(
@@ -407,14 +397,13 @@ class TestAccountHardDelete:
                 follow_redirects=True,
             )
             assert resp.status_code == 200
-            assert b"archived instead" in resp.data
-            assert b"cannot be permanently deleted" in resp.data
+            assert b"cannot be permanently deleted" not in resp.data
+            assert b"permanently deleted" in resp.data
 
-            # Archived, not deleted: the account and its params both survive.
-            reloaded = db.session.get(Account, acct_id)
-            assert reloaded is not None
-            assert reloaded.is_active is False
-            assert db.session.get(LoanParams, params_id) is not None
+            # Deleted: the account and its params both gone.
+            db.session.expire_all()
+            assert db.session.get(Account, acct_id) is None
+            assert db.session.get(LoanParams, params_id) is None
 
     def test_hard_delete_blocked_by_transfer_templates(
         self, app, auth_client, seed_user, db,
@@ -438,7 +427,6 @@ class TestAccountHardDelete:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Blocked Transfer",
-                default_amount=Decimal("100.00"),
             )
             db.session.add(xfer_template)
             db.session.commit()
@@ -477,7 +465,6 @@ class TestAccountHardDelete:
                 category_id=seed_user["categories"]["Rent"].id,
                 transaction_type_id=txn_type.id,
                 name="Blocking Template",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(template)
             db.session.flush()
@@ -682,7 +669,6 @@ class TestAccountHardDelete:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Archived Xfer Template",
-                default_amount=Decimal("100.00"),
                 is_active=False,
             )
             db.session.add(xfer_template)

@@ -169,7 +169,6 @@ class TestTransferRecurrenceLogging:
             to_account_id=td["savings"].id,
             category_id=td["category"].id,
             name="Recurring Transfer",
-            default_amount=Decimal("75.00"),
             is_active=True,
         )
         db.session.add(template)

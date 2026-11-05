@@ -39,26 +39,23 @@ R-G), so they are the seam fold's tier, exactly as the loan plan's PLANNED tier
 lives in ``balance_at._plan`` and not in ``loan_ledger``.
 
 **Two consumers, one walk** (ruling R-H).  The seam's read pass folds it into a
-balance at a date; at plan step X-d the posting writer projects the same facts
-into the balanced corrections it reconciles onto the general ledger, replacing
-the postings-sourced
-:func:`app.services.account_posting_service.walk_account_ledger`.
-Today those are two independent statements of what happened to an account -- one
-period-granular over transaction rows, one instant-granular over the postings it
-is correcting -- and their disagreement IS the defect Phase X exists to close
-(findings cash D1-D4).  One walk closes it by construction rather than by a test
-holding two implementations in step.
+balance at a date, and since plan task plan#2525 the posting writer books the
+same facts' assertion corrections onto the general ledger:
+:func:`app.services.ledger_lines.walk_account_ledger` frames the
+read fold's own replay over this walk
+(:func:`app.services.balance_at.assertion_corrections`, published at the seam's
+door because W9910 forbids the writer importing ``balance_at._assertions`` and
+its ``balance_before`` is a balance-at-T this package may not hold).  Until
+then they were two independent statements of what happened to an account --
+the writer's replayed its own STORED postings -- and their disagreement IS the
+defect Phase X exists to close (findings cash D1-D4).  One walk closes it by
+construction rather than by a test holding two implementations in step.
 
-**How that writer reaches the CORRECTIONS is a decision plan step X-f3c-1 left
-it**, and it is named in :mod:`app.services.balance_at._assertions` rather than
-left to be discovered: W9910 forbids ``account_posting_service`` importing that
-private module in every spelling.  It is the same treatment the RESIDUE
-question two paragraphs down gets, for the same reason.
-
-**Three differences from the account POSTING walk, all deliberate, all settled at
-X-d.**  (1) This walk reads SOURCE rows where that one reads back the postings;
-that is the direction the whole arc turns on -- the posted ledger is a projection
-of the facts, not a second opinion about them (plan Section 1, root cause 2).
+**Three differences from the account POSTING walk were named here, and plan
+task plan#2525 closed two.**  (1) That walk read back its own postings where
+this one reads SOURCE rows; the writer reads this walk now, the direction the
+whole arc turns on -- the posted ledger is a projection of the facts, not a
+second opinion about them (plan Section 1, root cause 2).
 (2) It does not refuse an amortizing account.  That refusal is a WRITE concern
 (which correction family a loan's anchors book into), not a property of a fact
 stream, and the cash-flow seam view deliberately consults no kind -- its balance
@@ -71,17 +68,20 @@ which closed the calendar door finding N-38 measured open (the Van Loan
 rendered at ``$531.94`` against ``$15,663.59`` owed).  So this walk stays total
 and kind-blind, the writer keeps
 the guard it needs, and no screen reaches a cash-basis loan balance through
-either.  (3) It sees no RESIDUE.  The posting walk reads a second source bucket
+either.  (3) It sees no RESIDUE.  The posting walk read a second source bucket
 beside the movement-linked one -- entries whose movement link
 (``transaction_entry_id``) was SET-NULLed by a hard
 delete -- precisely so its running total "stays equal to the live linked total
 even if the reverse-before-delete discipline is ever violated".  A source-row
-walk cannot see a posting whose source row is gone, by construction, so X-d must
-decide whether that defence moves to the checked-projection assert (where a
-residue row becomes a LOUD mismatch instead of a silently absorbed one) or is
-ceded; it is named here so that decision is made rather than discovered.
+walk cannot see a posting whose source row is gone, by construction, so moving
+the writer onto this walk at plan task plan#2525 decided it: a residue that does
+not net to zero is now a LOUD difference between the stored ledger and the
+records, which the parity proof of plan step plan#2513 names, rather than one
+the corrections silently absorb.  Measured on production 2026-11-01: four
+``purchase`` residue entries (two reversal pairs), netting ``$0.00`` per ledger
+account and per (paycheck, day).
 
-Reads the account's rows; no writes, no commit.
+Reads an account's rows, or an owner's; no writes, no commit.
 
 Plan step **X-a** (shipped at ``929b3a72``).
 """
@@ -92,16 +92,22 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.models.account import Account
+from app.models.transaction_entry import TransactionEntry
+from app.services.transfer_legs import PlanItem
+
 from ._amounts import ReconciledThrough
 from ._clearing import StatementCoverage, statement_coverage
 from ._events import (
     CashAnchorFact,
-    CashOpeningFact,
     CashSourceFact,
-    account_opening_fact,
+    _anchor_facts_by_account,
+    _settled_facts_by_account,
     cash_anchor_facts,
     settled_cash_facts,
 )
+from ._movement_scope import _dated_arms, _movement_pairs, _of_owner
+from ._openings import CashOpeningFact, _required_openings, account_opening_fact
 
 
 @dataclass(frozen=True)
@@ -134,12 +140,12 @@ class CashLedgerWalk:
             LAST is the balance in force.  Both properties below rest on that
             order and neither re-derives it (finding N-133 / R1).
         opening: The account's governing
-            :class:`~._events.CashOpeningFact` -- what its books opened with,
+            :class:`~._openings.CashOpeningFact` -- what its books opened with,
             and the level the fold's running total starts from (plan step
             **X-f3c-2a**, ruling **R-GX**).  A FACT like the other two, loaded
             in the same pass, which is what stops a consumer resolving it
             separately from the movements it is the level for.  It is not
-            optional: :func:`~._events.account_opening_fact` raises for an
+            optional: :func:`~._openings.account_opening_fact` raises for an
             account carrying no record, because a balance folded from a
             fabricated level is worse than no balance at all.
     """
@@ -245,7 +251,7 @@ def walk_cash_ledger(account_id: int, scenario_id: int) -> CashLedgerWalk:
             Assertions are per-ACCOUNT (``AccountAnchorHistory`` carries no
             scenario), so the same assertions accompany every scenario's own
             rows -- the same split
-            :func:`app.services.account_posting_service.walk_account_ledger`
+            :func:`app.services.ledger_lines.walk_account_ledger`
             documents.
 
     Returns:
@@ -260,13 +266,139 @@ def walk_cash_ledger(account_id: int, scenario_id: int) -> CashLedgerWalk:
     # It is the level the fold starts from, so an account missing it has no
     # balance to report -- and unlike the assertion list, an empty answer is
     # not honest here: it would silently re-level every figure on the account
-    # to zero.  :func:`~._events.account_opening_fact` raises instead.
-    opening = account_opening_fact(account_id)
-    anchors = cash_anchor_facts(account_id)
+    # to zero.  :func:`~._openings.account_opening_fact` raises instead.
+    return _walk_of(
+        account_opening_fact(account_id),
+        cash_anchor_facts(account_id),
+        settled_cash_facts(account_id, scenario_id),
+    )
+
+
+def _walk_of(
+    opening: CashOpeningFact,
+    anchors: list[CashAnchorFact],
+    sources: list[CashSourceFact],
+) -> CashLedgerWalk:
+    """Return one account's walk from its three loaded fact kinds.
+
+    The ONE assembly of a :class:`CashLedgerWalk`, for the account door
+    (:func:`walk_cash_ledger`) and the owner's (:func:`owner_cash_records`),
+    so the two hand a fold the same walk for the same account (ruling
+    **plan#2623**).  An account carrying no assertion walks no source: both
+    lists are empty, as :func:`walk_cash_ledger` documents, and this is the
+    one place that says so -- both doors load the sources and hand them
+    here, so neither states the rule as a load it skips (an account with no
+    assertion is production-unreachable, so the load it costs is a
+    fixture's).
+
+    Args:
+        opening: The account's governing opening.
+        anchors: Its assertions, in business-date order.
+        sources: Its dated movements' facts, ascending by ``(settled_on,
+            entry_id)``.
+
+    Returns:
+        The account's :class:`CashLedgerWalk`.
+    """
     if not anchors:
         return CashLedgerWalk([], [], opening)
-    return CashLedgerWalk(
-        settled_cash_facts(account_id, scenario_id), anchors, opening,
+    return CashLedgerWalk(sources, anchors, opening)
+
+
+@dataclass(frozen=True)
+class OwnerCashRecords:
+    """One owner's cash records in one scenario, each kind loaded once.
+
+    What :func:`owner_cash_records` returns: the owner's dated movements,
+    each beside its parent, and every walked account's
+    :class:`CashLedgerWalk` built from those same movements, so a reader
+    that books a movement's lines and walks its account reads the movement
+    once (ruling **plan#2623**).
+
+    Attributes:
+        movements: Every dated movement the owner holds in the scenario with
+            its parent -- its plan row, or the
+            :class:`~app.services.transfer_legs.TransferLeg` whose record it
+            is -- ascending by movement id.  The transfer arm states no
+            contributing gate in SQL (:func:`._movement_scope._dated_arms`),
+            so a reader that books lines asks each parent's.
+        walks: ``{account id: its CashLedgerWalk}``, one per account asked
+            for, each equal to :func:`walk_cash_ledger`'s for that account
+            (each account is the owner's, which :func:`owner_cash_records`
+            refuses otherwise).
+    """
+
+    movements: list[tuple[TransactionEntry, PlanItem]]
+    walks: dict[int, CashLedgerWalk]
+
+
+def owner_cash_records(
+    owner_id: int, scenario_id: int, accounts: list[Account],
+) -> OwnerCashRecords:
+    """Return one owner's dated movements and the walks of *accounts*.
+
+    The worked-out read's cash load (ruling **plan#2623**): each fact kind a
+    walk folds is loaded ONCE for the owner -- the movements in two
+    statements (:func:`._movement_scope._dated_arms` over the owner's scope),
+    the openings in one and the assertions in one -- and each account's
+    walk is assembled from its own slice by :func:`_walk_of`, the assembly
+    :func:`walk_cash_ledger` uses for one account.  Four statements whatever
+    the number of accounts or movements, where one walk per account cost
+    four per account and read every movement a second time.
+
+    **Each slice is the account's own read.**  The loaders are one body
+    over a set of account ids (:func:`~._events._governing_openings`,
+    :func:`~._events._anchor_facts_by_account`), and the owner's movements
+    are exactly the union of each account's (:func:`._movement_scope._of_owner`
+    says why), each filed under the account its money moved through
+    (:func:`~._events._settled_facts_by_account`).
+
+    **Each account must be the owner's, and one that is not is refused**
+    before anything loads: its opening and assertions would load by its id
+    while its movements, scoped by the owner, would not, and the walk handed
+    back would be a different account's records -- silently, which is what
+    an argument a caller can get wrong does (:func:`settled_cash_facts`
+    states the doctrine).
+
+    Args:
+        owner_id: The owner whose movements to load.
+        scenario_id: The budget scenario their parents live in.
+        accounts: The owner's accounts to walk, each a loaded
+            :class:`~app.models.account.Account` row the caller already
+            holds; every account not walked keeps its movements in
+            ``movements`` alone.
+
+    Returns:
+        The :class:`OwnerCashRecords`.
+
+    Raises:
+        ValueError: An account in *accounts* is not *owner_id*'s.
+        RuntimeError: An account in *accounts* carries no ``AccountOpening``
+            row (:func:`~._openings.account_opening_fact`'s refusal).
+    """
+    for account in accounts:
+        if account.user_id != owner_id:
+            raise ValueError(
+                f"owner_cash_records: account id={account.id} belongs to "
+                f"user id={account.user_id}, not owner id={owner_id}; its "
+                f"movements are not in the owner's load, so its walk would "
+                f"be another account's records"
+            )
+    account_ids = [account.id for account in accounts]
+    rows, legs = _dated_arms(_of_owner(owner_id), scenario_id)
+    openings = _required_openings(account_ids)
+    anchors = _anchor_facts_by_account(account_ids)
+    sources = _settled_facts_by_account(rows, legs)
+    return OwnerCashRecords(
+        movements=_movement_pairs(rows, legs),
+        walks={
+            account_id: _walk_of(
+                openings[account_id],
+                anchors.get(account_id, []),
+                sources.get(account_id, []),
+            )
+            for account_id in account_ids
+        },
     )
 
 
@@ -298,7 +430,7 @@ def dated_deltas(walk: CashLedgerWalk) -> list[tuple[date, Decimal]]:
     :func:`app.services.cash_ledger.movement_cash_leg` is debit-positive, so
     these steps ARE the linked ledger's movements in one convention, for assets
     and liabilities alike.  Verified against the writer:
-    ``_posting_purchases._purchase_target`` books ``movement_cash_leg(txn,
+    ``ledger_lines.purchase_target`` books ``movement_cash_leg(txn,
     entry)`` -- this module's :attr:`~._events.CashSourceFact.delta` -- onto
     the linked ledger.
     The NEGATIVES are the counter legs (the category ledger, the anchor-equity

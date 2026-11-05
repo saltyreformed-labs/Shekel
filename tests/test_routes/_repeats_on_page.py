@@ -7,7 +7,7 @@ browser posts it with the owner's changes (:func:`form_as_posted`).
 
 **A browser submits every control it renders, at the value it renders**, so
 a case that hand-picks its payload grades a submission no browser sends: an
-amount-only edit posted as ``{"default_amount": ...}`` alone would never
+amount-only edit posted as ``{"amount": ...}`` alone would never
 carry the start and the preselected reading that the real one does, and a
 preselection the page got wrong would pass it.
 """

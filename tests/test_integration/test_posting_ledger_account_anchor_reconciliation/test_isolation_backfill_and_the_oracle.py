@@ -18,12 +18,15 @@ from app.models.ledger_account import LedgerAccount
 from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
 from app.services import account_posting_service, posting_service, transfer_service
+from app.services.ledger_lines import account_counter_key, linked_key
+from tests._ledger_parity import LedgerParityDifference
 from tests._test_helpers import (
     append_only_guard_lifted,
     an_entered_day,
     create_account_of_type,
     create_settled_cash_transaction,
     create_settled_transfer,
+    governing_opening_row,
     ledger_account_of_kind,
     linked_ledger_account,
     load_migration_module,
@@ -92,6 +95,11 @@ class TestScenarioAndOwnerIsolation:
         """
         with app.app_context():
             checking = seed_user["account"]
+            # The day the baseline's opening is posted on: the seed's books,
+            # which the restatement below moves past every writer.
+            posted_opened_on = governing_opening_row(
+                db.session, checking,
+            ).opened_on
             opened = datetime(2026, 1, 2, 9, tzinfo=timezone.utc)
             reassert_balance_on(db.session, checking, opened)
             # **The BOOKS go back further than the restamp puts them** (plan
@@ -126,7 +134,40 @@ class TestScenarioAndOwnerIsolation:
                 checking.id, seed_user["scenario"].id,
             ) == Decimal("1000.00")
             _assert_account_anchors_reconcile(whatif.id)
-            _assert_account_anchors_reconcile(seed_user["scenario"].id)
+            # ``restate_account_opening`` writes its row straight to the
+            # table, past the door that re-bases the postings
+            # (``opening_service.apply_opening_restatement``), so nothing
+            # re-posts the BASELINE's opening (the what-if's is minted by its
+            # first settle, on the new day): the store keeps the $1,000.00
+            # opening on the seed's day, where the records open the books on
+            # 2025-11-30.  Those are the four cells it leaves the stored
+            # baseline behind on (plan task plan#2527); the owner holds one
+            # paycheck, so both days file in it.
+            linked = linked_key(checking)
+            equity = account_counter_key(
+                LedgerAccountKindEnum.ANCHOR_EQUITY, checking.id,
+            )
+            rows = {
+                linked: (linked_ledger_account(db.session, checking.id).id,),
+                equity: (ledger_account_of_kind(
+                    db.session, checking.id,
+                    LedgerAccountKindEnum.ANCHOR_EQUITY,
+                ).id,),
+            }
+            paycheck = seed_user["bootstrap_period"].id
+            _assert_account_anchors_reconcile(seed_user["scenario"].id, tuple(
+                LedgerParityDifference(
+                    key=key, stored_row_ids=rows[key],
+                    pay_period_id=paycheck, entry_date=day,
+                    stored=Decimal(stored), worked_out=Decimal(worked_out),
+                )
+                for key, day, stored, worked_out in (
+                    (linked, posted_opened_on, "1000.00", "0.00"),
+                    (equity, posted_opened_on, "-1000.00", "0.00"),
+                    (linked, date(2025, 11, 30), "0.00", "1000.00"),
+                    (equity, date(2025, 11, 30), "0.00", "-1000.00"),
+                )
+            ))
 
     def test_a_settle_that_rides_on_top_does_not_rewalk_an_opened_ledger(
         self, app, db, seed_user, monkeypatch,
@@ -631,14 +672,19 @@ class TestSettledTransferAttributionMutation:
         anchors (rides on top): Savings 200 + 150 = 350, Checking 1000 - 150 =
         850.  Moving its settle day to BEFORE the anchors (a 2024 day)
         through ``update_transfer`` makes the transfer PRE-assertion, so it must
-        be ABSORBED into the openings.  The settle day changes no leg, so the
-        Step-2 reconcile-to-target writes nothing and its effect-time self-heal
-        never fires; the F1 direct resync re-derives both endpoints' openings so
-        the absolute invariant still holds with NO manual sync.  Post-move both
-        accounts read their anchors (Savings 200, Checking 1000): the transfer
-        is absorbed, nothing rides on top.  Before F1 the openings stayed at
-        their ride-on-top values (Savings 350) while the invariant's RHS dropped
-        to 200 -- a silently stale correction.
+        be ABSORBED into the openings.  The move re-dates each side's leg -- a
+        reversal at the old day, the effect at 2024-01-05 -- and the cash
+        reconcile's effect-time self-heal, asked about that earlier day,
+        re-derives both endpoints' openings, so the absolute invariant still
+        holds with NO manual sync.  Post-move both accounts read their anchors
+        (Savings 200, Checking 1000): the transfer is absorbed, nothing rides
+        on top.  Before F1 the openings stayed at their ride-on-top values
+        (Savings 350) while the invariant's RHS dropped to 200 -- a silently
+        stale correction.  *F1 re-derived them through a direct resync of both
+        endpoints while a settle-day edit moved no leg; ruling plan#2574
+        deleted it once the leg carried the movement's day, and with the
+        self-heal also removed this case reads Savings 350 (measured at
+        plan#2559).*
         """
         with app.app_context():
             user_id = seed_user["user"].id

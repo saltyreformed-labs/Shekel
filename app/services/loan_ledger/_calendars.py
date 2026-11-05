@@ -1,11 +1,14 @@
 """A loan's CONTRACT terms, loaded once per read pass for every reader in it.
 
-The ONE producer of a loan's :class:`._charges.LoanCalendar` from its stored
-rows (:func:`build_loan_calendar`), and the per-pass memo that hands the SAME
-instance to the two readers a pass has (:class:`LoanCalendars`): the walk,
-whose charges are built from it (:func:`._walk.load_loan_stream`), and the cash
-price of a derive-mode loan payment
-(:class:`app.services.cash_ledger.LoanPricing`).
+The ONE builder of a loan's :class:`._charges.LoanCalendar` from its stored
+rows (:func:`build_loan_calendar`), and the per-pass memo that loads them and
+hands the SAME instance to the two readers a pass has (:class:`LoanCalendars`):
+the walk, whose charges are built from it (:func:`._walk.load_loan_stream`),
+and the cash price of a derive-mode loan payment
+(:class:`app.services.cash_ledger.LoanPricing`).  The ledger's walks build
+theirs from the owner's one load of every loan's rows
+(:func:`._walk.walk_loan_ledgers`, plan task plan#2649), through the same
+builder.
 
 **Pricing kept a second bundle of these terms until plan step
 recurrence:R25** (ruling **R-R105**: "one bundle that pricing and charging
@@ -33,25 +36,42 @@ every memo it holds.  A reader holding no pass builds a fresh
 :class:`LoanCalendars` for its one use.
 """
 
+from app.models.escrow_line import EscrowLine
 from app.models.loan_params import LoanParams
 from app.services import loan_loaders, loan_resolver
+from app.services.amortization_engine import RateChangeRecord
 
 from ._charges import LoanCalendar
 
 
-def build_loan_calendar(params: LoanParams) -> LoanCalendar:
-    """Return the loan's :class:`._charges.LoanCalendar`, loaded from its rows.
+def build_loan_calendar(
+    params: LoanParams,
+    rate_changes: list[RateChangeRecord] | None,
+    escrow_lines: list[EscrowLine],
+) -> LoanCalendar:
+    """Return the loan's :class:`._charges.LoanCalendar`, built from its rows.
 
     The note's origination and due day off *params*, its rate periods
     (:func:`app.services.loan_resolver.resolve_periods` over the loan's rate
-    history) and its escrow lines with their full version history
-    (:func:`app.services.loan_loaders.load_escrow_lines`).  It reads the
-    loan's TERMS and never its payment rows, so pricing a payment cannot read
-    the payments it prices (``test_loan_payment_service
+    history) and its escrow lines with their full version history.  It reads
+    the loan's TERMS and never its payment rows, so pricing a payment cannot
+    read the payments it prices (``test_loan_payment_service
     .test_the_contractual_payment.TestALoansPriceDoesNotReadItsOwnPayments``).
+
+    **Pure since plan task plan#2649**: it loaded the rate history and the
+    escrow lines itself, one loan at a time, so a read of every loan an owner
+    holds could not build their calendars from one load.  The caller hands
+    the rows in -- :class:`LoanCalendars` from the one-loan doors, the
+    ledger's walks from the owner's load
+    (:func:`app.services.loan_loaders.load_loan_records`) -- and both build
+    through this.
 
     Args:
         params: The loan's :class:`~app.models.loan_params.LoanParams`.
+        rate_changes: Its rate-change feed
+            (:func:`app.services.loan_loaders.load_rate_changes`' answer).
+        escrow_lines: Its escrow lines, every version loaded
+            (:func:`app.services.loan_loaders.load_escrow_lines`' list).
 
     Returns:
         The loan's contract terms.
@@ -59,10 +79,8 @@ def build_loan_calendar(params: LoanParams) -> LoanCalendar:
     return LoanCalendar(
         origination_date=params.origination_date,
         payment_day=params.payment_day,
-        periods=loan_resolver.resolve_periods(
-            params, loan_loaders.load_rate_changes(params.account_id),
-        ),
-        escrow_lines=loan_loaders.load_escrow_lines(params.account_id),
+        periods=loan_resolver.resolve_periods(params, rate_changes),
+        escrow_lines=escrow_lines,
     )
 
 
@@ -111,6 +129,10 @@ class LoanCalendars:
         if loan_account_id not in self._calendars:
             params = self.loan_params_of(loan_account_id)
             self._calendars[loan_account_id] = (
-                None if params is None else build_loan_calendar(params)
+                None if params is None else build_loan_calendar(
+                    params,
+                    loan_loaders.load_rate_changes(loan_account_id),
+                    loan_loaders.load_escrow_lines(loan_account_id),
+                )
             )
         return self._calendars[loan_account_id]

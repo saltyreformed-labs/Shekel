@@ -61,6 +61,7 @@ from app.services.pay_period_locks import (
 from app.services.statement_match import accept_match, matched_subjects
 from app.utils.archive_helpers import HeldMovements
 from tests._test_helpers import (
+    create_loan_account,
     add_entry,
     create_account_of_type,
     create_settled_transfer,
@@ -260,13 +261,13 @@ def _settle_and_revert(seed_user, txn):
 
 
 class TestTheAccountDoor:
-    """An account a hidden transfer named archives on its posting-ledger history.
+    """An account a hidden transfer named goes with that transfer (ruling plan#2784).
 
     The transfer's soft delete took both sides' payments off, so the hidden
-    transfer holds none; the settle's journal entries stay.
+    transfer holds none, and nothing is left to archive on.
     """
 
-    def test_a_hidden_transfer_whose_payments_went_archives_the_account_on_its_ledger(
+    def test_a_hidden_transfer_whose_payments_went_goes_with_the_account(
         self, app, db, auth_client, seed_user,
     ):
         """Ruling R-CC65: the cleanup deleted the hidden row AND its money.
@@ -281,10 +282,11 @@ class TestTheAccountDoor:
         a transfer's soft delete takes both sides' payments off the books
         too (ruling **credit_card:R-CC75**, "Same as a one-off"; finding
         **balance:BAL-532** closed), so the hidden transfer holds 0 payments
-        where it held 2, and Savings still archives rather than deletes --
-        now on the history its ledger keeps, not on a hidden payment.  An
-        ad-hoc transfer, because a recurring transfer's definition refuses
-        the account first (guard 2).
+        where it held 2.  **Re-expressed a third time under rule 5, ruling
+        plan#2784**: Savings archived on the settle's stored entries until that
+        ruling deleted the guard, since the worked-out ledger holds no line for
+        a payment that left the books.  An ad-hoc transfer, because a recurring
+        transfer's definition refuses the account first (guard 2).
         """
         with app.app_context():
             savings = create_account_of_type(
@@ -305,16 +307,16 @@ class TestTheAccountDoor:
 
             auth_client.post(f"/accounts/{savings.id}/hard-delete")
 
+            savings_id, xfer_id = savings.id, xfer.id
             assert _flashes(auth_client) == [
-                "'Savings' has posting-ledger history and cannot be "
-                "permanently deleted. It has been archived instead."
+                "Account 'Savings' permanently deleted."
             ]
             db.session.expire_all()
-            assert db.session.get(Account, savings.id) is not None
-            assert db.session.get(Transfer, xfer.id).is_deleted is True
+            assert db.session.get(Account, savings_id) is None
+            assert db.session.get(Transfer, xfer_id) is None
             assert db.session.query(TransactionEntry).filter(
-                (TransactionEntry.expense_transfer_id == xfer.id)
-                | (TransactionEntry.income_transfer_id == xfer.id),
+                (TransactionEntry.expense_transfer_id == xfer_id)
+                | (TransactionEntry.income_transfer_id == xfer_id),
             ).count() == 0
 
 
@@ -479,6 +481,35 @@ class TestThePayPeriodDoors:
             response = auth_client.get("/settings?section=pay-periods")
 
             assert b"Holds a recorded payment or purchase" in response.data
+
+    def test_a_paycheck_holding_only_a_correction_reads_editable(
+        self, app, db, auth_client, seed_user, seed_periods_today,
+    ):
+        """No "Posted" chip (ruling plan#2782): a loan's opening locks nothing.
+
+        The ruling's own example: a loan starting in a future paycheck files
+        its opening there, and that paycheck reads Editable.  Pairs with the
+        locked paycheck above, whose chip this page still renders.
+        """
+        with app.app_context():
+            future = seed_periods_today[7]
+            create_loan_account(
+                seed_user, db.session, name="Car Loan",
+                principal=Decimal("20000.00"), rate=Decimal("0.05"),
+                origination_date=future.start_date,
+            )
+            db.session.commit()
+            label = calendar_for(seed_user["user"].id).period_by_id(future.id).label
+
+            response = auth_client.get("/settings?section=pay-periods")
+
+            assert response.status_code == 200
+            row = re.search(
+                rf"{re.escape(label)}.*?</tr>".encode(), response.data, re.DOTALL,
+            )
+            assert row is not None, "the page must list the paycheck"
+            assert b"Editable" in row.group(0)
+            assert b"Posted" not in response.data
 
     def test_reset_refuses_while_a_row_holds_one(
         self, app, db, seed_user, seed_periods_today,

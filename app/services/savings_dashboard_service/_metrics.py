@@ -27,6 +27,10 @@ from app.services import (
     obligations_aggregator,
 )
 from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import (
+    template_pricing_load_options,
+    transfer_template_pricing_load_options,
+)
 from app.services.pay_calendar import PayCadence, PayCalendar, PeriodWindow
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import (
@@ -431,9 +435,14 @@ def _committed_expense_floor(
     if not checking_ids:
         return Decimal("0.00")
 
+    # The aggregator prices each definition on the pass's day
+    # (``obligations_aggregator.todays_price``, ruling plan#2693), so each
+    # query loads what pricing reads with the definitions: without it the
+    # page's statements grew with every definition (plan#2733).
     expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
     active_expense_templates = (
         db.session.query(TransactionTemplate)
+        .options(*template_pricing_load_options())
         .filter(
             TransactionTemplate.user_id == ctx.user_id,
             TransactionTemplate.account_id.in_(checking_ids),
@@ -444,6 +453,7 @@ def _committed_expense_floor(
     )
     active_transfer_templates = (
         db.session.query(TransferTemplate)
+        .options(*transfer_template_pricing_load_options())
         .filter(
             TransferTemplate.user_id == ctx.user_id,
             TransferTemplate.from_account_id.in_(checking_ids),

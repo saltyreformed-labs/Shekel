@@ -65,6 +65,7 @@ from tests._test_helpers import (
     make_cadence_rule,
 )
 from tests.oracles.recurrence_baseline import MONTHLY
+from tests._definition_price import newest_price
 
 # A short amortizing loan whose whole contractual schedule is enumerable:
 # $12,000 at 6% over 6 months, originated 2026-01-01, due on the 1st.  Read at
@@ -114,8 +115,8 @@ def _recurring_payment(seed_user, loan, base, *, derive=None, extra=None,
 
     *stated* opens the price SERIES through ``template_amount_service.set_amount``,
     the one write door, which is what makes the definition one that STATES its
-    price -- ``default_amount`` alone is a scalar the amount model refuses to
-    read as a price for a date.  *effective_on* dates that statement; it defaults
+    price -- ``default_amount`` alone was a scalar the amount model refused
+    to read as a price for a date, until plan step X-bp dropped it.  *effective_on* dates that statement; it defaults
     to the loan's origination so the series covers every installment.
     """
     template = TransferTemplate(
@@ -123,7 +124,6 @@ def _recurring_payment(seed_user, loan, base, *, derive=None, extra=None,
         from_account_id=seed_user["account"].id,
         to_account_id=loan.id,
         name=name,
-        default_amount=base,
     )
     if derive is not None or extra is not None:
         template.settings = LoanPaymentSettings(
@@ -271,7 +271,6 @@ class TestEveryDefinitionIntoAnAccount:
             from_account_id=seed_user["account"].id,
             to_account_id=account.id,
             name="One-off",
-            default_amount=Decimal("500.00"),
         )
         db.session.add(unruled)
         db.session.flush()
@@ -375,7 +374,7 @@ class TestEstimatedTierPricing:
 
         **The defect an adversarial review of plan step R7d-a found**, kept
         as a property of the plan now that the copy it was found in is gone.
-        ``template.default_amount`` sits on the NEWEST price the series states
+        ``template.default_amount`` sat on the NEWEST price the series states
         rather than the price on a date -- measured on a production clone, an
         owner stating ``$700.00`` effective 2028-01-01 moved the Van Loan's
         derived payoff six installments EARLY once its future rows were
@@ -391,8 +390,8 @@ class TestEstimatedTierPricing:
             template, Decimal("700.00"), effective_on=date(2026, 6, 1),
         )
         db.session.flush()
-        # The scalar has moved to the NEWEST price; the series has not.
-        assert template.default_amount == Decimal("700.00")
+        # The newest price is the 06-01 rise, which no earlier occurrence reads.
+        assert newest_price(template) == Decimal("700.00")
 
         plan = loan_plan(account, ctx)
 

@@ -20,10 +20,16 @@ loan that is FINISHED leaves both totals (the inflating direction); a loan
 whose cached bound is EARLIER than its payoff stays in them (the understating
 direction, plan ledger row **D35**'s shape, and the more dangerous of the two).
 
-The fixture loan is ``$12,000.00`` at 5% over 24 months; its MONTHLY
-``$200.00`` payment is ``200 * 12 / (1 * 12) = $200.00`` a month while it
-commits anything.  Today is frozen mid-2026 so the loan fixtures do not drift
-with the calendar, and every pass is pinned to a day the case names.
+The fixture loan is ``$12,000.00`` at 5% over 24 months, and its MONTHLY
+payment TRACKS the loan (derive mode, the loan door's own default), so it
+commits the contract's level payment a month while it commits anything:
+:data:`_CONTRACT`.  **It read ``$200.00`` until plan step X-bp**, the fixture's
+stored snapshot, because the aggregator read the template's
+``default_amount``; it prices a definition by the rule that prices its rows
+now (ruling plan#2693: "a tracking payment's figure follows the loan"), and
+the money each case is about -- whether the payment is IN the total at all --
+is unchanged.  Today is frozen mid-2026 so the loan fixtures do not drift with
+the calendar, and every pass is pinned to a day the case names.
 """
 from dataclasses import replace
 from datetime import date, timedelta
@@ -55,6 +61,12 @@ _TODAY = date(2026, 7, 1)
 #: fired occurrence -- the derived stop is ``ClosesOn(2026-06-15)``.
 _ORIGINATED = date(2026, 5, 1)
 _CLEARED = date(2026, 6, 15)
+#: What one installment of every loan here costs, and so -- monthly rule, one
+#: installment a month -- what its tracking payment commits a month.  The
+#: level payment on $12,000.00 at 5% over 24 months, with no escrow line:
+#: r = 0.05 / 12; 12000 * r / (1 - (1 + r) ** -24) = 50 / (1 - 1/1.1049413)
+#: = 526.4569, rounded to the cent.
+_CONTRACT = Decimal("526.46")
 
 
 @pytest.fixture(autouse=True)
@@ -152,7 +164,7 @@ class TestADerivedStopLeavesTheObligationsTotal:
             # The day before: the loan still owes, so the payment commits.
             assert obligations_aggregator.template_monthly_or_none(
                 tpl, BalanceContext.build(owner, _CLEARED - timedelta(days=1)),
-            ) == Decimal("200.00")
+            ) == _CONTRACT
             # The day it closed, and after: nothing is owed on or after it.
             assert obligations_aggregator.template_monthly_or_none(
                 tpl, on_close,
@@ -210,7 +222,8 @@ class TestADerivedStopLeavesTheObligationsTotal:
         word now.  A live loan originating on the frozen day, first
         installment 2026-08-01, whose standing payment carries an owner's
         stop of 2026-08-15: read on 2026-07-20 the 08-01 installment is still
-        owed and the payment counts (``$200.00`` a month, ``200 * 12 / 12``);
+        owed and the payment counts (:data:`_CONTRACT` a month, one
+        installment a month);
         read on 2026-08-05 it has ended -- under ruling **R-R45** "ended"
         means no occurrence is owed on or after the day asked, and the next
         1st falls past the stop -- so it leaves the total while the loan
@@ -239,7 +252,7 @@ class TestADerivedStopLeavesTheObligationsTotal:
 
             assert obligations_aggregator.template_monthly_or_none(
                 tpl, before_the_stop,
-            ) == Decimal("200.00"), (
+            ) == _CONTRACT, (
                 "a stop with an installment still owed before it dropped a "
                 "live loan payment out of the committed total"
             )
@@ -259,10 +272,11 @@ class TestADerivedStopLeavesTheObligationsTotal:
         checking expenses and the committed floor -- the aggregator's total
         over the checking account's outgoing definitions.  With nothing
         settled the floor IS the aggregator's answer, so a retired loan's
-        ``$200.00`` payment leaving from checking inflated the emergency-fund
-        baseline by ``$200.00`` a month until this step.  The control is a
-        second loan still owing: its identical payment must count, or a floor
-        of zero would prove only that the floor reads nothing.
+        payment leaving from checking inflated the emergency-fund baseline by
+        its monthly figure until this step.  The control is a second loan
+        still owing: its identical payment must count -- the contract,
+        :data:`_CONTRACT` a month -- or a floor of zero would prove only that
+        the floor reads nothing.
         """
         with app.app_context():
             make_retired_loan_payment(
@@ -284,7 +298,7 @@ class TestADerivedStopLeavesTheObligationsTotal:
             data = savings_dashboard_service.compute_dashboard_data(
                 BalanceContext.build(owner, _TODAY),
             )
-            assert data["avg_monthly_expenses"] == Decimal("200.00"), (
-                "the control does not fire: a live loan's $200.00 monthly "
-                "payment must set the committed floor"
+            assert data["avg_monthly_expenses"] == _CONTRACT, (
+                "the control does not fire: a live loan's tracking payment "
+                "must set the committed floor at the contract a month"
             )

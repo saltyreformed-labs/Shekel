@@ -80,10 +80,9 @@ from app.extensions import db
 from app.models.user import User
 from app.services import ledger_report_service
 from app.services.ledger_report_service import StatementWindow
+from app.services.pay_calendar import calendar_for
 from app.services.scenario_resolver import get_baseline_scenario
 from app.utils.dates import display_today
-from app.services.pay_calendar import calendar_for
-from app.services.pay_calendar import calendar_for
 
 
 def _money(value):

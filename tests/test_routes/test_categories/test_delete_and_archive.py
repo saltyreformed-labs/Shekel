@@ -57,7 +57,6 @@ class TestCategoryDelete:
                 category_id=category.id,
                 transaction_type_id=txn_type.id,
                 name="Rent Template",
-                default_amount=Decimal("1200.00"),
             )
             db.session.add(template)
             db.session.commit()
@@ -153,7 +152,6 @@ class TestCategoryDelete:
                 category_id=seed_second_user["categories"]["Rent"].id,
                 transaction_type_id=txn_type.id,
                 name="B Rent Template",
-                default_amount=Decimal("1000.00"),
             )
             db.session.add(tpl_b)
             db.session.commit()
@@ -324,7 +322,6 @@ class TestCategoryArchiveDelete:
                 category_id=cat_id,
                 transaction_type_id=txn_type.id,
                 name="Blocks Delete",
-                default_amount=Decimal("1200.00"),
             )
             db.session.add(template)
             db.session.commit()
@@ -486,7 +483,6 @@ class TestCategoryArchiveDelete:
                 category_id=cat_id,
                 transaction_type_id=txn_type.id,
                 name="In-Use Template",
-                default_amount=Decimal("500.00"),
             )
             db.session.add(template)
 

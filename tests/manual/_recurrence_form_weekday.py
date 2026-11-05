@@ -484,7 +484,7 @@ def _fill_definition(page, kind: str, name: str) -> None:
         name: The definition's name.
     """
     page.fill("#name", name)
-    page.fill("#default_amount", "1.00")
+    page.fill("#amount", "1.00")
     checking = _sql("SELECT id FROM budget.accounts WHERE name = 'Checking' "
                     f"AND user_id = {int(_form_owner(page))}")[0]
     if kind == "transaction":

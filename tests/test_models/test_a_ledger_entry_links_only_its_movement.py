@@ -429,9 +429,10 @@ class TestTheUpgradeRefuses:
         """An original and its reversal a DAY, a PERIOD or a LINK apart: four groups refused.
 
         Summed over the whole ledger the pair is zero, but each half sits in a
-        group of its own -- the loan sync's checked projection reads per date,
-        the account walk per period, the deleted readers per link -- so the
-        delete would move a figure one of them shows.
+        group of its own -- when the revision was written the loan sync's
+        checked projection read per date, the account walk per period (it
+        reads the records since plan task plan#2525), the deleted readers per
+        link -- so the delete would have moved a figure one of them showed.
         """
         with app.app_context():
             world = _world(seed_user, seed_periods)
@@ -458,12 +459,14 @@ class TestTheUpgradeRefuses:
     ):
         """An original carrying a movement link, its reversal not: four groups refused.
 
-        The account walk's and the ledger report's movement readers read any
-        entry carrying ``transaction_entry_id`` under that movement, at the
-        movement's day, whatever its kind, while the reversal, carrying no
-        movement link, is read apart from it (by the base's row loader at the
-        row's day, as its period's residue since).  Wherever those days
-        differ the delete would move a figure, so the refusal keys on the
+        When the revision was written, the account walk's and the ledger
+        report's movement readers read any entry carrying
+        ``transaction_entry_id`` under that movement, at the movement's day,
+        whatever its kind, while the reversal, carrying no movement link, was
+        read apart from it (by the base's row loader at the row's day, as its
+        period's residue since); the account walk reads the records since
+        plan task plan#2525.  Wherever those days differ the delete would
+        move a figure, so the refusal keys on the
         movement link itself rather than on whether they differ here.  The
         first group named is the original's, on the lowest ledger: NULL sorts
         last.

@@ -37,26 +37,29 @@ repository).  A stub of its own lines now prices it.
 The W-4 entries, filing status and state are TODAY's on both sides (ruling
 **R-SAL101**): the app keeps no dated history of them yet, so a change made
 after the latest stub cancels out until a stub paid under it is entered
-(plan step ``S16`` dates them; finding **SAL-591**).  The formulas charge
-FICA on the gross, so a pre-tax line the employer exempts from FICA is
-priced alike on both sides and cancels on a same-lines stub while both
-paychecks sit below the Social Security wage base; it errs on an
-other-lines stub (**R-SAL54**'s accepted cost) until plan step ``S11-e``.
+(plan step ``S16`` dates them; finding **SAL-591**).  **The formulas charge
+Social Security and Medicare on the gross less the "Pre-tax, all payroll
+taxes" lines since plan step salary:S11-e** (ruling **plan#2639**; ledger
+row **SAL-566**), on both sides: the paycheck's by the kind each LINE is
+priced as, the stub's by the kind the STUB records each figure under
+(R-SAL58), so a stub that records a line under the other pre-tax kind than
+its paycheck line now has prices the paycheck by that difference, which
+the entry door lists as a kind that differs.
 
-**Around the wage base it errs further, and that is ledger row SAL-595.**
-The stub's side is priced at the APP's year-to-date, so where the app and
-the employer disagree about whether the stub's paycheck had reached the
-base -- the app counting a FICA-exempt line toward it, or the employer
-counting wages the app never saw -- the stub's whole Social Security
-figure, or its absence, is carried into every paycheck it prices, the next
-year's included, until a stub of the new year is entered.  The Medicare
-surtax threshold shares it.  It moves ``$0.00`` for pay that never reaches
-the base, and ``S11-e`` owns the row.
+**Around the wage base it errs further, and that is ledger row SAL-595**
+(owner plan#2637).  The stub's side is priced at the APP's year-to-date, so
+where the app and the employer disagree about whether the stub's paycheck
+had reached the base -- the employer counting wages the app never saw --
+the stub's whole Social Security figure, or its absence, is carried into
+every paycheck it prices, the next year's included, until a stub of the new
+year is entered.  The Medicare surtax threshold shares it.  It moves
+``$0.00`` for pay that never reaches the base.  S11-e removed its other
+cause, an all-payroll-taxes line counted toward the base.
 
 **A worker Social Security does not cover is ledger row SAL-596** (owner
-``S11-e``, beside SAL-595).  The formulas always charge 6.2%, so a stub that
-prints ``$0.00`` Social Security prices every later paycheck at 6.2% of its
-pay above the stub's (``0.00 + formulas(paycheck) - formulas(stub)``, floored),
+plan#2636).  The formulas always charge 6.2%, so a stub that prints
+``$0.00`` Social Security prices every later paycheck at 6.2% of its pay
+above the stub's (``0.00 + formulas(paycheck) - formulas(stub)``, floored),
 and every paycheck before the first stub at the full 6.2%, where the deleted
 calibration priced ``$0.00``.  It moves ``$0.00`` for a worker the tax covers.
 
@@ -105,18 +108,27 @@ from decimal import Decimal
 
 from app import ref_cache
 from app.enums import PaycheckLineKindEnum, WithholdingKindEnum
+from app.services.paycheck_line_kinds import PRE_TAX_KINDS
 from app.utils.money import ZERO, round_money
 
-from ._breakdown import TaxLines, waterfall_gross, waterfall_net, waterfall_taxable
+from ._breakdown import (
+    TaxLines,
+    totals_by_kind,
+    waterfall_fica_wages,
+    waterfall_gross,
+    waterfall_net,
+    waterfall_taxable,
+)
 from ._calendar_questions import _get_cumulative_wages
 from ._withholding import _bracket_tax_lines, _WageBasis
 
 
 #: The kinds whose lines a tax formula reads -- the gross holds the taxable
-#: earnings and the taxable wage is the gross less the pre-tax deductions --
-#: and so the kinds "the same lines" compares (the module docstring).  A
-#: post-tax deduction and an after-tax earning move no tax.
-TAXED_KINDS = (PaycheckLineKindEnum.TAXABLE_EARNING, PaycheckLineKindEnum.PRE_TAX_DEDUCTION)
+#: earnings, the Social Security and Medicare wages are the gross less the
+#: all-payroll-taxes deductions, and the taxable wage is the gross less both
+#: pre-tax kinds -- and so the kinds "the same lines" compares (the module
+#: docstring).  A post-tax deduction and an after-tax earning move no tax.
+TAXED_KINDS = (PaycheckLineKindEnum.TAXABLE_EARNING, *PRE_TAX_KINDS)
 
 
 @dataclass(frozen=True)
@@ -125,7 +137,10 @@ class StubTotals:
 
     Attributes:
         gross: Base pay plus the taxable earnings.
-        pre_tax: The pre-tax deductions.
+        pre_tax: The pre-tax deductions, both pre-tax kinds.
+        pre_fica: The "Pre-tax, all payroll taxes" deductions alone: what
+            leaves the Social Security and Medicare wages (plan step
+            salary:S11-e).
         taxes: The four taxes.
         post_tax: The post-tax deductions.
         after_tax: The after-tax earnings.
@@ -134,6 +149,7 @@ class StubTotals:
     """
     gross: Decimal
     pre_tax: Decimal
+    pre_fica: Decimal
     taxes: Decimal
     post_tax: Decimal
     after_tax: Decimal
@@ -146,7 +162,10 @@ def stub_totals(base_pay: Decimal, kinded: Iterable, taxes: Iterable[Decimal]) -
     Ruling **R-SAL58**: a stub line and a one-off each carry their own kind,
     so nothing here reads a paycheck line.  The ONE producer of a stub's
     totals: the entry door checks a form's figures with it and the engine
-    prices a saved stub's paycheck with it.
+    prices a saved stub's paycheck with it.  The figures are summed by
+    :func:`~._breakdown.totals_by_kind`, the summation a priced paycheck's
+    all-payroll-taxes total reads too (plan step salary:S11-e), so the two
+    sides of the stub's difference total that kind by one rule.
 
     Args:
         base_pay: The base pay the stub prints.
@@ -158,19 +177,16 @@ def stub_totals(base_pay: Decimal, kinded: Iterable, taxes: Iterable[Decimal]) -
     Returns:
         The :class:`StubTotals`.
     """
-    by_kind = {member: ZERO for member in PaycheckLineKindEnum}
-    for figure in kinded:
-        by_kind[ref_cache.paycheck_line_kind_member(figure.paycheck_line_kind_id)] += (
-            figure.amount
-        )
+    by_kind = totals_by_kind(kinded)
     gross = waterfall_gross(base_pay, by_kind[PaycheckLineKindEnum.TAXABLE_EARNING])
     total_taxes = sum(taxes, ZERO)
-    pre_tax = by_kind[PaycheckLineKindEnum.PRE_TAX_DEDUCTION]
+    pre_fica = by_kind[PaycheckLineKindEnum.PRE_FICA_DEDUCTION]
+    pre_tax = sum((by_kind[kind] for kind in PRE_TAX_KINDS), ZERO)
     post_tax = by_kind[PaycheckLineKindEnum.POST_TAX_DEDUCTION]
     after_tax = by_kind[PaycheckLineKindEnum.AFTER_TAX_EARNING]
     return StubTotals(
-        gross=gross, pre_tax=pre_tax, taxes=total_taxes, post_tax=post_tax,
-        after_tax=after_tax,
+        gross=gross, pre_tax=pre_tax, pre_fica=pre_fica, taxes=total_taxes,
+        post_tax=post_tax, after_tax=after_tax,
         net=waterfall_net(gross, pre_tax, total_taxes, post_tax, after_tax),
     )
 
@@ -249,11 +265,14 @@ class Pay:
     Attributes:
         payday: The day it is paid, which fixes its year-to-date and rhythm.
         gross: Base pay plus the taxable earnings.
-        pre_tax: The pre-tax deductions' total.
+        pre_tax: The pre-tax deductions' total, both pre-tax kinds.
+        pre_fica: The all-payroll-taxes deductions' total (plan step
+            salary:S11-e): what leaves the Social Security and Medicare wages.
     """
     payday: date
     gross: Decimal
     pre_tax: Decimal
+    pre_fica: Decimal
 
 
 def _taxed(rows) -> list:
@@ -343,7 +362,8 @@ def priced_taxes(basis, pay: Pay, lines, law: Law) -> TaxLines:
         (row.amount for row in stub.withholdings),
     )
     on_stub = _formulas(
-        basis, Pay(stub.payday, totals.gross, totals.pre_tax), law.for_stub(stub),
+        basis, Pay(stub.payday, totals.gross, totals.pre_tax, totals.pre_fica),
+        law.for_stub(stub),
     )
     return TaxLines(
         federal=_floored(printed.federal + formulas.federal - on_stub.federal),
@@ -432,6 +452,7 @@ def _formulas(basis, pay: Pay, configs: dict) -> TaxLines:
         basis,
         _WageBasis(
             pay.gross,
+            waterfall_fica_wages(pay.gross, pay.pre_fica),
             waterfall_taxable(pay.gross, pay.pre_tax),
             _get_cumulative_wages(basis, pay.payday),
             basis.base_pay_on(pay.payday).periods_per_year,

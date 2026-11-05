@@ -180,7 +180,7 @@ class TestTheCreateIntoAPaymentLessLoan:
             "name": _NAME,
             "from_account_id": str(seed_user["account"].id),
             "to_account_id": str(loan.id),
-            "default_amount": "1200.00",
+            "amount": "1200.00",
             "category_id": str(category.id),
             **cadence_payload(
                 unit=RecurrenceUnitEnum.MONTH, starts_on=starts_on,

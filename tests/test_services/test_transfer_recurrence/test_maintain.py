@@ -65,11 +65,10 @@ class TestTransferMaintain:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name=name,
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         make_cadence_rule(template, EVERY_PERIOD, interval_n=1)
         db.session.refresh(template)
         rows = transfer_recurrence.generate_for_template(
@@ -207,7 +206,6 @@ class TestTransferMaintain:
             # moves too, and every survivor is asserted worth it below.
             template.recurrence_rule.end_date = last_covered_day(seed_periods[6])
             template.name = "Narrowed Definition"
-            template.default_amount = Decimal("155.00")
             state_template_price(template, Decimal("155.00"))
             db.session.flush()
 
@@ -501,7 +499,6 @@ class TestTransferMaintain:
             template.to_account_id = elsewhere.id
             template.name = "Every Column Moved"
             template.category_id = category.id
-            template.default_amount = Decimal("212.12")
             state_template_price(template, Decimal("212.12"))
             db.session.flush()
             conflict = self._regenerate(template, seed_user, seed_periods)
@@ -586,7 +583,6 @@ class TestTransferMaintain:
             recorded = rows[6]
             self._settle_then_revert(recorded, seed_user, Decimal("58.00"))
 
-            template.default_amount = Decimal("175.00")
             state_template_price(template, Decimal("175.00"))
             db.session.flush()
             conflict = self._regenerate(template, seed_user, seed_periods)
@@ -660,7 +656,6 @@ class TestTransferMaintain:
             template, _, rows = self._template_with_rows(
                 seed_user, seed_periods,
             )
-            template.default_amount = Decimal("133.70")
             state_template_price(template, Decimal("133.70"))
             template.name = "Renamed Mid-Life"
             db.session.flush()
@@ -771,7 +766,6 @@ class TestTransferMaintain:
             # case for why a re-price alone no longer writes a row.
             template.recurrence_rule.end_date = last_covered_day(seed_periods[4])
             template.name = "Narrowed Definition"
-            template.default_amount = Decimal("111.00")
             state_template_price(template, Decimal("111.00"))
             db.session.flush()
 

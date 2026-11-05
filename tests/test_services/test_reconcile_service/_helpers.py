@@ -165,12 +165,11 @@ def _transaction_arm_bill(seed_user, period, *, name="Electricity", amount="180.
             category_id=seed_user["categories"]["Groceries"].id,
             transaction_type_id=type_id,
             name=name,
-            default_amount=Decimal(amount),
             is_envelope=False,
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal(amount))
         make_cadence_rule(template, MONTHLY, fires_on_day=fires_on_day)
     return generate_row_of(template, period)
 

@@ -12,16 +12,18 @@ correction, both PROJECTED from ONE deterministic running-balance walk
 balance interest accrues on, never the drift separate walk implementations
 would risk:
 
-* **Payment splits** (:mod:`._payments`, Step 4): the real principal / interest /
-  escrow / refund split of each confirmed payment, layered as a correction on top
-  of the payment's cash movement (its loan-side covering movement's own entry,
+* **Payment splits** (:mod:`app.services.ledger_lines._loan_payments`, Step
+  4): the real principal / interest / escrow / refund split of each confirmed
+  payment, layered as a correction on top of the payment's cash movement (its
+  loan-side covering movement's own entry,
   :mod:`app.services._posting_purchases`) so the loan nets to the real
   principal.  A DERIVATION keyed ``(loan_payment kind, the payment's pay
   period, its visible day)`` with NO row link.
-* **Anchor corrections** (:mod:`._anchors`, the read switch): the once-per-loan
-  OPENING (``-original_principal`` vs. a per-loan opening-equity account) and
-  every user balance TRUE-UP, so the from-origination sum-of-postings reproduces
-  the resolver on a trued-up loan.  Keyed the same way.
+* **Anchor corrections** (:mod:`app.services.ledger_lines._loan_anchors`, the
+  read switch): the once-per-loan OPENING (``-original_principal`` vs. a
+  per-loan opening-equity account) and every user balance TRUE-UP, so the
+  from-origination sum-of-postings reproduces the resolver on a trued-up
+  loan.  Keyed the same way.
 
 ## Where the walk lives, and why it is not here
 
@@ -44,15 +46,18 @@ Split by concern (the module outgrew the size limit; mirrors
 ``from app.services import loan_posting_service`` and ``loan_posting_service.X``
 keep working unchanged:
 
-* :mod:`._payments` -- the per-payment split's TARGET legs.
-* :mod:`._anchors` -- the opening + true-up corrections' TARGET legs.
+* The TARGET legs -- the per-payment split's and the opening + true-up
+  corrections' -- were this package's ``_payments`` and ``_anchors`` until
+  plan task plan#2526 moved them into the worked-out ledger
+  (:func:`app.services.ledger_lines.loan_correction_targets`), which the
+  read sums and :mod:`._corrections` reconciles to.
 * :mod:`._corrections` -- the ONE reconcile of both: one posted read over the
   three correction kinds, one delta loop (``reconcile_loan_corrections``).
 * :mod:`._sync` -- the UNIFIED per-scenario sync (``sync_loan_postings``: one walk,
   one reconcile), the loan-GLOBAL all-scenarios sync, the duplicate translation,
   and the historical backfill.
 * :mod:`._linked_ledger` -- the grouped reads over a loan's linked ledger the
-  sync's E1a checks and the display's configured-loan guard are built on.
+  sync's E1a checks are built on.
 * :mod:`._display` -- the loan-detail page's two surfaces, both read off the
   walk.  This package answers no balance: the two sum-of-postings balance
   readers it once held (``confirmed_loan_balance_at`` /
@@ -103,9 +108,9 @@ the write that caused it.
 that once pointed at them is retired: the balance seam folds a loan's past from
 SOURCE events (steps C3b1 / C3b3) and its confirmed rows from the walk (step
 E1d-b), so a cold or stale posting cache is a repairable inconsistency, never a
-read outage.  What DOES read them is the general ledger's own presentation --
-the balance sheet and statements (:mod:`app.services.ledger_report_service`) and
-this package's per-payment attribution (:mod:`._display`).
+read outage.  What DOES read them is this package's per-payment attribution
+(:mod:`._display`); the balance sheet and statements did too until plan task
+plan#2771 moved them onto the worked-out ledger.
 """
 
 from ._display import (

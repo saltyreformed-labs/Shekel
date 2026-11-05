@@ -49,8 +49,6 @@ from sqlalchemy.orm import InstrumentedAttribute, Query
 from sqlalchemy.sql.expression import ColumnElement
 
 from app.extensions import db
-from app.models.journal_entry import Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.merchant_rule import MerchantRule
 from app.models.pay_period import PayPeriod
 from app.models.ref import Status
@@ -581,47 +579,6 @@ def account_holds_other_rows_movements(account_id: int) -> bool:
                 TransactionTemplate.account_id != account_id,
             ),
         ).exists()
-    ).scalar()
-
-
-def account_has_ledger_postings(account_id: int) -> bool:
-    """Check if any of an account's ledger accounts has postings.
-
-    A settled transfer writes balanced journal entries onto the account's
-    linked ledger account (Build-Order Step 2).  Those entries are immutable
-    and SURVIVE a transfer delete, which removes the transfer's movements and
-    so SET-NULLs their entries' ``journal_entries.transaction_entry_id``, so
-    an account can still hold posting legs after every transaction
-    referencing it is gone (e.g. its ad-hoc transfer was hard-deleted).
-    Hard-deleting such an account would CASCADE-delete only its own legs and
-    strand the paired legs as unbalanced single-leg entries (the balanced
-    trigger fires on INSERT/UPDATE, not DELETE), so the hard-delete guard
-    archives it instead.  The posting-ledger counterpart of
-    :func:`account_has_history`.
-
-    **It joins by ``account_id`` across ALL kinds, and that is load-bearing
-    rather than incidental.**  An account carries its ``linked`` row plus its
-    per-account COUNTER rows, and since ruling **R-FO** a correction re-pointed
-    from one counter row to another emits an entry whose ONLY legs are counter
-    legs -- so a linked-row-scoped check would answer False for an account that
-    really does hold immutable posted history, and the hard delete would
-    proceed.  The kind-agnostic join is what makes the model's
-    cascade-imbalance impossibility argument true by construction rather than
-    by a premise about which rows corrections touch.
-
-    Args:
-        account_id: The Account.id to check.
-
-    Returns:
-        True if any ledger account linked to *account_id* has at least one
-        posting.
-    """
-
-    return db.session.query(
-        db.session.query(Posting)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(LedgerAccount.account_id == account_id)
-        .exists()
     ).scalar()
 
 

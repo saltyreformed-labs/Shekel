@@ -22,6 +22,7 @@ predicates -- never another loan service.  Flask-isolated, reads only, no
 commits.
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -205,6 +206,10 @@ def load_loan_anchor_facts(params: LoanParams) -> list[LoanAnchorFact]:
     it reads the origination opening held flat -- the honest fold of the recorded
     facts.
 
+    A door over :func:`_merged_anchor_facts`, the merge, which the owner's
+    load (:func:`._records.load_loan_records`) runs over statements it
+    loaded for every loan at once (plan task plan#2649).
+
     Args:
         params: The loan's :class:`LoanParams` row (supplies the account id
             and the immutable origination fields).
@@ -217,8 +222,30 @@ def load_loan_anchor_facts(params: LoanParams) -> list[LoanAnchorFact]:
         refuse an assertion earlier than ``origination_date``; the sort does not
         depend on that guard holding.
     """
-    facts = [synthesize_origination_anchor(params)]
-    facts.extend(load_standing_loan_assertions(params.account_id))
+    return _merged_anchor_facts(
+        params, load_standing_loan_assertions(params.account_id),
+    )
+
+
+def _merged_anchor_facts(
+    params: LoanParams, standing: list[LoanAnchorFact],
+) -> list[LoanAnchorFact]:
+    """Return the synthesized origination and *standing*, in the loan's chronology.
+
+    :func:`load_loan_anchor_facts`' merge, pure: the one place a loan's
+    opening joins its stored statements, so the loan's own door and the
+    owner's load cannot order them two ways.
+
+    Args:
+        params: The loan's :class:`LoanParams` row.
+        standing: Its standing stored statements
+            (:func:`load_standing_loan_assertions`' list).
+
+    Returns:
+        The merged list ascending by
+        :func:`~app.utils.dates.anchor_chronology_key`.
+    """
+    facts = [synthesize_origination_anchor(params), *standing]
     facts.sort(key=anchor_chronology_key)
     return facts
 
@@ -253,6 +280,9 @@ def load_standing_loan_assertions(account_id: int) -> list[LoanAnchorFact]:
     and both read the list.  The door used to order in SQL as well, a second
     spelling of the chronology key; it now reads this order.
 
+    A door over :func:`_standing_assertions_by_account`, the one query, which
+    the owner's load runs over every loan at once (plan task plan#2649).
+
     Args:
         account_id: The loan account whose statements to load.
 
@@ -260,6 +290,27 @@ def load_standing_loan_assertions(account_id: int) -> list[LoanAnchorFact]:
         The standing :class:`LoanAnchorFact` list ascending by ``(anchor_date,
         created_at, event_id)``; empty when the loan has recorded no standing
         statement.
+    """
+    return _standing_assertions_by_account([account_id]).get(account_id, [])
+
+
+def _standing_assertions_by_account(
+    account_ids: Collection[int],
+) -> dict[int, list[LoanAnchorFact]]:
+    """Return each loan's STANDING stored statements, keyed by its account id.
+
+    :func:`load_standing_loan_assertions`' body over a set of loans, in one
+    statement: one loan's for the door, every loan an owner holds for the
+    owner's load (:func:`._records.load_loan_records`).  Each list is the
+    door's answer for its loan -- the same predicate, the same mapping, the
+    same order -- because a loan's list is the rows naming its id alone.
+
+    Args:
+        account_ids: The loan accounts whose statements to load.
+
+    Returns:
+        ``{account id: its standing statements, ascending by
+        (anchor_date, created_at, event_id)}``; a loan holding none is absent.
     """
     trueup_source_id = ref_cache.loan_anchor_source_id(
         LoanAnchorSourceEnum.USER_TRUEUP,
@@ -273,7 +324,7 @@ def load_standing_loan_assertions(account_id: int) -> list[LoanAnchorFact]:
     events = (
         db.session.query(LoanAnchorEvent)
         .filter(
-            LoanAnchorEvent.account_id == account_id,
+            LoanAnchorEvent.account_id.in_(account_ids),
             LoanAnchorEvent.source_id.in_(
                 [trueup_source_id, tracking_start_source_id],
             ),
@@ -281,8 +332,9 @@ def load_standing_loan_assertions(account_id: int) -> list[LoanAnchorFact]:
         )
         .all()
     )
-    facts = [
-        LoanAnchorFact(
+    facts: dict[int, list[LoanAnchorFact]] = {}
+    for event in events:
+        facts.setdefault(event.account_id, []).append(LoanAnchorFact(
             account_id=event.account_id,
             anchor_date=event.anchor_date,
             anchor_balance=Decimal(str(event.anchor_balance)),
@@ -290,10 +342,9 @@ def load_standing_loan_assertions(account_id: int) -> list[LoanAnchorFact]:
             created_at=event.created_at,
             event_id=event.id,
             is_tracking_start=(event.source_id == tracking_start_source_id),
-        )
-        for event in events
-    ]
-    facts.sort(key=anchor_chronology_key)
+        ))
+    for loan_facts in facts.values():
+        loan_facts.sort(key=anchor_chronology_key)
     return facts
 
 
@@ -399,6 +450,9 @@ def load_rate_history(account_id: int) -> list:
     (:mod:`app.models.loan_features`), and so is this read; which KIND of
     account the rows belong to is the caller's question.
 
+    A door over :func:`_rate_history_by_account`, the one query, which the
+    owner's load runs over every loan at once (plan task plan#2649).
+
     Args:
         account_id: The account whose rate history to load.
 
@@ -406,12 +460,36 @@ def load_rate_history(account_id: int) -> list:
         The account's :class:`RateHistory` rows, ``effective_date`` DESC
         (possibly empty: an unconfigured loan, or a card with no APR stated).
     """
-    return (
+    return _rate_history_by_account([account_id]).get(account_id, [])
+
+
+def _rate_history_by_account(
+    account_ids: Collection[int],
+) -> dict[int, list[RateHistory]]:
+    """Return each account's raw :class:`RateHistory` rows, keyed by its id.
+
+    :func:`load_rate_history`'s body over a set of accounts, in one
+    statement.  Each list is the door's answer for its account: its rows
+    alone, newest first -- a total order, since
+    ``uq_rate_history_account_effective_date`` holds one row per account
+    and day.
+
+    Args:
+        account_ids: The accounts whose rate history to load.
+
+    Returns:
+        ``{account id: its rows, effective_date DESC}``; an account holding
+        none is absent.
+    """
+    rows: dict[int, list[RateHistory]] = {}
+    for row in (
         db.session.query(RateHistory)
-        .filter_by(account_id=account_id)
+        .filter(RateHistory.account_id.in_(account_ids))
         .order_by(RateHistory.effective_date.desc())
         .all()
-    )
+    ):
+        rows.setdefault(row.account_id, []).append(row)
+    return rows
 
 
 def load_rate_changes(account_id: int) -> list[RateChangeRecord] | None:
@@ -460,11 +538,37 @@ def load_loan_params(account_id: int) -> LoanParams | None:
         The :class:`LoanParams` row, or ``None`` when the account is not a
         configured loan.
     """
-    return (
-        db.session.query(LoanParams)
-        .filter_by(account_id=account_id)
-        .first()
-    )
+    return load_loans_params([account_id]).get(account_id)
+
+
+def load_loans_params(account_ids: Collection[int]) -> dict[int, LoanParams]:
+    """Load many loan accounts' :class:`LoanParams` rows in one statement.
+
+    :func:`load_loan_params` for many loans, and its one query: the owner's
+    loan walk (:func:`app.services.loan_ledger.walk_loan_ledgers`) reads each
+    loan's terms here, BY THE LOANS' IDS, rather than off
+    ``Account.loan_params`` as the session loaded it -- a relationship already
+    loaded is not re-read by a later query, so an account whose terms were
+    loaded as ``None`` before a ``LoanParams`` row naming it was written by its
+    ``account_id`` (the loan setup route does) would walk to nothing (finding
+    plan#2691).  A query by id reads the row the session holds, its pending
+    write flushed first.  No statement when *account_ids* is empty.
+
+    Args:
+        account_ids: The accounts whose loan parameters to load.
+
+    Returns:
+        ``{account id: its LoanParams}``; an account that is not a configured
+        loan is absent (``account_id`` is unique per row).
+    """
+    if not account_ids:
+        return {}
+    return {
+        params.account_id: params
+        for params in db.session.query(LoanParams)
+        .filter(LoanParams.account_id.in_(account_ids))
+        .all()
+    }
 
 
 def load_all_loan_account_ids() -> list[int]:
@@ -545,21 +649,52 @@ def load_escrow_lines(account_id: int) -> list:
     the today's-escrow display / cash surfaces (which resolve on today) -- one
     loader, one source of truth, no separate active/all split.
 
+    A door over :func:`_escrow_lines_by_account`, the one query, which the
+    owner's load runs over every loan at once (plan task plan#2649).
+
     Args:
         account_id: The loan account whose escrow lines to load.
 
     Returns:
         The account's :class:`~app.models.escrow_line.EscrowLine` rows, ascending
-        by ``name`` (stable order for the display cent-allocation), each with
-        ``versions`` populated.  Empty when the account carries no escrow.
+        by ``(name, id)`` (stable order for the display cent-allocation), each
+        with ``versions`` populated.  Empty when the account carries no escrow.
     """
-    return (
+    return _escrow_lines_by_account([account_id]).get(account_id, [])
+
+
+def _escrow_lines_by_account(
+    account_ids: Collection[int],
+) -> dict[int, list[EscrowLine]]:
+    """Return each loan's escrow LINES with every version, keyed by its id.
+
+    :func:`load_escrow_lines`' body over a set of loans: the lines in one
+    statement and every line's versions in one more (``selectinload``), none
+    when no line matched.  Each list is the door's answer for its loan: its
+    lines alone, ascending by ``(name, id)``.  The ``id`` makes the order
+    total: the escrow route keeps at most one ACTIVE line per name and
+    account (:class:`~app.models.escrow_line.EscrowLine`), so a removed line
+    and an active one can share a name, and a query over many loans need not
+    break that tie as a query over one did.  It was the bare ``name`` until plan task
+    plan#2649.
+
+    Args:
+        account_ids: The loan accounts whose escrow lines to load.
+
+    Returns:
+        ``{account id: its lines, ascending by (name, id), versions
+        populated}``; a loan carrying no escrow is absent.
+    """
+    lines: dict[int, list[EscrowLine]] = {}
+    for line in (
         db.session.query(EscrowLine)
         .options(selectinload(EscrowLine.versions))
-        .filter(EscrowLine.account_id == account_id)
-        .order_by(EscrowLine.name)
+        .filter(EscrowLine.account_id.in_(account_ids))
+        .order_by(EscrowLine.name, EscrowLine.id)
         .all()
-    )
+    ):
+        lines.setdefault(line.account_id, []).append(line)
+    return lines
 
 
 def installment_for(

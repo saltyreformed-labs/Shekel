@@ -147,7 +147,7 @@ class TestCarryForwardEnvelopeZeroEntries:
         """
         with app.app_context():
             template = _create_envelope_template(
-                seed_user, default_amount="200.00",
+                seed_user, amount="200.00",
             )
             source = generate_row_of(template, seed_periods[0])
             target = generate_row_of(template, seed_periods[1])
@@ -185,7 +185,7 @@ class TestCarryForwardEnvelopeOverspend:
         """
         with app.app_context():
             template = _create_envelope_template(
-                seed_user, default_amount="100.00",
+                seed_user, amount="100.00",
             )
             source = generate_row_of(template, seed_periods[0])
             target = generate_row_of(template, seed_periods[1])
@@ -224,7 +224,7 @@ class TestCarryForwardEnvelopeOverspend:
         """
         with app.app_context():
             template = _create_envelope_template(
-                seed_user, default_amount="100.00",
+                seed_user, amount="100.00",
             )
             source = generate_row_of(template, seed_periods[0])
             target = generate_row_of(template, seed_periods[1])
@@ -275,7 +275,7 @@ class TestCarryForwardEnvelopeRefundedBelowZero:
         """`$100.00` budget, one `-$50.00` refund: `$150.00` rolls, source `-$50.00`."""
         with app.app_context():
             template = _create_envelope_template(
-                seed_user, default_amount="100.00",
+                seed_user, amount="100.00",
             )
             source = generate_row_of(template, seed_periods[0])
             target = generate_row_of(template, seed_periods[1])
@@ -321,7 +321,7 @@ class TestCarryForwardEnvelopeRefundedBelowZero:
         """
         with app.app_context():
             template = _create_envelope_template(
-                seed_user, default_amount="100.00",
+                seed_user, amount="100.00",
             )
             source = generate_row_of(template, seed_periods[0])
             target = generate_row_of(template, seed_periods[1])

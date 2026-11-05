@@ -2071,20 +2071,23 @@ class TestRefusals:
         class, and the only way to exercise the guard between them was to
         monkeypatch them apart, which is what this case did.
 
-        They are ONE statement:
-        :func:`~app.services.recurrence.has_day_of_month_coordinate` is a
-        membership test against ``MONTH_SPANNING_UNITS`` itself, which is the
-        key set of the table ``months_per_step`` reads.  A unit that names a day
-        of the month therefore has a stride by construction, and the guard that
-        used to say so was a fence over an impossible state.
+        They are ONE statement: since plan step plan#2302 (ruling plan#2748)
+        :func:`~app.services.recurrence.has_day_of_month_coordinate` reads the
+        unit's ``ref.recurrence_units.has_day_of_month``, which the DATABASE
+        generates from the same ``months_per_unit`` ``months_per_step`` reads.
+        A unit that names a day of the month therefore has a stride by
+        construction, and the guard that used to say so was a fence over an
+        impossible state.
 
-        **The intermediate alias went at plan step R8-a.**  R7b-1 left
-        ``_resolution._DAY_OF_MONTH_UNITS = MONTH_SPANNING_UNITS`` -- one
-        statement wearing two names, which this case asserted the identity of;
-        R8-a moved the predicate into ``_frequency`` beside the offer set that
-        reads it and deleted the alias, so there is no second name left to
-        compare and the property is asserted over the PREDICATE instead.  It
-        still fails the moment a separate list is written out again.
+        **Each home it has had, this case followed.**  R7b-1 left
+        ``_resolution._DAY_OF_MONTH_UNITS = MONTH_SPANNING_UNITS``, one code
+        tuple wearing two names, whose identity this case asserted; R8-a
+        deleted the alias; plan#2302 deleted the tuple and its month-span
+        table for the reference row, so there is no second name left to
+        compare and the property is asserted over the two READERS instead:
+        for every unit, the flag says a day exactly where the stride answers.
+        A separate list that agrees passes here; ``test_recurrence_unit_months``
+        changes the row to grade each reader.
 
         The refusal itself is not untested -- ``months_per_step`` still refuses
         a unit with no month span, asserted on the function directly by
@@ -2097,17 +2100,16 @@ class TestRefusals:
             if has_day_of_month_coordinate(unit)
         )
 
-        assert naming_a_day == tuple(_months.MONTH_SPANNING_UNITS), (
-            "the day-of-month units and the month-spanning units have been "
-            "written out separately again.  While they are one statement, a "
-            "cadence that names a day of the month provably has a month "
-            "stride; while they are two, that is a hope with a guard behind it."
-        )
-        # An identity between two EMPTY tuples would satisfy the assert above,
-        # so the members are exercised too.
-        assert naming_a_day
-        for unit in naming_a_day:
-            assert _months.months_per_step(unit, 1) >= 1
+        # Written out by hand: the units measured in months.  Without it a
+        # flag answering False for every unit would make the loop below
+        # vacuous on its first half.
+        assert naming_a_day == (RecurrenceUnitEnum.MONTH, RecurrenceUnitEnum.YEAR)
+        for unit in RecurrenceUnitEnum:
+            if has_day_of_month_coordinate(unit):
+                assert _months.months_per_step(unit, 1) >= 1, unit
+            else:
+                with pytest.raises(_months.MonthStepError):
+                    _months.months_per_step(unit, 1)
 
     @pytest.mark.parametrize(
         "unit", [RecurrenceUnitEnum.PERIOD, RecurrenceUnitEnum.WEEK],

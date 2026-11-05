@@ -5,7 +5,8 @@ The ONE place a transaction template's or transfer template's amount is stated,
 read as-of a date, and corrected.  Plan step **X-au-a**, rule 1 of ruling
 **R-FI**: every financial quantity that VARIES OVER TIME is a dated series
 resolved as-of, and a template's ``default_amount`` was the last such quantity
-in this app carried as a bare scalar.  The model is
+in this app carried as a bare scalar (plan step X-bp dropped it, rulings
+**R-IY** and **R-BAL16**).  The model is
 :class:`~app.models.template_amount_version.TemplateAmountVersion`; its
 docstring holds the supersession argument and this one holds the rules.
 
@@ -13,10 +14,10 @@ docstring holds the supersession argument and this one holds the rules.
 
 1. **Which definitions have a series** (:func:`owns_its_amount`).  A version
    records an amount somebody STATED.  A salary-linked transaction template and
-   a derive-mode loan-payment transfer template both carry a ``default_amount``
-   that something else COMPUTED -- the paycheck calculator in one case, P&I plus
-   escrow in the other -- so a series over either would manufacture a price
-   history nobody ever set.  Neither gets one.
+   a derive-mode loan-payment transfer template both have an amount something
+   else COMPUTES -- the paycheck calculator in one case, P&I plus escrow in the
+   other -- so a series over either would manufacture a price history nobody
+   ever set.  Neither gets one.
 
 2. **What a definition is worth on a date** (:func:`amount_as_of`).  The version
    with the greatest ``effective_date`` at or before the date; before the
@@ -28,7 +29,8 @@ docstring holds the supersession argument and this one holds the rules.
    definition with no version at all.
 
 3. **How an amount is stated** (:func:`set_amount`, the write door).  Setting an
-   amount as of a date keeps the scalar and the series in step in one call.  It
+   amount as of a date writes the series, and it refuses a definition rule 1
+   gives no series (plan step X-bp).  It
    is a no-op on the series when the series ALREADY answers that amount on that
    date, so a rename or a cadence edit appends nothing, and a version already
    standing on that exact date is CORRECTED in place rather than joined by a
@@ -56,12 +58,14 @@ are still projected.  The forward-only guard the loan escrow screen applies
 transfer, because an escrow version edit really does move a settled payment's
 principal/interest split and a template amount does not.
 
-**Additive as of this step.**  ``default_amount`` stays authoritative and no row
-is priced from this table yet; plan step **X-au-b** builds the resolver that
-reads it and **X-au-e** cuts generated rows over.  Until then a definition whose
-series is empty is not silently wrong -- :func:`amount_as_of` answers ``None``
-and X-au-b's resolver is specified to REFUSE rather than fall back, so a writer
-that forgets this door fails loud instead of publishing a plausible figure.
+**Additive at X-au-a, and the only price since X-bp.**  ``default_amount``
+stayed authoritative at X-au-a, with no row priced from this table; plan step
+**X-au-b** built the resolver that reads it, **X-au-e** and **X-au-f-2** cut
+generated rows over, and **X-bp** re-pointed the column's last readers and
+dropped it.  A definition whose series is empty is not silently wrong --
+:func:`amount_as_of` answers ``None`` and the resolver REFUSES rather than
+fall back, so a writer that forgets this door fails loud instead of publishing
+a plausible figure.
 
 Boundary discipline: no Flask import.  Inputs are ORM rows and plain data,
 outputs are plain data (``CLAUDE.md::Architecture``).
@@ -70,6 +74,8 @@ outputs are plain data (``CLAUDE.md::Architecture``).
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+
+from sqlalchemy import inspect
 
 from app.extensions import db
 from app.models.template_amount_version import TemplateAmountVersion
@@ -80,11 +86,12 @@ def is_salary_linked_template(template) -> bool:
     """Return True iff an ACTIVE salary profile drives this template's amounts.
 
     A salary-linked template's instance amounts are paycheck-calculated per
-    period (``income_service.SalaryPricing``), so its
-    ``default_amount`` is vestigial: editing it does not change a generated row.
-    Two callers read this, and they are the same question asked for two
-    purposes -- the update route skips the amount-change conflict chooser for
-    such a template, and :func:`owns_its_amount` refuses it a price series.
+    period (``income_service.SalaryPricing``), so it states no price of its
+    own.  :func:`owns_its_amount` refuses such a template a price series on this
+    answer, and that refusal is also why its edit never asks the conflict
+    chooser's question: the edit writes the series nothing, and the chooser
+    asks only when the series changed (plan step X-bp; the update route
+    passed this predicate as a flag to the chooser until then).
 
     It lives HERE rather than in ``recurrence_engine`` (its original home, plan
     step R2e-1) because the dependency has to run this way round: plan step
@@ -97,8 +104,10 @@ def is_salary_linked_template(template) -> bool:
     states that amount through the write door in the same unit of work -- and
     that door suppresses autoflush to protect the optimistic-lock counter.  A
     predicate issuing its own query would therefore read the profile as still
-    ACTIVE and record nothing, leaving an eligible template with an EMPTY series
-    (measured: 58 rows on production's one salary template).  The collection is
+    ACTIVE: until plan step X-bp the door then recorded nothing, leaving an
+    eligible template with an EMPTY series (measured: 58 rows on production's
+    one salary template), and since X-bp it refuses, so every archive would
+    fail.  The collection is
     identity-mapped, so a pending ``is_active = False`` is already visible here.
 
     Args:
@@ -118,15 +127,14 @@ def owns_its_amount(template) -> bool:
     The single eligibility predicate for the price series, applied identically
     by the write door, the backfill and every display.  Two kinds of recurring
     definition are refused a series, and both for the same reason -- their
-    ``default_amount`` is a snapshot of a computation, so versioning it would
-    record a history nobody stated:
+    amount is a computation, so versioning it would record a history nobody
+    stated:
 
     * a **salary-linked** transaction template, whose rows the paycheck
       calculator prices per period (:func:`is_salary_linked_template`);
-    * a **derive-mode loan-payment** transfer template, whose ``default_amount``
-      is the P&I plus escrow captured at its last write
-      (``routes/loan/payment_transfer.py``) and whose projected cash is
-      recomputed live by amount rule 4 (``cash_ledger._loan_pricing``).
+    * a **derive-mode loan-payment** transfer template, whose projected cash
+      amount rule 4 computes live from the loan
+      (``cash_ledger._loan_pricing``).
 
     A MANUAL loan payment is NOT refused: there the operator owns the base cash
     (amount rule 4's MANUAL arm, which resolves the parent transfer's own
@@ -168,6 +176,30 @@ def amount_versions(template) -> list[TemplateAmountVersion]:
     return sorted(
         template.amount_versions,
         key=lambda version: (version.effective_date, version.id or 0),
+    )
+
+
+def series_image(template) -> tuple[tuple[date, Decimal], ...]:
+    """Return *template*'s price history as plain values, oldest first.
+
+    ``((effective_date, amount), ...)`` off :func:`amount_versions`, for a
+    caller that asks whether an act CHANGED the series: the update routes
+    capture it before an edit and the conflict chooser compares it after
+    (``routes/_recurrence_conflict_chooser.PreEditTemplateState``, plan step
+    X-bp).  **Values, not the version rows**, because a same-day restatement
+    corrects a version IN PLACE (:func:`set_amount`), so an image holding the
+    rows would read the edit's own figure back and see no change.
+
+    Args:
+        template: The transaction or transfer template to read.
+
+    Returns:
+        One ``(effective_date, amount)`` pair per version, ascending; empty for
+        a template with no series.
+    """
+    return tuple(
+        (version.effective_date, Decimal(str(version.amount)))
+        for version in amount_versions(template)
     )
 
 
@@ -265,61 +297,45 @@ def _states_something_new(template, amount: Decimal, effective_on: date) -> bool
     return amount_as_of(template, effective_on) != amount
 
 
-def _resync_scalar(template) -> None:
-    """Put ``default_amount`` back on the NEWEST price the series states.
+def _series_changed(template) -> None:
+    """Bump *template*'s optimistic-lock counter: a price it has shown changed.
 
-    The one rule keeping the scalar and the series in step, applied by both
-    writers (:func:`set_amount` and :func:`delete_amount_version`) so neither
-    can state it differently.  **The newest price rather than TODAY's**, because
-    that is what the column MEANS, and the reason it means that has changed.
-    Generation used to write the scalar onto every row an edit rebuilt from
-    ``effective_from`` forward; since plan steps balance:X-au-e (a
-    transaction) and X-au-f-2 (a transfer) generation writes no figure at
-    all, and the column is read rather than copied (``git grep -n
-    default_amount app/`` is the census): the conflict chooser's
-    amount-change gate, the Recurring list's archived rows,
-    ``obligations_aggregator``, carry-forward's generated target, and
-    :func:`current_amount` for a definition holding no series among them.  A
-    scheduled rise still has to reach the column the moment it is stated, or
-    those readers would go on answering the old figure.  Today's price is a
-    different question, and the edit form asks it separately
-    (:func:`current_amount`).
+    **The definition's counter guards its PRICE, and its price is rows of
+    another table.**  Every stale-form guard on a definition compares the
+    counter its form shipped against ``template.version_id`` -- both edit
+    forms, and a placed row's card (``routes/transactions/_gates
+    ._stale_form_conflict``, which pins the definition's because a one-off's
+    price lives there) -- and SQLAlchemy bumps the counter only on an UPDATE
+    of the template's own row.  A version appended or corrected changes no
+    column of that row, so a price-only save left the counter where it was
+    and a second stale form saved over the first.  Until plan step X-bp the
+    write also stored the ``default_amount`` copy on the template, and that
+    UPDATE bumped the counter as a side effect; the column went, so the door
+    states the bump itself.  Assigning the next value makes the flush
+    ``UPDATE ... SET version_id = n + 1 WHERE id = ? AND version_id = n``:
+    the mapper takes an assigned counter as the new value and still checks
+    the loaded one, so a concurrent writer still raises ``StaleDataError``
+    and an edit that also writes a column of the row bumps once.
 
-    A no-op for a template with no series, which is only ever one whose amount is
-    derived -- there the column IS the statement and has already been set.
-
-    Args:
-        template: The transaction or transfer template to re-sync.
-    """
-    versions = amount_versions(template)
-    if versions:
-        template.default_amount = Decimal(str(versions[-1].amount))
-
-
-def current_amount(template, on_date: date) -> Decimal:
-    """Return what *template* costs on ``on_date``, for a form to prefill.
-
-    :func:`amount_as_of` with the derived kinds' answer folded in: a salary or
-    derive-mode loan template holds no series, so its column is its only
-    statement.  Separate from the scalar because the two answer different
-    questions and an adversarial review found the edit form asking the wrong
-    one: it prefilled ``default_amount`` -- the NEWEST stated price -- beside a
-    date input whose blank value means TODAY, so re-saving a template with a
-    scheduled rise restated that rise as today's price.  The page said so out
-    loud, offering an amount its own history panel labelled "Scheduled" while
-    labelling a different one "Current".
+    **Opening a series bumps nothing** (plan#2734).  A form can hold the
+    counter only of a price it was shown, and a series with no version in
+    the database has shown none: a definition being created, which every
+    create door prices in the request that INSERTs it, or a salary
+    profile's definition, whose archive opens its series at today's
+    paycheck (its edit form shows no Amount box while the profile prices
+    it, ruling plan#2694).  This skipped only a definition not yet
+    INSERTed until plan#2734, so the three create doors that flush the
+    definition before pricing it (both recurring forms and the one-off
+    producer) sent an UPDATE taking ``version_id`` from 1 to 2, with an
+    audit-log row for it.  The versions are read rather than the template
+    because the one test covers both: a definition not yet INSERTed has
+    no version in the database either.
 
     Args:
-        template: The transaction or transfer template to read.
-        on_date: The date to price it on -- today, for both edit forms.
-
-    Returns:
-        The amount in effect on ``on_date``.
+        template: The transaction or transfer template whose series changed.
     """
-    resolved = amount_as_of(template, on_date)
-    if resolved is None:
-        return Decimal(str(template.default_amount))
-    return resolved
+    if any(inspect(version).has_identity for version in template.amount_versions):
+        template.version_id = template.version_id + 1
 
 
 def _version_on(template, effective_on: date) -> TemplateAmountVersion | None:
@@ -346,23 +362,18 @@ def _version_on(template, effective_on: date) -> TemplateAmountVersion | None:
 def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
     """State *template*'s amount as ``amount``, in effect from ``effective_on``.
 
-    **The one write door for a recurring definition's amount.**  It keeps the
-    scalar (``default_amount``) and the dated series in step within one call, so
-    no caller can move one without the other.  **The scalar stopped PRICING a
-    transaction row at plan step balance:X-au-e and a transfer at X-au-f-2** --
-    generation writes no figure and the series answers on each row's own due
-    date (a generated transfer stored it until X-au-f-2) -- but it did not go
-    with either step: plan step X-bp deletes it from both template tables
-    (rulings **R-IY**, **R-BAL16**), and until then it is still READ.  The
-    census of its readers is ``git grep -n default_amount app/``; among them,
-    a salary profile's archive (``routes/salary/profiles.delete_profile``)
-    opens the template's series AT it, the conflict chooser gates on it, and
-    the X-au-e and X-au-f cutover migrations' downgrades restore from it.
+    **The one write door for a recurring definition's amount.**  It kept a
+    scalar copy (``default_amount``, the NEWEST stated price) in step with the
+    series until plan step X-bp dropped the column from both template tables
+    (rulings **R-IY**, **R-BAL16**), so the series is the only place a price
+    is stated.
 
     Every route that states a template's amount goes through this door: the
-    two create forms, the two edit forms, the investment contribution and loan
-    payment creators, and the salary paths (which it correctly records nothing
-    for).
+    two create forms, the two edit forms, the investment contribution
+    creator, the loan payment creator for a payment whose base the operator
+    typed, the one-off producer, and a salary profile's archive (which opens
+    the template's series at today's paycheck, the moment the template starts
+    owning its amount).
 
     Three outcomes on the series, and the order is the rule:
 
@@ -376,38 +387,32 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
     3. Otherwise a version is appended through the relationship, so a template
        that has not been flushed yet still records its opening amount.
 
-    A template that does NOT own its amount (:func:`owns_its_amount`) has the
-    scalar set and the series left alone -- the salary and derive-mode loan
-    paths reach here and must record nothing.
-
-    **The scalar is then re-read off the series, never assigned the argument,
-    and an adversarial review is why.**  ``default_amount`` means "the NEWEST
-    stated price" -- which is the argument only when the argument IS the newest.
-    *It meant that because generation wrote the scalar onto the rows an edit
-    rebuilt from ``effective_from`` forward; since plan steps balance:X-au-e
-    (a transaction) and X-au-f-2 (a transfer) generation writes no figure at
-    all, and the meaning now rests on the column's readers rather than on that
-    write (the census above).*  Assigning it directly broke both other cases:
-    stating a FUTURE price moved the scalar to it immediately, so the edit form
-    (which prefilled from that column until :func:`current_amount` replaced
-    it) then offered the December figure with a blank date meaning today, and
-    the next save -- a rename -- recorded the December rise as having happened
-    today; and BACK-dating a price below an already-scheduled one silently
-    cancelled the scheduled rise.
-    :func:`_resync_scalar` states the rule once, and
-    :func:`delete_amount_version` applies the same one.
+    **A template that does NOT own its amount (:func:`owns_its_amount`) is
+    REFUSED** (plan step X-bp): there is no price to state, because its rows
+    are priced by a computation -- the paycheck engine, or the loan's
+    contract -- and the Recurring and savings pages read that computation
+    live (``obligations_aggregator.todays_price``).  This door wrote the
+    computation's latest answer into the scalar for such a template until
+    X-bp, a copy nothing read once those pages stopped reading the column;
+    its three writers went with X-bp (``salary_regeneration``'s restatement
+    on every salary save, and a derive-mode loan payment's at its creation
+    and at Track), and both update doors refuse a typed amount for such a
+    template before they reach here
+    (``routes/_amount_version_actions.refuse_a_typed_worked_out_amount``).
+    So a call here for one is a caller's defect, and it raises rather than
+    recording a figure nobody stated.
 
     **It reads under ``no_autoflush``, and that is a correctness requirement
     rather than a tuning choice.**  Both templates carry an optimistic-lock
     ``version_id_col``, so EVERY separate UPDATE of the row bumps the counter --
-    and the eligibility read below queries ``salary_profiles`` while the column
-    assignment above is already dirty.  Left to autoflush, that query would
-    flush the amount on its own and the caller's later field write would flush
-    again, bumping the counter TWICE for one edit and breaking the guarantee the
-    stale-form guard rests on (measured: ``version_id`` went from 1 to 3 on a
-    single rename-plus-amount submit).  Suppressing the flush lets the caller's
-    one flush carry every field of the edit, which is what it did before this
-    door existed.
+    and the eligibility read below queries ``salary_profiles`` while the
+    caller's edit of the template is already dirty.  Left to autoflush, that
+    query would flush the edit on its own and the caller's later field write
+    would flush again, bumping the counter TWICE for one edit and breaking the
+    guarantee the stale-form guard rests on (measured: ``version_id`` went from
+    1 to 3 on a single rename-plus-amount submit, while this door also wrote
+    the scalar copy).  Suppressing the flush lets the caller's one flush carry
+    every field of the edit, which is what it did before this door existed.
 
     Args:
         template: The transaction or transfer template whose amount is stated.
@@ -415,25 +420,34 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
         effective_on: The date the amount takes effect.  Back-dating is legal
             and deliberate: a settled row owns the figure it was booked at, so
             restating a past price moves no money that has already moved.
+
+    Raises:
+        ValueError: *template* does not own its amount -- a salary-linked
+            transaction template or a derive-mode loan payment.  No door
+            reaches here with one (above), so this names a caller's defect
+            rather than handling a state the app writes.
     """
     with db.session.no_autoflush:
         if not owns_its_amount(template):
-            # No series to be the newest price OF; the column is the whole
-            # statement, exactly as it was before this door existed.
-            template.default_amount = amount
-            return
+            raise ValueError(
+                f"{type(template).__name__} {template.id} does not own its "
+                f"amount (a salary profile's or a loan-tracking payment's), so "
+                f"{amount} cannot be stated for it from {effective_on}: its "
+                f"rows are priced by the computation, not by a price series."
+            )
 
         existing = _version_on(template, effective_on)
         if existing is not None:
             if Decimal(str(existing.amount)) != amount:
                 existing.amount = amount
+                _series_changed(template)
         elif _states_something_new(template, amount, effective_on):
             template.amount_versions.append(
                 TemplateAmountVersion(
                     effective_date=effective_on, amount=amount,
                 ),
             )
-        _resync_scalar(template)
+            _series_changed(template)
 
 
 def restate_in_effect(template, amount: Decimal, *, on: date) -> None:
@@ -457,10 +471,9 @@ def restate_in_effect(template, amount: Decimal, *, on: date) -> None:
     :func:`_version_in_effect` -- and corrects THAT one, so the series
     stays ``{05-07: 170.00}`` and one version stays one.
 
-    A no-op when the version already states *amount*; the scalar is re-read
-    off the series afterwards exactly as :func:`set_amount` does, and under
-    the same ``no_autoflush`` for the same reason (the optimistic-lock
-    counter must bump once per edit, not once per read).
+    A no-op when the version already states *amount*; it reads under the
+    same ``no_autoflush`` as :func:`set_amount`, for the same reason (the
+    optimistic-lock counter must bump once per edit, not once per read).
 
     Not an arm inside :func:`set_amount`: exact-date semantics behind a flag
     is the override-parameter shape rule 1 forbids, and the two answer
@@ -492,7 +505,7 @@ def restate_in_effect(template, amount: Decimal, *, on: date) -> None:
             )
         if Decimal(str(in_effect.amount)) != amount:
             in_effect.amount = amount
-        _resync_scalar(template)
+            _series_changed(template)
 
 
 def _may_withdraw(versions, index: int) -> bool:
@@ -707,11 +720,11 @@ __all__ = [
     "AmountVersionRow",
     "amount_as_of",
     "amount_versions",
-    "current_amount",
     "build_amount_history",
     "delete_amount_version",
     "is_salary_linked_template",
     "owns_its_amount",
     "restate_in_effect",
+    "series_image",
     "set_amount",
 ]

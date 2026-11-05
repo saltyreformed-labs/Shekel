@@ -261,7 +261,9 @@ the one containing the occurrence, so rent due 1 August is paid from the 17
 July paycheck rather than the 31 July one.  D20 closed on the measurement and
 that capability carries its own ledger row.
 
-Pure: no Flask, no ORM, no clock, no database.
+No Flask, no ORM, no clock, and no database read: what a unit's reference row
+states comes from the reference cache, loaded once per process (ruling
+plan#2748).
 """
 from collections.abc import Iterator
 from datetime import date
@@ -478,14 +480,14 @@ def _unbounded(
     # ``months_per_step`` is partial over the enum and is NOT guarded here,
     # because reaching this line already proves membership: ``month_coordinate``
     # answers non-``None`` only for ``_frequency.has_day_of_month_coordinate``,
-    # which is a membership test against ``_months.MONTH_SPANNING_UNITS``
-    # itself, which is that function's own key set.  (It read
-    # ``_resolution._DAY_OF_MONTH_UNITS`` until plan step R8-a, an alias of the
-    # same tuple that moved to ``_frequency`` with the predicate.)  A guard
-    # whose only reachability condition is "two hand-written sets
-    # disagree" is the fence this project removes rather than tests, and an
-    # adversarial review of plan step R7b-1 named it: the sets are one now, so
-    # the state is unconstructible rather than merely unreached.
+    # which reads the unit's ``ref.recurrence_units.has_day_of_month`` -- a
+    # column the database GENERATES from the same ``months_per_unit`` that
+    # function reads (ruling plan#2748; until plan step plan#2302 both read one
+    # code tuple, ``_months.MONTH_SPANNING_UNITS``).  A guard whose only
+    # reachability condition is "two hand-written sets disagree" is the fence
+    # this project removes rather than tests, and an adversarial review of plan
+    # step R7b-1 named it: the fact has one home, so the state is
+    # unconstructible rather than merely unreached.
     start = month_ordinal(resolved.starts_on)
     return walk_months(
         start, coordinate.date_in, months_per_step(unit, resolved.interval_n),
@@ -702,7 +704,7 @@ def occurrences(
     paths, ``period_population``'s batch boundary, the preview's display
     choice, and ``recurring_view``'s ``as_of``.  The paths that state NOTHING
     pass ``None`` since plan step R4b-1 -- the template create path,
-    ``generate_transfers_for_all_periods`` and ``can_generate_in_period`` --
+    ``generate_transfers_for_all_periods`` and ``rows_to_generate_in_period`` --
     because the two defaults ``resolve_generation_plan`` used to apply were
     already inside the anchor.  That is a per-call display / regeneration
     boundary rather than a property of the recurrence, and conflating the two

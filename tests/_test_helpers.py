@@ -1852,6 +1852,63 @@ def transit_ledger_account(db_session, user_id):
     )
 
 
+def stored_chart_key(ledger_account):
+    """Return the ``ChartKey`` a STORED chart row stands for, read off its columns.
+
+    The bridge the worked-out ledger's proof maps by (plan#2513: plan#2523
+    builds it, the parity test plan#2527 and the production run plan#2528 map
+    each worked-out line onto its stored row with it).  It reads the row AS
+    STORED -- its ``kind_id``, its ``class_id``, and the one link column its
+    shape sets -- and deliberately re-derives nothing: a stored class the
+    worked-out rule would not give (a stale snapshot) must surface as a key
+    that differs, never be repaired by the mapping.  The record is whichever of
+    ``account_id`` / ``category_id`` / ``loan_account_id`` is set; the shape
+    CHECKs allow at most one, and an owner bucket sets none.
+
+    A row no worked-out key can name maps to a key no constructor builds: an
+    ``orphan``, or a ``category`` row whose category was deleted (its
+    ``category_id`` SET NULL, its kind unchanged), whose ``record_id`` is
+    ``None``.  The records book those lines on the owner's Uncategorized bucket
+    instead, so a nonzero stored net on one is a difference the proof names.
+
+    Args:
+        ledger_account: The stored
+            :class:`~app.models.ledger_account.LedgerAccount`.
+
+    Returns:
+        The :class:`~app.services.ledger_lines.ChartKey` its columns spell.
+    """
+    # pylint: disable=import-outside-toplevel  -- same collection-time-safety
+    # convention as the helpers above (no app symbols at module load).
+    from app import ref_cache
+    from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
+    from app.services.ledger_lines import ChartKey
+
+    kinds = {
+        ref_cache.ledger_account_kind_id(member): member
+        for member in LedgerAccountKindEnum
+    }
+    classes = {
+        ref_cache.ledger_account_class_id(member): member
+        for member in LedgerAccountClassEnum
+    }
+    # At most one is set: ``ck_ledger_accounts_account_or_category_null`` and
+    # ``ck_ledger_accounts_loan_shape`` hold the row to it.
+    links = [
+        link for link in (
+            ledger_account.account_id,
+            ledger_account.category_id,
+            ledger_account.loan_account_id,
+        )
+        if link is not None
+    ]
+    return ChartKey(
+        kinds[ledger_account.kind_id],
+        classes[ledger_account.class_id],
+        links[0] if links else None,
+    )
+
+
 def linked_ledger_account(db_session, account_id):
     """Return the account's LINKED ledger row, never its anchor-equity twin.
 
@@ -2466,9 +2523,14 @@ _C17D2_REVISION_FILE = "3ec5291ca4e2_a_pay_eras_kind_is_which_columns_it_carries
 _R18A_REVISION_FILE = "0a4d2c3e89f8_a_paycheck_is_a_list_of_lines.py"
 #: Plan step ``salary:R18-b``'s revision, which seeds the two EARNING kinds
 #: whose names the pre-rename column cannot hold; its ``downgrade()`` runs
-#: FIRST in the rewind (Alembic's newest-first order) and its ``upgrade()``
-#: LAST in the replay.
+#: after S11-e's and before R18-a's in the rewind (Alembic's newest-first
+#: order), and its ``upgrade()`` between them in the replay.
 _R18B_REVISION_FILE = "6c15d2a97b78_a_paycheck_has_earning_lines.py"
+
+#: Plan step ``salary:S11-e``'s revision, which seeded the all-payroll-taxes
+#: pre-tax kind -- a name too long for the column R18-a's downgrade narrows,
+#: so a rewind past R18-a takes it down first.
+_S11E_REVISION_FILE = "47beea2b628a_pre_tax_splits_in_two.py"
 
 
 def restore_pay_schedule_rhythm_columns(db_session):
@@ -2594,17 +2656,21 @@ def rewind_paycheck_lines_rename(db_session):
     seed through the ORM first, rewind, drive the old statement in SQL, and
     replay before reading a line back through the model.
 
-    **It runs R18-b's downgrade before R18-a's**: head carries the two
-    earning-kind rows R18-b seeded, and R18-a's downgrade REFUSES to narrow
-    the name column while a name longer than ten characters stands, which is
-    the refusal ``test_r18a_paycheck_lines_rename`` grades; R18-b's downgrade
-    in turn refuses while any line CARRIES an earning kind, so a case that
-    seeded one must delete it before rewinding.
+    **It runs S11-e's downgrade, then R18-b's, before R18-a's**: head carries
+    the all-payroll-taxes kind S11-e seeded and the two earning-kind rows
+    R18-b seeded, and R18-a's downgrade REFUSES to narrow the name column
+    while a name longer than ten characters stands, which is the refusal
+    ``test_r18a_paycheck_lines_rename`` grades; S11-e's and R18-b's
+    downgrades in turn refuse while any row CARRIES their kinds, so a case
+    that seeded one must delete it before rewinding.
 
     Args:
         db_session: The test ``db.session``, in the scope that holds the
             tables' locks (see :func:`run_migration_callable`).
     """
+    run_migration_callable(
+        load_migration_module(_S11E_REVISION_FILE).downgrade, db_session,
+    )
     run_migration_callable(
         load_migration_module(_R18B_REVISION_FILE).downgrade, db_session,
     )
@@ -2614,7 +2680,7 @@ def rewind_paycheck_lines_rename(db_session):
 
 
 def replay_paycheck_lines_rename(db_session):
-    """Run plan step ``salary:R18-a``'s own ``upgrade()`` after a rewind, then R18-b's.
+    """Run plan step ``salary:R18-a``'s own ``upgrade()`` after a rewind, then R18-b's and S11-e's.
 
     :func:`rewind_paycheck_lines_rename`'s inverse: the head names back, so a
     test that drove an older revision's statement can read the result through
@@ -2631,6 +2697,9 @@ def replay_paycheck_lines_rename(db_session):
     )
     run_migration_callable(
         load_migration_module(_R18B_REVISION_FILE).upgrade, db_session,
+    )
+    run_migration_callable(
+        load_migration_module(_S11E_REVISION_FILE).upgrade, db_session,
     )
 
 
@@ -6776,7 +6845,7 @@ def resolved_amount(txn):
     )
 
 
-def state_template_price(template, amount=None, *, effective_on=None):
+def state_template_price(template, amount, *, effective_on=None):
     """State *template*'s price through the app's ONE write door.
 
     **A fixture that constructs a template and stops has built a definition the
@@ -6790,7 +6859,7 @@ def state_template_price(template, amount=None, *, effective_on=None):
     real definition has a price SERIES.  A generated row stores no figure now
     and is priced by that series on its own due date, and
     ``cash_ledger._amount_source._stated_amount`` REFUSES a row whose series is
-    empty rather than falling back to ``default_amount`` -- which is X-au-a's
+    empty rather than falling back to a scalar -- which is X-au-a's
     ruling, not an oversight: the scalar has no time dimension, so reading it
     would price a March row at June's figure.
 
@@ -6805,8 +6874,8 @@ def state_template_price(template, amount=None, *, effective_on=None):
 
     Args:
         template: The flushed transaction or transfer template.
-        amount: The price to state; ``template.default_amount`` when omitted,
-            which is what both create doors pass.
+        amount: The price to state.  Required since plan step X-bp dropped
+            ``default_amount``, which it defaulted to.
         effective_on: The date it takes effect; the owner's today when omitted,
             as both doors pass.  One version is enough for any due date --
             ``amount_as_of`` holds FLAT before the earliest -- so a fixture
@@ -6823,7 +6892,7 @@ def state_template_price(template, amount=None, *, effective_on=None):
 
     template_amount_service.set_amount(
         template,
-        template.default_amount if amount is None else amount,
+        amount,
         effective_on=display_today() if effective_on is None else effective_on,
     )
 
@@ -6891,12 +6960,11 @@ def bare_expense_template(
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name=name,
-        default_amount=Decimal("100.00"),
         is_envelope=is_envelope,
     )
     db_session.add(template)
     db_session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("100.00"))
     return template
 
 
@@ -7091,11 +7159,8 @@ def first_occurrence_on_day(user_id, fires_on_day, fires_in_month=None):
     # symbols at top level (its collection-time-safety convention).
     # pylint: disable=import-outside-toplevel
     from app.services.pay_calendar import calendar_for
-    from app.services.recurrence._months import (
-        MONTHS_PER_YEAR,
-        clamped_day,
-        month_ordinal,
-    )
+    from app.services.recurrence._months import clamped_day, month_ordinal
+    from app.utils.dates import MONTHS_PER_YEAR
 
     opening = calendar_for(user_id).opening_bound()
     ordinal = month_ordinal(opening)
@@ -7645,14 +7710,13 @@ def _priced_repeating_template(
         ).id,
         transaction_type_id=ref_cache.txn_type_id(txn_type),
         name=name,
-        default_amount=Decimal(amount),
         is_active=is_active,
         is_envelope=is_envelope,
         companion_visible=companion_visible,
     )
     db_session.add(template)
     db_session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal(amount))
     # The definition first, then the cadence onto it (plan step R-F6).
     make_every_period_rule(db_session, template)
     return template
@@ -7707,7 +7771,6 @@ def make_transfer_template(db_session, seed_user, to_account, amount="200.00"):
         from_account_id=seed_user["account"].id,
         to_account_id=to_account.id,
         name="To Savings",
-        default_amount=Decimal(amount),
     )
     db_session.add(template)
     db_session.flush()
@@ -7715,7 +7778,7 @@ def make_transfer_template(db_session, seed_user, to_account, amount="200.00"):
     # does on every create.  Since plan step X-au-f a generated TRANSFER stores
     # no figure either, so a bare-constructed transfer template generates rows
     # nothing can price -- the transaction twin's obligation, one table over.
-    state_template_price(template)
+    state_template_price(template, Decimal(amount))
     # The definition first, then the cadence onto it (plan step R-F6).
     make_every_period_rule(db_session, template)
     return template
@@ -7823,9 +7886,9 @@ def make_loan_payment_template(
         seed_user: The ``seed_user`` fixture dict (supplies the owner and the
             checking account the payment leaves from).
         loan_account: The destination loan account.
-        amount: The template's stored ``default_amount``.  In derive mode this
-            is the snapshot a generated row carries and the live derivation
-            supersedes; in manual mode it is the figure the owner stated.
+        amount: The price stated into its series before the settings row is
+            attached.  In derive mode that series is dormant and the live
+            derivation answers; in manual mode it is the figure stated.
         derive_from_loan: The settings row's mode.
         extra_principal: The settings row's standing monthly overpayment.
         cadence: The :class:`~tests.oracles.recurrence_baseline.ShapeCadence`
@@ -7861,7 +7924,6 @@ def make_loan_payment_template(
         from_account_id=seed_user["account"].id,
         to_account_id=loan_account.id,
         name=f"Loan Payment {loan_account.id}",
-        default_amount=Decimal(amount),
     )
     db_session.add(template)
     db_session.flush()
@@ -7871,7 +7933,7 @@ def make_loan_payment_template(
     # version stated after the flip -- and the versions a template already holds
     # stay as the record of what was stated while it was manual, which is what
     # a MANUAL payment's base is read from since plan step X-au-f.
-    state_template_price(template)
+    state_template_price(template, Decimal(amount))
     # Attached through the relationship so it flushes with the template, the
     # way the route attaches it.
     template.settings = LoanPaymentSettings(

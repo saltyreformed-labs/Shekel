@@ -8,9 +8,9 @@ future pay periods (every_period, monthly, annual, etc.).
 statement of any of them.**  ``interval_n`` / ``unit_id`` / ``placement_id`` /
 ``shift_id`` / ``starts_on`` / ``nominal_day`` / ``weekday_reading`` /
 ``max_per_month`` are what a caller AUTHORS and what every reader takes;
-beside them sits only the closing bound's exclusive arc.
-``due_day_of_month`` -- a servicer's date for a bill the cadence scheduled
-elsewhere -- was dropped at plan step
+beside them sit only the closing bound's exclusive arc and one carried flag
+(below).  ``due_day_of_month`` -- a servicer's date for a bill the cadence
+scheduled elsewhere -- was dropped at plan step
 recurrence:R5-a (ruling **R-R96**, migration ``1c569c51b449``): a rule's own day
 IS the day its rows are due, and a recurring due day that differs from the day
 money moves is a term of the LOAN (``loan_params.payment_day``), not of the
@@ -24,6 +24,15 @@ READ, arrived at plan step **recurrence:R8-c** (rulings **plan#2668**,
 **plan#2670**, amending **R-R25**): "the third Tuesday" and "the last Friday"
 are dates read by their weekday, and the week number and weekday come from
 ``starts_on`` itself, so the reading is the one fact the date cannot carry.
+
+**One column is CARRIED rather than authored, and a key holds it** (plan step
+plan#2302, ruling plan#2748).  ``unit_has_day_of_month`` is the unit's own
+``ref.recurrence_units.has_day_of_month`` on this row, because a PostgreSQL
+CHECK reads only the row it checks and two of the pairings here turn on which
+kind of unit the rule names: a per-month ceiling needs a unit that can repeat
+within a month, and a nominal day needs a unit with a day to clamp.
+``fk_recurrence_rules_unit_day_of_month`` holds the copy to the unit, so a row
+whose flag disagrees with its unit is refused rather than reconciled.
 
 **Seven columns were DROPPED at plan step R7c-c** (migration
 ``d9f5c1a48b73``), each a derived encoding the write door maintained:
@@ -172,14 +181,22 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
         # spelled as a cadence, the ``Once`` shape plan step R2e-3 deleted.
         # There is deliberately no upper CHECK, for the reason ``interval_n``
         # has none: a ceiling above what a month can hold is vacuous rather
-        # than wrong, and the ``smallint`` type is the top.  Which UNITS may
-        # carry one is held at the door and at construction
-        # (``recurrence._resolution._require_month_ceiling_pair``) rather than
-        # here, because ``unit_id`` names a ``ref`` row and a CHECK comparing
-        # it to a literal id would tie the table to a seed.
+        # than wrong, and the ``smallint`` type is the top.
         db.CheckConstraint(
             "max_per_month IS NULL OR max_per_month > 0",
             name="ck_recurrence_rules_positive_max_per_month",
+        ),
+        # Which UNITS may carry one (plan step plan#2302): a cadence measured
+        # in whole months fires at most once a month, so a ceiling beside one
+        # could never bind.  It reads the carried flag rather than ``unit_id``
+        # because a CHECK comparing that to a literal id would tie the table
+        # to a seed.  ``recurrence._resolution._require_month_ceiling_pair``
+        # answers first, with the sentence a person can act on; this guards a
+        # writer that never sees it -- a restore, a hand edit, a raw-SQL
+        # migration.
+        db.CheckConstraint(
+            "max_per_month IS NULL OR NOT unit_has_day_of_month",
+            name="ck_recurrence_rules_max_per_month_unit",
         ),
         # At most ONE closing bound -- the EXCLUSIVE ARC this pair of nullable
         # columns is.  A rule that both ends on a date and after N occurrences
@@ -230,6 +247,16 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
             "EXTRACT(day FROM (date_trunc('month', starts_on::timestamp) "
             "+ INTERVAL '1 month - 1 day'))))",
             name="ck_recurrence_rules_nominal_day",
+        ),
+        # Only a unit with a day of the month has a day to clamp (plan step
+        # plan#2302), which the CHECK above cannot say: it holds the clamp, and
+        # a paycheck rule starting 2026-04-30 with a nominal day of 31 passes
+        # it.  ``recurrence._nominal_day._require_nominal_day_pair`` answers
+        # first; this guards the writer that never sees it, as the ceiling's
+        # twin above does.
+        db.CheckConstraint(
+            "nominal_day IS NULL OR unit_has_day_of_month",
+            name="ck_recurrence_rules_nominal_day_unit",
         ),
         # ``weekday_reading`` holds one of two literals, and the position each
         # needs of ``starts_on`` (plan step recurrence:R8-c, rulings plan#2668
@@ -322,6 +349,19 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
             "starts_on BETWEEN DATE '2000-01-01' AND DATE '2100-12-31'",
             name="ck_recurrence_rules_starts_on_range",
         ),
+        # The carried flag IS its unit's (plan step plan#2302), onto
+        # ``uq_recurrence_units_id_has_day_of_month``.  ``ON DELETE RESTRICT``
+        # matches ``fk_recurrence_rules_unit_id``, which stays beside it as
+        # ``fk_transactions_owner_account``'s single-column twin does: that key
+        # is about the unit's EXISTENCE and this one about AGREEMENT.  It also
+        # holds the unit's side: a span changed so the generated flag flips is
+        # refused while any rule names the unit.
+        db.ForeignKeyConstraint(
+            ["unit_id", "unit_has_day_of_month"],
+            ["ref.recurrence_units.id", "ref.recurrence_units.has_day_of_month"],
+            name="fk_recurrence_rules_unit_day_of_month",
+            ondelete="RESTRICT",
+        ),
         {"schema": "budget"},
     )
 
@@ -400,6 +440,12 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
         ),
         nullable=False,
     )
+    # The unit's ``has_day_of_month``, carried so this row's CHECKs can read it
+    # (see the module docstring).  NOT NULL because the composite key is
+    # ``MATCH SIMPLE``: a NULL member is not checked at all, so a nullable copy
+    # would hold nothing.  Written beside ``unit_id`` by the one writer,
+    # ``recurrence._authoring._author``.
+    unit_has_day_of_month = db.Column(db.Boolean, nullable=False)
     placement_id = db.Column(
         db.Integer,
         db.ForeignKey(
@@ -504,9 +550,10 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
     # NULLABLE because ``NULL`` IS the ordinary rule: no ceiling, which is
     # every rule authored before this step and every calendar-month cadence,
     # whose occurrences cannot repeat within a month and on which a value here
-    # is refused at construction.  Presence means the ceiling can bind, so
-    # the absence has one meaning -- the same discipline ``nominal_day`` keeps
-    # one column up.
+    # is refused at construction and by
+    # ``ck_recurrence_rules_max_per_month_unit``.  Presence means the ceiling
+    # can bind, so the absence has one meaning -- the same discipline
+    # ``nominal_day`` keeps one column up.
     max_per_month = db.Column(db.SmallInteger, nullable=True)
     # Optional end date -- recurrence stops generating after this date.
     # NULL means indefinite (no end).

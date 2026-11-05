@@ -498,8 +498,8 @@ class TestTheGenericFallbackSurvives:
         that "Not a valid integer." beside a visible widget adds noise.
         """
         with app.app_context():
-            # ``default_amount`` since plan step recurrence:R5-a.  The subject
-            # has moved three times now and for the same reason each time: this
+            # The amount field since plan step recurrence:R5-a (``amount`` since
+            # X-bp renamed ``default_amount``).  The subject has moved three times now and for the same reason each time: this
             # arm needs a field that is DECLARED (an unknown key is dropped by
             # ``unknown = EXCLUDE`` and produces no error at all, which would
             # make the assertion below pass against an EMPTY dict -- the
@@ -509,14 +509,14 @@ class TestTheGenericFallbackSurvives:
             # naming the control; R5-a dropped ``due_day_of_month`` with its
             # column (ruling R-R96).
             #
-            # ``default_amount`` is the right subject and not merely the next
+            # ``amount`` is the right subject and not merely the next
             # one available: no layer authors a refusal against it, and a
             # negative figure is outside its ``Range(min=0)`` -- so what comes
             # back is marshmallow's own stock Range sentence, which is the
             # shape under test.
             errors = TemplateCreateSchema().validate(
-                {"default_amount": "-1.00"}, partial=True,
+                {"amount": "-1.00"}, partial=True,
             )
 
-            assert "default_amount" in errors
+            assert "amount" in errors
             assert flash_message_for_errors(errors) == GENERIC_VALIDATION_FLASH

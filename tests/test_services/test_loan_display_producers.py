@@ -29,10 +29,13 @@ import pytest
 
 from app import ref_cache
 from app.enums import StatusEnum
-from app.services import loan_posting_service, transfer_service
+from app.models.ref import AccountType
+from app.models.scenario import Scenario
+from app.services import account_service, loan_posting_service, transfer_service
 from app.services.loan_posting_service import LoanAnchorDrift, LoanPaymentHistoryRow
 from tests._test_helpers import (
     SPLIT_LOAN,
+    capture_sql_statements,
     clear_loan_ledger,
     create_loan_account,
     create_loan_with_trueup,
@@ -48,6 +51,17 @@ _FROZEN_TODAY = date(2027, 1, 1)
 # The seed periods (payment_day=1) are due 02-01 / 03-01 / 04-01 2026, all after
 # the 2026-01-10 trueup anchor, so every payment splits from the $100,000 anchor.
 _P1_DUE = date(2026, 2, 1)
+# A $1,000.00 payment on the $100,000 anchor at 6%: interest
+# 100000.00 * 0.06 / 12 = 500.00, principal 1000.00 - 500.00 = 500.00.
+_P1_ROW = LoanPaymentHistoryRow(
+    installment=_P1_DUE,
+    cash=Decimal("1000.00"),
+    principal=Decimal("500.00"),
+    interest=Decimal("500.00"),
+    escrow=Decimal("0.00"),
+)
+# The stored ledger's tables, by name: what the display's two surfaces never read.
+_STORED_LEDGER_TABLES = ("journal_entries", "account_postings", "ledger_accounts")
 
 
 def _paid_on(year: int, month: int, day: int) -> datetime:
@@ -104,13 +118,7 @@ class TestConfirmedLoanPaymentHistory:
             rows = loan_posting_service.confirmed_loan_payment_history(
                 loan.id, scenario_id, _AS_OF,
             )
-            assert rows == [LoanPaymentHistoryRow(
-                installment=_P1_DUE,
-                cash=Decimal("1000.00"),
-                principal=Decimal("500.00"),
-                interest=Decimal("500.00"),
-                escrow=Decimal("0.00"),
-            )]
+            assert rows == [_P1_ROW]
 
     def test_multi_payment_rows_are_chronological(
         self, app, db, seed_user, seed_periods,
@@ -191,13 +199,9 @@ class TestConfirmedLoanPaymentHistory:
     ):
         """The table's split equals the schedule's confirmed rows (same payments).
 
-        The table reads the POSTED legs; the schedule rows fold the WALK (plan
-        step E1d-b).  A payment's (principal, interest) must be identical between
-        them -- which is the checked projection plan step E1a asserts at write
-        time, observed from the read side: two independent derivations of the same
-        payment's economics, and this is where they are compared.  Before E1d-b
-        both read the same posted legs, so agreement was near-tautological; now it
-        has teeth.
+        The table reads the ledger's walk; the schedule rows fold the read pass's
+        walk (plan step E1d-b).  A payment's (principal, interest) must be
+        identical between them, and this is where they are compared.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -271,23 +275,117 @@ class TestConfirmedLoanPaymentHistory:
             ) == []
 
     def test_unconfigured_loan_returns_none(self, app, db, seed_user):
-        """A loan with no OPENING posting reads None (the caller hides the table).
+        """A loan account with no terms reads None, and so does its scorecard.
 
-        With no genesis opening the table returns ``None`` rather than a
-        misleading empty list.  The broken loan is built EXPLICITLY
-        (``clear_loan_ledger``) -- production opens the ledger with the params, so
-        this state cannot arise there; the test used to get it by accident.
+        It walks to nothing, so both surfaces hide on the one gate rather than
+        showing a misleading empty table.
         """
         with app.app_context():
-            loan = create_loan_account(
-                seed_user, db.session, principal=_ORIGINATION_PRINCIPAL,
-                rate=_RATE, origination_date=_ORIGINATION_DATE,
+            loan_type = db.session.query(AccountType).filter_by(name="Auto Loan").one()
+            account = account_service.create_account(
+                account_service.AccountSpec(
+                    user_id=seed_user["user"].id,
+                    account_type_id=loan_type.id,
+                    name="No Terms Loan",
+                    anchor_balance=Decimal("0"),
+                ),
+            )
+            db.session.commit()
+
+            scenario_id = seed_user["scenario"].id
+            assert loan_posting_service.confirmed_loan_payment_history(
+                account.id, scenario_id, _AS_OF,
+            ) is None
+            assert loan_posting_service.loan_balance_anchor_history(
+                account.id, scenario_id, _AS_OF,
+            ) is None
+
+    def test_a_configured_loan_with_no_payment_reads_an_empty_table(
+        self, app, db, seed_user,
+    ):
+        """A configured loan's walk opened, so no payment yet is ``[]``, not None."""
+        with app.app_context():
+            loan = _make_split_loan(seed_user, db.session)
+            db.session.commit()
+            assert loan_posting_service.confirmed_loan_payment_history(
+                loan.id, seed_user["scenario"].id, _AS_OF,
+            ) == []
+
+    def test_a_scenario_shows_only_its_own_payments(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """Each scenario's table holds its own payments; one with none reads ``[]``.
+
+        The loan's opening and true-up are the loan's, so every scenario walks
+        from the same $100,000; the $1,000.00 payment sits in the what-if alone,
+        so only the what-if lists it (see ``_P1_ROW``'s arithmetic), and the
+        scenario holding no payment of the loan reads the empty table the page
+        hides.
+        """
+        with app.app_context():
+            user_id = seed_user["user"].id
+            whatif = Scenario(user_id=user_id, name="What-if", is_baseline=False)
+            unopened = Scenario(user_id=user_id, name="Unopened", is_baseline=False)
+            db.session.add_all([whatif, unopened])
+            db.session.commit()
+
+            loan = _make_split_loan(seed_user, db.session)
+            create_settled_transfer(
+                seed_user, db.session, seed_user["account"], loan,
+                seed_periods[_P1], amount=Decimal("1000.00"),
+                settled_on=date(2026, 6, 1), scenario=whatif,
+            )
+            db.session.commit()
+
+            history = loan_posting_service.confirmed_loan_payment_history
+            assert history(loan.id, whatif.id, _AS_OF) == [_P1_ROW]
+            assert history(loan.id, seed_user["scenario"].id, _AS_OF) == []
+            assert history(loan.id, unopened.id, _AS_OF) == []
+
+    def test_neither_surface_reads_the_stored_ledger(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """With the loan's postings gone the table still lists the walk's payment.
+
+        Plan task plan#2779: whether the table shows is the walk's answer.  The
+        statements are captured too, so a read of a stored table that happened
+        to agree could not pass.  A load FROM the terms' table is what says the
+        capture measured the walk, which reads the terms by the loan's id: merely
+        naming that table says nothing, since ``Account.loan_params`` joins it
+        into any load of the account.
+        """
+        with app.app_context():
+            scenario_id = seed_user["scenario"].id
+            loan = _make_split_loan(seed_user, db.session)
+            _settle(
+                seed_user, db.session, loan, seed_periods[_P1],
+                Decimal("1000.00"), settled_on=date(2026, 6, 1),
             )
             db.session.commit()
             clear_loan_ledger(loan.id)
-            assert loan_posting_service.confirmed_loan_payment_history(
-                loan.id, seed_user["scenario"].id, _AS_OF,
-            ) is None
+
+            rows, table_reads = capture_sql_statements(
+                lambda: loan_posting_service.confirmed_loan_payment_history(
+                    loan.id, scenario_id, _AS_OF,
+                ),
+            )
+            drifts, scorecard_reads = capture_sql_statements(
+                lambda: loan_posting_service.loan_balance_anchor_history(
+                    loan.id, scenario_id, _AS_OF,
+                ),
+            )
+            assert rows == [_P1_ROW]
+            assert [drift.recorded for drift in drifts] == [
+                Decimal("250000.00"), Decimal("100000.00"),
+            ]
+            for reads in (table_reads, scorecard_reads):
+                assert any(
+                    "FROM budget.loan_params" in text for text, _params in reads
+                )
+                assert not [
+                    text for text, _params in reads
+                    if any(table in text for table in _STORED_LEDGER_TABLES)
+                ]
 
     def test_future_as_of_raises(self, app, db, seed_user):
         """A future as_of is a forward projection, out of the reader's domain."""

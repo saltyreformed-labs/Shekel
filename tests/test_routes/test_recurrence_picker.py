@@ -95,6 +95,8 @@ from tests.oracles.recurrence_baseline import (
     SEMI_ANNUAL,
     ANNUAL,
 )
+from tests._definition_price import newest_price
+from tests._test_helpers import state_template_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -280,6 +282,11 @@ def _rule_on_cadence(owner, cadence, interval_n=None, unit_id=None):
             ref_cache.recurrence_unit_id(cadence.unit) if unit_id is None
             else unit_id
         ),
+        unit_has_day_of_month=(
+            ref_cache.recurrence_unit_has_day_of_month(cadence.unit)
+            if unit_id is None
+            else db.session.get(RecurrenceUnit, unit_id).has_day_of_month
+        ),
         placement_id=ref_cache.period_placement_id(cadence.placement),
         shift_id=ref_cache.business_day_shift_id(BusinessDayShiftEnum.NONE),
         starts_on=date(2026, 1, 1),
@@ -297,13 +304,13 @@ def _template_with_cadence(
     template = TransactionTemplate(
         user_id=seed_user["user"].id,
         name="Rent",
-        default_amount=Decimal("1200.00"),
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=_expense_type_id(),
         account_id=seed_user["account"].id,
     )
     db.session.add(template)
     db.session.flush()
+    state_template_price(template, Decimal("1200.00"))
     # The definition first, then the cadence onto it (plan step R-F6).
     _rule_on_cadence(template, cadence, interval_n, unit_id)
     db.session.commit()
@@ -317,13 +324,13 @@ def _transfer_template_with_cadence(
     template = TransferTemplate(
         user_id=seed_user["user"].id,
         name="To Savings",
-        default_amount=Decimal("50.00"),
         from_account_id=seed_user["account"].id,
         to_account_id=destination.id,
         category_id=seed_user["categories"]["Rent"].id,
     )
     db.session.add(template)
     db.session.flush()
+    state_template_price(template, Decimal("50.00"))
     # The definition first, then the cadence onto it (plan step R-F6).
     _rule_on_cadence(template, cadence, unit_id=unit_id)
     db.session.commit()
@@ -926,7 +933,7 @@ class TestAnUnreadableRuleCannotBeDestroyedBySavingIt:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1300.00",
+                "amount": "1300.00",
                 # Exactly what the rendered form submits.
                 "recurrence_unit": "",
                 "recurrence_placement": "",
@@ -951,7 +958,7 @@ class TestAnUnreadableRuleCannotBeDestroyedBySavingIt:
                 "the rule row was DELETED by a save the form promised to refuse"
             )
             # The refused edit committed nothing, amount included.
-            assert reloaded.default_amount == Decimal("1200.00")
+            assert newest_price(reloaded) == Decimal("1200.00")
 
     def test_the_transfer_door_refuses_it_too(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -975,7 +982,7 @@ class TestAnUnreadableRuleCannotBeDestroyedBySavingIt:
 
             resp = auth_client.post(f"/transfers/{template_id}", data={
                 "name": "To Savings",
-                "default_amount": "75.00",
+                "amount": "75.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "category_id": str(seed_user["categories"]["Rent"].id),
@@ -988,7 +995,7 @@ class TestAnUnreadableRuleCannotBeDestroyedBySavingIt:
             reloaded = db.session.get(TransferTemplate, template_id)
             assert reloaded.recurrence_rule.id == rule_id
             assert db.session.get(RecurrenceRule, rule_id) is not None
-            assert reloaded.default_amount == Decimal("50.00")
+            assert newest_price(reloaded) == Decimal("50.00")
 
     def test_choosing_a_cadence_repairs_the_rule(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -1015,7 +1022,7 @@ class TestAnUnreadableRuleCannotBeDestroyedBySavingIt:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.MONTH,
                     starts_on=date(2026, 9, 1),
@@ -1079,7 +1086,7 @@ class TestTheWriteDoorsRefuseAnUnstorableCadence:
 
             resp = auth_client.post("/templates", data={
                 "name": "Every Other Month Bill",
-                "default_amount": "10.00",
+                "amount": "10.00",
                 "category_id": str(seed_user["categories"]["Rent"].id),
                 "transaction_type_id": str(_expense_type_id()),
                 "account_id": str(seed_user["account"].id),
@@ -1111,7 +1118,7 @@ class TestTheWriteDoorsRefuseAnUnstorableCadence:
 
             resp = auth_client.post("/transfers", data={
                 "name": "Every Other Month Transfer",
-                "default_amount": "25.00",
+                "amount": "25.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "category_id": str(seed_user["categories"]["Rent"].id),
@@ -1147,7 +1154,7 @@ class TestTheWriteDoorsRefuseAnUnstorableCadence:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.PERIOD,
                     placement=PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
@@ -1209,7 +1216,7 @@ class TestAClearedIntervalBoxCannotReCadenceARule:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.MONTH,
                     interval_n=3,
@@ -1241,7 +1248,7 @@ class TestAClearedIntervalBoxCannotReCadenceARule:
 
             resp = auth_client.post("/templates", data={
                 "name": "Water Bill",
-                "default_amount": "120.00",
+                "amount": "120.00",
                 "category_id": str(seed_user["categories"]["Rent"].id),
                 "transaction_type_id": str(_expense_type_id()),
                 "account_id": str(seed_user["account"].id),
@@ -1272,7 +1279,7 @@ class TestAClearedIntervalBoxCannotReCadenceARule:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.MONTH,
                     interval_n=6,
@@ -1302,13 +1309,13 @@ class TestAClearedIntervalBoxCannotReCadenceARule:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1300.00",
+                "amount": "1300.00",
             }, follow_redirects=True)
 
             assert resp.status_code == 200
             db.session.expire_all()
             reloaded = db.session.get(TransactionTemplate, template_id)
-            assert reloaded.default_amount == Decimal("1300.00")
+            assert newest_price(reloaded) == Decimal("1300.00")
             assert reloaded.recurrence_rule.id == rule_id
             assert reloaded.recurrence_rule.interval_n == 3
 
@@ -1431,7 +1438,7 @@ class TestADeliberateClearIsRefusedOnATransactionTemplate:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1300.00",
+                "amount": "1300.00",
                 "recurrence_unit": "",
             }, follow_redirects=True)
 
@@ -1442,7 +1449,7 @@ class TestADeliberateClearIsRefusedOnATransactionTemplate:
             assert reloaded.recurrence_rule is not None
             assert reloaded.recurrence_rule.id == rule_id
             assert db.session.get(RecurrenceRule, rule_id) is not None
-            assert reloaded.default_amount == Decimal("1200.00")
+            assert newest_price(reloaded) == Decimal("1200.00")
 
     def test_a_modelled_rule_can_be_re_pointed(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -1455,7 +1462,7 @@ class TestADeliberateClearIsRefusedOnATransactionTemplate:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(unit=RecurrenceUnitEnum.MONTH),
             }, follow_redirects=True)
 

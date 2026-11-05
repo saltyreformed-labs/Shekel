@@ -53,9 +53,10 @@ tracing -- because three of them are SUBSETS of another:
      took the standing ``extra_principal`` with it.
   5. **CARD_PAYMENT** -- a card's worked-out payment, priced inside the card's
      own balance (plan step ``credit_card:CC-6``; rulings **R-CC22**,
-     plan#2666): what the card owes on the rule's day, less the credits not yet
-     inside that figure, floor zero.  A SUBSET of rule 3: its definition is a
-     transfer template.  The answer is a fold's, so the read pass injects it
+     plan#2666, plan#2887): what the card owes on the rule's day, less the
+     credits not yet inside that figure, never more than what is left of it now,
+     floor zero.  A SUBSET of rule 3: its definition is a transfer template.  The
+     answer is a fold's, so the read pass injects it
      (:attr:`AmountBasis.card_payments`).
 
 An earlier rule, **TRANSFER**, priced a transfer's two shadow rows by their

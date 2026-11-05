@@ -3,7 +3,8 @@ Shekel Budget App -- a card works out its payment inside its own balance
 
 Plan step **credit_card:CC-6**, its task plan#2677 (ruling **R-CC22**; design
 3.5): ``price = max(0, A - X)``, one case per the ruling's sentences, each figure
-computed by hand in the test that asserts it.
+computed by hand in the test that asserts it.  The ceiling above that figure is
+:mod:`tests.test_services.test_card_payment_follows_what_is_owed`.
 
 **The calendar** is ``seed_periods``': paydays Jan 2, Jan 16, Jan 30, Feb 13 and
 Feb 27 2026 onward.  **The card closes on the 5th and falls due on the 27th**

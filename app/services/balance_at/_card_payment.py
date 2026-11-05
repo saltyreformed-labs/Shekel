@@ -7,20 +7,56 @@ in a private module of the seam (W9910).  Every reader reaches this one answer:
 the amount model asks through :attr:`~app.services.cash_ledger.AmountBasis.card_payments`,
 so checking's leg, the card's leg, the grid cell and the popover read one figure.
 
-**The rule, stated once for all three amounts**: ``price = max(0, A - X)``.
+**The rule, stated once for all three amounts**:
+``price = max(0, min(A - X, B - Y))``.
 
 * **A** is what the card owes on the rule's day: at the end of the day before
   the row's day (:attr:`~app.enums.CardPaymentModeEnum.CARD_BALANCE`), or at the
   close of the statement the row pays, whose figure is the end of the day before
   that close (:attr:`~app.enums.CardPaymentModeEnum.STATEMENT_BALANCE`), or that
   statement's minimum (:attr:`~app.enums.CardPaymentModeEnum.MINIMUM_PAYMENT`).
-* **X** is every other transfer or credit into the card dated on or before the
-  row's day and not yet inside A: placed and unpaid, or paid later.
+  Money dated by the rule's day and not yet held is on that statement all the
+  same (the date decides the statement, ruling plan#2910), so the minimum is
+  worked out as if it were held.
+* **X** is every other transfer or credit into the card that the row counts,
+  dated after the rule's day and not yet inside A: placed and unpaid, or paid
+  later.
+* **B - Y is the ceiling, what is left now of what this row pays** (ruling
+  plan#2887: "The scheduled payment always covers what the balance is now").
+  **B** is what the card owes on the rule's day, or at the last true-up before
+  the row lands if that is later, because a true-up restates the balance.
+  **Y** is the money the row counts, or dated by the day before it lands, that is
+  not yet inside B.
 
-So a one-off in the same paycheck shrinks the row and the paycheck's total stays
-what the card owes; a payment on the close day counts and one after the due date
-does not; an earlier row paid late is not paid twice; and a purchase on the row's
-own day rolls to the next row.
+**A charge made after B's day is no part of the ceiling**: it is a later row's to
+pay, because each purchase has its own due date (ruling plan#2888).  So a later
+charge cannot lift a row back up to its statement.
+
+**An unmarked row dated by that true-up is not in Y**, because a balance read off
+the website already holds money sent and not yet marked.  A row this rule has
+priced is the exception: its figure was worked out from that true-up, and the
+money is still to leave, so the next row reads it.  This reaches the ceiling only:
+the fold still lands such a row after the true-up (ruling R-G), so a rule's day
+after it reads that money as arrived.
+
+**Which money a row counts follows its repeat, never its amount.**  An each-payday
+row counts money dated anywhere in its own paycheck, because its date is only the
+paycheck's: a one-off in that paycheck shrinks the row wherever in it the one-off
+falls, and the paycheck's total stays what the card owes.  Every other row, a
+due-date row above all, counts money dated on or before its own day, because that
+day is a deadline: Dec 18's $100 does not count against a Dec 15 row (R-CC22).  So
+a payment on the close day counts and one after the due date does not; an earlier
+row paid late is not paid twice; and a purchase on the row's own day rolls to the
+next row.  In the everything-on-the-card amount, that makes the next payday after
+a purchase the one that pays it off (ruling plan#2910), whichever paycheck the
+purchase's row sits in.
+
+**Money dated by the day before an overdue row lands counts wherever its window
+ends.**  Only an overdue row has such money, because only its landing day is later
+than its date.  So with no true-up after its date, an unmarked one-off and a marked
+one read one figure.  The cost: a row the bank really did take reads low once money
+or a lower true-up follows it, $0.00 if that is all of it, and checking reads high
+by the difference until the row is marked with the real figure.
 
 **The statement a row pays is the one closing strictly before its day.**  A due
 day equal to the close day makes the row's day itself a close, and the row pays
@@ -28,9 +64,10 @@ the statement before it (:func:`app.services.card_statement.due_date_for`).
 
 **A row is priced in date order off the running total WITHOUT worked-out rows**,
 and each priced row then joins what the next one reads.  That order is sound
-because a row lands on or after its dated day: every worked-out row landing by a
-row's valuation day is dated earlier, so it is already priced.  Two rows on one
-day are ordered by id, and the later sees the earlier as a credit.
+because landing keeps it: a row dated earlier never lands later, so every
+worked-out row landing by a row's valuation day or before its landing day is
+dated earlier, and is already priced.  Two rows on one day, or landing on one day,
+are ordered by date and then id, and the later sees the earlier as a credit.
 
 **A credit's date is the earlier of its row's date and the day its money moved.**
 A row paid late still counts from its own date, so it is not paid twice, and a
@@ -40,8 +77,9 @@ budgeted for something else.
 
 **A row outside the plan answers too**, because a budget figure is asked of every
 status (:func:`~app.services.cash_ledger.amounts_by_key`): by the same rule, its
-own money taken out of both A and X, so a settled row's plan is what the card
-asked of it and not what is left after paying it.
+own money taken out of A, B, X and Y, so a settled row's plan is what the card
+asked of it and not what is left after paying it.  It never lands, so its own
+date stands in for the day it would land.
 
 Nothing here reads or writes the stored ledger (plan#2516): the figures are the
 fold's own.
@@ -57,7 +95,7 @@ from decimal import Decimal
 from functools import cached_property
 
 from app import ref_cache
-from app.enums import CardPaymentModeEnum
+from app.enums import CardPaymentModeEnum, RecurrenceUnitEnum
 from app.exceptions import AmountUnresolvable
 from app.models.credit_card_params import CreditCardParams
 from app.models.transaction import Transaction
@@ -82,19 +120,24 @@ class _Credit:
     """Money into the card, and the two days the rule reads of it.
 
     Attributes:
-        dated_on: The day it counts from: on or before a row's day, it can
-            shrink that row.
-        held_from: The day it joins the card's running total: after the rule's
-            day, it is not yet inside A.  Never before :attr:`dated_on`.
+        dated_on: The day it counts from: by the last day a row counts
+            (:meth:`CardPayments._last_day_counted`), it can shrink that row.
+        held_from: The day it joins the card's running total: after a day the
+            rule reads, it is not yet inside that day's balance.  Never before
+            :attr:`dated_on`.
         amount: What it brings in, positive.
         transfer_id: The transfer it is a side of, ``None`` for a plan row's: a
             row's own money is never a credit against itself.
+        is_unmarked: Whether it is a plan row the owner has not marked, which a
+            true-up on or after its date is taken to hold already.  ``False``
+            for recorded money, and for a row this rule priced.
     """
 
     dated_on: date
     held_from: date
     amount: Decimal
     transfer_id: "int | None"
+    is_unmarked: bool
 
 
 class _CardTerms:
@@ -127,6 +170,28 @@ class _CardTerms:
                 "card's terms first."
             )
         return versions
+
+
+def _money_coming(
+    money_in: "list[_Credit]", after: date, dated_by: date,
+) -> Decimal:
+    """Return the money not yet held at the end of *after*, and dated by *dated_by*.
+
+    Args:
+        money_in: The money to read.
+        after: The day whose balance it is not yet inside.
+        dated_by: The last day it can carry and count.
+
+    Returns:
+        The sum, never negative.
+    """
+    return sum(
+        (
+            credit.amount for credit in money_in
+            if credit.held_from > after and credit.dated_on <= dated_by
+        ),
+        ZERO,
+    )
 
 
 def _day_before_the_row(dated_on: date, _terms: _CardTerms) -> date:
@@ -223,6 +288,7 @@ def _recorded_credits(
             held_from=fact.settled_on,
             amount=fact.delta,
             transfer_id=fact.transfer_id,
+            is_unmarked=False,
         )
         for fact in walk.source_facts
         if fact.delta > ZERO
@@ -255,6 +321,7 @@ def _planned_credits(plan: _CashPlan, calendar: PayCalendar) -> "list[_Credit]":
                         item.transfer.id if isinstance(item, TransferLeg)
                         else None
                     ),
+                    is_unmarked=True,
                 ))
     return money_in
 
@@ -317,20 +384,94 @@ class CardPayments:
                 dated_on=row.dated_on,
                 held_from=row.lands_on,
                 amount=self._price(
-                    transfer, row.dated_on, list(priced.values()),
+                    transfer, row.dated_on, row.lands_on, list(priced.values()),
                 ),
                 transfer_id=transfer.id,
+                is_unmarked=False,
             )
         return priced
 
-    def _price(
-        self, xfer: Transfer, dated_on: date, priced: "list[_Credit]",
+    def _last_day_counted(self, xfer: Transfer, dated_on: date) -> date:
+        """Return the latest date money can carry and still shrink *xfer*.
+
+        Args:
+            xfer: The row, whose definition names its repeat.
+            dated_on: The row's dated day.
+
+        Returns:
+            The last day of the row's paycheck for an each-payday row, and
+            *dated_on* for any other (the module docstring).
+
+        Raises:
+            RuntimeError: The row names a pay period the calendar does not
+                hold.
+        """
+        repeat = xfer.template.recurrence_rule
+        if (
+            repeat is not None
+            and repeat.unit_id
+            == ref_cache.recurrence_unit_id(RecurrenceUnitEnum.PERIOD)
+        ):
+            return self.calendar.require_period(FiledRow.for_row(xfer)).end_date
+        return dated_on
+
+    def _last_true_up(self, day: date) -> date:
+        """Return the last day the card's balance was stated, by *day*.
+
+        Args:
+            day: The latest day it can be.
+
+        Returns:
+            That day, the books' opening among them; ``date.min`` with none.
+        """
+        return max(
+            (
+                fact.observed_on for fact in self.walk.anchor_facts
+                if fact.observed_on <= day
+            ),
+            default=date.min,
+        )
+
+    def _owed_without(
+        self, xfer: Transfer, day: date, priced: "list[_Credit]",
     ) -> Decimal:
-        """Return ``max(0, A - X)`` for one row (the module docstring).
+        """Return what the card owes at the end of *day*, *xfer*'s money out.
+
+        Args:
+            xfer: The row, whose recorded money is taken back out.
+            day: The day.
+            priced: The worked-out rows already priced.
+
+        Returns:
+            What is owed, negative for a card in credit.
+        """
+        held = sample_cumulative(self.seed, self.steps, [day])[day] + sum(
+            (credit.amount for credit in priced if credit.held_from <= day),
+            ZERO,
+        )
+        own_money_inside = sum(
+            (
+                credit.amount for credit in self._others
+                if credit.transfer_id == xfer.id and credit.held_from <= day
+            ),
+            ZERO,
+        )
+        return owed(held) + own_money_inside
+
+    def _price(
+        self,
+        xfer: Transfer,
+        dated_on: date,
+        lands_on: date,
+        priced: "list[_Credit]",
+    ) -> Decimal:
+        """Return ``max(0, min(A - X, B - Y))`` for one row (the module docstring).
 
         Args:
             xfer: The row, whose definition names the mode.
             dated_on: The row's dated day.
+            lands_on: The day it joins the card's running total; its dated day
+                for a row outside the plan, which never does.
             priced: The worked-out rows the rule may already count.
 
         Returns:
@@ -339,42 +480,36 @@ class CardPayments:
         Raises:
             AmountUnresolvable: A mode that reads a statement, on a card with
                 no terms.
+            RuntimeError: An each-payday row names a pay period the calendar
+                does not hold.
         """
         rule = _MODE_RULES[ref_cache.card_payment_mode_member(
             xfer.template.card_payment_settings.mode_id,
         )]
         valued_on = rule.valued_on(dated_on, self._terms)
-        money_in = self._others + priced
-        own_money_inside = sum(
-            (
-                credit.amount for credit in money_in
-                if credit.transfer_id == xfer.id
-                and credit.held_from <= valued_on
-            ),
-            ZERO,
+        last_counted = self._last_day_counted(xfer, dated_on)
+        others = [
+            credit for credit in self._others + priced
+            if credit.transfer_id != xfer.id
+        ]
+        on_the_statement = _money_coming(others, valued_on, valued_on)
+        asked = rule.figure(
+            self._owed_without(xfer, valued_on, priced) - on_the_statement,
+            valued_on, self._terms,
+        ) - (_money_coming(others, valued_on, last_counted) - on_the_statement)
+
+        before_landing = lands_on - _ONE_DAY
+        restated_on = self._last_true_up(before_landing)
+        left_from = max(valued_on, restated_on)
+        left_now = self._owed_without(xfer, left_from, priced) - _money_coming(
+            [
+                credit for credit in others
+                if not (credit.is_unmarked and credit.dated_on <= restated_on)
+            ],
+            left_from,
+            max(last_counted, before_landing),
         )
-        not_yet_inside = sum(
-            (
-                credit.amount for credit in money_in
-                if credit.transfer_id != xfer.id
-                and credit.dated_on <= dated_on
-                and credit.held_from > valued_on
-            ),
-            ZERO,
-        )
-        held = sample_cumulative(
-            self.seed, self.steps, [valued_on],
-        )[valued_on] + sum(
-            (
-                credit.amount for credit in priced
-                if credit.held_from <= valued_on
-            ),
-            ZERO,
-        )
-        figure = rule.figure(
-            owed(held) + own_money_inside, valued_on, self._terms,
-        )
-        return max(_ZERO_MONEY, figure - not_yet_inside)
+        return max(_ZERO_MONEY, min(asked, left_now))
 
     def with_prices(self, day_nets: "dict[date, Decimal]") -> "dict[date, Decimal]":
         """Return *day_nets* with each worked-out row's price on its landing day.
@@ -410,10 +545,8 @@ class CardPayments:
         if xfer.id in self._priced:
             return self._priced[xfer.id].amount
         period = self.calendar.require_period(FiledRow.for_row(xfer))
-        return self._price(
-            xfer, period.attribution_day(xfer.due_date),
-            list(self._priced.values()),
-        )
+        dated_on = period.attribution_day(xfer.due_date)
+        return self._price(xfer, dated_on, dated_on, list(self._priced.values()))
 
     def next_price(self, template_id: int) -> Decimal:
         """Return what the next payment of a definition is priced at.

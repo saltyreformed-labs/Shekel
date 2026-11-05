@@ -9,7 +9,7 @@ what that line states.
 
 **It is PROVENANCE and not a figure that answers "am I done"**, which is why
 it is its own value rather than three more fields on
-:class:`~._reconcile.Hero`.  That class carries one comparison on one day and
+:class:`~._hero.Hero`.  That class carries one comparison on one day and
 documents its three money figures as all-or-nothing; what an import wrote is a
 fact about an act the owner performed, and it is present or absent on its own.
 

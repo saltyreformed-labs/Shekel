@@ -278,7 +278,7 @@ def pair_by_statement(
     * a genuinely NEW ``$4.75`` line that the bank INSERTED ahead of the
       recorded one was refused with the same sentence, for a line that had
       never been recorded.  The insertion behaviour is OBSERVED rather than
-      hypothetical: it is why :func:`~._record._refuse_restatement` stopped
+      hypothetical: it is why :func:`~._plan._refuse_restatement` stopped
       comparing running balances.
 
     Pairing on the wording answers both correctly and still refuses the event

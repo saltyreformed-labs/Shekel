@@ -11,6 +11,7 @@ paycheck holding the 20th -- the same paychecks through May, and in June the
 one starting Jun 19 rather than Jun 5.
 """
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
@@ -22,6 +23,7 @@ from app.services.payroll_basis import PayrollBasis
 from tests.test_routes._repeats_on_page import weekday_token
 
 from ._helpers import (
+    _authored_columns,
     _cadence_payload,
     _create_profile,
     _line_form,
@@ -107,6 +109,60 @@ class TestALineReadByItsWeekday:
         assert (attributes["starts-on"], attributes["repeats-on"]) == (
             "2026-01-20", "from_start",
         )
+
+    @pytest.mark.parametrize(
+        "posts_the_cadence", [True, False],
+        ids=["the prefilled controls", "no cadence key"],
+    )
+    def test_a_re_save_changes_the_amount_and_keeps_the_reading(
+        self, auth_client, seed_user, posts_the_cadence,
+    ):
+        """``/salary/lines/<id>/edit``: every column as it was, and the same paychecks.
+
+        The script prefills the edit form from the data attributes above, so
+        that case posts what they say.  The other names no cadence, which
+        leaves the rule alone rather than re-reading it.
+        """
+        profile = self._add_third_tuesday_line(auth_client, seed_user)
+        line = _line(profile, "Union dues")
+        before = _authored_columns(line.recurrence_rule)
+        assert before["weekday_reading"] == "from_start"
+        rule_id = line.recurrence_rule.id
+        if posts_the_cadence:
+            payload = _line_form(
+                "Union dues", amount="125.00",
+                **_cadence_payload(
+                    RecurrenceUnitEnum.MONTH,
+                    PeriodPlacementEnum.CONTAINING_DATE,
+                    ceiling=None,
+                ),
+                starts_on="2026-01-20",
+                repeats_on="from_start",
+            )
+        else:
+            payload = {
+                key: value
+                for key, value in _line_form("Union dues", amount="125.00").items()
+                if key not in {
+                    "starts_on", "repeats_on", "recurrence_end_mode", "end_date",
+                    "max_occurrences",
+                }
+            }
+
+        response = auth_client.post(
+            f"/salary/lines/{line.id}/edit", data=payload, follow_redirects=True,
+        )
+
+        assert response.status_code == 200
+        saved = _line(profile, "Union dues")
+        assert saved.amount == Decimal("125.00")
+        assert saved.recurrence_rule.id == rule_id
+        assert _authored_columns(saved.recurrence_rule) == before
+        basis = PayrollBasis(profile, calendar_for(seed_user["user"].id))
+        assert [
+            (payday, basis.line_applies_on(saved, payday))
+            for payday, _taken in _THIRD_TUESDAY_PAYCHECKS
+        ] == _THIRD_TUESDAY_PAYCHECKS
 
 
 @pytest.mark.usefixtures("seed_periods")

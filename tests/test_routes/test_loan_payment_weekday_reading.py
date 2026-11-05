@@ -12,7 +12,8 @@ first occurrence is the loan's first contractual installment, on
   (``settle_loan_start``), and a reading posted beside it -- a crafted one
   beside the locked row, or one a script-less browser posts beside a typed
   date -- read a date the rule will not carry, so it is replaced with the
-  contract day's reading: none.
+  contract day's reading: none.  **The update** moving a weekday transfer onto
+  such a loan runs the same derivation.
 
 Today is frozen on 2026-03-01, before the loan's 2026-04-15 origination; its
 payment day is the 1st, so the first installment is Fri 2026-05-01 -- the
@@ -27,10 +28,13 @@ import pytest
 from app.enums import AcctTypeEnum, RecurrenceUnitEnum
 from app.extensions import db
 from app.models.category import Category
+from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.routes._recurrence_form_refusals import LOAN_PAYMENT_BOUND_IS_DERIVED
+from tests._definition_price import amount_box_payload
 from tests._test_helpers import (
     cadence_payload,
+    create_account_of_type,
     create_loan_account,
     freeze_today,
     make_loan_payment_template,
@@ -195,3 +199,91 @@ class TestTheCreateIntoAPaymentLessLoan:
             to_account_id=loan.id, name=_NAME,
         ).one()
         assert _rule_columns(template.id) == (_FIRST_INSTALLMENT, None, None)
+
+
+@pytest.mark.usefixtures("seed_periods")
+class TestTheMoveOntoAPaymentLessLoan:
+    """The update door: the weekday reading leaves with the date.
+
+    **These grade the OUTCOME, and no one writer alone moves it** (measured by
+    deleting each).  ``settle_loan_start`` states the contract's reading into
+    the payload, the re-point branch reads an absent key as no reading, and
+    ``loan_recurrence_sync`` replaces whatever is left, so deleting only the
+    first leaves both cases green.  The whole form fails once the first and
+    the last are gone, the partial post once the second and the last are.
+    """
+
+    def _third_tuesday_into_savings(self, auth_client, seed_user):
+        """Create a monthly transfer into savings from Tue 2026-03-17 (3, 10, 17)."""
+        savings = create_account_of_type(
+            seed_user, db.session, "Savings", "Savings",
+            anchor_balance=Decimal("100.00"),
+        )
+        category = _debt_category(seed_user)
+        resp = auth_client.post("/transfers", data={
+            "name": _NAME,
+            "from_account_id": str(seed_user["account"].id),
+            "to_account_id": str(savings.id),
+            "amount": "1200.00",
+            "category_id": str(category.id),
+            **cadence_payload(
+                unit=RecurrenceUnitEnum.MONTH, starts_on=date(2026, 3, 17),
+            ),
+            "repeats_on": "from_start",
+        })
+        assert resp.headers["Location"].endswith("/transfers"), _flashes(auth_client)
+        template = db.session.query(TransferTemplate).filter_by(name=_NAME).one()
+        assert _rule_columns(template.id) == (
+            date(2026, 3, 17), None, "from_start",
+        )
+        return template
+
+    def _assert_moved(self, resp, auth_client, template, loan):
+        """It saved onto the loan, read by the contract's day, and its rows followed.
+
+        The first installment is May 1 and June 1 is past the saved schedule,
+        so one row remains.
+        """
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/transfers"), _flashes(auth_client)
+        db.session.expire_all()
+        saved = db.session.get(TransferTemplate, template.id)
+        assert saved.to_account_id == loan.id
+        assert _rule_columns(template.id) == (_FIRST_INSTALLMENT, None, None)
+        assert [
+            row.due_date
+            for row in db.session.query(Transfer).filter_by(
+                transfer_template_id=template.id, is_deleted=False,
+            )
+        ] == [_FIRST_INSTALLMENT]
+
+    def test_the_whole_form_posting_the_reading(self, auth_client, seed_user):
+        """The browser posts the stored date and reading beside the new destination."""
+        template = self._third_tuesday_into_savings(auth_client, seed_user)
+        loan = _mortgage(seed_user)
+        db.session.commit()
+        posted = form_as_posted(
+            auth_client, f"/transfers/{template.id}/edit",
+            f"/transfers/{template.id}", to_account_id=str(loan.id),
+        )
+        assert posted["repeats_on"] == "from_start"
+
+        resp = auth_client.post(f"/transfers/{template.id}", data=posted)
+
+        self._assert_moved(resp, auth_client, template, loan)
+
+    def test_a_partial_post_naming_only_the_destination(self, auth_client, seed_user):
+        """No cadence key at all: the door completes the cadence from the stored row."""
+        template = self._third_tuesday_into_savings(auth_client, seed_user)
+        loan = _mortgage(seed_user)
+        db.session.commit()
+
+        resp = auth_client.post(f"/transfers/{template.id}", data={
+            "name": template.name,
+            **amount_box_payload(template),
+            "from_account_id": str(template.from_account_id),
+            "version_id": str(template.version_id),
+            "to_account_id": str(loan.id),
+        })
+
+        self._assert_moved(resp, auth_client, template, loan)

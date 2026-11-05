@@ -402,6 +402,51 @@ class TestTheWalk:
             date(2026, 11, 26), _FROM_START, date(2028, 12, 31), unit=_YEAR,
         ) == [date(2026, 11, 26), date(2027, 11, 25), date(2028, 11, 23)]
 
+    def test_the_last_friday_of_january_yearly(self):
+        """Jan 1 falls Fri, Sat, Mon, Tue in 2027-2030, so Jan 29, 28, 26, 25."""
+        assert _walked(
+            _LAST_FRIDAY, _FROM_END, date(2030, 12, 31), unit=_YEAR,
+        ) == [
+            date(2027, 1, 29), date(2028, 1, 28),
+            date(2029, 1, 26), date(2030, 1, 25),
+        ]
+
+    def test_a_leap_februarys_last_tuesday_is_the_twenty_ninth(self):
+        """Feb 1 2028 is a Tuesday, so its fifth and last is the 29th.
+
+        Monthly from the last Tuesday of January: Jan 1 2028 is a Saturday
+        (Tuesdays 4, 11, 18, 25), and Mar 1 a Wednesday (7, 14, 21, 28).
+        """
+        assert _walked(
+            date(2028, 1, 25), _FROM_END, date(2028, 3, 31),
+        ) == [date(2028, 1, 25), date(2028, 2, 29), date(2028, 3, 28)]
+
+    def test_a_yearly_rule_from_a_leap_day_takes_each_years_last(self):
+        """Feb 1 falls Tue, Thu, Fri, Sat, Sun in 2028-2032, and 2032's 29th is a Sunday."""
+        assert _walked(
+            date(2028, 2, 29), _FROM_END, date(2032, 12, 31), unit=_YEAR,
+        ) == [
+            date(2028, 2, 29), date(2029, 2, 27), date(2030, 2, 26),
+            date(2031, 2, 25), date(2032, 2, 24),
+        ]
+
+    def test_a_stride_of_two_years_from_the_start(self):
+        """The fourth Thursday of November: Nov 1 falls Sun, Wed, Fri, Mon."""
+        assert _walked(
+            date(2026, 11, 26), _FROM_START, date(2032, 12, 31),
+            unit=_YEAR, interval_n=2,
+        ) == [
+            date(2026, 11, 26), date(2028, 11, 23),
+            date(2030, 11, 28), date(2032, 11, 25),
+        ]
+
+    def test_a_stride_of_three_years_from_the_end(self):
+        """The last Friday of January: Jan 1 falls Fri, Tue, Sat."""
+        assert _walked(
+            _LAST_FRIDAY, _FROM_END, date(2033, 12, 31),
+            unit=_YEAR, interval_n=3,
+        ) == [date(2027, 1, 29), date(2030, 1, 25), date(2033, 1, 28)]
+
     def test_the_second_tuesday_quarterly(self):
         """Jan 12, Apr 13, Jul 13, Oct 12 2027 (Apr and Jul open on Thursday)."""
         assert _walked(

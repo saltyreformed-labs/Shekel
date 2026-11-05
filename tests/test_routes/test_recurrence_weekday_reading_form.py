@@ -27,6 +27,7 @@ on the 20th of every month.
 import json
 import re
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
@@ -35,9 +36,16 @@ from app.extensions import db
 from app.models.ref import TransactionType
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
+from app.models.transfer import Transfer
+from app.models.transfer_template import TransferTemplate
 from app.routes._recurrence_preview import NOTHING_TO_PREVIEW
 from app.services.recurrence import weekday_reading_options
-from tests._test_helpers import cadence_payload, freeze_today
+from tests._definition_price import newest_price
+from tests._test_helpers import (
+    cadence_payload,
+    create_account_of_type,
+    freeze_today,
+)
 from tests.test_routes._repeats_on_page import (
     form_as_posted,
     repeats_on_control,
@@ -204,7 +212,9 @@ class TestTheFormStoresAndWalksTheReading:
 
         The browser posts the start and the preselected reading on every
         save, so a preselection the page got wrong would clear the reading
-        here -- the rows would move to the 20th.
+        here -- the rows would move to the 20th.  The redirect's target and the
+        price are what tell a save from a refusal, which also answers 302 and
+        leaves the rule and its rows alone.
         """
         template = _create_a_third_tuesday_rule(auth_client, seed_user)
 
@@ -216,8 +226,97 @@ class TestTheFormStoresAndWalksTheReading:
         )
 
         assert resp.status_code == 302, resp.data.decode()
+        assert resp.headers["Location"].endswith("/templates")
+        assert newest_price(template) == Decimal("30.00")
         assert _rule_columns(template) == (_THIRD_TUESDAY, None, "from_start")
         assert _due_dates(template) == _THIRD_TUESDAYS
+
+    def test_flipping_only_the_reading_moves_the_rows_there_and_back(
+        self, auth_client, seed_user,
+    ):
+        """The date stays Jan 20: by its day the rows fall on the 20th, then back.
+
+        February and March open on a Sunday, April on a Wednesday and May on
+        a Friday, so the third Tuesdays are the 17th, 17th, 21st and 19th.
+        """
+        template = _create_a_third_tuesday_rule(auth_client, seed_user)
+
+        by_day = auth_client.post(
+            f"/templates/{template.id}",
+            data=_edit_form_as_posted(auth_client, template, repeats_on=""),
+        )
+
+        assert by_day.status_code == 302, by_day.data.decode()
+        assert by_day.headers["Location"].endswith("/templates")
+        assert _rule_columns(template) == (_THIRD_TUESDAY, None, None)
+        assert _due_dates(template) == [
+            date(2026, 1, 20), date(2026, 2, 20), date(2026, 3, 20),
+            date(2026, 4, 20), date(2026, 5, 20),
+        ]
+
+        back = auth_client.post(
+            f"/templates/{template.id}",
+            data=_edit_form_as_posted(
+                auth_client, template, repeats_on="from_start",
+            ),
+        )
+
+        assert back.status_code == 302, back.data.decode()
+        assert back.headers["Location"].endswith("/templates")
+        assert _rule_columns(template) == (_THIRD_TUESDAY, None, "from_start")
+        assert _due_dates(template) == _THIRD_TUESDAYS
+
+    @pytest.mark.parametrize(
+        ("unit", "kept", "due_dates"),
+        [
+            pytest.param(
+                RecurrenceUnitEnum.MONTH, "from_start", _THIRD_TUESDAYS,
+                id="monthly",
+            ),
+            # One year on is past the saved schedule, so one row.
+            pytest.param(
+                RecurrenceUnitEnum.YEAR, "from_start", [_THIRD_TUESDAY],
+                id="yearly",
+            ),
+            # Every Tuesday from the first date through the schedule's last,
+            # May 19: a weekly rule reads no weekday of a month.
+            pytest.param(
+                RecurrenceUnitEnum.WEEK, None,
+                [
+                    date(2026, 1, 20), date(2026, 1, 27), date(2026, 2, 3),
+                    date(2026, 2, 10), date(2026, 2, 17), date(2026, 2, 24),
+                    date(2026, 3, 3), date(2026, 3, 10), date(2026, 3, 17),
+                    date(2026, 3, 24), date(2026, 3, 31), date(2026, 4, 7),
+                    date(2026, 4, 14), date(2026, 4, 21), date(2026, 4, 28),
+                    date(2026, 5, 5), date(2026, 5, 12), date(2026, 5, 19),
+                ],
+                id="weekly",
+            ),
+            pytest.param(RecurrenceUnitEnum.PERIOD, None, None, id="paycheck"),
+        ],
+    )
+    def test_a_unit_change_with_no_start_posted(
+        self, auth_client, seed_user, unit, kept, due_dates,
+    ):
+        """A unit measured in months keeps the stored reading; any other drops it.
+
+        What a locked or absent start posts: the cadence alone.  Keeping it
+        beside a weekly or paycheck unit is a pair the spec refuses, a 500.  A
+        paycheck rule's rows are not what is under test, so that case reads
+        the column alone.
+        """
+        template = _create_a_third_tuesday_rule(auth_client, seed_user)
+
+        resp = auth_client.post(
+            f"/templates/{template.id}",
+            data=cadence_payload(unit=unit, states_a_start=False),
+        )
+
+        assert resp.status_code == 302, resp.data.decode()
+        assert resp.headers["Location"].endswith("/templates")
+        assert _rule_columns(template)[1:] == (None, kept)
+        if due_dates is not None:
+            assert _due_dates(template) == due_dates
 
     def test_moving_the_date_to_the_30th_with_the_control_reset_clears_it(
         self, auth_client, seed_user,
@@ -268,6 +367,47 @@ class TestTheFormStoresAndWalksTheReading:
         ) in resp.data.decode()
         assert _rule_columns(template) == (_THIRD_TUESDAY, None, "from_start")
         assert _due_dates(template) == _THIRD_TUESDAYS
+
+
+@pytest.mark.usefixtures("seed_periods")
+class TestATransferReadByItsWeekday:
+    """A transfer into savings takes the same control and walks the same days."""
+
+    def test_its_rows_fall_on_the_third_tuesdays(self, auth_client, seed_user):
+        """Stored ``from_start``, one row a month, each due on its third Tuesday."""
+        savings = create_account_of_type(
+            seed_user, db.session, "Savings", "Savings",
+            anchor_balance=Decimal("100.00"),
+        )
+        db.session.commit()
+        page = auth_client.get("/transfers/new").data.decode()
+
+        resp = auth_client.post("/transfers", data={
+            "name": _NAME,
+            "from_account_id": str(seed_user["account"].id),
+            "to_account_id": str(savings.id),
+            "amount": "25.00",
+            "category_id": str(seed_user["categories"]["Rent"].id),
+            **cadence_payload(
+                unit=RecurrenceUnitEnum.MONTH, starts_on=_THIRD_TUESDAY,
+            ),
+            "repeats_on": weekday_token(page, counts_from_end=False),
+        })
+
+        assert resp.status_code == 302, resp.data.decode()
+        assert resp.headers["Location"].endswith("/transfers")
+        db.session.expire_all()
+        template = db.session.query(TransferTemplate).filter_by(name=_NAME).one()
+        rule = template.recurrence_rule
+        assert (rule.starts_on, rule.nominal_day, rule.weekday_reading) == (
+            _THIRD_TUESDAY, None, "from_start",
+        )
+        assert sorted(
+            row.due_date
+            for row in db.session.query(Transfer).filter_by(
+                transfer_template_id=template.id, is_deleted=False,
+            )
+        ) == _THIRD_TUESDAYS
 
 
 @pytest.mark.usefixtures("seed_periods")

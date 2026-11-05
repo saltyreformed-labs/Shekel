@@ -58,9 +58,15 @@ one read one figure.  The cost: a row the bank really did take reads low once mo
 or a lower true-up follows it, $0.00 if that is all of it, and checking reads high
 by the difference until the row is marked with the real figure.
 
-**The statement a row pays is the one closing strictly before its day.**  A due
-day equal to the close day makes the row's day itself a close, and the row pays
-the statement before it (:func:`app.services.card_statement.due_date_for`).
+**Which statement a row pays follows its repeat too.**  A row repeating on paydays
+pays the last to close strictly before its day, its date being only the paycheck's.
+Every other row is dated by a deadline, so it pays the statement falling due next on
+that day, or one that closed later and has already fallen due, whose balance holds it
+(:func:`app.services.card_statement.close_of_statement_paid_on`).  The two part only
+where a change of terms moves a due date or cuts a cycle: close 5 due 27, then close
+20 due 15 from Jan 10, and Jan 27's row pays the Jan 5 statement though Jan 20 has
+closed since.  A due day equal to the close day makes the row's day itself a close,
+and the row pays the statement before it.
 
 **A row is priced in date order off the running total WITHOUT worked-out rows**,
 and each priced row then joins what the next one reads.  That order is sound
@@ -72,8 +78,12 @@ are ordered by date and then id, and the later sees the earlier as a credit.
 **A credit's date is the earlier of its row's date and the day its money moved.**
 A row paid late still counts from its own date, so it is not paid twice, and a
 row paid early counts from the day the money arrived, for the same reason.  A
-refund under an expense row is dated its own day: the row it came back to was
-budgeted for something else.
+refund under an expense row is dated the day it was made, in flight or posted: the
+row it came back to was budgeted for something else, so that row's date says nothing
+about it.  Posting it sets only the day it joins the balance, so no row reads
+differently unless a true-up was stated on or after the day it was made: a refund
+posted by then is inside that balance, and the fold lands one in flight after it
+(ruling R-G).
 
 **A row outside the plan answers too**, because a budget figure is asked of every
 status (:func:`~app.services.cash_ledger.amounts_by_key`): by the same rule, its
@@ -100,7 +110,11 @@ from app.exceptions import AmountUnresolvable
 from app.models.credit_card_params import CreditCardParams
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
-from app.services.card_statement import cycle_containing, minimum_payment
+from app.services.card_statement import (
+    close_of_statement_paid_on,
+    cycle_containing,
+    minimum_payment,
+)
 from app.services.card_terms import load_card_term_versions
 from app.services.cash_ledger import CashLedgerWalk, CashSourceFact, sum_projected
 from app.services.liability_sign import owed
@@ -194,18 +208,42 @@ def _money_coming(
     )
 
 
-def _day_before_the_row(dated_on: date, _terms: _CardTerms) -> date:
+def _repeats_on_paydays(xfer: Transfer) -> bool:
+    """Return whether *xfer*'s definition repeats on paydays, each or every few.
+
+    Such a row's date is only its paycheck's, where any other row's is a
+    deadline (the module docstring), so the money a row counts and the statement
+    it pays both ask this.
+
+    Args:
+        xfer: The row, whose definition names its repeat.
+
+    Returns:
+        ``True`` for a repeat counted in paydays.
+    """
+    repeat = xfer.template.recurrence_rule
+    return (
+        repeat is not None
+        and repeat.unit_id == ref_cache.recurrence_unit_id(RecurrenceUnitEnum.PERIOD)
+    )
+
+
+def _day_before_the_row(_xfer: Transfer, dated_on: date, _terms: _CardTerms) -> date:
     """Return the rule's day for the balance: the end of the day before the row."""
     return dated_on - _ONE_DAY
 
 
-def _end_of_the_statement(dated_on: date, terms: _CardTerms) -> date:
+def _end_of_the_statement(xfer: Transfer, dated_on: date, terms: _CardTerms) -> date:
     """Return the rule's day for a statement: the end of the day before its close.
 
-    The statement a row pays is the one closing STRICTLY before its day: the
-    cycle holding the day before the row opened on that close.
+    A row repeating on paydays pays the last statement to close STRICTLY before
+    its day: the cycle holding the day before the row opened on that close.  Any
+    other row's day is a deadline (the module docstring).
     """
-    closes = cycle_containing(terms.versions, dated_on - _ONE_DAY).opens
+    if _repeats_on_paydays(xfer):
+        closes = cycle_containing(terms.versions, dated_on - _ONE_DAY).opens
+    else:
+        closes = close_of_statement_paid_on(terms.versions, dated_on)
     return closes - _ONE_DAY
 
 
@@ -226,11 +264,11 @@ class _ModeRule:
     """What one mode reads: the rule's day, and A from what was owed on it.
 
     Attributes:
-        valued_on: The row's dated day and the card's terms to the rule's day.
+        valued_on: The row, its dated day and the card's terms to the rule's day.
         figure: What was owed on that day, that day and the terms, to A.
     """
 
-    valued_on: "Callable[[date, _CardTerms], date]"
+    valued_on: "Callable[[Transfer, date, _CardTerms], date]"
     figure: "Callable[[Decimal, date, _CardTerms], Decimal]"
 
 
@@ -265,7 +303,7 @@ def _filed(fact: CashSourceFact) -> FiledRow:
 def _recorded_credit_date(fact: CashSourceFact, calendar: PayCalendar) -> date:
     """Return the day a recorded credit counts from (the module docstring)."""
     if not fact.is_income:
-        return fact.settled_on
+        return fact.purchased_on
     period = calendar.require_period(_filed(fact))
     return min(period.attribution_day(fact.parent_due_date), fact.settled_on)
 
@@ -406,12 +444,7 @@ class CardPayments:
             RuntimeError: The row names a pay period the calendar does not
                 hold.
         """
-        repeat = xfer.template.recurrence_rule
-        if (
-            repeat is not None
-            and repeat.unit_id
-            == ref_cache.recurrence_unit_id(RecurrenceUnitEnum.PERIOD)
-        ):
+        if _repeats_on_paydays(xfer):
             return self.calendar.require_period(FiledRow.for_row(xfer)).end_date
         return dated_on
 
@@ -486,7 +519,7 @@ class CardPayments:
         rule = _MODE_RULES[ref_cache.card_payment_mode_member(
             xfer.template.card_payment_settings.mode_id,
         )]
-        valued_on = rule.valued_on(dated_on, self._terms)
+        valued_on = rule.valued_on(xfer, dated_on, self._terms)
         last_counted = self._last_day_counted(xfer, dated_on)
         others = [
             credit for credit in self._others + priced

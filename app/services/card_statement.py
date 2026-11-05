@@ -94,7 +94,9 @@ ruling plan#2671) walks :class:`DueDateSchedule`: the slice of the dated terms
 the due dates read, held as plain values so the recurrence walk that takes it
 can key a memo on it, and its :meth:`DueDateSchedule.on_or_after`, every due
 date in date order.  Close order is not date order: a short transitional cycle
-can fall due before the long one ahead of it.
+can fall due before the long one ahead of it.  So the statement a payment on one
+of those dates pays is asked by its due date
+(:func:`close_of_statement_paid_on`, plan#2879), never read off the last close.
 
 All arithmetic is :class:`~decimal.Decimal`; :func:`~app.utils.money.round_money`
 is applied at the one boundary where a fraction of a cent can arise (the
@@ -136,7 +138,8 @@ _ONE_DAY = timedelta(days=1)
 #: day, at most the next month's length.  No month is longer than 31 days.
 #: :meth:`DueDateSchedule.on_or_after` starts its walk this far before the
 #: day it is asked from, so no statement falling due on or after that day is
-#: missed.
+#: missed, and :func:`close_of_statement_paid_on` looks back this far for the
+#: same reason.
 _LONGEST_DUE_AFTER_CLOSE = timedelta(days=31)
 
 
@@ -321,9 +324,10 @@ def cycle_containing(versions: "list[CreditCardParams]", day: date) -> CycleWind
     that close ends, and the close date itself opens the next.  Each close
     is the close day of the version in force on that date (the module
     docstring), so the cycle open when the close day changes is the
-    transitional one.  The placement the payment's "fold at the LAST close"
-    (design 3.5, CC-6) and the finance charge's "the cycle before the close
-    it posts at" (design 3.6, CC-3i) both start from.
+    transitional one.  The placement an each-payday payment's "fold at the LAST
+    close" (design 3.5, CC-6) and the finance charge's "the cycle before the close
+    it posts at" (design 3.6, CC-3i) both start from; a due-date payment asks
+    :func:`close_of_statement_paid_on` instead.
 
     Args:
         versions: The card's terms versions (non-empty), in any order.
@@ -401,6 +405,49 @@ def due_date_for(versions: "list[CreditCardParams]", closes: date) -> date:
     """
     due_day = _governing(versions, closes).payment_due_day
     return clamped_day(grid_month_after(closes, due_day), due_day)
+
+
+def close_of_statement_paid_on(
+    versions: "list[CreditCardParams]", day: date,
+) -> date:
+    """Return the close date of the statement a payment dated *day* is due to pay.
+
+    Of the statements closed strictly before *day*, the one falling due next on
+    it, or one that closed later and has fallen due by then: a later balance holds
+    every earlier one's unpaid balance, so nothing it holds waits for the next
+    deadline (:meth:`DueDateSchedule.on_or_after` makes the same reading of two
+    statements due on one day).  With every statement past due, that is the last to
+    close.
+
+    **It is not the last close before the day, nor the earliest statement still
+    open**, because close order is not date order.  Close 5 due 27, then close 20
+    due 15 from Jan 10: Jan 27 pays Jan 5 though Jan 20 has closed since, as Jan 20
+    is not due until Feb 15.  Close 20 due 19, then close 5 due 6 from Mar 1: Mar 6
+    pays Mar 5 though Feb 20 is still open, and so do Mar 7 and Mar 19, as Mar 5
+    holds all of Feb 20's.  With one terms version it is always the last close.
+
+    Args:
+        versions: The card's terms versions (non-empty), in any order.
+        day: The payment's date.
+
+    Returns:
+        The statement's close date (:attr:`CycleWindow.closes`), before *day*.
+
+    Raises:
+        ValueError: When *versions* is empty (a dormant card).
+    """
+    # Newest first.  A close further back than the longest due date is past due
+    # on *day*, so it cannot be the next to fall due, and the answer closes no
+    # earlier than the one that is.
+    closes = [_last_close_on_or_before(versions, day - _ONE_DAY)]
+    while closes[-1] + _LONGEST_DUE_AFTER_CLOSE >= day:
+        closes.append(_last_close_on_or_before(versions, closes[-1] - _ONE_DAY))
+    due_on = {close: due_date_for(versions, close) for close in closes}
+    next_due = min(
+        (due for due in due_on.values() if due >= day),
+        default=CALENDAR_DATE_MAX,
+    )
+    return next(close for close, due in due_on.items() if due <= next_due)
 
 
 def minimum_payment(

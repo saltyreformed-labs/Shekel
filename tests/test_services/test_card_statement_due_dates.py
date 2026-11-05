@@ -15,7 +15,10 @@ repeat walks; these cases pin what it yields:
   :func:`~app.services.card_statement.statement_sequence`, over every close
   day and due day and across a change of both, which is what grades the
   walk's start (``_LONGEST_DUE_AFTER_CLOSE``) and its holding of dates;
-* stopping at the calendar's last day, and refusing an empty schedule.
+* stopping at the calendar's last day, and refusing an empty schedule;
+* which statement a payment dated on a day pays
+  (:func:`~app.services.card_statement.close_of_statement_paid_on`, plan#2879),
+  each case by hand and then against a brute-force reading of the same terms.
 
 Pure: the versions are plain namespaces, as the module's own tests build them.
 """
@@ -29,6 +32,8 @@ import pytest
 from app.services.card_statement import (
     DueDateSchedule,
     DueDateTerms,
+    close_of_statement_paid_on,
+    cycle_containing,
     due_date_for,
     statement_sequence,
 )
@@ -232,3 +237,273 @@ def _take_through(dates, last):
         if due > last:
             return
         yield due
+
+
+class TestTheStatementAPaymentPays:
+    """The statement a payment dated on a day pays, each case by hand."""
+
+    def test_a_due_date_and_the_next_close_day_pay_one_statement(self):
+        """Close 5 due 27: Jan 27 pays Jan 5, and Feb 5 itself still pays Jan 5."""
+        versions = [_version(date(2026, 1, 1), 5, 27)]
+
+        assert close_of_statement_paid_on(versions, date(2026, 1, 27)) == date(
+            2026, 1, 5,
+        )
+        assert close_of_statement_paid_on(versions, date(2026, 2, 5)) == date(
+            2026, 1, 5,
+        )
+
+    def test_a_due_date_in_the_next_month(self):
+        """Close 20 due 15: Feb 15 pays Jan 20, not Dec 20 (due Jan 15, past)."""
+        versions = [_version(date(2025, 11, 1), 20, 15)]
+
+        assert close_of_statement_paid_on(versions, date(2026, 2, 15)) == date(
+            2026, 1, 20,
+        )
+
+    def test_a_due_day_equal_to_the_close_day_pays_the_statement_before(self):
+        """Close 5 due 5: Feb 5 is a close and a due date, and pays Jan 5."""
+        versions = [_version(date(2025, 11, 1), 5, 5)]
+
+        assert close_of_statement_paid_on(versions, date(2026, 2, 5)) == date(
+            2026, 1, 5,
+        )
+
+    def test_a_transitional_cycle_leaves_the_earlier_statement_due(self):
+        """Close 5 due 27, then close 20 due 15 from Jan 10.
+
+        Jan 5 falls due Jan 27 and Jan 20 falls due Feb 15, so Jan 27 pays Jan 5
+        though Jan 20 has closed since, and Feb 15 pays Jan 20.
+        """
+        versions = [
+            _version(date(2025, 11, 1), 5, 27),
+            _version(date(2026, 1, 10), 20, 15),
+        ]
+
+        assert close_of_statement_paid_on(versions, date(2026, 1, 27)) == date(
+            2026, 1, 5,
+        )
+        assert close_of_statement_paid_on(versions, date(2026, 2, 15)) == date(
+            2026, 1, 20,
+        )
+
+    def test_a_short_cycle_falling_due_first_holds_the_earlier_statement(self):
+        """Close 20 due 19, then close 5 due 6 from Mar 1: due dates out of close order.
+
+        Feb 20 falls due Mar 19 and Mar 5 falls due Mar 6.  Mar 6 pays Mar 5, the
+        statement due that day, though the Feb 20 statement before it is not yet
+        past due.  Mar 7 and Mar 19 pay Mar 5 too: it closed later and has fallen
+        due, so its balance holds all of Feb 20's.
+        """
+        versions = [
+            _version(date(2025, 11, 1), 20, 19),
+            _version(date(2026, 3, 1), 5, 6),
+        ]
+
+        for day in (date(2026, 3, 6), date(2026, 3, 7), date(2026, 3, 19)):
+            assert close_of_statement_paid_on(versions, day) == date(2026, 3, 5), day
+
+    def test_before_the_short_cycle_closes_the_earlier_statement_stands(self):
+        """The same terms on Mar 5: the short cycle has not closed, so Feb 20, due next."""
+        versions = [
+            _version(date(2025, 11, 1), 20, 19),
+            _version(date(2026, 3, 1), 5, 6),
+        ]
+
+        assert close_of_statement_paid_on(versions, date(2026, 3, 5)) == date(
+            2026, 2, 20,
+        )
+
+    def test_an_earlier_statement_still_falling_due_after_a_later_one_fell_due(self):
+        """Close 5 due 27, then close 20 due 21 from Jan 10: Jan 20 falls due Jan 21.
+
+        Jan 5 is not due until Jan 27.  A payment moved to Jan 23 falls between, and
+        pays Jan 20, overdue and holding all of Jan 5's.
+        """
+        versions = [
+            _version(date(2025, 11, 1), 5, 27),
+            _version(date(2026, 1, 10), 20, 21),
+        ]
+
+        assert close_of_statement_paid_on(versions, date(2026, 1, 23)) == date(
+            2026, 1, 20,
+        )
+
+    def test_two_statements_due_on_one_day_pay_the_later(self):
+        """Close 28 due 29: Feb 28 and Mar 28 both fall due Mar 29, which pays Mar 28.
+
+        February has no 29th in 2026, so the Feb 28 statement's first due day
+        strictly after its close is Mar 29, the Mar 28 statement's too.  The later
+        balance holds the earlier one's unpaid balance, so one payment answers both.
+        """
+        versions = [_version(date(2025, 11, 1), 28, 29)]
+
+        assert due_date_for(versions, date(2026, 2, 28)) == date(2026, 3, 29)
+        assert due_date_for(versions, date(2026, 3, 28)) == date(2026, 3, 29)
+        assert close_of_statement_paid_on(versions, date(2026, 3, 29)) == date(
+            2026, 3, 28,
+        )
+
+    def test_a_day_no_statement_falls_due_pays_the_next_to_fall_due(self):
+        """Close 5 due 27, then close 20 due 15 from Jan 10: a payment moved to Jan 26.
+
+        Jan 5 falls due the next day and Jan 20 not until Feb 15, so it pays Jan 5.
+        """
+        versions = [
+            _version(date(2025, 11, 1), 5, 27),
+            _version(date(2026, 1, 10), 20, 15),
+        ]
+
+        assert close_of_statement_paid_on(versions, date(2026, 1, 26)) == date(
+            2026, 1, 5,
+        )
+
+    def test_with_every_statement_past_due_it_pays_the_last_to_close(self):
+        """Close 5 due 27: Feb 1 is past Jan 27, and nothing closed since Jan 5."""
+        versions = [_version(date(2025, 11, 1), 5, 27)]
+
+        assert close_of_statement_paid_on(versions, date(2026, 2, 1)) == date(
+            2026, 1, 5,
+        )
+
+    def test_a_long_cycle_reaches_back_past_the_longest_due_date(self):
+        """Close 5 due 27, then close 20 due 15 from Jan 21: nothing closes until Feb 20.
+
+        Feb 19 is 45 days after the Jan 5 close, which fell due Jan 27.  No
+        statement is ahead, so it pays the last to close, Jan 5.
+        """
+        versions = [
+            _version(date(2025, 11, 1), 5, 27),
+            _version(date(2026, 1, 21), 20, 15),
+        ]
+
+        assert close_of_statement_paid_on(versions, date(2026, 2, 19)) == date(
+            2026, 1, 5,
+        )
+
+    def test_a_statement_falling_due_the_longest_time_after_its_close(self):
+        """Close 31 due 31, then close 20 due 5 from Jan 10: Dec 31 is due 31 days on.
+
+        Dec 31 falls due Jan 31 and Jan 20 falls due Feb 5, so Jan 31 pays Dec 31,
+        at the very edge of how far back a statement can still be due.
+        """
+        versions = [
+            _version(date(2025, 11, 1), 31, 31),
+            _version(date(2026, 1, 10), 20, 5),
+        ]
+
+        assert due_date_for(versions, date(2025, 12, 31)) == date(2026, 1, 31)
+        assert close_of_statement_paid_on(versions, date(2026, 1, 31)) == date(
+            2025, 12, 31,
+        )
+
+    def test_an_empty_series_is_refused(self):
+        """A dormant card has no statement to pay."""
+        with pytest.raises(ValueError, match="no terms version"):
+            close_of_statement_paid_on([], date(2026, 1, 27))
+
+
+def _paid_by_brute_force(versions, day):
+    """Which statement *day* pays, reading every close in the 100 days before it.
+
+    Wider than any cycle a change of terms can cut (two months) and than any
+    statement's due date can trail its close, so it cannot miss one.  It states the
+    same rule over every close, so it grades the look-back and not the rule, which
+    the hand cases above and the money in ``test_card_payment_dates`` grade.
+    """
+    closes = [
+        window.closes
+        for window in statement_sequence(
+            versions, day - timedelta(days=100), day - timedelta(days=1),
+        )
+    ]
+    ahead = [
+        due_date_for(versions, c) for c in closes if due_date_for(versions, c) >= day
+    ]
+    if not ahead:
+        return closes[-1]
+    return max(c for c in closes if due_date_for(versions, c) <= min(ahead))
+
+
+class TestTheStatementAPaymentPaysByBruteForce:
+    """Every day against the brute-force reading of the same terms."""
+
+    @pytest.mark.parametrize("close_day", range(1, 32))
+    def test_every_close_day_and_due_day_agrees(self, close_day):
+        """Every (close, due) pair, each day of a stretch holding a short February."""
+        for due_day in range(1, 32):
+            versions = [_version(date(2025, 1, 1), close_day, due_day)]
+            for offset in range(75):
+                day = date(2026, 1, 25) + timedelta(days=offset)
+
+                assert close_of_statement_paid_on(
+                    versions, day,
+                ) == _paid_by_brute_force(versions, day), (
+                    close_day, due_day, day,
+                )
+
+    @pytest.mark.parametrize("close_day", range(1, 32))
+    def test_with_one_terms_version_it_is_always_the_last_close(self, close_day):
+        """Terms that never change never move the answer off the last close before it."""
+        for due_day in range(1, 32):
+            versions = [_version(date(2025, 1, 1), close_day, due_day)]
+            for offset in range(75):
+                day = date(2026, 1, 25) + timedelta(days=offset)
+
+                assert close_of_statement_paid_on(versions, day) == cycle_containing(
+                    versions, day - timedelta(days=1),
+                ).opens, (close_day, due_day, day)
+
+    @pytest.mark.parametrize(
+        ("before", "after"),
+        [((20, 19), (5, 6)), ((31, 30), (1, 2)), ((5, 28), (28, 5)),
+         ((15, 14), (16, 15)), ((28, 1), (2, 31)), ((5, 27), (20, 15)),
+         ((31, 31), (20, 5))],
+    )
+    def test_a_change_of_close_and_due_day_agrees(self, before, after):
+        """Across a change of both days, from every day around the change."""
+        for changes_on in (date(2026, 1, 10), date(2026, 1, 21), date(2026, 3, 1)):
+            versions = [
+                _version(date(2025, 1, 1), *before),
+                _version(changes_on, *after),
+            ]
+            for offset in range(150):
+                day = date(2025, 12, 15) + timedelta(days=offset)
+
+                assert close_of_statement_paid_on(
+                    versions, day,
+                ) == _paid_by_brute_force(versions, day), (
+                    before, after, changes_on, day,
+                )
+
+    @pytest.mark.parametrize(
+        ("before", "after"),
+        [((20, 19), (5, 6)), ((31, 30), (1, 2)), ((5, 28), (28, 5)),
+         ((15, 14), (16, 15)), ((28, 29), (28, 29)), ((5, 27), (20, 15))],
+    )
+    def test_every_due_date_leaves_no_statement_due_by_it_uncovered(self, before, after):
+        """Each date the schedule yields pays the last to close of all due by that date.
+
+        So a statement fallen due holds nothing the row does not ask for, and the row
+        asks for no statement still to fall due.
+        """
+        versions = [
+            _version(date(2025, 1, 1), *before),
+            _version(date(2026, 3, 1), *after),
+        ]
+        schedule = DueDateSchedule.of(versions)
+        days = _take_through(
+            schedule.on_or_after(date(2025, 6, 1)), date(2027, 6, 1),
+        )
+
+        for day in days:
+            paid = close_of_statement_paid_on(versions, day)
+            due_by_then = [
+                window.closes
+                for window in statement_sequence(
+                    versions, day - timedelta(days=100), day - timedelta(days=1),
+                )
+                if due_date_for(versions, window.closes) <= day
+            ]
+
+            assert paid == max(due_by_then), (before, after, day)

@@ -334,7 +334,7 @@ class TestReaderParallelRunAgainstResolver:
 
             # The sweep: identities, per-entry balance, trial balance, and the
             # completeness guarantee that now covers the early settle.
-            _assert_loan_reconciles(loan, scenario_id, frozen)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_scalar_reader_diverges_by_the_exact_principal_delta_off_schedule(
         self, app, db, seed_user, seed_periods,
@@ -464,7 +464,7 @@ class TestReaderParallelRunAgainstResolver:
             # The reader jumps to the verified value; the resolver reseeds to it.
             assert reader == Decimal("95000.00")
             assert reader == resolver
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_reader_bounds_confirmed_postings_at_the_year_boundary(
         self, app, db, bare_user,
@@ -517,7 +517,7 @@ class TestReaderParallelRunAgainstResolver:
             reader_both = _posted_balance(loan.id, scenario_id, _AS_OF)
             assert reader_both == _resolver_balance(loan.id, scenario_id, _AS_OF)
             assert reader_both < reader_dec
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_reader_is_scenario_scoped_and_none_when_unopened(
         self, app, db, seed_user, seed_periods,
@@ -584,8 +584,8 @@ class TestReaderParallelRunAgainstResolver:
             assert stored_loan_balance_map(
                 loan.id, unopened.id, seed_periods,
             ) is None
-            _assert_loan_reconciles(loan, baseline.id, _AS_OF)
-            _assert_loan_reconciles(loan, whatif.id, _AS_OF)
+            _assert_loan_reconciles(loan, baseline.id)
+            _assert_loan_reconciles(loan, whatif.id)
 
     def test_biweekly_due_month_collision_reconciles_and_only_row_dates_differ(
         self, app, db, seed_user, seed_periods,
@@ -662,7 +662,7 @@ class TestReaderParallelRunAgainstResolver:
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             reader = _posted_balance(loan.id, scenario_id)
             assert ledger == reader
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
             # Attribution, DISPLAY rows: the confirmed view keeps BOTH rows at the
             # true February due date; the resolver replay redistributes the second

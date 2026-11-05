@@ -396,9 +396,7 @@ def _posted_period_map(
     return result
 
 
-def _assert_completeness(
-    loan_account_id: int, scenario_id: int, as_of: date
-) -> None:
+def _assert_completeness(loan_account_id: int, scenario_id: int) -> None:
     """Assert every settled payment that owes a correction has one.
 
     Plan 8.3: for each settled payment (the split walk's output -- since the R1
@@ -441,9 +439,7 @@ def _assert_completeness(
             )
 
 
-def _assert_loan_reconciles(
-    loan, scenario_id: int, as_of: date
-) -> None:
+def _assert_loan_reconciles(loan, scenario_id: int) -> None:
     """Assert a loan's whole ledger reconciles: three-way + completeness + trial.
 
     The production-wide sweep run after each fixture's mutations (plan 8.3 / 8.4 /
@@ -513,7 +509,7 @@ def _assert_loan_reconciles(
         f"settled_transfer_effect {income_reader} - corrections {per_loan}"
     )
     # (d) completeness.
-    _assert_completeness(loan_id, scenario_id, as_of)
+    _assert_completeness(loan_id, scenario_id)
     # (e) the store's per-entry balance + the read's trial balance.
     assert entries_violating_balance() == []
     assert trial_balance(_db.session) == Decimal("0")

@@ -107,7 +107,7 @@ class TestOracleIsNotVacuous:
             # re-derivation above).  ``match`` pins arm (a)'s message: the read
             # follows the tampered record, and only the store does not.
             with pytest.raises(AssertionError, match="account_posting_total"):
-                _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+                _assert_loan_reconciles(loan, scenario_id)
 
     def test_the_superseding_invariant_catches_a_wrong_read(
         self, app, db, seed_user, seed_periods, monkeypatch,
@@ -127,7 +127,7 @@ class TestOracleIsNotVacuous:
             loan = _make_loan(seed_user)
             _settle(seed_user, loan, seed_periods[_P1], amount=Decimal("1000.00"))
             db.session.commit()
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
             assert _per_loan_correction_net(
                 loan.id, scenario_id,
             ) == Decimal("100500.00")
@@ -141,7 +141,7 @@ class TestOracleIsNotVacuous:
                 loan.id, scenario_id,
             ) == Decimal("0.00")
             with pytest.raises(AssertionError, match="non-principal corrections"):
-                _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+                _assert_loan_reconciles(loan, scenario_id)
 
     def test_the_trial_balance_catches_a_wrong_read(
         self, app, db, seed_user, seed_periods, monkeypatch,
@@ -280,4 +280,4 @@ class TestOracleIsNotVacuous:
 
             # ...yet the structural sweep is (by design) blind to the split value
             # and STILL reconciles: per_loan and the loan leg both shifted by $10.
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)

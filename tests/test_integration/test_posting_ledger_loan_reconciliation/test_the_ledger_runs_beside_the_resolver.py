@@ -181,7 +181,7 @@ class TestParallelRunAgainstResolver:
             assert len(
                 loan_correction_entries(db.session, xfer.id, loan.id),
             ) == 1
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_tracking_start_opening_matches_resolver(
         self, app, db, seed_user, seed_periods,
@@ -213,7 +213,7 @@ class TestParallelRunAgainstResolver:
             # Opened at the tracking-start 100000, so the balance is far below
             # the 250000 origination -- proving the walk did NOT seed from it.
             assert ledger < _ORIGINATION_PRINCIPAL
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_on_schedule_multi_payment_matches_resolver(
         self, app, db, seed_user, seed_periods,
@@ -240,7 +240,7 @@ class TestParallelRunAgainstResolver:
             ledger = _ledger_balance(loan.id, scenario_id)
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             assert ledger == resolver
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_short_payment_diverges_and_ledger_owes_more(
         self, app, db, seed_user, seed_periods,
@@ -272,7 +272,7 @@ class TestParallelRunAgainstResolver:
             # They DIVERGE, and the ledger (short paydown) owes MORE.
             assert ledger != resolver
             assert resolver < ledger
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_extra_principal_diverges_and_ledger_owes_less(
         self, app, db, seed_user, seed_periods,
@@ -303,7 +303,7 @@ class TestParallelRunAgainstResolver:
             # They DIVERGE, and the ledger (extra paydown) owes LESS.
             assert ledger != resolver
             assert ledger < resolver
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_arm_rate_step_matches_a_hand_computed_post_step_balance(
         self, app, db, seed_user, seed_periods,
@@ -358,7 +358,7 @@ class TestParallelRunAgainstResolver:
             # The resolver books scheduled principal at each rate; short payments
             # mean it owes LESS -- divergence survives the rate step.
             assert resolver < ledger
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_pre_anchor_payment_is_correctly_summed_under_genesis(
         self, app, db, seed_user, seed_periods,
@@ -464,7 +464,7 @@ class TestSupersedesCashInvariantForLoans:
             # -250000 + true-up +150000)).
             assert non_principal == Decimal("100500.00")
             assert linked == cash_effect - non_principal
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -528,7 +528,7 @@ class TestRichFixtureFullSweep:
                 .filter_by(loan_account_id=loan.id)
                 .count()
             ) == 4
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -577,8 +577,8 @@ class TestScenarioAndOwnerIsolation:
             assert account_net(
                 _db.session, loan.id, whatif.id,
             ) == Decimal("-99500.00")
-            _assert_loan_reconciles(loan, baseline.id, _AS_OF)
-            _assert_loan_reconciles(loan, whatif.id, _AS_OF)
+            _assert_loan_reconciles(loan, baseline.id)
+            _assert_loan_reconciles(loan, whatif.id)
 
     def test_two_owners_reconcile_independently(
         self, app, db, seed_user, seed_second_user, seed_periods,
@@ -632,8 +632,8 @@ class TestScenarioAndOwnerIsolation:
                 for posting in entry.postings:
                     assert posting.ledger_account.user_id == entry.user_id
 
-            _assert_loan_reconciles(loan1, scenario1, _AS_OF)
-            _assert_loan_reconciles(loan2, scenario2, _AS_OF)
+            _assert_loan_reconciles(loan1, scenario1)
+            _assert_loan_reconciles(loan2, scenario2)
 
 
 # ---------------------------------------------------------------------------
@@ -683,7 +683,7 @@ class TestBackfillEqualsGoForward:
             assert forward_linked == Decimal("-98997.50")
             # Interest (500 + 497.50) + opening-equity legs (+100000).
             assert forward_per_loan == Decimal("100997.50")
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
             # Reproduce the pre-wiring state (no loan postings), then backfill.
             _clear_all_loan_postings()
@@ -694,7 +694,7 @@ class TestBackfillEqualsGoForward:
             # The backfilled nets equal the go-forward nets, and the sweep ties.
             assert stored_account_net(loan.id, scenario_id) == forward_linked
             assert stored_per_loan_net(loan.id, scenario_id) == forward_per_loan
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_reader_reads_none_before_backfill_then_matches_resolver_after(
         self, app, db, seed_user, seed_periods,

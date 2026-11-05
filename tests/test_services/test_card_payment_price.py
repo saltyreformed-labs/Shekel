@@ -149,8 +149,8 @@ def _spend(seed_user, card, period, amount, on):
 def _spent(seed_user, card, period, amount, on):
     """A purchase of *amount* on *card*, recorded as moved on *on*, committed.
 
-    What a pass held after *on* reads as money gone.  A projected purchase dated
-    before that pass has not happened and lands tomorrow (ruling R-G).
+    What a pass held after *on* reads as money gone, the bank having been seen to
+    take it, where :func:`_spend` is the row counted from its date (ruling plan#2926).
     """
     add_txn(
         db.session, seed_user, period, "Groceries", Decimal(amount),

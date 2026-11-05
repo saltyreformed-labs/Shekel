@@ -32,19 +32,20 @@ so checking's leg, the card's leg, the grid cell and the popover read one figure
 pay, because each purchase has its own due date (ruling plan#2888).  So a later
 charge cannot lift a row back up to its statement.
 
-**An unmarked row dated by that true-up is not in Y**, because a balance read off
-the website already holds money sent and not yet marked.  A row this rule has
-priced is the exception: its figure was worked out from that true-up, and the
-money is still to leave, so the next row reads it.  This reaches the ceiling only:
-the fold still lands such a row after the true-up (ruling R-G), so a rule's day
-after it reads that money as arrived.
+**An unmarked row dated by that true-up is inside it, in the fold itself**, because
+a balance read off the website already holds money sent and not yet marked
+(:func:`~._cash_plan._day_it_counts_from`), so A and B read one figure and the rule
+carries no exception for it.  A row this rule has priced stays outside: its figure
+was worked out from that true-up, and the money is still to leave, so the next row
+reads it.
 
 **Which money a row counts follows its repeat, never its amount.**  An each-payday
 row counts money dated anywhere in its own paycheck, because its date is only the
 paycheck's: a one-off in that paycheck shrinks the row wherever in it the one-off
 falls, and the paycheck's total stays what the card owes.  Every other row, a
 due-date row above all, counts money dated on or before its own day, because that
-day is a deadline: Dec 18's $100 does not count against a Dec 15 row (R-CC22).  So
+day is a deadline: money dated Dec 18 does not count against a Dec 15 row (R-CC22),
+whichever paycheck it is filed in.  So
 a payment on the close day counts and one after the due date does not; an earlier
 row paid late is not paid twice; and a purchase on the row's own day rolls to the
 next row.  In the everything-on-the-card amount, that makes the next payday after
@@ -80,10 +81,10 @@ A row paid late still counts from its own date, so it is not paid twice, and a
 row paid early counts from the day the money arrived, for the same reason.  A
 refund under an expense row is dated the day it was made, in flight or posted: the
 row it came back to was budgeted for something else, so that row's date says nothing
-about it.  Posting it sets only the day it joins the balance, so no row reads
-differently unless a true-up was stated on or after the day it was made: a refund
-posted by then is inside that balance, and the fold lands one in flight after it
-(ruling R-G).
+about it.  In flight it joins the balance the day it was made, like any swipe on a
+card; posted, the day it posted.  So a row reads differently only where a true-up
+falls between the two: one in flight is inside that balance, and one posted after it
+comes on top, as any movement dated after a true-up does (ruling R-FL).
 
 **A row outside the plan answers too**, because a budget figure is asked of every
 status (:func:`~app.services.cash_ledger.amounts_by_key`): by the same rule, its
@@ -116,13 +117,18 @@ from app.services.card_statement import (
     minimum_payment,
 )
 from app.services.card_terms import load_card_term_versions
-from app.services.cash_ledger import CashLedgerWalk, CashSourceFact, sum_projected
+from app.services.cash_ledger import (
+    CashLedgerWalk,
+    CashSourceFact,
+    InFlightMovement,
+    sum_projected,
+)
 from app.services.liability_sign import owed
 from app.services.pay_calendar import FiledRow, PayCalendar
 from app.services.transfer_legs import TransferLeg
 from app.utils.money import ZERO
 
-from ._cash_plan import _CashPlan, _WorkedOutRow, _planned_day
+from ._cash_plan import _CashPlan, _PlanItem, _WorkedOutRow, _planned_day
 from ._fold import sample_cumulative
 
 _ONE_DAY = timedelta(days=1)
@@ -137,21 +143,18 @@ class _Credit:
         dated_on: The day it counts from: by the last day a row counts
             (:meth:`CardPayments._last_day_counted`), it can shrink that row.
         held_from: The day it joins the card's running total: after a day the
-            rule reads, it is not yet inside that day's balance.  Never before
-            :attr:`dated_on`.
+            rule reads, it is not yet inside that day's balance.  Before
+            :attr:`dated_on` only for a transfer dated past its paycheck, whose legs
+            land at that paycheck's clamp.
         amount: What it brings in, positive.
         transfer_id: The transfer it is a side of, ``None`` for a plan row's: a
             row's own money is never a credit against itself.
-        is_unmarked: Whether it is a plan row the owner has not marked, which a
-            true-up on or after its date is taken to hold already.  ``False``
-            for recorded money, and for a row this rule priced.
     """
 
     dated_on: date
     held_from: date
     amount: Decimal
     transfer_id: "int | None"
-    is_unmarked: bool
 
 
 class _CardTerms:
@@ -184,6 +187,24 @@ class _CardTerms:
                 "card's terms first."
             )
         return versions
+
+
+def _own_day(item: _PlanItem, calendar: PayCalendar) -> date:
+    """Return the day a planned credit says it falls, its paycheck's clamp aside.
+
+    Money dated Jan 28 does not count against a Jan 27 row whichever paycheck it
+    is filed in, though the fold lands a transfer's legs at that paycheck's clamp.
+
+    Args:
+        item: A plan item.
+        calendar: The owner's pay calendar.
+
+    Returns:
+        Its own date, or the day :func:`~._cash_plan._planned_day` gives one with
+        none.
+    """
+    own = None if isinstance(item, InFlightMovement) else item.due_date
+    return own if own is not None else _planned_day(item, calendar)
 
 
 def _money_coming(
@@ -326,7 +347,6 @@ def _recorded_credits(
             held_from=fact.settled_on,
             amount=fact.delta,
             transfer_id=fact.transfer_id,
-            is_unmarked=False,
         )
         for fact in walk.source_facts
         if fact.delta > ZERO
@@ -346,21 +366,29 @@ def _planned_credits(plan: _CashPlan, calendar: PayCalendar) -> "list[_Credit]":
     Returns:
         One :class:`_Credit` per planned item worth more than zero.
     """
+    dated = [
+        (item, _own_day(item, calendar), lands_on)
+        for lands_on, items in plan.by_day.items()
+        for item in items
+    ]
+    dated.extend(
+        (item, day, day)
+        for day, items in plan.on_their_dates.items()
+        for item in items
+    )
     money_in: "list[_Credit]" = []
-    for lands_on, items in plan.by_day.items():
-        for item in items:
-            income, expense = sum_projected([item], plan.basis)
-            if income - expense > ZERO:
-                money_in.append(_Credit(
-                    dated_on=_planned_day(item, calendar),
-                    held_from=lands_on,
-                    amount=income - expense,
-                    transfer_id=(
-                        item.transfer.id if isinstance(item, TransferLeg)
-                        else None
-                    ),
-                    is_unmarked=True,
-                ))
+    for item, dated_on, held_from in dated:
+        income, expense = sum_projected([item], plan.basis)
+        if income - expense > ZERO:
+            money_in.append(_Credit(
+                dated_on=dated_on,
+                held_from=held_from,
+                amount=income - expense,
+                transfer_id=(
+                    item.transfer.id if isinstance(item, TransferLeg)
+                    else None
+                ),
+            ))
     return money_in
 
 
@@ -425,7 +453,6 @@ class CardPayments:
                     transfer, row.dated_on, row.lands_on, list(priced.values()),
                 ),
                 transfer_id=transfer.id,
-                is_unmarked=False,
             )
         return priced
 
@@ -535,12 +562,7 @@ class CardPayments:
         restated_on = self._last_true_up(before_landing)
         left_from = max(valued_on, restated_on)
         left_now = self._owed_without(xfer, left_from, priced) - _money_coming(
-            [
-                credit for credit in others
-                if not (credit.is_unmarked and credit.dated_on <= restated_on)
-            ],
-            left_from,
-            max(last_counted, before_landing),
+            others, left_from, max(last_counted, before_landing),
         )
         return max(_ZERO_MONEY, min(asked, left_now))
 

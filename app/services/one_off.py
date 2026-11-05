@@ -169,7 +169,8 @@ def due_date_for(stated: "date | None", period: DerivedPeriod) -> date:
     The one statement of the rule for a row this module places: the owner's
     stated day, else the paycheck's START.  Balance-neutral by construction
     -- ``DerivedPeriod.attribution_day`` already budgets an undated item to
-    its paycheck's start -- and the day amount rule 3 prices the row on.
+    its paycheck's start -- but on a card, where a row counts from this date
+    (ruling plan#2926), and the day amount rule 3 prices the row on.
 
     Args:
         stated: The day the owner (or the bank) said it falls, or ``None``.

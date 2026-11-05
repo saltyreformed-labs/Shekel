@@ -119,9 +119,10 @@ class AccountAnchorCorrection:
         target_balance: What the linked ledger must read once this correction
             posts -- the asserted balance, or the opening equity.
         ledger_before: The records' running total JUST BEFORE this correction
-            -- the read fold's
+            -- the replay's
             :attr:`~app.services.balance_at.CashAnchorCorrection.balance_before`
-            for an assertion, the opening equity plus every source this
+            for an assertion, over the records alone (a card's read fold also
+            lays its unmarked rows on it), the opening equity plus every source this
             assertion or an earlier one cleared on top of the prior
             assertions' resets (plan task plan#2525).  ``Decimal("0.00")`` for
             the opening, which by definition precedes every posting.

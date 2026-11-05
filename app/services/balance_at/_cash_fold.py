@@ -24,7 +24,8 @@ branch.**  Every date is answered off a single running total
   cannot drift).
 * the **PLANNED** steps -- the still-Projected rows, each landing at
   ``max(its attribution date, as_of + 1 day)`` (ruling R-G: "a plan cannot have
-  already happened").  The cash twin of the loan timeline's projections
+  already happened"), but for a bill on a card, which counts from its own date
+  (ruling plan#2926).  The cash twin of the loan timeline's projections
   (:mod:`app.services.balance_at._loan_stream`).  See
   :mod:`._cash_plan`.
 
@@ -73,7 +74,8 @@ LATEST assertion and sums only the still-Projected rows forward, so:
   assertion is replayed, so a past date reads the balance in force THEN.
 * an overdue-but-still-Projected bill is absorbed by the next re-anchor and
   silently deleted from the projection (on real data, one re-anchor every 2.3
-  days).  Here R-G clamps it forward instead.
+  days).  Here R-G clamps it forward instead, but for a bill on a card, which a
+  true-up is taken to hold (ruling plan#2926).
 
 **TOTAL over every date and every account.**  No date is refused and no account
 is: an account with no assertion history folds from a zero seed over whatever
@@ -90,7 +92,10 @@ cash-flow view, whose balance must reconcile with the transaction rows rendered
 beside it whatever the account.  What keeps a LOAN out of that view is a gate at
 the SOURCE -- ``resolve_grid_account`` (plan step A1) and ``resolve_analytics_cash_flow_set``
 (X-a1; ``resolve_analytics_account`` until CC-4-3) -- not a refusal in here, which would
-reintroduce exactly the partiality above.
+reintroduce exactly the partiality above.  **The one thing it asks of an account's
+type** is whether it is revolving, and only to date a plan row
+(:mod:`._cash_plan`, ruling plan#2926): a card still classifies PLAIN and rides this
+fold, and the walk itself stays kind-blind.
 
 **WIRED since plan step X-c2b2.**  Every cash figure the app renders is one of
 these three readings: the seam's three cash-flow entries
@@ -251,6 +256,13 @@ class AssembledCashFold:  # pylint: disable=too-many-instance-attributes
     calendar: PayCalendar
     card_payments: CardPayments
 
+    @property
+    def recorded_steps(self) -> "list[tuple[date, Decimal]]":
+        """What the account's books hold, ascending by date (:func:`_recorded_steps`)."""
+        return sorted(
+            _recorded_steps(self.walk, self.plan), key=lambda step: step[0],
+        )
+
     def require_account(self, account: Account) -> None:
         """Refuse an *account* these steps were not assembled for.
 
@@ -392,7 +404,8 @@ def _assemble(
 
     Args:
         account: The account to value.  Its ``id`` scopes the walk and the plan;
-            its KIND is not consulted (ruling R-J).  Must be attached to
+            its KIND is not consulted (ruling R-J), and its type is asked only
+            whether it is revolving (:mod:`._cash_plan`).  Must be attached to
             ``db.session``.
         basis: The read pass's
             :class:`~app.services.cash_ledger.AmountBasis`
@@ -425,27 +438,27 @@ def _assemble(
             hold (:meth:`~app.services.pay_calendar.PayCalendar.require_period`).
     """
     walk = walk_cash_ledger(account.id, basis.scenario_id)
+    # No row's WORTH reads the walk since plan step X-f3b (ruling **R-FM**): a
+    # purchase carrying a posting day is a movement in the walk itself, so the
+    # reservation reads the purchase and the clearing rule is only ever asked
+    # where the money is replayed.  A card's plan reads two of its DATES.
+    plan = _cash_plan(account, basis, as_of, calendar, walk)
     # The RESET policy, applied ONCE for every reader below (plan step
     # X-f3c-1).  It is what the walk itself used to do; it moved out because
     # what an assertion does to a running total differs by account kind
-    # (ruling R-FO) and the walk may not consult one (ruling R-J).
-    corrections = assertion_corrections(walk)
-    # The plan load is INDEPENDENT of the walk since plan step X-f3b (ruling
-    # **R-FM**): it took the walk so the entry reservation could ask which of an
-    # envelope's purchases a declared balance already contained, and a purchase
-    # carrying a posting day is now a movement in the walk itself, so the
-    # reservation reads the purchase and the clearing rule is only ever asked
-    # where the money is replayed.
-    plan = _cash_plan(account, basis, as_of, calendar)
+    # (ruling R-FO) and the walk may not consult one (ruling R-J).  After the
+    # plan, because a true-up includes a card's rows dated by it (ruling
+    # plan#2926).
+    corrections = assertion_corrections(walk, plan.nets_on_their_dates.items())
     day_nets = _planned_day_nets(plan)
-    seed, steps = _running_steps(walk, corrections, day_nets)
+    seed, steps = _running_steps(walk, plan, corrections, day_nets)
     # A card's worked-out payments are priced off the running total WITHOUT
     # them, then join it (plan step credit_card:CC-6): each is a later step on
     # the same total, never a second producer's series.
     card_payments = CardPayments(account.id, seed, steps, walk, plan, calendar)
     if plan.worked_out:
         day_nets = card_payments.with_prices(day_nets)
-        seed, steps = _running_steps(walk, corrections, day_nets)
+        seed, steps = _running_steps(walk, plan, corrections, day_nets)
     return AssembledCashFold(
         account_id=account.id,
         scenario_id=basis.scenario_id,
@@ -509,9 +522,11 @@ class CashDayFacts:
             quantized -- the same figure :func:`balances_at` samples,
             from the same running total.
         recorded: What the account's OWN settled rows moved that day
-            (:attr:`~app.services.cash_ledger.CashSourceFact.delta`, summed).
-            The only one of the three that is money the app believes actually
-            changed hands on that day.
+            (:attr:`~app.services.cash_ledger.CashSourceFact.delta`, summed), and
+            on a card its unmarked rows counted from that date, past or future
+            (ruling plan#2926; :attr:`AssembledCashFold.recorded_steps`).  On a
+            day that has passed, the only one of the three that is money the app
+            takes to have changed hands then.
         asserted: What BALANCE ASSERTIONS moved that day -- the jump each reset
             booked, **every assertion included, the first one too** (plan step
             X-f3c-2a).  The opening used to contribute nothing by construction,
@@ -523,9 +538,10 @@ class CashDayFacts:
             wherever a BACK-DATED assertion disagrees with the recorded
             opening.
         planned: What still-Projected rows contribute that day, each landing at
-            ``max(its attribution date, as_of + 1)`` (ruling R-G).  Zero for
-            every day at or before *as_of*, which is what lets a reader
-            comparing PAST days against an outside record ignore it.
+            ``max(its attribution date, as_of + 1)`` (ruling R-G), and a card's
+            priced payments the same.  Zero for every day at or before *as_of*,
+            which is what lets a reader comparing PAST days against an outside
+            record ignore it.
     """
 
     balance: Decimal
@@ -605,8 +621,8 @@ def day_facts(
 
     **The three components sum to the day's change in the running total**, and
     that is arithmetic rather than a claim: ``_running_steps`` assembles exactly
-    ``dated_deltas`` (the source facts) plus this fold's assertion corrections
-    plus the planned nets, so a day's steps ARE these three sums.  The opening
+    :func:`_recorded_steps` plus this fold's assertion corrections plus the
+    planned nets, so a day's steps ARE these three sums.  The opening
     equity is in the SEED, not in any day's steps, so it moves no day (plan step
     X-f3c-2a; before it a compensator had to cancel the opening correction on
     its own day to achieve the same thing).  ``balance`` is quantized where the
@@ -615,9 +631,7 @@ def day_facts(
     than differencing two rounded balances.
     """
     balances = sample_cumulative(folded.seed, folded.steps, days)
-    recorded = _day_sums(
-        [(fact.settled_on, fact.delta) for fact in folded.walk.source_facts]
-    )
+    recorded = _day_sums(folded.recorded_steps)
     # EVERY assertion's correction, the first included (plan step X-f3c-2a).
     # The opening's used to be excluded because the fold swallowed it into its
     # seed and cancelled it on its own day; with the seed a stored fact the
@@ -700,14 +714,36 @@ def period_balances(
     )
 
 
+def _recorded_steps(
+    walk: CashLedgerWalk, plan: _CashPlan,
+) -> "list[tuple[date, Decimal]]":
+    """Return what the books hold: the walk's movements and a card's rows on their dates.
+
+    **The one spelling**, read by the running total, a day's facts, the cash clock
+    and the outstanding difference, so none can hold a different set.  A card's
+    unmarked row is here because nothing further need be recorded for it (ruling
+    plan#2926); the posting writer stores it only once it is marked.
+
+    Args:
+        walk: The account's walk.
+        plan: The account's plan.
+
+    Returns:
+        ``(day, delta)`` pairs in no promised order.
+    """
+    return [*dated_deltas(walk), *plan.nets_on_their_dates.items()]
+
+
 def _actual_steps(
-    walk: CashLedgerWalk, corrections: "list[CashAnchorCorrection]",
+    walk: CashLedgerWalk,
+    plan: _CashPlan,
+    corrections: "list[CashAnchorCorrection]",
 ) -> "tuple[Decimal, list[tuple[date, Decimal]]]":
     """Return the ``(seed, steps)`` the RECORDED facts contribute.
 
-    The seed is the account's stored OPENING EQUITY and the steps are the leaf's
-    :func:`app.services.cash_ledger.dated_deltas` plus the assertion RESETS this
-    fold has chosen to apply; nothing is re-keyed, re-valued or compensated.
+    The seed is the account's stored OPENING EQUITY and the steps are
+    :func:`_recorded_steps` plus the assertion RESETS this fold has chosen to
+    apply; nothing is re-keyed, re-valued or compensated.
     That restraint is deliberate: the same re-key is what the posting writer
     consumes at plan step X-d, and a second statement of "which day does this
     event count from, and for how much" is precisely how the fold and the posted
@@ -750,6 +786,7 @@ def _actual_steps(
         walk: The account's :class:`~app.services.cash_ledger.CashLedgerWalk`,
             whose :attr:`~app.services.cash_ledger.CashLedgerWalk.opening`
             carries the level this seeds from.
+        plan: The account's plan, for a card's rows on their dates.
         corrections: Its assertion corrections
             (:func:`~._assertions.assertion_corrections`), replayed once by
             :func:`_assemble` and shared with every other reader of this fold.
@@ -763,7 +800,7 @@ def _actual_steps(
         Within-day order is immaterial -- ``sample_cumulative`` reads a day's
         boundary AFTER every step on it, so only the day's SUM is observable.
     """
-    steps = dated_deltas(walk)
+    steps = _recorded_steps(walk, plan)
     steps.extend(
         (correction.observed_on, correction.delta)
         for correction in corrections
@@ -773,6 +810,7 @@ def _actual_steps(
 
 def _running_steps(
     walk: CashLedgerWalk,
+    plan: _CashPlan,
     corrections: "list[CashAnchorCorrection]",
     day_nets: "dict[date, Decimal]",
 ) -> "tuple[Decimal, list[tuple[date, Decimal]]]":
@@ -786,6 +824,7 @@ def _running_steps(
 
     Args:
         walk: The account's :class:`~app.services.cash_ledger.CashLedgerWalk`.
+        plan: The account's plan, for a card's rows on their dates.
         corrections: Its assertion corrections
             (:func:`~._assertions.assertion_corrections`).
         day_nets: The PLANNED tier's per-day nets
@@ -796,7 +835,7 @@ def _running_steps(
         ``(seed, steps)`` with *steps* ASCENDING by date, which is what
         :func:`~app.services.balance_at._fold.sample_cumulative` requires.
     """
-    seed, steps = _actual_steps(walk, corrections)
+    seed, steps = _actual_steps(walk, plan, corrections)
     steps.extend(day_nets.items())
     steps.sort(key=lambda step: step[0])
     return seed, steps

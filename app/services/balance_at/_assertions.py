@@ -21,8 +21,9 @@ running total it is a policy about, and each fold applies what its own kind
 needs: :mod:`._cash_fold` for PLAIN, :mod:`._asset_fold` for the modelled kinds.
 
 **The POSTING writer reads this replay through the seam's public door** (plan
-task plan#2525).  Each of these corrections is what the writer books as a
-balanced journal entry, and it could not reach them here:
+task plan#2525).  Each of these corrections, measured against the records alone
+(a card's fold also passes it its unmarked rows, which the ledger does not hold), is
+what the writer books as a balanced journal entry, and it could not reach them here:
 ``account_posting_service`` importing ``balance_at._assertions`` is a
 private-module import in every spelling (W9910,
 :mod:`tools.pylint.shekel_checkers.package_privacy` -- no allowlist, and
@@ -50,6 +51,7 @@ Boundary discipline (``CLAUDE.md``): no Flask symbol, no query, no write; all
 money is :class:`~decimal.Decimal`.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -134,8 +136,25 @@ class CashAnchorCorrection:
         return self.anchor.anchor_balance - self.balance_before
 
 
+@dataclass(frozen=True)
+class _PlannedLine:
+    """One day of a card's rows counted from their dates, as the clearing rule asks.
+
+    A :class:`~app.services.cash_ledger.ClearableLine`: nothing has recorded a
+    statement showing a row the owner has not marked, so the date rule answers.
+
+    Attributes:
+        settled_on: The day the rows count from.
+        reconciled_by_id: Always ``None``.
+    """
+
+    settled_on: date
+    reconciled_by_id: None = None
+
+
 def assertion_corrections(
     walk: CashLedgerWalk,
+    planned_on_their_dates: "Iterable[tuple[date, Decimal]]" = (),
 ) -> list[CashAnchorCorrection]:
     """Replay *walk*'s facts under the RESET, returning one correction each.
 
@@ -210,8 +229,20 @@ def assertion_corrections(
     what the user declared and what the records hold is the RESIDUAL it
     displays -- and simply does not book them as steps.
 
+    **A true-up includes a card's unmarked row dated on or before it** (ruling
+    plan#2926).  Such a row is a step on the running total from its own date, so
+    the balance just before the reset holds it, and the reset then books the
+    difference from THAT rather than laying the row on top: typed $800 over an
+    unmarked $800 reads $800 and not $1,600.  The clearing rule is the same one a
+    recorded movement takes.  Only the read fold passes these
+    (:func:`~._cash_fold._assemble`): the stored ledger the posting writer books
+    (``ledger_lines._account_walk``) holds no plan, so its corrections are measured
+    against the records alone and it passes nothing.
+
     Args:
         walk: The account's :class:`~app.services.cash_ledger.CashLedgerWalk`.
+        planned_on_their_dates: ``(day, net)`` for a card's rows counted from
+            their dates (:attr:`~._cash_plan._CashPlan.nets_on_their_dates`).
 
     Returns:
         One :class:`CashAnchorCorrection` per assertion, in the walk's
@@ -220,10 +251,12 @@ def assertion_corrections(
     """
     coverage = walk.coverage
     cleared: dict[int, Decimal] = {}
-    for source in walk.source_facts:
-        anchor_id = coverage.clearing_anchor_id(source)
+    lines = [(source, source.delta) for source in walk.source_facts]
+    lines.extend((_PlannedLine(day), net) for day, net in planned_on_their_dates)
+    for line, amount in lines:
+        anchor_id = coverage.clearing_anchor_id(line)
         if anchor_id is not None:
-            cleared[anchor_id] = cleared.get(anchor_id, _ZERO_MONEY) + source.delta
+            cleared[anchor_id] = cleared.get(anchor_id, _ZERO_MONEY) + amount
 
     corrections: list[CashAnchorCorrection] = []
     # The books start at what the account HELD before its records begin, a

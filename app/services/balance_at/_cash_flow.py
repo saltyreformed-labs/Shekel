@@ -32,6 +32,7 @@ from app.models.account import Account
 from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
+    is_revolving,
 )
 from app.services.cash_ledger import CashOpeningFact
 from app.utils.dates import days_in_range, to_display_date
@@ -40,6 +41,7 @@ from app.utils.money import round_money
 from ._context import BalanceContext
 
 from . import _cash_fold
+from ._cash_plan import _rows_on_their_date
 from ._inputs import _require_scenario
 
 _ONE_DAY = timedelta(days=1)
@@ -346,6 +348,39 @@ def cash_daily_facts_series(
     )
 
 
+def rows_counted_from_their_date(
+    account: Account, ctx: BalanceContext, day: date,
+) -> "list[tuple[Decimal, str | None]]":
+    """Return a card's unmarked rows counted from *day*, each with its name.
+
+    The rows behind that part of a day's
+    :attr:`~._cash_fold.CashDayFacts.recorded` that no settled movement explains
+    (ruling plan#2926), so a reader listing what makes up a day's figure can list
+    all of it.
+
+    Args:
+        account: The account to read.  Must be session-attached.
+        ctx: The read pass's :class:`~app.services.balance_at.BalanceContext`.
+        day: The civil day.
+
+    Returns:
+        ``[(net, name), ...]``, signed as a movement is, without rows worth
+        nothing.  Empty on every account but a card.  A transfer's name can be
+        ``None``.
+
+    Raises:
+        BaselineMissingError: When ``ctx`` carries no scenario.
+        TypeError: When *day* is not a civil :class:`datetime.date`.
+    """
+    _require_scenario(ctx)
+    _require_civil_date("rows_counted_from_their_date", day=day)
+    # Asked first so a drill-down on checking does not assemble a fold for nothing:
+    # the page's other reads take the walk alone.
+    if not is_revolving(account):
+        return []
+    return _rows_on_their_date(_cash_fold.assembled_fold(account, ctx).plan, day)
+
+
 def records_balance_at(
     account: Account, ctx: BalanceContext, as_of: date,
 ) -> "Decimal | None":
@@ -407,7 +442,8 @@ def records_balance_at(
         as_of: The civil day to answer for.
 
     Returns:
-        The cent-quantized records-only ``Decimal``, or ``None`` when the
+        The cent-quantized records-only ``Decimal`` (on a card its unmarked rows
+        counted from their dates too, ruling plan#2926), or ``None`` when the
         account models a return and the question does not apply.
 
     Raises:

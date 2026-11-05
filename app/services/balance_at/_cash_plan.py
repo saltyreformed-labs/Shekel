@@ -12,6 +12,14 @@ the card's worked-out payment is priced beside this tier.  A plan is a job of
 its own, sharing one record with the fold's readers, and the dependency runs
 one way: :mod:`._cash_fold` imports this and this imports nothing of it.
 
+**A bill on a card counts from its date, marked or not** (ruling plan#2926).  The
+standing rule R-G lands an overdue row tomorrow because a plan cannot have already
+happened, which is right for checking, where the owner still has to pay it, and
+wrong for a card that pays the bill by itself.  So on an account whose type is
+revolving (:func:`~app.services.account_projection.is_revolving`) a row counts from
+its own date, whichever day the reader looks, and :func:`_day_it_counts_from` names
+what keeps R-G and why.  Checking and every other account land exactly as they did.
+
 Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes; all money is
 :class:`~decimal.Decimal`.
 """
@@ -20,11 +28,14 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
+from functools import cached_property
 
 from app.models.account import Account
 from app.models.transaction import Transaction
+from app.services.account_projection import is_revolving
 from app.services.cash_ledger import (
     AmountRule,
+    CashLedgerWalk,
     InFlightMovement,
     AmountBasis,
     planned_cash_rows,
@@ -33,6 +44,7 @@ from app.services.cash_ledger import (
 )
 from app.services.pay_calendar import FiledRow, PayCalendar
 from app.services.transfer_legs import TransferLeg, parent_of
+from app.utils.books_boundary import books_hold
 
 _PlanItem = Transaction | TransferLeg | InFlightMovement  # one plan item
 
@@ -85,7 +97,15 @@ class _CashPlan:
             the cash clock.  Empty when the account has no plan.  **A card's
             worked-out payments are NOT here** (plan step ``credit_card:CC-6``):
             their price is worked out off this very running total, so valuing
-            them with the rest would have the assembly ask itself.
+            them with the rest would have the assembly ask itself.  **Nor are
+            the rows in** :attr:`on_their_dates`.
+        on_their_dates: A card's rows that count from their own dates, keyed by
+            that date (ruling plan#2926; :func:`_day_it_counts_from`).  Apart
+            from :attr:`by_day` because they are what the books hold rather than
+            what is still to happen: they join the recorded steps
+            (:func:`~._cash_fold._recorded_steps`), and a true-up includes them
+            (:func:`~._assertions.assertion_corrections`).  Empty on every other
+            account.
         worked_out: Those payments, on the card that holds them, each with its
             two days (:mod:`._card_payment` prices them).  They stay in
             :attr:`rows`, because the period view reads rows after the fold
@@ -111,10 +131,20 @@ class _CashPlan:
     by_day: "dict[date, list[_PlanItem]]"
     basis: AmountBasis
     worked_out: "list[_WorkedOutRow]"
+    on_their_dates: "dict[date, list[_PlanItem]]"
+
+    @cached_property
+    def nets_on_their_dates(self) -> "dict[date, Decimal]":
+        """``{day: net}`` for :attr:`on_their_dates`, valued once per plan."""
+        return _nets_by_day(self.on_their_dates, self.basis)
 
 
 def _cash_plan(
-    account: Account, basis: AmountBasis, as_of: date, calendar: PayCalendar,
+    account: Account,
+    basis: AmountBasis,
+    as_of: date,
+    calendar: PayCalendar,
+    walk: CashLedgerWalk,
 ) -> _CashPlan:
     """Load the account's plan and key each row onto the day it lands on.
 
@@ -127,12 +157,14 @@ def _cash_plan(
     ``due_date``, falling back to
     its pay period's ``start_date``, clamped into that period's span -- the SAME
     rule the calendar groups its day cells by, so a flow's cell and the balance
-    line's step for it cannot land on different days.  That day is then clamped
+    line's step for it land on one day, but for a card's row whose own date falls
+    outside its paycheck (:func:`_day_it_counts_from`).  That day is then clamped
     UP to ``as_of + 1``: a plan cannot have already happened, so an overdue bill
     moves forward rather than being absorbed by the next assertion's reset.
     Rejected at the ruling: landing it on its nominal date, which on real data
     (one re-anchor every 2.3 days on Checking) silently deletes nearly every
-    unpaid past-due bill within days of its being entered.
+    unpaid past-due bill within days of its being entered.  Ruling plan#2926 takes
+    that landing for a card, where a true-up is taken to hold what is dated by it.
 
     **A movement IN FLIGHT lands on ``max(the day it happened, as_of + 1)``**
     (ruling **R-BAL77**): money already spent and not yet seen to leave, with
@@ -180,17 +212,15 @@ def _cash_plan(
     were attributed to -- and re-loading them for that would be two answers to
     "what is in this account's plan" a day apart from each other.
 
-    **It no longer takes the WALK, and plan step X-f3b is why.**  It did, for
-    one reason: a projected envelope's reservation had to know which of its
-    purchases a declared balance already contained, and that answer
-    (:attr:`~app.services.cash_ledger.CashLedgerWalk.coverage`) was read off the
-    facts :func:`~._cash_fold._assemble` had already loaded rather than by resolving the
-    account's assertions a second time.  Ruling **R-FM** dissolved the question:
-    a purchase carrying a recorded posting day is a cash movement of its OWN in
-    the walk, so the reservation asks the purchase and the clearing rule stays
-    where it is asked -- in the walk, about that movement.  One less argument,
-    and no shape in which the plan could be valued against a different account's
-    assertions than the walk replayed.
+    **What it reads of the WALK is two dates, and only on a card.**  The walk was
+    an argument once before, for a projected envelope's reservation, which had to
+    know which of its purchases a declared balance already contained.  Ruling
+    **R-FM** dissolved that (plan step X-f3b): a purchase carrying a recorded
+    posting day is a cash movement of its OWN in the walk, so the reservation asks
+    the purchase, and no row's WORTH reads the walk.  What a card's row needs is
+    WHEN: the day the books opened, because a row dated by then is already inside
+    the opening equity (ruling **R-HG**) and moves nothing, and the card's last
+    true-up (:func:`_stated_through`).
 
     Args:
         account: The account whose plan to load.
@@ -200,6 +230,7 @@ def _cash_plan(
             to.
         calendar: The OWNER's pay calendar, which each row's span is read
             from (:meth:`~app.services.pay_calendar.PayCalendar.require_period`).
+        walk: The account's walk, the same one the fold replays.
 
     Returns:
         The account's :class:`_CashPlan`; its ``rows`` and ``by_day`` are empty
@@ -212,21 +243,102 @@ def _cash_plan(
     """
     rows = planned_cash_rows(account.id, basis.scenario_id)
     if not rows:
-        return _CashPlan(rows=[], by_day={}, basis=basis, worked_out=[])
+        return _CashPlan(
+            rows=[], by_day={}, basis=basis, worked_out=[], on_their_dates={},
+        )
 
     not_before = as_of + _ONE_DAY
+    stated_through = _stated_through(walk) if is_revolving(account) else None
     by_day: "dict[date, list[_PlanItem]]" = defaultdict(list)
+    on_their_dates: "dict[date, list[_PlanItem]]" = defaultdict(list)
     worked_out: "list[_WorkedOutRow]" = []
     for item in rows:
         dated_on = _planned_day(item, calendar)
         lands_on = max(dated_on, not_before)
         if _is_worked_out(item):
             worked_out.append(_WorkedOutRow(item, dated_on, lands_on))
-        else:
+            continue
+        counts_from = (
+            None if stated_through is None
+            else _day_it_counts_from(item, stated_through)
+        )
+        if counts_from is None:
             by_day[lands_on].append(item)
+        elif books_hold(walk.opening.opened_on, counts_from):
+            on_their_dates[counts_from].append(item)
     return _CashPlan(
         rows=rows, by_day=dict(by_day), basis=basis, worked_out=worked_out,
+        on_their_dates=dict(on_their_dates),
     )
+
+
+def _stated_through(walk: CashLedgerWalk) -> date:
+    """Return the last day a card's balance has been stated for.
+
+    Its latest true-up, read off the walk's order
+    (:func:`~app.services.cash_ledger.cash_anchor_facts` loads ascending by
+    business date), or the day its books opened where it has none.
+
+    Args:
+        walk: The card's walk.
+
+    Returns:
+        That day.
+    """
+    if walk.anchor_facts:
+        return walk.anchor_facts[-1].observed_on
+    return walk.opening.opened_on
+
+
+def _day_it_counts_from(item: _PlanItem, stated_through: date) -> "date | None":
+    """Return the day a plan item on a card counts from, or ``None`` for R-G's.
+
+    Ruling plan#2926, item by item:
+
+    * **A dated row counts from its own date**, never its paycheck's clamp
+      (:meth:`~app.services.pay_calendar.DerivedPeriod.attribution_day`), because
+      the date decides the statement, the due date and the interest (ruling
+      plan#2910).  Bought Jan 14 with the row in Jan 16's paycheck, the clamp would
+      read Jan 16 and pay it a paycheck late.  The grid's two clocks already carry
+      a row whose money falls outside its column (``period_timing``).
+    * **A swipe or a refund in flight counts from the day it happened**, decided
+      under R-BAL207: it has happened, and only the bank's posting is still to
+      come.  The cost is a posting dated after a true-up that already held it: the
+      posting comes on top, by the same date rule a recorded movement takes (ruling
+      R-FL), until the true-up is restated.
+    * **An envelope's unspent budget keeps R-G**, decided under R-BAL207: money not
+      yet spent has no day it was spent on, so a true-up cannot hold it.  Its swipes
+      are the in-flight items above.  The cost: left open past its paycheck, the
+      unspent budget lands tomorrow on each read, so it moves to a later statement
+      and a later payment row until the envelope is closed.
+    * **An undated row keeps R-G**: it has no date to count from, and its
+      ``due_date`` of ``None`` says so.
+    * **A transfer keeps R-G until a true-up is dated on or after its own date**,
+      then counts from that date, so that true-up holds it.  Until then both its
+      legs land together, so money is never off checking before it reaches the card
+      or on the card before it leaves checking.  Once a balance read off the card's
+      website is stated, that balance holds money sent by then, marked or not
+      (ruling plan#2887), so landing the leg again would take it off twice: $800
+      owed, $200 sent Jan 5, $600 stated Jan 10, and the next payment is $600
+      rather than $400.  Checking's leg still lands tomorrow.  The cost: if the $200
+      had not really gone, the owner states $800, the row reads $800 and checking
+      reads $200 low until he marks the transfer with a later day than the true-up;
+      a true-up closes its own day, so money moved later that same day is inside it.
+
+    Args:
+        item: A plan item on a card, not a worked-out payment.
+        stated_through: The last day the card's balance was stated for.
+
+    Returns:
+        The day it counts from, or ``None`` where it lands by ruling R-G.
+    """
+    if isinstance(item, InFlightMovement):
+        return item.purchased_on
+    if item.due_date is None:
+        return None
+    if isinstance(item, TransferLeg):
+        return item.due_date if item.due_date <= stated_through else None
+    return None if item.tracks_purchases else item.due_date
 
 
 def _planned_day(item: _PlanItem, calendar: PayCalendar) -> date:
@@ -236,7 +348,8 @@ def _planned_day(item: _PlanItem, calendar: PayCalendar) -> date:
     flight has no due date and no attribution clamp, so it is dated the day it
     happened (ruling **R-BAL77**).  **One statement**, for the clamp above and
     for the card's rule, which needs a credit's date as well as its landing
-    day (:mod:`._card_payment`).
+    day (:mod:`._card_payment`).  A dated row on a card counts from its own date
+    instead (:func:`_day_it_counts_from`).
 
     Args:
         item: A plan item.
@@ -310,11 +423,49 @@ def _planned_day_nets(plan: _CashPlan) -> "dict[date, Decimal]":
     Returns:
         ``{day: net}`` -- one entry per day carrying at least one planned row
         in :attr:`_CashPlan.by_day`, valued as signed income-minus-expense.
-        ``{}`` for an account with no plan.  A card's worked-out payments join
-        these nets afterwards (:func:`~._cash_fold._assemble`).
+        ``{}`` for an account with no plan.  A card's rows on their own dates are
+        not in them (:attr:`_CashPlan.nets_on_their_dates`), and its worked-out
+        payments join afterwards (:func:`~._cash_fold._assemble`).
+    """
+    return _nets_by_day(plan.by_day, plan.basis)
+
+
+def _nets_by_day(
+    items_by_day: "dict[date, list[_PlanItem]]", basis: AmountBasis,
+) -> "dict[date, Decimal]":
+    """Return what each day's plan items are worth, income less expense.
+
+    Args:
+        items_by_day: The items, keyed by the day each counts on.
+        basis: The read pass's amount basis.
+
+    Returns:
+        One net per key.
     """
     nets: "dict[date, Decimal]" = {}
-    for day, txns in plan.by_day.items():
-        income, expense = sum_projected(txns, plan.basis)
+    for day, items in items_by_day.items():
+        income, expense = sum_projected(items, basis)
         nets[day] = income - expense
     return nets
+
+
+def _rows_on_their_date(
+    plan: _CashPlan, day: date,
+) -> "list[tuple[Decimal, str | None]]":
+    """Return each row counted from *day*, by what it moves and what it is called.
+
+    Args:
+        plan: The account's plan.
+        day: The day.
+
+    Returns:
+        ``[(net, name), ...]`` summing to that day's net in
+        :attr:`_CashPlan.nets_on_their_dates`, without rows worth nothing.  A
+        transfer's name can be ``None``.
+    """
+    named: "list[tuple[Decimal, str | None]]" = []
+    for item in plan.on_their_dates.get(day, []):
+        income, expense = sum_projected([item], plan.basis)
+        if income != expense:
+            named.append((income - expense, item.name))
+    return named

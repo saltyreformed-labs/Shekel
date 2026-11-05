@@ -728,10 +728,13 @@ class InFlightMovement:
         is_income: The parent's type, so a budget-clock reduction files it on
             the parent's leg.
         purchased_on: The day it happened, the floor the plan's landing day is
-            clamped up from (``balance_at._cash_plan._cash_plan``).
+            clamped up from (``balance_at._cash_plan._cash_plan``), and on a card
+            the day it counts from.
         delta: :func:`~._cash_leg.movement_cash_leg` -- its whole figure in
             the parent's direction, signed as the settled stream would sign it
             the day it is dated.
+        name: What the owner called the purchase, so a reader listing plan items
+            asks ``name`` of a row, a leg and this alike.
     """
 
     transaction_id: int
@@ -740,6 +743,7 @@ class InFlightMovement:
     is_income: bool
     purchased_on: date
     delta: Decimal
+    name: str
 
 
 def in_flight_movements(
@@ -773,6 +777,7 @@ def in_flight_movements(
             is_income=entry.transaction.is_income,
             purchased_on=entry.purchased_on,
             delta=movement_cash_leg(entry.transaction, entry),
+            name=entry.description,
         )
         for entry in sorted(
             _movements_of(

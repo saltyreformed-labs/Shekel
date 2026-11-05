@@ -100,7 +100,9 @@ kill.
   set is empty and stays empty (W9909).  The posting writer's
   ``ledger_lines.walk_account_ledger`` reads it (plan task
   plan#2525), so the posted corrections and the fold's are one walk where
-  they were two: the writer had summed its own STORED postings.  See
+  they were two: the writer had summed its own STORED postings.  A card's fold
+  also lays its unmarked rows on that walk (ruling plan#2926), so there the two
+  differ until the row is marked.  See
   :mod:`._assertions`.
 * The LIABILITY entry (:func:`liability_owed_at_dates`) answers what every
   debt OWES at a list of FORWARD calendar dates in one resolution pass --
@@ -271,6 +273,7 @@ from ._cash_flow import (
     cash_daily_balance_series,
     cash_daily_facts_series,
     records_balance_at,
+    rows_counted_from_their_date,
 )
 from ._confirmed_view import confirmed_view
 from ._context import BalanceContext
@@ -430,6 +433,7 @@ __all__ = [
     "next_card_payment_price",
     "positions",
     "records_balance_at",
+    "rows_counted_from_their_date",
     "resolved_with_books",
     "row_books_opened_on",
     "positions_period_map",

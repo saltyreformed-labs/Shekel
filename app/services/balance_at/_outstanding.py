@@ -57,7 +57,6 @@ from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
 )
-from app.services.cash_ledger import dated_deltas
 from app.utils.books_boundary import first_movement_day
 from app.utils.money import round_money
 
@@ -331,12 +330,15 @@ def _books_balance_at(
     **Three tiers go in and only ONE comes out, which is what makes it
     different from** :func:`~._cash_fold.balances_at`.  That reading samples
     the seed, the recorded steps, the assertion RESETS and the still-projected
-    plan; this one samples the seed and the recorded steps alone.  Dropping the
+    plan; this one samples the seed and the recorded steps alone, a card's rows on
+    their dates among them.  Dropping the
     resets is the whole point (ruling **R-FN**: an assertion is a CHECK, and
     this is what it is checked against).  Dropping the PLAN is the definition
     rather than an optimisation: the BOOKS are what the account has RECORDED,
     and what it is projected to hold is a different question this figure must
-    not answer.
+    not answer.  **A card's unmarked row counted from its date is in the books**
+    (ruling plan#2926): nothing further need be recorded for that bill, so a
+    declared balance holding it is no difference.
 
     *A first draft justified the omission by arguing it changed nothing -- that
     ruling R-G clamps a still-projected row to ``as_of + 1`` and an assertion's
@@ -347,17 +349,14 @@ def _books_balance_at(
     the choice is free would be false exactly where it was load-bearing.  The
     choice is not free; it is correct.*
 
-    **It calls** :func:`~app.services.cash_ledger.dated_deltas` **a second time
-    for this pass, and that is deliberate rather than overlooked.**  The
-    assembly already merged those steps with the assertion corrections into one
-    sorted list (:func:`~._cash_fold._actual_steps`), so there is no recorded
-    tier left on the record to read back; the alternatives are a tenth field on
-    :class:`~._cash_fold.AssembledCashFold` -- which already carries a
-    ``too-many-instance-attributes`` disable -- or summing ``source_facts``
-    here, which would be a second statement of the one clock.  ``dated_deltas``
-    is a PURE function of the walk, so calling it twice cannot produce two
-    answers; what it costs is one list build and one sort over the account's
-    settled rows (354 on the real Checking account).
+    **It reads** :attr:`~._cash_fold.AssembledCashFold.recorded_steps`, **a second
+    build of those steps for this pass, and that is deliberate rather than
+    overlooked.**  The assembly already merged them with the assertion corrections
+    into one sorted list (:func:`~._cash_fold._actual_steps`), so there is no
+    recorded tier left on the record to read back.  They are a PURE function of
+    the walk and the plan, so building them twice cannot produce two answers; what
+    it costs is one list build and one sort over the account's settled rows (354 on
+    the real Checking account).
 
     Args:
         folded: The account's :class:`~._cash_fold.AssembledCashFold`.
@@ -368,6 +367,4 @@ def _books_balance_at(
         opening equity flat -- the honest fold of an empty prefix, and the same
         totality every other reading in this package has.
     """
-    return sample_cumulative(
-        folded.seed, dated_deltas(folded.walk), [day],
-    )[day]
+    return sample_cumulative(folded.seed, folded.recorded_steps, [day])[day]

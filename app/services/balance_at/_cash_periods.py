@@ -93,7 +93,8 @@ class CashPeriodFigures:
     Attributes:
         balance: The fold's balance at the period's ``end_date``, cent-quantized
             -- assertions replayed, settled cash counted from the day it moved,
-            and the still-projected plan clamped forward (ruling R-G).
+            and the still-projected plan clamped forward (ruling R-G), but for a
+            card's row on its own date (ruling plan#2926).
         income: Every row ATTRIBUTED to this period whose type is income --
             settled at its confirmed cash leg, still-projected at its live or
             entries-aware amount.  A magnitude, cent-quantized.
@@ -225,8 +226,9 @@ def period_view_of(
     causes.  :attr:`~CashPeriodFigures.period_timing` carries the two that are
     about WHEN money moved: a row that settled outside its own pay period (19 of
     the real account's 130 settled rows; nets to ``$0.00`` across history and
-    swings to ``-$2,007.46`` inside one period), and a still-projected row
-    ruling R-G clamped forward out of its column.
+    swings to ``-$2,007.46`` inside one period), a still-projected row
+    ruling R-G clamped forward out of its column, and a card's row whose own date
+    falls outside its column or whose date the opening already holds.
     :attr:`~CashPeriodFigures.book_vs_bank` carries EVERY balance ASSERTION
     (the first one included since plan step X-f3c-2a, where the opening used to
     be held back because the fold had swallowed its correction into the seed)
@@ -247,7 +249,8 @@ def period_view_of(
     ordinary correction: ``0.00`` where the owner's declaration agrees with the
     books, and a real movement where it does not.
 
-    Kind-blind, exactly as the fold is (ruling R-J): this is the CASH-FLOW view,
+    Kind-blind, as the fold is but for a card's plan dates (ruling R-J): this is the
+    CASH-FLOW view,
     whose balance has to reconcile with the transaction rows rendered beside it.
     An INTEREST account's accrual is layered on ABOVE this by the grid view,
     which is the ``+ accrual[p]`` term of R-K's identity.
@@ -277,7 +280,7 @@ def period_view_of(
             window,
             period_balances(folded, window),
             _budget_legs(folded.walk, folded.plan, window, FarLegs.none()),
-            _cash_sums(folded.walk, folded.day_nets, window),
+            _cash_sums(folded, window),
             _assertion_sums(folded.corrections, window),
         ),
     )
@@ -488,35 +491,27 @@ def _budget_legs(
 
 
 def _cash_sums(
-    walk: CashLedgerWalk,
-    day_nets: "dict[date, Decimal]",
-    window: PeriodWindow,
+    folded: AssembledCashFold, window: PeriodWindow,
 ) -> "dict[int, Decimal]":
     """Return ``{period_id: net}`` on the CASH clock -- what MOVED in the period.
 
     The same rows :func:`_budget_legs` groups by budget column, grouped instead
     by the day each one's money moves: a settled row on its ``settled_on``
     (a STORED civil day since plan step X-f1, read once onto the fact; it was
-    ``paid_at``'s display-timezone day under ruling R-DH), a planned row on
-    the day ruling R-G lands it.
+    ``paid_at``'s display-timezone day under ruling R-DH), a card's row on its own
+    date (ruling plan#2926), and a planned row on the day ruling R-G lands it.
     Assertions are NOT here -- they are :func:`_assertion_sums`, because an
     assertion is not a row.
 
     Args:
-        walk: The account's walk.
-        day_nets: The plan's per-day nets
-            (:func:`~._cash_plan._planned_day_nets`).
+        folded: The account's assembled fold.
         window: The reported periods.
 
     Returns:
         ``{period_id: net}`` -- signed, UNROUNDED, total over the window.
     """
     moved = _zeroed(window)
-    for fact in walk.source_facts:
-        period_id = _column_for(window, fact.settled_on)
-        if period_id is not None:
-            moved[period_id] += fact.delta
-    for day, net in day_nets.items():
+    for day, net in [*folded.recorded_steps, *folded.day_nets.items()]:
         period_id = _column_for(window, day)
         if period_id is not None:
             moved[period_id] += net

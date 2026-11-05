@@ -137,8 +137,11 @@ def is_revolving(account) -> bool:
 
     **It is NOT a projection kind, and :func:`classify_account` never reads it.**
     A card's balance is ``opening + SUM(movements)``, the cash fold every
-    non-loan account already rides, so a card classifies PLAIN and nothing in
-    the balance seam dispatches on this flag.  The 2026-07-19 plan's sixth
+    non-loan account already rides, so a card classifies PLAIN.  The balance seam
+    asks this flag only of what a card alone has: the day a plan row counts from
+    (``balance_at._cash_plan``, ruling plan#2926), a repeat on its due dates
+    (``balance_at._definition_due_dates``) and its unmarked rows
+    (``balance_at._cash_flow``).  The 2026-07-19 plan's sixth
     kind (``REVOLVING``) existed to send the card to a fold of its own, which
     ruling R-CC14 dissolved; ``ck_account_types_revolving_is_plain`` makes a
     type that is revolving AND amortizing / interest / appreciating /

@@ -91,6 +91,9 @@ from app.utils.dates import days_in_range
 _ZERO_MONEY = Decimal("0.00")
 _ONE_DAY = timedelta(days=1)
 
+#: What a row the owner gave no name reads as in the drill-down.
+_UNNAMED = "(unnamed)"
+
 #: The most days this report will DRAW, counted back from the most recent.
 #:
 #: **A bound rather than a preference, because the span is user-supplied
@@ -134,8 +137,9 @@ class AgreementDay:
             day inside an imported window, and ``None`` on a day inside NO
             import's window: nothing the bank said reaches it, which is an
             absence rather than the bank saying nothing moved.
-        recorded: What the app's own SETTLED rows moved that day, or ``None``
-            on and before the day the books opened
+        recorded: What the app's own SETTLED rows moved that day, and on a card
+            its unmarked rows counted from that date (ruling plan#2926), or
+            ``None`` on and before the day the books opened
             (:func:`~app.utils.books_boundary.books_hold`): that day's money is
             inside the opening equity (ruling **R-HG**), so the books hold no
             movement for it.
@@ -594,11 +598,10 @@ class DayLine:
 
 @dataclass(frozen=True)
 class DayRow:
-    """One of the app's own settled movements on a day.
+    """One of the app's own movements on a day: settled, or a card's row on its date.
 
     Attributes:
-        amount: The signed cash the row moved -- the same
-            :attr:`~app.services.cash_ledger.CashSourceFact.delta` the fold
+        amount: The signed cash the row moved -- the same figure the fold
             counted, so the rows shown here sum to the day's ``recorded``.
         description: What the row is called.
         matched: Whether a statement match already claims it.
@@ -616,7 +619,7 @@ class DayDetail:
     Attributes:
         day: The day explained.
         lines: The bank's lines posted that day.
-        rows: The app's own settled movements that day.
+        rows: The app's own movements that day (:class:`DayRow`).
 
     **Every line and every row is listed, not only the unmatched ones**, and
     that is the correction of the obvious shortcut.  A row matched to a line
@@ -664,7 +667,9 @@ def bank_agreement(
     balance carries PLAN, and setting a plan beside a bank line would report
     agreement where the app has merely predicted what the bank did -- or a
     disagreement about money nobody has spent.  When it truncates,
-    :attr:`BankAgreement.recorded_through` says so.
+    :attr:`BankAgreement.recorded_through` says so.  **A card's unmarked row dated
+    by then is not plan** (ruling plan#2926): the day's ``recorded`` carries it, so
+    a line posted a day later reads as the timing difference it is.
     """
     span = statement_import.recorded_span(account.id)
     if span.first_day is None or span.last_day is None:
@@ -908,7 +913,7 @@ def _lines_on(
 def _rows_on(
     account: Account, ctx: balance_at.BalanceContext, day: date,
 ) -> "list[tuple[Decimal, str, bool]]":
-    """Return the app's own settled movements on one day, with match state.
+    """Return the app's own movements on one day, with match state.
 
     Args:
         account: The account whose walk to read.
@@ -932,6 +937,10 @@ def _rows_on(
     Through plan step ``credit_card:CC-5-4a-2`` an act recorded before
     ``CC-5-4a-1`` named the covering movement's ROW, and this asked both
     homes; migration ``2eabfa596ee0`` re-keyed those onto the movement.
+
+    **A card's unmarked row counted from this day is listed too**, since the day's
+    ``recorded`` holds it (ruling plan#2926).  It reads unmatched: accepting a match
+    settles a row and dates a movement, so nothing in the plan is ever claimed.
     """
     facts = [
         fact
@@ -948,22 +957,24 @@ def _rows_on(
         # review 2026-08-24.
         if fact.settled_on == day and fact.delta != _ZERO_MONEY
     ]
-    if not facts:
-        return []
-    names = _row_names(facts)
-    claimed = matched_subjects(account.id).entries
-    return sorted(
-        (
+    rows = [
+        (amount, name if name is not None else _UNNAMED, False)
+        for amount, name in balance_at.rows_counted_from_their_date(
+            account, ctx, day,
+        )
+    ]
+    if facts:
+        names = _row_names(facts)
+        claimed = matched_subjects(account.id).entries
+        rows.extend(
             (
                 fact.delta,
-                names.get((fact.transaction_id, fact.entry_id), "(unnamed)"),
+                names.get((fact.transaction_id, fact.entry_id), _UNNAMED),
                 fact.entry_id in claimed,
             )
             for fact in facts
-        ),
-        key=lambda row: abs(row[0]),
-        reverse=True,
-    )
+        )
+    return sorted(rows, key=lambda row: abs(row[0]), reverse=True)
 
 
 def _row_names(facts: list) -> "dict[tuple[int, int], str]":

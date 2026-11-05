@@ -296,6 +296,16 @@ function initRecurrenceForm() {
   // payoff" would contradict itself (developer, 2026-09-12).
   var endModeBeforeLock = null;
 
+  // Whether the date box has focus, from its own focus and blur events.
+  // ``document.activeElement`` cannot say: in Chromium it is not the box during
+  // the ``change`` of a digit that moves on to the next segment (measured
+  // 2026-11-05), though no blur fires.
+  var dateBoxFocused = false;
+
+  // The "repeating on" choice a date refused while the box had focus; see
+  // syncRepeatsOn.
+  var readingPassedOver = null;
+
   // Show and enable only the input the chosen "Ends" shape needs, and disable
   // the whole control when the definition does not repeat -- or when the
   // chosen destination is a loan whose payment this would be (plan step
@@ -479,10 +489,25 @@ function initRecurrenceForm() {
   // DISABLED as well as hidden, for the reason every other control here is: a
   // hidden select still SUBMITS, and a reading left behind beside a date it
   // does not fit is exactly what the CHECKs refuse.  The selection is cleared
-  // with an option the new date does not allow, because a reading the date
-  // cannot carry is not one the user can still mean; a weekday reading the
-  // new date DOES allow keeps its place and takes the new date's words ("the
-  // third Tuesday" becomes "the second Tuesday").
+  // with an option the new date does not allow, because the control never shows
+  // or posts a reading the date cannot carry; a weekday reading the new date
+  // DOES allow keeps its place and takes the new date's words ("the third
+  // Tuesday" becomes "the second Tuesday").
+  //
+  // Only a date clears it.  With no date to read -- a unit without a day of a
+  // month, a loan destination that derives the bounds, a box holding no complete
+  // date -- nothing has answered the question, so the choice waits in the
+  // select, disabled and posting nothing, and comes back with the control, as a
+  // typed ceiling does and as the "Ends" shape does after a lock.  Clearing it
+  // there read as a refusal: one move away and back turned "the third Tuesday"
+  // into the 17th on the save.
+  //
+  // A date in a focused box may only be passing through: Chromium fires
+  // ``change`` for each digit that leaves a complete date (measured 2026-11-05),
+  // so Nov 24 typed as 12/29/2026 is Jan 24 for a keystroke, outside its month's
+  // last seven days, where Dec 29 is inside its own.  So a choice refused while
+  // the box has focus is cleared as any other is, and remembered, and a later
+  // date that allows it brings it back.  Leaving the box forgets it.
   function syncRepeatsOn(hasDayCoordinate) {
     if (!repeatsOn || !repeatsOnWrap) return;
     var facts = hasDayCoordinate ? calendarFacts(startsOn && startsOn.value) : null;
@@ -497,7 +522,14 @@ function initRecurrenceForm() {
       opt.hidden = !mine;
       opt.disabled = !mine;
       if (mine) any = true;
-      if (!mine && opt.selected) repeatsOn.selectedIndex = 0;
+      if (facts === null) return;
+      if (mine && opt.value === readingPassedOver) {
+        opt.selected = true;
+        readingPassedOver = null;
+      } else if (!mine && opt.selected) {
+        if (dateBoxFocused) readingPassedOver = opt.value;
+        repeatsOn.selectedIndex = 0;
+      }
     });
     repeatsOnWrap.classList.toggle('d-none', !any);
     if (!startsOnLocked) repeatsOn.disabled = !any;
@@ -585,7 +617,8 @@ function initRecurrenceForm() {
 
   // Whether a control in the "Starts on" row states a value the preview must
   // carry.  A control the FORM turned off states nothing; one the SERVER
-  // locked states the value the save will use.  See fetchPreview.
+  // locked states the value the save will use.  See fetchPreview, which asks
+  // one more thing of the "repeating on" control: whether its OPTION is off.
   function statesAStartValue(el) {
     if (!el) return false;
     return (startsOnLocked || !el.disabled) && el.value !== '';
@@ -626,16 +659,19 @@ function initRecurrenceForm() {
     // cadence" forever.  ``startsOnLocked`` is read once at load and tells the
     // two apart.
     //
-    // The "repeating on" choice rides on the same test rather than its own:
-    // it is the second half of one row, the server disables it with the date,
+    // The "repeating on" choice rides on the same test because it is the
+    // second half of one row: the server disables it with the date,
     // and the preview must show "Apr 30, May 31, Jun 30" rather than "Apr 30,
     // May 30" for a month-end loan payment as much as for a typed one.  An
     // empty value is the same day of the month, which the endpoint reads from
-    // the key's absence.
+    // the key's absence.  A reading waiting for the control to come back (see
+    // syncRepeatsOn) states nothing, and its option is what says so: on a row
+    // the server locked, ``disabled`` is true whichever cadence is chosen.
     if (statesAStartValue(startsOn)) {
       params.set('starts_on', startsOn.value);
     }
-    if (statesAStartValue(repeatsOn)) {
+    if (statesAStartValue(repeatsOn) &&
+        !repeatsOn.options[repeatsOn.selectedIndex].disabled) {
       params.set('repeats_on', repeatsOn.value);
     }
 
@@ -765,6 +801,14 @@ function initRecurrenceForm() {
         !destinationDerivesTheBounds()
       );
       fetchPreview();
+    });
+    startsOn.addEventListener('focus', function() {
+      dateBoxFocused = true;
+    });
+    // Leaving the box makes a clear final, whichever date it was on.
+    startsOn.addEventListener('blur', function() {
+      dateBoxFocused = false;
+      readingPassedOver = null;
     });
   }
   // The "Ends" mode re-links which value input is enabled, then previews:

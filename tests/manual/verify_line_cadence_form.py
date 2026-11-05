@@ -429,6 +429,11 @@ def _drive_line_weekday(page, profile_id: int) -> None:
     _check("R: paychecks hides the control and posts nothing",
            not _visible(page, "field-repeats-on") and _posted(page)["repeats_on"] == [],
            str(_posted(page)))
+    page.locator("#recurrence_unit").select_option(units["months"])
+    _settle(page)
+    _check("R: months again brings the control back on the choice the date still allows",
+           _visible(page, "field-repeats-on")
+           and _posted(page)["repeats_on"] == ["from_start"], str(_posted(page)))
 
 
 def _fill_line(page, name: str, units: dict[str, str], ceiling: str) -> None:

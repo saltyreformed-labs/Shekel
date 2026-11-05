@@ -4,8 +4,10 @@ The drives ``verify_recurrence_form.py`` runs on the transfer forms alone,
 because the transaction form has no destination account and its definition
 can never be a loan payment: the create form's "Starts on" and "Ends" locks
 (:func:`_drive_loan_destination_lock`, :func:`_drive_ends_lock`), the
-preview's destination (:func:`_drive_preview_destination`) and the edit
-form's locks (:func:`_drive_edit_form_locks`).
+"repeating on" control's lock on both forms (:func:`_drive_reading_lock`), the
+preview's destination (:func:`_drive_preview_destination`), the edit form's
+locks (:func:`_drive_edit_form_locks`) and a server-locked reading's preview
+(:func:`_drive_locked_reading_preview`).
 
 Split out of ``verify_recurrence_form.py`` when it passed 1,000 lines
 (plan#2680).
@@ -13,6 +15,7 @@ Split out of ``verify_recurrence_form.py`` when it passed 1,000 lines
 from _recurrence_form_kit import (
     DEV_BASE_URL,
     _check,
+    _leave_date,
     _posted_bound,
     _posted_opening,
     _select_end_mode,
@@ -20,6 +23,13 @@ from _recurrence_form_kit import (
     _sql,
     _unit_ids,
     _visible,
+    _watch_previews,
+)
+from _recurrence_form_weekday import (
+    THIRD_TUESDAY,
+    _choose_reading,
+    _chosen_reading,
+    _offered,
 )
 
 
@@ -128,6 +138,89 @@ def _drive_loan_destination_lock(page) -> None:
 
     _drive_ends_lock(page, loan_ids, non_loan)
     _drive_preview_destination(page, loan_ids, non_loan)
+    _drive_reading_lock(page, "transfer R", loan_ids[0], non_loan)
+
+
+def _drive_reading_lock(page, label: str, loan_id: str, back_to: str) -> None:
+    """Check a payment-less loan takes the "repeating on" control and hands the choice back.
+
+    The third of a loan destination's locks, beside "Starts on" and "Ends",
+    graded here since plan#2935: a derived first occurrence brings its own
+    reading, so the control hides and posts nothing beside it.  Choosing the
+    loan asks nothing of the date, which comes back with the control, so the
+    reading the user chose comes back too.
+
+    Args:
+        page: The Playwright page, on a transfer form whose destination is
+            *back_to*.
+        label: Names the form in the check labels.
+        loan_id: A destination in the form's lock set.
+        back_to: A destination the form does not lock for.
+    """
+    page.locator("#recurrence_unit").select_option(_unit_ids(page)["months"])
+    _settle(page)
+    page.fill("#starts_on", THIRD_TUESDAY)
+    _settle(page)
+    _leave_date(page)
+    _choose_reading(page, "from_start")
+    _check(f"{label}: precondition -- the third Tuesday posts",
+           _posted_opening(page)["repeats_on"] == ["from_start"],
+           str(_posted_opening(page)["repeats_on"]))
+    page.select_option("#to_account_id", loan_id)
+    _settle(page)
+    _check(f"{label}: a payment-less loan hides the repeating-on control",
+           not _visible(page, "field-repeats-on"), "visible")
+    _check(f"{label}: the control is disabled for a payment-less loan",
+           page.locator("#repeats_on").is_disabled(), "enabled")
+    _check(f"{label}: it posts NOTHING for the reading",
+           _posted_opening(page)["repeats_on"] == [],
+           str(_posted_opening(page)["repeats_on"]))
+    page.select_option("#to_account_id", back_to)
+    _settle(page)
+    _check(f"{label}: the control comes back when the loan is deselected",
+           _visible(page, "field-repeats-on"), "hidden")
+    _check(f"{label}: the third Tuesday comes back with it",
+           _chosen_reading(page) == ["from_start", "the third Tuesday"]
+           and _posted_opening(page)["repeats_on"] == ["from_start"],
+           f"{_chosen_reading(page)}; posts {_posted_opening(page)['repeats_on']}")
+
+
+def _drive_locked_reading_preview(page) -> None:
+    """Check a reading on a row the SERVER locked reaches the preview only while it is in play.
+
+    A locked row states its values to the preview although its controls are
+    disabled, so ``disabled`` cannot say a reading is waiting out a cadence
+    with no day of a month; its option can (plan#2935).  The row a server locks
+    holds a reading only as a month-end loan's nominal day, and the production
+    copy of 2026-11-05 has no such loan, so the drive selects whichever reading
+    the row's date enables: a weekday one may be a state no server renders on
+    this row, which grades the same line, because the guard reads only the
+    option's flag.
+
+    Args:
+        page: The Playwright page, on the edit form of a standing loan payment
+            whose cadence has a day of a month.
+    """
+    reading = next((token for token, _ in _offered(page)[1] if token), None)
+    if reading is None:
+        print("   SKIPPED (locked reading): the row's date offers no reading")
+        return
+    stored_unit = page.evaluate("() => document.getElementById('recurrence_unit').value")
+    page.evaluate("(token) => { document.getElementById('repeats_on').value = token; }",
+                  reading)
+    previews, stop_watching = _watch_previews(page)
+    page.locator("#recurrence_unit").select_option(_unit_ids(page)["paychecks"])
+    _settle(page)
+    _check("edit P: a locked reading is not previewed beside paychecks",
+           bool(previews) and "repeats_on" not in previews[-1],
+           previews[-1] if previews else "no preview request was made")
+    previews.clear()
+    page.locator("#recurrence_unit").select_option(stored_unit)
+    _settle(page)
+    _check("edit P: it is previewed again once the cadence has a day of a month",
+           bool(previews) and f"repeats_on={reading}" in previews[-1],
+           previews[-1] if previews else "no preview request was made")
+    stop_watching()
 
 
 def _drive_preview_destination(page, loan_ids: list[str], non_loan: str) -> None:
@@ -390,6 +483,8 @@ def _drive_edit_form_locks(page) -> None:
         _check("edit R: the Ends help is the owner's again",
                "generated past" in page.inner_text("#end-bound-help"),
                page.inner_text("#end-bound-help"))
+        if unpaid is not None:
+            _drive_reading_lock(page, "edit R", unpaid, original)
 
     print("\n=== transfer edit-form locks: the loan's standing payment (pinned) ===")
     if ids["pinned"] is None:
@@ -410,6 +505,7 @@ def _drive_edit_form_locks(page) -> None:
                page.locator("#starts_on").is_disabled(), "enabled")
         _check("edit P: Ends is still server-locked",
                page.locator("#recurrence_end_mode").is_disabled(), "enabled")
+        _drive_locked_reading_preview(page)
 
     print("\n=== transfer edit-form locks: a one-time transfer into a loan ===")
     if ids["one_off"] is None:

@@ -122,6 +122,21 @@ def _settle(page) -> None:
     page.wait_for_timeout(FIELD_SPACING_MS)
 
 
+def _leave_date(page) -> None:
+    """Move focus out of "Starts on", which is what says the date in it is final.
+
+    ``page.fill`` leaves the box focused, and ``recurrence_form.js`` remembers a
+    "repeating on" choice a date refused until the box is left, because a
+    focused box may only be passing through that date.  A person leaves the box
+    by clicking the next control; a drive that goes on to another date has to
+    say so, or the choice comes back.  It fires no preview.
+
+    Args:
+        page: The Playwright page.
+    """
+    page.locator("#starts_on").blur()
+
+
 def _visible(page, element_id: str) -> bool:
     """Return whether an element is actually rendered to the user.
 

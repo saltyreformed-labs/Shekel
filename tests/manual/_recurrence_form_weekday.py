@@ -18,9 +18,12 @@ that half, on the transaction and transfer forms:
   typed date allows are the only ones offered, worded for that date
   (:data:`EXPECTED_OFFERS`, hand-computed); choosing a weekday posts the one
   key, so a nominal day beside it is a pair no form can post; a move keeps a
-  choice the new date allows (re-worded) and resets one it does not; and the
-  live preview's request carries the reading and lists the paychecks the
-  hand-computed dates fall in.
+  choice the new date allows (re-worded) and resets one it does not; a date
+  typed digit by digit is judged by where it ends, not by the dates it passes
+  through, and leaving the box makes a reset final; a move that asks the date
+  nothing (a cadence with no day of a month, a cleared date) keeps it for when
+  the control returns; and the live preview's request carries the reading and
+  lists the paychecks the hand-computed dates fall in.
 * :func:`_drive_weekday_round_trip`, under ``VERIFY_WRITE=1`` against a copy
   of the dev database: a save through the real form stores the reading,
   generates its rows on the hand-computed dates, reads "Monthly (third
@@ -42,6 +45,7 @@ from _recurrence_form_kit import (
     DEV_DATABASE,
     POST_SPACING_SECONDS,
     _check,
+    _leave_date,
     _posted_opening,
     _selectable_unit,
     _set_interval,
@@ -110,6 +114,25 @@ EXPECTED_OFFERS: dict[str, list[tuple[str, str]]] = {
 #: The first five third Tuesdays from :data:`THIRD_TUESDAY`, by hand: Nov 17;
 #: Dec 1, 8, 15; Jan 5, 12, 19; Feb 2, 9, 16; Mar 2, 9, 16.
 THIRD_TUESDAYS = ["2026-11-17", "2026-12-15", "2027-01-19", "2027-02-16", "2027-03-16"]
+
+#: Dec 29, 2026, a Tuesday and its month's last, as a keyboard enters it.  Typed
+#: over :data:`LAST_TUESDAY`, the month's first digit makes Jan 24, outside its
+#: month's last seven days: the date a keystroke passes through that refuses a
+#: last-weekday reading.
+LAST_TUESDAY_TYPED = "12292026"
+
+#: The date that first digit passes through.
+LAST_TUESDAY_PASSES_THROUGH = "2026-01-24"
+
+#: Nov 10, 2026, as a keyboard enters it: a date that ENDS on a refusal of the
+#: last Tuesday, where :data:`LAST_TUESDAY_TYPED` only passes through one.
+SECOND_TUESDAY_TYPED = "11102026"
+
+#: The pause between a typed date's digits.
+KEY_SPACING_MS = 120
+
+#: The live preview's request, for :func:`_type_date` to answer.
+PREVIEW_REQUESTS = "**/preview-recurrence*"
 
 #: The same five months read as the 17th: what the weekday reading replaces.
 SEVENTEENTHS = ["2026-11-17", "2026-12-17", "2027-01-17", "2027-02-17", "2027-03-17"]
@@ -299,6 +322,7 @@ def _drive_moves(page, kind: str) -> None:
     """
     page.fill("#starts_on", THIRD_TUESDAY)
     _settle(page)
+    _leave_date(page)
     _choose_reading(page, "from_start")
     page.fill("#starts_on", SECOND_TUESDAY)
     _settle(page)
@@ -307,10 +331,41 @@ def _drive_moves(page, kind: str) -> None:
            str(_chosen_reading(page)))
     _check(f"{kind} WR: and it still posts once",
            _posted_reading(page) == ["from_start"], str(_posted_reading(page)))
+    # A box holding no complete date has answered nothing, so the choice waits.
+    page.fill("#starts_on", "")
+    _settle(page)
+    _check(f"{kind} WR: a cleared date posts no reading",
+           _posted_reading(page) == [], str(_posted_reading(page)))
+    page.fill("#starts_on", SECOND_TUESDAY)
+    _settle(page)
+    _check(f"{kind} WR: the same date retyped keeps the choice",
+           _chosen_reading(page) == ["from_start", "the second Tuesday"]
+           and _posted_reading(page) == ["from_start"],
+           f"{_chosen_reading(page)}; posts {_posted_reading(page)}")
+    # In the box, Nov 30 may be a date on the way to another: what the control
+    # shows and posts is the date's answer at once, and the choice can return.
     page.fill("#starts_on", MONTH_END_MONDAY)
     _settle(page)
-    _check(f"{kind} WR: moving to Nov 30 (no from-start week) resets to the same day",
+    _check(f"{kind} WR: moving to Nov 30 (no from-start week) shows and posts the same day",
+           _chosen_reading(page) == ["", "the same day of the month"]
+           and _posted_reading(page) == [""],
+           f"{_chosen_reading(page)}; posts {_posted_reading(page)}")
+    page.fill("#starts_on", SECOND_TUESDAY)
+    _settle(page)
+    _check(f"{kind} WR: a later date in the box that allows it brings the choice back",
+           _chosen_reading(page) == ["from_start", "the second Tuesday"]
+           and _posted_reading(page) == ["from_start"],
+           f"{_chosen_reading(page)}; posts {_posted_reading(page)}")
+    # Out of the box, Nov 30 was the date the user meant: the reset is final.
+    page.fill("#starts_on", MONTH_END_MONDAY)
+    _settle(page)
+    _leave_date(page)
+    page.fill("#starts_on", SECOND_TUESDAY)
+    _settle(page)
+    _check(f"{kind} WR: leaving the box on Nov 30 makes the reset final",
            _posted_reading(page) == [""], str(_posted_reading(page)))
+    page.fill("#starts_on", MONTH_END_MONDAY)
+    _settle(page)
     shown, _ = _offered(page)
     _check(f"{kind} WR: Nov 30 offers the same day, the month's last day and the last Monday",
            shown == [("", "the same day of the month"), ("31", "the last day of the month"),
@@ -318,12 +373,85 @@ def _drive_moves(page, kind: str) -> None:
            str(shown))
 
 
+def _type_date(page, digits: str) -> list[list[str]]:
+    """Enter a date in "Starts on" a digit at a time, as a keyboard does.
+
+    ``page.fill`` sets the value whole.  A keyboard does not: the browser fires
+    ``change`` for each digit that leaves a complete date.  Measured 2026-11-05:
+    Nov 24 typed as 12/29/2026 changed to Jan 24, Dec 24, Dec 2, Dec 29, then
+    three dates in years 2, 20 and 202, then Dec 29, 2026.  Each change fetches
+    a preview, eight within a second, past what the run's pacing leaves under
+    the limiter's 30 a minute, so they are answered here and never reach the
+    app.  What is graded is the control, which no preview's answer touches.
+
+    Args:
+        page: The Playwright page.
+        digits: The month, day and year digits, in the order they are typed.
+
+    Returns:
+        One ``[date, reading]`` per ``change``, read after the script's own
+        listener ran, so a check can say the date did pass through.
+    """
+    _leave_date(page)
+    page.route(PREVIEW_REQUESTS, lambda route: route.fulfill(
+        status=200, content_type="text/html", body=""))
+    page.evaluate(
+        """() => {
+            const box = document.getElementById('starts_on');
+            window.typedDate = {changes: [], listener: () => window.typedDate.changes.push(
+                [box.value, document.getElementById('repeats_on').value])};
+            box.addEventListener('change', window.typedDate.listener);
+        }"""
+    )
+    page.locator("#starts_on").focus()
+    for digit in digits:
+        page.keyboard.press(digit)
+        page.wait_for_timeout(KEY_SPACING_MS)
+    changes = page.evaluate(
+        """() => {
+            document.getElementById('starts_on')
+                .removeEventListener('change', window.typedDate.listener);
+            return window.typedDate.changes;
+        }"""
+    )
+    page.unroute(PREVIEW_REQUESTS)
+    return changes
+
+
+def _drive_typed_date(page, kind: str) -> None:
+    """Check a typed date is judged by where it ends, not by the dates it passes through.
+
+    Args:
+        page: The Playwright page, on the create form, a month unit chosen.
+        kind: "transaction" or "transfer", for the labels.
+    """
+    page.fill("#starts_on", LAST_TUESDAY)
+    _settle(page)
+    _choose_reading(page, "from_end")
+    changes = _type_date(page, LAST_TUESDAY_TYPED)
+    _check(f"{kind} WR: precondition -- typing passes through Jan 24, clearing the choice",
+           [LAST_TUESDAY_PASSES_THROUGH, ""] in changes, str(changes))
+    _check(f"{kind} WR: typing it ends on Dec 29",
+           _posted_opening(page)["starts_on"] == ["2026-12-29"],
+           str(_posted_opening(page)["starts_on"]))
+    _check(f"{kind} WR: typing Dec 29 through Jan 24 keeps the last Tuesday",
+           _chosen_reading(page) == ["from_end", "the last Tuesday"]
+           and _posted_reading(page) == ["from_end"],
+           f"{_chosen_reading(page)}; posts {_posted_reading(page)}")
+    _type_date(page, SECOND_TUESDAY_TYPED)
+    _leave_date(page)
+    _check(f"{kind} WR: typing a date that ends on a refusal resets it",
+           _posted_reading(page) == [""], str(_posted_reading(page)))
+
+
 def _drive_units(page, kind: str, units: dict[str, str]) -> None:
     """Check the control shows for months and years and hides AND disables for paychecks and weeks.
 
-    Each unit without a day of a month is reached from a month unit with a
+    Each cadence without a day of a month is reached from a month unit with a
     weekday chosen, so "hidden" is a change the script made, and "posts
-    nothing" is a choice it withdrew rather than one never made.
+    nothing" is a choice it withdrew rather than one never made.  The way back
+    is graded too: none of those moves asked the date, so the choice returns
+    with the control, and only a date the choice does not fit resets it.
 
     Args:
         page: The Playwright page, on the create form.
@@ -332,6 +460,7 @@ def _drive_units(page, kind: str, units: dict[str, str]) -> None:
     """
     page.fill("#starts_on", THIRD_TUESDAY)
     _settle(page)
+    _leave_date(page)
     for label in ("months", "years"):
         page.locator("#recurrence_unit").select_option(units[label])
         _settle(page)
@@ -342,18 +471,41 @@ def _drive_units(page, kind: str, units: dict[str, str]) -> None:
                str(_offered(page)[1]))
     weeks = _selectable_unit(page, units, "weeks")
     others = [("paychecks", units["paychecks"])] + ([("weeks", weeks)] if weeks else [])
+    others.append(("no cadence", ""))
     if weeks is None:
         print("   SKIPPED (weeks arm): no live weeks option; the visibility pass fails it")
+    page.locator("#recurrence_unit").select_option(units["months"])
+    _settle(page)
+    _choose_reading(page, "from_start")
     for label, unit in others:
-        page.locator("#recurrence_unit").select_option(units["months"])
-        _settle(page)
-        _choose_reading(page, "from_start")
         page.locator("#recurrence_unit").select_option(unit)
         _settle(page)
         _check(f"{kind} WU: the control is hidden for {label}",
                not _visible(page, "field-repeats-on"), "visible")
+        _check(f"{kind} WU: the control is disabled for {label}",
+               page.locator("#repeats_on").is_disabled(), "enabled")
         _check(f"{kind} WU: the weekday chosen for months posts NOTHING for {label}",
                _posted_reading(page) == [], str(_posted_reading(page)))
+        page.locator("#recurrence_unit").select_option(units["months"])
+        _settle(page)
+        _check(f"{kind} WU: the third Tuesday comes back with months after {label}",
+               _chosen_reading(page) == ["from_start", "the third Tuesday"]
+               and _posted_reading(page) == ["from_start"],
+               f"{_chosen_reading(page)}; posts {_posted_reading(page)}")
+    page.locator("#recurrence_unit").select_option(units["paychecks"])
+    _settle(page)
+    page.fill("#starts_on", MONTH_END_MONDAY)
+    _settle(page)
+    _leave_date(page)
+    page.locator("#recurrence_unit").select_option(units["months"])
+    _settle(page)
+    _check(f"{kind} WU: a date moved while it was hidden still answers: Nov 30 resets it",
+           _posted_reading(page) == [""], str(_posted_reading(page)))
+    # That refusal met an unfocused box, so nothing remembers the choice.
+    page.fill("#starts_on", THIRD_TUESDAY)
+    _settle(page)
+    _check(f"{kind} WU: a reset made outside the box stays final on a date allowing it",
+           _posted_reading(page) == [""], str(_posted_reading(page)))
 
 
 def _drive_preview(page, kind: str, units: dict[str, str]) -> None:
@@ -429,6 +581,7 @@ def _drive_weekday_reading(page, kind: str, url: str) -> None:
     units = _unit_ids(page)
     _drive_offers(page, kind, units)
     _drive_moves(page, kind)
+    _drive_typed_date(page, kind)
     _drive_units(page, kind, units)
     _drive_preview(page, kind, units)
 

@@ -40,7 +40,12 @@ from app.services import (
 )
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import PayCalendar, calendar_for
-from app.services.recurrence import NEVER_ENDS, EndBound, picker_model
+from app.services.recurrence import (
+    NEVER_ENDS,
+    EndBound,
+    picker_model,
+    stored_month_reading,
+)
 from app.schemas.validation import (
     EFFECTIVE_DATE_MAX,
     EFFECTIVE_DATE_MIN,
@@ -279,8 +284,8 @@ def _line_cadence_context(
       The section emits each as ``data-line-*`` attributes on the row's edit
       button, and ``app.js`` fills the one inline form from them the way it
       fills every other field of that form.
-    * ``selected_spans`` -- ``{line id: LineSpan}``, the row's start, nominal
-      day and closing bound for the same edit prefill (plan step
+    * ``selected_spans`` -- ``{line id: LineSpan}``, the row's start, its
+      "repeating on" choice and closing bound for the same edit prefill (plan step
       salary:R18-c, ruling **R-SAL38** (2)); ``add_form_start`` /
       ``add_form_end`` -- what the ADD form's span rows open on: a BLANK
       start (blank is the opening payday) and *never*; ``starts_on_min`` /
@@ -308,7 +313,7 @@ def _line_cadence_context(
             for line in profile.lines
         },
         "selected_spans": {line.id: _line_span(line, picker) for line in profile.lines},
-        "add_form_start": RecurrenceStart(starts_on=None, nominal_day=None),
+        "add_form_start": RecurrenceStart(starts_on=None),
         "add_form_end": RecurrenceEnd(selected=NEVER_ENDS),
         "starts_on_min": EFFECTIVE_DATE_MIN,
         "starts_on_max": EFFECTIVE_DATE_MAX,
@@ -324,13 +329,15 @@ class LineSpan:
             with no rule -- rendered as a BLANK box, because blank is what the
             form means by "from the opening payday" and a re-save of a blank
             box derives the same default again (plan step salary:R18-c).
-        nominal_day: The rule's nominal day, or ``None``.
+        repeats_on: What the rule's "repeating on" choice posts
+            (:attr:`~app.services.recurrence.MonthReading.token`): empty for
+            the same day of the month and for a line with no rule.
         end: The closing bound as the ONE value the form's three controls
             compose to (:class:`~app.services.recurrence.EndBound`): *never*
             for a line with no rule.
     """
     starts_on: date | None
-    nominal_day: int | None
+    repeats_on: str
     end: EndBound
 
 
@@ -356,7 +363,10 @@ def _line_span(line, picker) -> LineSpan:
     rule = line.recurrence_rule
     return LineSpan(
         starts_on=None if rule is None else rule.starts_on,
-        nominal_day=None if rule is None else rule.nominal_day,
+        repeats_on=(
+            "" if rule is None
+            else stored_month_reading(rule.nominal_day, rule.weekday_reading).token
+        ),
         end=edit_form_end(line, None, picker, locked=False).selected,
     )
 

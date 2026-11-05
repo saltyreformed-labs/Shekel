@@ -96,7 +96,7 @@ from app.schemas.validation import (
     RECURRENCE_END_BOUND_KEY,
     RECURRENCE_MAX_PER_MONTH_KEY,
     RECURRENCE_NEEDS_A_START,
-    RECURRENCE_NOMINAL_DAY_KEY,
+    RECURRENCE_REPEATS_ON_KEY,
     RECURRENCE_STARTS_ON_KEY,
     end_bound_before_start_message,
 )
@@ -105,6 +105,7 @@ from app.services.pay_calendar import PayCalendar, calendar_for
 from app.services.recurrence import (
     NEVER_ENDS,
     EmptyAuthoredWindowError,
+    MonthReading,
     RecurrenceOwner,
     RecurrenceSpec,
     author_rule,
@@ -120,7 +121,7 @@ from app.services.recurrence import (
 _BASE_RECURRENCE_KEYS: tuple[str, ...] = (
     "recurrence_placement",
     "interval_n",
-    RECURRENCE_NOMINAL_DAY_KEY,
+    RECURRENCE_REPEATS_ON_KEY,
     RECURRENCE_MAX_PER_MONTH_KEY,
 )
 
@@ -335,7 +336,7 @@ def recurrence_spec_from_form(
     Args:
         data: Marshmallow-validated payload; mutated in place.  The
             helper pops ``recurrence_unit``, ``recurrence_placement``,
-            ``interval_n``, ``nominal_day``, ``max_per_month``,
+            ``interval_n``, ``repeats_on``, ``max_per_month``,
             ``starts_on``, and the closing
             bound's three (:data:`_END_BOUND_KEYS`).
         user_id: Owner of the resulting :class:`RecurrenceRule` row.
@@ -393,7 +394,11 @@ def recurrence_spec_from_form(
     # the caller's downstream model constructor never receives one as a stray
     # kwarg.
     _pop_end_bound_keys(data)
-    nominal_day = data.pop(RECURRENCE_NOMINAL_DAY_KEY, None)
+    # How the first occurrence is READ -- its day of the month, a clamped
+    # month-end day, or its weekday (plan step recurrence:R8-c) -- as the ONE
+    # value the schema composed from the "repeating on" control.  Absent is
+    # the control's default, the same day of the month.
+    reading = data.pop(RECURRENCE_REPEATS_ON_KEY, MonthReading())
     # The rule's FIRST OCCURRENCE (plan step R7c-b).  Popped unconditionally,
     # like every other recurrence key, so the caller's model constructor never
     # sees it.
@@ -436,7 +441,8 @@ def recurrence_spec_from_form(
         starts_on=starts_on,
         interval_n=interval_n,
         placement=placement,
-        nominal_day=nominal_day,
+        nominal_day=reading.nominal_day,
+        weekday_reading=reading.weekday_reading,
         max_per_month=max_per_month,
         # A create form that stated no bound authors an UNBOUNDED rule:
         # there is no stored bound to leave alone, so absence and "never"
@@ -489,7 +495,7 @@ def update_recurrence_rule_from_form(
             tests ``template.recurrence_rule``).
         data: Marshmallow-validated payload; mutated in place.  Pops
             ``recurrence_unit``, ``recurrence_placement``, ``interval_n``,
-            ``nominal_day``, ``max_per_month`` and ``starts_on``.
+            ``repeats_on``, ``max_per_month`` and ``starts_on``.
         ctx: The :class:`RecurrenceFormContext` carrying the form's
             ``end_bound`` (which REPLACES the rule's when stated and leaves it
             alone when ``None``).  Its ``redirect`` is unused here and
@@ -552,13 +558,17 @@ def update_recurrence_rule_from_form(
     # installment, derived", which this branch carries onto the rule exactly
     # as it would an owner's date.
     #
-    # ``nominal_day`` follows the SAME key, not its own: the two are one
-    # statement of when the rule fires, and the control that posts the second
-    # is rendered only beside the first.  Reading them apart would let a save
-    # that moved the date keep a nominal day the new date's month never
-    # clamped -- which ``RecurrenceSpec`` refuses, so it would be a 500 rather
-    # than a wrong answer, but a refusal reachable from an ordinary edit is a
-    # defect either way.
+    # How the date is READ (``repeats_on``: a nominal day or, since plan step
+    # recurrence:R8-c, a weekday reading) follows the SAME key, not its own:
+    # the two are one statement of when the rule fires, and the control that
+    # posts the second is rendered only beside the first.  Reading them apart
+    # would let a save that moved the date keep a nominal day the new date's
+    # month never clamped, or a "third Tuesday" on a date past the 28th --
+    # which ``RecurrenceSpec`` refuses, so it would be a 500 rather than a
+    # wrong answer, but a refusal reachable from an ordinary edit is a defect
+    # either way.  Both halves of the reading are replaced together, so a
+    # stored reading of one kind never survives beside a submitted one of the
+    # other.
     states_a_start = RECURRENCE_STARTS_ON_KEY in data
     # The per-month ceiling on the same present-versus-absent rule (plan step
     # salary:R15-a): the control is rendered beside the cadence and DISABLED
@@ -568,7 +578,7 @@ def update_recurrence_rule_from_form(
     # it -- while a present ``None`` is a cleared box and clears.
     states_a_ceiling = RECURRENCE_MAX_PER_MONTH_KEY in data
     submitted_starts_on = data.pop(RECURRENCE_STARTS_ON_KEY, None)
-    submitted_nominal_day = data.pop(RECURRENCE_NOMINAL_DAY_KEY, None)
+    submitted_reading = data.pop(RECURRENCE_REPEATS_ON_KEY, MonthReading())
     submitted_ceiling = data.pop(RECURRENCE_MAX_PER_MONTH_KEY, None)
     # The bound's keys too, on THIS branch as well: the route reads the mode
     # into ``ctx.end_bound`` before calling, and a submission that named none
@@ -637,8 +647,12 @@ def update_recurrence_rule_from_form(
                 submitted_starts_on if states_a_start else current.starts_on
             ),
             nominal_day=(
-                submitted_nominal_day if states_a_start
+                submitted_reading.nominal_day if states_a_start
                 else current.nominal_day
+            ),
+            weekday_reading=(
+                submitted_reading.weekday_reading if states_a_start
+                else current.weekday_reading
             ),
             # The form states the WHOLE closing bound, never half of one
             # (plan step R7b-3): the "Ends" control's three shapes are one

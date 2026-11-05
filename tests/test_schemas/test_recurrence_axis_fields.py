@@ -40,6 +40,7 @@ from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
 from app.extensions import db
 from app.models.ref import PeriodPlacement, RecurrenceUnit
 from app.schemas.validation import TemplateCreateSchema, TemplateUpdateSchema
+from app.services.recurrence import MonthReading
 from app.schemas.validation.templates import A_CADENCE_IS_REQUIRED
 from app.schemas.validation.salary import (
     PaycheckLineCreateSchema,
@@ -658,12 +659,12 @@ class TestTheNominalDayMustFitTheFirstOccurrence:
                         # which one the assertion caught.
                         "interval_n": "1",
                         "starts_on": starts_on.isoformat(),
-                        "nominal_day": str(nominal_day),
+                        "repeats_on": str(nominal_day),
                     },
                     partial=True,
                 )
 
-            assert exc.value.messages.keys() == {"nominal_day"}, (
+            assert exc.value.messages.keys() == {"repeats_on"}, (
                 f"{schema_label}: {label}"
             )
 
@@ -688,12 +689,12 @@ class TestTheNominalDayMustFitTheFirstOccurrence:
                     ),
                     "interval_n": "1",
                     "starts_on": "2026-04-30",
-                    "nominal_day": "31",
+                    "repeats_on": "31",
                 },
                 partial=True,
             )
 
-            assert loaded["nominal_day"] == 31
+            assert loaded["repeats_on"] == MonthReading(nominal_day=31)
 
     def test_a_MONTHLY_FIRST_cadence_may_carry_one_too(self, app):
         """The cadence the two day questions disagree about.
@@ -718,12 +719,12 @@ class TestTheNominalDayMustFitTheFirstOccurrence:
                     ),
                     "interval_n": "1",
                     "starts_on": "2026-04-30",
-                    "nominal_day": "31",
+                    "repeats_on": "31",
                 },
                 partial=True,
             )
 
-            assert loaded["nominal_day"] == 31
+            assert loaded["repeats_on"] == MonthReading(nominal_day=31)
 
     def test_an_absent_start_skips_the_rule(self, app):
         """A locked "Starts on" control posts nothing, and must stay savable.
@@ -746,12 +747,12 @@ class TestTheNominalDayMustFitTheFirstOccurrence:
                         ),
                     ),
                     "interval_n": "1",
-                    "nominal_day": "31",
+                    "repeats_on": "31",
                 },
                 partial=True,
             )
 
-            assert loaded["nominal_day"] == 31
+            assert loaded["repeats_on"] == MonthReading(nominal_day=31)
             assert "starts_on" not in loaded
 
 
@@ -915,7 +916,7 @@ class TestTheLineSchemasTakeTheCadenceAndTheSpan:
         "recurrence_unit", "recurrence_placement", "interval_n", "max_per_month",
     })
     _THE_SPAN_FIVE = frozenset({
-        "starts_on", "nominal_day", "recurrence_end_mode", "end_date",
+        "starts_on", "repeats_on", "recurrence_end_mode", "end_date",
         "max_occurrences",
     })
 

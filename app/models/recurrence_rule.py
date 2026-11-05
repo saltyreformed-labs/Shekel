@@ -4,13 +4,13 @@ Shekel Budget App -- Recurrence Rule Model (budget schema)
 Defines the pattern by which transactions are auto-generated into
 future pay periods (every_period, monthly, annual, etc.).
 
-**This table states its recurrence in SEVEN columns and carries no second
+**This table states its recurrence in EIGHT columns and carries no second
 statement of any of them.**  ``interval_n`` / ``unit_id`` / ``placement_id`` /
-``shift_id`` / ``starts_on`` / ``nominal_day`` / ``max_per_month`` are what a
-caller AUTHORS and what every reader takes; beside them sit only the
-closing bound's exclusive arc and one carried flag (below).
-``due_day_of_month`` -- a servicer's date for
-a bill the cadence scheduled elsewhere -- was dropped at plan step
+``shift_id`` / ``starts_on`` / ``nominal_day`` / ``weekday_reading`` /
+``max_per_month`` are what a caller AUTHORS and what every reader takes;
+beside them sit only the closing bound's exclusive arc and one carried flag
+(below).  ``due_day_of_month`` -- a servicer's date for a bill the cadence
+scheduled elsewhere -- was dropped at plan step
 recurrence:R5-a (ruling **R-R96**, migration ``1c569c51b449``): a rule's own day
 IS the day its rows are due, and a recurring due day that differs from the day
 money moves is a term of the LOAN (``loan_params.payment_day``), not of the
@@ -19,14 +19,19 @@ the migration refuses to run over one that does.  The seventh, the per-month
 ceiling, arrived at plan step **salary:R15-a** (ruling **R-SAL29**) as the
 cadence's third value: "every paycheck, at most 2 a month" is how a payroll
 benefit taken on a month's first two paychecks is stated, and neither axis
-could say it (ledger row **D59**).
+could say it (ledger row **D59**).  The eighth, how the first occurrence is
+READ, arrived at plan step **recurrence:R8-c** (rulings **plan#2668**,
+**plan#2670**, amending **R-R25**): "the third Tuesday" and "the last Friday"
+are dates read by their weekday, and the week number and weekday come from
+``starts_on`` itself, so the reading is the one fact the date cannot carry.
 
 **One column is CARRIED rather than authored, and a key holds it** (plan step
 plan#2302, ruling plan#2748).  ``unit_has_day_of_month`` is the unit's own
 ``ref.recurrence_units.has_day_of_month`` on this row, because a PostgreSQL
-CHECK reads only the row it checks and two of the pairings here turn on which
+CHECK reads only the row it checks and three of the pairings here turn on which
 kind of unit the rule names: a per-month ceiling needs a unit that can repeat
-within a month, and a nominal day needs a unit with a day to clamp.
+within a month, a nominal day needs a unit with a day to clamp, and a weekday
+reading needs a unit with a month to read the weekday in.
 ``fk_recurrence_rules_unit_day_of_month`` holds the copy to the unit, so a row
 whose flag disagrees with its unit is refused rather than reconciled.
 
@@ -254,6 +259,54 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
             "nominal_day IS NULL OR unit_has_day_of_month",
             name="ck_recurrence_rules_nominal_day_unit",
         ),
+        # ``weekday_reading`` holds one of two literals, and the position each
+        # needs of ``starts_on`` (plan step recurrence:R8-c, rulings plan#2668
+        # and plan#2670).  The week number and the weekday come from the date,
+        # so this is all a row states about them:
+        #
+        # * ``'from_start'`` -- the weekday counted from the month's start,
+        #   "the third Tuesday".  Only the 28th or earlier: four whole weeks
+        #   fit in the shortest month, so every month holds a 1st-4th of every
+        #   weekday and only some hold a 5th, and there is no fifth.
+        # * ``'from_end'`` -- the month's last such weekday, so the date sits
+        #   within a week of its month's end.
+        #
+        # **Two literals rather than a ``ref`` id, because of this CHECK**: it
+        # must name which value it is checking, and a CHECK comparing a ref id
+        # to a literal would tie the table to a seed (the reason the
+        # ``max_per_month`` paragraph above gives).  The two arms are also the
+        # whole domain, so a third value fails both.  IMMUTABLE expressions
+        # only, for the reason the ``nominal_day`` CHECK above gives.
+        db.CheckConstraint(
+            "weekday_reading IS NULL "
+            "OR (weekday_reading = 'from_start' "
+            "AND EXTRACT(day FROM starts_on) <= 28) "
+            "OR (weekday_reading = 'from_end' "
+            "AND EXTRACT(day FROM starts_on) + 7 > "
+            "EXTRACT(day FROM (date_trunc('month', starts_on::timestamp) "
+            "+ INTERVAL '1 month - 1 day')))",
+            name="ck_recurrence_rules_weekday_reading",
+        ),
+        # Only a unit with a day of the month has a month to read a weekday in
+        # (ruling plan#2704), which the CHECK above cannot say: it holds the
+        # position, and Thu 2026-01-15 fits ``'from_start'`` on a weekly rule as
+        # well as on a monthly one.
+        # ``recurrence._month_coordinate._require_weekday_reading_pair`` answers
+        # first; this guards the writer that never sees it, as the nominal
+        # day's twin above does.
+        db.CheckConstraint(
+            "weekday_reading IS NULL OR unit_has_day_of_month",
+            name="ck_recurrence_rules_weekday_reading_unit",
+        ),
+        # The EXCLUSIVE ARC ruling R-R25 put on this table: a nominal day reads
+        # the first occurrence by its clamped day of the month and a weekday
+        # reading by its weekday, and one date is read one way.  Stateable
+        # only because both sit on this row -- the satellite table the arc
+        # replaced could not have carried it, a CHECK reading one row.
+        db.CheckConstraint(
+            "weekday_reading IS NULL OR nominal_day IS NULL",
+            name="ck_recurrence_rules_one_month_reading",
+        ),
         # A closing DATE never precedes the first occurrence.  **HELD BACK from
         # plan step R7c-b to plan step R7d-g on a developer ruling
         # (2026-08-15), and the absence was a ruling rather than an
@@ -452,6 +505,17 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
     # exceeds the day the date carries -- so the only rows it admits are the
     # ones where the date genuinely lost the intent.
     nominal_day = db.Column(db.SmallInteger, nullable=True)
+    # How ``starts_on`` is read when it is read by its WEEKDAY:
+    # ``'from_start'`` ("the third Tuesday") or ``'from_end'`` ("the last
+    # Friday"), the values of ``recurrence.WeekdayReading``.  NULL reads it by
+    # its day of the month, which is every rule stored before plan step
+    # recurrence:R8-c and every rule whose unit has no month coordinate:
+    # absence is the discriminator and ``ck_recurrence_rules_weekday_reading``
+    # and ``ck_recurrence_rules_weekday_reading_unit`` constrain presence, the
+    # discipline ``nominal_day`` keeps one column up.
+    # A string because the CHECK above names the values; the write door
+    # stores the member's value and the read door reads the member back.
+    weekday_reading = db.Column(db.String(10), nullable=True)
     # How many ``unit_id``\\ s pass between occurrences.
     #
     # **It says what the cadence says from plan step R7c-c, and it did not
@@ -514,7 +578,7 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
 
     # Relationships
     #
-    # **THREE have been deleted from this model and none replaced.**
+    # **FOUR have been deleted from this model and none replaced.**
     # ``pattern`` went at plan step R7a (ledger row **D17**): ``lazy="joined"``,
     # so every rule load eager-joined ``ref.recurrence_patterns`` for a single
     # reader, the ``recurrence_cell`` macro's fallback branch, which titled the
@@ -534,28 +598,15 @@ class RecurrenceRule(CreatedAtMixin, db.Model):
     # the discriminator and its presence is constrained, which
     # ``ck_recurrence_rules_nominal_day`` is what makes true here.
     #
-    # ``weekday_anchor`` is the ONE 0-or-1 subtype left, it is EMPTY, and it is
-    # SCHEDULED FOR DELETION unwritten (ruling **R-R25**, 2026-08-16, plan step
-    # **R8-c**).  It was to hold "the third Friday" -- two fields with their own
-    # domain, and "the LAST Tuesday" (``nth_week = -1``) is not derivable from a
-    # date at all -- and those two fields go on THIS table as an exclusive arc
-    # instead, for the reason the ``month_anchor`` paragraph above already
-    # gives: a rule fires on a day-of-month OR an nth-weekday, never both, and
-    # that invariant is only a CHECK while both facts sit on one row.  This
-    # comment claimed it "is a CHECK against ``nominal_day``" with the anchor in
-    # another table, which plan step R8-a measured unbuildable -- a PostgreSQL
-    # CHECK may reference only columns of the row being checked.
-    # ``uselist=False`` because the UNIQUE constraint on its
-    # ``recurrence_rule_id`` makes at most one row possible; ``lazy="select"``
-    # because nothing reads it and nothing will, so an eager join would cost
-    # every rule load for no reader; ``passive_deletes`` defers to the FK's ON
-    # DELETE CASCADE rather than loading the child to delete it.
-    weekday_anchor = db.relationship(
-        "RecurrenceWeekdayAnchor",
-        uselist=False, lazy="select",
-        cascade="all, delete-orphan", passive_deletes=True,
-        back_populates="rule",
-    )
+    # ``weekday_anchor`` went at plan step **R8-c** with its table, unwritten
+    # (ruling **R-R25**, amended by **plan#2668**; migration
+    # ``897a6663d221``).  ``budget.recurrence_weekday_anchors`` was to hold
+    # "the third Friday" as ``(nth_week, weekday)``, and a rule fires on a
+    # day-of-month OR an nth-weekday, never both: an invariant that is a CHECK
+    # only while both facts sit on one row.  On this row the two fields
+    # became one, ``weekday_reading``, because the week number and the weekday
+    # are ``starts_on``'s own, and only WHICH reading -- from the month's start
+    # or as its last such weekday -- is a fact the date cannot carry.
     # The owning definition, one arm of the exclusive arc each.  MANY-TO-ONE
     # onto a primary key, so SQLAlchemy resolves each from the identity map
     # when the owner is already loaded (the ``use_get`` path) -- which is every

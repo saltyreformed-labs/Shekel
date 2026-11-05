@@ -157,9 +157,9 @@ class TestFederalHolidays:
         SPILLOVER, and it is blind by construction to everything else: a
         COUNT cannot see where a weekday-anchored holiday lands, because
         moving one cannot collide it with another.  An adversarial review
-        measured that -- reverting ``_last_weekday`` to the Memorial Day
+        measured that -- reverting ``last_weekday`` to the Memorial Day
         2027 defect, and computing MLK as the second Monday of January,
-        both leave this test GREEN.  ``_nth_weekday`` and ``_last_weekday``
+        both leave this test GREEN.  ``nth_weekday`` and ``last_weekday``
         are graded by the five transcribed years above and by
         :meth:`test_memorial_day_is_always_the_last_monday_of_may`, not
         here.  *An earlier draft claimed those two functions were "what it
@@ -196,9 +196,9 @@ class TestFederalHolidays:
         definition itself -- a week later is June -- rather than against a
         recomputed nth-weekday, which is what makes this independent of
         the function it grades.  Beside the transcribed years it is
-        also the only whole-calendar guard on ``_last_weekday``.
+        also the only whole-calendar guard on ``last_weekday``.
 
-        ``_last_weekday`` began the month's search at the 28th and stepped
+        ``last_weekday`` began the month's search at the 28th and stepped
         forward in weeks, so in any month whose last such weekday falls on
         the 29th, 30th or 31st it answered a week early: Memorial Day 2027
         came back as 2027-05-24 against a true 2027-05-31.

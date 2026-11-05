@@ -68,11 +68,13 @@ from app.services.pay_calendar import PayCalendar
 from app.services.recurrence import (
     NEVER_ENDS,
     Closing,
+    DayOfMonth,
     DerivedStop,
     EndsOnDate,
     RecurrenceGenerationError,
     RecurrenceResolutionError,
     ResolvedRecurrence,
+    WeekdayReading,
     has_day_of_month_coordinate,
     occurrence_placements,
     occurrences,
@@ -208,6 +210,7 @@ def resolved_value(
     derived: DerivedStop | None = None,
     nominal_day: int | None = None,
     max_per_month: int | None = None,
+    weekday_reading: WeekdayReading | None = None,
 ) -> ResolvedRecurrence:
     """Return a two-axis value stated directly, bypassing ``resolve``.
 
@@ -241,6 +244,8 @@ def resolved_value(
             month clamped it.
         max_per_month: The per-month ceiling (plan step salary:R15-a), or
             ``None`` for none.
+        weekday_reading: How the first occurrence is read by its weekday
+            (plan step R8-c), or ``None`` for its day of the month.
 
     Returns:
         The :class:`~app.services.recurrence.ResolvedRecurrence`.
@@ -255,6 +260,7 @@ def resolved_value(
         closing=Closing(authored=end_bound, derived=derived),
         nominal_day=nominal_day,
         max_per_month=max_per_month,
+        weekday_reading=weekday_reading,
     )
 
 
@@ -2421,7 +2427,7 @@ class TestTheMonthWalkReachesTheCalendarsLastMonth:
     def test_a_monthly_walk_ends_on_the_last_day_the_calendar_holds(self):
         """The 31st from January 2100: twelve dates, the last 2100-12-31."""
         walked = list(_months.walk_months(
-            _months.month_ordinal(date(2100, 1, 1)), 31, 1,
+            _months.month_ordinal(date(2100, 1, 1)), DayOfMonth(31).date_in, 1,
         ))
         assert len(walked) == 12
         assert walked[1] == date(2100, 2, 28)
@@ -2436,11 +2442,11 @@ class TestTheMonthWalkReachesTheCalendarsLastMonth:
         so this is the case that grades the stop's direction.
         """
         assert list(_months.walk_months(
-            _months.month_ordinal(date(2100, 12, 1)), 15, 1,
+            _months.month_ordinal(date(2100, 12, 1)), DayOfMonth(15).date_in, 1,
         )) == [date(2100, 12, 15)]
 
     def test_a_stride_landing_past_the_calendar_fires_once(self):
         """Yearly from March 2100: March 2101 is past the calendar, so one date."""
         assert list(_months.walk_months(
-            _months.month_ordinal(date(2100, 3, 1)), 15, 12,
+            _months.month_ordinal(date(2100, 3, 1)), DayOfMonth(15).date_in, 12,
         )) == [date(2100, 3, 15)]

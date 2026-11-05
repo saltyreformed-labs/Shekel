@@ -26,7 +26,12 @@ ship a dead control:
    R-SAL38 (2)) -- but no due day and no preview, so the script runs with
    the container and without those two; a "Does not repeat" save must post
    NOTHING under the span keys, a cadence must show the rows, and the "Starts
-   on" box must open BLANK (blank is the opening payday).
+   on" box must open BLANK (blank is the opening payday);
+4. the "repeating on" control (plan step recurrence:R8-c) rides inside that
+   container, so on this form it is HIDDEN until a date is typed, and the
+   edit prefill fills its choice AFTER the unit's one dispatch has worded the
+   options for the row's date (``_drive_line_weekday``, and the write pass's
+   weekday edit).
 
 It is paced to the real Valkey limiter the dev app runs (30 a minute per IP),
 exactly as its sibling is.
@@ -61,8 +66,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-import verify_recurrence_form as shared
-from verify_recurrence_form import (
+import _recurrence_form_kit as shared
+from _recurrence_form_kit import (
     DEV_BASE_URL,
     POST_SPACING_SECONDS,
     SESSION_STATE,
@@ -71,6 +76,14 @@ from verify_recurrence_form import (
     _sql,
     _unit_ids,
     _visible,
+)
+from _recurrence_form_weekday import (
+    EXPECTED_OFFERS,
+    THIRD_TUESDAY,
+    THIRD_TUESDAY_CADENCE,
+    _choose_reading,
+    _chosen_reading,
+    _offered,
 )
 
 #: Marks every row this script creates, so the cleanup pass can find them
@@ -89,7 +102,8 @@ def _posted(page) -> dict[str, list[str]]:
     The span keys are read too (plan step salary:R18-c): absent under "Does
     not repeat", present -- ``starts_on`` blank unless typed, the bound's
     mode ``never`` with neither value input posting -- once a cadence is
-    chosen.
+    chosen.  So is ``repeats_on`` (plan step recurrence:R8-c), which posts
+    only beside a typed date on a month or year unit.
 
     Args:
         page: The Playwright page.
@@ -110,6 +124,7 @@ def _posted(page) -> dict[str, list[str]]:
                 recurrence_end_mode: data.getAll('recurrence_end_mode'),
                 end_date: data.getAll('end_date'),
                 max_occurrences: data.getAll('max_occurrences'),
+                repeats_on: data.getAll('repeats_on'),
             };
         }"""
     )
@@ -155,7 +170,7 @@ def _drive_add_form(page, profile_id: int) -> None:
     _check("A: the #recurrence-fields container holds the span rows (R18-c)",
            page.evaluate(
                """() => ['recurrence-fields', 'starts_on', 'recurrence_end_mode',
-                         'end_date', 'max_occurrences', 'nominal_day']
+                         'end_date', 'max_occurrences', 'repeats_on']
                      .every(id => document.getElementById(id) !== null)"""),
            "a span control is missing")
     _check("A: no due day and no preview control is rendered",
@@ -284,6 +299,7 @@ def _rows(page) -> list[dict[str, str]]:
             end_mode: b.dataset.lineEndMode,
             end_date: b.dataset.lineEndDate,
             max_occurrences: b.dataset.lineMaxOccurrences,
+            repeats_on: b.dataset.lineRepeatsOn,
             phrase: document.querySelector('[data-line-cadence="' + b.dataset.lineEdit + '"]')
                     .textContent.trim(),
         }))"""
@@ -333,6 +349,16 @@ def _drive_edit_prefill(page, row: dict[str, str], label: str) -> None:
     _check(f"{label}: the prefill posts the bound's value under its own shape alone",
            posted["end_date"] == wanted_end_date and posted["max_occurrences"] == wanted_count,
            str(posted))
+    # The "repeating on" choice (plan step recurrence:R8-c): app.js fills it
+    # AFTER the unit's dispatch has worded and enabled the options for the
+    # row's date, so a month or year row posts its stored choice and any
+    # other row posts nothing (the control hidden and disabled).
+    units = _unit_ids(page)
+    wanted_reading = (
+        [row["repeats_on"]] if row["unit"] in (units["months"], units["years"]) else []
+    )
+    _check(f"{label}: the prefill posts the row's 'repeating on' choice, or nothing",
+           posted["repeats_on"] == wanted_reading, str(posted))
     _check(f"{label}: the submit button reads Update",
            "Update" in page.inner_text("#line-submit-btn"), page.inner_text("#line-submit-btn"))
 
@@ -349,6 +375,65 @@ def _drive_existing_rows(page, profile_id: int) -> None:
         # Back to add mode between rows, the way the user gets there.
         page.click('[data-toggle-target="add-line-form"]')
         page.wait_for_timeout(400)
+
+
+def _type_start(page, iso: str) -> None:
+    """Type a "Starts on" date and dispatch the change the script re-links on."""
+    page.fill("#starts_on", iso)
+    page.evaluate(
+        """() => document.getElementById('starts_on')
+                 .dispatchEvent(new Event('change', {bubbles: true}))"""
+    )
+    _settle(page)
+
+
+def _drive_line_weekday(page, profile_id: int) -> None:
+    """Check the add form's "repeating on" control offers the weekday reading (plan step R8-c).
+
+    The control is the template forms' (``_recurrence_form_weekday.py`` drives
+    it there), placed here through the same partial, and this form opens
+    with a BLANK start: a blank date can be read no way at all, so the
+    control is hidden and disabled until a date is typed, then worded and
+    enabled for it on a month or a year unit and never a paycheck one.
+
+    Args:
+        page: The Playwright page.
+        profile_id: The salary profile whose edit page holds the form.
+    """
+    print(f"\n=== deduction 'repeating on' (R8-c): /salary/{profile_id}/edit ===")
+    page.goto(f"{DEV_BASE_URL}/salary/{profile_id}/edit", wait_until="domcontentloaded")
+    page.wait_for_selector("#recurrence_unit", state="attached")
+    _open_add_form(page)
+    units = _unit_ids(page)
+    page.locator("#recurrence_unit").select_option(units["months"])
+    _settle(page)
+    _check("R: on a blank start the control is hidden and posts nothing",
+           not _visible(page, "field-repeats-on") and _posted(page)["repeats_on"] == [],
+           str(_posted(page)))
+    _type_start(page, THIRD_TUESDAY)
+    shown, enabled = _offered(page)
+    _check("R: months on Nov 17 shows exactly the same day and the third Tuesday",
+           shown == EXPECTED_OFFERS[THIRD_TUESDAY], str(shown))
+    _check("R: and enables exactly those",
+           enabled == EXPECTED_OFFERS[THIRD_TUESDAY], str(enabled))
+    _choose_reading(page, "from_start")
+    _check("R: choosing the third Tuesday posts it once",
+           _posted(page)["repeats_on"] == ["from_start"], str(_posted(page)))
+    page.locator("#recurrence_unit").select_option(units["years"])
+    _settle(page)
+    _check("R: years shows the control and keeps the choice the date still allows",
+           _visible(page, "field-repeats-on")
+           and _posted(page)["repeats_on"] == ["from_start"], str(_posted(page)))
+    page.locator("#recurrence_unit").select_option(units["paychecks"])
+    _settle(page)
+    _check("R: paychecks hides the control and posts nothing",
+           not _visible(page, "field-repeats-on") and _posted(page)["repeats_on"] == [],
+           str(_posted(page)))
+    page.locator("#recurrence_unit").select_option(units["months"])
+    _settle(page)
+    _check("R: months again brings the control back on the choice the date still allows",
+           _visible(page, "field-repeats-on")
+           and _posted(page)["repeats_on"] == ["from_start"], str(_posted(page)))
 
 
 def _fill_line(page, name: str, units: dict[str, str], ceiling: str) -> None:
@@ -508,14 +593,25 @@ def _drive_write_pass(page, profile_id: int) -> None:
     _check("W: the SAME rule row now starts on a 1st with no ceiling and no stop",
            len(stored) == 1 and stored[0].startswith("|")
            and stored[0].endswith("-01|"), str(stored))
+    _drive_weekday_edit(page)
+    _drive_delete(page, added["id"])
 
-    # --- delete it through the row's form ------------------------------
-    # The confirmation is the project's own modal (confirm.js intercepts
-    # htmx:confirm and asks through #confirmModal; the browser's confirm()
-    # is only its fallback), so the Yes button is what a user clicks.  The
-    # first run of this drive accepted a native dialog that never opened and
-    # reported the row surviving a delete that was never sent.
-    page.click(f'form[action$="/lines/{added["id"]}/delete"] button[type=submit]')
+
+def _drive_delete(page, line_id: str) -> None:
+    """Delete the marked line through its row's form, and check the rule went with it.
+
+    The confirmation is the project's own modal (confirm.js intercepts
+    htmx:confirm and asks through #confirmModal; the browser's confirm()
+    is only its fallback), so the Yes button is what a user clicks.  The
+    first run of this drive accepted a native dialog that never opened and
+    reported the row surviving a delete that was never sent.  Split out of
+    :func:`_drive_write_pass` when plan#2680 gave that pass a weekday step.
+
+    Args:
+        page: The Playwright page, on the salary edit page.
+        line_id: The marked line's id.
+    """
+    page.click(f'form[action$="/lines/{line_id}/delete"] button[type=submit]')
     page.wait_for_selector("#confirmModalYes", state="visible")
     page.click("#confirmModalYes")
     page.wait_for_timeout(int(POST_SPACING_SECONDS * 1000))
@@ -528,6 +624,52 @@ def _drive_write_pass(page, profile_id: int) -> None:
                "JOIN salary.paycheck_lines d ON d.id = r.paycheck_line_id "
                f"WHERE d.name = '{MARK}'",
            ) == ["0"], "a rule survived")
+
+
+def _drive_weekday_edit(page) -> None:
+    """Edit the marked monthly line to the third Tuesday and read it back (plan step R8-c).
+
+    The line's save door, row, Frequency phrase and prefill each carry the
+    reading, and only a real save through the swapped-in form reaches all
+    four.
+
+    Args:
+        page: The Playwright page, on the salary edit page, the marked line
+            monthly.
+    """
+    rows = [r for r in _rows(page) if r["name"] == MARK]
+    if not rows:
+        return
+    _drive_edit_prefill(page, rows[0], "W[edit prefill before the weekday edit]")
+    _type_start(page, THIRD_TUESDAY)
+    _choose_reading(page, "from_start")
+    posted = _posted(page)
+    _check("W: the weekday edit posts Nov 17 and the third Tuesday",
+           posted["starts_on"] == [THIRD_TUESDAY] and posted["repeats_on"] == ["from_start"],
+           str(posted))
+    _submit_and_settle(page)
+    rows = [r for r in _rows(page) if r["name"] == MARK]
+    _check("W: the weekday edit swapped the section in", len(rows) == 1, str(rows))
+    if not rows:
+        return
+    stored = _sql(
+        "SELECT r.starts_on, coalesce(r.nominal_day::text, ''), "
+        "coalesce(r.weekday_reading, '') FROM budget.recurrence_rules r "
+        "JOIN salary.paycheck_lines d ON d.id = r.paycheck_line_id "
+        f"WHERE d.name = '{MARK}'",
+    )
+    _check("W: the SAME rule now starts on Nov 17 and reads it by its weekday",
+           stored == [f"{THIRD_TUESDAY}||from_start"], str(stored))
+    _check(f"W: the row's Frequency cell opens {THIRD_TUESDAY_CADENCE!r}",
+           rows[0]["phrase"].startswith(THIRD_TUESDAY_CADENCE), rows[0]["phrase"])
+    _check("W: the row's prefill carries the reading",
+           rows[0]["repeats_on"] == "from_start", str(rows[0]))
+    _drive_edit_prefill(page, rows[0], "W[edit prefill of the weekday row]")
+    _check("W: the edit prefill re-opens on the third Tuesday, worded",
+           _chosen_reading(page) == ["from_start", "the third Tuesday"],
+           str(_chosen_reading(page)))
+    page.click('[data-toggle-target="add-line-form"]')
+    page.wait_for_timeout(400)
 
 
 def _cleanup() -> None:
@@ -581,6 +723,7 @@ def main() -> int:
         profile_id = int(edit_links[0].rstrip("/").split("/")[-2])
 
         _drive_add_form(page, profile_id)
+        _drive_line_weekday(page, profile_id)
         _drive_existing_rows(page, profile_id)
         if WRITE:
             _cleanup()
@@ -597,7 +740,7 @@ def main() -> int:
         browser.close()
 
     print("\n" + "=" * 62)
-    # Pylint: ``protected-access`` -- the failures are the sibling drive's own
+    # Pylint: ``protected-access`` -- the failures are the shared kit's
     # record, which every ``_check`` imported from it appends to; reading it
     # here is this drive reporting the checks it ran through that module.
     failures = shared._failures  # pylint: disable=protected-access

@@ -51,8 +51,11 @@ What an occurrence IS, per unit
   :attr:`ResolvedRecurrence.nominal_day` when ``starts_on``'s own month was too
   short to hold it, and ``starts_on.day`` otherwise (ruling R-R3) -- which is
   what keeps a day-31 rule on the last day of every month instead of decaying
-  to the 30th forever.  Both are read through
-  :attr:`ResolvedRecurrence.day_of_month`, the one place that join is written.
+  to the 30th forever.  **Or the weekday ``starts_on`` names** -- "the third
+  Tuesday", "the last Friday" -- when the rule reads its first date by its
+  weekday (plan step R8-c).  All three are read through
+  :attr:`ResolvedRecurrence.month_coordinate`, the one place that join is
+  written, and walked by its shape's own day.
 * ``WEEK`` -- ``starts_on`` plus multiples of ``7 * interval_n`` days, through
   :data:`~app.utils.dates.CALENDAR_DATE_MAX`.  It was correct and unreachable
   from plan step R3 until plan step **R8-b**: the offer set withheld the unit
@@ -281,10 +284,7 @@ from app.services.recurrence._months import (
     walk_months,
 )
 from app.services.recurrence._resolution import ResolvedRecurrence
-from app.utils.dates import CALENDAR_DATE_MAX
-
-#: Days in a week, for the ``WEEK`` unit's stride.
-_DAYS_PER_WEEK = 7
+from app.utils.dates import CALENDAR_DATE_MAX, DAYS_PER_WEEK
 
 
 class RecurrenceGenerationError(ShekelError):
@@ -333,7 +333,7 @@ def _week_walk(anchor: date, interval_n: int) -> Iterator[date]:
     """
     for ordinal in range(
         anchor.toordinal(), CALENDAR_DATE_MAX.toordinal() + 1,
-        _DAYS_PER_WEEK * interval_n,
+        DAYS_PER_WEEK * interval_n,
     ):
         yield date.fromordinal(ordinal)
 
@@ -440,24 +440,25 @@ def _unbounded(
         return _period_walk(resolved, calendar)
     if unit is RecurrenceUnitEnum.WEEK:
         return _week_walk(resolved.starts_on, resolved.interval_n)
-    # The day the rule MEANS, read through the ONE accessor that joins
-    # ``starts_on``'s day to ``nominal_day`` (plan step R7a).  It was open-coded here
-    # until the display describer needed the same join: two copies of "which of
-    # these two fields holds the day" is how a rule comes to fire on the 31st
-    # and read as the 30th.  It answers ``None`` for a unit that does not fire
-    # on a day of the month, which after the two returns above means a unit
-    # this engine has no walk for -- so ONE refusal covers both, and neither
-    # ``walk_months`` nor ``clamped_day`` is ever handed a ``None`` to fail on
-    # three frames down with a bare ``TypeError``.
-    month_day = resolved.day_of_month
-    if month_day is None:
+    # The day of each month the rule MEANS, read through the ONE accessor that
+    # joins ``starts_on`` to ``nominal_day`` and the weekday reading (plan
+    # steps R7a and R8-c).  It was open-coded here until the display describer
+    # needed the same join: two copies of "which of these fields holds the
+    # day" is how a rule comes to fire on the 31st and read as the 30th -- or,
+    # until R8-c, on the 17th while meaning the third Tuesday (plan ledger row
+    # D29).  It answers ``None`` for a unit with no month coordinate, which
+    # after the two returns above means a unit this engine has no walk for --
+    # so ONE refusal covers both, and ``walk_months`` is never handed a
+    # ``None`` to fail on three frames down with a bare ``TypeError``.
+    coordinate = resolved.month_coordinate
+    if coordinate is None:
         raise RecurrenceGenerationError(
             f"recurrence unit {unit!r} has no occurrence walk: it is neither "
-            f"PERIOD nor WEEK and it names no day of the month.  Every member "
+            f"PERIOD nor WEEK and it names no day of a month.  Every member "
             f"of RecurrenceUnitEnum must have a walk -- returning nothing "
             f"would read as a rule that never fires -- and walking a "
-            f"day-of-month cadence without a day would fire it on a "
-            f"fabricated one."
+            f"month-measured cadence without its coordinate would fire it on "
+            f"a fabricated day."
         )
     # Seeded at ``starts_on``'s own month, so the first date this yields IS the
     # authored first occurrence -- by construction rather than by two
@@ -474,7 +475,7 @@ def _unbounded(
     # from it.
     #
     # ``months_per_step`` is partial over the enum and is NOT guarded here,
-    # because reaching this line already proves membership: ``day_of_month``
+    # because reaching this line already proves membership: ``month_coordinate``
     # answers non-``None`` only for ``_frequency.has_day_of_month_coordinate``,
     # which reads the unit's ``ref.recurrence_units.has_day_of_month`` -- a
     # column the database GENERATES from the same ``months_per_unit`` that
@@ -486,7 +487,7 @@ def _unbounded(
     # unconstructible rather than merely unreached.
     start = month_ordinal(resolved.starts_on)
     return walk_months(
-        start, month_day, months_per_step(unit, resolved.interval_n),
+        start, coordinate.date_in, months_per_step(unit, resolved.interval_n),
     )
 
 

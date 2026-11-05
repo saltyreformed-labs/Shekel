@@ -421,9 +421,10 @@ def has_day_of_month_coordinate(unit: RecurrenceUnitEnum) -> bool:
     step itself introduced.  Every consumer used to reach for whichever of the
     two nearby predicates was in scope:
 
-    * :func:`~app.services.recurrence.offerable_nominal_days` and
-      :attr:`~app.services.recurrence.ResolvedRecurrence.day_of_month` ask
-      THIS question -- the unit's;
+    * :func:`~app.services.recurrence.offerable_nominal_days`,
+      :func:`~app.services.recurrence.offerable_weekday_readings` and
+      :attr:`~app.services.recurrence.ResolvedRecurrence.month_coordinate`
+      ask THIS question -- the unit's;
     * :func:`fires_on_day_of_month` asks a DIFFERENT one -- whether the day a
       generated ROW is dated from comes off that coordinate -- and the two
       differ for exactly one cadence, ``Monthly First``.
@@ -431,8 +432,8 @@ def has_day_of_month_coordinate(unit: RecurrenceUnitEnum) -> bool:
     They differ because a MONTH-unit rule funded from a month's FIRST paycheck
     still fires on a day of the month; only the row it generates is dated from
     the paycheck.  The occurrence walk reads
-    :attr:`~app.services.recurrence.ResolvedRecurrence.day_of_month` for it
-    like any other MONTH rule, so its nominal day is meaningful -- and asking
+    :attr:`~app.services.recurrence.ResolvedRecurrence.month_coordinate` for
+    it like any other MONTH rule, so its nominal day is meaningful -- and asking
     the other question where this one belongs is what let a "last day of every
     month" rent lose its ``nominal_day`` and move to the 30th forever
     (``recurrence_form.js``), and a month-end loan payment bill a day early for

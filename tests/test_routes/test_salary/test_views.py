@@ -235,7 +235,7 @@ class TestDeductionFrequencyDisplay:
                     ref_cache.period_placement_id(PeriodPlacementEnum.CONTAINING_DATE),
                 ),
                 "max-per-month": "2",
-                "starts-on": "2026-01-02", "nominal-day": "",
+                "starts-on": "2026-01-02", "repeats-on": "",
                 "end-mode": "never", "end-date": "", "max-occurrences": "",
             }
 

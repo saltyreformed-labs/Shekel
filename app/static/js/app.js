@@ -576,12 +576,12 @@ function _populateLineForm(editBtn) {
     // all of them as it re-links: it shows the span rows for a cadence and
     // hides and DISABLES them for "Does not repeat" (a hidden control still
     // posts; a disabled one does not), reveals and enables the one input the
-    // chosen bound shape needs, and offers the nominal day's options off the
-    // (unit, date) pair.  A change dispatched on the mode select itself
+    // chosen bound shape needs, and offers the "repeating on" choices off the
+    // (unit, date) pair, worded for that date.  A change dispatched on the mode select itself
     // would re-enable it under "Does not repeat" and post a bound nothing
     // asked for (an adversarial review of this leaf), so there is exactly
-    // one dispatch here, the unit's.  The bound's value and the nominal day
-    // are filled AFTER it, into controls it has just enabled.
+    // one dispatch here, the unit's.  The bound's value and the "repeating
+    // on" choice are filled AFTER it, into controls it has just enabled.
     var unit = form.querySelector('[name=recurrence_unit]');
     var interval = form.querySelector('[name=interval_n]');
     var placement = form.querySelector('[name=recurrence_placement]');
@@ -597,8 +597,8 @@ function _populateLineForm(editBtn) {
         unit.value = editBtn.dataset.lineUnitId || '';
         unit.dispatchEvent(new Event('change', { bubbles: true }));
     }
-    var nominalDay = form.querySelector('[name=nominal_day]');
-    if (nominalDay) nominalDay.value = editBtn.dataset.lineNominalDay || '';
+    var repeatsOn = form.querySelector('[name=repeats_on]');
+    if (repeatsOn) repeatsOn.value = editBtn.dataset.lineRepeatsOn || '';
     var endDate = form.querySelector('[name=end_date]');
     if (endDate) endDate.value = editBtn.dataset.lineEndDate || '';
     var maxOccurrences = form.querySelector('[name=max_occurrences]');
@@ -764,7 +764,7 @@ document.addEventListener('keydown', function(e) {
     var cur = headerRow.querySelector('th.current-period');
     if (!cur) return 0;
     var idx = Array.prototype.indexOf.call(headerRow.children, cur) - 1;
-    return idx >= 0 ? idx : 0;
+    return Math.max(idx, 0);
   }
 
   function clearFocus() {

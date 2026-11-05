@@ -23,6 +23,7 @@ All money is ``Decimal`` from strings.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -50,6 +51,9 @@ from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import (
     RecurrenceSpec,
+    WeekdayReading,
+    reauthor_rule,
+    recurrence_spec,
     resolve,
     scheduling_day_of_month,
 )
@@ -267,6 +271,56 @@ class TestStartBoundIsSynced:
             .order_by(Transfer.due_date)
         ]
         assert dues == [date(2026, 5, 20)]
+
+    def test_a_re_pointed_rule_drops_a_weekday_reading_for_the_contract_day(
+        self, auth_client, seed_user, db, seed_periods,
+    ):
+        """The loan's coordinate is its contract day, whatever the rule read before.
+
+        Plan step recurrence:R8-c, ruling R-R96.  The rule's first date Fri
+        2026-05-01 read FROM ITS START is "the first Friday"; a ``payment_day``
+        edit to the 20th re-points it onto Wed 2026-05-20.  Carried across,
+        the reading would make that "the third Wednesday" -- Jun 17, Jul 15 --
+        where the contract bills the 20th every month.
+
+        NEGATIVE CONTROL: drop ``weekday_reading=None`` from
+        ``loan_recurrence_sync.loan_cadence_spec`` and the row keeps
+        ``'from_start'`` and schedules on no day of the month.
+        """
+        acct = _upcoming_mortgage(seed_user, db.session, seed_periods)
+        db.session.commit()
+        auth_client.post(
+            f"/accounts/{acct.id}/loan/create-transfer",
+            data={"source_account_id": str(seed_user["account"].id)},
+        )
+        rule = (
+            db.session.query(Transfer)
+            .filter(Transfer.to_account_id == acct.id)
+            .first()
+        ).template.recurrence_rule
+        assert rule.starts_on == date(2026, 5, 1)
+        reauthor_rule(
+            rule,
+            replace(
+                recurrence_spec(rule),
+                weekday_reading=WeekdayReading.FROM_START,
+            ),
+            calendar_for(rule.user_id),
+        )
+        db.session.commit()
+        assert rule.weekday_reading == "from_start"
+
+        params = loan_loaders.load_loan_params(acct.id)
+        params.payment_day = 20
+        db.session.commit()
+        with auth_client.application.app_context():
+            loan_recurrence_sync.sync_loan_payment_start(acct.id)
+            db.session.commit()
+
+        db.session.refresh(rule)
+        assert rule.starts_on == date(2026, 5, 20)
+        assert rule.weekday_reading is None
+        assert scheduling_day_of_month(rule) == 20
 
     def test_a_day_less_rule_keeps_its_pay_period_cadence(
         self, app, db, seed_user, seed_periods,

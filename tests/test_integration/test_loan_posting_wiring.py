@@ -8,15 +8,18 @@ transfer settle / revert / edit / delete / restore paths
 change and origination-rate / params edit routes, and loan-params creation (the
 N1 back-post).  These integration tests drive each chokepoint through its REAL
 entry point (the service call or the HTTP route), with NO manual loan sync
-call anywhere, and assert the ledger ends in the right state.
+call anywhere, and assert the ledger ends in the right state.  Each figure is the
+worked-out read, which follows the records and cannot see a sync, so every test
+ends on ``assert_ledger_parity``: that is what fails when a chokepoint's sync is
+deleted, and it goes with the sync (plan#2914).
 
 The load-bearing invariant (plan Section 5 / 8.5): a Step-4 correction links
 NO row -- it is a date-keyed correction since plan step ``balance:X-bi-6-3``
 (ruling **R-BAL102**), and carried a NULL ``transfer_id`` before that -- so
 the cash reader (movement-keyed, source-filtered) never sees it -- proven
 end-to-end by asserting a revert / delete of a corrected payment posts the
-FULL cash reversal (Checking returns to exactly 0), not a reversal short by
-the correction.
+FULL cash reversal (Checking returns to its $1000.00 opening), not a reversal
+short by the correction.
 
 Loans use a $100,000 anchor at 6%, so the first month accrues exactly $500.00
 (``100000 * 0.06 / 12``); every asserted split is hand-computed in the docstring.
@@ -136,6 +139,7 @@ class TestSettleWiringAutoPosts:
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == Decimal("0.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_settle_with_actual_amount_splits_from_actual_cash(
         self, app, db, seed_user, seed_periods,
@@ -186,7 +190,7 @@ class TestRevertAndDeletePostFullCashReversal:
     def test_revert_posts_full_cash_reversal_and_reverses_correction(
         self, app, db, seed_user, seed_periods,
     ):
-        """Reverting a corrected payment returns Checking to exactly 0.
+        """Reverting a corrected payment returns Checking to its $1000.00 opening.
 
         The correction (Loan -500 / Interest +500) carries a NULL transfer_id,
         so the Step-2 cash reader sees only the +1,000 cash on the loan ledger
@@ -226,6 +230,7 @@ class TestRevertAndDeletePostFullCashReversal:
             assert ledger_net(
                 db.session, _interest_key(loan), scenario_id,
             ) == Decimal("0.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_hard_delete_strands_nothing_and_full_cash_reversal(
         self, app, db, seed_user, seed_periods,
@@ -290,6 +295,7 @@ class TestRevertAndDeletePostFullCashReversal:
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_delete_resplits_downstream_payments(
         self, app, db, seed_user, seed_periods,
@@ -384,6 +390,7 @@ class TestRestoreWiring:
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
+            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestTrueUpWiring:
@@ -746,3 +753,4 @@ class TestRouteChokepointWiring:
             assert ledger_net(
                 db.session, _interest_key(loan), scenario_id,
             ) == Decimal("500.00")
+            assert_ledger_parity(db.session, scenario_id)

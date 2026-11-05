@@ -2,9 +2,11 @@
 Shekel Budget App -- the stored ledger, as the tests that grade it read it.
 
 What a test still reads of ``budget.journal_entries``, ``budget.account_postings``
-and ``budget.ledger_accounts``, each read moved here from ``tests/_test_helpers.py``
-by plan step plan#2913 once every assertion of a figure had moved onto
-``tests/_ledger_reads.py``.  **The callers are the store's own machinery**: the
+and ``budget.ledger_accounts``, by plan step plan#2913 once every assertion of a
+figure had moved onto ``tests/_ledger_reads.py``: most moved here from
+``tests/_test_helpers.py``, and ``stored_account_net``, ``stored_per_loan_net``,
+``stored_trial_balance`` and ``entries_violating_balance`` were written here from
+what the package helpers held.  **The callers are the store's own machinery**: the
 shape or count of a journal entry or a reversal, a re-sync, the deploy resync,
 the balanced-write refusals, chart row creation, the parity tests, and a state
 only the store can hold (a forged or cleared entry).  So nothing here is a
@@ -16,10 +18,21 @@ Underscore-prefixed module name keeps pytest from collecting it.
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import LedgerAccountKindEnum
+from app.enums import (
+    LedgerAccountClassEnum,
+    LedgerAccountKindEnum,
+    PostingKindEnum,
+    PostingSourceEnum,
+)
 from app.extensions import db
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
+from app.models.transfer import Transfer
+from app.services._posting_reconcile import account_chart_row_ids
+from app.services.ledger_lines import ChartKey
+from app.services.pay_calendar import calendar_for
+from app.services.posting_reads import _ledger_account_for
+from app.utils.money import round_money
 from tests._ledger_reads import (
     family_movement_ids,
     transfer_family_movement_ids,
@@ -47,11 +60,6 @@ def ledger_accounts_for_account(db_session, account_id):
         its ``anchor_equity`` twin (one per account-linked kind).  Callers
         asserting counts or shapes must say WHICH kinds they expect.
     """
-    # Pylint: ``import-outside-toplevel`` -- same collection-time-safety
-    # convention as the helpers above (no app symbols imported at module
-    # load); load the model lazily here.
-    # pylint: disable=import-outside-toplevel
-    from app.models.ledger_account import LedgerAccount
 
     return (
         db_session.query(LedgerAccount)
@@ -83,12 +91,6 @@ def ledger_account_of_kind(db_session, account_id, kind_enum):
         The :class:`~app.models.ledger_account.LedgerAccount` of that kind for
         the account, or ``None`` when the account has no such row yet.
     """
-    # pylint: disable=import-outside-toplevel  -- same collection-time-safety
-    # convention every helper in this module follows (no app symbols at module
-    # load).
-    from app import ref_cache
-    from app.models.ledger_account import LedgerAccount
-
     return (
         db_session.query(LedgerAccount)
         .filter_by(
@@ -118,12 +120,6 @@ def transit_ledger_account(db_session, user_id):
         The ``transit`` :class:`~app.models.ledger_account.LedgerAccount`, or
         ``None`` when no transfer of the owner's has posted yet.
     """
-    # pylint: disable=import-outside-toplevel  -- same collection-time-safety
-    # convention as the helpers above (no app symbols at module load).
-    from app import ref_cache
-    from app.enums import LedgerAccountKindEnum
-    from app.models.ledger_account import LedgerAccount
-
     return (
         db_session.query(LedgerAccount)
         .filter_by(
@@ -163,12 +159,6 @@ def stored_chart_key(ledger_account):
     Returns:
         The :class:`~app.services.ledger_lines.ChartKey` its columns spell.
     """
-    # pylint: disable=import-outside-toplevel  -- same collection-time-safety
-    # convention as the helpers above (no app symbols at module load).
-    from app import ref_cache
-    from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
-    from app.services.ledger_lines import ChartKey
-
     kinds = {
         ref_cache.ledger_account_kind_id(member): member
         for member in LedgerAccountKindEnum
@@ -214,10 +204,6 @@ def linked_ledger_account(db_session, account_id):
         The LINKED :class:`~app.models.ledger_account.LedgerAccount`, or
         ``None`` when the account has no pairing yet.
     """
-    # pylint: disable=import-outside-toplevel  -- same collection-time-safety
-    # convention as the helpers above (no app symbols at module load).
-    from app.enums import LedgerAccountKindEnum
-
     return ledger_account_of_kind(
         db_session, account_id, LedgerAccountKindEnum.LINKED,
     )
@@ -266,11 +252,6 @@ def loan_correction_entries(db_session, transfer_id, loan_account_id):
     Raises:
         ValueError: If the loan side holds no dated record (it has no key).
     """
-    # Pylint: import-outside-toplevel -- same lazy-app-import convention
-    # every helper in this module follows.
-    # pylint: disable=import-outside-toplevel
-    from app.models.transfer import Transfer
-
     record = transfer_side_record(db_session, transfer_id, loan_account_id)
     if record is None or record.settled_on is None:
         raise ValueError(
@@ -318,13 +299,6 @@ def loan_correction_entries_at(
         list[:class:`~app.models.journal_entry.JournalEntry`], ascending by id
         (empty when nothing is posted at the key).
     """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app import ref_cache
-    from app.enums import PostingSourceEnum
-    from app.models.journal_entry import JournalEntry, Posting
-    from app.services._posting_reconcile import account_chart_row_ids
-
     on_loan_rows = (
         db_session.query(Posting.journal_entry_id)
         .filter(Posting.ledger_account_id.in_(
@@ -351,8 +325,7 @@ def stored_ledger_net(db_session, ledger_account_id, scenario_id):
     """Return the net of every posting leg on a ledger account in a scenario.
 
     Sums ``budget.account_postings.amount`` over *ledger_account_id* for journal
-    entries in *scenario_id*.  Shared by the Step-4 split-service and wiring
-    suites so both read a ledger's net the same way.
+    entries in *scenario_id*.
 
     Args:
         db_session: The test ``db.session``.
@@ -362,11 +335,6 @@ def stored_ledger_net(db_session, ledger_account_id, scenario_id):
     Returns:
         The signed net as a ``Decimal`` (``Decimal("0")`` when none posted).
     """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app.extensions import db
-    from app.models.journal_entry import JournalEntry, Posting
-
     return (
         db_session.query(
             db.func.coalesce(db.func.sum(Posting.amount), Decimal("0"))
@@ -498,11 +466,6 @@ def stored_net_by_date(db_session, ledger_account_id, scenario_id):
     Returns:
         A ``{entry_date: Decimal}`` mapping (empty when none posted).
     """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app.extensions import db
-    from app.models.journal_entry import JournalEntry, Posting
-
     rows = (
         db_session.query(
             JournalEntry.entry_date,
@@ -542,14 +505,6 @@ def _posted_loan_linked_ledger(loan_account_id, scenario_id):
         PostingError: If the loan account has no linked ledger account at all (a
             broken chart-of-accounts pairing).
     """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app import ref_cache
-    from app.enums import PostingKindEnum
-    from app.extensions import db
-    from app.models.journal_entry import JournalEntry, Posting
-    from app.services.posting_reads import _ledger_account_for
-
     linked = _ledger_account_for(loan_account_id)
     has_opening = db.session.query(
         db.session.query(Posting.id)
@@ -580,10 +535,11 @@ def stored_loan_balance_at(loan_account_id, scenario_id, as_of):
     seam answers a loan from the event FOLD (steps C3b1 / C3b3 / E1d-b) and the
     balance sheet reads the postings through
     :mod:`app.services.ledger_report_service`, so the sum-of-postings
-    balance-at-T had no production caller left -- its only remaining job was to be
-    the counterparty the fold and the resolver are graded against.  An oracle's
-    window belongs on the oracle's side: a window living here cannot be re-exported
-    into a screen.
+    balance-at-T had no production caller left.  An oracle's window belongs on the
+    oracle's side: a window living here cannot be re-exported into a screen.  Since
+    plan#2913 the fold and the resolver are graded against the worked-out window,
+    :func:`tests._ledger_reads.posted_loan_balance_at`, and this answers only for
+    the store's own machinery.
 
     Two deliberate differences from the deleted reader, both stated so a caller is
     not surprised:
@@ -611,12 +567,6 @@ def stored_loan_balance_at(loan_account_id, scenario_id, as_of):
         The posted balance owed as a cent-quantized ``Decimal``, or ``None`` when
         the loan has no OPENING posting in the scenario.
     """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app.extensions import db
-    from app.models.journal_entry import JournalEntry, Posting
-    from app.utils.money import round_money
-
     linked = _posted_loan_linked_ledger(loan_account_id, scenario_id)
     if linked is None:
         return None
@@ -680,9 +630,6 @@ def stored_loan_balance_map(loan_account_id, scenario_id, periods):
         A ``{period.id: Decimal}`` mapping, or ``None`` when the loan has no
         OPENING posting in the scenario.
     """
-    from app.services.pay_calendar import (  # pylint: disable=import-outside-toplevel
-        calendar_for,
-    )
 
     if _posted_loan_linked_ledger(loan_account_id, scenario_id) is None:
         return None
@@ -737,11 +684,6 @@ def find_loan_ledger_account(db_session, loan_account_id, kind):
         The :class:`~app.models.ledger_account.LedgerAccount`, or ``None`` when
         the resolver has not minted it yet.
     """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app import ref_cache
-    from app.models.ledger_account import LedgerAccount
-
     return (
         db_session.query(LedgerAccount)
         .filter_by(
@@ -780,13 +722,6 @@ def stored_linked_ledger_total(account_id):
     Raises:
         PostingError: When the account has no linked ledger account.
     """
-    from app.extensions import db  # pylint: disable=import-outside-toplevel
-    from app.models.journal_entry import (  # pylint: disable=import-outside-toplevel
-        Posting,
-    )
-    from app.services.posting_reads import (  # pylint: disable=import-outside-toplevel
-        _ledger_account_for,
-    )
 
     # ``_ledger_account_for`` RAISES ``PostingError`` for an unpaired account;
     # it never returns ``None``.  An earlier version of this helper guarded for
@@ -835,10 +770,6 @@ def family_journal_filter(txn):
     Returns:
         A SQLAlchemy boolean clause over ``JournalEntry``.
     """
-    # pylint: disable=import-outside-toplevel -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app.models.journal_entry import JournalEntry
-
     return JournalEntry.transaction_entry_id.in_(family_movement_ids(txn))
 
 
@@ -875,10 +806,6 @@ def transfer_family_journal_filter(transfer_id):
     Returns:
         A SQLAlchemy boolean clause over ``JournalEntry``.
     """
-    # pylint: disable=import-outside-toplevel -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app.models.journal_entry import JournalEntry
-
     return JournalEntry.transaction_entry_id.in_(transfer_family_movement_ids(transfer_id))
 
 
@@ -900,8 +827,4 @@ def transfer_side_journal_filter(transfer_id, account_id):
     Returns:
         A SQLAlchemy boolean clause over ``JournalEntry``.
     """
-    # pylint: disable=import-outside-toplevel -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app.models.journal_entry import JournalEntry
-
     return JournalEntry.transaction_entry_id.in_(transfer_side_movement_ids(transfer_id, account_id))

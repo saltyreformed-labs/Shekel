@@ -722,3 +722,4 @@ class TestTypeChangeBoundaryGuard:
             ) == assertions_before
             # ...and the edit this door DOES own still landed.
             assert db.session.get(Account, checking_id).name == "Renamed Checking"
+            assert_ledger_parity(db.session, scenario_id)

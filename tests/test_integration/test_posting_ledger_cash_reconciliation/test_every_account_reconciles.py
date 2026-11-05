@@ -314,10 +314,10 @@ class TestPerCounterAccountReconciliation:
         ledger account -- which becomes an orphan -- and the transaction) leaves
         the orphan still holding +50.00 while the transaction now reads
         ``category_id IS NULL``.  A ``category_id`` match could no longer find
-        the transaction (it would mis-attribute it to the fallback), but the
-        ``transaction_id`` linkage reconciles the orphan against exactly the
-        transaction whose leg landed on it -- the property the counter sweep
-        relies on.  (The category-delete *route* archives a category still in use
+        the transaction (it would mis-attribute it to the fallback), and the
+        stored row keeps its leg.  The read files the leg by the row's category,
+        so it books on the Uncategorized bucket, which is the sweep's answer.
+        (The category-delete *route* archives a category still in use
         by a transaction; this raw-SQL delete reproduces the DB-level SET NULL
         directly to lock the defensive linkage reconciliation -- see the
         ``ledger_account.py`` "Reconciliation of orphans" note.)
@@ -404,8 +404,8 @@ class TestPerCounterAccountReconciliation:
                 category_key(None, LedgerAccountClassEnum.EXPENSE),
                 scenario_id,
             ) == Decimal("50.00")
-            # A category_id match would find NO counter account for the now-NULL
-            # transaction (proving why the linkage formulation is required).
+            # The category's own chart row is gone, so nothing is left that a
+            # category_id match could find.
             assert (
                 db.session.query(LedgerAccount)
                 .filter_by(

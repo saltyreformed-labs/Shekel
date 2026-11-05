@@ -932,7 +932,7 @@ class TestTheSettledParentRuleIsTheArithmetic:
         ``purchases`` close has no covering movement, its purchases carrying
         the money (ruling **R-BAL81**) -- and the account's posted total
         moves ``822.04 -> 880.00``, which is the removed purchase's own
-        `$57.96` leg reversed on its own day and nothing else.  Before this
+        `$57.96` line gone from its own day and nothing else.  Before this
         step the removal was refused outright, and 103 purchases a statement
         pass created in error had no door at all.
         """

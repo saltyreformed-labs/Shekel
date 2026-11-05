@@ -399,14 +399,11 @@ class TestBackDatedTrueUpReBasesTheLedger:
             assert entries_violating_balance() == []
             _assert_account_anchors_reconcile(scenario_id)
 
-            # The source KIND flipped with the flag, and it is graded by the NET
-            # opening-sourced amount per day rather than by which days carry an
-            # opening entry at all.  That distinction is the finding: the
-            # reconcile does not retag a row in place, it REVERSES the old
-            # opening entry -- and a reversal keeps the source kind it reverses,
-            # so the old day still has opening-kind entries and only their SUM
-            # says they cancelled.  A first version of this assertion looked at
-            # the days alone and reported both, which grades nothing.
+            # The source KIND flipped with the flag, graded on the read's
+            # opening line per day.  The store's reconcile reversed the old
+            # opening entry, and a reversal keeps the source kind it reverses, so
+            # there only a SUM per day could say they cancelled.  The read holds
+            # no reversal: which day holds a line is the whole answer.
             opening_by_day = {
                 line.entry_date: line.amount
                 for line in source_lines(

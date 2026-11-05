@@ -109,7 +109,8 @@ class TestResetResyncsLoanGenesis:
         them; the re-sync re-posts exactly two entries (opening + true-up), now
         attributed to the rebuilt schedule's earliest period (both anchor dates
         precede its 2026-06-05 start), and the loan-linked ledger nets -100000
-        again -- it would be 0 without the fix.
+        again.  The read holds that figure whatever the re-sync did, because it
+        follows the anchors; the entry count is what would be 0 without the fix.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -289,7 +290,8 @@ class TestResetResyncsAccountOpenings:
         wipe disposes it with the old periods; the re-sync re-posts exactly
         one opening entry attributed to the re-anchored period (the rebuilt
         schedule's resolved anchor), and the linked ledger nets 1000.00
-        again -- it would be 0 without the fix.
+        again.  The read holds that figure whatever the re-sync did, because it
+        follows the anchors; the entry count is what would be 0 without the fix.
         """
         with app.app_context():
             user_id = seed_user["user"].id

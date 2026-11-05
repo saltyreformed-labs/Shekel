@@ -107,11 +107,10 @@ def _seed_boundary_loan(bare_user):
 class TestReaderParallelRunAgainstResolver:
     """The dated posting window reads back == the resolver.
 
-    Sections 1-6 pin the posted LEDGER against the resolver through the test's OWN
-    unbounded ``-(sum of linked postings)`` query.  This section pins the
-    ``entry_date``-BOUNDED read of those same postings -- at a point in time and
-    at every period boundary -- as a THIRD derivation run in the SAME test as the
-    resolver.  On an on-schedule
+    Sections 1-6 pin the LEDGER against the resolver through the read's unbounded
+    net of the loan's own line.  This section pins the ``entry_date``-BOUNDED read
+    of those same lines -- at a point in time and at every period boundary -- run
+    in the SAME test as the resolver.  On an on-schedule
     payment the two must agree to the penny; off-schedule they must diverge by
     exactly the extra / short principal (the reader books the REAL principal from
     the cash, the resolver only the SCHEDULED principal).

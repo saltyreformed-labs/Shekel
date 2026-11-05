@@ -5,7 +5,8 @@ Every figure a test asserts about the ledger is read here, off
 :func:`app.services.ledger_lines.worked_out_lines` (plan step plan#2913): a net,
 a balance, a total, "this account holds no line".  The stored journal is not
 asked; what still reads it grades the store's own machinery, through
-``tests/_stored_ledger.py``, and goes with the store.
+``tests/_stored_ledger.py``, ``posting_service.account_posting_total`` or the
+store's own models, and goes with the store.
 
 **A chart account is a** :class:`~app.services.ledger_lines.ChartKey`, built by
 its constructor (``linked_key``, ``category_key``, ``account_counter_key``,
@@ -303,8 +304,9 @@ def posted_loan_balance_at(loan_account_id, scenario_id, as_of):
 
     ``-(the sum of the lines on the loan's own key dated on or before as_of)``:
     the opening, every settled payment's net principal and every true-up.  The
-    suite's own window onto the loan's ledger, the counterparty the fold and
-    the resolver are graded against.  A future date carries the sum flat.
+    suite's own window onto the loan's ledger, the counterparty the resolver is
+    graded against; it shares its walk with the fold, so agreeing with the fold
+    grades how the lines are dated and signed.  A future date carries the sum flat.
 
     Args:
         loan_account_id: The loan.

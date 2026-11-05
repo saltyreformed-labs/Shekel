@@ -1518,6 +1518,7 @@ class TestASettleDayMoveAcrossAnAssertion:
                     "PRECONDITION: the door moved the movement's day"
                 )
                 assert read_both() == expected, f"moved to {moved_to}"
+            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestCorrectionPeriodAttribution:
@@ -1698,6 +1699,7 @@ class TestCorrectionPeriodAttribution:
             assert account_net(
                 _db.session, account.id, scenario_id,
             ) == Decimal("600.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_the_refiled_correction_reconcile_is_idempotent(
         self, app, db, seed_user,
@@ -2222,6 +2224,7 @@ class TestATeardownReChecksTheAnchorsAfterTheRecordsLeave:
             assert _linked_source_net(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             ) == Decimal("0.00")
+            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestLedgerAgreesWithTheGridOnAssertionPeriods:

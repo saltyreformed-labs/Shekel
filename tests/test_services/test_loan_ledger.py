@@ -30,6 +30,7 @@ from app.models.loan_features import RateHistory
 from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.services.balance_at._fold import fold_loan_balances
 from app.services.rate_period_engine import period_for_date
+from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import posted_loan_balance_at
 from tests._test_helpers import (
     create_loan_account,
@@ -584,10 +585,10 @@ class TestFoldAgreesWithThePostedSum:
     ):
         """Every day from the opening to the last period: fold == posted ledger.
 
-        Two disjoint paths to one number -- the fold walks the loan's anchors and
-        settled payment rows; the reader sums the posted journal legs the sync
-        wrote -- so an agreement on every day is evidence the postings faithfully
-        project the fold. That equality is what C3's cutover rests on.
+        One walk, two shapes of its answer: the fold walks the loan's anchors and
+        settled payment rows, and the window sums the lines the worked-out ledger
+        derives from the same walk.  Agreement on every day grades how the read
+        dates and signs those lines; it reads no store.
         """
         from tests._test_helpers import freeze_today
         with app.app_context():
@@ -845,9 +846,10 @@ class TestTheSettledWalkChargesOncePerInstallment:
         The transition the cutover will actually exercise, and the one an
         incremental sync hides: whichever payment OPENS an accrual period carries
         its charge, and which payment that is can CHANGE when an earlier-due one
-        arrives afterwards.  The first payment's correction must then reverse the
-        interest and escrow it already posted, at the ``(period, entry_date)`` it
-        posted them under, and its loan-linked leg must move with them.
+        arrives afterwards.  The store's correction for the first payment must then
+        reverse the interest and escrow it already posted, at the
+        ``(period, entry_date)`` it posted them under, and its loan-linked leg must
+        move with them.
 
         Settled in this order, both satisfying February:
 
@@ -860,9 +862,9 @@ class TestTheSettledWalkChargesOncePerInstallment:
 
         Final: (02-01) interest $500.00, escrow $100.00, principal $400.00;
         (02-20) interest $0.00, escrow $0.00, principal $1,000.00; owed
-        $98,600.00.  **The posted balance agreeing is the assertion that matters**
-        -- it can only hold if step 1's interest and escrow legs were reversed,
-        since they are still on the ledger otherwise.
+        $98,600.00.  The read's balance agreeing shows the follower carries no
+        charge; the read walks the records and holds no reversal.  That the store
+        reversed step 1's interest and escrow legs is the parity line's to grade.
 
         The sibling test above cannot reach this: settling in pay-period order
         makes the opener arrive first, so its follower posts an EMPTY correction
@@ -911,6 +913,7 @@ class TestTheSettledWalkChargesOncePerInstallment:
             assert posted_loan_balance_at(
                 loan.id, seed_user["scenario"].id, on,
             ) == Decimal("98600.00")
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
 
 

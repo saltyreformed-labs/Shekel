@@ -51,6 +51,7 @@ from app.services.ledger_lines import (
     chart_record_type,
     linked_key,
 )
+from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import ledger_net, owner_worked_out_lines
 from tests._stored_ledger import ledger_account_of_kind
 from tests._test_helpers import (
@@ -436,9 +437,10 @@ class TestThePostedLedgerSelfMigrates:
         production modelled account is in the moment this code deploys.
 
         Two things are asserted because either alone would pass a broken
-        implementation: the equity row nets to ZERO (the old leg was reversed,
-        not left behind, which would double-count equity), and the linked
-        ledger is UNCHANGED (the migration is balance-neutral).
+        implementation: the true-up's $150.00 leaves equity for the gain line, and
+        the linked ledger is UNCHANGED (the migration is balance-neutral).  The
+        read holds no reversal, so the parity line grades that the store reversed
+        the old leg rather than leaving it behind to double-count equity.
         """
         with app.app_context():
             account = _opened_account(
@@ -473,6 +475,7 @@ class TestThePostedLedgerSelfMigrates:
             assert ledger_net(_db.session, linked, scenario_id) == (
                 linked_before
             )
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_a_second_sync_after_the_re_point_writes_nothing(
         self, app, db, seed_user,

@@ -3,9 +3,11 @@
 The correctness gate for the READ side of Step 5: the two confirmed-ledger
 statements (:mod:`app.services.ledger_report_service`) -- an income statement
 (pay-period AND calendar windows) and a balance sheet (as-of a date, with a
-trial-balance tie-out) -- read against an independent second opinion re-derived
-from the posting ledger and the source tables, never against the readers that
-produced the numbers.  This is the FOURTH reconciliation oracle, the read-side
+trial-balance tie-out) -- read against a second opinion re-derived from the
+worked-out lines and the source tables.  It shares those lines with the readers,
+so it is independent of their attribution and signing, not of the lines, which
+the source tables and hand-computed figures grade.  This is the FOURTH
+reconciliation oracle, the read-side
 sibling of the account-anchor write oracle
 (the ``test_posting_ledger_account_anchor_reconciliation`` package); together they pin the
 Step-5 promise that the trial balance closes app-wide and ``A = L + E`` is

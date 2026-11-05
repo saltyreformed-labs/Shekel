@@ -82,8 +82,9 @@ def _noon(year: int, month: int, day: int) -> datetime:
 # second opinion: the balance-sheet totals are re-summed by chart CLASS off the
 # worked-out read (``tests/_ledger_reads.py``, plan step plan#2913; a different
 # path than the reader's per-source attribution), signed by a test-local
-# debit-normal set, with retained earnings derived here -- so a bug shared by the
-# reader's attribution and presentation cannot reproduce these numbers.
+# debit-normal set, with retained earnings derived here -- so a bug in the
+# reader's attribution or presentation cannot reproduce these numbers.  A bug in
+# the lines themselves it shares, and the source tables grade those.
 
 # The accounting sign convention, restated INDEPENDENTLY of
 # ``ref_cache.ledger_class_is_debit_normal`` (which the reader signs by): a

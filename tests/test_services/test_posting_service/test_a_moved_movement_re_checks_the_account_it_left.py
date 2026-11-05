@@ -8,7 +8,9 @@ was moved off a card reversed the card's leg and left the card's correction
 booked for money no longer there (review plan#2521, finding A1; a defect at
 the merge base too).  The self-heal now reads the accounts off the deltas'
 own legs, and these cases grade both sides of such a move through the door a
-user's correction runs (``transaction_service.apply_requested_status``).
+user's correction runs (``transaction_service.apply_requested_status``).  The
+figures are the worked-out read, which holds them whatever the re-check did, so
+the parity lines are what grade the re-check.
 """
 
 from __future__ import annotations
@@ -60,7 +62,8 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
         and the card's records hold no payment, so its true-up must return
         to 0.00:
 
-            card     -500.00 (asserted; -380.00 with the card never re-checked)
+            card     -500.00 (asserted; the store reads -380.00 with the card
+                     never re-checked)
             Checking 1,000.00 opening (2024) - 120.00 riding on top = 880.00
         """
         with app.app_context():
@@ -107,7 +110,8 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
         correction.  Savings opens at $300.00 on 2026-05-14 too.  Moved to
         Savings, Checking's records hold no payment, so its true-up is 0.00:
 
-            Checking 1,000.00 (asserted; 1,120.00 with Checking never re-checked)
+            Checking 1,000.00 (asserted; the store reads 1,120.00 with Checking
+                     never re-checked)
             Savings  300.00 (its opening absorbs the payment, as the card's did)
         """
         with app.app_context():

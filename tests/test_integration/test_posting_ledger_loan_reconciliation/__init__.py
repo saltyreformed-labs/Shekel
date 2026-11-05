@@ -50,27 +50,26 @@ against a displayed balance.  The invariants below are plan Section 8.
      go-forward wiring post identical corrections, so a ledger rebuilt by the
      backfill reconciles identically to the go-forward one.
   7. **The DATED posting window parallel run (plan 4-commit-6 / 8.2).**
-     Invariants 1-6 pin the posted LEDGER against the resolver via the test's OWN
-     unbounded ``-(sum of linked postings)`` query (``_ledger_balance``); this
-     pins the ``entry_date``-BOUNDED read of the same postings -- at a point in
-     time (``_posted_balance``) and at every period boundary
-     (``_posted_period_map``) -- as a THIRD derivation, proven == the resolver
-     on-schedule and divergent by exactly the extra / short principal
-     off-schedule, including a pre-true-up payment, a mid-life true-up, a
-     calendar-year boundary, two scenarios, and the unconfigured -> ``None`` route.
-     Both windows are the test suite's own (``tests/_test_helpers.py``): plan step
-     E1e deleted the production readers, whose only remaining job was to be graded
-     here.
+     Invariants 1-6 pin the LEDGER against the resolver via the read's unbounded
+     net of the loan's own line (``_ledger_balance``); this pins the
+     ``entry_date``-BOUNDED read of the same lines -- at a point in time
+     (``_posted_balance``) and at every period boundary (``_posted_period_map``)
+     -- proven == the resolver on-schedule and divergent by exactly the extra /
+     short principal off-schedule, including a pre-true-up payment, a mid-life
+     true-up, a calendar-year boundary, and two scenarios.  Both windows are the
+     test suite's own (``tests/_ledger_reads.py``), one walk, so what they share
+     is graded against the resolver rather than against each other: plan step E1e
+     deleted the production readers, whose only remaining job was to be graded here.
      ``TestPostedLoanBalanceSums`` pins the same posted sums against
      hand-computed literals; this pins them against the independent resolver, so a
      ledger bug a literal happened to share is still caught (the ``+$10`` injection
      below fails these too).
 
-Three adversarial cases prove the oracle is not vacuous: tampering a settled
-payment's ``actual_amount`` makes the loan-aware invariant FAIL and the real
-sweep helper raise (a real ledger drift would be caught), injecting one extra leg
-makes the trial balance go non-zero (the ``= 0`` assertion is a real check, not
-one the per-entry trigger makes unconditionally true), and injecting $10 of
+Adversarial cases prove the oracle is not vacuous: tampering a settled payment's
+``actual_amount`` makes the real sweep helper raise on the store's reader, arm (a),
+because the read follows the record and the store does not; a read that loses a
+loan's component lines fails the loan-aware invariant; injecting one extra leg
+makes the STORED trial balance go non-zero; and injecting $10 of
 phantom interest into the walk fails the parallel-run VALUE checks while the
 structural sweep -- an accounting identity -- correctly survives (the executable
 form of the "+$10 injection failed 9 of 11 tests" evidence).  A companion guard

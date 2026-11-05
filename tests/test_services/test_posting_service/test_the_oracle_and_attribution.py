@@ -55,9 +55,9 @@ class TestPostedPurchaseEffect:
         (+2000) on Checking net to +1950.00 -- each settled row's money is its
         ONE covering movement.  ``posted_purchase_effect`` (a source-table
         query over the movements) reports exactly that; both settles are
-        dated today (post-assertion), so ``account_posting_total`` (the ledger
-        sum) carries the same +1950.00 on top of the $1000.00 opening --
-        2950.00.  The two independent tables agree on the movements'
+        dated today (post-assertion), so ``account_net`` (the worked-out
+        ledger) carries the same +1950.00 on top of the $1000.00 opening --
+        2950.00.  The read and the source query agree on the movements'
         contribution only because no transfers exist here, so the
         post-opening cash legs are entirely movement-sourced.
         """

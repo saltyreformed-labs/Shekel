@@ -354,13 +354,11 @@ def _posted_balance(
     """Return what the postings say the loan owed on a DATE (the dated window).
 
     :func:`tests._ledger_reads.posted_loan_balance_at`: the same lines
-    :func:`_ledger_balance` sums, but bounded by ``entry_date <= as_of``
-    and guarded by the OPENING sentinel.  A distinct derivation, so the two
-    windows agreeing is a real check rather than one query written twice, and
-    the only one that can answer a historical date at all.  Asserts non-``None``
-    because every caller here builds a CONFIGURED loan (an opening is posted), so
-    a ``None`` would be a defect, not an unconfigured loan (the ``None`` route is
-    proven directly by its own test).
+    :func:`_ledger_balance` sums, but bounded by ``entry_date <= as_of``, so
+    the two agreeing grades only that bound.  The only one that can answer a
+    historical date at all.  Asserts non-``None`` because every caller here
+    builds a CONFIGURED loan, and the read answers ``None`` only for a loan with
+    no terms.
     """
     result = posted_loan_balance_at(
         loan_account_id, scenario_id, as_of,

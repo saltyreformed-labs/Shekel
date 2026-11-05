@@ -7,7 +7,10 @@ payback-delete paths, and carry-forward -- so settling, editing, reverting,
 deleting, and carrying forward a transaction keep the append-only double-entry
 ledger in step.  These tests drive transactions END TO END through those
 handlers (NOT by calling ``posting_service`` directly -- that is Commit 4's unit
-suite) and assert the resulting ledger state.
+suite) and assert the resulting ledger state.  A figure is the worked-out read,
+which follows the records and holds no reversal, so where a test's subject is the
+door's act on the store it also ends on ``assert_ledger_parity``, and that line is
+what grades the act.
 
 The load-bearing wiring properties, each pinned by a test below:
 
@@ -998,10 +1001,11 @@ class TestDeleteReversesPostings:
     ):
         """Hard-deleting a Paid ad-hoc expense reverses its postings first.
 
-        The $50 expense posts -50 / +50; the hard delete reverses to zero
-        BEFORE the row goes, so after the delete every ledger account nets to
-        zero (the original + reversal survive as a net-zero pair with their
-        movement link SET NULL as the movement goes with the row).
+        The $50 expense posts -50 / +50, and after the delete the read holds no
+        line for it, so every account is back where it was.  On the store the
+        delete reverses to zero BEFORE the row goes (the original + reversal
+        survive as a net-zero pair with their movement link SET NULL as the
+        movement goes with the row), which the parity line grades.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -1092,8 +1096,9 @@ class TestDeleteReversesPostings:
 
         Mark an $80 expense Credit (creating a Projected payback), settle that
         payback (posting -80 / +80 on the CC Payback account), then un-mark the
-        source.  ``delete_payback_on_credit_revert`` reverses the payback's
-        postings BEFORE deleting it, so the CC Payback ledger nets to zero.
+        source: the CC Payback ledger nets to zero.  On the store
+        ``delete_payback_on_credit_revert`` reverses the payback's postings BEFORE
+        deleting it, which the parity line grades.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -1131,9 +1136,10 @@ class TestDeleteReversesPostings:
         """Deleting a source reverses a settled payback DEEP in the credit chain.
 
         source -> payback1 -> payback2, with payback2 settled (posted -100 /
-        +100 on CC Payback).  Deleting the source recurses through the chain,
-        reversing payback2's postings at its level before each row is removed,
-        so the CC Payback ledger nets to zero.
+        +100 on CC Payback).  Deleting the source recurses through the chain, and
+        the CC Payback ledger nets to zero.  On the store payback2's postings
+        reverse at its level before each row is removed, which the parity line
+        grades.
         """
         with app.app_context():
             user_id = seed_user["user"].id

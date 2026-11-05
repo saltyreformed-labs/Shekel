@@ -75,11 +75,10 @@ class TestRevertAndRecategorizeReconciles:
         The route-level 2.8 CRITICAL: a Paid Groceries expense (posted to the
         Groceries-Expense counter) is reverted to Projected AND recategorized to
         Rent in ONE PATCH (the lock lifts on the revert), then re-settled.  The
-        reconcile reverses the OLD counter read from the ledger, so Groceries nets
-        to zero and Rent carries the expense.  Beyond the per-account check the
-        Commit-6 lifecycle test makes, this asserts the COUNTER-ACCOUNT LINKAGE
-        SWEEP reconciles after the move -- proving the linkage formula excludes
-        the net-zero Groceries reversal pair and attributes the effect to Rent.
+        read holds nothing on Groceries, and Rent carries the expense.  Beyond the
+        per-account check the Commit-6 lifecycle test makes, this asserts the
+        COUNTER-ACCOUNT SWEEP reconciles after the move, attributing the effect to
+        Rent.  The sweep's parity arm grades the store's reversal of Groceries.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id

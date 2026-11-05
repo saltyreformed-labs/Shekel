@@ -200,9 +200,8 @@ class TestARevertUnDatesAndAReSettleReDates:
             assert survivor.amount == Decimal("148.32")
             assert survivor.figure_source_id == _source(MovementFigureSourceEnum.RESOLVED)
             assert txn.purchases == []
-            # The door's family reconcile reversed the un-dated movement's
-            # legs (it posts nothing without a day); the parent's zero leg had
-            # nothing to reverse.  Net: back to before.
+            # An un-dated movement books no line, so the ledger is back to
+            # before.
             assert ledger_net(db.session, cash, txn.scenario_id) == before
 
     def test_a_revert_un_dates_a_typed_movement_and_both_homes_retain_the_figure(

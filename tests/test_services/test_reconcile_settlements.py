@@ -736,7 +736,7 @@ class TestTheCardsGapClosesByThePayment:
         books-vs-bank difference: -$120.00 before the tick, $0.00 after.
         Checking's cash facts and posted ledger do not move -- the money was
         never Checking's.  (The per-day read is inline, as
-        ``test_anchor_settle_partition`` reads one: ``_test_helpers`` has the
+        ``test_anchor_settle_partition`` reads one: ``_ledger_reads`` has the
         per-PERIOD one only, and ``linked_net_by_date`` would net the
         payment's own leg in.)
         """

@@ -74,6 +74,7 @@ from app.services import (
 from app.services._posting_write import _emit_balanced_entry, _PostingLeg
 from app.services.ledger_lines import loan_key
 from app.services.transfer_legs import transfer_side_leg
+from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     account_net,
     correction_net_in_period,
@@ -830,13 +831,15 @@ class TestWalkReadsNoClock:
         a function of the loan's facts alone.  The loan is configured and synced at
         2026-03-20 (before it closes); the clock then moves past origination to
         2026-05-07 and the SAME sync re-runs.  Reconcile-to-target means an
-        already-correct ledger is not re-posted, so an unchanged ledger is the
-        proof: the first sync already recorded everything.
+        already-correct ledger is not re-posted, so an unchanged entry count is
+        the proof: the first sync already recorded everything.  The read's figure
+        beside it grades that the walk's answer did not move with the clock.
 
         Both halves are asserted, because the clock moved both: the OPENING leg
         (-$200,000.00 on the linked ledger) and the payment's split correction.
 
-        NEGATIVE CONTROL (measured): restore the ``anchor.anchor_date <= as_of``
+        NEGATIVE CONTROL (measured on the store, before plan#2913): restore the
+        ``anchor.anchor_date <= as_of``
         filter and the first sync posts no opening AND routes the whole payment to
         Refund, so the linked ledger nets to exactly ``0.00`` -- the loan reads as
         owing NOTHING while $1,073.64 of the borrower's cash sits in a Refund
@@ -2367,6 +2370,7 @@ class TestSyncLoanAnchorCorrections:
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_payment_due_on_anchor_date_is_subsumed_by_the_reset(
         self, app, db, seed_user, seed_periods,
@@ -2523,6 +2527,7 @@ class TestLoanAnchorPeriodAttribution:
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_the_refiled_anchor_reconcile_is_idempotent(
         self, app, db, seed_user, seed_periods,
@@ -2590,6 +2595,7 @@ class TestLoanAnchorPeriodAttribution:
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
+            assert_ledger_parity(db.session, scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -2778,7 +2784,7 @@ class TestPostedLoanBalanceSums:
         shrinking real balance; principal 500.00 / 502.50 / 505.01) leaves
         100000 - 1507.51 = 98492.49 -- the resolver's confirmed balance
         (``test_opening_payments_trueup_reproduce_resolver_balance`` proves the
-        equality against ``account_posting_total``); the reader negates the same
+        equality against ``account_net``); the reader negates the same
         linked net to the same figure.
         """
         with app.app_context():
@@ -3394,8 +3400,9 @@ class TestCheckedProjection:
         A PURE settle-day edit to 2026-02-05 changes no amount, so the
         pre-E1a reconcile wrote nothing and the entries kept the old date --
         while the fold moved to 02-05, a divergence the checked-projection
-        assert now refuses.  After the edit: 01-20 nets 0.00 (reversed at its
-        own date), 02-05 nets +500.00, and a repeat sync writes NOTHING (the
+        assert now refuses.  After the edit: 01-20 holds no line (the store nets
+        0.00 there, reversed at its own date), 02-05 nets +500.00, and a repeat sync
+        writes NOTHING (the
         reconcile converged in one pass -- no churn).
         """
         with app.app_context():
@@ -3445,7 +3452,7 @@ class TestCheckedProjection:
         the old-dated reversal as "the latest posting" after a BACKWARD move
         and re-churn (reverse + repost) on every later sync forever.  The
         per-(period, date) reconcile keys each delta to its exact date, so the
-        backward move (02-05 -> 01-20) lands in one pass: 02-05 nets 0.00,
+        backward move (02-05 -> 01-20) lands in one pass: 02-05 holds no line,
         01-20 nets +500.00, and a repeat sync writes nothing.
         """
         with app.app_context():

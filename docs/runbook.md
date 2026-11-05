@@ -549,18 +549,64 @@ the previous image onto whatever host files are in place. It copies none of 2.5'
 writes nothing under `/opt/docker/shekel/secrets/`. A card whose change needs the host changed too
 writes the steps here, one subsection naming the card, each with its rollback and what was measured;
 `/release` runs them at its step 11 for each card the release carries, after the developer's "Logged
-out, deploy now", from `~/projects/Shekel` at `main`. Once production runs a card, its subsection is
-history, and the next change to this section deletes it.
+out, deploy now", from `~/projects/Shekel` at `main`. A step marked as coming before the merge into
+`main` runs at `/release` step 5 instead. Once production runs a card, its subsection is history,
+and the next change to this section deletes it.
+
+#### The update App's key, before the merge into `main` (plan#1183)
+
+**These steps are the developer's, in GitHub's settings, and they come before the merge into
+`main`**, which brings `updates.yml` there (ruling plan#2472, built by plan#2728). `updates.yml`
+signs in as the update App with a private key only a run on `main` may reach: the secret of an
+environment named `update`, whose deployment branches are `main` alone.
+
+1. Create the environment `update`, in
+   [Shekel's environments](https://github.com/saltyreformed-labs/Shekel/settings/environments).
+2. Set its deployment branches to `main` alone: **Selected branches and tags**, with one rule, a
+   branch rule and not a tag rule, named `main`.
+3. Add the `UPDATE_APP_KEY` secret to it. This needs the App's private key file, or a new key from
+   the App's page, as GitHub never shows a stored secret again.
+4. Delete the repository secret `UPDATE_APP_KEY`, in
+   [Shekel's Actions secrets](https://github.com/saltyreformed-labs/Shekel/settings/secrets/actions).
+
+`UPDATE_APP_CLIENT_ID` stays a repository variable, and `PLAN_READER_KEY` a repository secret: the
+landing job runs on every pull request and queue group, which a `main`-only environment would
+refuse.
+
+**The order is the point, and nothing but the read-back checks it.** Were the release to land first,
+the first keyed run would have GitHub create `update` with no rules and no secrets,
+`secrets.UPDATE_APP_KEY` would resolve to the repository secret, the mint would succeed, and every
+branch could still name the key, with no red run and no alert. Likewise with every step done but the
+last. (plan#2728's review, read in GitHub's documentation; not measured.)
+
+**The read-back**, which reads only, before the approval:
+
+```bash
+REPO=repos/saltyreformed-labs/Shekel
+gh api "$REPO/environments/update/deployment-branch-policies" --jq '[.branch_policies[] | {name, type}]'; echo "exit=$?"
+gh api "$REPO/environments/update/secrets" --jq '[.secrets[].name]'; echo "exit=$?"
+gh api "$REPO/actions/secrets" --jq '[.secrets[].name]'; echo "exit=$?"
+```
+
+Each must exit 0. The first must list exactly one policy, `name` `main` and `type` `branch`; the
+second must list `UPDATE_APP_KEY`; the third must not. Anything else is a STOP: nothing merges.
+
+**Rollback:** none. Until the merge, no workflow on `main` names the key, so the steps can stay
+whether or not the release goes on, and `shekel-deploy`'s rollback leaves them as they are.
+
+**Measured** 2026-11-05T12:26Z, before the steps: the first two reads answered 404 and exit 1, and
+the third printed `["PLAN_READER_KEY","UPDATE_APP_KEY"]`, so the read-back refuses until they are
+done. No environment exists to read yet, so what it reads of a policy comes from GitHub's REST
+reference, not a run.
 
 #### The Valkey switch (plan#1183)
 
-**This ships as its own release**, cut at plan#1183's merge, or at plan#2718's where that step
-landed after it. plan#2718 deletes the source-build deploy, which cannot cross this switch, so it
-lands before or with this release. Nothing that needs a rehearsal kit rides with it: the kit's bench
-refuses a side with no `uv.lock`, which `main` is until this release. So when plan#1183 is queued,
-`dev` holds nothing unreleased that needs a kit. The switch has no rehearsal of its own (ruling
-plan#2473): CI's real-store test, the rehearsal measured below and `verify_prod_deploy.sh`'s
-`GET /login` answer for it.
+**This ships as its own release**, cut at plan#2718's merge, which landed after plan#1183's and
+deleted the source-build deploy, as that could not cross this switch. Nothing that needs a rehearsal
+kit rides with it: the kit's bench refuses a side with no `uv.lock`, which `main` is until this
+release, so a card landed between the two merges that needs a kit is a STOP for the developer. The
+switch has no rehearsal of its own (ruling plan#2473): CI's real-store test, the rehearsal measured
+below and `verify_prod_deploy.sh`'s `GET /login` answer for it.
 
 The release carrying plan#1183 moves the rate limiter's store from Redis to Valkey (R-BAL298). The
 image and the host files must move together, and only the steps below move them back:

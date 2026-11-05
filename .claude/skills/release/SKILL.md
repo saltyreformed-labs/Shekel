@@ -250,6 +250,12 @@ under a heading of their own:
 Exit 0 ends with its `verdict:` line. Exit 2 listed nothing (the file says why), and an exit with
 no `verdict:` line is a crash: either is a STOP.
 
+**Steps before the merge.** A subsection of `docs/runbook.md` 2.6 for a card the release carries may
+mark steps as the developer's and as coming before the merge into `main`. Ask Josh to do them, in
+plain words with its links, then run its read-back, the block opening with the source line, its
+output into `$R/before_merge_<card>.txt`. A read-back that does not hold is a STOP: the question
+below is not asked, and nothing merges.
+
 Header "Release ok". The question lists, in plain words with each id after its words:
 
 - each card the release carries, and which moves money;

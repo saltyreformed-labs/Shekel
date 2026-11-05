@@ -67,10 +67,17 @@ both fail if any act moved one.
 ## Before you start
 
 **1. Get both exports the same day, before the dump.** SECU's Checking history as CSV (the
-running-balance column included) and Capital One's transaction history as CSV, both saved into
-the day's handoff folder. The sheet is derived from both, and act 1 imports **that very
-file** of SECU's: the rehearsal and the check know the import by the file's SHA-256, and a
-download taken again can differ in its bytes.
+running-balance column included) and Capital One's transaction history as CSV, each one download,
+asked for from January 1 of the books' first year through today, both saved into the day's handoff
+folder. The sheet is derived from both, and act 1 imports **that very file** of SECU's: the
+rehearsal and the check know the import by the file's SHA-256, and a download taken again can
+differ in its bytes. **A Capital One file that starts late or stops early turns card spending into
+cancels**: a charge outside the file reads exactly like a charge that never happened. So the SETUP
+block names the two days you asked Capital One for, and the sheet refuses, writing nothing, a row a
+charge could be whose days that download cannot speak for, and a download with a month of no lines
+inside those two days. The refusal says what to do: download again asking from earlier, or on a
+later day. The last days asked do not count, because a charge made on them may not have posted, so
+a row a few days old at the download refuses until they have.
 
 **2. Open the grid once, then change nothing in the app until the after-dump.** The first grid
 or dashboard page loaded after a payday adds a paycheck and fills it from the recurring items
@@ -100,12 +107,14 @@ from the deployed revision's only in comments. A checkout carrying a migration p
 fails the act sheet at its first read, and is not run.
 
 First the SETUP block. It only defines names and runs nothing, so it can be pasted again at any
-time; fill in the four values in capitals.
+time; fill in the six values in capitals.
 
 ```bash
 D=~/projects/shekel-handoffs/FOLDER    # the day's handoff folder, outside every git checkout
 SECU=SECU_CSV                          # SECU's Checking export in $D, downloaded today (a name, not a path)
 CARD=CAPITAL_ONE_CSV                   # Capital One's export in $D, downloaded today
+CARD_FROM=FIRST_DAY                    # the first day you asked that download for: YYYY-MM-DD
+CARD_THROUGH=LAST_DAY                  # the last day you asked it for: YYYY-MM-DD
 H=CHECKOUT                             # the checkout holding card/1192, outside ~/projects/Shekel
 A=1                                    # the account reconciled: Checking
 B=shekel_xbk2_before                   # the copy the act sheet is derived from; no act touches it
@@ -178,7 +187,8 @@ the CODE block recorded. It drops and rebuilds `$B` and `$R`, and nothing else.
   same_code
   restore $B "$D/prod_$T.dump"; restore $R "$D/prod_$T.dump"
   here $B "$D/act_sheet_$T.out" reconcile_act_sheet.py --clone $B --account $A \
-        --secu "$D/$SECU" --card "$D/$CARD" --out "$D/act_sheet_$T.json"
+        --secu "$D/$SECU" --card "$D/$CARD" --card-from "$CARD_FROM" --card-through "$CARD_THROUGH" \
+        --out "$D/act_sheet_$T.json"
   here $B "$D/disagreements_before_$T.out" measure_bank_disagreements.py --out "$D/disagreements_before_$T.txt"
   prod $R "$D/rehearsal_$T.out" reconcile_rehearsal.py --clone $R --account $A --acts "$D/act_sheet_$T.json" \
         --secu "$D/$SECU" --sheet "$D/sheet_$T.md" --snapshot "$D/snapshot_$T.json"
@@ -193,7 +203,8 @@ the CODE block recorded. It drops and rebuilds `$B` and `$R`, and nothing else.
 **The block must end `REHEARSED`, or the performance does not start**; its last gate is the
 PRE-ACT block, pasted just before act 1 (The acts, below). The act sheet refuses,
 writing nothing, a movement no class takes, a day whose unanswered movements do not add up to
-its residue, an export the import would refuse, and a books day the comparison cannot take. The
+its residue, an export the import would refuse, a books day the comparison cannot take, and a
+row a charge could be on days Capital One's download cannot speak for. The
 rehearsal refuses a copy named `shekel` before it boots the app, and BEFORE any act a copy on
 which any act's pre-state has moved (the export already imported, a row already matched or no
 longer Paid, a line gone); between the two, the app's development build it boots seeds the
@@ -589,6 +600,23 @@ rendered; the post-state and the check, task plan#2416). Its door-driving half i
   balances nor the list; row 1299, cancelled, set back to Projected and its check mark pressed
   on the grid (Paid, today) failed the check on that cancel and the balances on Checking alone,
   at the same 837 figures, and did not move the list.
+* **2026-11-04, how far Capital One's download reaches** (task plan#2891): on a restore of
+  production's dump of 2026-10-30, with that day's two exports. Before this task that card file,
+  cut to begin at the earliest payment credit the sheet names, wrote a sheet, exit 0, with 5 rows
+  more to cancel than the whole file, and nothing on it said so. After it, that cut file asked for
+  from that day was refused on 22 rows, the 5 among them; said to be asked for from January 1, it
+  was refused on its 98 days with no line; and a file with no line was refused. The whole file,
+  asked for through the day it was downloaded, wrote the same sheet as before this task but for
+  its stamps and the two new lines naming the file's digest and what was asked for. Its last line
+  is 8 days before that download only because the card was quiet, as the download of 2026-11-04
+  shows. Said to be asked for only through 10-20, it was refused on 4 rows: 1 to cancel and 3 kept
+  as card spending. Hand-built rows through the same functions: a row whose charge has not posted,
+  with a later credit on file, was refused until its days were past the 5 days allowed for
+  posting; a row past the edge that took the charge another row needed was refused, which stops
+  the sheet that would have cancelled that other row; and a row that moved money in was not held.
+  **Not
+  graded**: a shorter hole inside one download's span, a payment credit past the edge, SECU's
+  own tail, and what the owner says was asked for beyond the month the lines are held to.
 * **Two measured traps the harness answers**: the rate limiter answered the rehearsal's 31st
   full-edit open inside a minute with a 429 (a person's pace never reaches it, and the rehearsal
   turns it off: `door_rehearsal.connect`), and the Reconcile page answers a refused card with a

@@ -37,8 +37,9 @@ such day.  Gathering those days and naming their movements is
 **It refuses rather than guesses**: a movement no class takes, a day whose
 unanswered movements do not add up to its residue (a match on another day
 stands behind it), an export the import would refuse, a books day the
-comparison cannot take.  A refusal names what it could not class, by id and
-day, and writes no sheet -- so a later run cannot perform acts from one.
+comparison cannot take, a row a charge could be on days Capital One's download
+cannot speak for.  A refusal names what it could not class, by id and day, and
+writes no sheet -- so a later run cannot perform acts from one.
 
 Run it against a restore, never a live database, and with this checkout's
 ``app/``: the movements' ids come from the drill-down
@@ -51,6 +52,7 @@ Usage::
         python tests/manual/reconcile_act_sheet.py --clone <the restore> \\
         --account <its id> --secu <SECU's CSV export> \\
         --card <Capital One's CSV export> \\
+        --card-from <first day asked for> --card-through <last day asked for> \\
         --out ~/projects/shekel-handoffs/<folder>/act_sheet.json
 
 Reads only: every connection is read-only (:func:`door_rehearsal
@@ -58,6 +60,7 @@ Reads only: every connection is read-only (:func:`door_rehearsal
 """
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -98,6 +101,16 @@ from reconcile_inputs import (
 #: recorded with the 04-10 payment), the classes are the same at every window
 #: from 31 to 62 days, and at 90 a January charge starts claiming an April row.
 CARD_LOOKBACK = timedelta(days=62)
+
+#: How long after it is made a charge can still be missing from a download,
+#: which holds only what has posted.  Measured 2026-11-04 on that day's 105
+#: charges: 0 to 3 days, one of them at 3; this is that and a weekend.
+CARD_POSTING_LAG = timedelta(days=5)
+
+#: The most days a download of the card's whole history may pass with no line.
+#: Measured 2026-11-04: the longest stretch is 12 days, on a card paid about
+#: monthly, so a longer one is a download that did not cover what was asked.
+CARD_QUIET_STRETCH = timedelta(days=31)
 
 #: The act each class performs, in the words the sheet prints.
 CANCEL_ROW = "cancel row"
@@ -325,6 +338,16 @@ def _adding_up(
     return min(found, key=lambda members: (len(members), members), default=None)
 
 
+def _spent(row: Row) -> bool:
+    """Return whether *row* moved money OUT, the only kind a charge can be."""
+    return row.amount < ZERO
+
+
+def _charge_window(row: Row) -> "tuple[date, date]":
+    """Return the first and last day a charge *row* could be may be dated."""
+    return row.earliest - CARD_LOOKBACK, row.day
+
+
 def _charge_options(
     row: Row, card: "list[CardLine]",
 ) -> "list[tuple[tuple[bool, bool, int, int], tuple[int, ...]]]":
@@ -339,13 +362,13 @@ def _charge_options(
         ``[(rank, charge indexes), ...]``, best first; empty for a row that
         moved money IN, which no charge is.
     """
-    owed = -row.amount
-    if owed <= ZERO:
+    if not _spent(row):
         return []
+    owed = -row.amount
+    first, last = _charge_window(row)
     pool = [
         index for index, charge in enumerate(card)
-        if not charge.is_credit
-        and row.earliest - CARD_LOOKBACK <= charge.transaction_on <= row.day
+        if not charge.is_credit and first <= charge.transaction_on <= last
     ]
     options = [
         ((not row.words & card[index].words, card[index].amount != owed, 1,
@@ -514,6 +537,81 @@ def refusals(sheet: ActSheet) -> "list[str]":
     return found
 
 
+def beyond_the_card_export(
+    sheet: ActSheet, card: "list[CardLine]", asked: "tuple[date, date]",
+) -> "list[str]":
+    """Return why *card* cannot speak for the rows the card pass weighed.
+
+    **NEVER MOVED says no charge could be the row, and a file can say that only
+    of days it covers**: it is what the passes before it left, so a charge the
+    download did not reach reads exactly like a charge that never happened.
+    Measured 2026-11-04 on the 2026-10-30 copy: that export cut to begin at the
+    earliest payment credit the sheet names wrote a sheet, exit 0, cancelling
+    5 rows the whole export keeps as card spending.
+
+    **What a download covers is what the owner asked it for (*asked*), never
+    read off its lines.**  The file states no span, and its lines cannot stand
+    in for one: a quiet card reads as a file that stopped short (the whole
+    export of 2026-10-30 ends 8 days before its download, and a later one
+    shows it was complete), and a charge not yet posted, dated before a later
+    line, reads as covered.  What the owner says can overclaim, so the lines
+    are held to it: more than :data:`CARD_QUIET_STRETCH` with no line, from the
+    first day asked to the last, is a download that did not cover it.
+
+    **The last :data:`CARD_POSTING_LAG` days asked are not spoken for**, since a
+    charge made then may not have posted.  Every charge made from the first day
+    asked through the day before those is in the file, whichever day the bank
+    filters its download on.
+
+    **Every row the card pass weighs is held, not only those it leaves to
+    cancel**: one charge explains one row, so a row whose charge lies past the
+    edge takes one another row needed, and the OTHER row is cancelled.  With
+    each one's window inside what the download speaks for, every charge any of
+    them could claim is in the file, so a longer download gives the same
+    classes.  A row that moved money in is weighed against nothing, so it is
+    not held.
+
+    **What this does not see**: a hole shorter than the stretch inside the
+    span, which one bank download does not have and a stitched file can; a
+    payment credit past the edge, whose SECU line then falls to the later
+    passes; and SECU's own tail, where a row whose line has not posted yet
+    lands in NEVER MOVED just the same (:func:`reconcile_inputs.classed_days`
+    takes the export's declared span as covered).
+
+    Args:
+        sheet: The sheet.
+        card: Capital One's export.
+        asked: The first and last day the owner asked the download for.
+
+    Returns:
+        One sentence for each stretch and each row, the row by id and day,
+        never by figure, each saying what to do.
+    """
+    asked_from, asked_through = asked
+    speaks_through = asked_through - CARD_POSTING_LAG
+    stops = [asked_from, *sorted(line.transaction_on for line in card), asked_through]
+    found = [
+        f"the Capital One export holds no line from {before} to {after}, inside "
+        f"the {asked_from}..{asked_through} said to be asked for: check the "
+        "download's dates"
+        for before, after in zip(stops, stops[1:])
+        if after - before > CARD_QUIET_STRETCH
+    ]
+    weighed = sheet.never_moved + [
+        movement for kind, movement, _ in sheet.card if kind != "payment"
+    ]
+    for row in weighed:
+        first, last = _charge_window(row)
+        if _spent(row) and (first < asked_from or last > speaks_through):
+            found.append(
+                f"{row.day}: movement {row.entry_id}: a charge it could be may "
+                f"be dated {first}..{last}, and this download speaks only for "
+                f"{asked_from}..{speaks_through}: download it again, asking "
+                "from earlier, or later once those days have posted"
+            )
+    return found
+
+
 def document(sheet: ActSheet, provenance: dict) -> dict:
     """Return *sheet* as the file it is written to."""
     return {
@@ -591,6 +689,14 @@ def main() -> None:
     parser.add_argument("--secu", required=True, help="SECU's CSV export")
     parser.add_argument("--card", required=True, help="Capital One's CSV export")
     parser.add_argument(
+        "--card-from", required=True, type=date.fromisoformat,
+        help="the first day the Capital One download was asked for",
+    )
+    parser.add_argument(
+        "--card-through", required=True, type=date.fromisoformat,
+        help="the last day the Capital One download was asked for",
+    )
+    parser.add_argument(
         "--out", required=True,
         help="the sheet to write -- outside every checkout (R-BAL132)",
     )
@@ -598,7 +704,8 @@ def main() -> None:
     out = new_file(args.out, "--out")
     secu = Path(args.secu).expanduser()
     card_file = Path(args.card).expanduser()
-    card = read_card_export(card_file.read_bytes())
+    card_bytes = card_file.read_bytes()
+    card = read_card_export(card_bytes)
     app = connect_read_only(args.clone)
     with app.app_context():
         account = db.session.get(Account, args.account)
@@ -606,9 +713,11 @@ def main() -> None:
             raise SystemExit(f"{args.clone} holds no account {args.account}")
         ctx = balance_at.BalanceContext.build(account.user_id)
         sheet = derive(account, ctx, plan_import(account, secu.read_bytes()), card)
-        found = refusals(sheet)
+        found = refusals(sheet) + beyond_the_card_export(
+            sheet, card, (args.card_from, args.card_through),
+        )
         if found:
-            print("refused: the classes do not partition the list", file=sys.stderr)
+            print("refused: no sheet written", file=sys.stderr)
             for sentence in found:
                 print(f"  {sentence}", file=sys.stderr)
             raise SystemExit(1)
@@ -621,6 +730,11 @@ def main() -> None:
             "written": datetime.now(timezone.utc).isoformat(),
             "secu_export": secu.name,
             "card_export": card_file.name,
+            "card_export_sha256": hashlib.sha256(card_bytes).hexdigest(),
+            "card_asked": {
+                "from": args.card_from.isoformat(),
+                "through": args.card_through.isoformat(),
+            },
         })
     out.write_text(json.dumps(written, indent=1) + "\n", encoding="utf-8")
     print(f"wrote {out}")

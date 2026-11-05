@@ -32,6 +32,7 @@ from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
+from app.models.user import User
 from app.services.ledger_lines import chart_record_type, linked_key, worked_out_lines
 from app.services.pay_calendar import calendar_for
 from app.utils.money import round_money
@@ -123,6 +124,47 @@ def ledger_net(db_session, key, scenario_id):
         (
             line.amount for line in scenario_lines(db_session, scenario_id)
             if line.key == key
+        ),
+        _ZERO,
+    )
+
+
+def account_net(db_session, account_id, scenario_id):
+    """Return the net of an account's own line in a scenario.
+
+    :func:`ledger_net` of :func:`linked_key_of`: never its correction counters,
+    which are keys of their own, so an anchor correction's two legs do not cancel
+    here.
+
+    Args:
+        db_session: The test ``db.session``.
+        account_id: The account's id.
+        scenario_id: The scenario.
+
+    Returns:
+        The signed net as a ``Decimal``, debit-positive; ``$0.00`` for an account
+        holding no line.
+    """
+    return ledger_net(db_session, linked_key_of(db_session, account_id), scenario_id)
+
+
+def trial_balance(db_session):
+    """Return the net of every worked-out line of every owner, in every scenario.
+
+    ``$0.00`` while everything the read books carries its counter line, so a
+    sweep can ask it after any mutation.
+
+    Args:
+        db_session: The test ``db.session``.
+
+    Returns:
+        The signed net as a ``Decimal``.
+    """
+    return sum(
+        (
+            line.amount
+            for (owner_id,) in db_session.query(User.id)
+            for _scenario_id, line in owner_worked_out_lines(db_session, owner_id)
         ),
         _ZERO,
     )

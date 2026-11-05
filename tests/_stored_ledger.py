@@ -15,6 +15,11 @@ Underscore-prefixed module name keeps pytest from collecting it.
 
 from decimal import Decimal
 
+from app import ref_cache
+from app.enums import LedgerAccountKindEnum
+from app.extensions import db
+from app.models.journal_entry import JournalEntry, Posting
+from app.models.ledger_account import LedgerAccount
 from tests._ledger_reads import (
     family_movement_ids,
     transfer_family_movement_ids,
@@ -373,6 +378,75 @@ def stored_ledger_net(db_session, ledger_account_id, scenario_id):
         )
         .scalar()
     )
+
+
+def stored_account_net(account_id, scenario_id):
+    """Return the net of an account's LINKED row's legs in a scenario.
+
+    Keyed off the real account (``ledger_accounts.account_id``) and filtered to
+    the LINKED kind: an anchor correction lands ``+delta`` on the linked row and
+    ``-delta`` on the ``anchor_equity`` twin, which shares the ``account_id``
+    column, so a bare ``account_id`` sum would cancel the correction pairwise.
+
+    Args:
+        account_id: The real account's id.
+        scenario_id: The scenario to scope to.
+
+    Returns:
+        The signed net as a ``Decimal`` (``Decimal("0")`` when none posted).
+    """
+    return (
+        db.session.query(
+            db.func.coalesce(db.func.sum(Posting.amount), Decimal("0"))
+        )
+        .select_from(Posting)
+        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
+        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
+        .filter(
+            LedgerAccount.account_id == account_id,
+            LedgerAccount.kind_id == ref_cache.ledger_account_kind_id(
+                LedgerAccountKindEnum.LINKED,
+            ),
+            JournalEntry.scenario_id == scenario_id,
+        )
+        .scalar()
+    )
+
+
+def stored_trial_balance():
+    """Return ``SUM(account_postings.amount)`` over the whole stored ledger."""
+    return (
+        db.session.query(
+            db.func.coalesce(db.func.sum(Posting.amount), Decimal("0"))
+        )
+        .scalar()
+    )
+
+
+def entries_violating_balance():
+    """Return ``(entry_id, leg_sum, leg_count)`` for every malformed stored entry.
+
+    A well-formed double-entry has ``leg_sum == 0`` and ``leg_count >= 2``.  Any
+    row returned here is a violation -- the per-entry invariant the deferred
+    trigger also enforces, re-checked from the ORM side.
+
+    Returns:
+        The violating entries, empty for a well-formed journal.
+    """
+    rows = (
+        db.session.query(
+            Posting.journal_entry_id,
+            db.func.sum(Posting.amount),
+            db.func.count(Posting.id),
+        )
+        .group_by(Posting.journal_entry_id)
+        .all()
+    )
+    return [
+        (entry_id, leg_sum, leg_count)
+        for entry_id, leg_sum, leg_count in rows
+        if leg_sum != 0 or leg_count < 2
+    ]
 
 
 def stored_net_by_date(db_session, ledger_account_id, scenario_id):

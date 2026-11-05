@@ -18,7 +18,7 @@ from app.enums import TxnTypeEnum
 from app.services import posting_service
 from app.services.liability_sign import owed
 
-from tests._ledger_reads import posted_loan_balance_at
+from tests._stored_ledger import stored_loan_balance_at
 from tests._test_helpers import (
     create_loan_account,
     current_pay_period,
@@ -119,7 +119,7 @@ class TestCreateBaseline:
 
         NEGATIVE CONTROL: drop the ``resync_user_loan_postings`` call from
         ``baseline_service.create_baseline_scenario`` and
-        ``posted_loan_balance_at`` returns ``None`` (the opening is never
+        ``stored_loan_balance_at`` returns ``None`` (the opening is never
         reposted), while ``balance_at`` still folds the $200,000.00 debt from
         source.
 
@@ -158,7 +158,7 @@ class TestCreateBaseline:
             # This is what pins the recovery -- balance_at cannot, since it folds
             # the same $200,000 debt from source whether or not the opening was
             # reposted.
-            assert posted_loan_balance_at(
+            assert stored_loan_balance_at(
                 loan_id, new_baseline.id, bctx.as_of,
             ) == Decimal("200000.00")
             # And the user-facing balance is correct: no payment made, so the loan

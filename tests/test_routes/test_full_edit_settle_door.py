@@ -38,7 +38,6 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import MovementFigureSourceEnum, StatusEnum
 from app.extensions import db
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.transaction import Transaction
 from app.services import transaction_service
 from app.services.settle_day import record_settle_day, recorded_settle_day
@@ -46,9 +45,10 @@ from app.services.state_machine import allowed_transitions
 from app.utils.dates import display_today
 from tests._ledger_reads import (
     family_movement_ids,
+    linked_key_of,
+    movement_nets_by_key,
     net_posted_by_day,
 )
-from tests._stored_ledger import family_journal_filter
 from tests._test_helpers import (
     add_entry,
     amount_basis_for,
@@ -159,27 +159,11 @@ def _full_edit_save(auth_client, txn, status_id, **overrides):
 
 
 def _cash_leg(txn_id, account_id):
-    """Return the net posted amount on the account's ledger for *txn_id*.
-
-    Debit-positive, so a settled expense reads negative: this is what the
-    double-entry ledger says the row cost, read back independently of the row.
-    """
-    # pylint: disable=import-outside-toplevel  -- collection-time safety, the
-    # convention the shared helpers use.
-    from tests._stored_ledger import linked_ledger_account
-
-    ledger_id = linked_ledger_account(db.session, account_id).id
-    return (
-        db.session.query(
-            db.func.coalesce(db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .join(JournalEntry, JournalEntry.id == Posting.journal_entry_id)
-        .filter(
-            family_journal_filter(txn_id),
-            Posting.ledger_account_id == ledger_id,
-        )
-        .scalar()
-    )
+    """Return the net the row's movements book on the account's own line."""
+    txn = db.session.get(Transaction, txn_id)
+    return movement_nets_by_key(
+        db.session, family_movement_ids(txn), txn.scenario_id,
+    ).get(linked_key_of(db.session, account_id), Decimal("0.00"))
 
 
 class TestTheDropdownBooksWhatTheRowCost:
@@ -510,7 +494,7 @@ class TestARevertTakesBackWhatTheSettleDerived:
             assert status_seam.recorded_settlement(reverted) is None
             assert reverted.settled_on is None
             assert _plan_worth(reverted) == Decimal("80.00")
-            # The settle's postings reverse with it: nothing is left booked.
+            # The settle's money leaves with it: nothing is left booked.
             assert _cash_leg(txn_id, seed_user["account"].id) == Decimal("0.00")
 
     def test_a_BILLs_hand_typed_figure_SURVIVES_the_revert_round_trip(

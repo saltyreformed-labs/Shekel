@@ -906,8 +906,8 @@ class TestTheSettledWalkChargesOncePerInstallment:
 
             on = last_covered_day(seed_periods[3])
             assert _fold(loan, seed_user, [on])[on] == Decimal("98600.00")
-            # THE REVERSAL.  Only true if the 02-20 payment's posted interest and
-            # escrow legs were negated when it stopped opening the period.
+            # The ledger's figure: the 02-20 payment no longer carries the
+            # interest and escrow it opened the period with.
             assert posted_loan_balance_at(
                 loan.id, seed_user["scenario"].id, on,
             ) == Decimal("98600.00")

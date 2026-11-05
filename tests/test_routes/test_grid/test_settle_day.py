@@ -15,6 +15,8 @@ from app.utils.dates import display_today
 
 from tests._ledger_reads import (
     family_movement_ids,
+    linked_key_of,
+    movement_nets_by_date,
     net_posted_by_day,
 )
 from tests._stored_ledger import family_journal_filter
@@ -201,7 +203,6 @@ class TestSettleDayLifecycle:
         with app.app_context():
             from app import ref_cache
             from app.enums import StatusEnum
-            from app.models.journal_entry import JournalEntry
             from app.services import posting_service, status_seam
 
             txn = self._create_test_txn(seed_user, seed_periods_today)
@@ -225,16 +226,10 @@ class TestSettleDayLifecycle:
             db.session.commit()
 
             def _ledger_days():
-                # The row's family, as ``_ledger_days_for`` reads it.
-                return sorted(
-                    entry.entry_date
-                    for entry in db.session.query(JournalEntry)
-                    .filter(family_journal_filter(txn))
-                    .all()
-                )
+                return self._line_days_for(txn.id)
 
             days_before = _ledger_days()
-            assert days_before, "fixture posted no journal entry to grade"
+            assert days_before, "fixture booked no line to grade"
 
             # Edit a non-status, non-locked field -- no status change.
             response = auth_client.patch(
@@ -284,7 +279,6 @@ class TestSettleDayLifecycle:
         with app.app_context():
             from app import ref_cache
             from app.enums import StatusEnum
-            from app.models.journal_entry import JournalEntry
             from app.services import posting_service, status_seam
 
             txn = self._create_test_txn(seed_user, seed_periods_today)
@@ -310,16 +304,10 @@ class TestSettleDayLifecycle:
             db.session.commit()
 
             def _ledger_days():
-                # The row's family, as ``_ledger_days_for`` reads it.
-                return sorted(
-                    entry.entry_date
-                    for entry in db.session.query(JournalEntry)
-                    .filter(family_journal_filter(txn))
-                    .all()
-                )
+                return self._line_days_for(txn.id)
 
             days_before = _ledger_days()
-            assert days_before, "fixture posted no journal entry to grade"
+            assert days_before, "fixture booked no line to grade"
 
             # The replay (idempotent Paid -> Paid).
             resp2 = auth_client.post(f"/transactions/{txn.id}/mark-done")
@@ -335,6 +323,18 @@ class TestSettleDayLifecycle:
                 "The replayed mark-done moved the posted ledger: "
                 f"{days_before} -> {_ledger_days()} (finding N-146)."
             )
+
+    def _line_days_for(self, txn_id):
+        """Return the days *txn_id*'s movements book money on its account's own line.
+
+        The LEDGER half of a settle-day assertion (ruling **R-ED**): the ledger
+        must FOLLOW the column, or the books silently disagree with the screen.
+        """
+        txn = db.session.get(Transaction, txn_id)
+        return sorted(movement_nets_by_date(
+            db.session, family_movement_ids(txn),
+            linked_key_of(db.session, txn.account_id), txn.scenario_id,
+        ))
 
     def _ledger_days_for(self, txn_id):
         """Return the ``entry_date`` of every journal entry linked to *txn_id*.
@@ -537,8 +537,8 @@ class TestSettleDayLifecycle:
                 "a Projected row was given a settle day -- the PATCH setattr "
                 "loop is writing the column the seam owns (finding N-185)"
             )
-            assert self._ledger_days_for(txn.id) == [], (
-                "a Projected row posted to the ledger"
+            assert self._line_days_for(txn.id) == [], (
+                "a Projected row booked on the ledger"
             )
 
     def test_a_future_settle_day_is_refused_and_moves_no_money(

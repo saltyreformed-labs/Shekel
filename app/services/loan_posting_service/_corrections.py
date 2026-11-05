@@ -6,13 +6,13 @@ deterministic running-balance walk
 pass (plan step ``balance:X-bi-6-3``, ruling **R-BAL102**):
 
 * the once-per-loan OPENING and every user balance TRUE-UP
-  (:func:`._anchors.anchor_correction_targets`);
+  (:func:`app.services.ledger_lines.anchor_correction_targets`);
 * every confirmed payment's real principal / interest / escrow / refund SPLIT
-  (:func:`._payments.payment_split_targets`).
+  (:func:`app.services.ledger_lines.payment_split_targets`).
 
 Each is a DERIVATION -- the walk re-computes it from scratch every sync -- so
 each is keyed the way a derivation is keyed, ``(source kind, pay period, entry
-date)`` with no row link (:data:`app.services._posting_reconcile.CorrectionKey`),
+date)`` with no row link (:data:`app.services.ledger_lines.CorrectionKey`),
 and the three share one "already posted" read
 (:func:`app.services._posting_reconcile.posted_correction_legs`, scoped to the
 loan's own chart rows) and one delta loop
@@ -42,17 +42,15 @@ Flask-isolated: plain data in, no ``request`` / ``session``.
 
 from app import ref_cache
 from app.enums import PostingSourceEnum
+from app.extensions import db
+from app.models.account import Account
 from app.services._posting_reconcile import (
-    CorrectionKey,
-    LegMap,
     emit_correction_deltas,
     filing_calendar_for,
     posted_correction_legs,
 )
+from app.services.ledger_lines import loan_correction_targets
 from app.services.loan_ledger import LoanLedgerWalk
-
-from ._anchors import anchor_correction_targets
-from ._payments import payment_split_targets
 
 
 def reconcile_loan_corrections(
@@ -62,8 +60,8 @@ def reconcile_loan_corrections(
 
     Builds the per-``(source kind, pay period, date)`` targets of both halves
     from the walk the caller already holds -- the anchor corrections
-    (:func:`._anchors.anchor_correction_targets`) and the settled payment
-    splits (:func:`._payments.payment_split_targets`) -- reads back what is
+    (:func:`app.services.ledger_lines.anchor_correction_targets`) and the settled payment
+    splits (:func:`app.services.ledger_lines.payment_split_targets`) -- reads back what is
     posted under the three correction kinds on the loan's OWN chart rows (its
     linked row and its per-loan interest / escrow / refund / opening-equity
     rows: :func:`app.services._posting_reconcile.posted_correction_legs`), and
@@ -99,9 +97,11 @@ def reconcile_loan_corrections(
             payment split carries its payment's own stored period and asks no
             calendar.
         PostingError: A loan account with no linked ledger account (a broken
-            chart-of-accounts pairing), from either target builder.
+            chart-of-accounts pairing), when a correction books on it, from
+            the emit step that resolves the targets' chart keys (plan task
+            plan#2524; from either target builder until then).
     """
-    if not walk.anchor_corrections and not walk.payment_splits:
+    if walk.is_empty:
         return
     # The SAME door the account twin takes (plan step C2-d), so the period
     # this writer FILES an anchor under and the period that one files an
@@ -112,18 +112,18 @@ def reconcile_loan_corrections(
     if resolved is None:
         return
     owner_id, calendar = resolved
+    # The loan itself, once, for the key of its own line, whose class is its
+    # type's (plan task plan#2524).  Present: the owner just read is its row's.
+    # Usually an identity-map hit, since a payment door's transfer holds its
+    # accounts joined.  Every leg of both halves is this loan's, and every key
+    # resolves to a row of the owner's -- the transfer's owner too, which
+    # ``fk_transfers_owner_to_account`` makes the loan's.
+    loan = db.session.get(Account, loan_account_id)
 
-    target: dict[CorrectionKey, LegMap] = anchor_correction_targets(
-        walk.anchor_corrections, owner_id, calendar,
-    )
-    # Disjoint by construction: the split's keys carry the ``loan_payment``
-    # kind and the anchors' the opening / true-up kinds, so the two maps
-    # share no key and a plain update merges them.
-    target.update(payment_split_targets(walk.settled_splits))
     emit_correction_deltas(
         owner_id,
         scenario_id,
-        target=target,
+        target=loan_correction_targets(walk, loan, calendar),
         posted=posted_correction_legs(
             loan_account_id,
             scenario_id,

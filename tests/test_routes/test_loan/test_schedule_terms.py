@@ -317,7 +317,6 @@ class TestTheClosingBoundIsNeverWrittenByARoute:
             from_account_id=seed_user["account"].id,
             to_account_id=account.id,
             name="Premature Payment",
-            default_amount=Decimal("500.00"),
             is_active=True,
         )
         db.session.add(tpl)
@@ -357,7 +356,6 @@ class TestTheClosingBoundIsNeverWrittenByARoute:
             from_account_id=second_user["account"].id,
             to_account_id=other_loan.id,
             name="Other User Payment",
-            default_amount=Decimal("1000.00"),
             is_active=True,
         )
         db.session.add(tpl)

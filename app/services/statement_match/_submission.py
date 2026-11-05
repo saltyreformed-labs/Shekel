@@ -201,10 +201,12 @@ class ReviewedRow:
     * the row's own amount edited (``178.32`` to ``500.00``): ``version_id``
       moves 3 to 4 AND the figure moves.  Either coordinate sees it;
     * a card ENTRY added to the row: ``version_id`` stays at 3 while the figure
-      moves ``-178.32`` to ``-153.32``.  Only the FIGURE sees it -- a
-      transaction's cash is ``gross - off_statement_sum(entries)``
-      (:func:`~app.services.cash_ledger.cash_leg_of`) and a CHILD insert emits
-      no UPDATE against the parent, so no counter on the parent can move;
+      moves ``-178.32`` to ``-153.32``.  Only the FIGURE sees it -- a CHILD
+      insert emits no UPDATE against the parent, so no counter on the parent
+      can move.  The row's price then subtracted the card entry
+      (``gross - off_statement_sum(entries)``); since ruling **R-BAL78** a
+      row holding a purchase is priced at ``0`` and its purchases are the
+      candidates (:func:`~._settle_price.settle_price`);
     * the row's ``purchased_on`` moved three days: ``version_id`` moves 1 to 2
       while the figure is unchanged.  Only the COUNTER sees it -- and that day
       decides whether a match RE-DATES the purchase

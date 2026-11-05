@@ -3,11 +3,7 @@
 # Adopted as a committed-secret floor -- the one catastrophic class the
 # rest of the linter stack does not watch, with no human reviewer behind
 # the solo operator. The gate scans the working tree; the allowlist
-# below collapses the ~480 raw findings (all noise) to zero:
-#   * prior secret-scanner OUTPUT blobs committed as audit artifacts
-#     (detect-secrets baseline, container/db config dumps, gitleaks' own
-#     json/sarif) are wall-to-wall detected-string hashes, not live keys,
-#   * the remediation plan quotes a couple of detected example strings,
+# below collapses its raw findings (all noise) to zero:
 #   * tests carry obvious dummy credentials by design,
 #   * the operator's local .env is gitignored (never committed); gitleaks
 #     `dir` mode reads gitignored files, so it is allowlisted to keep
@@ -22,10 +18,8 @@
 useDefault = true
 
 [allowlist]
-description = "Audit-artifact scanner output, test fixtures, local .env"
+description = "Test fixtures, local .env"
 paths = [
-  '''docs/audits/security-2026-04-15/scans/''',
-  '''docs/audits/security-2026-04-15/remediation-plan\.md''',
   '''(^|/)\.env$''',
   '''tests/conftest\.py$''',
   '''tests/test_config\.py$''',

@@ -17,7 +17,7 @@ def _card(number, kind="step", **changes):
     fields = {
         "number": number, "id": 1000 + number, "node_id": f"I_{number}", "title": f"card {number}",
         "kind": kind, "labels": ("balance",), "arc": None if kind == "task" else "balance",
-        "is_open": True, "state_reason": None,
+        "priority": None, "effort": None, "is_open": True, "state_reason": None,
         "parent": None, "children": (), "blocked_by": (), "board_item": None,
         "closed_by_tool": False, "touched_by_hand": False, "outside": (),
     }

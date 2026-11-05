@@ -84,6 +84,7 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
+from tests._definition_price import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -112,14 +113,13 @@ def _recurring_txn_template(seed_user, recurs=True):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=expense.id,
         name="Streaming",
-        default_amount=Decimal("15.99"),
     )
     db.session.add(template)
     db.session.flush()
     # Priced, as the transfer twin below is: its rows are the engine's and
     # DERIVED, and a derived row of an unpriced definition is the shape
     # ``state_template_price`` says the application cannot build.
-    state_template_price(template)
+    state_template_price(template, Decimal("15.99"))
     rule = _every_period_rule(template) if recurs else None
     if rule is not None:
         recurrence_engine.generate_for_template(
@@ -168,14 +168,13 @@ def _recurring_transfer_template(seed_user, savings, recurs=True):
         to_account_id=savings.id,
         category_id=seed_user["categories"]["Rent"].id,
         name="Sweep to savings",
-        default_amount=Decimal("50.00"),
     )
     db.session.add(template)
     db.session.flush()
     # Its definition STATES a price, as every app-side create door
     # does: since plan step X-au-f a generated transfer stores no
     # figure and reads this series on its own due date.
-    state_template_price(template)
+    state_template_price(template, Decimal("50.00"))
     rule = _every_period_rule(template) if recurs else None
     if rule is not None:
         transfer_recurrence.generate_for_template(
@@ -224,7 +223,7 @@ class TestClearingATransactionTemplatesRecurrence:
 
         resp = auth_client.post(f"/templates/{template.id}", data={
             "recurrence_unit": "",
-            "default_amount": "19.99",
+            "amount": "19.99",
             "effective_from": seed_periods[4].start_date.isoformat(),
             "version_id": str(template.version_id),
         }, follow_redirects=True)
@@ -236,7 +235,7 @@ class TestClearingATransactionTemplatesRecurrence:
         assert template.recurrence_rule is not None
         assert template.recurrence_rule.id == rule_id
         assert db.session.get(RecurrenceRule, rule_id) is not None
-        assert template.default_amount == Decimal("15.99")
+        assert newest_price(template) == Decimal("15.99")
         assert template.version_id == version_before
         survivors = db.session.query(Transaction).filter_by(
             template_id=template.id,
@@ -281,14 +280,14 @@ class TestClearingATransactionTemplatesRecurrence:
         rule_id = template.recurrence_rule.id
 
         resp = auth_client.post(f"/templates/{template.id}", data={
-            "default_amount": "19.99",
+            "amount": "19.99",
             "version_id": str(template.version_id),
         }, follow_redirects=True)
         assert resp.status_code == 200
 
         db.session.expire_all()
         template = db.session.get(TransactionTemplate, template.id)
-        assert template.default_amount == Decimal("19.99")
+        assert newest_price(template) == Decimal("19.99")
         assert template.recurrence_rule.id == rule_id
         assert db.session.get(RecurrenceRule, rule_id) is not None
         rows = db.session.query(Transaction).filter_by(
@@ -556,7 +555,6 @@ class TestClearingATransferTemplatesRecurrence:
             to_account_id=loan.id,
             category_id=seed_user["categories"]["Rent"].id,
             name="Mortgage payment",
-            default_amount=Decimal("1000.00"),
         )
         template.settings = LoanPaymentSettings(
             extra_principal=Decimal("250.00"),
@@ -566,7 +564,7 @@ class TestClearingATransferTemplatesRecurrence:
         # Its definition STATES a price, as every app-side create door
         # does: since plan step X-au-f a generated transfer stores no
         # figure and reads this series on its own due date.
-        state_template_price(template)
+        state_template_price(template, Decimal("1000.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule_id = _every_period_rule(template).id
         db.session.commit()

@@ -59,9 +59,10 @@ board item is a difference (the coordinator's call, 14:4x 2026-10-21).
 **The organization's issue fields are exactly the five declared** (:data:`ISSUE_FIELDS`;
 rulings ``balance:R-BAL348``, ``R-BAL354``, and the developer's word of 2026-10-25): Arc, a
 single select of the arcs, which a card's arc moves into after the cutover, its matching
-label then kept as display; and GitHub's four defaults, Priority, Effort, Start date and
-Target date, which the developer keeps, empty for now.  Any other is a difference, deleted
-on the web.  The board lists each one it shows as a field of its own, which GitHub marks
+label then kept as display; and GitHub's four defaults, which the developer keeps: Priority
+and Effort, which quill writes (plan#2491; Effort's options the sessions a card's work takes,
+ruling plan#2508), and Start date and Target date, empty for now.  Any other is a difference,
+deleted on the web.  The board lists each one it shows as a field of its own, which GitHub marks
 ``isIssueField``: its value is the issue's, so the board stores nothing for it (finding
 plan#1839, measured 2026-10-27), and it is no stored field.  **Every card's arc labels display
 its Arc** (R-BAL354, views_spec s.6): each card the rule ``quill sync``'s label pass reports
@@ -84,7 +85,7 @@ from urllib.parse import quote
 
 import requests
 
-from tools.ci.arcs import ARCS
+from tools.ci.arcs import ARC_COLORS, ARCS
 from tools.quill._arcs import ARC_FIELD, arc_verdict, card_arcs
 from tools.quill._board_fields import (
     GITHUB_STATUS_FIELD,
@@ -96,6 +97,7 @@ from tools.quill._board_fields import (
     stores_values,
 )
 from tools.quill._exits import described
+from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD, PRIORITY_OPTIONS
 from tools.quill._github import (
     APP_DIR,
     CredentialsError,
@@ -184,16 +186,21 @@ class IssueField:
 #: makes four more when issue fields are switched on, Priority, Effort, Start date and Target
 #: date.  R-BAL348 ruled them deleted, a click on the web that was never made, and on
 #: 2026-10-25 the developer kept them ("I want to use those fields even if they are empty for
-#: now"), so each is declared exactly as the organization held it that day.  An
+#: now"), so each is declared exactly as the organization held it that day, but Effort, and
+#: Priority, which gained On hold (ruling plan#1832).
+#: Priority and Effort (:mod:`_fields`) are quill's to write since plan#2491; Effort counts the
+#: sessions a card's work takes, its options the ones the developer set on the web on
+#: 2026-11-01 (ruling plan#2508; read by GraphQL at 10:42 EST, in this order).  An
 #: organization's issue fields, like its issue types, are changed only with the ``admin:org``
 #: scope, so the developer changes them on the web and this module checks them; any other
-#: field is a difference.
+#: field is a difference.  Each single select's options here are also the choices quill
+#: offers for it.
 ISSUE_FIELDS = {
     ARC_FIELD: IssueField("SINGLE_SELECT", ARCS, "the arcs"),
-    "Priority": IssueField("SINGLE_SELECT", ("Urgent", "High", "Medium", "Low")),
+    PRIORITY_FIELD: IssueField("SINGLE_SELECT", PRIORITY_OPTIONS),
     "Start date": IssueField("DATE"),
     "Target date": IssueField("DATE"),
-    "Effort": IssueField("SINGLE_SELECT", ("High", "Medium", "Low")),
+    EFFORT_FIELD: IssueField("SINGLE_SELECT", ("1", "2", "3", "4", "5+")),
 }
 ISSUE_FIELDS_URL = f"https://github.com/organizations/{ORG}/settings/issue-fields"
 
@@ -209,11 +216,6 @@ REPOSITORY = {
     "has_wiki": False,
 }
 
-#: Each arc is one label.  The arcs are :data:`tools.ci.arcs.ARCS`, their one
-#: home beside each arc's planning document (step X-cx's L4 deleted this
-#: module's second list); a label's colour is the one at its arc's position.
-_ARC_COLORS = ("0e8a16", "1d76db", "5319e7", "d93f0b", "006b75", "c5a100")
-
 #: The mark every card quill files carries from the call that creates it
 #: until its filing's last write removes it (ruling ``balance:R-BAL202``).
 FILING = "filing"
@@ -227,28 +229,33 @@ def unmarked(labels: Iterable[str]) -> tuple[str, ...]:
 
 
 #: The two labels a release reads: a step whose release moves money, and a parent
-#: whose leaves ``/release`` ships in one release.  ``quill file step --label`` takes its
-#: choices from here.
+#: whose leaves ``/release`` ships in one release.
 MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL = "moves-money", "deploy-together"
-
-#: Every label the tracker carries: one per arc, the two a release reads, and
-#: quill's :data:`FILING` mark.
+#: The label marking security work, in whatever arc it is (ruling plan#2179).
+SECURITY_LABEL = "security"
+#: Every label the tracker carries: one per arc, its colour the arc's own
+#: (:data:`tools.ci.arcs.ARC_COLORS`, the arcs' one home beside each arc's planning document;
+#: step X-cx's L4 deleted this module's second list), the ones a person chooses, and quill's
+#: :data:`FILING` mark.
 LABELS = {
-    **{
-        arc: (_ARC_COLORS[index % len(_ARC_COLORS)], f"The {arc.replace('_', '-')} arc")
-        for index, arc in enumerate(ARCS)
-    },
+    **{arc: (color, f"The {arc.replace('_', '-')} arc") for arc, color in ARC_COLORS.items()},
     MOVES_MONEY_LABEL: (
         "b60205", "Its release moves money: /release carries at most one such step"
     ),
     DEPLOY_TOGETHER_LABEL: (
         "fbca04", "A parent whose leaves /release ships in one release, never split"
     ),
+    SECURITY_LABEL: ("d90466", "Security related issues"),
     FILING: (
         "bfdadc",
         "Quill has not finished filing this card, so it is not offered as work",
     ),
 }
+
+#: The labels a person chooses for a card: every declared label but the arc labels, which
+#: display its Arc, and quill's :data:`FILING` mark.  ``quill file step --label`` and
+#: ``quill label`` take their choices from here (ruling plan#2221).
+CHOSEN_LABELS = tuple(label for label in LABELS if label not in ARCS and label != FILING)
 
 #: What quill's App may do, and nothing more: write cards (issues,
 #: their sub-issues and dependencies) and place cards on the organization's

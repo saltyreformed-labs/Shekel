@@ -4,19 +4,12 @@ correction against a delete, an archive or each other, and no pair deadlocks.
 
 from __future__ import annotations
 
-import threading
-import time
-from dataclasses import dataclass
-
-from sqlalchemy import event, text
-from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.extensions import db as _db
-from tests._test_helpers import owner_lock_key
+from tests._request_race import race_two_requests, signed_in_clients
 
 from ._helpers import (
-    _WAIT,
-    _signed_in_clients,
     _state,
     _groceries,
     _hotel,
@@ -66,116 +59,6 @@ _SAVE_REFUSED = (
 )
 
 
-#: Whether a backend in THIS database waits, ungranted, for one owner's write
-#: lock.  Scoped to the owner's key and to ``current_database()``: a poll of
-#: every ungranted lock on the cluster reads a wait on any other lock -- a row
-#: lock, another test's key -- as this one, which is how a broken build once
-#: passed a race (the step's third checkpoint).
-_WAITING_ON_THE_OWNER = text(
-    "SELECT EXISTS (SELECT 1 FROM pg_locks "
-    "WHERE locktype = 'advisory' AND NOT granted "
-    "AND database = (SELECT oid FROM pg_database "
-    "WHERE datname = current_database()) "
-    "AND classid = CAST(:namespace AS oid) AND objid = CAST(:owner AS oid) "
-    "AND objsubid = 2)"
-)
-
-
-@dataclass
-class _Answer:
-    """What one request came to: its response, and whether it waited on the owner's key."""
-
-    response: object = None
-    waited: bool = False
-
-
-def _race(app, owner_id, first, second):
-    """Race two REQUESTS: *first* held at its commit, *second* started, then both released.
-
-    *first* and *second* are no-argument callables that each issue one
-    request and return its response.  Each runs on a thread of its own with
-    no app context pushed, so the request pushes its own, with its own
-    session, as production gives it.  The first is held at its FIRST commit
-    by a ``before_commit`` hook on its thread alone; the second starts once
-    it is held, and the test polls for the second waiting on *owner_id*'s
-    write lock (:data:`_WAITING_ON_THE_OWNER`).  Then the first commits and
-    the second runs to its answer.
-
-    Args:
-        app: The application.
-        owner_id: The owner whose write lock both requests take.
-        first: The request that commits first.
-        second: The request that arrives while the first is held.
-
-    Returns:
-        ``(first_answer, second_answer)``; ``second_answer.waited`` is whether
-        the second was seen waiting on the owner's key.
-
-    Raises:
-        AssertionError: When the first request never reached a commit, or a
-            thread did not finish -- the harness measured nothing.
-    """
-    namespace, owner_key = owner_lock_key(owner_id)
-    answers = (_Answer(), _Answer())
-    errors = []
-    held, release = threading.Event(), threading.Event()
-    box = {"first": None, "held": False}
-
-    def hold_the_first_commit(_session):
-        if threading.get_ident() == box["first"] and not box["held"]:
-            box["held"] = True
-            held.set()
-            release.wait(_WAIT)
-
-    def run(click, answer, is_first):
-        if is_first:
-            box["first"] = threading.get_ident()
-        try:
-            answer.response = click()
-        except BaseException as exc:  # pylint: disable=broad-exception-caught
-            # Re-raised on the test's thread below: an exception a request
-            # raised is the failure the test must report, with its traceback,
-            # rather than a thread dying unseen.
-            errors.append(exc)
-        finally:
-            if is_first:
-                held.set()
-
-    event.listen(Session, "before_commit", hold_the_first_commit)
-    try:
-        one = threading.Thread(target=run, args=(first, answers[0], True))
-        one.start()
-        assert held.wait(_WAIT) and box["held"], (
-            "the first request never reached its commit -- nothing was held, "
-            f"so nothing raced ({errors or answers[0].response})"
-        )
-        two = threading.Thread(target=run, args=(second, answers[1], False))
-        two.start()
-        deadline = time.monotonic() + _WAIT
-        while time.monotonic() < deadline and two.is_alive():
-            if _db.session.execute(
-                _WAITING_ON_THE_OWNER,
-                {"namespace": namespace, "owner": owner_key},
-            ).scalar_one():
-                answers[1].waited = True
-                break
-            time.sleep(0.02)
-        _db.session.rollback()
-        release.set()
-        one.join(_WAIT * 3)
-        two.join(_WAIT * 3)
-        assert not one.is_alive() and not two.is_alive(), (
-            "a request never finished"
-        )
-    finally:
-        release.set()
-        event.remove(Session, "before_commit", hold_the_first_commit)
-    if errors:
-        raise errors[0]
-    _db.session.expire_all()
-    return answers
-
-
 def _movements(row_id):
     """Return ``[(amount, is the row's own payment record)]`` under *row_id*, oldest first."""
     return [
@@ -219,8 +102,8 @@ class TestPurchaseAgainstDelete:
         """Delete lands first: the purchase waits, then meets the door's sentence; nothing is written."""
         with app.app_context():
             _template, row_id = _groceries(seed_user)
-            one, two = _signed_in_clients(app)
-            delete, purchase = _race(
+            one, two = signed_in_clients(app)
+            delete, purchase = race_two_requests(
                 app, seed_user["user"].id,
                 _delete(one, row_id), _purchase(two, row_id),
             )
@@ -243,8 +126,8 @@ class TestPurchaseAgainstDelete:
         """
         with app.app_context():
             _template, row_id = _groceries(seed_user)
-            one, two = _signed_in_clients(app)
-            purchase, delete = _race(
+            one, two = signed_in_clients(app)
+            purchase, delete = race_two_requests(
                 app, seed_user["user"].id,
                 _purchase(one, row_id), _delete(two, row_id),
             )
@@ -264,8 +147,8 @@ class TestMarkPaidAgainstDelete:
         """Delete lands first: Mark Paid waits, then its cell says the row was deleted; no payment."""
         with app.app_context():
             _template, row_id = _hotel(seed_user)
-            one, two = _signed_in_clients(app)
-            delete, paid = _race(
+            one, two = signed_in_clients(app)
+            delete, paid = race_two_requests(
                 app, seed_user["user"].id,
                 _delete(one, row_id), _mark_paid(two, row_id),
             )
@@ -290,8 +173,8 @@ class TestMarkPaidAgainstDelete:
         """
         with app.app_context():
             _template, row_id = _hotel(seed_user)
-            one, two = _signed_in_clients(app)
-            paid, delete = _race(
+            one, two = signed_in_clients(app)
+            paid, delete = race_two_requests(
                 app, seed_user["user"].id,
                 _mark_paid(one, row_id), _delete(two, row_id),
             )
@@ -313,8 +196,8 @@ class TestPurchaseAgainstArchive:
         """
         with app.app_context():
             template, row_id = _groceries(seed_user)
-            one, two = _signed_in_clients(app)
-            archive, purchase = _race(
+            one, two = signed_in_clients(app)
+            archive, purchase = race_two_requests(
                 app, seed_user["user"].id,
                 _archive(one, template.id), _purchase(two, row_id),
             )
@@ -328,8 +211,8 @@ class TestPurchaseAgainstArchive:
         """Purchase lands first: the archive waits, then keeps the row that now holds money."""
         with app.app_context():
             template, row_id = _groceries(seed_user)
-            one, two = _signed_in_clients(app)
-            purchase, archive = _race(
+            one, two = signed_in_clients(app)
+            purchase, archive = race_two_requests(
                 app, seed_user["user"].id,
                 _purchase(one, row_id), _archive(two, template.id),
             )
@@ -346,8 +229,8 @@ class TestMarkPaidAgainstArchive:
         """Archive lands first: Mark Paid waits, then its cell says Hotel was archived; no payment."""
         with app.app_context():
             template, row_id = _hotel(seed_user)
-            one, two = _signed_in_clients(app)
-            archive, paid = _race(
+            one, two = signed_in_clients(app)
+            archive, paid = race_two_requests(
                 app, seed_user["user"].id,
                 _archive(one, template.id), _mark_paid(two, row_id),
             )
@@ -365,8 +248,8 @@ class TestNoDoorPairDeadlocks:
         """Two tabs each add a $12.34 purchase to Groceries at once: both land."""
         with app.app_context():
             _template, row_id = _groceries(seed_user)
-            one, two = _signed_in_clients(app)
-            first, second = _race(
+            one, two = signed_in_clients(app)
+            first, second = race_two_requests(
                 app, seed_user["user"].id,
                 _purchase(one, row_id), _purchase(two, row_id),
             )
@@ -379,8 +262,8 @@ class TestNoDoorPairDeadlocks:
         """Two tabs press Delete on one Groceries occurrence: one deletes it, the other is told it is gone."""
         with app.app_context():
             _template, row_id = _groceries(seed_user)
-            one, two = _signed_in_clients(app)
-            first, second = _race(
+            one, two = signed_in_clients(app)
+            first, second = race_two_requests(
                 app, seed_user["user"].id,
                 _delete(one, row_id), _delete(two, row_id),
             )
@@ -408,8 +291,8 @@ class TestPurchaseAgainstMarkPaid:
         """Purchase lands first: Mark Paid waits, then settles Groceries at its purchases, $12.34."""
         with app.app_context():
             _template, row_id = _groceries(seed_user)
-            one, two = _signed_in_clients(app)
-            purchase, paid = _race(
+            one, two = signed_in_clients(app)
+            purchase, paid = race_two_requests(
                 app, seed_user["user"].id,
                 _purchase(one, row_id), _mark_paid(two, row_id),
             )
@@ -425,8 +308,8 @@ class TestPurchaseAgainstMarkPaid:
         """Mark Paid lands first: the purchase waits, then meets the settled-row refusal, naming the row."""
         with app.app_context():
             _template, row_id = _groceries(seed_user)
-            one, two = _signed_in_clients(app)
-            paid, purchase = _race(
+            one, two = signed_in_clients(app)
+            paid, purchase = race_two_requests(
                 app, seed_user["user"].id,
                 _mark_paid(one, row_id), _purchase(two, row_id),
             )
@@ -455,8 +338,8 @@ class TestMarkCreditAgainstDelete:
         """Delete lands first: Mark Credit waits, then answers "not found"; no payback is born."""
         with app.app_context():
             row_id = _dinner(seed_user, seed_periods)
-            one, two = _signed_in_clients(app)
-            delete, credit = _race(
+            one, two = signed_in_clients(app)
+            delete, credit = race_two_requests(
                 app, seed_user["user"].id,
                 _delete(one, row_id), _mark_credit(two, row_id),
             )
@@ -482,8 +365,8 @@ class TestMarkCreditAgainstDelete:
         """
         with app.app_context():
             row_id = _dinner(seed_user, seed_periods)
-            one, two = _signed_in_clients(app)
-            credit, delete = _race(
+            one, two = signed_in_clients(app)
+            credit, delete = race_two_requests(
                 app, seed_user["user"].id,
                 _mark_credit(one, row_id), _delete(two, row_id),
             )
@@ -509,9 +392,9 @@ class TestActualCorrectionAgainstDelete:
         """Delete lands first: the $125.00 Save waits, then its cell says the change cannot be saved."""
         with app.app_context():
             row_id = _paid_hotel(seed_user)
-            one, two = _signed_in_clients(app)
+            one, two = signed_in_clients(app)
             correction = _save_an_actual(two, row_id, "125.00")
-            delete, save = _race(
+            delete, save = race_two_requests(
                 app, seed_user["user"].id, _delete(one, row_id), correction,
             )
             assert delete.response.status_code == 200

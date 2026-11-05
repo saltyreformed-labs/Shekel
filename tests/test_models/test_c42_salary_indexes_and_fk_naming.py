@@ -46,8 +46,8 @@ session's connection so the migration's ``op.create_index`` and the
 Operations proxy.  This mirrors the test-c41 round-trip pattern.
 
 Audit reference: F-071, F-072, F-079, F-137, F-138, F-139, F-140 of
-docs/audits/security-2026-04-15/findings.md; commit C-42 of
-docs/audits/security-2026-04-15/remediation-plan.md.
+shekel-audits/security-2026-04-15/findings.md; commit C-42 of
+shekel-audits/security-2026-04-15/remediation-plan.md.
 """
 # pylint: disable=redefined-outer-name,unused-argument
 # pylint: disable=protected-access

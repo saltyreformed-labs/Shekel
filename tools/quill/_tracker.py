@@ -64,8 +64,10 @@ from typing import overload
 from urllib.parse import quote
 
 from tools.quill import _arcs, _queries
-from tools.quill._arcs import ARC_FIELD, ArcCard, arc_answered, arc_labels, labels_and_arc
+from tools.quill._arcs import ARC_FIELD, ArcCard, arc_answered, arc_of, labels_and_values
 from tools.quill._draft import Draft
+from tools.quill._fields import FIELDS, answered_value, value_of
+from tools.quill._filed import filed_labels, filed_values
 from tools.quill._github import (
     GitHub,
     TrackerError,
@@ -107,6 +109,9 @@ GRAPHQL_INT_MAX = 2**31 - 1
 #: GitHub's issue search serves at most this many results of one query, whatever its
 #: ``total_count`` says.
 _SEARCH_CAP = 1000
+#: How many of a card's issue field values the read after a clear asks for
+#: (:meth:`Tracker.set_field`): REST's most a page, and a card holds one a field.
+_VALUES_PAGE = 100
 
 #: The board's writes, the only GraphQL mutations quill sends (a recording
 #: sends no other: ``_recorded.refusal``), each sent by :meth:`Board._write` alone.
@@ -154,13 +159,14 @@ class BareCard:  # pylint: disable=too-many-instance-attributes
     about the board that is handed one raises AttributeError, never reads it as off the
     board.
 
-    Pylint: too-many-instance-attributes (15/7) -- **fifteen because a card
-    states fifteen facts the plan reads without the board**, each its own GitHub
+    Pylint: too-many-instance-attributes (17/7) -- **seventeen because a card
+    states seventeen facts the plan reads without the board**, each its own GitHub
     field, and no subset of them travels apart from the others.
 
     ``arc``: the value of its issue field Arc, the arc's one home (rulings
     ``balance:R-BAL349``, ``R-BAL354``; :mod:`_arcs`), None when it holds none; its arc label
-    is display.
+    is display.  ``priority`` and ``effort``: the values of its issue fields Priority and
+    Effort (:mod:`_fields`, plan#2491), each None when it holds none.
 
     ``parent``, ``children`` and ``blocked_by`` name cards of the tracker only;
     ``outside`` holds every link to an issue anywhere else (R-BAL188).
@@ -181,6 +187,8 @@ class BareCard:  # pylint: disable=too-many-instance-attributes
     kind: str | None
     labels: tuple[str, ...]
     arc: str | None
+    priority: str | None
+    effort: str | None
     is_open: bool
     state_reason: str | None
     parent: int | None
@@ -280,15 +288,6 @@ def milestone_nodes(github: GitHub, place: Place) -> list[dict]:
                  lambda answer: answer["repository"]["milestones"], "the milestones")[0]
 
 
-def filed_labels(labels: Iterable[str], arc: str | None) -> list[str]:
-    """The labels a create sends for a card filed in ``arc`` (None: a task, which holds no
-    arc) beside ``labels``: those, its arc's label as display of its Arc
-    (:func:`_arcs.arc_labels`, ruling ``balance:R-BAL354``) and the :data:`setup_tracker.FILING`
-    mark (R-BAL202), sorted, as GitHub's answer is read back.  The one composition, which
-    :meth:`Tracker.create` sends and the tests' tracker files by."""
-    return sorted({*labels, *arc_labels(arc), FILING})
-
-
 def _comment(node: dict) -> Comment:
     """A :class:`Comment` from one GraphQL comment node (:data:`_queries.COMMENT_FIELDS`)."""
     return Comment((node["author"] or {}).get("login"), node["createdAt"], node["body"])
@@ -318,7 +317,7 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
     links += [(blocker, "blocker")
               for blocker in counted(node["blockedBy"], "blockers", number)]
     inside = [(link, what) for link, what in links if is_tracker_issue(link, place)]
-    labels, arc = labels_and_arc(node)
+    labels, values = labels_and_values(node)
     facts = {
         "number": number,
         "id": int(node["fullDatabaseId"]),
@@ -326,7 +325,8 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
         "title": node["title"],
         "kind": (node["issueType"] or {}).get("name"),
         "labels": labels,
-        "arc": arc,
+        "arc": arc_of(values),
+        **{part: value_of(values, field) for part, field in FIELDS.items()},
         "is_open": is_open,
         "state_reason": node["stateReason"],
         "parent": next((link["number"] for link, what in inside if what == "parent"), None),
@@ -574,7 +574,8 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     """A tracker as the App sees it: its cards, each with its board item, and its
     :class:`Board`.
 
-    Pylint: ``too-many-public-methods`` (27/20, measured at plan#1861's merge of plan#1811:
+    Pylint: ``too-many-public-methods`` (28/20 at plan#2491, whose :meth:`set_field` writes a
+    card's Priority and Effort; 27 measured at plan#1861's merge of plan#1811:
     plan#1811's arc-label pass reads every card's labels and Arc, puts its arc labels back
     and sets a missing Arc from its one arc label (ruling plan#1856), and plan#1861 reads many
     cards' comments in one request and places a task in its card's order; 22 at plan#1772,
@@ -756,14 +757,17 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         own), marked :data:`setup_tracker.FILING` beside its labels in this, its first write
         (R-BAL202): every card quill files is born marked, and its filing's last write,
         :meth:`unmark`, removes the mark.  Its number, once GitHub's answer shows the type,
-        labels, Arc and milestone sent.
+        labels, field values and milestone sent.
 
         Its arc is written in the same call to its issue field Arc, the arc's one home, and
         as its arc label beside, display of it (rulings ``balance:R-BAL349``, ``R-BAL354``;
-        :func:`filed_labels`); the Arc's id is read first (:meth:`_arc_field_id`).  A task,
-        which holds neither (R-BAL386), sends no field and reads no id, so its request is
-        what it was.  GitHub drops a field value silently where the feature is off (its REST
-        description), so the Arc is read back as the type is.
+        :func:`_filed.filed_labels`), and so is every other field value it holds, a step's or
+        a finding's Effort (ruling plan#2492; :func:`_filed.filed_values`); their ids are read
+        first, in one read (:meth:`_field_ids`).  A task, which holds none (R-BAL386), sends no
+        field and reads no id, so its request is what it was.  GitHub drops a field value
+        silently where the feature is off (its REST description), so each is read back as the
+        type is; a Priority or Effort it dropped, the same command run again writes
+        (``_filing._refield``).
 
         ``milestone``: the number of the milestone the card is filed in: a leaf's that
         ``quill file step --parent`` files in its split step's while that step holds one
@@ -783,66 +787,105 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         """
         labels = filed_labels(card.labels, card.arc)
         sent = {"title": card.title, "body": card.body, "type": card.kind, "labels": labels}
-        if card.arc is not None:
-            sent["issue_field_values"] = [{"field_id": self._arc_field_id(), "value": card.arc}]
+        if values := filed_values(card):
+            ids = self._field_ids(*values)
+            sent["issue_field_values"] = [{"field_id": ids[field], "value": value}
+                                          for field, value in values.items()]
         if milestone is not None:
             sent["milestone"] = milestone
         issue = self.github.rest("POST", f"{self.place.path}/issues", sent)
+        answered = issue.get("issue_field_values") or []
         got = ((issue.get("type") or {}).get("name"), sorted(l["name"] for l in issue["labels"]),
-               arc_answered(issue.get("issue_field_values") or []))
+               arc_answered(answered))
         if got != (wanted := (card.kind, labels, card.arc)):
             raise TrackerError(f"plan#{issue['number']} was filed as {got}, not {wanted}: fix it "
                                "by hand")
+        if (holding := {field: answered_value(answered, field) for field in values}) != values:
+            raise TrackerError(f"plan#{issue['number']} was filed holding {holding}, not "
+                               f"{values}: once `quill show plan#{issue['number']}` reads it, run "
+                               "the same command again, which writes them (R-BAL186); run while "
+                               "GitHub's lists of open and marked cards do not hold it yet, it "
+                               "files a second card")
         held = (issue.get("milestone") or {}).get("number")
         if held != milestone:
             raise TrackerError(f"plan#{issue['number']} was filed in milestone {held}, not "
                                f"{milestone}: fix it by hand")
         return issue["number"]
 
-    def _arc_field_id(self) -> int:
-        """The REST id of the tracker's issue field :data:`_arcs.ARC_FIELD`, read
-        (:func:`_queries.issue_fields`) for the create that writes a card's Arc.
+    def _field_ids(self, *names: str) -> dict[str, int]:
+        """The REST id of each of the tracker's issue fields ``names``, by name, in one read
+        (:func:`_queries.issue_fields`): for the create that writes a card's field values and
+        the write of one value (:meth:`set_field`).
 
         Raises:
             TrackerError: When the repository holds no such field, or the read GitHub cut
                 short does not hold it.
         """
-        with reading(f"{self.place.full_name}'s issue field {ARC_FIELD!r}"):
+        with reading(f"{self.place.full_name}'s issue fields {list(names)}"):
             fields = self.github.graphql(_queries.issue_fields(self.place))[
                 "repository"]["issueFields"]
-        found = [node["fullDatabaseId"] for node in fields["nodes"]
-                 if (node or {}).get("name") == ARC_FIELD]
-        if len(found) != 1:
-            raise TrackerError(
-                f"{self.place.full_name} holds {len(found)} issue fields named {ARC_FIELD!r} "
-                f"in a read of {len(fields['nodes'])} of its {fields['totalCount']}: run "
-                "python -m tools.quill.setup_tracker")
-        return int(found[0])
+        ids = {}
+        for name in names:
+            found = [node["fullDatabaseId"] for node in fields["nodes"]
+                     if (node or {}).get("name") == name]
+            if len(found) != 1:
+                raise TrackerError(
+                    f"{self.place.full_name} holds {len(found)} issue fields named {name!r} in "
+                    f"a read of {len(fields['nodes'])} of its {fields['totalCount']}: run "
+                    "python -m tools.quill.setup_tracker")
+            ids[name] = int(found[0])
+        return ids
 
-    def set_arc(self, number: int, arc: str) -> None:
-        """Set a card's Arc, its issue field :data:`_arcs.ARC_FIELD`, to ``arc``, its other
-        field values left as they are: REST's add of the one value (measured 2026-10-27 on
-        plan#1811, ``build_1811/first_write.out``; never its "set" (PUT), which replaces every
-        value, Priority and Effort too), read back from GitHub's answer, the card's values
-        after it.  ``quill sync``'s fill of a card filed by older quill with its arc label
-        alone (ruling plan#1856, :mod:`_relabel`); the Arc's id is read first
-        (:meth:`_arc_field_id`).
+    def set_field(self, number: int, field: str, value: str | None) -> None:
+        """Set a card's single select ``field`` to the option ``value``, or with None clear
+        it, its other field values left as they are, read back from GitHub (plan#2491): the one
+        write of a card's field value, which :meth:`set_arc` names for the Arc; the field's id
+        is read first (:meth:`_field_ids`).
+
+        A value is REST's add of the one value, never its "set" (PUT), which replaces every
+        value, nor an add of none, which clears them all (GitHub's REST description); it
+        replaces a value the field holds, the one value of it left (measured 2026-10-30 on
+        plan#2225, an Arc, and 2026-11-01 on plan#2491, an Effort of 3 then 4 and a Priority of
+        High then Urgent, ``effort-priority-2026-11-01/measure_replace.out``), and answers the
+        card's values after it.  A clear is REST's delete of the value, answered 204 and no body
+        (404 "Issue field value not found" when the card holds none), so the card's values are
+        read after it, a page of :data:`_VALUES_PAGE`.  Measured 2026-11-01 on plan#2491, a
+        set and a clear of its Priority and of its Effort by ``quill priority`` and ``quill
+        effort`` (``effort-priority-2026-11-01/measure_set_field.out``).
 
         Raises:
-            TrackerError: When that answer does not show ``arc`` as the card's Arc, or is not
-                a list of its values.
+            TrackerError: When GitHub's last answer is not a list of the card's values, or
+                does not show ``value`` as the field's, or after a clear is a full page.
         """
-        answer = self.github.rest(
-            "POST", f"{self.place.path}/issues/{number}/issue-field-values",
-            {"issue_field_values": [{"field_id": self._arc_field_id(), "value": arc}]})
+        values = f"{self.place.path}/issues/{number}/issue-field-values"
+        field_id = self._field_ids(field)[field]
+        if value is not None:
+            answer = self.github.rest(
+                "POST", values, {"issue_field_values": [{"field_id": field_id, "value": value}]})
+        else:
+            self.github.rest("DELETE", f"{values}/{field_id}")
+            with reading(f"plan#{number}'s issue field values"):
+                answer = self.github.rest("GET", f"{values}?per_page={_VALUES_PAGE}")
+            if isinstance(answer, list) and len(answer) >= _VALUES_PAGE:
+                raise TrackerError(f"plan#{number}'s issue field values were answered a full "
+                                   f"page of {_VALUES_PAGE}, which another may follow: read its "
+                                   f"{field} back by hand")
         try:
-            held = arc_answered(answer)
+            held = answered_value(answer, field)
         except (TypeError, KeyError, AttributeError) as error:
-            raise TrackerError(f"plan#{number}'s Arc was answered {answer!r:.300}, not a list "
-                               "of its field values: read it back by hand") from error
-        if held != arc:
-            raise TrackerError(f"plan#{number} holds the Arc {held!r}, not {arc!r}, after it "
-                               "was set: fix it by hand")
+            raise TrackerError(f"plan#{number}'s {field} was answered {answer!r:.300}, not a "
+                               "list of its field values: read it back by hand") from error
+        if held != value:
+            done = "set" if value is not None else "cleared"
+            raise TrackerError(f"plan#{number} holds the {field} {held!r}, not {value!r}, after "
+                               f"it was {done}: fix it by hand")
+
+    def set_arc(self, number: int, arc: str) -> None:
+        """Set a card's Arc, its issue field :data:`_arcs.ARC_FIELD`, to ``arc``
+        (:meth:`set_field`, named for the Arc): ``quill sync``'s fill of a card filed by older
+        quill with its arc label alone (ruling plan#1856, :mod:`_relabel`), and ``quill arc``'s
+        move of a card (ruling plan#2221, :mod:`_arc_label`)."""
+        self.set_field(number, ARC_FIELD, arc)
 
     def set_milestone(self, number: int, milestone: int | None) -> None:
         """Put a card in the milestone numbered ``milestone``, or with None take it out of its
@@ -900,8 +943,9 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         labels left as they are: an add sends only what it names, and a removal one label
         (GitHub's REST description; never its "set labels", which replaces them all and so
         would undo a label a person added since the card was read).  ``quill sync``'s put-back
-        of a card's arc labels (:mod:`_relabel`), read back from GitHub's last answer, which
-        is the card's labels after it (measured on the filing mark's removal,
+        of a card's arc labels (:mod:`_relabel`), and ``quill arc``'s and ``quill label``'s
+        writes (:mod:`_arc_label`), read back from GitHub's last answer, which is the card's
+        labels after it (measured on the filing mark's removal,
         ``recorded/tracker.json``).  A removal of a label the card no longer carries is
         answered 404 "Label does not exist" (:meth:`unmark`), and fails the run.
 

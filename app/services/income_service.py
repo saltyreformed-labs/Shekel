@@ -655,7 +655,7 @@ class SalaryPricing:
         salary:X-av-2, ruling **R-SAL71**): :meth:`net_for` reads a ROW's
         figure through it, and the Recurring surface's salary row reads
         TODAY's paycheck through it
-        (``obligations_aggregator.occurrence_amount``) -- the net AND the
+        (``obligations_aggregator.todays_price``) -- the net AND the
         rhythm it was priced at
         (:attr:`~app.services.paycheck_calculator.PeriodInfo.cadence`), which a
         monthly figure must convert with.  The whole breakdown rather than a

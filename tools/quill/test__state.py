@@ -24,7 +24,6 @@ from tools.quill._state import (
     missing,
     never_offered,
     never_split,
-    next_step,
     outside_reports,
     release_hint,
     resolved,
@@ -37,6 +36,7 @@ from tools.quill._state import (
     workable,
 )
 from tools.quill._git import Claim
+from tools.quill._next import next_step
 from tools.quill._tracker import Card, Child, OutsideLink
 from tools.quill.setup_tracker import FILING
 
@@ -48,7 +48,7 @@ def _card(number, kind="step", **changes):
     fields = {
         "number": number, "id": 1000 + number, "node_id": f"I_{number}", "title": f"card {number}",
         "kind": kind, "labels": ("balance",), "arc": None if kind == "task" else "balance",
-        "is_open": True, "state_reason": None,
+        "priority": None, "effort": None, "is_open": True, "state_reason": None,
         "parent": None, "children": (), "blocked_by": (), "board_item": f"PVTI_{number}",
         "closed_by_tool": False, "touched_by_hand": False, "outside": (),
     }
@@ -654,6 +654,20 @@ def test_a_wait_or_a_drop_two_steps_up_holds_a_leaf_back():
     assert "plan#1 above it waits on o/code#1" in never_offered(cards[3], cards, set())
     cards[1] = _closed(1, by_tool=False, children=(Child(2, "step", True),))
     assert never_offered(cards[3], cards, set()) == "plan#1 above it was dropped (R-BAL185)"
+
+
+def test_on_hold_holds_back_the_step_marked_and_every_leaf_below_it():
+    """Ruling plan#1832: On hold is never offered, read from the card or any step above it,
+    nothing copied (R-BAL182's shape); no other mark holds anything back."""
+    cards = _cards(_card(1, priority="On hold", children=(Child(2, "step", True),)),
+                   _card(2, parent=1, children=(Child(3, "step", True),)), _card(3, parent=2),
+                   _card(4, priority="On hold"))
+    assert never_offered(cards[4], cards, set()) == "it is On hold (ruling plan#1832)"
+    assert never_offered(cards[3], cards, set()) == "plan#1 above it is On hold (ruling plan#1832)"
+    assert not workable(cards[4], cards, set(), {}) and not workable(cards[3], cards, set(), {})
+    for mark in ("Urgent", "High", "Medium", "Low", None):
+        free = _cards(_card(5, priority=mark))
+        assert never_offered(free[5], free, set()) is None and workable(free[5], free, set(), {})
 
 
 def test_an_open_ruling_is_reported_once_as_unfinished_or_as_open_by_hand():

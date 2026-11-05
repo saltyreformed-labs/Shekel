@@ -165,16 +165,21 @@ class TestTheDeployResync:
         so Checking's ledger reads $820.00, and Checking is trued up to
         $820.00 as of D -- an assertion covering all three, its correction
         $0.00.  Every entry of all three is then deleted behind the ledger's
-        back, so each source's money waits its turn: the account walk reads
-        only what is posted.  The resync reports (1, 2); per (real account,
-        day) the nets are restored exactly, transit nets 0.00, and NOT ONE
-        anchor correction entry is written.  Mutations, each observed firing
-        (+2 entries): the transfer arm re-checking inside its loop -- the
-        first transfer's walk cannot see the $50.00 transfer not yet
-        re-posted and books a -$50.00 true-up the second's re-check
-        reverses; the row arm re-checking inside its loop -- the row's walk
-        runs before either transfer is re-posted and books a -$150.00 true-up
-        the one re-check reverses.
+        back, so each source's money waits its turn for the resync.  The
+        resync reports (1, 2); per (real account, day) the nets are restored
+        exactly, transit nets 0.00, and NOT ONE anchor correction entry is
+        written.
+
+        **Its two mutations no longer fire, and that is plan task plan#2525's
+        point.**  Both were observed firing (+2 entries) while the account
+        walk summed what was POSTED: the transfer arm re-checking inside its
+        loop booked a -$50.00 true-up for the transfer not yet re-posted, and
+        the row arm a -$150.00 one, each reversed by a later re-check.  The
+        walk reads the RECORDS since, so no source waits its turn as far as a
+        walk can tell: measured 2026-11-01 with BOTH arms re-checking inside
+        their loops, this module's four cases pass.  What this case grades is
+        the outcome -- a batch re-book under a true-up writes no correction --
+        and the hold's placement is no longer what keeps it.
 
         **Re-expressed under ruling plan#1890** (card plan#1845): the money
         waiting its turn was the legacy one-entry shape, which the walk did
@@ -248,22 +253,25 @@ class TestTheDeployResync:
         The case above proves the re-check writes nothing extra; this one
         proves it runs (ruling **R-BAL103** refused "no re-check in the
         resync").  Arithmetic: Checking opens at $1,000.00; a $100.00
-        transfer to Savings settles on D and its entries are deleted behind
-        the ledger's back, so the account walk cannot see it; Checking is
-        then trued up to $900.00 as of D, so the walk books a -$100.00
-        correction for money it cannot see and Checking's ledger reads
-        $900.00 with the transfer missing.  The resync re-posts the transfer
-        (the -$100.00 visible again, the ledger at $800.00) and the one
-        re-check reverses the correction: exactly ONE new anchor-correction
-        entry, Checking +100.00, and the ledger reads $900.00.  Mutation: the
-        transfer arm's hold removed -> the ledger stays at $800.00.
+        transfer to Savings settles on D; Checking is trued up to $1,000.00
+        as of D-1 (the transfer after it, correction $0.00).  Checking's side
+        of the transfer is then moved to D-1 behind the ledger's back (the
+        stale-day forge the row twin below uses), so the assertion now covers
+        it.  The resync re-dates the transfer -- (0, 1) -- and the one
+        re-check books the correction the move owes: exactly ONE new
+        anchor-correction entry, Checking +100.00, and the ledger reads the
+        asserted $1,000.00.  Mutation: the transfer arm's hold removed -> the
+        ledger stays at $900.00.
 
-        **Re-expressed under ruling plan#1890** (card plan#1845), as the
-        case above is: the transfer's money waited in the legacy one-entry
-        shape, which kept its -$100.00 in the ledger (reading $800.00 before
-        the resync) while the walk could not see it.  A deleted entry is out
-        of the ledger too, so that one setup figure reads $900.00; every
-        figure the resync is graded by is unchanged.
+        **Re-expressed at plan task plan#2525**, when the account walk moved
+        onto the RECORDS.  The forge was a deletion of the transfer's entries,
+        which made its money invisible to a walk that summed STORED postings,
+        so the true-up booked -$100.00 for it and the re-check reversed it
+        (+100.00, the ledger at $900.00).  A walk over the records sees a
+        transfer whatever is posted for it: the deletion now moves no
+        correction at all -- the true-up books $0.00 and the re-check rightly
+        writes nothing -- so the only forge that can move a correction is one
+        that moves the RECORDS, which this case now makes.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -272,16 +280,23 @@ class TestTheDeployResync:
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
             )
             _db.session.commit()
-            day = _covering_movement_of_side(transfer.id, checking.id).settled_on
-            _delete_behind_the_ledgers_back(_entries_for_transfer(transfer.id))
-            _db.session.commit()
-            assert _entries_for_transfer(transfer.id) == []
+            side = _covering_movement_of_side(transfer.id, checking.id)
+            earlier = side.settled_on - timedelta(days=1)
             anchor_service.apply_anchor_true_up(
-                account=checking, new_balance=Decimal("900.00"),
-                observed_on=day,
+                account=checking, new_balance=Decimal("1000.00"),
+                observed_on=earlier,
             )
             checking_ledger = _ledger_id(checking)
             assert _ledger_total(checking_ledger) == Decimal("900.00")
+            _db.session.execute(
+                _db.text(
+                    "UPDATE budget.transaction_entries "
+                    "SET settled_on = :day, purchased_on = :day "
+                    "WHERE id = :id"
+                ),
+                {"day": earlier, "id": side.id},
+            )
+            _db.session.commit()
             newest = _db.session.query(_db.func.max(JournalEntry.id)).scalar()
 
             assert posting_service.resync_all_cash_postings() == (0, 1)
@@ -290,7 +305,7 @@ class TestTheDeployResync:
             assert _new_anchor_correction_legs(newest, checking_ledger) == [
                 Decimal("100.00"),
             ]
-            assert _ledger_total(checking_ledger) == Decimal("900.00")
+            assert _ledger_total(checking_ledger) == Decimal("1000.00")
 
     def test_the_one_re_check_corrects_what_a_row_re_date_moved(
         self, app, db, seed_user,
@@ -371,9 +386,10 @@ def _delete_behind_the_ledgers_back(entries):
     """Delete *entries* by raw SQL, so their source's money waits for the resync.
 
     The ORM's append-only guard is about the app's own writes, so a forge
-    goes by raw SQL, as every forge in this module does.  The account walk
-    reads only what is posted, so a source whose entries are gone is money
-    waiting its turn until the resync re-posts it (ruling **R-BAL103**).
+    goes by raw SQL, as every forge in this module does.  A source whose
+    entries are gone is money waiting its turn until the resync re-posts it
+    (ruling **R-BAL103**); the account walk reads the RECORDS since plan task
+    plan#2525, so no anchor correction is booked for the gap meanwhile.
     """
     _db.session.execute(
         _db.text("DELETE FROM budget.journal_entries WHERE id = ANY(:ids)"),

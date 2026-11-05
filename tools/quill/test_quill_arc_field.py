@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from tools.quill._command import _label
 from tools.quill._fake import FakeTracker, run
-from tools.quill._state import next_step
+from tools.quill._next import next_step
 from tools.quill.setup_tracker import FILING
 
 
@@ -65,8 +65,8 @@ def test_a_question_becomes_a_ruling_in_the_arc_its_field_holds(code, tmp_path, 
 
 def test_a_question_holding_no_arc_is_refused_with_what_fixes_it(code, tmp_path, capsys):
     """A question holding no Arc (filed before the one-time pass, or by older code) matches no
-    ``--arc``, so its refusal names the fix, its Arc set on the web, never another --arc
-    (plan#1811's review, L2); nothing is written."""
+    ``--arc``, so its refusal names the fix, its Arc set with ``quill arc`` (ruling plan#2221),
+    never another --arc (plan#1811's review, L2); nothing is written."""
     answer = tmp_path / "a"
     answer.write_text("Yes.")
     tracker = FakeTracker()
@@ -77,7 +77,7 @@ def test_a_question_holding_no_arc_is_refused_with_what_fixes_it(code, tmp_path,
                "balance") == 1
     assert capsys.readouterr().err == (
         "refused: plan#2 [question, no arc] Ship holds no Arc, its arc's one home (R-BAL349): "
-        "set its Arc on the web, then convert it\n")
+        "set it with `quill arc plan#2 --to ARC`, then convert it\n")
     assert not tracker.writes
 
 
@@ -94,7 +94,7 @@ def test_a_filing_run_again_over_a_card_whose_arc_was_changed_by_hand_is_refused
     person changed since is theirs to fix, and nothing is written."""
     tracker = FakeTracker()
     tracker.add(4, body="New work.", title="New", labels=("salary", FILING), arc="balance")
-    assert run(tracker, code, "file", "step", "--arc", "salary", "--title", "New",
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
                "--body-file", _spec(tmp_path)) == 1
     assert capsys.readouterr().err == (
         "refused: plan#4 [step, balance] New has this kind, title and text but holds the Arc "
@@ -123,8 +123,8 @@ def test_a_filing_run_again_over_a_card_whose_arc_label_was_changed_is_finished(
     stops no filing, which the same command finishes, its Arc as it was filed."""
     tracker = FakeTracker()
     tracker.add(4, body="New work.", title="New", labels=("balance", FILING), arc="salary",
-                on_board=False)
-    assert run(tracker, code, "file", "step", "--arc", "salary", "--title", "New",
+                effort="2", on_board=False)
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
                "--body-file", _spec(tmp_path)) == 0
     assert tracker.writes == [("board_add", 4), ("unmark", 4)]
 

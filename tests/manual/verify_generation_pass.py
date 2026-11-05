@@ -22,8 +22,9 @@ each builds its schedule differently:
   the post-write calendar meet;
 * the whole-schedule generate the template-create, unarchive, salary and
   template-edit routes run, re-driven over every active transaction template;
-* the carry-forward PREDICTION, ``can_generate_in_period``, which is the one
-  read-only consumer of the same preamble.
+* the carry-forward PREDICTION, ``rows_to_generate_in_period`` (which
+  carry-forward's preview calls), the one read-only consumer of the same
+  preamble.
 
 **It compiles and runs on BOTH sides**, which standard 3 requires: the
 constructor names, the carry-forward keyword and -- in the leaf's SECOND half

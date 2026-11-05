@@ -34,6 +34,10 @@ What it holds a card to (rulings ``balance:R-BAL136``, ``R-BAL138``,
   developer's question, then his answer -- at most 2,000 characters in all.
   That they are HIS words, word for word, is the filer's duty; no check can see
   it.
+- a Priority or an Effort the change writes is held by a kind that may hold it: an Effort
+  by a step or a finding alone, the work a branch builds (ruling plan#2506), and a Priority
+  by a step, a finding or a question, what waits on work or on the developer's answer
+  (ruling plan#2507); a clear, which writes none, any card may take.
 
 **Only what a change writes is graded** (``R-BAL136``: "rows nobody edits keep
 their text until they close").  A caller names the parts it writes in
@@ -54,6 +58,7 @@ from collections.abc import Collection
 
 from tools.ci.arcs import ARCS
 from tools.quill._draft import Draft, Owner
+from tools.quill._fields import EFFORT, FIELDS, PRIORITY
 from tools.quill._state import SHIPPABLE, may_own
 from tools.quill.setup_tracker import CARD_TYPES, TASK
 
@@ -68,10 +73,21 @@ RULING_CAP = 2000
 #: above it.
 TITLE_CAP = 100
 
-#: The parts of a card a change can write.
+#: The parts of a card a change can write, beside :data:`_fields.PRIORITY` and
+#: :data:`_fields.EFFORT`, the parts holding its Priority and Effort.
 TITLE, BODY, OWNER = "title", "body", "owner"
 #: A new card writes every part.
-NEW_CARD = frozenset({TITLE, BODY, OWNER})
+NEW_CARD = frozenset({TITLE, BODY, OWNER, PRIORITY, EFFORT})
+#: The kinds of card that may hold each issue field quill writes beside the Arc
+#: (:data:`_fields.FIELDS`), by the part writing it, and the ruling saying so: an Effort the
+#: work a branch builds (ruling plan#2506), a Priority what waits on work or on the
+#: developer's answer (ruling plan#2507).  A step split into smaller steps holds no Effort
+#: (ruling plan#2555), which the callers apply, as whether a step is split reads the steps
+#: linked under it and git (``_filing._finish`` clears it, ``_arc_label.cmd_field`` refuses it).
+HOLDERS = {
+    PRIORITY: (("step", "finding", "question"), "plan#2507"),
+    EFFORT: (("step", "finding"), "plan#2506"),
+}
 
 _QUESTION, _ANSWER = "Question: ", "\n\nAnswer: "
 #: Where a sentence may end: terminal punctuation (not the last dot of an
@@ -230,6 +246,20 @@ def _title_problems(title: str, changed: Collection[str]) -> list[str]:
     return []
 
 
+def _field_problems(draft: Draft, changed: Collection[str]) -> list[str]:
+    """Why a Priority or an Effort the change writes is on a kind that may not hold it
+    (:data:`HOLDERS`); none for a field the change does not write, or writes as none (a
+    clear), which any card may take, one holding a value set on the web among them."""
+    problems = []
+    for part, (kinds, ruling) in HOLDERS.items():
+        value = getattr(draft, part)
+        if part in changed and value is not None and draft.kind not in kinds:
+            problems.append(f"{FIELDS[part]} is held by a {', '.join(kinds[:-1])} or {kinds[-1]} "
+                            f"alone (ruling {ruling}); this {draft.kind or 'card with no type'} "
+                            f"would hold {value!r}")
+    return problems
+
+
 def _task_problems(draft: Draft, changed: Collection[str]) -> list[str]:
     """Every way a task breaks the plan's rules (R-BAL386): it holds no Arc, since its arc is
     its card's (rule 14); a title it writes is a short name; and a parent it sets
@@ -240,6 +270,7 @@ def _task_problems(draft: Draft, changed: Collection[str]) -> list[str]:
     if draft.arc is not None:
         problems.append(f"a task holds no Arc: its arc is its card's; it holds {draft.arc!r}")
     problems += _title_problems(draft.title, changed)
+    problems += _field_problems(draft, changed)
     owner = draft.owner
     if OWNER in changed and not (owner is not None and owner.kind in SHIPPABLE and owner.live):
         problems.append("a task is a sub-issue of a LIVE step or finding, the piece of work it "
@@ -251,8 +282,9 @@ def violations(draft: Draft, changed: Collection[str] = NEW_CARD) -> list[str]:
     """Every way ``draft`` breaks the plan's rules; empty when it may be written.
 
     ``changed``: the parts the change writes (:data:`TITLE`, :data:`BODY`,
-    :data:`OWNER`); only those are graded beyond the type and the Arc.  A task
-    (:data:`setup_tracker.TASK`) is held to its own rules (:func:`_task_problems`).
+    :data:`OWNER`, :data:`PRIORITY`, :data:`EFFORT`); only those are graded beyond the type
+    and the Arc.  A task (:data:`setup_tracker.TASK`) is held to its own rules
+    (:func:`_task_problems`).
     """
     if draft.kind == TASK:
         return _task_problems(draft, changed)
@@ -263,6 +295,7 @@ def violations(draft: Draft, changed: Collection[str] = NEW_CARD) -> list[str]:
         problems.append(f"it holds one arc in its Arc field, one of {', '.join(ARCS)}; it holds "
                         f"{'none' if draft.arc is None else repr(draft.arc)}")
     problems += _title_problems(draft.title, changed)
+    problems += _field_problems(draft, changed)
     if OWNER in changed:
         problems += _owner_problems(draft)
     body = normalized(draft.body)

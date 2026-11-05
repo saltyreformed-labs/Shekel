@@ -33,8 +33,10 @@ takes its owner's write lock before it reads any of the owner's data
 has read the row, and then reads the first click's committed work.
 :class:`TestTheOwnersLockComesFirst` grades that order door by door.
 
-**How a request race is staged** (:func:`_race`).  Each click is a request on
-a thread of its own with no app context pushed, so the request pushes its own
+**How a request race is staged**
+(:func:`tests._request_race.race_two_requests`, this package's own until
+plan#2331 raced a second pair).  Each click is a request on a thread of its
+own with no app context pushed, so the request pushes its own
 and has its own session, exactly as production gives each request.  The
 FIRST request runs until its COMMIT and is held there -- a ``before_commit``
 hook on that thread alone -- still holding everything it locked.  The SECOND

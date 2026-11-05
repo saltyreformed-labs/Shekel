@@ -66,7 +66,7 @@ class LoanPaymentSettings(TimestampMixin, db.Model):
     # Moved off ``transfer_templates`` (decision B): TRUE means this recurring
     # transfer's cash is derived LIVE from the destination loan (P&I + as-of
     # escrow) on every render, so it tracks the loan after an escrow / rate
-    # change instead of staying frozen at ``default_amount``.
+    # change instead of staying frozen at a stated price.
     derive_from_loan = db.Column(
         db.Boolean, nullable=False, default=False,
         server_default=db.text("false"),

@@ -185,8 +185,9 @@ class DerivedTransferFields(NamedTuple):
             same field at plan step X-au-e.
         due_date: Derived from the rule and the placed occurrence by
             :func:`~app.services.recurrence.compute_due_date`, which always
-            answers one (the occurrence for a cadence naming a day of the
-            month, the funding payday for one naming none: plan step R5-a);
+            answers one (the occurrence for a calendar cadence -- weeks,
+            months, years -- funded by the paycheck containing it, the funding
+            payday otherwise: plan step R5-a, weeks since R8-b);
             for a RULE-LESS definition it is the transfer's own
             (:func:`_derive_unruled_fields`), which is a date too, because
             ``ck_transfers_template_row_needs_due_date`` refuses a linked

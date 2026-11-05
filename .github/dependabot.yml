@@ -109,7 +109,7 @@ updates:
       prefix: "chore(deps)"
 
   # GitHub Actions: SHA-pinned ``uses:`` lines with a version comment;
-  # Dependabot updates both.  actionlint and zizmor gate the result.
+  # Dependabot updates both.  jactionlint and zizmor gate the result.
   - package-ecosystem: github-actions
     directory: /
     schedule:

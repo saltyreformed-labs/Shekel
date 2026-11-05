@@ -3222,7 +3222,6 @@ def _build_full_user_data(db, seed_user, periods):
         from_account_id=account.id,
         to_account_id=savings_account.id,
         name="Monthly Savings",
-        default_amount=Decimal("200.00"),
     )
     db.session.add(transfer_tpl)
     db.session.flush()
@@ -3230,7 +3229,7 @@ def _build_full_user_data(db, seed_user, periods):
     # plan step balance:X-au-f a generated TRANSFER stores no figure and is
     # priced by this series on its own due date, so a template without one
     # generates rows ``_stated_amount`` REFUSES.
-    state_template_price(transfer_tpl)
+    state_template_price(transfer_tpl, Decimal("200.00"))
     # ...and its CADENCE, so a test wanting a transfer of this definition
     # takes the ENGINE's (:func:`generate_transfer_of`, plan step
     # balance:X-ch) rather than hand-building one.  No transfer is generated
@@ -3371,13 +3370,12 @@ def seed_full_second_user_data(app, db, seed_second_user, seed_second_periods):
         from_account_id=account.id,
         to_account_id=savings_account.id,
         name="Bi-Weekly Savings",
-        default_amount=Decimal("150.00"),
     )
     db.session.add(transfer_tpl)
     db.session.flush()
     # Its price, stated as every app-side create door states it, and its
     # cadence (see the calendar-anchored twin above).
-    state_template_price(transfer_tpl)
+    state_template_price(transfer_tpl, Decimal("150.00"))
     make_every_period_rule(db.session, transfer_tpl)
 
     # d) Salary profile.
@@ -3741,7 +3739,7 @@ def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argumen
         SQLAlchemy connections to release -- and the
         ``WITH (FORCE)`` clause severs any backend that did
         escape, at the protocol level.  See
-        ``docs/audits/security-2026-04-15/per-worker-database-plan.md``
+        ``docs/audits/test_improvements/per-worker-database-plan.md``
         Phase 3 for the broader context.
 
     Survives SIGKILL imperfectly: a process killed before this hook

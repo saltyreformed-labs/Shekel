@@ -63,7 +63,8 @@ def test_a_mark_removed_by_hand_mid_filing_fails_its_unmark_and_the_same_command
     tracker = FakeTracker()
     spec = tmp_path / "spec.md"
     spec.write_text("Build it.")
-    args = ("file", "step", "--arc", "balance", "--title", "Alone", "--body-file", str(spec))
+    args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Alone",
+            "--body-file", str(spec))
     _HandUnmarks(tracker)
     assert run(tracker, code, *args) == 2
     assert "Label does not exist" in capsys.readouterr().err
@@ -358,7 +359,8 @@ def test_no_leaf_conversion_or_leaf_move_rides_on_a_filing_that_has_not_finished
     assert "one whose link has not landed reads as a top-level step" in capsys.readouterr().err
     assert not tracker.writes
     assert run(tracker, code, "move", "plan#2", "--top") == 0
-    assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Twice",
+    assert run(tracker, code, "file", "finding", "--effort", "1", "--arc", "balance",
+               "--title", "Twice",
                "--owner", "plan#1", "--text", "The report counts a refund twice.") == 0
 
 
@@ -553,7 +555,8 @@ def test_only_an_unfinished_leaf_holds_a_new_leaf(code, tmp_path, capsys):
     tracker.add(10, parent=9, labels=marked, on_board=False)
     assert run(tracker, code, *leaf_filing(tmp_path, "Held", "plan#9")) == 1
     capsys.readouterr()
-    assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Twice",
+    assert run(tracker, code, "file", "finding", "--effort", "1", "--arc", "balance",
+               "--title", "Twice",
                "--owner", "plan#9", "--text", "The report counts a refund twice.") == 1
     refused = capsys.readouterr().err
     assert "its owner is a step split into smaller steps" in refused and "R-BAL204" not in refused

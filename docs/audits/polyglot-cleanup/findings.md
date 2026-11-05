@@ -3,7 +3,7 @@
 Extension of the pylint cleanup to every non-Python surface: shell, the
 enforcement hooks themselves, JavaScript, Jinja templates, CSS, and the
 CI/Dockerfile/SQL layer. Compose files were excluded (exhaustively audited
-in the 2026-06-12 dev-prod parity pass, `docs/audits/dev-prod-parity/`).
+in the 2026-06-12 dev-prod parity pass, `shekel-audits/dev-prod-parity/`).
 
 **Method.** 60-agent orchestrated audit: 7 parallel surface auditors reading
 their files in full against `.claude/rules/coding.md` + `docs/coding-standards.md`,

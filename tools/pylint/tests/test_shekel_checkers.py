@@ -18,6 +18,7 @@ from pylint.testutils import CheckerTestCase, MessageTest
 from shekel_checkers import (
     _CASH_LEDGER_MODULES,
     _FENCED_MODULE_RULINGS,
+    _LEDGER_LINES_MODULES,
     _LOAN_PAYMENT_SEAM_MODULES,
     _SEAM_PRIVATE_CONTEXT_MODULES,
     _LEDGER_LEAF_MODULE_NAMES,
@@ -824,6 +825,9 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
           no ``__init__`` edit, and W9910 cannot see attribute access -- and,
           since ruling R-BAL146, ``balance_at._recurrence_memos``, the mixin
           it inherits three of those methods from)
+        * ``_LEDGER_LINES_MODULES`` (``ledger_lines``, plan task plan#2526 --
+          the worked-out ledger, which took every ledger target rule, two of
+          them ruled under ``loan_posting_service``, and the read beside them)
 
         For those, a set-equality guard would be SELF-ATTESTING: delete the
         registry entry and empty the constant -- two adjacent edits in one
@@ -848,6 +852,7 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
             "app.services.recurring_transfer_query",
             "app.services.balance_at._context",
             "app.services.balance_at._recurrence_memos",
+            "app.services.ledger_lines",
         ):
             node = self._function_def(
                 "def balance_on(account, target):\n    return None\n",
@@ -941,6 +946,7 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
             | _KIND_CLASSIFIER_MODULES
             | _ROW_VALUATION_MODULES
             | _RECURRING_DEFINITION_MODULES
+            | _LEDGER_LINES_MODULES
         )
         assert set(_FENCED_MODULE_RULINGS) == expected
 
@@ -1921,22 +1927,50 @@ class TestShekelLedgerModelFenceChecker(CheckerTestCase):
     def test_allows_import_from_allowlisted_package_submodule(self) -> None:
         """A submodule of an allowlisted PACKAGE stays inside the fence (prefix match).
 
-        The loan / account posting packages and the report package are
-        allowlisted by prefix, so their real submodules (``_walk`` /
-        ``_linked_ledger`` / ``_attribution``) that legitimately query the
-        ledger must remain
-        exempt -- the package-prefix arm of :func:`_module_in_allowlist`.
+        The loan / account posting packages and the chart resolver package
+        are allowlisted by prefix, so their real submodules (``_sync`` /
+        ``_linked_ledger`` / ``_linked``) that legitimately query the ledger
+        must remain exempt -- the package-prefix arm of
+        :func:`_module_in_allowlist`.  The report package was the third
+        example until plan task plan#2771 moved the statements onto the
+        worked-out ledger and the fence tightened past it
+        (:meth:`test_flags_the_report_package_since_it_reads_lines`).
         """
         for module_name in (
             "app.services.loan_posting_service._linked_ledger",
-            "app.services.account_posting_service._walk",
-            "app.services.ledger_report_service._attribution",
+            "app.services.account_posting_service._sync",
+            "app.services.ledger_account_service._linked",
         ):
             node = self._importfrom_node(
                 "from app.models.journal_entry import Posting, JournalEntry",
                 module_name,
             )
             with self.assertNoMessages():
+                self.checker.visit_importfrom(node)
+
+    def test_flags_the_report_package_since_it_reads_lines(self) -> None:
+        """The statements' package is outside the fence (plan task plan#2771).
+
+        It read the stored journal until X-ew's second leaf moved both
+        statements onto the worked-out ledger, which reads no ledger model;
+        the allowlist dropped it, so a ledger model imported there again is
+        flagged, at the package and at the submodule that read the store.
+        """
+        for module_name in (
+            "app.services.ledger_report_service",
+            "app.services.ledger_report_service._attribution",
+        ):
+            node = self._importfrom_node(
+                "from app.models.journal_entry import Posting", module_name,
+            )
+            with self.assertAddsMessages(
+                MessageTest(
+                    "shekel-ledger-model-bypass",
+                    node=node,
+                    args=("app.models.journal_entry",),
+                ),
+                ignore_position=True,
+            ):
                 self.checker.visit_importfrom(node)
 
 

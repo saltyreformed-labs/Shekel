@@ -13,6 +13,15 @@ secret at rest.  The field set is owned by
 ``mfa_service.clear_mfa_material`` / ``has_mfa_material``, shared with
 the app's ``/mfa/disable`` route so the two paths cannot drift.
 
+Like ``/mfa/disable``, the reset also bumps the user's
+``session_invalidated_at``: it ends every session of the user and forgets
+every trusted device of theirs (plan#2173, ruling plan#2406, "turning 2FA
+off ... forgets them all").  A device is trusted only while it was trusted
+at or after that column (``app.services.trusted_device_service``), and a
+lost authenticator is exactly when a trust it vouched for must die: without
+the bump, a browser trusted under the old authenticator would skip the
+code of the one enrolled after the reset.
+
 Usage:
     python scripts/reset_mfa.py <user_email>
     python scripts/reset_mfa.py --force <user_email>
@@ -25,6 +34,7 @@ import argparse
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 
 # Add project root to path.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,7 +46,9 @@ def reset_mfa(email: str | None) -> None:
     Clears the encrypted TOTP secret, hashed backup codes, confirmation
     timestamp, replay-prevention step boundary, and any pending setup
     ciphertext via the ``mfa_service.clear_mfa_material`` rule shared
-    with the app's ``/mfa/disable`` route.  The clear also runs when
+    with the app's ``/mfa/disable`` route, and bumps the user's
+    ``session_invalidated_at`` in the same commit (the module docstring
+    says why).  The clear also runs when
     ``is_enabled`` is already ``False`` but residual material remains
     (an orphaned secret from a manual DB intervention, an interrupted
     disable flow, or an abandoned ``/mfa/setup`` whose encrypted
@@ -88,8 +100,11 @@ def reset_mfa(email: str | None) -> None:
     # Clear all MFA material + disable, via the rule shared with the
     # /mfa/disable route (see clear_mfa_material's docstring for the
     # per-field rationale, including the C-09 last_totp_timestep
-    # contract).
+    # contract).  In the same commit, end the user's sessions and forget
+    # their trusted devices, as /mfa/disable's invalidate_other_sessions
+    # does on the same process clock (the module docstring says why).
     mfa_service.clear_mfa_material(mfa_config)
+    user.session_invalidated_at = datetime.now(timezone.utc)
     db.session.commit()
 
     # Audit trail for the reset action.
@@ -99,7 +114,10 @@ def reset_mfa(email: str | None) -> None:
         "MFA reset via admin script", user_email=email,
     )
 
-    print(f"MFA has been disabled for {email}.")
+    print(
+        f"MFA has been disabled for {email}; their sessions are ended and "
+        f"their trusted devices forgotten."
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

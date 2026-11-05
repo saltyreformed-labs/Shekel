@@ -172,8 +172,12 @@ def _grid(account, ctx, periods, categories):
     """The grid's row keys, cells and figures for *account* over *periods*."""
     # The grid's window is rows AND transfer legs since balance:X-bi-6-1; this
     # harness measured definitions, which only rows carry.  The loader takes
-    # the account's cash-flow SET (credit_card:CC-4-1), a set of one here.
-    rows = load_grid_items(CashFlowSet.single(account), ctx, periods).rows
+    # the account's cash-flow SET (credit_card:CC-4-1), a set of one here, and
+    # answers one list since plan#2130, so the rows are taken out of it.
+    rows = [
+        item for item in load_grid_items(CashFlowSet.single(account), ctx, periods)
+        if isinstance(item, Transaction)
+    ]
     income_keys = grid_view_service.build_row_keys(rows, categories, True)
     expense_keys = grid_view_service.build_row_keys(rows, categories, False)
     matched = grid_view_service.build_matched_by_row_period(

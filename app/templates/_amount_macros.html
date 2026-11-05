@@ -22,20 +22,38 @@
 
 {% from "_money_macros.html" import money %}
 
-{% macro amount_field(template, amount_today, min_amount="") %}
+{% macro amount_field(template, amount, min_amount="") %}
+{# ``amount`` is the route's ``EditFormAmount`` (``routes/_amount_version_actions``),
+   ``none`` on a create form.  A definition whose amount is WORKED OUT -- a
+   salary profile's paycheck, a loan payment that follows its loan -- shows one
+   line naming where its figure comes from, with no box and no date (ruling
+   plan#2694): it states no price, so it has no history to date one in, and a
+   box here wrote into the stored copy the Recurring page counted (finding
+   plan#2689). #}
+{% if amount and amount.worked_out_by %}
+<div class="mb-3" data-worked-out-amount>
+  <span class="form-label d-block">Amount</span>
+  <div class="form-control-plaintext">
+    <span class="font-mono">{{ money(amount.today) }}</span> today.
+    {{ amount.worked_out_by }}
+  </div>
+</div>
+{% else %}
 <div class="mb-3">
-  <label for="default_amount" class="form-label">Amount</label>
+  <label for="amount" class="form-label">Amount</label>
   <div class="input-group">
     <span class="input-group-text">$</span>
-    {# ``amount_today`` -- what the definition costs NOW -- not the stored
-       column, which carries the NEWEST stated price.  The two differ whenever a
-       rise is scheduled, and prefilling the column beside a date input whose
-       blank value means today is what let a rename restate a December rise as
-       having happened today. #}
+    {# ``amount.today`` -- what the definition's history states on the owner's
+       today, the day the date input below means when left blank -- not its
+       NEWEST stated price, which the dropped ``default_amount`` column held.
+       The two differ whenever a rise is scheduled, and prefilling the newest
+       beside that date input is what let a rename restate a December rise as
+       having happened today; ``edit_form_amount`` says why the day is the
+       owner's and not the server's. #}
     <input type="number" step="0.01"
            {% if min_amount %}min="{{ min_amount }}"{% endif %}
-           id="default_amount" name="default_amount" class="form-control" required
-           value="{{ amount_today if template else '' }}">
+           id="amount" name="amount" class="form-control" required
+           value="{{ amount.today if amount and amount.today is not none else '' }}">
   </div>
 </div>
 {% if template %}
@@ -48,6 +66,7 @@
     and upcoming entries from that date are rebuilt. Leave blank for today.
   </div>
 </div>
+{% endif %}
 {% endif %}
 {% endmacro %}
 

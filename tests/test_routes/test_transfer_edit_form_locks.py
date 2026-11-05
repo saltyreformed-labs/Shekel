@@ -71,6 +71,7 @@ from tests._test_helpers import (
     make_loan_payment_template,
     state_template_price,
 )
+from tests._definition_price import amount_box_payload, newest_price
 
 #: Frozen so "today" cannot drift past the schedule ``seed_periods`` builds.
 _TODAY = date(2026, 3, 1)
@@ -120,11 +121,10 @@ def _template_into(seed_user, account, name, *, repeats, starts_on=None):
         from_account_id=seed_user["account"].id,
         to_account_id=account.id,
         name=name,
-        default_amount=Decimal("200.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("200.00"))
     if repeats:
         rule = make_every_period_rule(db.session, template)
         if starts_on is not None:
@@ -184,8 +184,8 @@ def _pass(seed_user):
 def _post_what_a_pinned_form_emits(auth_client, template, **fields):
     """POST the edit form of a PINNED loan payment exactly as the browser would.
 
-    Every enabled control and nothing else: the name, the amount, the source
-    account, the version pin, and the three cadence controls -- the MONTHLY
+    Every enabled control and nothing else: the name, the Amount box where
+    the form shows one (:func:`amount_box_payload`), the source account, the version pin, and the three cadence controls -- the MONTHLY
     cadence the loan door authors (``make_loan_payment_template``).  NOT
     ``to_account_id`` (the destination select is disabled since plan step
     R7d-f-5), NOT ``starts_on`` and NOT the three "Ends" keys (both rows are
@@ -194,7 +194,7 @@ def _post_what_a_pinned_form_emits(auth_client, template, **fields):
     """
     payload = {
         "name": template.name,
-        "default_amount": str(template.default_amount),
+        **amount_box_payload(template),
         "from_account_id": str(template.from_account_id),
         "version_id": str(template.version_id),
         **cadence_payload(unit=RecurrenceUnitEnum.MONTH, states_a_start=False),
@@ -624,7 +624,7 @@ class TestWhatTheArchivedFormPosts:
 
             resp = auth_client.post(f"/transfers/{archived.id}", data={
                 "name": "Archived, renamed",
-                "default_amount": str(archived.default_amount),
+                "amount": str(newest_price(archived)),
                 "from_account_id": str(archived.from_account_id),
                 "version_id": str(archived.version_id),
                 **cadence_payload(unit=RecurrenceUnitEnum.PERIOD, states_a_start=False),
@@ -669,7 +669,7 @@ class TestWhatTheArchivedFormPosts:
 
             resp = auth_client.post(f"/transfers/{archived.id}", data={
                 "name": archived.name,
-                "default_amount": str(archived.default_amount),
+                "amount": str(newest_price(archived)),
                 "from_account_id": str(archived.from_account_id),
                 "version_id": str(archived.version_id),
                 **cadence_payload(unit=RecurrenceUnitEnum.PERIOD, states_a_start=False),

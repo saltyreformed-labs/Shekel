@@ -1,6 +1,6 @@
 """add ck_recurrence_rules_dom and ck_recurrence_rules_moy CHECK constraints
 
-Closes H-3 of docs/audits/security-2026-04-15/model-migration-drift.md.
+Closes H-3 of shekel-audits/security-2026-04-15/model-migration-drift.md.
 The model app/models/recurrence_rule.py declares three CHECK
 constraints on budget.recurrence_rules:
 

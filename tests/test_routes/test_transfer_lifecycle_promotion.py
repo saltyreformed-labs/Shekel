@@ -63,6 +63,7 @@ from tests._test_helpers import (
     make_loan_payment_template,
     state_template_price,
 )
+from tests._definition_price import amount_box_payload, newest_price
 
 #: Frozen so "today" cannot drift past the schedule ``seed_periods`` builds.
 _TODAY = date(2026, 3, 1)
@@ -129,11 +130,10 @@ def _second_transfer(seed_user, loan, name, *, starts_on, stop=None):
         from_account_id=seed_user["account"].id,
         to_account_id=loan.id,
         name=name,
-        default_amount=Decimal("50.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("50.00"))
     author_rule(
         RecurrenceSpec(
             user_id=seed_user["user"].id,
@@ -610,11 +610,10 @@ class TestTheUpdateDoorTranslatesTheServicesRefusal:
                 from_account_id=seed_user["account"].id,
                 to_account_id=loan.id,
                 name="One-off",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(one_off)
             db.session.flush()
-            state_template_price(one_off)
+            state_template_price(one_off, Decimal("50.00"))
             db.session.commit()
             period = calendar_for(seed_user["user"].id).period_containing(
                 date(2026, 4, 16),
@@ -626,7 +625,7 @@ class TestTheUpdateDoorTranslatesTheServicesRefusal:
 
             resp = auth_client.post(f"/transfers/{one_off.id}", data={
                 "name": one_off.name,
-                "default_amount": str(one_off.default_amount),
+                "amount": str(newest_price(one_off)),
                 "from_account_id": str(one_off.from_account_id),
                 "to_account_id": str(loan.id),
                 "version_id": str(one_off.version_id),
@@ -683,7 +682,7 @@ class TestTheUpdateDoorReadsTheSeamsIdentity:
 
             resp = auth_client.post(f"/transfers/{older_id}", data={
                 "name": savings.name,
-                "default_amount": str(savings.default_amount),
+                "amount": str(newest_price(savings)),
                 "from_account_id": str(savings.from_account_id),
                 "to_account_id": str(loan.id),
                 "version_id": str(savings.version_id),
@@ -706,13 +705,14 @@ class TestTheUpdateDoorReDerivesAfterACadenceUnitEdit:
     def _post_unit(self, auth_client, template, unit):
         """POST the locked standing payment's form with *unit* chosen.
 
-        What the form emits: every enabled control and nothing else -- no
+        What the form emits: every enabled control and nothing else (the
+        Amount box only where the form shows one, :func:`amount_box_payload`) -- no
         ``to_account_id`` (pinned), no ``starts_on`` and no "Ends" keys (both
         rows server-locked).
         """
         return auth_client.post(f"/transfers/{template.id}", data={
             "name": template.name,
-            "default_amount": str(template.default_amount),
+            **amount_box_payload(template),
             "from_account_id": str(template.from_account_id),
             "version_id": str(template.version_id),
             **cadence_payload(unit=unit, states_a_start=False),

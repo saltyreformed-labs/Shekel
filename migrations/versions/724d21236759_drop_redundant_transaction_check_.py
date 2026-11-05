@@ -1,6 +1,6 @@
 """drop redundant ck_transactions_positive_* CHECK constraints
 
-Closes H-1 of docs/audits/security-2026-04-15/model-migration-drift.md.
+Closes H-1 of shekel-audits/security-2026-04-15/model-migration-drift.md.
 The constraints ck_transactions_positive_amount and
 ck_transactions_positive_actual were added by
 c5d6e7f8a901_add_positive_amount_check_constraints.py with the same

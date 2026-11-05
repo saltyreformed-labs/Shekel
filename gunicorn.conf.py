@@ -109,7 +109,7 @@ if not _forwarded_allow_ips:
         "Set FORWARDED_ALLOW_IPS to the trusted reverse proxy's "
         "container IP or the Docker bridge subnet that contains only "
         "the proxy and the app.  See gunicorn.conf.py and "
-        "docs/audits/security-2026-04-15/remediation-plan.md (Commit "
+        "shekel-audits/security-2026-04-15/remediation-plan.md (Commit "
         "C-33) for the full rationale."
     )
 forwarded_allow_ips = _forwarded_allow_ips

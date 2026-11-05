@@ -1,5 +1,7 @@
 """A card's arc read from its issue field Arc (rulings ``balance:R-BAL349``, ``R-BAL354``):
-:func:`_arcs.arc_of` and :func:`_tracker.card_from`'s read of it; nothing calls GitHub.
+:func:`_arcs.arc_of` and :func:`_tracker.card_from`'s read of it; and its Priority and Effort,
+read by the same parse (:func:`_arcs.labels_and_values`) and the same read of a single select's
+value (:mod:`_fields`, plan#2491); nothing calls GitHub.
 
 No recording plan#1811 re-keyed holds a card with an Arc value: no card held one when they
 were recorded (their cards' values are ``recorded/sources/issue_field_values.json``); the
@@ -17,6 +19,7 @@ import copy
 import pytest
 
 from tools.quill._arcs import ARC_FIELD, arc_of
+from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD, answered_value, value_of
 from tools.quill._recorded import recording
 from tools.quill._tracker import TrackerError, card_from
 from tools.quill.setup_tracker import PLAN
@@ -77,3 +80,30 @@ def test_a_field_values_read_cut_short_is_refused():
     node = _with_values(BALANCE, total=11)
     with pytest.raises(TrackerError, match="plan#2 has 11 issue field values; the read holds 1"):
         card_from(node, PLAN, None, APP)
+
+
+def test_a_card_s_priority_and_effort_are_their_fields_values_whichever_reader_reads_it():
+    """plan#2491: a card's Priority and Effort are the values of those fields, read by the parse
+    that reads its Arc, alike with the board and without it, a value of another type passed
+    over; a card holding neither holds None for each."""
+    high, three = ({"name": "High", "field": {"name": PRIORITY_FIELD}},
+                   {"name": "3", "field": {"name": EFFORT_FIELD}})
+    node = _with_values(three, {}, BALANCE, high)
+    board = node["projectItems"]["nodes"][0]["project"]["id"]
+    for card in (card_from(node, PLAN, None, APP), card_from(node, PLAN, board, APP)):
+        assert (card.arc, card.priority, card.effort) == ("balance", "High", "3")
+    bare = card_from(_with_values(BALANCE), PLAN, None, APP)
+    assert (bare.priority, bare.effort) == (None, None)
+
+
+def test_a_single_select_s_value_is_read_by_its_field_s_name_alone():
+    """The one read of a single select's value (:mod:`_fields`), from a GraphQL read and from
+    REST's answer to a write, takes the named field's option and no other's: the shapes GitHub
+    answered plan#1811's Arc in (``first_write.out``), Effort's beside it."""
+    read = [{"name": "2", "field": {"name": EFFORT_FIELD}}, BALANCE]
+    assert value_of(read, EFFORT_FIELD) == "2"
+    assert value_of(read, PRIORITY_FIELD) is None
+    answer = [{"issue_field_name": ARC_FIELD, "single_select_option": {"name": "balance"}},
+              {"issue_field_name": EFFORT_FIELD, "single_select_option": {"name": "5+"}}]
+    assert answered_value(answer, EFFORT_FIELD) == "5+"
+    assert answered_value(answer, PRIORITY_FIELD) is None

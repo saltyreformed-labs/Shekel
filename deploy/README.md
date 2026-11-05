@@ -241,6 +241,6 @@ maintainer just verifies with the `--certificate-identity-regexp` form above.
 - `docs/runbook.md` -- full operational runbook (deploy, restart, rollback, troubleshooting).
 - `scripts/config_audit.py` -- skeleton drift-check script that will compare the on-host runtime
   configs against the repo copies.
-- `docs/audits/security-2026-04-15/scans/` -- audit-window snapshots of the on-host configs,
+- `shekel-audits/security-2026-04-15/scans/` -- audit-window snapshots of the on-host configs,
   retained as historical evidence and to verify that the runtime config has not drifted further
   since the audit.

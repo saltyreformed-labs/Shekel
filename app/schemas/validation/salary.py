@@ -16,7 +16,7 @@ from marshmallow import (
 
 from app import ref_cache, tax_law
 from app.enums import CalcMethodEnum
-from app.services import paycheck_line_kinds
+from app.services import paycheck_line_kinds, payroll_line_cadence
 from app.schemas.validation._helpers import (
     BaseSchema,
     RowId,
@@ -409,7 +409,7 @@ class RaiseUpdateSchema(RaiseCreateSchema):
 class PaycheckLineCreateSchema(RecurrenceFormFieldsMixin, BaseSchema):
     """Validates POST data for adding a payroll line to a salary profile.
 
-    **A line of any of the four kinds since plan step salary:R18-b** (ruling
+    **A line of any kind since plan step salary:R18-b** (ruling
     **R-SAL38**): ``paycheck_line_kind_id`` names its position in the
     paycheck's waterfall, and the one rule that differs by side --
     ``target_account_id``, the account a DEDUCTION funds -- is
@@ -576,6 +576,38 @@ class PaycheckLineCreateSchema(RecurrenceFormFieldsMixin, BaseSchema):
                 paycheck_line_kinds.EARNING_TARGET_REFUSAL,
                 field_name="target_account_id",
             )
+
+    @validates_schema
+    def validate_cadence_picks_paychecks(self, data, **kwargs):
+        """Refuse a cadence a payroll line may not repeat by (ruling plan#2591).
+
+        A line's rule picks WHICH paychecks take it, and the salary page offers
+        only the units that pick paychecks
+        (:func:`~app.services.payroll_line_cadence.line_cadences`); this is
+        that offer's door-side half, asked through the same
+        :func:`~app.services.payroll_line_cadence.picks_paychecks`, so a
+        crafted POST naming the week unit is a field error rather than a line
+        the paycheck engine takes once per paycheck however many weeks it
+        holds -- or a ``KeyError`` out of the default start.  The template
+        forms' own refusal (``validate_authorable_cadence``) still runs beside
+        it; this narrows the set, it does not replace that one.
+
+        Skipped when no unit is named: "Does not repeat" is every paycheck
+        (ruling **R-SAL3**), and an absent unit leaves the stored rule alone.
+
+        Raises:
+            ValidationError: When the submitted unit is one a payroll line
+                may not repeat by.
+        """
+        unit = data.get("recurrence_unit")
+        if unit is None or payroll_line_cadence.picks_paychecks(unit):
+            return
+        raise ValidationError(
+            "A payroll line repeats by paychecks, months or years, not weeks. "
+            "For an amount set per week, enter what each paycheck takes and "
+            "repeat it every paycheck.",
+            field_name="recurrence_unit",
+        )
 
 
 class PaycheckLineUpdateSchema(PaycheckLineCreateSchema):

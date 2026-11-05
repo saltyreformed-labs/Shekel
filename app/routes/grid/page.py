@@ -795,14 +795,14 @@ def index():
     show_all = request.args.get("show_all", type=integer_arg) == 1
 
     row_data = _build_grid_row_data(
-        items.items, ctx.periods, show_all, all_categories,
+        items, ctx.periods, show_all, all_categories,
     )
 
     # Build the parallel context for the mobile "Plan" tab.  Decoupled
     # from ctx.periods so a `?periods=1&offset=N` URL (driven by the
     # This Period arrow nav) does not starve Plan of forward visibility.
     plan_view = _build_plan_view(
-        ctx, items.items, grid_view, all_categories,
+        ctx, items, grid_view, all_categories,
     )
 
     # The envelope cards' two maps (pay-calendar plan step C4-a-3).  It takes
@@ -822,7 +822,7 @@ def index():
     # entry-list builder filters before it asks anything else), and the card
     # macro reads both maps with ``.get``.
     entry_maps = _build_entry_maps(
-        items.items, amounts.budgets, ctx.all_periods, ctx.owner_cash_flow,
+        items, amounts.budgets, ctx.all_periods, ctx.owner_cash_flow,
     )
 
     return render_template(

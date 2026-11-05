@@ -17,6 +17,7 @@ from app.extensions import db as _db
 from app.models.transaction_entry import TransactionEntry
 from app.services import entry_service
 from app.services.settle_day import SettleDay
+from tests._request_race import signed_in_clients
 from tests._test_helpers import (
     advisory_lock_keys,
     create_account_of_type,
@@ -29,7 +30,6 @@ from tests._test_helpers import (
 
 from ._helpers import (
     _WAIT,
-    _signed_in_clients,
     _state,
     _groceries,
     _hotel,
@@ -474,7 +474,7 @@ class TestTheOwnersLockComesFirst:
         """A $12.34 purchase on Groceries locks the owner before it reads the row."""
         with app.app_context():
             _template, row_id = _groceries(seed_user)
-            (client,) = _signed_in_clients(app, 1)
+            (client,) = signed_in_clients(app, 1)
             self._assert_the_owners_lock_first(
                 seed_user["user"].id, _purchase(client, row_id), 200,
             )
@@ -483,7 +483,7 @@ class TestTheOwnersLockComesFirst:
         """Mark Paid on the $120.00 Hotel locks the owner before it reads the row."""
         with app.app_context():
             _template, row_id = _hotel(seed_user)
-            (client,) = _signed_in_clients(app, 1)
+            (client,) = signed_in_clients(app, 1)
             self._assert_the_owners_lock_first(
                 seed_user["user"].id, _mark_paid(client, row_id), 200,
             )
@@ -497,7 +497,7 @@ class TestTheOwnersLockComesFirst:
         """
         with app.app_context():
             row_id = _paid_hotel(seed_user)
-            (client,) = _signed_in_clients(app, 1)
+            (client,) = signed_in_clients(app, 1)
             self._assert_the_owners_lock_first(
                 seed_user["user"].id,
                 _save_an_actual(client, row_id, "125.00"), 200,
@@ -507,7 +507,7 @@ class TestTheOwnersLockComesFirst:
         """Delete of a posted Groceries locks the owner before it reads the row."""
         with app.app_context():
             row_id = _posted_groceries(seed_user)
-            (client,) = _signed_in_clients(app, 1)
+            (client,) = signed_in_clients(app, 1)
             self._assert_the_owners_lock_first(
                 seed_user["user"].id, _delete(client, row_id), 200,
             )
@@ -516,7 +516,7 @@ class TestTheOwnersLockComesFirst:
         """Archive locks the owner before it reads the item or its rows."""
         with app.app_context():
             template, _row_id = _groceries(seed_user)
-            (client,) = _signed_in_clients(app, 1)
+            (client,) = signed_in_clients(app, 1)
             self._assert_the_owners_lock_first(
                 seed_user["user"].id, _archive(client, template.id), 302,
             )
@@ -525,7 +525,7 @@ class TestTheOwnersLockComesFirst:
         """Mark Credit on an $80.00 Dinner locks the owner before it reads the row."""
         with app.app_context():
             row_id = _dinner(seed_user, seed_periods)
-            (client,) = _signed_in_clients(app, 1)
+            (client,) = signed_in_clients(app, 1)
             self._assert_the_owners_lock_first(
                 seed_user["user"].id, _mark_credit(client, row_id), 200,
             )

@@ -17,11 +17,9 @@ from decimal import Decimal
 
 from sqlalchemy.orm import joinedload
 
-from app.extensions import db
 from app.models.account import Account
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
-from app.models.transfer import Transfer
 from app.models.user import UserSettings
 from app.services import balance_at, cash_ledger
 from app.services.account_resolver import resolve_analytics_cash_flow_set
@@ -37,9 +35,10 @@ from app.services.calendar_day_flows import (
 from app.services.calendar_infrequency import badge_cadence
 from app.services.cash_flow_set import (
     CashFlowSet,
-    PlanItems,
-    own_rows_clause,
-    set_transfer_legs_in_periods,
+    Paychecks,
+    PlanScope,
+    StatusBand,
+    load_plan_items,
 )
 from app.services.pay_calendar import (
     DerivedPeriod,
@@ -49,10 +48,6 @@ from app.services.pay_calendar import (
 )
 from app.services.balance_at import BalanceContext
 from app.services.transfer_legs import PlanItem, cell_key
-from app.utils.balance_predicates import (
-    balance_contributing_clause,
-    is_balance_contributing,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -302,11 +297,11 @@ def get_month_detail(  # pylint: disable=too-many-arguments
 
     ctx = _MonthBuildContext(
         year=year, account=cash_flow.balance, periods=periods,
-        transactions=items.items,
+        transactions=items,
         contributions=_contributions(items, balance_ctx),
         large_threshold=large_threshold,
         balance_ctx=balance_ctx, today=today,
-        pay_cadence=badge_cadence(user_id, items.items),
+        pay_cadence=badge_cadence(user_id, items),
     )
     return _build_month_summary(month, ctx)
 
@@ -361,11 +356,11 @@ def get_year_overview(
 
     ctx = _MonthBuildContext(
         year=year, account=cash_flow.balance, periods=periods,
-        transactions=items.items,
+        transactions=items,
         contributions=_contributions(items, balance_ctx),
         large_threshold=large_threshold,
         balance_ctx=balance_ctx, today=None,
-        pay_cadence=badge_cadence(user_id, items.items),
+        pay_cadence=badge_cadence(user_id, items),
     )
     months = [_build_month_summary(m, ctx) for m in range(1, 13)]
 
@@ -384,7 +379,7 @@ def get_year_overview(
 # ── Internal helpers ────────────────────────────────────────────────
 
 
-def _contributions(items: PlanItems, balance_ctx: BalanceContext) -> dict:
+def _contributions(items: list[PlanItem], balance_ctx: BalanceContext) -> dict:
     """Return ``{cell_key: what the item is WORTH}`` over a build's items.
 
     ONE :func:`~app.services.cash_ledger.contributions_by_key` call over
@@ -396,22 +391,21 @@ def _contributions(items: PlanItems, balance_ctx: BalanceContext) -> dict:
     basis (plan step X-au-c2b).
 
     Args:
-        items: The build's :class:`~app.services.cash_flow_set.PlanItems`.
+        items: The build's plan items, :func:`_query_transactions_for_range`'s
+            list.
         balance_ctx: The read pass.
 
     Returns:
         The map, covering every item.
     """
-    return cash_ledger.contributions_by_key(
-        items.items, balance_ctx.amounts(),
-    )
+    return cash_ledger.contributions_by_key(items, balance_ctx.amounts())
 
 
 def _query_transactions_for_range(
     cash_flow: CashFlowSet,
     scenario_id: int,
     periods: PeriodWindow,
-) -> PlanItems:
+) -> list[PlanItem]:
     """Load the plan items filed under every period of *periods*.
 
     **The items are the PAYCHECK's across the owner's cash-flow set --
@@ -421,8 +415,7 @@ def _query_transactions_for_range(
     plus one LEG per transfer, read off the parent in ``budget.transfers``
     rather than off a shadow row: :func:`~app.services.cash_flow_set
     .own_rows_clause` selects every member's plan rows and no shadow, and
-    :func:`~app.services.cash_flow_set.set_transfer_legs_in_periods` draws
-    each transfer the set touches from the side
+    each transfer the set touches is drawn from the side
     :func:`~app.services.cash_flow_set.leg_accounts_shown` names (ruling
     ``R-CC23``: once, from the balance line's side, when both endpoints are
     members) -- an expense leg on checking's calendar, an income leg on the
@@ -453,14 +446,25 @@ def _query_transactions_for_range(
     date falls in, so a period straddling two months splits its rows across
     them without double-counting.
 
+    **The calendar's scope, stated once** (plan step **plan#2130**): the set,
+    the scenario, these paychecks, balance-contributing, every type -- which
+    :func:`~app.services.cash_flow_set.load_plan_items` turns into the rows'
+    query and the transfers' alike, the rows in id order then the sides.  The
+    row query carried no ``ORDER BY`` until that step, so two ROWS of one
+    type and one magnitude on one day, which
+    :func:`~app.services.calendar_day_flows.order_for_display` does not tell
+    apart, were listed in whatever order the planner returned them.
+
     Eager-loads category, status, template -> recurrence_rule, and
-    pay_period to prevent N+1 queries downstream.
+    pay_period on the rows to prevent N+1 queries downstream; the transfers
+    carry the loader's own.
 
     Per F-3 / HIGH-02 / W-065, the item set is constrained by
     :func:`~app.utils.balance_predicates.balance_contributing_clause`
-    (``is_deleted=False AND status_id NOT IN (Credit, Cancelled)``) -- over
-    ``Transaction`` for the rows and over ``Transfer`` for the legs' parents,
-    the same predicate twice -- rather than the prior inline
+    (``is_deleted=False AND status_id NOT IN (Credit, Cancelled)``), the
+    :attr:`~app.services.cash_flow_set.StatusBand.BALANCE_CONTRIBUTING` band
+    the loader states once over ``Transaction`` for the rows and ``Transfer``
+    for the legs' parents, rather than the prior inline
     ``is_deleted=False``-only gate.  This is the locked Choice-2 semantic
     from ``remediation_follow_up_plan.md`` Section 2: calendar day cells
     display realized payments at their settled date, so the predicate
@@ -484,35 +488,28 @@ def _query_transactions_for_range(
             off its own ``BalanceContext``, which is what scopes them.
 
     Returns:
-        The :class:`~app.services.cash_flow_set.PlanItems`: the matching
-        :class:`~app.models.transaction.Transaction` rows and the legs of
-        the matching transfers, records loaded.
+        The plan items: the matching
+        :class:`~app.models.transaction.Transaction` rows by id, then the
+        legs of the matching transfers, their records not pre-loaded
+        (ruling **plan#2136**).
     """
-    period_ids = [p.period_id for p in periods]
-
-    rows = (
-        db.session.query(Transaction)
-        .options(
+    return load_plan_items(
+        PlanScope(
+            cash_flow=cash_flow,
+            scenario_id=scenario_id,
+            window=Paychecks(tuple(p.period_id for p in periods)),
+            band=StatusBand.BALANCE_CONTRIBUTING,
+            expenses_only=False,
+        ),
+        (
             joinedload(Transaction.category),
             joinedload(Transaction.status),
             joinedload(Transaction.template).joinedload(
                 TransactionTemplate.recurrence_rule,
             ),
             joinedload(Transaction.pay_period),
-        )
-        .filter(
-            own_rows_clause(cash_flow),
-            Transaction.scenario_id == scenario_id,
-            balance_contributing_clause(),
-            Transaction.pay_period_id.in_(period_ids),
-        )
-        .all()
+        ),
     )
-    legs = set_transfer_legs_in_periods(
-        cash_flow, scenario_id, period_ids,
-        balance_contributing_clause(Transfer),
-    )
-    return PlanItems.of(rows, legs)
 
 
 def _assign_transactions_to_days(
@@ -536,17 +533,17 @@ def _assign_transactions_to_days(
     :data:`MAX_VISIBLE_DAY_FLOWS` are the visible named lines and any beyond
     are summarized in :class:`DayOverflow` (count plus signed residual net).
 
-    Per F-3 / W-065, every transaction is re-checked against
-    :func:`~app.utils.balance_predicates.is_balance_contributing`
-    before being assigned to a day.  This is the belt-and-suspenders
-    half of the locked Choice-2 predicate: the SQL filter in
-    :func:`_query_transactions_for_range` already constrains the row
-    set, but reapplying the Python predicate here ensures a future
-    regression that drops the SQL filter alone (or routes a different
-    query into this helper) cannot leak Cancelled / Credit rows into
-    the day-cell display.  ``is_balance_contributing`` is generated
-    from the same ``ref_cache`` accessors as the SQL clause so the
-    two predicates cannot disagree.
+    **Which items count is the SQL's alone** (F-3 / W-065's locked Choice-2
+    predicate, in :func:`_query_transactions_for_range`, the one query whose
+    items this folds).  Every item was re-checked here against
+    :func:`~app.utils.balance_predicates.is_balance_contributing` until ruling
+    **plan#2262** deleted that -- the remediation's belt-and-suspenders, a
+    second statement of the predicate over items the SQL had already
+    filtered.  It could drop only what the SQL dropped, so no figure moved;
+    what it did was hide the SQL filter from every behaviour test (switching
+    the filter off left them green), so the filter was graded only by two
+    tests that stubbed both statements of it.  The cancelled and credit
+    tests grade the one statement now.
 
     **It takes the CONTEXT rather than the five settings it reads off it**
     (plan step X-au-c2).  Adding ``contributions`` -- what each row is WORTH,
@@ -581,8 +578,6 @@ def _assign_transactions_to_days(
     for txn in ctx.transactions:
         key = cell_key(txn)
         if key in seen:
-            continue
-        if not is_balance_contributing(txn):
             continue
         display_day = _get_display_day(
             txn, spans[txn.pay_period_id], month, ctx.year,

@@ -1,6 +1,6 @@
 """align system.audit_log with canonical schema: executed_at NOT NULL + ck_audit_log_operation
 
-Closes H-4 of docs/audits/security-2026-04-15/model-migration-drift.md.
+Closes H-4 of shekel-audits/security-2026-04-15/model-migration-drift.md.
 Two storage-tier guarantees declared in
 ``app/audit_infrastructure.py:_CREATE_AUDIT_LOG_TABLE_SQL`` -- the
 canonical CREATE TABLE used by the test path -- never reached the

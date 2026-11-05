@@ -70,7 +70,6 @@ def _create_salary_profile(seed_user, db_session, name="Main Job"):
         category_id=cat.id,
         transaction_type_id=income_type.id,
         name=name,
-        default_amount=Decimal("80000.00") / 26,
         is_active=True,
     )
     db_session.add(template)
@@ -3274,15 +3273,18 @@ class TestTheRailSavesARaisesEndYear:
     ):
         """Ending the raise after its first year writes the column AND re-prices.
 
-        The write is the row's ``terminal_year``.  The regeneration is what
-        every salary write is followed by (ruling **R-SAL24**), and its
-        observable here is the template's per-paycheck amount: seeded at a
-        gross, it is re-stated at TODAY's net under the saved terms, which is
-        exactly what the pass's pricer says that payday is worth -- the grid
-        derives each paycheck row from the same rows this door wrote, so the
-        two cannot disagree.  Ending the raise a year earlier is the smaller
-        figure (``$3,230.77`` against ``$3,392.31`` gross), which the second
-        Save shows.
+        The write is the row's ``terminal_year``.  The re-price is TODAY's
+        paycheck as a fresh pass prices it after each Save, the figure the
+        Recurring and savings pages show
+        (``obligations_aggregator.todays_price``): the grid derives each
+        paycheck row from the same rows this door wrote, so the two cannot
+        disagree.  Ending the raise a year earlier is the smaller figure
+        (``$3,230.77`` against ``$3,392.31`` gross), which the second Save
+        shows.  Its observable was the template's ``default_amount``, which
+        the regeneration re-stated at today's net, until plan step X-bp
+        deleted the re-statement; the regeneration's call is graded by
+        :meth:`test_two_rows_posted_together_both_write` and
+        :meth:`test_the_saved_raises_own_profile_is_regenerated_and_no_other`.
 
         **Built on fixed days, so it holds in any month** (plan step
         salary:X-av-3a).  The one pay entry sits on the first payday,
@@ -3299,11 +3301,9 @@ class TestTheRailSavesARaisesEndYear:
         believed forever, 3,076.92 x 1.05 = 3,230.766 -> 3,230.77, then
         x 1.05 = 3,392.3085 -> 3,392.31; ended after 2026, 3,230.77.
         """
-        # The regeneration prices the period containing the PROCESS clock's
-        # today (its own read; pay_calendar plan step C10's residue) while the
-        # pricer below is asked for the display day's: pin both clocks to one
-        # civil day so the comparison holds, the four UTC hours after a New
-        # York midnight included.
+        # Pin both clocks to one civil day: the calendar below is fixed, so
+        # "today" must be its 2027-03-12 payday's period, the four UTC hours
+        # after a New York midnight included.
         freeze_today(monkeypatch, date(2027, 3, 20))
         # Sign in again on the moved date: ``auth_client`` signed in on the
         # real clock, and the idle timeout measures against the clock this
@@ -3313,41 +3313,28 @@ class TestTheRailSavesARaisesEndYear:
         raise_id, effective, profile_id = self._seed_saveable_raise(
             seed_user, db, seed_periods_52, effective_month=2,
         )
-        template = db.session.get(SalaryProfile, profile_id).template
-        seeded_amount = template.default_amount
+
+        def _todays_paycheck():
+            """Today's paycheck, priced by a fresh pass over what was saved."""
+            db.session.expire_all()
+            ctx = BalanceContext.build(seed_user["user"].id)
+            return ctx.paychecks().for_profile(
+                db.session.get(SalaryProfile, profile_id),
+            ).at(ctx.calendar().period_containing(display_today()))
 
         forever = self._save(auth_client, raise_id, "none", "")
         assert forever.status_code == 200
-        db.session.expire_all()
-        amount_forever = db.session.get(SalaryProfile, profile_id).template.default_amount
-        assert amount_forever != seeded_amount, "the regeneration did not run"
+        priced_forever = _todays_paycheck()
+        assert priced_forever.earnings.gross_biweekly == Decimal("3392.31")
 
         ended = self._save(auth_client, raise_id, "year", str(effective))
         assert ended.status_code == 200
         assert self._stored(db, raise_id)[0] == effective
-        profile = db.session.get(SalaryProfile, profile_id)
-        amount_ended = profile.template.default_amount
-        assert amount_ended < amount_forever, (
-            "a raise believed one year less did not lower the template's "
-            "per-paycheck amount, so the Save wrote the column without the "
-            "regeneration every salary write runs"
+        priced_ended = _todays_paycheck()
+        assert priced_ended.earnings.gross_biweekly == Decimal("3230.77")
+        assert priced_ended.earnings.net_pay < priced_forever.earnings.net_pay, (
+            "a raise believed one year less did not lower today's paycheck"
         )
-        ctx = BalanceContext.build(seed_user["user"].id)
-        period = ctx.calendar().period_containing(display_today())
-        priced = ctx.paychecks().for_profile(profile).at(period)
-        assert priced.earnings.gross_biweekly == Decimal("3230.77")
-        assert amount_ended == priced.earnings.net_pay
-        # And the first Save's amount was the two-application gross's net.
-        forever_ctx = BalanceContext.build(seed_user["user"].id)
-        db.session.get(SalaryRaise, raise_id).terminal_year = None
-        db.session.commit()
-        priced_forever = (
-            BalanceContext.build(seed_user["user"].id)
-            .paychecks().for_profile(db.session.get(SalaryProfile, profile_id)).at(period)
-        )
-        del forever_ctx
-        assert priced_forever.earnings.gross_biweekly == Decimal("3392.31")
-        assert amount_forever == priced_forever.earnings.net_pay
 
         html = ended.data.decode()
         row = self._row(html, raise_id)
@@ -3681,17 +3668,24 @@ class TestTheRailSavesARaisesEndYear:
         assert any("1 upcoming instance kept the value" in text for _, text in flashes)
 
     def test_the_saved_raises_own_profile_is_regenerated_and_no_other(
-        self, auth_client, seed_user, db, seed_periods_today,
+        self, auth_client, seed_user, db, seed_periods_today, monkeypatch,
     ):
-        """Two profiles, one Save: the raise's OWN profile is re-priced.
+        """Two profiles, one Save: the raise's OWN profile is regenerated.
 
         Every other case seeds one profile, so a regeneration that reached
         for ``salary_profiles[0]`` instead of the row's profile would pass
-        them all while re-pricing the wrong template for an owner with two
-        (an adversarial review of this step named the mutation).  The raise
-        sits on the SECOND profile; its template's amount moves, the first
-        profile's stays at its seed.
+        them all while redrawing the wrong template's rows for an owner with
+        two (an adversarial review of this step named the mutation).  The
+        raise sits on the SECOND profile, and the regeneration is called for
+        it alone.  Its observable was each template's ``default_amount``,
+        which the regeneration re-stated, until plan step X-bp deleted the
+        re-statement, so the call is counted, as
+        :meth:`test_two_rows_posted_together_both_write` counts it.
         """
+        # Pylint: import-outside-toplevel -- the route module is needed only
+        # to count the regeneration's calls.
+        from app.routes import retirement as retirement_mod  # pylint: disable=import-outside-toplevel
+
         # The first profile, with no raise, is what _seed_underfunded builds.
         _, effective, first_id = self._seed_saveable_raise(seed_user, db, seed_periods_today)
         first_raise = db.session.query(SalaryRaise).filter_by(
@@ -3703,18 +3697,24 @@ class TestTheRailSavesARaisesEndYear:
         row = make_recurring_raise(second_id, db.session, effective_year=effective)
         db.session.commit()
         raise_id = row.id
-        first_seed = db.session.get(SalaryProfile, first_id).template.default_amount
-        second_seed = db.session.get(SalaryProfile, second_id).template.default_amount
+        real = retirement_mod.salary_regeneration.regenerate_salary_transactions
+        calls = []
+
+        def _counted(ctx, profile):
+            calls.append(profile.id)
+            return real(ctx, profile)
+
+        monkeypatch.setattr(
+            retirement_mod.salary_regeneration, "regenerate_salary_transactions", _counted,
+        )
 
         resp = self._save(auth_client, raise_id, "year", str(effective))
 
         assert resp.status_code == 200
         assert self._stored(db, raise_id)[0] == effective
-        assert db.session.get(SalaryProfile, first_id).template.default_amount == first_seed, (
-            "the first profile's template was re-priced for a raise it does not carry"
-        )
-        assert db.session.get(SalaryProfile, second_id).template.default_amount != second_seed, (
-            "the raise's own profile was not regenerated"
+        assert first_id != second_id
+        assert calls == [second_id], (
+            "the regeneration ran for a profile other than the raise's own"
         )
 
     def test_a_non_htmx_save_writes_and_redirects_to_retirement(

@@ -303,7 +303,7 @@ class TestEnvExampleUriTemplatesSanitized:
     template that EMBEDS the same password inside a connection URI is
     the second F-109 surface, closed by the C-38 follow-up Issue 3
     work documented in
-    ``docs/audits/security-2026-04-15/c-38-followups.md``.
+    ``shekel-audits/security-2026-04-15/c-38-followups.md``.
     ``TEST_DATABASE_URL`` was the other one until ``balance:X-br-4``
     deleted the line entirely; the first test below holds it deleted.
 
@@ -467,7 +467,7 @@ class TestVerifyBackupScriptCredentialHygiene:
     """``scripts/verify_backup.sh`` no longer hard-codes ``shekel_pass``.
 
     Two F-109 surfaces in the script (documented in
-    ``docs/audits/security-2026-04-15/c-38-followups.md`` Issue 3
+    ``shekel-audits/security-2026-04-15/c-38-followups.md`` Issue 3
     "Related cleanup"):
 
     1. Line 236 (pre-C-38-followup): ``|| echo "shekel_pass"``

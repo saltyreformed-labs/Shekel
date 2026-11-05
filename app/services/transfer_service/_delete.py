@@ -9,7 +9,10 @@ leaf 3b deleted the delete's last query and flags over them.
 
 The ORDER inside is the whole of the module: the posted cash effect is
 reversed while the rows still exist to link against, because a hard delete
-SET-NULLs those links on its way out; the loan-payment split links no row
+SET-NULLs those links on its way out, and the anchor corrections are
+re-checked once the records are gone -- both inside the one removal act, which
+this hands every record the pair holds (ruling **plan#2564**); the
+loan-payment split links no row
 (ruling **R-BAL102**) and is re-derived AFTER the payment is gone; and a soft
 delete that took a settled transfer's payments off returns it to a plan only
 once it is hidden (ruling **R-BAL246**, through ``_status.return_to_plan``),
@@ -28,7 +31,6 @@ from app.models.transfer import Transfer
 from app.services import (
     match_withdrawal,
     movement_removal,
-    posting_service,
     status_seam,
     transfer_legs,
 )
@@ -81,21 +83,6 @@ def delete_transfer(transfer_id, user_id, soft=False, *, press=None):
     # of already-soft-deleted transfers continue to work.
     xfer = _get_transfer_or_raise(transfer_id, user_id, allow_deleted=True)
 
-    # ── Posting ledger reconcile (Build-Order Step 2) ──────────────
-    # Reverse any posted effect BEFORE the row is removed, so a settled
-    # transfer's per-movement entries net to zero.  Runs first -- while
-    # xfer.id and its sides' covering movements still exist -- so each
-    # reversal entry can link its movement and read the posted legs back; a
-    # hard delete then SET-NULLs the links, leaving the immutable net-zero
-    # pairs as history.  The TEARDOWN door, not the pair's sync (plan step
-    # ``balance:X-bi-6-3``, ruling **R-BAL101**): the sync reads each
-    # movement's own state and would find two live, dated movements at this
-    # moment and leave them posted.  Idempotent no-op for a never-settled or
-    # already-reversed transfer (the account-delete and
-    # recurrence-regeneration paths only ever reach those: Guard 4 in
-    # ``accounts/crud.py`` archives any account with settled history).
-    posting_service.reverse_transfer_postings_before_delete(xfer)
-
     # ── Loan coordinates, captured while the row exists ────────────
     # The loan this payment leaves is re-reconciled AFTER the delete (below):
     # its split correction links no row (ruling **R-BAL102**, plan step
@@ -113,9 +100,12 @@ def delete_transfer(transfer_id, user_id, soft=False, *, press=None):
     # is deleted, so an act it was the last app row of is withdrawn and that
     # line is unexplained again.  Through the ONE act that takes a movement off
     # the books (plan step ``credit_card:CC-5-4a-3``, ruling **R-CC54**): both
-    # sides' records out of their matches and deleted -- the pair's posted
-    # effect is the reconcile above's to reverse, so the act's per-movement
-    # reversal has nothing of its own to do -- and FLUSHED before the
+    # sides' records reversed, out of their matches and deleted, then the
+    # anchor corrections re-checked once their records are gone -- the pair's
+    # posted effect is the act's to reverse since plan task plan#2557 (ruling
+    # **plan#2564**), where a teardown reconcile here reversed it first and
+    # re-checked while both records still stood, which left a deleted Paid
+    # transfer's true-up in place -- and FLUSHED before the
     # transfer goes.  Since plan step ``balance:X-bi-6-4d-2`` the records hang
     # off the TRANSFER by side keys that are NO ACTION (ruling **R-CC64**), so
     # a transfer still holding one REFUSES its own delete, and an order that

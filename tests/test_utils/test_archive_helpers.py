@@ -13,7 +13,8 @@ return True for any status carrying ``Status.is_settled = True``
 
 Test IDs C21-1..C21-7 trace to ``remediation_plan.md`` Section 9
 "Commit 21" subsection E.  The companion route-level tests live in
-``tests/test_routes/test_templates.py``; this file is the unit-level
+``tests/test_routes/test_templates/test_archive_unarchive_and_hard_delete.py``;
+this file is the unit-level
 pin on the predicate boolean output and on the absence of the prior
 ID enumeration in the production source.
 """

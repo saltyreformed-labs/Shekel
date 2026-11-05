@@ -357,8 +357,8 @@ class PayPeriodLocked(ShekelError):
 
     Raised by truncate / regenerate when the window they would delete or
     rebuild contains a period that may never be removed -- it is
-    historical, holds a settled, non-deleted row or transfer, holds a row or
-    transfer holding a payment or purchase, or holds posted ledger entries
+    historical, holds a settled, non-deleted row or transfer, or holds a row
+    or transfer holding a payment or purchase
     (:class:`~app.services.pay_period_locks.PeriodLockReason`).  A hard lock
     is NOT overridable (unlike the discard gate); the operation deletes
     nothing.
@@ -464,12 +464,10 @@ class PayPeriodRemovalRefused(ValidationError):
 
     Plan step ``pay_calendar:C21``.  Raised by the door's gate
     (``pay_period_gates.gate_removable_head``: a row the owner made, a pay
-    stub, money dated inside the removed paychecks -- ruling **R-PC109**),
-    by the era rule (``pay_era_write.era_to_move``, **R-PC110**) and by the
-    ledger post-condition (``pay_period_gates.reject_moved_ledger``,
-    **R-PC114**).  The operation leaves nothing behind: the gate's refusals
-    come before the door writes anything, and R-PC110's and R-PC114's
-    inside a savepoint the door rolls back before it re-raises.
+    stub, money dated inside the removed paychecks -- ruling **R-PC109**)
+    and by the era rule (``pay_era_write.era_to_move``, **R-PC110**).  The
+    operation leaves nothing behind: each comes before the door writes
+    anything.
 
     **Its own class, for the reason** :class:`PayPeriodUnresolved` **gives**:
     the route must catch the door's refusals and nothing else.  The door
@@ -940,4 +938,38 @@ class PageOutOfDate(ValidationError):
             "Nothing was saved: this page was out of date. As things are now, "
             "this press would leave a bank line unexplained that this page did "
             "not mention."
+        )
+
+
+class CardTermsRemovalRefused(ValidationError):
+    """A Remove of a card's ONLY terms version was refused.
+
+    Plan#2331, developer ruling **plan#2587** (2026-11-02): *"The one
+    remaining entry cannot be removed, so a card never loses its terms by a
+    click."*  Raised by :func:`app.services.card_terms.remove_terms` before it
+    writes anything.  The page offers no Remove while a card holds one
+    version, so a request reaching this was drawn when it held two: a stale
+    tab, or the second of two tabs that each removed one, which waits on the
+    owner's write lock and counts after the first's commit.
+
+    **Its own class, for the reason** :class:`PayPeriodRemovalRefused`
+    **gives**: the route must catch this refusal and nothing else.  A
+    subclass of :class:`ValidationError`, so a caller asking the broader
+    question still hears it.
+
+    Args:
+        effective_date: The date of the version the Remove named.
+
+    Attributes:
+        effective_date: As above.
+    """
+
+    def __init__(self, effective_date: date) -> None:
+        """Keep the date and state why these terms stay, and the way to re-date them."""
+        self.effective_date = effective_date
+        super().__init__(
+            f"The terms from {effective_date.strftime('%b %-d, %Y')} are this "
+            f"card's only terms, so they were not removed: a card always keeps "
+            f"one set. To change their date, save the terms again dated the "
+            f"right day, then remove these."
         )

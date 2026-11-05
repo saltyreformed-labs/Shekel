@@ -426,14 +426,18 @@ def preload_side_records(transfers: Iterable[Transfer]) -> None:
     ONE statement where SQLAlchemy's ``selectinload`` over the two
     relationships is two, and it takes transfers the caller has ALREADY
     loaded, which a loader option cannot: the Spending report's settled items
-    and the loan's settled payments are loaded by their readers' own queries.
+    are loaded by the plan-item loader's query
+    (``cash_flow_set.load_plan_items``) and the loan's settled payments by
+    their reader's own.
     It replaced ``covering_movements_by_leg``, a ``{(transfer id, account
     id): record}`` map built beside the transfer's own lists, statement for
     statement.
 
     **Called by a reader that READS records, and by no other** (ruling
-    **plan#2136**): the Spending report's settled items
-    (``spending_analysis``), the loan's settled payments
+    **plan#2136**): the plan-item loader for a screen that asks
+    (``cash_flow_set.load_plan_items``' ``side_records``, which the Spending
+    report's settled items in ``spending_analysis`` ask for), the loan's
+    settled payments
     (``loan_loaders.settled_income_legs``), statement match's still-planned
     offers (``statement_match._leg_valuation.offered_legs``), the reconcile
     writer's ticked transfers, whose settles read them
@@ -721,10 +725,12 @@ def grid_transfer_legs(
     and a leg's fragments draw a leg off its transfer, and the only records
     they meet are the cash fold's, which fills its own
     (:func:`recorded_transfer_legs`).  It pre-loaded every side's list until
-    that ruling, one statement per render that nothing read.  Its two callers
-    whose readers DO read a record pre-load them themselves: the Spending
-    report's settled items (``spending_analysis``) and the loan's settled
-    payments (``loan_loaders.settled_income_legs``).
+    that ruling, one statement per render that nothing read.  The two readers
+    that DO read a record have theirs pre-loaded by the loader they reach
+    this through: the Spending report's settled items by
+    ``cash_flow_set.load_plan_items``' ``side_records``, which
+    ``spending_analysis`` asks for, and the loan's settled payments by
+    ``loan_loaders.settled_income_legs``.
 
     Args:
         transfers: The parents in the window, loaded by the caller with the

@@ -344,11 +344,10 @@ def _sweep(seed_user, source, destination):
         to_account_id=destination.id,
         category_id=seed_user["categories"]["Rent"].id,
         name="Sweep",
-        default_amount=Decimal("200.00"),
     )
     _db.session.add(template)
     _db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("200.00"))
     make_cadence_rule(template, EVERY_PERIOD)
     transfer_recurrence.generate_for_template(
         template, _schedule(template.user_id), seed_user["scenario"].id,

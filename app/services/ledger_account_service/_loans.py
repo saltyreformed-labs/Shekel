@@ -6,52 +6,26 @@ correction books its accrued interest, its configured escrow and any payoff
 overpayment into three per-loan accounts, and the once-per-loan opening entry
 books the origination balance into a fourth.  All four carry
 ``loan_account_id`` and are keyed ``(user, loan, kind)`` by
-``uq_ledger_accounts_loan``.
+``uq_ledger_accounts_loan``.  Each kind's class and label are the worked-out
+chart's (:func:`app.services.ledger_lines.loan_key`,
+:func:`~app.services.ledger_lines.chart_label`; plan task plan#2523).
 
 Flask-isolated and commit-free: plain data in, ORM objects out; the caller owns
 the transaction boundary.
 """
 
 from app import ref_cache
-from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
+from app.enums import LedgerAccountKindEnum
+from app.extensions import db
 from app.models.account import Account
 from app.models.ledger_account import LedgerAccount
 from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
 )
+from app.services.ledger_lines import chart_label, loan_key
 
 from ._common import ChartRowLink, get_or_create_chart_row, load_owned_account
-
-# The four per-loan ledger-account kinds this resolver materialises, each
-# mapped to (its accounting class, the display-name suffix snapshotted into
-# ``name``).  Three are booked by the Step-4 loan-payment correction:
-# ``loan_interest`` and ``loan_escrow`` are Expense (the accrued interest and
-# the configured escrow both leave the borrower as an expense at payment time)
-# and ``loan_refund`` is an Asset (a payoff overpayment is a receivable).  The
-# fourth, ``equity_opening``, holds the credit counter-leg of the
-# once-per-loan opening-equity entry the loan read switch (Step 4, second half)
-# books at origination -- the loan's opening balance posted as Equity so the
-# ledger is authoritative for its confirmed balance; it is Equity class.
-# Spelled out here, like ``_buckets._OWNER_BUCKET_NAMES``, rather than
-# derived from the enum value so renaming a ``LedgerAccountKindEnum`` member can
-# never silently rewrite the class or the label on already-posted per-loan rows.
-#
-# This map is the resolver's -- and therefore the app's -- sole guarantee that
-# a ``loan_account_id`` row carries one of the four loan kinds and the
-# accounting class that kind implies: the shipped
-# ``ck_ledger_accounts_loan_shape`` CHECK is columns-only (a CHECK cannot
-# subquery ``ref.ledger_account_kinds`` and the project forbids hardcoding its
-# IDs -- see the model docstring), so nothing at the storage tier pins a loan
-# row's ``kind_id`` to a loan kind.  A kind absent from this map is rejected
-# before any write -- the load-bearing guard, not belt-and-suspenders.
-_LOAN_LEDGER_KINDS = {
-    LedgerAccountKindEnum.LOAN_INTEREST: (LedgerAccountClassEnum.EXPENSE, "Interest"),
-    LedgerAccountKindEnum.LOAN_ESCROW: (LedgerAccountClassEnum.EXPENSE, "Escrow"),
-    LedgerAccountKindEnum.LOAN_REFUND: (LedgerAccountClassEnum.ASSET, "Refund"),
-    LedgerAccountKindEnum.EQUITY_OPENING: (LedgerAccountClassEnum.EQUITY, "Opening"),
-}
-
 
 def _load_amortizing_loan_account(user_id: int, loan_account_id: int) -> Account:
     """Load and validate the loan account a per-loan ledger row will link.
@@ -111,8 +85,9 @@ def get_or_create_loan_ledger_account(
 
     The accounting class is derived from ``kind`` (``loan_interest`` /
     ``loan_escrow`` -> Expense; ``loan_refund`` -> Asset; ``equity_opening`` ->
-    Equity) via ``_LOAN_LEDGER_KINDS`` -- the caller passes only the kind, so
-    the class can never be set inconsistently with it.  ``kind`` MUST be one of
+    Equity) by the worked-out chart (:func:`app.services.ledger_lines.loan_key`)
+    -- the caller passes only the kind, so the class can never be set
+    inconsistently with it.  ``kind`` MUST be one of
     the four loan kinds; any other (``linked`` / ``category`` / ``fallback`` /
     ``orphan``) is rejected before any write.  That guard, and the
     amortizing-loan guard in :func:`_load_amortizing_loan_account`, are
@@ -128,11 +103,13 @@ def get_or_create_loan_ledger_account(
     otherwise reject a duplicate).  The created row sets ``loan_account_id``,
     leaves ``account_id`` / ``category_id`` NULL and ``is_owner_bucket`` False (the
     per-loan column shape ``ck_ledger_accounts_loan_shape`` requires), and
-    snapshots a display ``name`` (``"<loan name> -- Interest|Escrow|Refund|Opening"``)
-    clipped to the column width -- like a category row the snapshot is frozen at
-    creation, so renaming the loan never rewrites posted history (and unlike a
-    linked row, a per-loan row has ``account_id`` NULL, so
-    ``ck_ledger_accounts_name_present`` requires the stored ``name``).
+    snapshots a display ``name`` (``"<loan name> -- Interest|Escrow|Refund|Opening"``,
+    the worked-out chart's label) clipped to the column width -- like a
+    category row the snapshot is frozen at creation, so renaming the loan does
+    not relabel the stored row, where the worked-out label follows the rename
+    (ruling plan#2518; and unlike a linked row, a per-loan row has
+    ``account_id`` NULL, so ``ck_ledger_accounts_name_present`` requires the
+    stored ``name``).
 
     Flushes so the new row's ``id`` is assigned, but does NOT commit -- the
     caller (the Step-4 ``posting_service``) owns the transaction boundary.
@@ -158,23 +135,35 @@ def get_or_create_loan_ledger_account(
             No database CHECK enforces either, so these guards are the sole
             defense against a malformed per-loan chart entry.
     """
-    if kind not in _LOAN_LEDGER_KINDS:
-        raise ValueError(
-            f"loan ledger account kind must be one of "
-            f"{sorted(member.value for member in _LOAN_LEDGER_KINDS)}, "
-            f"got {kind!r}"
-        )
-    ledger_class, component = _LOAN_LEDGER_KINDS[kind]
+    key = loan_key(kind, loan_account_id)
     return get_or_create_chart_row(
         user_id,
-        ref_cache.ledger_account_kind_id(kind),
-        ref_cache.ledger_account_class_id(ledger_class),
+        ref_cache.ledger_account_kind_id(key.kind),
+        ref_cache.ledger_account_class_id(key.ledger_class),
         ChartRowLink(LedgerAccount.loan_account_id, loan_account_id),
         # Called ONLY when a row is being created, which is what keeps the
         # amortizing-loan guard off the hit path: an existing row resolves
         # without loading (or re-validating) the loan.
-        lambda: (
-            f"{_load_amortizing_loan_account(user_id, loan_account_id).name}"
-            f" -- {component}"
+        lambda: chart_label(
+            key, _load_amortizing_loan_account(user_id, loan_account_id),
         ),
     )
+
+
+def dispose_loan_chart_rows(loan_account_id: int) -> None:
+    """Delete a loan's per-loan chart rows, ahead of the loan's own delete.
+
+    ``fk_ledger_accounts_loan_account_id`` is RESTRICT, so a permanent delete
+    of a loan has to clear these first (ruling plan#2784); an account's linked
+    and counter rows go by their CASCADE instead.  Each row's legs go by
+    ``fk_account_postings_ledger_account_id``'s CASCADE, which PostgreSQL runs
+    as the table owner: the running app holds no DELETE on the journal
+    (:func:`app.posting_infrastructure.apply_ledger_append_only_privileges`),
+    so this deletes the chart rows and never an entry.  Does not commit.
+
+    Args:
+        loan_account_id: The loan about to be deleted.
+    """
+    db.session.query(LedgerAccount).filter_by(
+        loan_account_id=loan_account_id,
+    ).delete(synchronize_session="fetch")

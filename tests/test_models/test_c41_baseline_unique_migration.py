@@ -6,7 +6,7 @@ was already present on the test-template path via the c5d6e7f8a901
 upgrade and on the ``db.create_all()`` path via the Scenario model
 declaration, but production was bootstrapped before either of those
 paths carried the index -- see F-069 / H-2 in
-``docs/audits/security-2026-04-15/model-migration-drift.md``).
+``shekel-audits/security-2026-04-15/model-migration-drift.md``).
 
 These tests exercise four invariants of the migration:
 

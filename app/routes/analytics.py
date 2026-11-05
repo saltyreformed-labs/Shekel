@@ -395,8 +395,8 @@ def retired_tab():
 def income_statement_tab():
     """HTMX partial: confirmed-ledger income statement (Statements pill).
 
-    Reads the append-only posting ledger's Income and Expense accounts
-    into a revenue / cost statement over one window
+    Reads the worked-out ledger's Income and Expense lines into a
+    revenue / cost statement over one window
     (:func:`app.services.ledger_report_service.compute_income_statement`),
     for the baseline scenario only (the deferred multi-scenario policy is
     R8's).  Grouped with the Balance Sheet behind the Statements pill's
@@ -504,7 +504,7 @@ def income_statement_tab():
 def balance_sheet_tab():
     """HTMX partial: confirmed-ledger balance sheet as of a date.
 
-    Reads the posted ledger's position as of ``as_of``
+    Reads the worked-out ledger's position as of ``as_of``
     (:func:`app.services.ledger_report_service.compute_balance_sheet`):
     Assets, Liabilities, and Equity sections with a derived
     retained-earnings line and a two-part trial-balance tie-out, for the
@@ -750,7 +750,7 @@ def _resolve_as_of_param(raw, today):
     Returns:
         The parsed date clamped to ``[2000-01-01, today]``; ``today`` when
         *raw* is absent or is not a valid ISO date (a future or pre-2000
-        as-of is meaningless for the posted ledger, and a garbage value
+        as-of is meaningless for the confirmed ledger, and a garbage value
         must degrade to today rather than raise).
     """
     floor = date(2000, 1, 1)

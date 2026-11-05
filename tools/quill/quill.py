@@ -14,14 +14,18 @@ display, which ``sync`` writes from git.  A card is CLAIMED while the code
 repository's ``origin`` holds a branch ``card/N`` whose work neither ``dev``
 nor ``main`` holds: ``claim`` makes it, a commit adding the card's marker
 pushed create-only, and ``release`` keeps its work on ``released/N/<instant>``
-and deletes it.  So every command that asks git -- ``next``, ``show``,
-``claim``, ``release``, ``move``, ``drop``, ``sync``, and ``file`` given an
-owner or a parent or finding a card of its own closed while still marked --
-first reads it once (:func:`_git.read`): it lists the ``card/N`` branches
+and deletes it.  So every command that asks git what shipped and who claims what --
+``next``, ``show``, ``claim``, ``release``, ``move``, ``drop``, ``sync``, ``note``,
+``finding-file``, ``hand``, ``block`` of a finding, ``watch`` once a branch moved
+from the tips its last finished pass saved, ``effort --to`` of a step with a step
+linked under it, and ``file`` given an owner (its ``--owner``, or the owner of the
+question it converts) or a parent, or finding a card of its own closed while still
+marked -- first reads it once (:func:`_git.read`): it lists the ``card/N`` branches
 ``origin`` holds, then fetches ``dev``, ``main`` and each of them, which moves
 this checkout's ``origin/dev``, ``origin/main`` and ``origin/card/N``.
-(``move`` and ``drop`` ask it whether a step is split: a leaf dropped before
-its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
+``start`` fetches only ``dev``, ``main`` and its card's branch (:func:`_git.fetch`).
+(``move``, ``drop`` and ``effort`` ask it whether a step is split: a leaf dropped
+before its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
 A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-issue
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, on the board under a step the board holds (ruling plan#1814,
@@ -40,11 +44,14 @@ marked nor handed on, and a leaf's while a step above it owns one (``landing``, 
 A LEAF (``file step --parent``) is filed in its split step's milestone while the split
 step holds one, which the filing then clears; else in none, the milestones its leaves
 hold named for a person to set one on the web (``_filing._leaf_milestone``).  A leaf
-dropped before its filing finished gives it back (``_unsplit``).
+dropped before its filing finished gives it back (``_unsplit``).  The filing clears its split
+step's Effort too, which ``effort`` refuses to set on a split step (ruling plan#2555).
 ``sync`` runs every three hours on this host (``shekel-plan-sync.timer``, its units' sources in
 ``/opt/docker/scripts``) from its own clone ``~/projects/shekel-plan-sync`` at dev's tip; a run
 that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``
-says when sync is behind.  ``watch`` runs every minute from the same clone, never beside
+says when sync is behind.  ``next`` hands out Urgent, then High, then the board's order, a step's
+unfinished prerequisites just ahead of it, never one On hold (rulings plan#1830, plan#1831,
+plan#1832; :mod:`_next`).  ``watch`` runs every minute from the same clone, never beside
 ``sync`` (``shekel-plan-watch.timer``): the same producer over each card whose branch moved
 since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
 :mod:`_watch`).  ``answer`` answers the developer's comments on a card, and ``next``
@@ -54,7 +61,11 @@ claimed card's next session starts and prints its prompt (rulings plan#1921, pla
 :mod:`_notes`).
 ``pr`` opens a card's pull request into ``dev``, its text naming the card so the card links it,
 and ``file question --owner`` links a question to the step it is asked for, a link its ruling
-keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).
+keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).  ``arc`` sets a card's Arc and puts
+its arc label back to display it, ``label`` adds or removes a label a person chooses (ruling
+plan#2221), and ``priority`` and ``effort`` set or clear a card's Priority and Effort
+(plan#2491, :mod:`_arc_label`); ``file step`` and ``file finding`` file a card holding its
+Effort, the filing session's estimate (ruling plan#2492, :mod:`_filing`).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -62,8 +73,10 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill claim plan#N [--here]
     python -m tools.quill.quill release plan#N
     python -m tools.quill.quill show plan#N | OLD-ID
-    python -m tools.quill.quill file step --arc ARC --title NAME --body-file SPEC [--parent plan#P]
+    python -m tools.quill.quill file step --arc ARC --title NAME --body-file SPEC
+                                         --effort SESSIONS [--parent plan#P]
     python -m tools.quill.quill file finding --arc ARC --title NAME --owner plan#S --text SENTENCE
+                                            --effort SESSIONS
     python -m tools.quill.quill file ruling --arc ARC --title NAME
                                 (--owner plan#S --question-file Q | [--owner plan#S]
                                  --from-question plan#Q) --answer-file A
@@ -77,6 +90,10 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill hand plan#F --to plan#S
     python -m tools.quill.quill edit plan#N [--title NAME] [--body-file TEXT]
     python -m tools.quill.quill comment plan#N --body-file TEXT
+    python -m tools.quill.quill arc plan#N --to ARC
+    python -m tools.quill.quill label plan#N (--add LABEL | --remove LABEL)
+    python -m tools.quill.quill priority plan#N (--to PRIORITY | --clear)
+    python -m tools.quill.quill effort plan#N (--to SESSIONS | --clear)
     python -m tools.quill.quill answer plan#N --body-file TEXT
     python -m tools.quill.quill note plan#N --body-file NOTE
     python -m tools.quill.quill block plan#N --by plan#M [--remove]
@@ -121,6 +138,7 @@ import requests
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
 from tools.quill import (
+    _arc_label,
     _comments,
     _filing,
     _findings,
@@ -144,8 +162,10 @@ from tools.quill._command import (
 )
 from tools.quill._exits import Refused, exit_status
 from tools.quill._export import cmd_export
+from tools.quill._fields import ON_HOLD
 from tools.quill._filing import cmd_file
 from tools.quill._github import CredentialsError, GitHubError
+from tools.quill._next import next_step
 from tools.quill._show import cmd_show
 from tools.quill._state import (
     STALE_CLAIM,
@@ -162,7 +182,6 @@ from tools.quill._state import (
     left_bare,
     never_offered,
     never_split,
-    next_step,
     outside_reports,
     release_hint,
     resolved,
@@ -176,6 +195,7 @@ from tools.quill._state import (
 from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import (
     BODY,
+    HOLDERS,
     TITLE,
     Draft,
     in_ruling_shape,
@@ -183,10 +203,8 @@ from tools.quill.check import (
     violations,
 )
 from tools.quill.setup_tracker import (
-    DEPLOY_TOGETHER_LABEL,
     FILING,
     IN_ORDER,
-    MOVES_MONEY_LABEL,
     PLAN,
     TASK,
 )
@@ -199,8 +217,10 @@ CONNECT = partial(Tracker.connect, PLAN)
 # -- next, claim, release -----------------------------------------------------
 
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
-    """The first open step in the board's order that is unclaimed, unshipped and unblocked;
-    then how far ``sync`` is behind, what it cannot offer that a person must act on, and last,
+    """The step :func:`_next.next_step` hands out, Urgent, then High, then the board's order, each
+    step's unfinished prerequisites just ahead of it, and never one On hold; then how far ``sync``
+    is behind, what it cannot offer that a person must act on, each step waiting on one On hold,
+    by name (ruling plan#1830, plan#1820's spec), and last,
     after every line no further read can cost, each claimed card, and each task under one,
     holding a comment of the developer's that no answer of quill's has followed (plan#1822,
     ruling plan#1924, :func:`_comments.unanswered_lines`).
@@ -231,6 +251,9 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
                  if never_split(card, cards, shipped) else
                  f"place it with `quill move plan#{card.number} --after plan#M` (or the board "
                  "lags a fresh write)"))
+    for wait in answer.waiting:
+        print(f"WAITING: {_label(wait.step)} needs what is {ON_HOLD}: "
+              f"{' and '.join(map(_label, wait.on))}")
     for claim in stale_claims(reads.claims, datetime.now(UTC)):
         print(f"STALE CLAIM: plan#{claim.card} on {holder(claim)}: no commit for more than "
               f"{STALE_CLAIM.days} days -- {release_hint(claim)} keeps its work and frees it")
@@ -252,7 +275,9 @@ def cmd_claim(args, tracker: Tracker, root: Path,
     order, unless they are filed already (ruling plan#1875): decided before the push
     (:func:`_filing.finishing_filings`), written after it.  Refused, with nothing written,
     for what is no work to claim (work shown done that a revert unshipped says to sync
-    first); while ``card/N`` holds a claim (:func:`_claimed_again`); while ``origin`` holds
+    first); for what is never offered (:func:`_state.never_offered`: On hold, ruling plan#1832,
+    among its reasons); while ``card/N`` holds a claim (:func:`_claimed_again`); while
+    ``origin`` holds
     a ``card/N`` already merged, which a create-only push cannot replace; while this clone
     already has a branch of that name, which the check-out would collide with; and for what
     the filing of a finishing task refuses.  The claim line is printed once the push lands,
@@ -844,44 +869,6 @@ def cmd_spec_revert(args, tracker: Tracker, _root: Path) -> int:
 
 # -- the command line -----------------------------------------------------------------
 
-def _file_parser(commands) -> None:
-    """``file step|finding|ruling|question|task`` and each kind's arguments."""
-    kinds = commands.add_parser("file", help="file a step, finding, ruling, question or task")
-    sub = kinds.add_subparsers(dest="kind", required=True)
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--arc", required=True, choices=ARCS)
-    common.add_argument("--title", required=True, help="a short name (R-BAL178)")
-    step = sub.add_parser("step", parents=[common], help="a step, or a leaf of one")
-    step.add_argument("--body-file", required=True, help="its spec")
-    step.add_argument("--parent", type=card_number, help="the step this leaf splits")
-    step.add_argument("--label", action="append",
-                      choices=(MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL))
-    finding = sub.add_parser("finding", parents=[common], help="a defect in the code")
-    finding.add_argument("--owner", type=card_number, required=True, help="its owner step")
-    finding.add_argument("--text", required=True, help="one sentence, at most 400 characters")
-    ruling = sub.add_parser("ruling", parents=[common], help="the developer's decision")
-    ruling.add_argument("--owner", type=card_number,
-                        help="its owner step; from a question that names one, that one")
-    asked = ruling.add_mutually_exclusive_group(required=True)
-    asked.add_argument("--question-file", help="his question, word for word")
-    asked.add_argument("--from-question", type=card_number,
-                       help="the question card he answered; it becomes the ruling")
-    ruling.add_argument("--answer-file", required=True, help="his answer, word for word")
-    question = sub.add_parser("question", parents=[common], help="for the developer to answer")
-    question.add_argument("--body-file", required=True, help="the question")
-    question.add_argument("--owner", type=card_number,
-                          help="the step it is asked for, if one, which its ruling keeps")
-    task = sub.add_parser(TASK, help="a piece of one step or finding: a commit in its card's "
-                                     "pull request (its arc is its card's)")
-    task.add_argument("--parent", type=card_number, required=True,
-                      help="the step or finding it is a piece of")
-    task.add_argument("--title", required=True, help="a short name (R-BAL178)")
-    task.add_argument("--body-file", required=True, help="what the piece builds")
-    task.add_argument("--before", type=card_number,
-                      help="the open task under the same card it is built before; else it goes "
-                           "above the card's finishing tasks")
-
-
 def _text_parser(commands) -> None:
     """``edit``, ``comment``, ``answer``, ``note`` and ``pr``, and their arguments: each names a
     card and a file holding the text it writes."""
@@ -921,8 +908,9 @@ def parser() -> argparse.ArgumentParser:
     release.add_argument("card", type=card_number)
     commands.add_parser("show", help="a card, its comments and its git history").add_argument(
         "card")
-    _file_parser(commands)
+    _filing.file_parser(commands)
     _text_parser(commands)
+    _arc_label.add_parsers(commands)
     block = commands.add_parser("block", help="record a blocked-by edge")
     block.add_argument("card", type=card_number)
     block.add_argument("--by", type=card_number, required=True)
@@ -965,7 +953,8 @@ def parser() -> argparse.ArgumentParser:
 
 COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
-    "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment,
+    "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment, "arc": _arc_label.cmd_arc,
+    "label": _arc_label.cmd_label, **dict.fromkeys(HOLDERS, _arc_label.cmd_field),
     "answer": _comments.cmd_answer, "note": _notes.cmd_note, "block": cmd_block,
     "move": cmd_move, "drop": cmd_drop, "start": _tasks.cmd_start,
     "task-file": _tasks.cmd_task_file,

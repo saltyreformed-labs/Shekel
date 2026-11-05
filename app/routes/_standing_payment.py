@@ -46,7 +46,7 @@ from app.routes._recurrence_conflict_chooser import (
 )
 from app.routes._redirect_target import RedirectTarget
 from app.routes._transfer_creation_helpers import TRANSFER_TEMPLATE_KIND
-from app.services import loan_recurrence_sync
+from app.services import loan_recurrence_sync, template_amount_service
 from app.utils.dates import display_today
 
 
@@ -146,7 +146,8 @@ def sync_loan_payment_start_or_refuse(
     return regenerate_or_refuse(
         moved,
         PreEditTemplateState(
-            amount=moved.default_amount, had_recurrence_rule=True,
+            series=template_amount_service.series_image(moved),
+            had_recurrence_rule=True,
         ),
         display_today(),
         redirect=redirect,
@@ -193,7 +194,6 @@ def regenerate_or_refuse(
     try:
         return regenerate_or_conflict_chooser(
             template, before, effective_from, TRANSFER_TEMPLATE_KIND,
-            amount_drives_instances=True,
         )
     except (NotFoundError, ShekelValidationError) as exc:
         db.session.rollback()

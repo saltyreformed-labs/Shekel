@@ -918,7 +918,7 @@ Phase 1. Their **observed flake rate** depends on the timing landscape:
   burst itself sees less concurrent WAL pressure. This is plausible but unverified. The
   prior session's 2 baseline runs are consistent with a low-but-nonzero baseline rate;
   shape #1 was already observed in a related code path during the 2026-04-15
-  c-38-followups.md Issue 2a investigation (referenced in test source comments).
+  shekel-audits/security-2026-04-15/c-38-followups.md Issue 2a investigation (referenced in test source comments).
 
 ## Comparison -- prior session vs this session
 

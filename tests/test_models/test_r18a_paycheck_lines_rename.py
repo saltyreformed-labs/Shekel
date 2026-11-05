@@ -46,10 +46,16 @@ _M_R18A = load_migration_module("0a4d2c3e89f8_a_paycheck_is_a_list_of_lines.py")
 #: The revision above it, whose two earning-kind rows must go before this
 #: one's downgrade can narrow the name column, and come back after.
 _M_R18B = load_migration_module("6c15d2a97b78_a_paycheck_has_earning_lines.py")
+#: The revision that split the pre-tax kind (plan step salary:S11-e), whose
+#: row must go first on the way down, its name being too long for the column
+#: this revision's downgrade narrows too.
+_M_S11E = load_migration_module("47beea2b628a_pre_tax_splits_in_two.py")
 
-#: The four kinds head carries (ruling R-SAL38), in the enum's waterfall order.
+#: The kinds head carries (rulings R-SAL38 and plan#2639), in the enum's
+#: waterfall order.
 _HEAD_KINDS = {
-    "taxable_earning", "pre_tax_deduction", "post_tax_deduction", "after_tax_earning",
+    "taxable_earning", "pre_fica_deduction", "pre_tax_deduction", "post_tax_deduction",
+    "after_tax_earning",
 }
 
 _LINES = ("salary", "paycheck_lines")
@@ -280,6 +286,7 @@ class TestTheRoundTrip:
             line_id = _seed_line(seed_user, "Vision", "12.06")
             before = _snapshot(db.session)
 
+            _run(_M_S11E.downgrade, db.session)
             _run(_M_R18B.downgrade, db.session)
             assert _kind_names(db.session, *_KINDS) == {
                 "pre_tax_deduction", "post_tax_deduction",
@@ -316,6 +323,7 @@ class TestTheRoundTrip:
 
             _run(_M_R18A.upgrade, db.session)
             _run(_M_R18B.upgrade, db.session)
+            _run(_M_S11E.upgrade, db.session)
 
             assert _snapshot(db.session) == before
             db.session.expire_all()

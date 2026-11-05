@@ -363,8 +363,9 @@ class TestNoPageReadsASideAlone:
         Two transfers out of Checking, each due and Paid on the same day, so
         both fall in that day's month (a transfer is attributed to its due
         day).  The report's timeliness metric reads each expense leg's
-        record, which ``spending_analysis._settled_items`` pre-loads; without
-        that pre-load it reads them alone.  Two more due that day are still
+        record, which ``spending_analysis.query_settled_expenses`` asks the
+        one plan-item loader to pre-load (``side_records``); without that
+        pre-load it reads them alone.  Two more due that day are still
         planned, which the report does not draw today (it loads settled
         money only, ``settled_status_ids``); they stand in the fixture so a
         read of a planned side's record, whose list nothing fills, would be
@@ -855,8 +856,18 @@ class TestAReconcileFetchesItsTransfersRecordsOnce:
         fetches nothing.  The act's other side-record fetches are each
         settle's posting walk (``transfer_legs.transfer_family_movements``),
         one per transfer, which re-fetches what the pre-load loaded (finding
-        **plan#2147**).  So ``1 + 3``; without the pre-load each settle
-        fetches its own pair, ``3 + 3``.
+        **plan#2147**), and the act's ONE anchor re-check at its close
+        (``posting_service.holding_the_anchor_re_check``, ruling
+        **plan#2574**), whose walk of an account's records
+        (``cash_ledger.settled_cash_facts``) fetches its transfers' records
+        in one statement: Savings alone, whose opening is asserted on the
+        settles' own day, while Checking's latest assertion (2024-01-05)
+        sits before them, so its corrections cannot move and the re-check
+        skips it.  So ``1 + 3 + 1``.  Without the pre-load each settle
+        fetches its own pair, ``3 + 3 + 1``; without the hold each settle
+        re-checks for itself, and the endpoint resync plan#2574 deleted
+        walked both endpoints again, ``1 + 3 + 3 * 3`` (measured at
+        plan#2559 before the fix).
         """
         with app.app_context():
             ticked = self._three_planned(seed_user, seed_periods_today)
@@ -875,7 +886,9 @@ class TestAReconcileFetchesItsTransfersRecordsOnce:
                 for xfer_id in ticked
             )
             assert alone == []
-            assert len(fetches) == 1 + len(ticked)
+            # The pre-load, one posting walk per settle, and the close's one
+            # re-check walk (Savings).
+            assert len(fetches) == 1 + len(ticked) + 1
 
     def test_the_reconcile_panel_fetches_no_record_of_the_transfers_it_offers(
         self, app, seed_user, seed_periods_today,

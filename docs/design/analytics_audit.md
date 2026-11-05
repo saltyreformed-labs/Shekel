@@ -61,10 +61,11 @@ accident).
   scope" over `resolve_analytics_account` until then). Calendar and Spending both read the
   paycheck's items across the owner's cash-flow SET -- checking and its cards: the set's own rows
   through `cash_flow_set.own_rows_clause` and, since `balance:X-bi-6-1b`, one LEG per transfer the
-  set touches through `cash_flow_set.set_transfer_legs_in_periods` (the Spending report's
-  calendar-span arm through its own join and `set_transfer_legs`; it was `paycheck_rows_clause`,
-  which carried a transfer's near shadow row and was deleted with its last reader) -- behind ONE
-  member's balance line. The CALENDAR resolves that line through
+  set touches, both from the one loader `cash_flow_set.load_plan_items` since plan#2130 (each
+  screen's scope stated once in a `PlanScope`; it was `set_transfer_legs_in_periods` beside each row
+  query, and the Spending report's calendar-span arm with its own join; before that
+  `paycheck_rows_clause`, which carried a transfer's near shadow row and was deleted with its last
+  reader) -- behind ONE member's balance line. The CALENDAR resolves that line through
   `account_resolver.resolve_analytics_cash_flow_set`: `?account_id=` names the balance member, an
   owned cash-flow account outside the set gets its own single-account calendar, a refused id is a
   404, and the default is the set's primary. SPENDING takes no `?account_id=`: its scope is the

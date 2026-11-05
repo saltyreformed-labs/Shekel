@@ -77,10 +77,7 @@ from app.enums import (
 )
 from app.extensions import db
 from app.models.recurrence_rule import RecurrenceRule
-from app.services.recurrence import (
-    RecurrenceResolutionError,
-    scheduling_day_of_month,
-)
+from app.services.recurrence import scheduling_day_of_month
 from tests._test_helpers import bare_expense_template, load_migration_module
 
 _MIGRATION_FILENAME = "d9f5c1a48b73_the_closed_pattern_set_dies.py"
@@ -121,6 +118,7 @@ def _plant_rule(seed_user, unit, placement, *, starts_on, nominal_day=None,
         ).id,
         interval_n=interval_n,
         unit_id=ref_cache.recurrence_unit_id(unit),
+        unit_has_day_of_month=ref_cache.recurrence_unit_has_day_of_month(unit),
         placement_id=ref_cache.period_placement_id(placement),
         shift_id=ref_cache.business_day_shift_id(BusinessDayShiftEnum.NONE),
         starts_on=starts_on,
@@ -333,6 +331,15 @@ class TestTheSqlDerivationIsThePythonOne:
             "annual", RecurrenceUnitEnum.YEAR,
             PeriodPlacementEnum.CONTAINING_DATE, date(2026, 7, 4), None,
         ),
+        # A weekly cadence names no day of the month: the SQL CASE has no
+        # arm for it and derives NULL, and the Python answers None.  Until
+        # plan step R8-b the Python REFUSED the unit instead, because None
+        # meant "date this row from its paycheck"; R8-b dates a weekly row
+        # from its occurrence, so the two now agree here too.
+        (
+            "every week", RecurrenceUnitEnum.WEEK,
+            PeriodPlacementEnum.CONTAINING_DATE, date(2026, 3, 15), None,
+        ),
     )
 
     @pytest.mark.parametrize(
@@ -403,54 +410,3 @@ class TestTheSqlDerivationIsThePythonOne:
             )
 
             assert scheduling_day_of_month(rule) == 31
-
-    def test_the_equality_is_claimed_for_AUTHORABLE_cadences_only(
-        self, app, seed_user,
-    ):
-        """Where the two implementations part, and why that is not a defect yet.
-
-        The SQL ``CASE`` has no ``ELSE``, so an unauthorable cadence -- the
-        WEEK unit -- derives ``NULL``, while ``scheduling_day_of_month``
-        REFUSES it: ``require_row_date_coordinate`` has no date such a row
-        could carry, and refusing is what stops a row being dated from a
-        cadence nothing can express.  **The refused set narrowed at plan step
-        R8-a**, which admitted the year-scale deferred cadence this sentence
-        also named -- its refusal cited a derivation ruling **R-R16** had
-        deleted -- and which is where that refusal stopped being inherited from
-        the anchor-family router and became a rule of its own.
-
-        Harmless at this revision, and the boundary is worth pinning rather
-        than papering over.  No such row can exist: ``require_authorable_
-        cadence`` refuses the write and the picker never offers the pair, which
-        is the same fact ``refuse_unencodable_cadences`` relies on in the other
-        direction.  **Plan step R8 is what makes the WEEK unit authorable**, so
-        this is the case to re-read then: a WEEK row would pass the upgrade's
-        ``IS DISTINCT FROM`` grade (both sides ``NULL``, so they agree) and
-        then raise in ``compute_due_date``, which is the designed refusal
-        rather than a silent re-dating -- but the grade would no longer be
-        measuring what its docstring says it measures.
-        """
-        with app.app_context():
-            rule = _plant_rule(
-                seed_user,
-                RecurrenceUnitEnum.WEEK,
-                PeriodPlacementEnum.CONTAINING_DATE,
-                starts_on=date(2026, 3, 15),
-            )
-
-            derived = db.session.execute(
-                text(
-                    f"""
-                    SELECT ({_DERIVED_SCHEDULING_DAY}) AS derived_day
-                    FROM budget.recurrence_rules r
-                    JOIN ref.recurrence_units u ON u.id = r.unit_id
-                    JOIN ref.period_placements p ON p.id = r.placement_id
-                    WHERE r.id = :rule_id
-                    """
-                ),
-                {"rule_id": rule.id},
-            ).scalar_one()
-
-            assert derived is None
-            with pytest.raises(RecurrenceResolutionError):
-                scheduling_day_of_month(rule)

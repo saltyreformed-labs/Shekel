@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from tests._test_helpers import cadence_payload, one_off_row_of
+from tests._test_helpers import cadence_payload, one_off_row_of, state_template_price
 from app.models.user import User, UserSettings
 from app.models.scenario import Scenario
 from app.models.category import Category
@@ -243,7 +243,7 @@ class TestTransferAccountOwnership:
 
         resp = auth_client.post("/transfers", data={
             "name": "Malicious Transfer",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "from_account_id": str(other["account"].id),  # foreign account
             "to_account_id": str(savings_acct.id),
             "recurrence_pattern": "",
@@ -265,7 +265,7 @@ class TestTransferAccountOwnership:
 
         resp = auth_client.post("/transfers", data={
             "name": "Malicious Transfer 2",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "from_account_id": str(seed_user["account"].id),
             "to_account_id": str(other["account"].id),  # foreign account
             "recurrence_pattern": "",
@@ -307,9 +307,10 @@ class TestTransferAccountOwnership:
             from_account_id=seed_user["account"].id,
             to_account_id=savings_acct.id,
             name="My Transfer",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
+        db.session.commit()
+        state_template_price(template, Decimal("100.00"))
         db.session.commit()
 
         # Snapshot before attack.
@@ -321,7 +322,7 @@ class TestTransferAccountOwnership:
             f"/transfers/{template.id}",
             data={
                 "name": "My Transfer",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(second_user["account"].id),
                 "to_account_id": str(savings_acct.id),
             },
@@ -349,9 +350,10 @@ class TestTransferAccountOwnership:
             from_account_id=seed_user["account"].id,
             to_account_id=savings_acct.id,
             name="My Transfer 2",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
+        db.session.commit()
+        state_template_price(template, Decimal("100.00"))
         db.session.commit()
 
         # Snapshot before attack.
@@ -363,7 +365,7 @@ class TestTransferAccountOwnership:
             f"/transfers/{template.id}",
             data={
                 "name": "My Transfer 2",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(second_user["account"].id),
             },
@@ -457,7 +459,7 @@ class TestTemplateOwnership:
 
         resp = auth_client.post("/templates", data={
             "name": "Malicious Template",
-            "default_amount": "50.00",
+            "amount": "50.00",
             "account_id": str(other["account"].id),
             "category_id": str(seed_user["categories"]["Rent"].id),
             "transaction_type_id": str(expense_type.id),
@@ -478,7 +480,7 @@ class TestTemplateOwnership:
 
         resp = auth_client.post("/templates", data={
             "name": "Malicious Template Cat",
-            "default_amount": "50.00",
+            "amount": "50.00",
             "account_id": str(seed_user["account"].id),
             "category_id": str(other["category"].id),
             "transaction_type_id": str(expense_type.id),
@@ -656,7 +658,6 @@ class TestUniqueConstraints:
             from_account_id=seed_user["account"].id,
             to_account_id=savings_acct.id,
             name="Monthly Savings",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(t1)
         db.session.commit()
@@ -666,7 +667,6 @@ class TestUniqueConstraints:
             from_account_id=seed_user["account"].id,
             to_account_id=savings_acct.id,
             name="Monthly Savings",
-            default_amount=Decimal("200.00"),
         )
         db.session.add(t2)
         with pytest.raises(IntegrityError, match="uq_transfer_templates_user_name"):
@@ -719,7 +719,7 @@ class TestSelfTransferRejection:
         """
         resp = auth_client.post("/transfers", data={
             "name": "Self Transfer",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "from_account_id": str(seed_user["account"].id),
             "to_account_id": str(seed_user["account"].id),
             "recurrence_pattern": "",

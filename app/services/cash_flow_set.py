@@ -53,9 +53,10 @@ Every display reader's rows are the set's OWN (:func:`own_rows_clause`) --
 every member's plan rows, less every shadow until plan step
 ``balance:X-bi-6-4d-2`` deleted them -- beside the LEGS of every
 transfer the set touches (:func:`touched_transfers_clause`, then
-:func:`set_transfer_legs`), the two halves one :class:`PlanItems` carries:
-the grid since leaf ``X-bi-6-1``, the dashboard's bills, the calendar and the
-Spending report since leaf ``X-bi-6-1b``.  **The ROW spelling of the rule --
+:func:`set_transfer_legs`), one list since plan step **plan#2130** and two
+halves of one value (``PlanItems``) until it: the grid since leaf
+``X-bi-6-1``, the dashboard's bills, the calendar and the Spending report
+since leaf ``X-bi-6-1b``.  **The ROW spelling of the rule --
 ``paycheck_rows_clause``, every member's rows less the far-leg shadow through
 ``far_leg_clause`` -- was DELETED at ``X-bi-6-1b`` with its last reader**: a
 fence with no reader is deleted, not kept.  :func:`far_legs_of` read the
@@ -63,29 +64,50 @@ SETTLED far-leg shadows for the balance seam's subtotal until leaf
 ``X-bi-6-4a``, when the fold's facts came to name their transfer (ruling
 **R-BAL106**) and that read went: both halves are excluded by transfer id.
 
+**A screen states its scope ONCE** (plan step **plan#2130**): it fills in a
+:class:`PlanScope` -- the set, the scenario, a :class:`Paychecks` or
+:class:`AttributionSpan` window, a :class:`StatusBand`, expenses only -- and
+:func:`load_plan_items` turns every part into a clause for both parent tables
+in one place and answers one list, the rows by id then the sides.
+
 Services boundary (``CLAUDE.md``): no Flask symbol.  The clauses are built,
 never executed, here; the queries this module DOES run are
-:func:`set_transfer_legs_in_periods` (the readers' period-windowed transfer
-load, with the record load :func:`set_transfer_legs` reaches through
-``transfer_legs``) and :func:`far_legs_of`'s one for the seam.
+:func:`load_plan_items`'s two (with the record pre-load a screen that reads
+records asks for) and :func:`far_legs_of`'s one for the seam.
 """
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import NamedTuple
+from datetime import date
+from enum import Enum
+from typing import TypeVar
 
 from sqlalchemy import or_
+from sqlalchemy.orm import Query
+from sqlalchemy.orm.interfaces import LoaderOption
+from sqlalchemy.sql.expression import ColumnElement
 
+from app import ref_cache
+from app.enums import TxnTypeEnum
 from app.extensions import db
 from app.models.account import Account
+from app.models.pay_period import PayPeriod
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.services.transfer_legs import (
     PlanItem,
+    PlanParent,
     TransferLeg,
+    expense_legs,
     grid_transfer_legs,
+    preload_side_records,
 )
 from app.utils.amount_relationships import transfer_pricing_load_options
+from app.utils.balance_predicates import (
+    balance_contributing_clause,
+    is_projected_clause,
+    settled_status_ids,
+)
 
 
 @dataclass(frozen=True)
@@ -326,10 +348,12 @@ def touched_transfers_clause(cash_flow: CashFlowSet):
     members``: the transfer twin of :func:`own_rows_clause` (leaf
     ``X-bi-6-1b``), and the ONE spelling of which parents a reader of the
     set's plan items loads before :func:`leg_accounts_shown` decides which
-    side -- if any -- it draws.  Every display reader appends THIS to its
-    transfer query beside :func:`own_rows_clause` on its row query, exactly
-    as each appends its own window and status filters to both; the grid's
-    loader spelled it inline until this leaf gave it three more readers.
+    side -- if any -- it draws.  :func:`load_plan_items` puts THIS on its
+    transfer query beside :func:`own_rows_clause` on its row query, with the
+    screen's window and status band on both (plan step **plan#2130**; every
+    display reader appended the two clauses and its own filters itself until
+    then); the grid's loader spelled it inline until leaf ``X-bi-6-1b`` gave
+    it three more readers.
 
     Args:
         cash_flow: The set.
@@ -353,16 +377,16 @@ def set_transfer_legs(
     own rule: one leg per account :func:`leg_accounts_shown` names for each
     transfer.  The leaf's loader takes the rule as a function so that it
     states no set of its own; this is where the set supplies it, ONCE, for
-    every reader (leaf ``X-bi-6-1b``) -- the period-windowed ones through
-    :func:`set_transfer_legs_in_periods`, the rest with their own query.  A
-    reader that reads the legs' records pre-loads them itself (the Spending
-    report's settled items, ruling **plan#2136**); the grid, the dashboard and
-    the calendar read none.
+    every reader (leaf ``X-bi-6-1b``), through :func:`load_plan_items` since
+    plan step **plan#2130**.  A reader that reads the legs' records asks that
+    loader to pre-load them (``side_records``: the Spending report's settled
+    items, ruling **plan#2136**); the grid, the dashboard and the calendar
+    read none.
 
     Args:
         cash_flow: The set.
-        transfers: The parents a reader loaded for its window, with the
-            relationships its render will read.
+        transfers: The parents the loader selected for a screen's scope, with
+            the relationships its render will read.
 
     Returns:
         The legs, in transfer order then side order; ``[]`` for none.
@@ -372,84 +396,263 @@ def set_transfer_legs(
     )
 
 
-def set_transfer_legs_in_periods(
-    cash_flow: CashFlowSet, scenario_id: int, period_ids, *filters,
-) -> list[TransferLeg]:
-    """Load the legs of every live transfer the set touches in *period_ids*.
+#: The parent table a scope's query is rooted at, ``Transaction`` or
+#: ``Transfer``: a query narrowed here comes back rooted at the same one.
+_Parent = TypeVar("_Parent", bound=PlanParent)
 
-    The ONE query behind every reader windowed by PERIOD MEMBERSHIP -- the
-    grid window, the dashboard's bills, the calendar and the Spending
-    report's pay-period arm (leaf ``X-bi-6-1b``): the parents through
-    :func:`touched_transfers_clause`, in *scenario_id*, filed in
-    *period_ids*, live, narrowed by whatever *filters* the reader's own
-    question adds (``is_projected_clause(Transfer)`` for a bill,
-    ``balance_contributing_clause(Transfer)`` for a calendar cell, the
-    settled statuses for spent money; nothing for the grid), then
-    :func:`set_transfer_legs` over them.  Each parent carries
-    :func:`~app.utils.amount_relationships.transfer_pricing_load_options`
-    (the chain a leg's price walks, and the period a bill reads); the
-    endpoints, status and category are ``lazy="joined"`` on the model.  A
-    reader windowed some other way -- the Spending report's calendar span,
-    selected by attribution day -- builds its own query and calls
-    :func:`set_transfer_legs` directly.
 
-    Args:
-        cash_flow: The set.
-        scenario_id: The budget scenario the transfers live in.
-        period_ids: The pay period ids the window holds; empty loads none.
-        *filters: Further SQLAlchemy clauses over :class:`Transfer`.
+class StatusBand(Enum):
+    """Which statuses a screen draws its plan items from.
 
-    Returns:
-        The legs, in transfer id order then side order; ``[]`` for none.
+    One part of a :class:`PlanScope`, and each band is ONE predicate over
+    either parent table, ``Transaction`` or ``Transfer``, through the clause
+    :mod:`app.utils.balance_predicates` already states for it -- so a screen's
+    bill rows and its transfer sides are drawn from the same statuses because
+    there is one statement of them, not two that agree.
+
+    * :attr:`EVERY` -- no status filter: the grid draws every row and side,
+      cancelled and credit included, and its cells decide what they show.
+    * :attr:`PROJECTED` -- still planned: the dashboard's unpaid bills.
+    * :attr:`SETTLED` -- paid or received: the Spending report's spent money.
+    * :attr:`BALANCE_CONTRIBUTING` -- projected or settled, never credit or
+      cancelled: the calendar's day cells (the F-3 Choice-2 predicate, wider
+      than the grid subtotal's on purpose).
     """
-    if not period_ids:
-        return []
-    transfers = (
-        db.session.query(Transfer)
-        .options(*transfer_pricing_load_options())
-        .filter(
-            touched_transfers_clause(cash_flow),
-            Transfer.scenario_id == scenario_id,
-            Transfer.pay_period_id.in_(period_ids),
-            Transfer.is_deleted.is_(False),
-            *filters,
-        )
-        .order_by(Transfer.id)
-        .all()
-    )
-    return set_transfer_legs(cash_flow, transfers)
+
+    EVERY = "every"
+    PROJECTED = "projected"
+    SETTLED = "settled"
+    BALANCE_CONTRIBUTING = "balance_contributing"
+
+    def clauses(self, model: type[PlanParent]) -> tuple[ColumnElement[bool], ...]:
+        """Return the band's filters over *model*.
+
+        Args:
+            model: ``Transaction`` or ``Transfer``; both carry ``status_id``
+                and ``is_deleted`` under the same names.
+
+        Returns:
+            A tuple of SQLAlchemy clauses over *model*; empty for
+            :attr:`EVERY`.
+        """
+        if self is StatusBand.PROJECTED:
+            return (is_projected_clause(model),)
+        if self is StatusBand.SETTLED:
+            return (model.status_id.in_(settled_status_ids()),)
+        if self is StatusBand.BALANCE_CONTRIBUTING:
+            return (balance_contributing_clause(model),)
+        return ()
 
 
-class PlanItems(NamedTuple):
-    """What a reader of the set's plan items draws: its own rows and the legs.
+@dataclass(frozen=True)
+class Paychecks:
+    """A window of pay periods: the items FILED under any of them.
 
-    The one shape the grid window (``routes/grid/_items.load_grid_items``),
-    the dashboard's unpaid bills, the calendar's period rows and the Spending
-    report's settled expenses each answer (leaves ``X-bi-6-1`` and
-    ``X-bi-6-1b``): the rows :func:`own_rows_clause` selected and the legs
-    :func:`set_transfer_legs` drew.  Every map, row-key, match and fold over
-    them takes the one list :attr:`items`, each map one call over rows and
-    legs alike since ruling **plan#1983** folded the per-item producers' leg
-    twins, and no ``app/`` code reads :attr:`rows` or :attr:`legs` apart
-    (only tests do): plan step **plan#2130** replaces this value with one
-    loader per screen (ruling **plan#2131**).
+    The grid's, the dashboard's, the calendar's and the Spending report's
+    pay-period window: selected by period membership, ``pay_period_id IN
+    (...)``, on either parent table.
 
     Attributes:
-        rows: The plan rows, :class:`~app.models.transaction.Transaction`.
-        legs: One :class:`~app.services.transfer_legs.TransferLeg` per
-            transfer the set shows, from the side it shows.
-        items: ``rows + legs``, the list every reader that treats the two
-            alike iterates.
+        period_ids: The ``budget.pay_periods.id`` values the window holds.
     """
 
-    rows: list[Transaction]
-    legs: list[TransferLeg]
-    items: list[PlanItem]
+    period_ids: tuple[int, ...]
 
-    @classmethod
-    def of(cls, rows: list[Transaction], legs: list[TransferLeg]) -> "PlanItems":
-        """Build the value with ``items`` derived, so it cannot disagree."""
-        return cls(rows=rows, legs=legs, items=[*rows, *legs])
+    @property
+    def selects_nothing(self) -> bool:
+        """``True`` for no periods: the loader answers ``[]`` with no statement."""
+        return not self.period_ids
+
+    def narrow(self, query: Query[_Parent], model: type[_Parent]) -> Query[_Parent]:
+        """Return *query* over *model* narrowed to the window.
+
+        Args:
+            query: A query rooted at *model*.
+            model: ``Transaction`` or ``Transfer``.
+
+        Returns:
+            The narrowed query.
+        """
+        return query.filter(model.pay_period_id.in_(self.period_ids))
+
+
+@dataclass(frozen=True)
+class AttributionSpan:
+    """A calendar span: the items ATTRIBUTED to a day inside it.
+
+    The Spending report's calendar window: an item belongs to the span when
+    ``COALESCE(due_date, its pay period's start)`` falls in ``[first_day,
+    last_day]``, across all the owner's periods, so a bill due in month M is
+    M's even when its funding period does not overlap M.  The period is
+    JOINED for its start and not loaded.
+
+    Attributes:
+        first_day: The span's first calendar day (inclusive).
+        last_day: The span's last calendar day (inclusive).
+    """
+
+    first_day: date
+    last_day: date
+
+    @property
+    def selects_nothing(self) -> bool:
+        """``False``: which days an item is attributed to only the database answers."""
+        return False
+
+    def narrow(self, query: Query[_Parent], model: type[_Parent]) -> Query[_Parent]:
+        """Return *query* over *model* narrowed to the items attributed to the span.
+
+        **The joined period must be the item's OWN owner's**, which is a fact
+        the database holds for a row (``fk_transactions_owner_period``) and
+        not for a transfer, whose period key is a plain one.  Stated against
+        the item's ``user_id`` -- a member's own owner, held equal to every
+        endpoint's by the transfer's composite account keys -- it selects
+        what the report's ``PayPeriod.user_id == <the owner>`` did, without a
+        second statement of who the owner is.
+
+        Args:
+            query: A query rooted at *model*.
+            model: ``Transaction`` or ``Transfer``; both carry ``due_date``,
+                ``pay_period_id`` and ``user_id``.
+
+        Returns:
+            The narrowed query, ``budget.pay_periods`` joined.
+        """
+        attribution_day = db.func.coalesce(model.due_date, PayPeriod.start_date)
+        return (
+            query.join(PayPeriod, model.pay_period_id == PayPeriod.id)
+            .filter(
+                PayPeriod.user_id == model.user_id,
+                attribution_day >= self.first_day,
+                attribution_day <= self.last_day,
+            )
+        )
+
+
+@dataclass(frozen=True)
+class PlanScope:
+    """WHICH plan items a screen draws: its scope, stated once for both tables.
+
+    The one value a reader of the set's plan items fills in (plan step
+    **plan#2130**, ruling **plan#2131**): the grid, the dashboard's bills, the
+    calendar and the Spending report each state their scope here and call
+    :func:`load_plan_items`, which turns every part into a clause for each
+    parent table in one place.  Until that step each wrote two queries, one
+    over ``budget.transactions`` and one over ``budget.transfers``, and
+    spelled every part twice -- five times over.
+
+    Attributes:
+        cash_flow: Whose items: the set's own rows
+            (:func:`own_rows_clause`) and the legs of every transfer it
+            touches (:func:`touched_transfers_clause`), drawn from the side
+            :func:`leg_accounts_shown` names.
+        scenario_id: The budget scenario the items live in.
+        window: :class:`Paychecks` or :class:`AttributionSpan`.
+        band: The :class:`StatusBand` the items are drawn from.
+        expenses_only: ``True`` keeps the expense rows and the sides money
+            LEAVES by (:func:`~app.services.transfer_legs.expense_legs`): a
+            bill, or money spent.
+    """
+
+    cash_flow: CashFlowSet
+    scenario_id: int
+    window: Paychecks | AttributionSpan
+    band: StatusBand
+    expenses_only: bool
+
+
+def load_plan_items(
+    scope: PlanScope, row_loads: tuple[LoaderOption, ...], *,
+    side_records: bool = False,
+) -> list[PlanItem]:
+    """Load the plan items *scope* selects: bill rows, then transfer sides.
+
+    **The ONE loader of a screen's plan items** (plan step **plan#2130**).
+    Each part of the scope becomes a clause on both parent tables here --
+    the scenario, the window, live (not deleted) and the status band through
+    :func:`_scoped`; the set through :func:`own_rows_clause` and
+    :func:`touched_transfers_clause`; expenses only as the rows'
+    ``transaction_type_id`` and the sides' :func:`~app.services.transfer_legs
+    .expense_legs` -- so a screen's rows and its transfers cannot disagree on
+    scope.  Were every bill a transfer, the row query would go, and with it
+    each screen's *row_loads*, the one argument a screen passes that is a
+    row's alone; no screen's :class:`PlanScope` would change.
+
+    **The list is in one order, a function of the data**: rows by id, then
+    the sides in transfer id then side order -- exactly
+    :func:`~app.services.transfer_legs.key_order` (finding **plan#2186**).
+    The row query carried no ``ORDER BY`` before, so a grid cell holding two
+    rows drew them in whatever order the planner returned, which two copies of
+    one state showed reversed (the X-bi-6-5 kit, 2026-10-29).
+
+    One statement for the rows and one for the transfers, each with what its
+    loader options select in (a transfer's pricing chain reads its period);
+    none at all for a window that :attr:`~Paychecks.selects_nothing`; one
+    more for *side_records*.
+
+    Args:
+        scope: The screen's :class:`PlanScope`.
+        row_loads: The loader options for what the screen's readers read off
+            a ROW (each screen keeps its own).  A transfer carries
+            :func:`~app.utils.amount_relationships
+            .transfer_pricing_load_options` for every screen: the chain a
+            side's price walks, and the period a bill reads; its endpoints,
+            status and category are ``lazy="joined"`` on the model.
+        side_records: ``True`` for a screen whose readers read a side's
+            RECORD (the Spending report's timeliness): every side's record is
+            pre-loaded in one statement
+            (:func:`~app.services.transfer_legs.preload_side_records`, ruling
+            **plan#2136**: called by a reader that reads records, and by no
+            other).
+
+    Returns:
+        The rows, then the sides: one list of
+        :data:`~app.services.transfer_legs.PlanItem`.
+    """
+    if scope.window.selects_nothing:
+        return []
+    rows = _scoped(scope, Transaction).options(*row_loads).filter(
+        own_rows_clause(scope.cash_flow),
+    )
+    if scope.expenses_only:
+        rows = rows.filter(
+            Transaction.transaction_type_id
+            == ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
+        )
+    transfers = (
+        _scoped(scope, Transfer)
+        .options(*transfer_pricing_load_options())
+        .filter(touched_transfers_clause(scope.cash_flow))
+    )
+    loaded_rows = rows.order_by(Transaction.id).all()
+    sides = set_transfer_legs(
+        scope.cash_flow, transfers.order_by(Transfer.id).all(),
+    )
+    if scope.expenses_only:
+        sides = expense_legs(sides)
+    if side_records:
+        preload_side_records(side.transfer for side in sides)
+    return [*loaded_rows, *sides]
+
+
+def _scoped(scope: PlanScope, model: type[_Parent]) -> Query[_Parent]:
+    """Return the query of *model*'s live rows in *scope*'s scenario, window and band.
+
+    The parts of a scope both tables state alike, stated once; the set and
+    expenses only differ by table and :func:`load_plan_items` adds them.
+
+    Args:
+        scope: The screen's :class:`PlanScope`.
+        model: ``Transaction`` or ``Transfer``.
+
+    Returns:
+        A query rooted at *model* -- built, not executed.
+    """
+    return scope.window.narrow(db.session.query(model), model).filter(
+        model.scenario_id == scope.scenario_id,
+        model.is_deleted.is_(False),
+        *scope.band.clauses(model),
+    )
 
 
 @dataclass(frozen=True)

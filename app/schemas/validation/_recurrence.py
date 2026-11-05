@@ -176,12 +176,11 @@ def validate_authorable_cadence(data):
     so what is left is whether the application can HONOUR the
     ``(unit, placement)`` PAIR.  Until plan step **R8-a** that meant "can a
     first occurrence be DERIVED", which refused two pairs by naming derivations
-    ruling **R-R16** had already deleted; it is the two live rules
-    :func:`~app.services.recurrence.authorable_cadences` states now, and the
-    only reading still refused is the ``WEEK`` unit -- whose occurrences are
-    neither paydays nor days of the month, so
-    ``recurrence.compute_due_date`` has nothing to date its rows from
-    until plan step **R8-b** dates a weekly row from its occurrence.  **The
+    ruling **R-R16** had already deleted; it is the live rule
+    :func:`~app.services.recurrence.authorable_cadences` states now.  The
+    ``WEEK`` unit was refused too until plan step **R8-b** dated a weekly row
+    from its occurrence, so the only reading still refused is a pay-period
+    cadence funded from a LATER paycheck, whose placement is inert.  **The
     interval is no longer able to make a cadence unauthorable**, which is what
     the refusal's own copy had to stop saying.
 
@@ -542,7 +541,7 @@ class RecurrenceCadenceFieldsMixin:
     # is a payroll benefit taken on a month's first two paychecks, which the
     # two axes could not say (ledger row **D59**).  The form renders the
     # control ONLY beside a unit whose occurrences can repeat within a month
-    # (paychecks; weeks once plan step R8-b opens them); a calendar-month
+    # (paychecks and weeks); a calendar-month
     # cadence fires at most once a month by construction, and
     # :meth:`validate_ceiling_fits_the_unit` refuses the pair a hand-assembled
     # POST could state.

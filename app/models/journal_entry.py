@@ -219,11 +219,14 @@ class JournalEntry(UserScopedMixin, CreatedAtMixin, db.Model):
     # correction links no row.
     #
     # **It is a source of its own rather than more legs on the parent's entry**
-    # because the posted walk reads a source's day and its clearing link off the
-    # SOURCE ROW: a purchase carries its own ``settled_on`` and its own
-    # ``reconciled_by_id``, and a still-projected envelope has no settle day at
-    # all -- so legs grouped under the parent row's own link (``transaction_id``,
-    # deleted at card plan#1845) could not be dated or attributed.
+    # because a source's day and its clearing link are the SOURCE ROW's: a
+    # purchase carries its own ``settled_on`` and its own ``reconciled_by_id``,
+    # and a still-projected envelope has no settle day at all -- so legs
+    # grouped under the parent row's own link (``transaction_id``, deleted at
+    # card plan#1845) could not be dated or attributed.  The posted walk read
+    # both off the row by this link until plan task plan#2525 moved the
+    # account walk onto the records; the ledger report still dates a
+    # movement's legs by it.
     transaction_entry_id = db.Column(
         db.Integer,
         db.ForeignKey(
@@ -275,14 +278,10 @@ class Posting(CreatedAtMixin, db.Model):
     ``journal_entry.user_id`` (normalisation over a denormalised
     convenience column).  ``journal_entry_id`` and ``ledger_account_id`` are
     both CASCADE -- the documented disposal paths (a tenancy delete cascades
-    through the entry; a ledger-account delete cascades the leg).  Per the
-    cascade-imbalance impossibility argument in
-    :class:`app.models.ledger_account.LedgerAccount`, an account whose linked
-    ledger *has* postings is archived rather than hard-deleted (route Guard 5,
-    load-bearing because a settled transfer's postings outlive the transfer
-    that wrote them), so only a posting-free account ever reaches the CASCADE
-    and the ``ledger_account_id`` CASCADE never orphans -- and in practice
-    never fires on -- a leg.
+    through the entry; a ledger-account delete cascades the leg, which a
+    permanent account delete does: see
+    :class:`app.models.ledger_account.LedgerAccount`, whose FK-action rationale
+    says what that leaves).
 
     Append-only: see the module docstring.  The per-entry balanced invariant
     (sum to zero, at least two legs) is enforced by the deferred constraint
@@ -319,8 +318,8 @@ class Posting(CreatedAtMixin, db.Model):
     )
     # The chart-of-accounts entry this leg lands in.  CASCADE is the
     # documented disposal path (mirroring ``loan_anchor_events.account_id``);
-    # the LedgerAccount impossibility argument keeps it from ever orphaning a
-    # leg in practice.
+    # the LedgerAccount FK-action rationale says what a permanent account
+    # delete leaves.
     ledger_account_id = db.Column(
         db.Integer,
         db.ForeignKey(

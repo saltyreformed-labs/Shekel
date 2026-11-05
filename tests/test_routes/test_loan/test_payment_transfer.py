@@ -19,6 +19,9 @@ from tests._test_helpers import (
 from tests.oracles.recurrence_baseline import MONTHLY
 
 from ._helpers import _create_loan_account, _payment_template, _create_mortgage
+from app.services.balance_at import BalanceContext
+from app.services.obligations_aggregator import todays_price
+from tests._definition_price import newest_price
 
 
 # ── Transfer Prompt Tests (Commit 5.1-3) ─────────────────────────
@@ -55,7 +58,6 @@ class TestTransferPrompt:
             from_account_id=seed_user["account"].id,
             to_account_id=acct.id,
             name="Existing Mortgage Payment",
-            default_amount=Decimal("1500.00"),
             is_active=True,
         )
         db.session.add(tpl)
@@ -63,7 +65,7 @@ class TestTransferPrompt:
         # Priced, as every real definition is (the loan page's plan sums this
         # definition's occurrences since plan step R16-b-2 and refuses a
         # series nobody stated).
-        state_template_price(tpl)
+        state_template_price(tpl, Decimal("1500.00"))
         db.session.commit()
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
@@ -98,7 +100,6 @@ class TestTransferPrompt:
             from_account_id=seed_user["account"].id,
             to_account_id=acct.id,
             name="Old Mortgage Payment",
-            default_amount=Decimal("1500.00"),
             is_active=False,  # Deactivated
         )
         db.session.add(tpl)
@@ -146,7 +147,17 @@ class TestTransferPrompt:
         assert tpl.is_active is True
         assert tpl.from_account_id == checking.id
         assert tpl.recurrence_rule is not None
-        assert tpl.default_amount > 0
+        # A payment that follows its loan states no price (plan step X-bp,
+        # where this asserted its ``default_amount`` copy); the figure the app
+        # shows for it is the loan's, priced live: the contractual P&I of the
+        # $255,000.00 the helper originates (the $250,000.00 balance plus the
+        # $5,000.00 it paid down) at 6.5% over 360 months, with no escrow,
+        # 255,000 x (0.065 / 12) / (1 - (1 + 0.065 / 12) ** -360)
+        # = 1,381.25 / (1 - 1 / 6.991798) = 1,611.77.
+        assert newest_price(tpl) is None
+        assert todays_price(
+            tpl, BalanceContext.build(seed_user["user"].id),
+        ).amount == Decimal("1611.77")
         # No "amount" override was posted, so the route defaults to the
         # full monthly payment and opts into live derivation: the loan-only
         # derive_from_loan flag lives in the 1:1 loan_payment_settings row
@@ -332,7 +343,7 @@ class TestTransferPrompt:
             .first()
         )
         assert tpl is not None
-        assert tpl.default_amount == Decimal("2000.00")
+        assert newest_price(tpl) == Decimal("2000.00")
         # Manual mode (typed amount) still gets a loan_payment_settings row,
         # but with derive_from_loan False -- the cash stays the typed base
         # (decision B / decision D).
@@ -344,9 +355,9 @@ class TestTransferPrompt:
     ):
         """Creating a payment with an extra stores it on settings, not the base.
 
-        The standing extra rides the settings row (spec Sec. 6.3); the
-        ``default_amount`` stays the derived base (P&I + escrow), NOT base +
-        extra -- the extra is applied live, never baked in.
+        The standing extra rides the settings row (spec Sec. 6.3); the base
+        is the derived P&I + escrow, priced live and stated nowhere, so the
+        extra is applied live, never baked in.
         """
         from app.models.transfer_template import TransferTemplate  # pylint: disable=import-outside-toplevel
 
@@ -371,8 +382,15 @@ class TestTransferPrompt:
         assert tpl.settings is not None
         assert tpl.settings.derive_from_loan is True
         assert tpl.settings.extra_principal == Decimal("100.00")
-        # The base is the derived P&I + escrow, NOT base + extra.
-        assert tpl.default_amount > Decimal("100.00")
+        # The base is the derived P&I + escrow, priced live, NOT a stated
+        # base + extra: the template states no price for the extra to be
+        # baked into.  The figure shown is that base with the extra on top:
+        # the $1,611.77 P&I (no escrow; test_create_transfer_success's
+        # arithmetic) + $100.00 = $1,711.77.
+        assert newest_price(tpl) is None
+        assert todays_price(
+            tpl, BalanceContext.build(seed_user["user"].id),
+        ).amount == Decimal("1711.77")
 
     def test_update_payment_settings_changes_extra(
         self, auth_client, seed_user, db, seed_periods,

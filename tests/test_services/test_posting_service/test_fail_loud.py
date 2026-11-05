@@ -11,7 +11,7 @@ import pytest
 from app.enums import StatusEnum
 from app.extensions import db as _db
 from app.models.journal_entry import JournalEntry
-from app.services import posting_service
+from app.services import posting_service, transfer_legs
 from app.services._posting_write import _emit_balanced_entry, _PostingLeg
 from app.services.posting_service import PostingError
 from tests._test_helpers import (
@@ -123,7 +123,13 @@ class TestFailLoud:
             _db.session.commit()
             checking_ledger = _ledger_id(checking)
             transit_ledger = _transit_ledger_id(seed_user)
-            posting_service.reverse_transfer_postings_before_delete(transfer)
+            # The teardown's reversal over the pair's records, which the one
+            # removal act runs before it deletes them (ruling plan#2564; the
+            # pair's own teardown door until plan task plan#2557 deleted it).
+            posting_service.reverse_leaving_movements([
+                movement for movement, _leg
+                in transfer_legs.transfer_family_movements(transfer)
+            ])
             _db.session.commit()
             assert _ledger_total(transit_ledger) == Decimal("0.00")
             # Remove the to-side's record via raw SQL, around the service: a

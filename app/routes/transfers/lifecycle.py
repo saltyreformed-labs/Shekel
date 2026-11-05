@@ -69,7 +69,11 @@ from app.routes._standing_payment import (
     sync_loan_payment_start_or_refuse,
 )
 from app.routes.transfers._bp import transfers_bp
-from app.services import definition_unarchive, transfer_service
+from app.services import (
+    definition_unarchive,
+    template_amount_service,
+    transfer_service,
+)
 from app.services.balance_at import BalanceContext
 from app.utils import archive_helpers
 from app.utils.auth_helpers import get_or_404, require_owner
@@ -291,7 +295,8 @@ def unarchive_transfer_template(template_id):
         refused = regenerate_or_refuse(
             template,
             PreEditTemplateState(
-                amount=template.default_amount, had_recurrence_rule=True,
+                series=template_amount_service.series_image(template),
+                had_recurrence_rule=True,
             ),
             display_today(),
             redirect=_LIST,

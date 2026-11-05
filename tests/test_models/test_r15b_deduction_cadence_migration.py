@@ -39,10 +39,14 @@ from tests._test_helpers import (
     load_migration_module,
     make_line_cadence_rule,
     make_salary_profile,
-    replay_paycheck_lines_rename as _replay,
+    replay_paycheck_lines_rename,
     restore_rule_due_day_column,
     rewind_paycheck_lines_rename,
     run_migration_callable as _run,
+)
+from tests.test_models._rule_unit_flag import (
+    replay_rule_unit_flag,
+    rewind_rule_unit_flag,
 )
 
 
@@ -51,14 +55,28 @@ def _rewind(db_session):
 
     Plan step ``recurrence:R5-a`` dropped ``recurrence_rules.due_day_of_month``,
     which this revision's own SQL reads (``_DEDUCTION_RULES``, ``_unadorned``),
-    so its downgrade runs FIRST -- it is the newest -- and plan step
-    ``salary:R18-a``/``R18-b``'s rename rewind after it.
+    and plan step ``salary:R18-a``/``R18-b``'s rename rewind after it.  Plan step
+    plan#2302's NOT NULL flag goes first of all, being the newest: this revision's
+    INSERT states no such column.
 
     Args:
         db_session: The test ``db.session``.
     """
+    rewind_rule_unit_flag(db_session)
     restore_rule_due_day_column(db_session)
     rewind_paycheck_lines_rename(db_session)
+
+
+def _replay(db_session):
+    """Bring back what the ORM models map, for a case that reads through them.
+
+    The head names, then the flag; the due day stays, the model not mapping it.
+
+    Args:
+        db_session: The test ``db.session``.
+    """
+    replay_paycheck_lines_rename(db_session)
+    replay_rule_unit_flag(db_session)
 
 #: This revision, loaded so its own callables are what this file drives.
 _M_R15B = load_migration_module(

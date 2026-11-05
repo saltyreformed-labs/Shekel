@@ -436,7 +436,7 @@ services:
     image: ghcr.io/saltyreformed-labs/shekel@${SHEKEL_IMAGE_DIGEST:?Set SHEKEL_IMAGE_DIGEST=sha256:... in /opt/docker/shekel/.env to pin the production image (audit finding F-060). See deploy/README.md "Image digest pinning" for the procedure.}
     environment:
       # Pin the app's civil timezone (parity audit 2026-06-12, finding
-      # M01 in docs/audits/dev-prod-parity/findings.md).  The image
+      # M01 in shekel-audits/dev-prod-parity/findings.md).  The image
       # default is UTC, which flipped ``date.today()`` to the next day
       # at 20:00 America/New_York (19:00 in winter), so date-defaulted
       # entries, pay-period membership, and staleness flags disagreed

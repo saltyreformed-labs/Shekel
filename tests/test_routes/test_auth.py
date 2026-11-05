@@ -202,8 +202,9 @@ class TestLogin:
                 # counters (so a future test that flips
                 # ``limiter.enabled = True`` without calling
                 # ``init_app`` cannot inherit non-zero counts from
-                # this test -- see c-38-followups.md Issue 2a), and
-                # reset limiter for other tests.  The ``finally``
+                # this test -- see Issue 2a of
+                # shekel-audits/security-2026-04-15/c-38-followups.md),
+                # and reset limiter for other tests.  The ``finally``
                 # guarantees this runs even if an assertion above
                 # raised.
                 with rate_app.app_context():
@@ -2380,8 +2381,9 @@ class TestRegistration:
                 # counters (so a future test that flips
                 # ``limiter.enabled = True`` without calling
                 # ``init_app`` cannot inherit non-zero counts from
-                # this test -- see c-38-followups.md Issue 2a), and
-                # reset limiter for other tests.  The ``finally``
+                # this test -- see Issue 2a of
+                # shekel-audits/security-2026-04-15/c-38-followups.md),
+                # and reset limiter for other tests.  The ``finally``
                 # guarantees this runs even if an assertion above
                 # raised.
                 with rate_app.app_context():
@@ -2481,8 +2483,9 @@ class TestMfaVerifySecurity:
                 # counters (so a future test that flips
                 # ``limiter.enabled = True`` without calling
                 # ``init_app`` cannot inherit non-zero counts from
-                # this test -- see c-38-followups.md Issue 2a), and
-                # reset limiter for other tests.  The ``finally``
+                # this test -- see Issue 2a of
+                # shekel-audits/security-2026-04-15/c-38-followups.md),
+                # and reset limiter for other tests.  The ``finally``
                 # guarantees this runs even if an assertion above
                 # raised.
                 with rate_app.app_context():

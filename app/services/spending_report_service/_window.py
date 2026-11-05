@@ -19,7 +19,7 @@ Boundary discipline: no Flask import; DB reads only, ``Decimal`` out.
 from decimal import Decimal
 
 from app.services import spending_analysis
-from app.services.cash_flow_set import PlanItems
+from app.services.cash_flow_set import AttributionSpan, Paychecks
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import PlanItem, parent_of
 from app.utils.money import ZERO
@@ -98,34 +98,35 @@ def _resolve_window(ids: _ScopeIds, window: SpendingWindow) -> _ResolvedWindow:
 
 def _window_transactions(
     ids: _ScopeIds, resolved: _ResolvedWindow,
-) -> PlanItems:
+) -> list[PlanItem]:
     """Load the settled expense items attributed to a resolved window.
 
-    A calendar window selects by the attribution rule itself --
-    COALESCE(due_date, pay period start) inside the window span, across
-    ALL the user's periods
-    (:func:`spending_analysis.query_settled_expenses_in_span`) -- so a
-    bill due in month M belongs to M even when its funding period does not
-    overlap M (the former period-overlap pre-filter attributed such a row
-    to NO month window).  A pay-period window applies no date filter: the
-    period IS the window.
+    **This is where the report chooses its loader's window**, and the one
+    settled-spend loader takes it (:func:`spending_analysis
+    .query_settled_expenses`, plan step **plan#2130**; a loader per window
+    until then).  A calendar window selects by the attribution rule itself
+    -- COALESCE(due_date, pay period start) inside the window span, across
+    ALL the owner's periods
+    (:class:`~app.services.cash_flow_set.AttributionSpan`) -- so a bill due
+    in month M belongs to M even when its funding period does not overlap M
+    (the former period-overlap pre-filter attributed such a row to NO month
+    window).  A pay-period window applies no date filter: the period IS the
+    window (:class:`~app.services.cash_flow_set.Paychecks`).
 
     Args:
         ids: The report's scope ids.
         resolved: The resolved window (period ids + optional span).
 
     Returns:
-        The window's :class:`~app.services.cash_flow_set.PlanItems`: its
-        settled expense rows and its settled transfers' expense legs (leaf
-        ``balance:X-bi-6-1b``).
+        The window's settled expense rows, then its settled transfers'
+        expense legs (leaf ``balance:X-bi-6-1b``): one list.
     """
     if resolved.first_day is None:
-        return spending_analysis.query_settled_expenses(
-            ids.scenario_id, resolved.period_ids, ids.cash_flow,
-        )
-    return spending_analysis.query_settled_expenses_in_span(
-        ids.scenario_id, ids.cash_flow, ids.user_id,
-        resolved.first_day, resolved.last_day,
+        window = Paychecks(tuple(resolved.period_ids))
+    else:
+        window = AttributionSpan(resolved.first_day, resolved.last_day)
+    return spending_analysis.query_settled_expenses(
+        ids.cash_flow, ids.scenario_id, window,
     )
 
 
@@ -166,7 +167,7 @@ def _load_window(
         ``(items, total)``; ``total`` per :func:`_window_total`.
     """
     resolved = _resolve_window(ids, window)
-    items = _window_transactions(ids, resolved).items
+    items = _window_transactions(ids, resolved)
     return items, _window_total(resolved, items)
 
 

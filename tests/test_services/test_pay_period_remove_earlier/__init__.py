@@ -8,12 +8,13 @@ the owner entered, changed or paid refuses the removal and is named, as does
 any entry the posted ledger booked in it, a pay stub on its payday, and money
 DATED inside it anywhere in the budget.  Ruling **R-PC114** (amending
 R-PC109's booked-entry clause): what the posted ledger booked in a removed
-paycheck is re-filed through Reset's two re-syncs, and the removal is refused
-only if a posted total still moves.  Ruling **R-PC110**: at least one
+paycheck is re-filed through Reset's two re-syncs.  Ruling **plan#2517**
+(amending R-PC114): the removal is no longer refused when a booked total
+moves, because worked out from the records no total can.  Ruling **R-PC110**: at least one
 paycheck of the earliest pay rhythm always stays, and that rhythm's start
 moves UP to the new first paycheck (the reverse of R-PC105's move down).
 
-Eight contracts, one class each:
+Nine contracts, one class each:
 
 * the PRODUCER (``pay_calendar.opening_rephase``) -- pure: the exact inverse
   of ``earlier_paydays``' re-phase over every cadence kind and convention,
@@ -23,11 +24,14 @@ Eight contracts, one class each:
   stays;
 * an ADD UNDONE -- add N with C18-b's door, re-sync the ledger, remove them
   with this one, template rows and a recurring transfer included: paydays,
-  eras, rows and posted totals come back (the test names what it compares);
+  eras, rows and both ledgers' totals come back (the test names what it
+  compares);
 * WHAT A PAYCHECK MAY HOLD (R-PC109's filed half), one case per kind;
-* the LEDGER RE-FILED (R-PC114) -- an account's and a loan's opening filed
+* the STORE RE-FILED (R-PC114) -- an account's and a loan's opening filed
   in an added paycheck go back, a self-cancelling pair goes, and an entry no
-  re-sync rebuilds refuses in the ruled words;
+  re-sync rebuilds goes too, unrefused (plan#2517);
+* NO WORKED-OUT TOTAL MOVES (plan#2517) -- openings and a loan's planned
+  payments in the head, every total per chart key equal before and after;
 * MONEY DATED inside the removed span (R-PC109's dated half), one case per
   arm, and the case the span excludes;
 * the EARLIEST RHYTHM KEEPS A PAYCHECK (R-PC110);

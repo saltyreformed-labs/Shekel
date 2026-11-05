@@ -104,4 +104,4 @@ every client.
 - `scripts/generate_pg_cert.sh` -- the canonical generator + verifier.
 - `deploy/docker-compose.prod.yml` -- the bind-mount declarations and the matching `ssl_cert_file` /
   `ssl_key_file` postgres flags.
-- `docs/audits/security-2026-04-15/findings.md` F-154 -- the audit finding this directory closes.
+- `shekel-audits/security-2026-04-15/findings.md` F-154 -- the audit finding this directory closes.

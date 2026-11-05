@@ -27,11 +27,13 @@ its NAME, so a Quarterly rule read as monthly at face value -- and that same
 migration re-points it, so it now means "how many ``unit_id``\\ s pass between
 occurrences" for every unit and every reader takes it off the column.
 
-What survives that a later step still owes: ``recurrence.compute_due_date``
-dated every row from the dropped ``day_of_month`` and reads
-:func:`scheduling_day_of_month` instead (developer ruling 2026-08-16, plan
-ledger row **D37**), until plan step **R5** deletes that function by giving a
-generated row its own ``occurs_on`` and ``due_on``.
+``recurrence.compute_due_date`` dated every row from the dropped
+``day_of_month`` and read :func:`scheduling_day_of_month` in its place
+(developer ruling 2026-08-16, plan ledger row **D37**): for the day itself
+until plan step **R5-a** dated a row from its occurrence, and for whether it
+was ``None`` until plan step **R8-b** dated a row from the cadence's unit and
+placement.  Nothing that dates a row reads it now; it still answers the day of
+the month a rule schedules on.
 
 **A stored DERIVATION would have been a cache; a stored AUTHORED value is a
 fact**, and that distinction is why the R2d ruling of 2026-08-07 refused these
@@ -51,7 +53,7 @@ What this package offers
 ------------------------
 
 * :func:`resolve` -- ``(spec, calendar) -> ResolvedRecurrence``, the two-axis
-  meaning.  Pure: no Flask, no ORM, no clock, no database.
+  meaning.  No Flask, no ORM, no clock, no database read.
   Its ``starts_on`` is the rule's FIRST OCCURRENCE, with ONE meaning for every
   unit (ruling **R-R16**, plan ledger row **D28**), and it is what
   ``budget.recurrence_rules.starts_on`` holds.  ``anchor_date`` and the

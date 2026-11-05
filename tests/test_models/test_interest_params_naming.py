@@ -21,7 +21,7 @@ never dropped, double-firing into ``system.audit_log`` on every
     ``audit_*`` trigger on the table).
 
 Audit reference: M-1 of
-docs/audits/security-2026-04-15/model-migration-drift.md.
+shekel-audits/security-2026-04-15/model-migration-drift.md.
 """
 # pylint: disable=redefined-outer-name  -- pytest fixture pattern
 from __future__ import annotations

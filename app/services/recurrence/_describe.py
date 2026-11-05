@@ -20,7 +20,7 @@ Three problems, all of them structural:
   the difference beyond who wrote which branch;
 * **the vocabulary itself was the ceiling.**  Cadences the closed set had no
   member to name -- ``(2, MONTH)``, which plan step R7c-c made authorable, and
-  ``(1, WEEK)``, which is still plan step R8's -- could have no branch written
+  ``(1, WEEK)``, which plan step R8-b did -- could have no branch written
   for them at all; a rule the
   seven did not match fell to a fallback that titled the ``ref`` row's own
   ``name``.  That fallback was the last ``.name``-for-display coupling on THIS
@@ -688,7 +688,7 @@ def describe(resolved: ResolvedRecurrence) -> RecurrenceDescription:
     The single producer of a recurrence's display phrase, and total over
     ``(interval_n, unit, placement, max_per_month)`` rather than over the
     closed pattern set it replaced -- so ``(2, MONTH)`` and ``(1, WEEK)``
-    already read correctly though nothing authors them until plan step R8,
+    read correctly before anything authored them (plan steps R7c-c and R8-b),
     and a ceilinged rule reads ``"Every paycheck (at most 2 a month)"``
     (plan step salary:R15-a).
 

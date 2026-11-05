@@ -146,7 +146,7 @@ This version is a structural reorganisation of the roadmap; almost no content wa
 3. **Two new sections added.**
    - **Section 1 (Security Remediation):** the in-progress April 2026 audit response (56 commits
      across 10 phases; 16 merged). Entry summarises status and links to the canonical plan at
-     `docs/audits/security-2026-04-15/remediation-plan.md`; the plan is not duplicated in the
+     `shekel-audits/security-2026-04-15/remediation-plan.md`; the plan is not duplicated in the
      roadmap.
    - **Section 2 (Financial Calculation Consistency):** a new parent section addressing drift
      between the multiple paths that compute monetary amounts. Three sequenced stages: unify
@@ -216,8 +216,8 @@ tail and Section 7 is load-bearing, recorded in `docs/plans/implementation_plan_
 consolidated into earlier commits and largely shipped; two Phase 8 items remain (the Argon2id
 password-hash migration and a config-drift check script); Phase 9 is not being pursued; Phase 10 is
 operator-tracked. Verified against merged git history. **Audit date:** April 15, 2026.
-**Canonical plan:** `docs/audits/security-2026-04-15/remediation-plan.md`.
-**Supporting files in `docs/audits/security-2026-04-15/`:** `findings.md`, `c-09-followups.md`,
+**Canonical plan:** `shekel-audits/security-2026-04-15/remediation-plan.md`.
+**Supporting files in `shekel-audits/security-2026-04-15/`:** `findings.md`, `c-09-followups.md`,
 `reports/`, `sbom/`, `scans/`.
 
 ### 1.1 Context
@@ -748,7 +748,7 @@ comparisons. All findings remediated. Supporting documents: `docs/adversarial_au
 `docs/implementation_plan_audit_remediation.md`. See v4-6 Section 4B for full detail.
 
 > **Note:** A second, deeper security audit was conducted in April 2026
-> (`docs/audits/security-2026-04-15/`). That audit's remediation work is tracked as Section 1 in
+> (`shekel-audits/security-2026-04-15/`). That audit's remediation work is tracked as Section 1 in
 > this roadmap.
 
 ### A.6 Cleanup Sprint (v4-6 Section 5A) -- COMPLETE April 2026
@@ -859,7 +859,7 @@ Docker stack: Cloudflare Tunnel ingress, the shared Nginx vhost, real-IP pinning
 per-container hardening (`cap_drop`, `no-new-privileges`, `read_only`), and image digest pinning.
 Six of ten findings were closed in a same-day remediation pass; the remainder (tier segmentation, a
 UniFi upgrade, a Cloudflare Access scope) were deferred. It shares the C-33 network-isolation work
-with Section 1. Supporting doc: `docs/audits/homelab-security-2026-05-09/findings.md`.
+with Section 1. Supporting doc: `shekel-audits/homelab-security-2026-05-09/findings.md`.
 
 ### A.16 Code Quality Audit and Remediation -- COMPLETE June 2026
 
@@ -893,7 +893,7 @@ rate limiting, owner-role parity by making the containerized dev app the primary
 digest pinning, an external pgdata volume, and host hygiene. The biggest correctness item was
 pinning `TZ=America/New_York` on the app services so date-boundary logic matches production (see
 `project_timezone_display_policy`). One operator action (a systemd audit-cleanup timer) is the only
-follow-up requiring host sudo. Supporting doc: `docs/audits/dev-prod-parity/findings.md`.
+follow-up requiring host sudo. Supporting doc: `shekel-audits/dev-prod-parity/findings.md`.
 
 ### A.19 Fable 5 UI/UX Overhaul -- Core shipped June 2026 (per-screen rollout ongoing)
 

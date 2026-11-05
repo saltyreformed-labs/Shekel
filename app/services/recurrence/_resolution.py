@@ -50,7 +50,9 @@ honest cadence existed for it, and it resolved to the same inert value as
 Plan step R2e-3 deleted it: "does not recur" is NO RULE naming the definition,
 on either template kind, which never reaches this module at all.
 
-Pure: no Flask, no ORM, no clock, no database.  Its two inputs are the
+No Flask, no ORM, no clock, and no database read: what a unit's reference row
+states comes from the reference cache, loaded once per process (ruling
+plan#2748).  Its two inputs are the
 authored spec and the owner's
 :class:`~app.services.pay_calendar.PayCalendar`, so every derivation below can
 be exercised at exact dates.
@@ -109,14 +111,8 @@ from app.services.recurrence._nominal_day import (
     _require_nominal_day_pair,
     cadence_day_of_month,
 )
-from app.services.recurrence._offer import (
-    require_authorable_cadence,
-    require_row_date_coordinate,
-)
-from app.services.recurrence._row_day import (
-    cadence_scheduled_day,
-    date_row,
-)
+from app.services.recurrence._offer import require_authorable_cadence
+from app.services.recurrence._row_day import date_row
 from app.utils.books_boundary import row_books_day
 from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN
 
@@ -152,6 +148,9 @@ def _require_month_ceiling_pair(
     never changes an answer with.  Storing it would be the closed-set shape
     this package removes: a column holding a fact no reader can act on, which
     is how a value comes to be maintained by nobody and believed by someone.
+
+    The actionable check in front of ``ck_recurrence_rules_max_per_month_unit``
+    (plan step plan#2302), which holds a writer that never reaches this one.
 
     Membership is :func:`~app.services.recurrence.can_repeat_within_month`,
     and not a second list of units: that predicate is what the picker offers
@@ -393,18 +392,11 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
         **stamps on that row, from this value's own coordinates** (plan step
         ``pay_calendar:C18-a``, ruling **R-PC86**).  Both hand one body --
         :func:`~app.services.recurrence._row_day.date_row` -- the placed
-        occurrence and whether the cadence is dated from its paycheck
-        (:func:`~app.services.recurrence._row_day.cadence_scheduled_day`
-        answering ``None``), so the day the walk bounds by the books and the
-        day the written row carries are one derivation: the occurrence for a
-        cadence naming a day, the funding payday for one naming none (plan
-        step recurrence:R5-a, rulings **R-R94** / **R-R95**).
-
-        The row-date refusal is asked FIRST, as
-        ``scheduling_day_of_month`` asks it: a ``WEEK`` value is
-        unconstructible through :func:`resolve` (the authorable-cadence
-        refusal) but not by hand, and a plausible payday-dated answer for it
-        would discard the weekday the rule means.
+        occurrence and the cadence's unit and placement, so the day the walk
+        bounds by the books and the day the written row carries are one
+        derivation: the occurrence for a calendar cadence funded by the
+        paycheck containing it, the funding payday for every other (plan
+        steps recurrence:R5-a and R8-b, rulings **R-R94** / **R-R95**).
 
         Args:
             occurrence: The date the cadence names, off the placement.
@@ -413,17 +405,9 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
 
         Returns:
             The due day.
-
-        Raises:
-            RecurrenceResolutionError: The unit's occurrences cannot be dated
-                onto a generated row (``require_row_date_coordinate``).
         """
-        require_row_date_coordinate(self.unit, "a resolved recurrence")
         return date_row(
-            occurrence, period,
-            from_paycheck=cadence_scheduled_day(
-                self.unit, self.placement, self.starts_on, self.nominal_day,
-            ) is None,
+            occurrence, period, unit=self.unit, placement=self.placement,
         )
 
     def books_day(self, occurrence: date, period: DerivedPeriod) -> date:
@@ -446,11 +430,6 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
         Returns:
             The day the walk hands
             :func:`~app.utils.books_boundary.books_hold`.
-
-        Raises:
-            RecurrenceResolutionError: See :meth:`row_date`, asked first
-                for an envelope too, so a value whose unit cannot date a row
-                is refused whatever it is compared on.
         """
         return row_books_day(
             self.row_date(occurrence, period), period.end_date,

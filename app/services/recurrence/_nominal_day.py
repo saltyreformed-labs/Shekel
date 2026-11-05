@@ -20,7 +20,9 @@ refusal both value types hold at construction
 **The dependency runs ONE way**: this module imports :mod:`._frequency` and
 nothing of :mod:`._resolution`, which imports it.
 
-Pure: no Flask, no ORM, no clock, no database.
+No Flask, no ORM, no clock, and no database read: what a unit's reference row
+states comes from the reference cache, loaded once per process (ruling
+plan#2748).
 """
 import calendar as calendar_module
 from datetime import date
@@ -191,6 +193,8 @@ def _require_nominal_day_pair(
     in-memory half here, so both values that carry the pair
     (:class:`RecurrenceSpec` and :class:`ResolvedRecurrence`) refuse it before
     they exist.  There is no state left for a generation-time fence to catch.
+    The unit half of the rule reached the table at plan step plan#2302
+    (``ck_recurrence_rules_nominal_day_unit``); this answers in front of it.
 
     **Membership in :func:`offerable_nominal_days`, and not a second list of
     conditions.**  That function IS the rule -- the cadence must fire on a day

@@ -5,12 +5,16 @@ command (R-BAL186), and nothing written over one an earlier run filed -- ruling
 and no leaf filed under a step a branch has claimed, or one with a task still open.  A
 task (ruling ``balance:R-BAL386``) is filed under the piece of work it is part of, and
 holds no Arc and no arc label; every other card is born holding its Arc, its arc's one home,
-and its arc label beside as display (rulings ``R-BAL349``, ``R-BAL354``); a finding and a
-ruling are blocked by their owner step, never its sub-issues (``R-BAL395``), and so is a
-question given ``--owner``, the step it is asked for, which its ruling keeps
-(:func:`_carried_owner`, plan#1861's item 10); a leaf is filed in its split step's milestone
-while that step holds one, which it then gives up (:func:`_leaf_milestone`).  ``quill.py``'s
-module docstring is the command's usage.
+and its arc label beside as display (rulings ``R-BAL349``, ``R-BAL354``), and a step or a
+finding its Effort, the filing session's estimate of its sessions (ruling plan#2492); a
+finding and a ruling are blocked by their owner step, never its sub-issues (``R-BAL395``), and
+so is a question given ``--owner``, the step it is asked for, which its ruling keeps
+(:func:`_carried_owner`, plan#1861's item 10); a question converted into its ruling has its
+Priority cleared, and any Effort, as a ruling holds neither (rulings plan#2506, plan#2507); a
+leaf is filed in its split step's milestone while that step holds one, which it then gives up
+(:func:`_leaf_milestone`), and its filing clears its split step's Effort, as a split step holds
+none (ruling plan#2555, :func:`_finish`).  ``quill.py``'s module docstring is the command's
+usage.
 
 Split out of the command module at X-cx L2's leaf C, whose change would otherwise take
 that module past the 1,000 lines ``too-many-lines`` allows (it has been ``quill.py``
@@ -18,20 +22,24 @@ since the tool's rename).
 """
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
+from tools.ci.arcs import ARCS
 from tools.quill import _findings, _git, _tasks
-from tools.quill._arcs import other_labels
+from tools.quill._arcs import arc_remedy, other_labels
 from tools.quill._command import (
     _label,
     _one,
     _outside_parent,
     _read,
+    card_number,
     on_board,
     with_closure,
 )
 from tools.quill._exits import Refused
+from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS
 from tools.quill._state import (
     OWNED,
     done_tasks,
@@ -49,6 +57,7 @@ from tools.quill._state import (
 )
 from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import (
+    HOLDERS,
     Draft,
     Owner,
     in_ruling_shape,
@@ -57,7 +66,7 @@ from tools.quill.check import (
     ruling_question,
     violations,
 )
-from tools.quill.setup_tracker import FILING, TASK, unmarked
+from tools.quill.setup_tracker import CHOSEN_LABELS, FILING, ISSUE_FIELDS, TASK, unmarked
 
 
 @dataclass(frozen=True)
@@ -222,8 +231,9 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
         body = ruling_body(_read(args.question_file), _read(args.answer_file))
     labels = tuple(dict.fromkeys(getattr(args, "label", None) or ()))
     arc = None if args.kind == TASK else args.arc
-    return _Filing(Draft(args.kind, args.title, body, labels, arc, held_by), parent, cards,
-                   reads, asked, _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
+    return _Filing(Draft(args.kind, args.title, body, labels, arc, held_by,
+                         effort=getattr(args, EFFORT, None)), parent, cards, reads, asked,
+                   _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
                    if args.kind == "step" and parent is not None else _NO_MILESTONE)
 
 
@@ -555,6 +565,55 @@ def _standing(tracker: Tracker, filing: _Filing, root: Path) -> Card | None:
     return fresh
 
 
+def file_parser(commands) -> None:
+    """``file step|finding|ruling|question|task`` and each kind's arguments: the command
+    line of :func:`cmd_file`, moved here beside it from the command module, which ``quill
+    arc`` and ``quill label`` (ruling plan#2221) would take past the 1,000 lines
+    ``too-many-lines`` allows.  ``--effort`` is required of each kind that may hold an Effort
+    (``check.HOLDERS``, ruling plan#2506), its choices the field's options
+    (``setup_tracker.ISSUE_FIELDS``): a step or a finding is sized when it is filed (ruling
+    plan#2492)."""
+    kinds = commands.add_parser("file", help="file a step, finding, ruling, question or task")
+    sub = kinds.add_subparsers(dest="kind", required=True)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--arc", required=True, choices=ARCS)
+    common.add_argument("--title", required=True, help="a short name (R-BAL178)")
+    step = sub.add_parser("step", parents=[common], help="a step, or a leaf of one")
+    step.add_argument("--body-file", required=True, help="its spec")
+    step.add_argument("--parent", type=card_number, help="the step this leaf splits")
+    step.add_argument("--label", action="append", choices=CHOSEN_LABELS)
+    finding = sub.add_parser("finding", parents=[common], help="a defect in the code")
+    finding.add_argument("--owner", type=card_number, required=True, help="its owner step")
+    finding.add_argument("--text", required=True, help="one sentence, at most 400 characters")
+    ruling = sub.add_parser("ruling", parents=[common], help="the developer's decision")
+    ruling.add_argument("--owner", type=card_number,
+                        help="its owner step; from a question that names one, that one")
+    asked = ruling.add_mutually_exclusive_group(required=True)
+    asked.add_argument("--question-file", help="his question, word for word")
+    asked.add_argument("--from-question", type=card_number,
+                       help="the question card he answered; it becomes the ruling")
+    ruling.add_argument("--answer-file", required=True, help="his answer, word for word")
+    question = sub.add_parser("question", parents=[common], help="for the developer to answer")
+    question.add_argument("--body-file", required=True, help="the question")
+    question.add_argument("--owner", type=card_number,
+                          help="the step it is asked for, if one, which its ruling keeps")
+    task = sub.add_parser(TASK, help="a piece of one step or finding: a commit in its card's "
+                                     "pull request (its arc is its card's)")
+    task.add_argument("--parent", type=card_number, required=True,
+                      help="the step or finding it is a piece of")
+    task.add_argument("--title", required=True, help="a short name (R-BAL178)")
+    task.add_argument("--body-file", required=True, help="what the piece builds")
+    task.add_argument("--before", type=card_number,
+                      help="the open task under the same card it is built before; else it goes "
+                           "above the card's finishing tasks")
+    sized, ruling = HOLDERS[EFFORT]
+    for kind in sized:
+        sub.choices[kind].add_argument(
+            f"--{EFFORT}", required=True, choices=ISSUE_FIELDS[FIELDS[EFFORT]].options,
+            help=f"the sessions its work takes, the filing session's estimate (rulings "
+                 f"plan#2492, {ruling})")
+
+
 def cmd_file(args, tracker: Tracker, root: Path) -> int:
     """File a step, finding, ruling, question or task, after :func:`check.violations` passes;
     finish one a failure cut short (R-BAL186); write nothing over one the earlier run
@@ -596,9 +655,9 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
 def _write(tracker: Tracker, filing: _Filing, earlier: Card | None,
            before: Card | None) -> None:
     """Every write of ``filing``, decided over already, each printed as it lands: ``earlier``,
-    the card an earlier run made, finished, or with none a new card created
-    (:func:`_created`), then the rest of its filing (:func:`_finish`), a task placed above
-    ``before`` when the filing names one."""
+    the card an earlier run made, finished, the field values it lacks written first
+    (:func:`_refield`), or with none a new card created (:func:`_created`), then the rest of
+    its filing (:func:`_finish`), a task placed above ``before`` when the filing names one."""
     card = earlier
     if card is None:
         card = _created(tracker, filing.draft, filing.milestone)
@@ -606,7 +665,23 @@ def _write(tracker: Tracker, filing: _Filing, earlier: Card | None,
         print(f"finishing {_label(card)}: its filing has not finished (it is still marked "
               f"{FILING!r}), so this command finishes it rather than filing another (R-BAL186, "
               "R-BAL202)")
+        _refield(tracker, card, filing.draft)
     _finish(tracker, card, filing, before)
+
+
+def _refield(tracker: Tracker, card: Card, draft: Draft) -> None:
+    """Write each Priority or Effort ``draft`` holds (``check.HOLDERS``) that ``card``, the card
+    an earlier run of its filing made, does not hold (:meth:`_tracker.Tracker.set_field`): a
+    create whose value GitHub dropped, or a card filed by older quill, which sent none (ruling
+    plan#2492).  A value ``draft`` does not hold is left as the card holds it.  One the card
+    holds that differs is overwritten, deliberately: a card still being filed holds the filing
+    session's estimate, which this run states again, where a different Arc or labels are a
+    person's call, refused (:func:`_refuse_relabel`)."""
+    for part, field in FIELDS.items():
+        value, held = getattr(draft, part), getattr(card, part)
+        if value is not None and held != value:
+            tracker.set_field(card.number, field, value)
+            print(f"  its {field}: {value!r}" + ("" if held is None else f", not {held!r}"))
 
 
 @dataclass(frozen=True)
@@ -694,11 +769,16 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
     printed as it lands, then its mark removed, last (R-BAL202): the link, a ruling's
     close, a leaf's place and its split step's milestone cleared (after the leaf's create
     carried it, so a run cut short between them leaves it held, and the same command run
-    again clears it), then each open finding the split step owns handed to the leaf, which a
-    split step never owns (ruling plan#1784, :func:`_findings.hand_on`: a run cut short
-    between a finding's two writes leaves it two owners, and the same command run again
-    finishes it), a top-level step's or question's board place, or a task's under a step the
-    board holds (:func:`_command.on_board`, rulings plan#1814, plan#1842), at the bottom,
+    again clears it), and its split step's Effort cleared when it holds one, as a split step
+    holds none (ruling plan#2555: the same command run again clears one a run cut short left
+    held; a leaf dropped after that clear and before its filing finished leaves its step
+    holding none, a plain step again when it was the only leaf, as nothing records the value
+    cleared, and ``quill effort`` sets one if it is wanted), then each open finding the split
+    step owns handed to the leaf, which a split step never owns (ruling plan#1784,
+    :func:`_findings.hand_on`: a run cut short between a finding's two writes leaves it two
+    owners, and the same command run again finishes it), a top-level step's or question's
+    board place, or a task's under a step the board holds (:func:`_command.on_board`, rulings
+    plan#1814, plan#1842), at the bottom,
     where the board's order does not read it; a task is first placed in its card's order of
     its tasks, above ``before`` when the filing names one (:func:`_tasks.place`, ruling
     plan#1868)."""
@@ -716,6 +796,10 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
         if (split := filing.milestone.leaf) is not None:
             tracker.set_milestone(parent.number, None)
             print(f"  plan#{parent.number} left milestone #{split}: a split step keeps none")
+        if (held := parent.effort) is not None:
+            tracker.set_field(parent.number, EFFORT_FIELD, None)
+            print(f"  cleared plan#{parent.number}'s {EFFORT_FIELD}, {held!r}: a split step "
+                  "holds none (ruling plan#2555)")
         for finding in _findings.owned(tracker, parent.number, filing.shipped):
             _findings.hand_on(tracker, finding, card, parent, prefix="  ")
     elif on_board(kind, parent) and card.board_item is None:
@@ -734,7 +818,9 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
     conversion a failure cut short (R-BAL186): a card already typed a ruling but
     still open, with this answer, is one.  Its parent is checked before anything
     is written.  ``to`` is its owner: the step ``--owner`` names, or the one the question was
-    asked for (:func:`_carried_owner`), whose link the ruling keeps.
+    asked for (:func:`_carried_owner`), whose link the ruling keeps.  A field a ruling may not
+    hold (``check.HOLDERS``) is cleared: the question's Priority (ruling plan#2507), and an
+    Effort a person set on it by hand (ruling plan#2506).
     """
     question = asked.card
     if not question.is_open or question.kind not in ("question", "ruling"):
@@ -743,8 +829,8 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
         raise Refused(f"{_label(question)}'s filing has not finished (R-BAL202): finish it with "
                       "the `quill file` command that filed it first, then convert it")
     if question.arc is None:
-        raise Refused(f"{_label(question)} holds no Arc, its arc's one home (R-BAL349): set its "
-                      "Arc on the web, then convert it")
+        raise Refused(f"{_label(question)} holds no Arc, its arc's one home (R-BAL349): "
+                      f"{arc_remedy(question.number, question.kind)}, then convert it")
     if question.arc != args.arc:
         raise Refused(f"{_label(question)} is not in the {args.arc} arc; pass its own --arc")
     _refuse_rehoming(question, "ruling", to)
@@ -757,6 +843,11 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
     if question.kind != "ruling":
         tracker.retype(question.number, "ruling")
         print(f"  plan#{question.number} is now a ruling")
+    for part, (kinds, ruling) in HOLDERS.items():
+        if "ruling" not in kinds and (held := getattr(question, part)) is not None:
+            tracker.set_field(question.number, FIELDS[part], None)
+            print(f"  cleared its {FIELDS[part]}, {held!r}: a ruling holds none (ruling "
+                  f"{ruling})")
     if draft.title.strip() != question.title.strip():
         tracker.retitle(question.number, draft.title)
         print(f"  retitled {draft.title!r}")

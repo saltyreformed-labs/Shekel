@@ -1,8 +1,13 @@
 """
 Shekel Budget App -- WHICH RELATIONSHIPS pricing a row walks.
 
-Six functions, and they exist so that the eager load the amount model needs
-is stated ONCE rather than copied into every loader that feeds it.
+Eight functions, and they exist so that the eager load the amount model needs
+is stated ONCE rather than copied into every loader that feeds it.  Two are
+rooted at a DEFINITION (:func:`template_pricing_load_options`,
+:func:`transfer_template_pricing_load_options`): what pricing one walks off
+the template, which the row-rooted sets compose under the row's link to it,
+so a definition's half of the graph has one spelling whichever root a loader
+selects (plan#2733).
 :mod:`app.services.cash_ledger._amount_source` owns the four rules; this owns
 the relationship graph those rules traverse, so a rule that starts reading a new
 relationship adds it here in the same edit and every routed loader gets it.
@@ -81,6 +86,64 @@ def transfer_period_load_option():
     return selectinload(Transfer.pay_period)
 
 
+def template_pricing_load_options() -> tuple:
+    """Return the loader options a query of MANY transaction definitions should apply.
+
+    What pricing a :class:`~app.models.transaction_template.TransactionTemplate`
+    walks off the template, both relationships ``lazy="select"``:
+
+    * ``salary_profiles`` -- whether an ACTIVE profile names it: amount rule
+      2's refinement for a row (``_amount_rule._rule_within_definition``),
+      and ``template_amount_service.owns_its_amount`` for the definition;
+    * ``amount_versions`` -- rule 3, the price series as of the day.
+
+    **A definition priced in its own right reads exactly what its rows read
+    of it**, and since plan step X-bp two pages do that for every definition
+    they list: ``obligations_aggregator.todays_price`` (ruling plan#2693)
+    prices each on the read pass's day for the Recurring page, its Archived
+    drawer and the ``/savings`` floor.  A loader of those definitions that
+    did not take this paid two statements per definition (plan#2733,
+    measured 2026-11-02: the Recurring page ran 35 statements with two of
+    each kind of definition and 83 with eight).  :func:`pricing_load_options`
+    composes this under ``Transaction.template``, so the two roots cannot
+    name different relationships.
+
+    Returns:
+        A tuple of SQLAlchemy loader options, splatted into ``Query.options``
+        on a select rooted at
+        :class:`~app.models.transaction_template.TransactionTemplate`.
+    """
+    return (
+        selectinload(TransactionTemplate.salary_profiles),
+        selectinload(TransactionTemplate.amount_versions),
+    )
+
+
+def transfer_template_pricing_load_options() -> tuple:
+    """Return the loader options a query of MANY transfer definitions should apply.
+
+    The :class:`~app.models.transfer_template.TransferTemplate` twin of
+    :func:`template_pricing_load_options`, for the same pages (plan#2733):
+
+    * ``settings`` -- whether a loan payment's settings row hangs off it:
+      rule 4's refinement (``cash_ledger.is_loan_payment_definition``), and
+      ``owns_its_amount`` for a payment that follows its loan;
+    * ``amount_versions`` -- rule 3, and rule 4's MANUAL arm.
+
+    :func:`transfer_pricing_load_options` composes this under
+    ``Transfer.template``.
+
+    Returns:
+        A tuple of SQLAlchemy loader options, splatted into ``Query.options``
+        on a select rooted at
+        :class:`~app.models.transfer_template.TransferTemplate`.
+    """
+    return (
+        selectinload(TransferTemplate.settings),
+        selectinload(TransferTemplate.amount_versions),
+    )
+
+
 def pricing_load_options() -> tuple:
     """Return the loader options a caller resolving MANY rows should apply.
 
@@ -90,11 +153,15 @@ def pricing_load_options() -> tuple:
     per row).  ``Transaction.pay_period`` is read by no amount rule; its entry
     says why it stays.
 
-    **Three entries, covering FOUR relationships, since plan step
-    balance:X-bi-6-4d-2** (``Transaction.template`` and its two collections,
-    and the period), measured by walking the composed options rather than
-    counted from this list.  The count's history follows, because a census is
-    exactly the kind of claim that reads as complete.
+    **Two entries, covering FOUR relationships, since plan#2733**
+    (``Transaction.template`` and its two collections, and the period),
+    measured by walking the composed options rather than counted from this
+    list: the template's two collections are one entry composing
+    :func:`template_pricing_load_options`, and the walk named the same four
+    paths before and after (2026-11-02).  It was three entries covering the
+    same four from plan step balance:X-bi-6-4d-2.  The count's history
+    follows, because a census is exactly the kind of claim that reads as
+    complete.
 
     At plan step X-au-f it was six chains, covering NINE relationships.  An
     adversarial review counted seven at plan step X-au-b after a first draft
@@ -188,11 +255,8 @@ def pricing_load_options() -> tuple:
         A tuple of SQLAlchemy loader options, splatted into ``Query.options``.
     """
     return (
-        selectinload(Transaction.template).selectinload(
-            TransactionTemplate.salary_profiles,
-        ),
-        selectinload(Transaction.template).selectinload(
-            TransactionTemplate.amount_versions,
+        selectinload(Transaction.template).options(
+            *template_pricing_load_options(),
         ),
         period_load_option(),
     )
@@ -222,6 +286,11 @@ def transfer_pricing_load_options() -> tuple:
       only on its no-``due_date`` fallback), and the loan partition sorts on
       it.
 
+    The first two are one entry composing
+    :func:`transfer_template_pricing_load_options` since plan#2733; the set
+    named the same four paths before and after (``Transfer.template``, its
+    two relationships and the period; walked, 2026-11-02).
+
     ONE spelling of a transfer's pricing graph, and since plan step
     ``balance:X-bi-6-4d-2`` the one path to it.  :func:`pricing_load_options`
     composed exactly this tuple under ``Transaction.transfer``, the path a
@@ -234,9 +303,8 @@ def transfer_pricing_load_options() -> tuple:
         on a select rooted at :class:`~app.models.transfer.Transfer`.
     """
     return (
-        selectinload(Transfer.template).selectinload(TransferTemplate.settings),
-        selectinload(Transfer.template).selectinload(
-            TransferTemplate.amount_versions,
+        selectinload(Transfer.template).options(
+            *transfer_template_pricing_load_options(),
         ),
         transfer_period_load_option(),
     )

@@ -122,22 +122,23 @@ class PaycheckLineKindEnum(enum.Enum):
     lines, and a line's kind is where it sits between base pay and net pay::
 
         base pay
-        + TAXABLE_EARNING       -> gross (the FICA base; withholding annualises it)
+        + TAXABLE_EARNING       -> gross (withholding annualises it)
+        - PRE_FICA_DEDUCTION    -> Social Security and Medicare wages
         - PRE_TAX_DEDUCTION     -> taxable income (the income-tax base)
         - withholding
         - POST_TAX_DEDUCTION
         + AFTER_TAX_EARNING     -> net pay (the deposit)
 
-    Sign and stage DERIVE from the kind, so the row carries one column for
-    the fact.  A pre-tax deduction leaves the income-tax base and not the
-    FICA base (a pay stub's Social Security figure carries the employer's
-    Section 125 base), while a taxable earning joins BOTH -- which is why
-    the two sides are four kinds and not two axes.  Until R18-a this was
-    ``DeductionTimingEnum`` over ``ref.deduction_timings`` (``pre_tax`` /
-    ``post_tax``), a name that could hold nothing but a deduction.
+    Sign and stage DERIVE from the kind, so a position no payroll has (a
+    post-tax line that skips Social Security) is not storable.  The two
+    pre-tax kinds are plan step **salary:S11-e** (ruling **plan#2639**,
+    **SAL-566**): "Pre-tax, all payroll taxes" (a Section 125 premium, a
+    flexible spending account) and "Pre-tax, income tax only" (a retirement
+    deferral, the one kind before it).  ``DeductionTimingEnum`` until R18-a.
     """
 
     TAXABLE_EARNING = "taxable_earning"
+    PRE_FICA_DEDUCTION = "pre_fica_deduction"
     PRE_TAX_DEDUCTION = "pre_tax_deduction"
     POST_TAX_DEDUCTION = "post_tax_deduction"
     AFTER_TAX_EARNING = "after_tax_earning"

@@ -63,6 +63,7 @@ from tests._test_helpers import (
     make_transfer_template,
     state_template_price,
 )
+from tests._definition_price import amount_box_payload
 
 #: The day every request here is made on, frozen ahead of the loan's
 #: origination and inside the schedule ``seed_periods`` builds.
@@ -144,11 +145,10 @@ def _one_off_into(seed_user, account, name="R7d-f-4 one-off"):
         from_account_id=seed_user["account"].id,
         to_account_id=account.id,
         name=name,
-        default_amount=Decimal("200.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("200.00"))
     db.session.commit()
     return template
 
@@ -206,7 +206,8 @@ def _post_update(auth_client, template, **fields):
     """POST the edit form for *template*; redirect unfollowed so the flash stays.
 
     Carries what the form's non-recurrence controls emit for an unchanged
-    definition -- name, amount, source account, the optimistic-lock counter --
+    definition -- name, the Amount box where the form shows one
+    (:func:`amount_box_payload`), source account, the optimistic-lock counter --
     so every case walks the route the browser does (the amount write door,
     the source-account ownership probe, the version check), and *fields*
     states what THIS case changes or posts for the recurrence controls.  A
@@ -214,7 +215,7 @@ def _post_update(auth_client, template, **fields):
     """
     return auth_client.post(f"/transfers/{template.id}", data={
         "name": template.name,
-        "default_amount": str(template.default_amount),
+        **amount_box_payload(template),
         "from_account_id": str(template.from_account_id),
         "version_id": str(template.version_id),
         **fields,
@@ -672,6 +673,7 @@ class TestARecurringTransferMovedOntoALoan:
         db.session.add(surplus)
         db.session.flush()
         template.recurrence_rule.unit_id = surplus.id
+        template.recurrence_rule.unit_has_day_of_month = surplus.has_day_of_month
         db.session.commit()
         assert stored_cadence(template.recurrence_rule) is None, (
             "precondition: the cadence is unreadable"

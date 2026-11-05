@@ -157,7 +157,7 @@ class TestTransferNegativePaths:
         with app.app_context():
             resp = auth_client.post("/transfers", data={
                 "name": "Bad Transfer",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": "",
                 "to_account_id": "",
             }, follow_redirects=True)
@@ -337,7 +337,7 @@ class TestTransferDoorsResolveOwnershipStructurally:
             savings = _create_savings_account(seed_user)
             payload = {
                 "name": "IDOR Attempt",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "category_id": str(seed_user["categories"]["Rent"].id),

@@ -100,7 +100,7 @@ for a fence, the kind is this record's reading.
 | T-35 | `tests/test_arch/test_a_control_rendered_invisible_has_a_rule_that_shows_it.py:119` | a hidden control no stylesheet or script reveals | a Jinja, CSS and JS contract no type spans |
 | T-38 | `tests/test_arch/test_a_request_is_a_query_or_a_command.py:138` | a page load that is not read-only, a command at the wrong isolation (`balance:R-EN`) | it grades the mechanism in `app/db_transaction.py` |
 | T-44 | `tests/test_arch/test_the_confirm_guard_binds_first.py:79` | a destructive act submitted before its confirm dialog exists | a rendered-order lock on a structural fix |
-| T-64 | `tests/test_routes/test_templates.py:2968` (its import half) | a render site re-inlining the shared recurrence macro | a one-spelling lock with no structural form |
+| T-64 | `tests/test_routes/test_templates/test_validation_and_form_rules.py:389` (its import half) | a render site re-inlining the shared recurrence macro | a one-spelling lock with no structural form |
 | T-98 | `tests/test_routes/test_recurrence_picker.py:415` (its property half) | a script reading a property the server stopped sending | a Python and JS contract |
 | T-204 | `tests/test_deploy/test_proxy_trust_and_headers.py:310` and five more sites | trusted-proxy ranges disagreeing across nginx, compose and gunicorn | one network fact in three formats |
 | T-222 | `tests/test_routes/test_url_id_converter.py:53` | an integer route rule that escaped the row-id converter | it grades that the converter reached every rule |
@@ -181,7 +181,7 @@ list above with that ruling as its reason. The posted-ledger family is ruled by 
 | A-19 | `scripts/init_database.py:378` (`backfill_loan_payment_postings_after_migration`) | re-reconciles every loan's corrections at each deploy | the posted-ledger family | `balance:X-ek` |
 | A-22 | `app/services/loan_posting_service/_sync.py:300` (`_assert_checked_projection`) | the posted loan ledger equals the loan's fold, date by date | the posted-ledger family | `balance:X-ek` |
 | A-23 | `scripts/_integrity_consistency.py:232` (DC-10) | an undated movement holding a live journal leg | the posted-ledger family | `balance:X-ek` |
-| A-25 | `app/services/pay_period_gates.py:424` (`reject_moved_ledger`) | removing earlier paychecks when a booked total would move | `pay_calendar:R-PC53`, `R-PC114` | `pay_calendar:C25` |
+| A-25 | `app/services/pay_period_gates.py:424` (`reject_moved_ledger`) | removing earlier paychecks when a booked total would move | `pay_calendar:R-PC53`, `R-PC114` | `pay_calendar:C25`; answered yes by plan#2517, deleted by plan#2775 |
 | A-38 | `app/exceptions.py:129` (`ForeignAccountError`) | a balance read handed another owner's account | `R-GV` | `balance:X-el` |
 | A-41 | `app/services/loan_recurrence_sync.py:580` (`sync_loan_payment_start`) | a loan rule's start date re-copied from the loan | `recurrence:R-R29` | `recurrence:R31` |
 

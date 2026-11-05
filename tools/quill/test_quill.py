@@ -621,8 +621,8 @@ def test_a_split_step_whose_leaves_were_all_dropped_counts_as_dropped(code, tmp_
     assert tracker.writes[-1] == ("close", 7, "not_planned")
     spec = tmp_path / "s"
     spec.write_text("Redo.")
-    assert run(tracker, code, "file", "step", "--arc", "balance", "--title", "L7c",
-               "--parent", "plan#7", "--body-file", str(spec)) == 1
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+               "--title", "L7c", "--parent", "plan#7", "--body-file", str(spec)) == 1
     assert "a step that is done" in capsys.readouterr().err
     writes = list(tracker.writes)
     assert run(tracker, code, "sync") == 0

@@ -498,11 +498,10 @@ def _first_row_of_a_monthly_first_bill(seed_user, seed_periods, account, starts_
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name="Monthly-first bill",
-        default_amount=Decimal("10.00"),
     )
     _db.session.add(template)
     _db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("10.00"))
     make_cadence_rule(template, MONTHLY_FIRST, starts_on=starts_on)
     _db.session.refresh(template)
     rows = recurrence_engine.generate_for_template(

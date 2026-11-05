@@ -49,24 +49,23 @@ from app.schemas.validation import (
 class TestLoginSchema:
     """Tests for LoginSchema (commit C-26 / F-041 + F-163)."""
 
-    def test_valid_data_with_remember_on(self):
-        """Happy path: form-style ``remember=on`` deserialises to True."""
+    def test_valid_data_drops_a_stale_remember_field(self):
+        """Happy path; a ``remember=on`` from a stale cached form is dropped.
+
+        "Remember me" is gone (plan#2173, ruling plan#2406).  A browser
+        holding the old login page still posts ``remember=on``, and the
+        sign-in must neither fail on it nor carry it anywhere: the loaded
+        data is exactly the two credentials.
+        """
         data = LoginSchema().load({
             "email": "user@example.com",
             "password": "anylengthpassword",
             "remember": "on",
         })
-        assert data["email"] == "user@example.com"
-        assert data["password"] == "anylengthpassword"
-        assert data["remember"] is True
-
-    def test_valid_data_remember_omitted_defaults_false(self):
-        """Missing remember field deserialises to False (load_default)."""
-        data = LoginSchema().load({
+        assert data == {
             "email": "user@example.com",
-            "password": "testpass",
-        })
-        assert data["remember"] is False
+            "password": "anylengthpassword",
+        }
 
     def test_email_lowercased_and_stripped(self):
         """Email is lowercased and whitespace-stripped at pre_load."""

@@ -40,10 +40,12 @@ from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.services import (
     account_posting_service,
+    loan_posting_service,
     pay_period_admin,
     posting_service,
     transfer_service,
 )
+from app.services.ledger_lines import linked_key
 from app.services.pay_period_locks import PeriodLockReason
 # The APP's civil day, never ``date.today()`` -- these fixtures build periods
 # that must CONTAIN the day the account factory stamps on its origination
@@ -54,6 +56,12 @@ from scripts.integrity_check import (
     check_balance_anomalies,
     check_referential_integrity,
 )
+from tests._ledger_parity import (
+    assert_ledger_parity,
+    ledger_parity_differences,
+    owner_worked_out_lines,
+    worked_out_totals,
+)
 from tests._test_helpers import (
     record_paydays_across_a_hole,
     rhythm_of,
@@ -61,6 +69,7 @@ from tests._test_helpers import (
     all_periods,
     assert_pay_period_invariants,
     bare_expense_template,
+    create_loan_account,
     create_savings_account,
     derived_span,
     last_covered_day,
@@ -87,14 +96,31 @@ def _future_periods(db_session, seed_user, count=6, start=date(2026, 7, 3)):
     return periods
 
 
+def _openings_filed_on(db_session, user_id, day):
+    """Return the paychecks the worked-out ledger files the openings dated *day* in.
+
+    Asserts both an account's and a loan's opening are among them, so a case
+    reading it cannot pass on lines it never found.
+    """
+    openings = {
+        ref_cache.posting_source_id(PostingSourceEnum.ACCOUNT_OPENING),
+        ref_cache.posting_source_id(PostingSourceEnum.LOAN_OPENING),
+    }
+    lines = [
+        line for _scenario_id, line in owner_worked_out_lines(db_session, user_id)
+        if line.source_kind_id in openings and line.entry_date == day
+    ]
+    assert {line.source_kind_id for line in lines} == openings
+    return {line.pay_period_id for line in lines}
+
+
 def _emit_untethered_entry(db_session, seed_user, savings, period, amount):
     """Post one balanced entry whose per-account nets are NON-zero in *period*.
 
     The shape a loan opening / true-up correction has -- balanced across two
     ledger accounts (Checking ``-amount`` / Savings ``+amount``), each with a
-    non-zero net, linked to NO movement -- so the LEDGER_POSTINGS
-    gate is exercised without a settled source row (which would trip the
-    higher-precedence SETTLED_TXN lock instead).  Built directly on the models
+    non-zero net, linked to NO movement -- with no settled source row (which
+    would trip the SETTLED_TXN lock instead).  Built directly on the models
     (tests are unfenced); the deferred balanced-journal trigger accepts it.
     """
     ledger_ids = {
@@ -348,9 +374,8 @@ class TestTruncateHappyPath:
 # holding no correction, and the raw bulk-DELETE raising an IntegrityError on
 # the anchor FK.  All three graded a lock and an FK that are gone -- neither an
 # account nor a balance assertion references a pay period, so no period delete
-# can strand one.  The period's POSTED state is what is still worth refusing,
-# and ``LEDGER_POSTINGS`` (which outranked ``ACCOUNT_ANCHOR`` in the precedence
-# anyway) covers it; its own cases in this class are untouched.
+# can strand one.  ``LEDGER_POSTINGS``, the lock on a period's POSTED state, went
+# at plan task plan#2777 (ruling plan#2782), its cases inverted in this class.
 
 
 class TestTruncateRefusesAnIdItCannotResolve:
@@ -463,39 +488,25 @@ class TestTruncateHardLocks:
             assert PeriodLockReason.HISTORICAL in excinfo.value.blocking.values()
             assert _count_periods(db.session, user_id) == before
 
-    def test_nonzero_anchor_opening_blocks_as_ledger_postings(
+    def test_a_paycheck_holding_only_corrections_truncates_and_they_re_file(
         self, app, db, seed_user,
     ):
-        """A NON-zero anchor's opening correction hard-locks its period.
+        """An account's and a loan's openings in a to-delete paycheck: no lock.
 
-        The Step-5 accepted behavior change (plan Section 3.5): a $500.00
-        savings whose opening correction lands in a to-delete period makes
-        that period's per-ledger nets non-zero, so the double-entry gate
-        reports LEDGER_POSTINGS (it precedes ACCOUNT_ANCHOR).  Nothing is
-        deleted.
+        Ruling plan#2782.  The worked-out ledger files each opening by its
+        day, so in the paycheck covering it before the truncate and in the
+        last kept one after, clamped, with every per-key total unchanged.
+        The stored copy goes with the cascade, short until its next re-sync,
+        which the end of this case runs: the ruling's claim about the store.
 
         **The schedule is generated AROUND today deliberately** (plan step
-        X-ai-r).  A correction books in the period CONTAINING the day it is
-        dated (ruling R-DH), and this fixture puts a to-delete period there.
-        It used to force ``anchor_period_id`` onto a FUTURE period and rely on
-        the writer copying that stored id, which is the attribution X-ai-r
-        removed; the split case moved to the test below.
-
-        **The OPENING correction is dated where the BOOKS open, not where the
-        balance was observed** (plan step X-f3c-2a), and the two stopped being
-        the same day at plan step X-f3c-2b: the factory opens an account's
-        books before anything a fixture could date, which is BEFORE the window
-        this case truncates.  So the books are restated into the anchored
-        period explicitly and the postings reconciled, which is what puts the
-        correction in the to-delete window this case is about.  Legal because
-        the account records no movement -- ruling **R-HG** bounds an opening by
-        the movements on file, and there are none.
+        X-ai-r): the account's observed day (today) falls inside one of its
+        paychecks, production's shape, and the books are restated into that
+        paycheck, which is legal because the account records no movement
+        (ruling **R-HG**).
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            # Periods straddling today, so the account's observed day (today)
-            # falls INSIDE one of them -- production's shape, where a row's
-            # period and its observed day are two statements of one fact.
             periods = _future_periods(
                 db.session, seed_user, count=6,
                 start=display_today() - timedelta(days=28),
@@ -504,9 +515,6 @@ class TestTruncateHardLocks:
                 period for period in periods
                 if period.start_date <= display_today() <= last_covered_day(period)
             )
-            # Truncate through the period BEFORE the anchored one, so the
-            # anchored period is inside the to-delete window.  Named by id
-            # since plan step C3-a; it was ``anchored.period_index - 1``.
             previous = max(
                 (p for p in periods if p.start_date < anchored.start_date),
                 key=lambda p: p.start_date,
@@ -518,37 +526,50 @@ class TestTruncateHardLocks:
             account_posting_service.sync_account_anchor_postings_all_scenarios(
                 savings.id,
             )
+            loan = create_loan_account(
+                seed_user, db.session, name="Car Loan",
+                principal=Decimal("20000.00"), rate=Decimal("0.05"),
+                origination_date=anchored.start_date,
+            )
             db.session.commit()
+            scenario = seed_user["scenario"].id
             assert _opening_entry_period(db.session, savings.id) == anchored.id, (
                 "the fixture must place the opening correction inside the "
                 "window this case truncates, or it grades nothing"
             )
+            day, last_kept = anchored.start_date, previous.id
+            assert _openings_filed_on(db.session, user_id, day) == {anchored.id}
+            totals = worked_out_totals(db.session, user_id)
+            assert totals[(scenario, linked_key(savings))] == Decimal("500.00")
+            assert totals[(scenario, linked_key(loan))] == Decimal("-20000.00")
             before = _count_periods(db.session, user_id)
+            doomed = [p for p in periods if p.start_date > previous.start_date]
 
-            with pytest.raises(PayPeriodLocked) as excinfo:
-                pay_period_admin.truncate_pay_periods(
-                    user_id, keep_through_period_id=previous.id,
-                )
-            assert excinfo.value.blocking.get(anchored.id) == (
-                PeriodLockReason.LEDGER_POSTINGS
-            )
-            assert _count_periods(db.session, user_id) == before
+            assert pay_period_admin.truncate_pay_periods(
+                user_id, keep_through_period_id=last_kept,
+            ) == len(doomed)
+            db.session.commit()
 
-    def test_unbalanced_ledger_postings_block_and_delete_nothing(
+            assert _count_periods(db.session, user_id) == before - len(doomed)
+            assert _openings_filed_on(db.session, user_id, day) == {last_kept}
+            assert worked_out_totals(db.session, user_id) == totals
+            # The stored copy is short until its next re-sync, and then equal.
+            assert ledger_parity_differences(db.session, scenario)
+            loan_posting_service.resync_user_loan_postings(user_id)
+            account_posting_service.resync_user_account_anchor_postings(user_id)
+            db.session.commit()
+            assert_ledger_parity(db.session, scenario)
+            assert_pay_period_invariants(db.session, user_id)
+
+    def test_a_stored_entry_no_record_rebuilds_no_longer_blocks(
         self, app, db, seed_user,
     ):
-        """A period whose postings do not net to zero per ledger is hard-locked.
+        """A period holding a non-self-cancelling stored entry truncates (plan#2782).
 
-        The R2 defense-in-depth gate (the 2026-07-02 adversarial review):
-        ``journal_entries.pay_period_id`` is ON DELETE CASCADE and the
-        balanced-journal trigger never fires on DELETE, so truncating a period
-        holding a NON-self-cancelling entry (the shape a loan opening /
-        true-up correction has -- balanced across two ledger accounts, each
-        with a non-zero net) would silently mis-state both accounts.  The
-        entry here is built directly in that shape (no settled transaction,
-        so the pre-existing SETTLED_TXN lock cannot mask the new gate):
-        Checking -100 / Savings +100 in a to-delete period.  Truncate must
-        refuse with LEDGER_POSTINGS and delete nothing.
+        The deleted lock's own firing case (the 2026-07-02 adversarial review's
+        R2): Checking -100 / Savings +100, built directly with no settled
+        transaction, in a to-delete period.  The cascade takes it, and the
+        worked-out ledger, which reads the records, never held it.
         """
         with app.app_context():
             periods = _future_periods(db.session, seed_user, count=4)
@@ -562,31 +583,28 @@ class TestTruncateHardLocks:
                 Decimal("100.00"),
             )
             db.session.commit()
-            before = _count_periods(db.session, user_id)
+            totals = worked_out_totals(db.session, user_id)
+            doomed_id = periods[2].id
 
-            with pytest.raises(PayPeriodLocked) as excinfo:
-                pay_period_admin.truncate_pay_periods(
-                    user_id, keep_through_period_id=periods[1].id,
-                )
+            assert pay_period_admin.truncate_pay_periods(
+                user_id, keep_through_period_id=periods[1].id,
+            ) == 2
+            db.session.commit()
 
-            assert excinfo.value.blocking.get(periods[2].id) == (
-                PeriodLockReason.LEDGER_POSTINGS
-            )
-            assert _count_periods(db.session, user_id) == before
             assert db.session.query(JournalEntry).filter_by(
-                pay_period_id=periods[2].id,
-            ).count() == 1
+                pay_period_id=doomed_id,
+            ).count() == 0
+            assert worked_out_totals(db.session, user_id) == totals
 
     def test_zero_netting_reversal_pair_does_not_block(
         self, app, db, seed_user,
     ):
         """A period whose entries fully cancel per ledger account may truncate.
 
-        The other half of the R2 gate: after a settle-in-F,
-        revert-and-move-to-P flow, F holds the original entry AND its reversal
-        (the R2 attribution rule keeps the reversal in the period it
-        reverses), netting every ledger account to zero.  Cascading that pair
-        moves no account's sum, so the gate must NOT block -- truncating F
+        After a settle-in-F, revert-and-move-to-P flow, F holds the original
+        entry AND its reversal (the R2 attribution rule keeps the reversal in
+        the period it reverses), netting every ledger account to zero.
+        Cascading that pair moves no account's sum -- truncating F
         succeeds, the moved (now Projected) transaction survives in P, and
         the whole-ledger trial balance stays zero.
         """

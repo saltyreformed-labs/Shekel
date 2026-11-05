@@ -255,16 +255,16 @@ def compute_pulse_section(
     # plan#1983) -- an ``int`` and a tuple cannot collide, so one dict serves
     # both shapes (``routes/grid/_items.build_amount_maps``).
     contributions = cash_ledger.contributions_by_key(
-        unpaid.items, balance_ctx.amounts(),
+        unpaid, balance_ctx.amounts(),
     )
     # The second question the same items must answer, off the SAME basis (plan
     # step X-au-c2b): what an envelope's BUDGET is, which ruling E-21 fixes on
     # the row's own amount unconditionally -- never the entered actual, never
     # status-dependent -- so a contribution cannot stand in for it.
-    budgets = cash_ledger.amounts_by_key(unpaid.items, balance_ctx.amounts())
+    budgets = cash_ledger.amounts_by_key(unpaid, balance_ctx.amounts())
 
     due_soon = _due_soon(
-        unpaid.items, contributions, budgets, current_period, balance_ctx.as_of,
+        unpaid, contributions, budgets, current_period, balance_ctx.as_of,
     )
 
     return {
@@ -294,7 +294,7 @@ def compute_pulse_section(
             forward_periods, end_balances, current_period,
         ),
         "still_due": _still_due(
-            unpaid.items, contributions, budgets, current_period, next_period,
+            unpaid, contributions, budgets, current_period, next_period,
         ),
         "street": _street(current_period, balance_ctx.as_of),
         "due_soon": due_soon,

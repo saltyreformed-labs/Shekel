@@ -119,17 +119,17 @@ from tests._test_helpers import (
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD, MONTHLY
 from app.services.balance_at import BalanceContext
-from app.services.cash_flow_set import PlanItems
 from app.routes.grid._items import build_amount_maps
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import parent_of
+from tests._definition_price import newest_price
 
 
 # The definition's price history, and the row dates that select from it.  TWO
 # versions rather than one, deliberately: a single-version series answers the
 # same figure on every day, so a test built on one cannot tell a resolver that
 # reads DATES from one that ignores them -- nor the series from the
-# ``default_amount`` scalar it replaced, which ``set_amount`` keeps equal to the
+# ``default_amount`` scalar it replaced, which ``set_amount`` kept equal to the
 # NEWEST version.  Production has exactly one multi-version template of each
 # kind, which is why this discrimination lives here rather than in the oracle.
 _OLD_PRICE = Decimal("178.00")
@@ -223,7 +223,6 @@ def _priced_template(
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(txn_type),
         name=name,
-        default_amount=_OLD_PRICE,
     )
     db.session.add(template)
     db.session.flush()
@@ -253,7 +252,6 @@ def _seriesless_template(seed_user, name="Never Stated"):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name=name,
-        default_amount=Decimal("42.00"),
     )
     db.session.add(template)
     db.session.flush()
@@ -342,7 +340,6 @@ def _generated_transfer(
         from_account_id=seed_user["account"].id,
         to_account_id=to_account.id,
         name="Money Market Contribution",
-        default_amount=series,
     )
     db.session.add(template)
     db.session.flush()
@@ -800,13 +797,13 @@ class TestWhatEachRuleAnswers:
         Due 2026-01-02 -- its paycheck's start -- falls between the 2026-01-01
         version (``$178.00``) and the 2026-03-01 one (``$165.30``), so the
         answer is the older price -- which
-        is also the answer the ``default_amount`` scalar CANNOT give, since
-        ``set_amount`` keeps that column at the newest stated figure.
+        is also the answer the ``default_amount`` scalar COULD NOT give, since
+        ``set_amount`` kept that column at the newest stated figure.
         """
         template = _priced_template(seed_user)
         txn = _template_row(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         assert _PRICE_ROSE_ON <= txn.due_date < _PRICE_FELL_ON
-        assert template.default_amount == _NEW_PRICE
+        assert newest_price(template) == _NEW_PRICE
         assert _resolve(seed_user, txn) == _OLD_PRICE
 
     def test_a_later_row_of_the_same_template_answers_the_later_price(
@@ -1110,7 +1107,7 @@ class TestEveryRefusalFires:
     def test_a_template_row_whose_series_is_empty_is_refused(
         self, app, db, seed_user, seed_periods,
     ):
-        """Nobody ever stated a price, so ``default_amount`` is not an answer.
+        """Nobody ever stated a price, so no scalar copy is an answer.
 
         The scalar carries no time dimension, which is why the refusal is a
         refusal: reading it would price a February row at whatever the template
@@ -1170,7 +1167,6 @@ class TestEveryRefusalFires:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Unstated Contribution",
-            default_amount=Decimal("250.00"),
         )
         db.session.add(template)
         db.session.flush()
@@ -1445,7 +1441,6 @@ class TestTheDefinitionPriceIsTheRowsOwnRule:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Never Stated",
-            default_amount=Decimal("42.00"),
         )
         db.session.add(template)
         db.session.flush()
@@ -1597,9 +1592,7 @@ class TestTheBatchTier:
         legs = _legs_of(xfer)
         basis = _basis_for(seed_user)
 
-        shown = build_amount_maps(
-            PlanItems.of([paycheck, repriced], legs), basis,
-        ).budgets
+        shown = build_amount_maps([paycheck, repriced, *legs], basis).budgets
 
         assert set(shown) == {
             paycheck.id, repriced.id, *(leg.cell_key for leg in legs),
@@ -1813,7 +1806,8 @@ class TestTheBasisIsOneDerivationPerReadPass:
         # the refinement's one-profile read from the projection's.
         basis = built["basis"]
         touched = [text for text, _params in statements]
-        assert basis.salary._profiles is None, (  # pylint: disable=protected-access -- the derivation's memo IS the fact
+        # Pylint: ``protected-access`` -- the derivation's memo IS the fact.
+        assert basis.salary._profiles is None, (  # pylint: disable=protected-access
             "pricing an ordinary expense row must not resolve the paycheck "
             f"derivation; got {touched}"
         )
@@ -1821,8 +1815,10 @@ class TestTheBasisIsOneDerivationPerReadPass:
         # step recurrence:R25 (it was ``LoanPricing._loans``); its params memo
         # is the first thing any loan price loads, and the calendar is built
         # over it, so both empty is "no loan resolved".
-        terms = basis.loans._terms  # pylint: disable=protected-access -- likewise
-        assert not terms._params and not terms._calendars, (  # pylint: disable=protected-access -- likewise
+        # Pylint: ``protected-access`` -- the loan derivation's memo IS the fact.
+        terms = basis.loans._terms  # pylint: disable=protected-access
+        # Pylint: ``protected-access`` -- its two memos ARE the fact.
+        assert not terms._params and not terms._calendars, (  # pylint: disable=protected-access
             "pricing an ordinary expense row must not resolve the loan "
             f"derivation; got {touched}"
         )
@@ -1969,15 +1965,19 @@ class TestTheBasisIsOneDerivationPerReadPass:
 
         assert booked == displayed == Decimal("1499.10")
 
-    def test_one_read_pass_hands_out_the_SAME_basis(
+    def test_one_read_pass_hands_out_the_SAME_basis(  # pylint: disable=unused-argument
         self, app, db, seed_user, seed_periods,
-    ):  # pylint: disable=unused-argument
+    ):
         """``BalanceContext.amounts()`` memoizes, so a render holds one.
 
         Identity, not equality: two bases with the same pins ARE equal (the
         derivations are excluded from the comparison, exactly as
         ``BalanceContext``'s own memo caches are), so an equality assertion
         would pass on two objects that each resolve the projection separately.
+
+        Pylint: ``unused-argument`` -- ``app``, ``db`` and ``seed_periods``
+        are requested for the state they set up (the app context, the
+        database, the periods the read pass is built over), never read.
         """
         ctx = BalanceContext.build(seed_user["user"].id)
 
@@ -2407,6 +2407,7 @@ class TestTheAmountModelReadsNoClock:
         # Pylint: import-outside-toplevel -- the file-wide test convention.
         import pathlib  # pylint: disable=import-outside-toplevel
 
+        # Pylint: import-outside-toplevel -- the file-wide test convention.
         import app.services.cash_ledger as package  # pylint: disable=import-outside-toplevel
 
         return pathlib.Path(package.__file__).parent
@@ -2423,6 +2424,7 @@ class TestTheAmountModelReadsNoClock:
         # Pylint: import-outside-toplevel -- the file-wide test convention.
         import pathlib  # pylint: disable=import-outside-toplevel
 
+        # Pylint: import-outside-toplevel -- the file-wide test convention.
         import app.services.loan_payment_service as package  # pylint: disable=import-outside-toplevel
 
         found = _clock_calls_in(pathlib.Path(package.__file__).parent)

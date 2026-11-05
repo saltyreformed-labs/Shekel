@@ -116,8 +116,9 @@ def _stated_amount(template, on_date: date, subject: str) -> Decimal:
       the record of what was stated then), so an emptiness test would answer a
       derive-mode payment from a price nobody is stating any more.
     * **an empty series** on a definition that DOES own its amount: its creator
-      wrote the scalar without going through
-      ``template_amount_service.set_amount``, the one write door.  Nobody ever
+      never stated a price through ``template_amount_service.set_amount``, the
+      one write door (until plan step X-bp it could have written the
+      ``default_amount`` scalar instead).  Nobody ever
       stated a price, and X-au-a's own docstring names this refusal as the
       reason it answers ``None`` instead of guessing.
 
@@ -132,7 +133,8 @@ def _stated_amount(template, on_date: date, subject: str) -> Decimal:
     every writer of a linked row dates it (``compute_due_date``'s answer,
     which always exists, or the chosen paycheck's start where the definition
     names no cadence -- the one-time transfer, the cleared-rule carry-forward
-    arm -- which is that function's own answer for a rule naming no day),
+    arm -- which is that function's own answer for a rule dated on its
+    funding payday),
     and an occurrence no row answers yet is dated by the same function -- so
     ``on_date`` is a ``date`` here by construction, and a refusal over a
     state that cannot be stored is a fence.
@@ -187,9 +189,9 @@ def _stated_amount(template, on_date: date, subject: str) -> Decimal:
             "-- its price series is EMPTY. Either its amount is derived rather "
             "than stated (template_amount_service.owns_its_amount is False), "
             "or it was created without going through set_amount, the one write "
-            "door. There is deliberately no fallback to default_amount: that "
-            "scalar has no time dimension, so reading it here would price a "
-            "March row at June's figure."
+            "door. There is deliberately no fallback: a single figure has no "
+            "time dimension, so reading one here would price a March row at "
+            "June's figure."
         )
     return stated
 
@@ -297,5 +299,34 @@ def definition_cash(
     return _stated_amount(row.template, row.due_date, subject)
 
 
+def stated_price(template, on_date: date, *, subject: str) -> Decimal:
+    """Rule 3 for a reader above this package: what *template* states for ``on_date``.
 
-__all__ = ["DefinitionRow", "definition_cash"]
+    The public door onto :func:`_stated_amount`, the series arm rule 3 and
+    rule 4's manual arm share, for a reader pricing a DEFINITION on a day
+    rather than a row (plan step **X-bp**, ruling plan#2693): the Recurring
+    page and the savings page price each definition as of the read pass's
+    day by the rule that prices its rows
+    (``obligations_aggregator.todays_price``).  A definition no loan-payment
+    settings row names is rule 3 there as it is here, and rule 3 needs no
+    :class:`AmountBasis` -- which is why that reader asks this door rather
+    than :func:`definition_cash`: building a basis refuses an owner with no
+    baseline scenario, and ruling **R-R30** allows that refusal only for a
+    definition that pays into a loan.
+
+    Args:
+        template: The transaction or transfer template that states the price.
+        on_date: The day to price.
+        subject: What is being priced, for the refusal messages.
+
+    Returns:
+        The stated amount on ``on_date``.
+
+    Raises:
+        AmountUnresolvable: See :func:`_stated_amount`: the definition's
+            amount is derived rather than stated, or its series is empty.
+    """
+    return _stated_amount(template, on_date, subject)
+
+
+__all__ = ["DefinitionRow", "definition_cash", "stated_price"]

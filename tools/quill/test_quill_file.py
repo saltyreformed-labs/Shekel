@@ -20,8 +20,8 @@ def test_a_finding_that_fails_the_check_writes_nothing(code, capsys):
     """The check runs before anything is sent."""
     tracker = FakeTracker()
     tracker.add(1)
-    status = run(tracker, code, "file", "finding", "--arc", "balance", "--title", "t",
-                 "--owner", "plan#1", "--text", "Two sentences. Not one.")
+    status = run(tracker, code, "file", "finding", "--effort", "1", "--arc", "balance",
+                 "--title", "t", "--owner", "plan#1", "--text", "Two sentences. Not one.")
     assert status == 1
     assert "ONE sentence" in capsys.readouterr().err
     assert not tracker.writes
@@ -34,7 +34,8 @@ def test_a_finding_is_filed_under_its_owner_and_kept_off_the_board(code):
     off last."""
     tracker = FakeTracker()
     tracker.add(1)
-    assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Twice",
+    assert run(tracker, code, "file", "finding", "--effort", "1", "--arc", "balance",
+               "--title", "Twice",
                 "--owner", "plan#1", "--text", "The report counts a refund twice.") == 0
     assert tracker.writes == [("create", 2, "finding", "Twice", ("balance", FILING), "balance"),
                               ("block", 2, 1), ("unmark", 2)]
@@ -67,7 +68,8 @@ def test_a_leaf_takes_the_split_steps_place_and_the_next_leaf_follows_it(code, t
     tracker = FakeTracker()
     for number in (1, 2, 3):
         tracker.add(number)
-    args = ("file", "step", "--arc", "balance", "--parent", "plan#2", "--body-file", str(spec))
+    args = ("file", "step", "--effort", "2", "--arc", "balance", "--parent", "plan#2",
+            "--body-file", str(spec))
     assert run(tracker, code, *args, "--title", "first half") == 0
     assert tracker.board.items == [1, 4, 3]
     assert run(tracker, code, *args, "--title", "second half") == 0
@@ -84,7 +86,7 @@ def test_a_new_step_and_a_question_go_to_the_bottom(code, tmp_path):
     tracker.add(1)
     assert run(tracker, code, "file", "question", "--arc", "recurrence", "--title", "Day",
                 "--body-file", str(text)) == 0
-    assert run(tracker, code, "file", "step", "--arc", "salary", "--title", "New",
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
                 "--body-file", str(text), "--label", "moves-money") == 0
     assert tracker.board.items == [1, 2, 3]
     assert tracker.cards_by_number[3].labels == ("moves-money", "salary")
@@ -163,8 +165,8 @@ def test_a_leaf_is_never_filed_under_a_step_already_done_with(code, tmp_path, ca
     tracker = FakeTracker()
     tracker.add(1)
     ship(code, 1)
-    assert run(tracker, code, "file", "step", "--arc", "balance", "--title", "late",
-               "--parent", "plan#1", "--body-file", str(spec)) == 1
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+               "--title", "late", "--parent", "plan#1", "--body-file", str(spec)) == 1
     assert "the LIVE step it splits" in capsys.readouterr().err
     assert not tracker.writes
 
@@ -178,8 +180,8 @@ def test_splitting_a_blocked_step_offers_no_leaf_until_its_wait_ends(code, tmp_p
     tracker.add(2)
     claim(code, 2)
     tracker.add(7, blocked_by=(2,))
-    assert run(tracker, code, "file", "step", "--arc", "balance", "--title", "L7a",
-               "--parent", "plan#7", "--body-file", str(spec)) == 0
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+               "--title", "L7a", "--parent", "plan#7", "--body-file", str(spec)) == 0
     capsys.readouterr()
     assert run(tracker, code, "next") == 0
     assert capsys.readouterr().out.startswith("next: nothing")
@@ -240,8 +242,8 @@ def test_the_same_finding_filed_twice_is_one_card(code, capsys):
     filing finished (no mark), so the second run writes nothing and says so."""
     tracker = FakeTracker()
     tracker.add(1)
-    args = ("file", "finding", "--arc", "balance", "--title", "Twice", "--owner", "plan#1",
-            "--text", "The report counts a refund twice.")
+    args = ("file", "finding", "--effort", "1", "--arc", "balance", "--title", "Twice",
+            "--owner", "plan#1", "--text", "The report counts a refund twice.")
     assert run(tracker, code, *args) == 0
     writes = list(tracker.writes)
     capsys.readouterr()
@@ -258,8 +260,8 @@ def test_a_matching_card_under_another_owner_or_with_other_labels_is_refused_unw
     tracker = FakeTracker()
     tracker.add(1)
     tracker.add(3)
-    twice = ("file", "finding", "--arc", "balance", "--title", "Twice", "--owner", "plan#1",
-             "--text", "The report counts a refund twice.")
+    twice = ("file", "finding", "--effort", "1", "--arc", "balance", "--title", "Twice",
+             "--owner", "plan#1", "--text", "The report counts a refund twice.")
     tracker.add(2, "finding", body="The report counts a refund twice.", title="Twice",
                 blocked_by=(3,))
     assert run(tracker, code, *twice) == 1
@@ -272,7 +274,7 @@ def test_a_matching_card_under_another_owner_or_with_other_labels_is_refused_unw
     spec = tmp_path / "spec.md"
     spec.write_text("New work.")
     tracker.add(4, body="New work.", title="New", labels=("salary",), arc="salary")
-    assert run(tracker, code, "file", "step", "--arc", "salary", "--title", "New",
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
                "--body-file", str(spec), "--label", "moves-money") == 1
     assert "relabel it by hand" in capsys.readouterr().err
     assert not tracker.writes
@@ -300,10 +302,24 @@ def test_a_label_named_twice_files_the_card_once(code, tmp_path):
     text = tmp_path / "spec.md"
     text.write_text("New work.")
     tracker = FakeTracker()
-    assert run(tracker, code, "file", "step", "--arc", "salary", "--title", "New",
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
                "--body-file", str(text), "--label", "moves-money", "--label", "moves-money") == 0
     assert tracker.writes[0] == ("create", 1, "step", "New", (FILING, "moves-money", "salary"),
                                  "salary")
+
+
+def test_a_security_step_is_filed_in_the_tooling_arc_carrying_its_label(code, tmp_path):
+    """Ruling plan#2179: tooling is an arc, and security a label a step is filed with, beside
+    its arc label, which displays its Arc."""
+    text = tmp_path / "spec.md"
+    text.write_text("Rate-limit each client.")
+    tracker = FakeTracker()
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "tooling",
+               "--title", "Limits", "--body-file", str(text), "--label", "security") == 0
+    assert tracker.writes[0] == ("create", 1, "step", "Limits", (FILING, "security", "tooling"),
+                                 "tooling")
+    assert (tracker.cards_by_number[1].arc, tracker.cards_by_number[1].labels) == (
+        "tooling", ("security", "tooling"))
 
 
 
@@ -312,7 +328,8 @@ def test_a_finding_owner_open_on_the_tracker_but_shipped_in_git_is_refused(code,
     tracker = FakeTracker()
     tracker.add(1)
     ship(code, 1)
-    assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Late",
+    assert run(tracker, code, "file", "finding", "--effort", "1", "--arc", "balance",
+               "--title", "Late",
                "--owner", "plan#1", "--text", "The report counts a refund twice.") == 1
     assert "a step that is done" in capsys.readouterr().err
     assert not tracker.writes
@@ -344,8 +361,8 @@ def test_a_placement_the_board_has_not_shown_yet_is_said(code, tmp_path, capsys)
     tracker.board.lagging = True
     assert run(tracker, code, "move", "plan#2", "--top") == 0
     assert "the board has not shown it yet" in capsys.readouterr().out
-    assert run(tracker, code, "file", "step", "--arc", "balance", "--title", "half",
-               "--parent", "plan#1", "--body-file", str(spec)) == 0
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+               "--title", "half", "--parent", "plan#1", "--body-file", str(spec)) == 0
     assert "(the board has not shown it yet)" in capsys.readouterr().out
 
 
@@ -357,7 +374,8 @@ def test_two_open_cards_with_the_same_kind_title_and_text_are_refused(code, caps
     for number in (2, 3):
         tracker.add(number, "finding", body="The report counts a refund twice.", title="Twice",
                     on_board=False)
-    assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Twice",
+    assert run(tracker, code, "file", "finding", "--effort", "1", "--arc", "balance",
+               "--title", "Twice",
                "--owner", "plan#1", "--text", "The report counts a refund twice.") == 1
     assert ("2 cards have this kind, title and text (plan#2, plan#3): withdraw the extras -- "
             "`quill drop` an open one") in capsys.readouterr().err
@@ -469,8 +487,8 @@ def test_a_leaf_is_never_filed_under_a_card_with_no_type(code, tmp_path, capsys)
     tracker = FakeTracker()
     tracker.add(1, kind=None)
     tracker.board.items.append(1)
-    assert run(tracker, code, "file", "step", "--arc", "balance", "--title", "half",
-               "--parent", "plan#1", "--body-file", str(spec)) == 1
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+               "--title", "half", "--parent", "plan#1", "--body-file", str(spec)) == 1
     assert "its parent is a card with no type" in capsys.readouterr().err
     assert not tracker.writes
 
@@ -484,8 +502,8 @@ def test_a_top_level_filing_never_finishes_a_leaf(code, tmp_path, capsys):
     tracker = FakeTracker()
     tracker.add(1, children=(Child(2, "step", True),), on_board=False)
     tracker.add(2, body="New work.", title="New", parent=1)
-    assert run(tracker, code, "file", "step", "--arc", "balance", "--title", "New",
-               "--body-file", str(spec)) == 1
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+               "--title", "New", "--body-file", str(spec)) == 1
     err = capsys.readouterr().err
     assert "a sub-issue of plan#1, not a top-level card" in err
     assert not tracker.writes
@@ -517,8 +535,8 @@ def test_an_open_card_of_another_kind_is_never_finished_as_this_filing(code, tmp
     text.write_text("Which day?")
     tracker = FakeTracker()
     tracker.add(1, "question", body="Which day?", title="Day")
-    assert run(tracker, code, "file", "step", "--arc", "balance", "--title", "Day",
-               "--body-file", str(text)) == 0
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+               "--title", "Day", "--body-file", str(text)) == 0
     assert capsys.readouterr().out.startswith("filed plan#2\n")
 
 
@@ -532,7 +550,8 @@ def test_a_leaf_already_placed_is_left_where_the_developer_moved_it(code, tmp_pa
     tracker = FakeTracker()
     for number in (1, 2, 3):
         tracker.add(number)
-    args = ("file", "step", "--arc", "balance", "--parent", "plan#2", "--body-file", str(spec))
+    args = ("file", "step", "--effort", "2", "--arc", "balance", "--parent", "plan#2",
+            "--body-file", str(spec))
     assert run(tracker, code, *args, "--title", "first half") == 0
     assert run(tracker, code, *args, "--title", "second half") == 0
     assert tracker.board.items == [1, 4, 5, 3]
@@ -619,8 +638,8 @@ def test_a_leaf_whose_split_step_is_still_on_the_board_is_finished_into_its_plac
     for number in (1, 2, 3):
         tracker.add(number)
     FailOnce(tracker.board, "remove")
-    args = ("file", "step", "--arc", "balance", "--title", "half", "--parent", "plan#2",
-            "--body-file", str(spec))
+    args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "half",
+            "--parent", "plan#2", "--body-file", str(spec))
     assert run(tracker, code, *args) == 2
     assert tracker.board.items == [1, 2, 4, 3]
     assert run(tracker, code, *args) == 0
@@ -691,7 +710,7 @@ def test_a_leaf_whose_move_failed_is_moved_into_its_place_by_the_same_command(co
     tracker.add(3, parent=1)
     tracker.add(4)
     FailOnce(tracker.board, "place")
-    args = ("file", "step", "--parent", "plan#1", "--arc", "balance", "--title",
+    args = ("file", "step", "--effort", "2", "--parent", "plan#1", "--arc", "balance", "--title",
             "Trailer check", "--body-file", str(spec))
     assert run(tracker, code, *args) == 2
     assert tracker.board.items == [2, 3, 4, 5]
@@ -765,10 +784,11 @@ def test_a_finished_leaf_a_later_leaf_follows_is_never_moved(code, tmp_path, cap
     for name in ("first", "second"):
         spec = tmp_path / f"{name}.md"
         spec.write_text(f"Build the {name} half.")
-    first = ("file", "step", "--parent", "plan#1", "--arc", "balance", "--title", "First half",
-             "--body-file", str(tmp_path / "first.md"))
+    first = ("file", "step", "--effort", "2", "--parent", "plan#1", "--arc", "balance",
+             "--title", "First half", "--body-file", str(tmp_path / "first.md"))
     assert run(tracker, code, *first) == 0
-    assert run(tracker, code, "file", "step", "--parent", "plan#1", "--arc", "balance",
+    assert run(tracker, code, "file", "step", "--effort", "2", "--parent", "plan#1",
+               "--arc", "balance",
                "--title", "Second half", "--body-file", str(tmp_path / "second.md")) == 0
     assert tracker.board.items == [2, 3, 5, 6, 4]
     writes = list(tracker.writes)
@@ -796,10 +816,10 @@ def test_a_marked_leaf_is_moved_only_by_a_leaf_filed_before_it_on_the_board(code
     tracker.add(3, parent=1, on_board=False)
     tracker.add(4, on_board=False)
     tracker.add(5, parent=1, body="Half.", title="half", on_board=False,
-                labels=("balance", FILING))
+                labels=("balance", FILING), effort="2")
     tracker.board.items[:] = board
-    assert run(tracker, code, "file", "step", "--parent", "plan#1", "--arc", "balance",
-               "--title", "half", "--body-file", str(spec)) == 0
+    assert run(tracker, code, "file", "step", "--effort", "2", "--parent", "plan#1",
+               "--arc", "balance", "--title", "half", "--body-file", str(spec)) == 0
     out = capsys.readouterr().out
     assert ("  board: moved to just after the leaves of plan#1 filed before it\n" in out) is moved
     assert tracker.board.items == board
@@ -818,10 +838,11 @@ def test_a_marked_leaf_the_board_listing_does_not_show_is_never_added_again(
     tracker.add(1, children=(Child(2, "step", True), Child(5, "step", True)), on_board=False)
     tracker.add(2, parent=1)
     tracker.add(4)
-    tracker.add(5, parent=1, body="Half.", title="half", labels=("balance", FILING))
+    tracker.add(5, parent=1, body="Half.", title="half", labels=("balance", FILING),
+                effort="2")
     monkeypatch.setattr(tracker.board, "order", lambda: shown)
-    assert run(tracker, code, "file", "step", "--parent", "plan#1", "--arc", "balance",
-               "--title", "half", "--body-file", str(spec)) == 0
+    assert run(tracker, code, "file", "step", "--effort", "2", "--parent", "plan#1",
+               "--arc", "balance", "--title", "half", "--body-file", str(spec)) == 0
     assert tracker.writes == [("board_place", 5, "PVTI_2")] * bool(shown) + [("unmark", 5)]
 
 
@@ -840,6 +861,6 @@ def test_a_leaf_left_at_the_bottom_is_placed_after_the_leaves_filed_before_it(co
                 labels=("balance", FILING))
     tracker.add(6, parent=1, on_board=False)
     tracker.board.items[:] = [2, 3, 6, 4, 5]
-    assert run(tracker, code, "file", "step", "--parent", "plan#1", "--arc", "balance",
-               "--title", "half", "--body-file", str(spec)) == 0
+    assert run(tracker, code, "file", "step", "--effort", "2", "--parent", "plan#1",
+               "--arc", "balance", "--title", "half", "--body-file", str(spec)) == 0
     assert tracker.board.items == [2, 3, 5, 6, 4]

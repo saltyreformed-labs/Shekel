@@ -122,6 +122,11 @@ def assert_ledger_parity(db_session, scenario_id, known=()):
     parity test's negative controls force each of its two sections to fire,
     so it is graded code rather than code a green suite never runs.
 
+    A test whose subject is a door's act on the ledger ends on this line: the
+    worked-out read follows the records and cannot see the door's sync, so
+    this is the one assertion there that fails when the sync is deleted.  It
+    goes with the sync (plan#2914).
+
     Args:
         db_session: The test ``db.session``.
         scenario_id: The ``budget.scenarios`` row to compare in.

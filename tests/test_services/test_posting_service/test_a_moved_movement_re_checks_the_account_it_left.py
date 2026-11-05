@@ -20,6 +20,7 @@ import pytest
 from app.extensions import db as _db
 from app.services import anchor_service, transaction_service
 from app.services.anchor_service import AnchorTrueUpOutcome
+from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import account_net
 from tests._test_helpers import create_account_of_type, freeze_today
 from ._helpers import (
@@ -80,6 +81,7 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00"), "CONTROL: Checking holds no payment yet"
+            assert_ledger_parity(_db.session, scenario_id)
 
             _move_paid_from(row, checking)
 
@@ -90,6 +92,7 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == Decimal("880.00")
+            assert_ledger_parity(_db.session, scenario_id)
 
     def test_a_paid_from_moved_off_checking_re_checks_checking(
         self, app, db, seed_user, seed_periods,
@@ -129,6 +132,7 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00"), "CONTROL: the true-up absorbs the payment"
+            assert_ledger_parity(_db.session, scenario_id)
 
             _move_paid_from(row, savings)
 
@@ -138,3 +142,4 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
             assert account_net(
                 _db.session, savings.id, scenario_id,
             ) == Decimal("300.00")
+            assert_ledger_parity(_db.session, scenario_id)

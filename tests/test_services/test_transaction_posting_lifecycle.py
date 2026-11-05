@@ -58,6 +58,7 @@ from app.services import (
 )
 from app.services.entry_service import EntryDetails
 from app.services.ledger_lines import category_key, linked_key
+from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     account_net,
     family_movement_ids,
@@ -369,6 +370,7 @@ class TestPatchPostingLifecycle:
                 db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("950.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_revert_and_recategorize_reconciles(
         self, app, auth_client, seed_user, seed_periods,
@@ -429,6 +431,7 @@ class TestPatchPostingLifecycle:
             assert _ledger_total(seed_user, rent_ledger) == Decimal("50.00")
             assert _ledger_total(seed_user, groceries_ledger) == Decimal("0.00")
             _assert_reconciles(scenario_id, checking)
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_notes_only_edit_posts_nothing(
         self, app, auth_client, seed_user, seed_periods,
@@ -612,6 +615,7 @@ class TestEnvelopePostingLifecycle:
                 db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("930.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_entry_credit_flip_on_a_posted_envelope_resyncs(
         self, app, auth_client, seed_user, seed_periods,
@@ -636,6 +640,7 @@ class TestEnvelopePostingLifecycle:
                 seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
             )
             assert _ledger_total(seed_user, groceries_ledger) == Decimal("40.00")
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
             entry_service.update_entry(entry_id, user_id, is_credit=True)
             db.session.commit()
@@ -645,6 +650,7 @@ class TestEnvelopePostingLifecycle:
                 db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("1000.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_entry_delete_on_a_posted_envelope_resyncs(
         self, app, auth_client, seed_user, seed_periods,
@@ -678,6 +684,7 @@ class TestEnvelopePostingLifecycle:
                 db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("960.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_recording_a_posting_day_moves_the_leg_onto_its_own_day(
         self, app, auth_client, seed_user, seed_periods,
@@ -884,6 +891,7 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             assert _ledger_total(seed_user, _category_chart_key(
                 seed_user, "Car Payment", LedgerAccountClassEnum.EXPENSE,
             )) == Decimal("40.00")
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_moving_the_parent_between_periods_re_files_its_purchases_legs(
         self, app, auth_client, seed_user, seed_periods,
@@ -931,6 +939,7 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             assert by_period[seed_periods[1].id][
                 linked_key(seed_user["account"])
             ] == Decimal("-40.00")
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_deleting_a_purchase_reverses_its_leg_before_the_row_goes(
         self, app, seed_user, seed_periods,
@@ -1020,6 +1029,7 @@ class TestDeleteReversesPostings:
                 db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_soft_delete_template_settled_reverses(
         self, app, auth_client, seed_user, seed_periods,
@@ -1073,6 +1083,7 @@ class TestDeleteReversesPostings:
                 db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_settled_payback_reversed_on_unmark_credit(
         self, app, auth_client, seed_user, seed_periods,
@@ -1112,6 +1123,7 @@ class TestDeleteReversesPostings:
                 db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_recursive_payback_chain_reverses_on_source_delete(
         self, app, auth_client, seed_user, seed_periods,
@@ -1153,6 +1165,7 @@ class TestDeleteReversesPostings:
                 db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
+            assert_ledger_parity(db.session, scenario_id)
 
 
 # ---------------------------------------------------------------------------

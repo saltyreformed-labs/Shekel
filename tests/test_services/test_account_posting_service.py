@@ -67,6 +67,7 @@ from app.services.pay_calendar import PayCalendarError
 from app.services.auth_service import hash_password
 from app.utils.dates import display_today, to_display_date
 from app.services.ledger_lines import account_counter_key
+from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     account_net,
     correction_net_in_period,
@@ -1923,6 +1924,7 @@ class TestSyncEntryPoints:
             assert _linked_source_net(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             ) == Decimal("200.00")
+            assert_ledger_parity(_db.session, scenario_id)
 
     def test_wired_trueup_and_revert_self_heal_end_to_end(
         self, app, db, seed_user,

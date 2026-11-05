@@ -22,6 +22,7 @@ from app.models.account import AccountAnchorHistory
 from app.services import transfer_legs, transfer_service
 from app.services.settle_day import SettleDay, record_settle_day
 from app.utils.dates import display_today
+from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     net_posted_by_day,
     transfer_family_movement_ids,
@@ -165,6 +166,7 @@ class TestACorrection:
             assert net_posted_by_day(transfer_family_movement_ids(xfer.id)) == {
                 corrected: Decimal("300.00"),
             }
+            assert_ledger_parity(db.session, xfer.scenario_id)
 
     def test_sides_on_two_days_post_on_two_days(
         self, app, seed_user, seed_periods_today,

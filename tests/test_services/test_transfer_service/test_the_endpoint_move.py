@@ -20,6 +20,7 @@ from app.services import (
     transfer_service,
 )
 from app.exceptions import NotFoundError, ValidationError
+from tests._ledger_parity import assert_ledger_parity
 from tests._test_helpers import add_anchor_history, create_loan_account
 from app.models.amount_ownership import AmountOwnership
 
@@ -851,3 +852,4 @@ class TestMovingATransferBetweenAccounts:
             # zero and so absent from the nets entirely.
             assert destination[0] not in vacated
             assert sum(after.values()) == Decimal("0")
+            assert_ledger_parity(db.session, td["scenario"].id)

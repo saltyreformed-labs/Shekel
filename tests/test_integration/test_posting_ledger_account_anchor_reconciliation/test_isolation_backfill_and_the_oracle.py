@@ -134,12 +134,12 @@ class TestScenarioAndOwnerIsolation:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                checking.id, whatif.id,
+            assert account_net(
+                _db.session, checking.id, whatif.id,
             ) == Decimal("930.00")
             # The baseline is untouched by the fresh scenario's activity.
-            assert posting_service.account_posting_total(
-                checking.id, seed_user["scenario"].id,
+            assert account_net(
+                _db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("1000.00")
             _assert_account_anchors_reconcile(whatif.id)
             # ``restate_account_opening`` writes its row straight to the
@@ -248,8 +248,8 @@ class TestScenarioAndOwnerIsolation:
             # The opening ABSORBS the pre-assertion settle (nothing rides on
             # top of it) while the on-top one reduces the balance:
             # 1000 - 40 = $960.00.
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("960.00")
             _assert_account_anchors_reconcile(scenario_id)
 

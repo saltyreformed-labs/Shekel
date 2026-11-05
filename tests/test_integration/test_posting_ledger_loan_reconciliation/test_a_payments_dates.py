@@ -19,6 +19,7 @@ from app.services.installment_calendar import monthly_due_date
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
 from app.services.liability_sign import owed
+from tests._ledger_parity import assert_ledger_parity
 from tests._test_helpers import rhythm_of, last_covered_day
 
 from ._helpers import (
@@ -373,3 +374,4 @@ class TestDueDateEditReconcilesTheLedger:
             )
             assert owed(balance_at.balance_at(loan, bctx, _AS_OF)) == posted_after
             assert _posted_balance(loan.id, scenario_id) == posted_after
+            assert_ledger_parity(db.session, scenario_id)

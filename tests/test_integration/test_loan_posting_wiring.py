@@ -41,6 +41,7 @@ from app.services import (
 )
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.ledger_lines import loan_key
+from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     account_net,
     ledger_net,
@@ -176,6 +177,7 @@ class TestSettleWiringAutoPosts:
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("0.00")
+            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestRevertAndDeletePostFullCashReversal:
@@ -262,6 +264,7 @@ class TestRevertAndDeletePostFullCashReversal:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("0.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_soft_delete_reverses_correction_and_full_cash(
         self, app, db, seed_user, seed_periods,
@@ -324,6 +327,7 @@ class TestRevertAndDeletePostFullCashReversal:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("1000.00")
+            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestRestoreWiring:
@@ -428,6 +432,7 @@ class TestTrueUpWiring:
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == checking_before
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_trueup_syncs_every_scenario(
         self, app, db, seed_user, seed_periods,
@@ -474,6 +479,8 @@ class TestTrueUpWiring:
             assert ledger_net(
                 db.session, interest_key, whatif.id,
             ) == Decimal("450.00")
+            assert_ledger_parity(db.session, baseline.id)
+            assert_ledger_parity(db.session, whatif.id)
 
     def test_trueup_resubmit_is_idempotent(
         self, app, db, seed_user, seed_periods,
@@ -511,6 +518,7 @@ class TestTrueUpWiring:
             assert ledger_net(
                 db.session, _interest_key(loan), scenario_id,
             ) == Decimal("450.00")
+            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestNonLoanTransferIgnored:
@@ -597,6 +605,7 @@ class TestRouteChokepointWiring:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("1495.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_params_update_origination_rate_resplits_interest(
         self, app, db, seed_user, seed_periods, auth_client,
@@ -628,6 +637,7 @@ class TestRouteChokepointWiring:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("666.67")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_params_payment_day_change_resplits_across_trueup(
         self, app, db, seed_user, seed_periods, auth_client,
@@ -677,6 +687,7 @@ class TestRouteChokepointWiring:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("1250.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_params_created_after_settle_backposts(
         self, app, db, seed_user, seed_periods, auth_client,

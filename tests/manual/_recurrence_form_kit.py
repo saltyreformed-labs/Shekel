@@ -47,7 +47,7 @@ MARK = "ZZVERIFY-RECURRENCE"
 #: How long to wait after a field change that fires a preview fetch.
 #:
 #: **The limiter being REAL is the point**, so the run is paced to it rather
-#: than the other way round: the dev app runs prod's Redis limiter at 30
+#: than the other way round: the dev app runs prod's Valkey limiter at 30
 #: requests a minute per IP, ``recurrence_form.js`` fetches the occurrence
 #: preview on every field change, and this script changes a field about sixty
 #: times.  At 2.5s that is 24 a minute, the same headroom
@@ -71,7 +71,7 @@ MARK = "ZZVERIFY-RECURRENCE"
 #: adding more than 15 would meet 429s in a fresh window too.  Run it once an
 #: hour; the preview route's counter is
 #: ``LIMITS:LIMITER/<ip>/templates.preview_recurrence/200/1/hour`` in the
-#: dev Redis, its length the fetches still in the window.
+#: dev Valkey, its length the fetches still in the window.
 FIELD_SPACING_MS = 2500
 
 #: How long to wait between crafted POSTs.  See the module docstring.

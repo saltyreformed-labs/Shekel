@@ -97,7 +97,7 @@ Usage:
     VERIFY_WRITE=1 VERIFY_DEV_DATABASE=<clone> python tests/manual/verify_recurrence_form.py
 
 Exit code 0 when every check passes, 1 on a failure, 2 when the preconditions
-are not met.  It is paced: the dev app runs the real Redis limiter (30/minute
+are not met.  It is paced: the dev app runs the real Valkey limiter (30/minute
 per IP, prod behaviour), and a burst meets 429s.
 
 **Its drives live in three sibling modules** since plan#2680 split this

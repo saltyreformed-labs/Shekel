@@ -665,7 +665,7 @@ def _route_table_app():
     **Why not ``create_app``.**  The table this sweep needs is settled by
     blueprint registration, but ``create_app`` under the testing config also
     ensures schemas, seeds ``ref.*`` and populates ``ref_cache``
-    (`app/__init__.py:159-162` and the `ref_cache.init` at `:207`) -- 151 SQL
+    (its dev/test arm and its `ref_cache.init`, `app/__init__.py`) -- 151 SQL
     statements over 3 connections including 5 ``CREATE SCHEMA IF NOT EXISTS``,
     measured 2026-08-29.  That work is orthogonal to ``url_map`` and it would
     run at COLLECTION here, where a database failure is a collection ERROR:
@@ -686,7 +686,7 @@ def _route_table_app():
     impossible, and its blast radius is the suite rather than this file.
 
     ``register_url_converters`` is called FIRST because `create_app` documents
-    that order as required (`app/__init__.py:136`): a rule naming a converter
+    that order as required (its URL converters comment): a rule naming a converter
     this app has not registered raises ``LookupError`` at import, which is that
     same collection error arriving by another door.
 

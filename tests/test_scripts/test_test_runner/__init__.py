@@ -32,7 +32,10 @@ among them) are ``test_private_cluster.py``.  The cases here drive it THROUGH
 the wrapper, which makes its token, arms the traps and hands pytest the DSNs.
 
 These drive a stub ``docker`` and a stub ``pytest`` on ``PATH``, so they need
-no daemon, no image and no database, and they run in CI.  The suite-scale
+no daemon, no image and no database, and they run in CI.  Each runs a copy of
+the wrapper in a tree of its own (``_helpers._wrapper_copy``), because the wrapper
+syncs the venv of the tree it finds itself in; that sync is ``test_venv.py``'s,
+which also runs the real uv, over a project with no dependency.  The suite-scale
 behaviour they stand in for was measured separately, on 2026-09-05 at
 ``balance:X-br-2``: 13,156 passed in 342.8 s in a private cluster against
 356.4 s on the shared one.

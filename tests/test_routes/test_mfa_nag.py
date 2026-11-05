@@ -1,7 +1,7 @@
 """Tests for the owner-role MFA enrolment nag banner (F-095 / C-12).
 
 Covers the ``inject_mfa_nag_visible`` context processor in
-``app/__init__.py`` and the ``dashboard/_mfa_nag.html`` partial that
+``app/context_processors.py`` and the ``dashboard/_mfa_nag.html`` partial that
 ``base.html`` includes when the flag is truthy.
 
 The banner must:

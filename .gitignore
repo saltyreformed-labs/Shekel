@@ -9,9 +9,10 @@ dist/
 build/
 .eggs/
 
-# Virtual environments.  ``.venv`` has no trailing slash: a lane's
-# worktree holds a LINK to the main checkout's (tools/quill/lane.py),
-# and ``.venv/`` matches only a directory.
+# Virtual environments.  ``.venv`` has no trailing slash: a lane still
+# before the lock holds a LINK to the main checkout's (scripts/test.sh
+# replaces it once its tree holds uv.lock), and ``.venv/`` matches only
+# a directory.
 venv/
 .venv
 env/

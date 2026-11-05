@@ -8,7 +8,7 @@ paycheck and projecting balances forward over a ~2-year horizon.
 
 **Two ways to run Shekel:**
 
-- **Docker (recommended):** Download two files, create a volume, run `docker compose up`. No Python
+- **Docker (recommended):** Download five files, create a volume, run `docker compose up`. No Python
   or PostgreSQL install needed. See [Quick Start (Docker)](#quick-start-docker).
 - **From source:** Clone the repo, set up Python, use Docker for databases. See
   [Developer Setup (from source)](#developer-setup-from-source).
@@ -29,14 +29,32 @@ docker compose version
 ### 2. Download Configuration Files
 
 ```bash
-mkdir -p shekel/deploy/nginx-bundled && cd shekel
-curl -O https://raw.githubusercontent.com/saltyreformed-labs/Shekel/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/saltyreformed-labs/Shekel/main/.env.example
-curl -o deploy/nginx-bundled/nginx.conf https://raw.githubusercontent.com/saltyreformed-labs/Shekel/main/deploy/nginx-bundled/nginx.conf
-cp .env.example .env
+mkdir shekel && cd shekel
+```
+
+Then, inside `shekel`, pull the app image and download the configuration files from the commit the
+image was built from, so the two always match. Every update runs this block again (see
+[Updating](#updating)), and it overwrites the files it downloads: keep your own settings in `.env`
+or in a `docker-compose.override.yml`. `-f` keeps a file as it was when the server refuses its
+download, and an error naming `REV` means the pull failed and that line downloaded nothing, so read
+the output for an error before going on:
+
+```bash
+docker pull ghcr.io/saltyreformed-labs/shekel:latest
+REV=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' ghcr.io/saltyreformed-labs/shekel:latest)
+mkdir -p deploy/nginx-bundled deploy/valkey
+curl -f -O "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/docker-compose.yml"
+curl -f -O "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/.env.example"
+curl -f -o deploy/nginx-bundled/nginx.conf "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/deploy/nginx-bundled/nginx.conf"
+curl -f -o deploy/valkey/users.acl "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/deploy/valkey/users.acl"
+curl -f -o deploy/valkey/start.sh "https://raw.githubusercontent.com/saltyreformed-labs/Shekel/${REV:?}/deploy/valkey/start.sh"
 ```
 
 ### 3. Configure Environment
+
+```bash
+cp .env.example .env
+```
 
 Edit `.env` and set these values:
 
@@ -44,11 +62,13 @@ Edit `.env` and set these values:
 |---|---|---|
 | `POSTGRES_PASSWORD` | Yes | Choose a strong database password. |
 | `SECRET_KEY` | Yes | Run `openssl rand -hex 32` and paste the output. |
+| `APP_ROLE_PASSWORD` | Yes | The app's least-privilege database role. Run `openssl rand -hex 24` and paste the output. |
+| `SHEKEL_VALKEY_PASSWORD` | Yes | The rate limiter's store. Run `openssl rand -hex 24` and paste the output. |
 | `TOTP_ENCRYPTION_KEY` | No | Required before enabling MFA/TOTP. See [MFA Setup](#mfa-setup). |
 | `REGISTRATION_ENABLED` | No | Set to `true` to enable the `/register` endpoint. Default in production: `false` (see [Security](#security)). |
-| `SEED_USER_EMAIL` | No | Login email. Default: `admin@shekel.local`. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
-| `SEED_USER_PASSWORD` | No | Login password (min 12 characters). Default: `ChangeMe!2026`. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
-| `SEED_USER_LAST_PAYDAY` | Only with `SEED_USER_EMAIL` | The day the seeded owner was last paid, ISO `YYYY-MM-DD`. No default -- Shekel budgets by paycheck and will not invent one. Must fall within one pay cadence of the first boot. |
+| `SEED_USER_EMAIL` | No | Login email, `admin@shekel.local` in `.env.example`. While it is set, the first boot creates this user and the two rows below are required. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
+| `SEED_USER_PASSWORD` | With `SEED_USER_EMAIL` | Login password, at least 12 characters. The app refuses to start with `.env.example`'s `ChangeMe!2026`. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
+| `SEED_USER_LAST_PAYDAY` | With `SEED_USER_EMAIL` | The day the seeded owner was last paid, ISO `YYYY-MM-DD`. No default -- Shekel budgets by paycheck and will not invent one. Must fall within one pay cadence of the first boot. |
 | `SEED_USER_CADENCE_DAYS` | No | Days between the seeded owner's paydays. Default: `14`. |
 | `SEED_USER_NUM_PERIODS` | No | How many pay periods to generate ahead. Default: `52`. |
 
@@ -73,8 +93,8 @@ Look for `=== Starting Application ===` to confirm the app is running.
 
 ### 5. Log In
 
-Open <http://localhost> and log in with the credentials from your `.env` file (or the defaults
-above).
+Open <http://localhost> and log in with `SEED_USER_EMAIL` and `SEED_USER_PASSWORD` from your `.env`
+file.
 
 ### 6. First-Time Setup in the App
 
@@ -94,11 +114,28 @@ grid) to calibrate projections against your real checking account balance.
 
 ### Updating
 
-```bash
-docker compose pull && docker compose up -d
-```
+These steps update the bundled install the Quick Start makes. Shared mode updates by
+[`deploy/README.md`](deploy/README.md), with the host steps a release needs in `docs/runbook.md`
+2.6. A release changes the image and the configuration files together, so an update takes both. From
+your `shekel` directory:
 
-Database migrations run automatically on startup.
+1. Run the block of [step 2](#2-download-configuration-files) that pulls the image and downloads the
+   files again.
+2. Once, for an install from before the rate limiter moved from Redis to Valkey: if `.env` names
+   `SHEKEL_REDIS_PASSWORD`, rename it to `SHEKEL_VALKEY_PASSWORD`, keeping its value. The app now
+   names its store itself, the bundled Valkey, so if `.env` sets `RATELIMIT_STORAGE_URI`, delete the
+   line: nothing reads it, and a store of your own is no longer supported.
+3. Start the new release:
+
+   ```bash
+   docker compose pull && docker compose up -d --remove-orphans
+   ```
+
+If a `docker-compose.override.yml` of yours pins the app image by digest, put the new release's
+digest there first (`deploy/README.md`, "Updating the digest") and name that pinned image in step
+1's block in place of `ghcr.io/saltyreformed-labs/shekel:latest`. `--remove-orphans` removes each
+container whose service the new `docker-compose.yml` no longer names, as it removes
+`shekel-prod-redis` once Valkey replaces it. Database migrations run automatically on startup.
 
 ### Stopping and Removing
 
@@ -123,12 +160,14 @@ docker volume rm shekel-prod-pgdata
 | `shekel-prod-pgdata ... not found` on first run | Run `docker volume create shekel-prod-pgdata` before `docker compose up`. |
 | MFA enable fails with "TOTP_ENCRYPTION_KEY" message | Set `TOTP_ENCRYPTION_KEY` in `.env`. See [MFA Setup](#mfa-setup) for generation instructions. |
 | `/register` returns 404 | `REGISTRATION_ENABLED` is `false` (the production default). Set `REGISTRATION_ENABLED=true` in `.env` to re-enable. |
-| Nginx fails with "mount ... not a directory" | The `deploy/nginx-bundled/nginx.conf` file is missing. Re-run the download step: `mkdir -p deploy/nginx-bundled && curl -o deploy/nginx-bundled/nginx.conf https://raw.githubusercontent.com/saltyreformed-labs/Shekel/main/deploy/nginx-bundled/nginx.conf` |
+| Nginx fails with "mount ... not a directory" | `deploy/nginx-bundled/nginx.conf` was missing when the stack started, so Docker made a directory in its place. Remove it with `rmdir deploy/nginx-bundled/nginx.conf` (with `sudo` if Docker runs as root), then run the block of [step 2](#2-download-configuration-files) that downloads the files again from your `shekel` directory. |
 | App does not start or shows blank page | Run `docker compose logs app` and check for error messages. |
 | Container keeps restarting | Run `docker compose logs app` -- a missing required variable or database connection issue is the most common cause. |
 | Container marked unhealthy during first startup | First-time initialization (schema creation, migrations, seeding) can take over 60 seconds. The healthcheck `start_period` allows 120 seconds before failures count. Wait and check `docker compose logs -f app`. |
 | `curl` not found inside the container | The slim image does not include curl. Use Python instead: `docker compose exec app python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"` |
-| `Can't locate revision identified by ...` | The GHCR image may be older than your database. Rebuild from source (`docker compose build`) or pull the latest image (`docker compose pull`). |
+| `Can't locate revision identified by ...` | The GHCR image may be older than your database. Update to the latest release ([Updating](#updating)). |
+| `VALKEY_PASSWORD is not set` in `docker compose logs app` | Your `docker-compose.yml` is older than the image, so it does not hand the app the rate limiter's password. Follow [Updating](#updating) from step 1. |
+| Signing in fails, and `docker compose logs app` names `redis:6379` | Your configuration files are newer than the image, as when a `docker-compose.override.yml` pins an older digest: an image from before the switch to Valkey looks for a Redis the files no longer start. Follow [Updating](#updating) from step 1. |
 
 ### Deployment Architecture
 
@@ -137,14 +176,14 @@ matches your host.
 
 | Mode | When to use | Reverse proxy | Active files |
 |------|-------------|---------------|--------------|
-| **Bundled** (default) | The host has no other reverse proxy. The Quick Start above runs in this mode. | `shekel-prod-nginx` (in this stack) | `deploy/nginx-bundled/nginx.conf` |
-| **Shared** | The host already runs a central Nginx (or Traefik/Caddy) in front of multiple services. | A separate Nginx managed outside this stack | `deploy/nginx-shared/nginx.conf`, `deploy/nginx-shared/conf.d/shekel.conf`, `deploy/docker-compose.prod.yml` |
+| **Bundled** (default) | The host has no other reverse proxy. The Quick Start above runs in this mode. | `shekel-prod-nginx` (in this stack) | `deploy/nginx-bundled/nginx.conf`, `deploy/valkey/` |
+| **Shared** | The host already runs a central Nginx (or Traefik/Caddy) in front of multiple services. | A separate Nginx managed outside this stack | `deploy/nginx-shared/nginx.conf`, `deploy/nginx-shared/conf.d/shekel.conf`, `deploy/docker-compose.prod.yml`, `deploy/valkey/` |
 
 In bundled mode the repo's `docker-compose.yml` mounts `deploy/nginx-bundled/nginx.conf` into the
 bundled `shekel-prod-nginx` container. Nothing under `deploy/nginx-shared/` is read.
 
 In shared mode the bundled `shekel-prod-nginx` is parked in the `disabled` profile by
-`deploy/docker-compose.prod.yml`, so only `db`, `redis`, and `app` start. The shared Nginx (defined
+`deploy/docker-compose.prod.yml`, so only `db`, `valkey`, and `app` start. The shared Nginx (defined
 and managed outside this stack) reaches the app over an external `homelab` Docker network.
 
 For full details and the file layout under `deploy/`, see [`deploy/README.md`](deploy/README.md).
@@ -334,11 +373,11 @@ Python application.
 ### 1. Prerequisites
 
 - **Docker Engine** -- provides the dev and test PostgreSQL databases
-- **Python 3.12+** and **pip**
+- **uv** -- installs the Python `.python-version` names and every package `uv.lock` pins
 
 ```bash
 docker compose version
-python --version
+uv --version
 ```
 
 ### 2. Clone & Set Up Python Environment
@@ -348,12 +387,10 @@ cd ~/projects  # or wherever you keep code
 git clone https://github.com/saltyreformed-labs/Shekel.git
 cd Shekel
 
-# Create a virtual environment
-python -m venv .venv
+# Create .venv and install exactly what uv.lock pins: the runtime packages plus
+# the test, lint and build tools (no new package without the developer's approval)
+uv sync --locked
 source .venv/bin/activate
-
-# Install dependencies (dev file includes production deps + test/lint tools)
-pip install -r requirements-dev.txt
 ```
 
 ### 3. Configure Environment
@@ -542,7 +579,8 @@ shekel/
 ├── Dockerfile                   # Multi-stage production container
 ├── gunicorn.conf.py             # Gunicorn WSGI server configuration
 ├── entrypoint.sh                # Container startup (DB init, migrate, seed)
-├── requirements.txt             # Production Python dependencies
-├── requirements-dev.txt         # Dev/test/lint dependencies (includes requirements.txt)
+├── .python-version              # The Python version uv, CI and the Dockerfile follow
+├── pyproject.toml               # Python dependencies and the ranges each may move in
+├── uv.lock                      # Every package's exact version and sha256
 └── run.py                       # Entry point
 ```

@@ -27,7 +27,7 @@ def _needs(**results):
             hyphen (``tax_law`` names the ``tax-law`` job).
     """
     needs = {job: {"result": "success", "outputs": {}} for job in
-             ("landing", "tools", "tax-law", "lint", "test")}
+             ("landing", "tools", "tax-law", "lint", "test", "image")}
     for job, result in results.items():
         needs[job.replace("_", "-")]["result"] = result
     return needs
@@ -40,7 +40,7 @@ class TestARunIsGreenOnlyWhenEveryGraderPassed:
         """The one green shape of a run."""
         assert not ci_verdict.verdict(_needs())
 
-    @pytest.mark.parametrize("job", ["landing", "tools", "tax_law", "lint", "test"])
+    @pytest.mark.parametrize("job", ["landing", "tools", "tax_law", "lint", "test", "image"])
     @pytest.mark.parametrize("result", ["failure", "cancelled", "skipped"])
     def test_any_grader_not_succeeding_is_red(self, job, result):
         """A failed, cancelled or SKIPPED grader turns the check red.
@@ -62,7 +62,7 @@ class TestTheVerdictKnowsExactlyWhatItGrades:
             "benchmarks: a job this verdict does not know how to grade",
         ]
 
-    @pytest.mark.parametrize("job", ["landing", "tools", "tax-law", "lint", "test"])
+    @pytest.mark.parametrize("job", ["landing", "tools", "tax-law", "lint", "test", "image"])
     def test_a_named_job_missing_from_needs_is_red(self, job):
         """Dropping a grader from ``needs`` cannot quietly stop grading it."""
         needs = _needs()

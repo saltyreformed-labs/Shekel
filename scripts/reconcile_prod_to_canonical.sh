@@ -19,11 +19,12 @@
 # Step-list:
 #   1. Generate Postgres TLS cert (sudo for chown)
 #   2. Create /opt/docker/shekel/{secrets,deploy/postgres} dirs
-#   3. Migrate four high-sensitivity secrets from .env to files
+#   3. Migrate four high-sensitivity secrets from .env to files, and write
+#      Valkey's password file from .env
 #   4. Rewrite /opt/docker/shekel/.env (placeholders + new vars)
 #   5. Create shekel-frontend network if missing
 #   6. Update shared Nginx vhost (deploy/nginx-shared/conf.d/shekel.conf)
-#   7. Copy repo compose files to /opt/docker/shekel/
+#   7. Copy repo compose files and deploy/valkey/ to /opt/docker/shekel/
 #
 # Exit codes:
 #   0 -- all steps succeeded; operator may proceed with recreate.
@@ -116,6 +117,27 @@ for pair in \
     echo "wrote $target ($(wc -c <"$target") bytes)"
 done
 
+# Valkey's password file, which the override's valkey service and app
+# both read (ruling plan#2633), so step 4 leaves a placeholder in .env
+# for it as for the four above.  0640, not 0600: the valkey container
+# reads it as uid 999 gid 1000, gid 1000 is the operating user's group,
+# and compose v2 ignores the secret reference's mode; the app reads it
+# as uid 1000, its owner.
+valkey_target="$PROD_ROOT/secrets/valkey_password"
+if [[ -s "$valkey_target" ]]; then
+    warn "$valkey_target already non-empty -- skipping"
+else
+    value=$(extract_env_value SHEKEL_VALKEY_PASSWORD)
+    [[ -n "$value" ]] || die "SHEKEL_VALKEY_PASSWORD missing or empty in $PROD_ROOT/.env -- cannot write $valkey_target"
+    (
+        umask 027
+        printf '%s' "$value" >"$valkey_target"
+    )
+    chmod 0640 "$valkey_target"
+    # shellcheck disable=SC2312 # wc -c is a display-only byte count for the wrote message, as in the loop above
+    echo "wrote $valkey_target ($(wc -c <"$valkey_target") bytes)"
+fi
+
 # ── 4. Rewrite /opt/docker/shekel/.env ────────────────────────────
 log "Step 4: rewrite $PROD_ROOT/.env"
 
@@ -144,11 +166,9 @@ if [[ -z "$current_digest" ]]; then
 fi
 [[ -n "$current_digest" ]] || die "could not determine the image digest: no SHEKEL_IMAGE_DIGEST in $PROD_ROOT/.env and no inline digest on the shekel image line of $PROD_ROOT/docker-compose.yml"
 
-# Carry forward the values that should survive: SHEKEL_REDIS_PASSWORD,
-# SEED_USER_*, GUNICORN_WORKERS, NGINX_PORT, AUDIT_RETENTION_DAYS,
-# LOG_LEVEL, SLOW_REQUEST_THRESHOLD_MS, TOTP_ENCRYPTION_KEY_OLD.
-SHEKEL_REDIS_PASSWORD=$(extract_env_value SHEKEL_REDIS_PASSWORD)
-[[ -n "$SHEKEL_REDIS_PASSWORD" ]] || die "SHEKEL_REDIS_PASSWORD missing in current .env"
+# Carry forward the values that should survive: SEED_USER_*,
+# GUNICORN_WORKERS, NGINX_PORT, AUDIT_RETENTION_DAYS, LOG_LEVEL,
+# SLOW_REQUEST_THRESHOLD_MS, TOTP_ENCRYPTION_KEY_OLD.
 SEED_USER_EMAIL=$(extract_env_value SEED_USER_EMAIL)
 SEED_USER_PASSWORD=$(extract_env_value SEED_USER_PASSWORD)
 SEED_USER_DISPLAY_NAME=$(extract_env_value SEED_USER_DISPLAY_NAME)
@@ -186,10 +206,13 @@ TOTP_ENCRYPTION_KEY=replaced_by_docker_secret
 # window.  See docs/runbook_secrets.md "Rotating TOTP_ENCRYPTION_KEY".
 TOTP_ENCRYPTION_KEY_OLD=
 
-# Per-app Redis ACL user password.  Lower sensitivity than the four
-# secrets above (gates a Redis user restricted to the ~LIMITS*
-# keyspace on an internal network), so kept as an env var.
-SHEKEL_REDIS_PASSWORD=$SHEKEL_REDIS_PASSWORD
+# Per-app Valkey ACL user password.  Lower sensitivity than the four
+# secrets above (gates a Valkey user restricted to the limiter's own
+# commands on the LIMITS:* keys, reached only over a socket file the app
+# shares).  The valkey service and the app both read it from
+# /opt/docker/shekel/secrets/valkey_password; the placeholder satisfies
+# the base docker-compose.yml's interpolation, as the four above do.
+SHEKEL_VALKEY_PASSWORD=replaced_by_docker_secret
 
 # Image digest pin.  Carried forward from the previous .env unchanged
 # so this reconciliation does not double as an image bump.  Rotate
@@ -285,11 +308,17 @@ echo "snapshot saved to $snap_dir/"
 
 cp -v "$REPO_ROOT/docker-compose.yml" "$PROD_ROOT/docker-compose.yml"
 cp -v "$REPO_ROOT/deploy/docker-compose.prod.yml" "$PROD_ROOT/docker-compose.override.yml"
+# Valkey's ACL rules and start script, which the base file mounts from
+# ./deploy/valkey (it refuses to start without them).
+if [[ -d "$PROD_ROOT/deploy/valkey" ]]; then
+    cp -a "$PROD_ROOT/deploy/valkey" "$snap_dir/valkey.pre-reconcile"
+fi
+install -d -m 0755 "$PROD_ROOT/deploy/valkey"
+cp -v "$REPO_ROOT/deploy/valkey/users.acl" "$REPO_ROOT/deploy/valkey/start.sh" "$PROD_ROOT/deploy/valkey/"
 
 # Validate the merged config before exiting.  The rendered merge
 # INTERPOLATES .env values -- any credential that is not yet a docker
-# secret (e.g. SHEKEL_REDIS_PASSWORD inside the redis ACL command and
-# the app's RATELIMIT_STORAGE_URI default) appears in cleartext -- so
+# secret appears in cleartext -- so
 # the file must be owner-only from the moment it exists (umask first,
 # then chmod is belt-and-braces; finding M08).
 log "Validation: docker compose config (merged)"
@@ -337,6 +366,7 @@ Rollback (if anything goes wrong):
 
     sudo cp $snap_dir/docker-compose.yml.pre-reconcile $PROD_ROOT/docker-compose.yml
     sudo cp $snap_dir/docker-compose.override.yml.pre-reconcile $PROD_ROOT/docker-compose.override.yml
+    # and, if it existed before, deploy/valkey from $snap_dir/valkey.pre-reconcile
     sudo cp $backup $PROD_ROOT/.env
     cd $PROD_ROOT && docker compose up -d
 ────────────────────────────────────────────────────────────────────

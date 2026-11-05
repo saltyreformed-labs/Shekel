@@ -41,9 +41,13 @@ PROD_COMPOSE_OVERRIDE = DEPLOY_DIR / "docker-compose.prod.yml"
 BUNDLED_NGINX_CONF = DEPLOY_DIR / "nginx-bundled" / "nginx.conf"
 
 # Production services that must carry the full hardening bundle.
-# redis was hardened in an earlier commit; including it here pins
-# the regression surface so the existing fields cannot be removed.
-HARDENED_SERVICES = ("db", "app", "nginx", "redis")
+# valkey (redis before ruling R-BAL298) was hardened in an earlier
+# commit; including it here pins the regression surface so the
+# existing fields cannot be removed.
+HARDENED_SERVICES = ("db", "app", "nginx", "valkey")
+# The services the shared-mode merge still runs: nginx is parked in
+# its disabled profile there, so the merged result holds no nginx.
+MERGED_SERVICES = tuple(name for name in HARDENED_SERVICES if name != "nginx")
 
 # Bytes-per-MiB conversion used to normalise compose's mixed
 # representation of mem_limit (raw bytes from ``compose config``,
@@ -113,9 +117,10 @@ class TestBaseComposeHardeningFields:
     """Parse ``docker-compose.yml`` directly and assert each Shekel
     service carries the C-35 hardening bundle.
 
-    All four services (db, app, nginx, redis) are checked because:
+    All four services (db, app, nginx, valkey) are checked because:
       * db, app, and nginx are the focus of Commit C-35;
-      * redis was hardened in an earlier commit (Commit C-15-era)
+      * valkey (redis before ruling R-BAL298) was hardened in an
+        earlier commit (Commit C-15-era)
         and including it here prevents a future change from quietly
         regressing the existing fields.
     """
@@ -127,8 +132,8 @@ class TestBaseComposeHardeningFields:
 
         ``yaml.safe_load`` is the standard tool here: we never need
         to construct arbitrary Python objects from this file, just
-        read its mapping/list shape.  PyYAML is in
-        ``requirements.txt`` (already used by the sibling C-33
+        read its mapping/list shape.  PyYAML is in the lock's dev
+        group (``pyproject.toml``; already used by the sibling C-33
         tests), so a missing import would surface as a suite-level
         failure rather than masking a hardening regression here.
         """
@@ -210,7 +215,7 @@ class TestBaseComposeHardeningFields:
         tmpfs = service.get("tmpfs") or []
         assert "/tmp" in tmpfs, (
             f"service {service_name!r} read-only rootfs without /tmp "
-            f"tmpfs would break Python tempfile, redis temp writes, "
+            f"tmpfs would break Python tempfile, valkey temp writes, "
             f"and nginx pid path: {tmpfs}"
         )
 
@@ -249,7 +254,7 @@ class TestBaseComposeHardeningFields:
             ("db", 256),
             ("app", 256),
             ("nginx", 64),
-            ("redis", 64),
+            ("valkey", 64),
         ],
     )
     def test_mem_limit_set_and_reasonable(
@@ -342,7 +347,7 @@ class TestBaseComposeHardeningFields:
         [
             ("db", "postgres"),
             ("nginx", "nginx"),
-            ("redis", "redis"),
+            ("valkey", "valkey"),
         ],
     )
     def test_non_root_user_pinned(
@@ -352,7 +357,7 @@ class TestBaseComposeHardeningFields:
         expected_user: str,
     ) -> None:
         """Pinning ``user:`` to a non-root identity is what lets the
-        upstream postgres / nginx / redis entrypoints take their
+        upstream postgres / nginx / valkey entrypoints take their
         ``[ "$(id -u)" != '0' ]`` branches and skip the chown +
         gosu-drop steps.  Without that, ``cap_drop: [ALL]`` would
         starve the entrypoints of CAP_CHOWN/CAP_SETUID/CAP_SETGID
@@ -651,7 +656,8 @@ class TestProdComposeOverrideInheritsHardening:
 class TestMergedComposeHardeningSurvivesOverride:
     """Run ``docker compose config`` against the merged base +
     shared-mode override and verify the hardening fields appear on
-    the merged result for the app and db services.
+    the merged result for the app, db and valkey services, and that
+    valkey takes its password from production's file.
 
     This is the highest-fidelity check: it exercises the same
     merge logic compose uses at deploy time and catches a regression
@@ -670,7 +676,7 @@ class TestMergedComposeHardeningSurvivesOverride:
         regressions this class is meant to detect.
 
         Class-scoped so the subprocess only runs once per test
-        session despite the eight parametrize cases below.
+        session despite the parametrize cases below.
         """
         if not _docker_available():
             pytest.skip(
@@ -695,12 +701,12 @@ class TestMergedComposeHardeningSurvivesOverride:
             # value never reaches a real pull because ``compose config``
             # only renders the merged YAML.
             "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # Phase B3 Redis ACL hardening: the bundled redis service's
-            # ``--user shekel`` ACL line interpolates
-            # ``${SHEKEL_REDIS_PASSWORD:?...}`` from .env.  Synthetic
+            # The Valkey password: the app's and the valkey service's
+            # VALKEY_PASSWORD interpolate
+            # ``${SHEKEL_VALKEY_PASSWORD:?...}`` from .env.  Synthetic
             # value satisfies the required-form check; the test never
-            # actually starts the redis container.
-            "SHEKEL_REDIS_PASSWORD": "test-redis-password",
+            # actually starts the valkey container.
+            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
         }
         result = subprocess.run(
             [
@@ -728,14 +734,14 @@ class TestMergedComposeHardeningSurvivesOverride:
         )
         return yaml.safe_load(result.stdout)
 
-    @pytest.mark.parametrize("service_name", ("db", "app"))
+    @pytest.mark.parametrize("service_name", MERGED_SERVICES)
     def test_merged_service_carries_security_opt(
         self,
         merged: dict,
         service_name: str,
     ) -> None:
         """The shared-mode merge must preserve ``security_opt`` on
-        the app and db services (nginx is parked in the disabled
+        the app, db and valkey services (nginx is parked in the disabled
         profile in shared mode and is therefore filtered from the
         default merge result).
         """
@@ -746,14 +752,14 @@ class TestMergedComposeHardeningSurvivesOverride:
             f"no-new-privileges:true: {opts}"
         )
 
-    @pytest.mark.parametrize("service_name", ("db", "app"))
+    @pytest.mark.parametrize("service_name", MERGED_SERVICES)
     def test_merged_service_carries_cap_drop(
         self,
         merged: dict,
         service_name: str,
     ) -> None:
         """The shared-mode merge must preserve ``cap_drop: [ALL]``
-        on the app and db services.
+        on the app, db and valkey services.
         """
         service = merged["services"][service_name]
         cap_drop = service.get("cap_drop") or []
@@ -762,7 +768,7 @@ class TestMergedComposeHardeningSurvivesOverride:
             f"{cap_drop}"
         )
 
-    @pytest.mark.parametrize("service_name", ("db", "app"))
+    @pytest.mark.parametrize("service_name", MERGED_SERVICES)
     def test_merged_service_carries_read_only(
         self,
         merged: dict,
@@ -775,7 +781,7 @@ class TestMergedComposeHardeningSurvivesOverride:
             f"after override merge"
         )
 
-    @pytest.mark.parametrize("service_name", ("db", "app"))
+    @pytest.mark.parametrize("service_name", MERGED_SERVICES)
     def test_merged_service_carries_resource_limits(
         self,
         merged: dict,
@@ -807,3 +813,46 @@ class TestMergedComposeHardeningSurvivesOverride:
             f"(deploy.resources.limits.pids or pids_limit): "
             f"{pids_limit!r}"
         )
+
+    def test_merged_valkey_reads_production_s_password_file(
+        self,
+        merged: dict,
+    ) -> None:
+        """Production hands Valkey its password as a file, never in the
+        container's stored environment: the merge mounts the
+        ``valkey_password`` secret, from ``secrets/valkey_password``
+        under production's directory, at the path ``start.sh`` reads,
+        and blanks ``VALKEY_PASSWORD``, which ``start.sh`` would
+        otherwise fall back to.
+        """
+        valkey = merged["services"]["valkey"]
+        start_sh = (DEPLOY_DIR / "valkey" / "start.sh").read_text(encoding="utf-8")
+        (read_at,) = [line.removeprefix("secret=") for line in start_sh.splitlines()
+                      if line.startswith("secret=")]
+        assert [f"/run/secrets/{mount['target']}" for mount in valkey["secrets"]
+                if mount["source"] == "valkey_password"] == [read_at]
+        assert merged["secrets"]["valkey_password"]["file"] == (
+            "/opt/docker/shekel/secrets/valkey_password")
+        assert valkey["environment"]["VALKEY_PASSWORD"] == ""
+
+    def test_merged_app_reads_valkey_s_own_password_file(
+        self,
+        merged: dict,
+    ) -> None:
+        """The app logs in with the password Valkey holds, from the same file
+        (ruling plan#2633): the merge mounts the ``valkey_password`` secret into
+        the app at the path Valkey reads it from, blanks the app's
+        ``VALKEY_PASSWORD`` so its stored environment holds no password (and
+        .env's placeholder never reaches it), and gives it no store address,
+        which its code names.
+        """
+        app, valkey = merged["services"]["app"], merged["services"]["valkey"]
+
+        def mounted(service: dict) -> list[str]:
+            """Where ``service`` mounts the ``valkey_password`` secret."""
+            return [mount["target"] for mount in service["secrets"]
+                    if mount["source"] == "valkey_password"]
+
+        assert mounted(app) == mounted(valkey) == ["valkey_password"]
+        assert app["environment"]["VALKEY_PASSWORD"] == ""
+        assert "RATELIMIT_STORAGE_URI" not in app["environment"]

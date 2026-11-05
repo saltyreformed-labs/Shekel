@@ -87,7 +87,6 @@ Measured against the running maintainer host 2026-08-08. The nginx row differs b
 |--------|---------|-------|
 | `shekel-deploy` | **Production deploy** (digest-pinned GHCR image + cosign) | `shekel-deploy [sha256:... ] [--dry-run] [--no-verify]`, or `shekel-deploy --dump-only` |
 | `deploy/verify_prod_deploy.sh` | Read-only check of production after a deploy | `deploy/verify_prod_deploy.sh [SINCE]` |
-| `scripts/deploy.sh` | Self-hosted **source-build** deploy (NOT the production path) | `./scripts/deploy.sh [--skip-pull] [--skip-backup]` |
 | `scripts/backup.sh` | Create database backup | `./scripts/backup.sh [--no-nas] [--local-dir DIR]` |
 | `scripts/restore.sh` | Restore database from backup | `./scripts/restore.sh <backup_file>` |
 | `scripts/verify_backup.sh` | Verify backup integrity | `./scripts/verify_backup.sh <backup_file>` |
@@ -125,23 +124,9 @@ Crontab entries (replace `/opt/shekel` with your actual path):
 
 ### 2.1 Deploying a New Version
 
-**There are two deploy paths, and only one of them is production.** Pick by how the image is
-produced, not by which script you remember.
-
-| | Production (maintainer) | Self-hosted source build |
-|---|---|---|
-| Script | `shekel-deploy` | `scripts/deploy.sh` |
-| Canonical source | `deploy/shekel-deploy.sh` in the repo, symlinked to `/opt/docker/scripts/` | `scripts/deploy.sh` |
-| Stack | `/opt/docker/shekel` (hardened, digest-pinned) | `/opt/shekel` (`docker-compose.yml` + `docker-compose.build.yml`) |
-| Image | `ghcr.io/saltyreformed-labs/shekel@sha256:...`, cosign-verified | built locally from the working tree |
-| Rollback | digest revert, decided by the re-read schema stamp (2.3) | `:previous` image tag |
-
-`scripts/deploy.sh` **refuses to run when `/opt/docker/shekel` exists** (`--force-self-hosted`
-overrides): running it on the maintainer's host would replace the pinned, hardened container with an
-unpinned locally-built one. If you are the maintainer, you want `shekel-deploy`; 2.1.2 below is for
-self-hosted installs that build from source.
-
-#### 2.1.1 Production deploy (`shekel-deploy`)
+Production deploys with `shekel-deploy`, which pins `ghcr.io/saltyreformed-labs/shekel@sha256:...`,
+cosign-verified, on the hardened stack at `/opt/docker/shekel`. A self-hosted install runs the image
+CI builds and signs, and updates by 2.2. Development is `docker-compose.dev.yml`.
 
 ```bash
 shekel-deploy                  # pull :latest, deploy if the digest is new
@@ -191,69 +176,16 @@ sudo ln -sfn /home/josh/projects/Shekel/deploy/shekel-deploy.sh \
              /opt/docker/scripts/shekel-deploy.sh
 ```
 
-#### 2.1.2 Self-hosted source-build deploy (`scripts/deploy.sh`)
+### 2.2 Updating a Self-Hosted Install
 
-The deploy script automates the full deployment workflow with automatic rollback on failure.
-
-```bash
-cd /opt/shekel
-./scripts/deploy.sh
-```
-
-**What it does (in order):**
-
-1. Pulls the latest code from GitHub (`git pull --ff-only`)
-2. Runs a pre-deploy database backup (`scripts/backup.sh`)
-3. Tags the current Docker image as `:previous` for rollback
-4. Builds the new Docker image (`docker compose build app`)
-5. Restarts the app container (`docker compose up -d --no-deps --force-recreate app`)
-6. Waits for the health endpoint to report healthy (default: 60s timeout)
-7. On health check failure: rolls back to the `:previous` image automatically
-
-**Options:**
-
-| Flag | Effect |
-|------|--------|
-| `--skip-pull` | Skip `git pull` (deploy from current working tree) |
-| `--skip-backup` | Skip pre-deploy database backup |
-| `--health-timeout N` | Seconds to wait for health check (default: 60) |
-| `--health-interval N` | Seconds between health check retries (default: 5) |
-
-**Example: deploy from a specific branch without backup:**
-
-```bash
-cd /opt/shekel
-git checkout feature-branch
-./scripts/deploy.sh --skip-pull --skip-backup
-```
-
-### 2.2 Manual Deployment
-
-If the deploy script is unavailable or you need more control:
-
-```bash
-cd /opt/shekel
-
-# 1. Pull latest code.
-git pull --ff-only
-
-# 2. Back up the database.
-./scripts/backup.sh
-
-# 3. Build the new image.
-docker compose build app
-
-# 4. Restart the app container (migrations run automatically via entrypoint.sh).
-docker compose up -d --no-deps --force-recreate app
-
-# 5. Verify health.
-curl -s http://localhost/health
-# Expected: {"status":"healthy","timestamp":"..."}
-```
+A self-hosted install is the README's Quick Start: the image CI builds and signs on `main`, and the
+configuration files of the commit that image was built from. A release changes both, so an update
+takes both, by the README's Updating section. Migrations run on the new container's start. The
+README's steps check no signature; `deploy/README.md`'s `cosign verify` command does.
 
 ### 2.3 Rolling Back
 
-#### Production (`shekel-deploy`): the re-read stamp decides
+**In production, `shekel-deploy`'s re-read stamp decides.**
 
 When the new image fails (compose rejects it, its container reports unhealthy, or it is not healthy
 within 4 minutes), `shekel-deploy` stops the new container, so its entrypoint can commit nothing
@@ -376,80 +308,11 @@ sed -i 's|^SHEKEL_IMAGE_DIGEST=.*|SHEKEL_IMAGE_DIGEST=<old-digest>|' /opt/docker
 docker compose up -d app
 ```
 
-**Automatic rollback:** For a self-hosted source build, `scripts/deploy.sh` automatically rolls back
-if the health check fails after restart. No manual action is needed. For production, see the stamp
-rule above.
-
-**Manual rollback, SELF-HOSTED source-build stacks only** (`/opt/shekel`, `scripts/deploy.sh`). It
-does not apply to the maintainer's production stack, which has no `:previous` tag and no
-`/opt/shekel` -- for that, use the digest sequence above:
-
-```bash
-cd /opt/shekel
-
-# Option A: Roll back to a specific git commit.
-git log --oneline -5          # Find the commit to roll back to
-git checkout <commit-hash>
-docker compose build app
-docker compose up -d --no-deps --force-recreate app
-
-# Option B: If the previous image is still tagged.
-# deploy.sh tags the in-place image as ${APP_CONTAINER}:previous
-# (so shekel-prod-app:previous) before each deploy, then on rollback
-# re-tags it as the image the compose files name.  The compose image for
-# a source build is localhost/shekel:latest, the build's own name, which
-# docker-compose.build.yml gives it and never pulls (ruling plan#2703).
-# Both files, as the base file alone names GHCR's image instead.
-docker tag shekel-prod-app:previous localhost/shekel:latest
-docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --no-deps --force-recreate app
-```
-
-After rollback, verify health:
-
-```bash
-curl -s http://localhost/health
-```
-
 ### 2.4 First-Time Setup
 
-**Prerequisites:** Docker, Docker Compose v2, and git installed on the Proxmox host.
-
-```bash
-# 1. Clone the repository.
-git clone https://github.com/<your-repo>/shekel.git /opt/shekel
-cd /opt/shekel
-
-# 2. Create the environment file.
-cp .env.example .env
-nano .env
-# Fill in REQUIRED values: SECRET_KEY, POSTGRES_PASSWORD, TOTP_ENCRYPTION_KEY
-# See .env.example for generation commands.
-
-# 3. Create the monitoring network (required by docker-compose.yml).
-docker network create monitoring
-
-# 4. Build this clone's image and start the stack.  Both files, as
-#    scripts/deploy.sh names them: the base file alone runs GHCR's image
-#    instead, migrations and all (ruling plan#2703).
-docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
-
-# 5. Wait for all services to be healthy.
-docker compose ps
-# All three services (db, app, nginx) should show "healthy".
-
-# 6. Seed the first user (first run only).  The reference seed already ran
-#    inside entrypoint step 3, as it does on every start.  (No tax data is
-#    seeded: the tax law ships in the code, app/tax_law/.)
-docker exec shekel-prod-app python scripts/seed_user.py
-
-# 7. Verify the application.
-curl -s http://localhost/health
-# Open http://localhost in a browser and log in.
-# Default credentials: admin@shekel.local / ChangeMe!2026
-
-# 8. Set up cron jobs (see §1 Cron Schedule above).
-crontab -e
-```
+A new install follows the README's Quick Start. The host-side jobs of 1's Cron Schedule
+(`backup.sh`, `backup_retention.sh`, `verify_backup.sh`) are neither among the files it downloads
+nor in the image, so they run from a checkout of this repository.
 
 ### 2.5 Shared-mode Deployment and Config Sync
 
@@ -687,18 +550,72 @@ the previous image onto whatever host files are in place. It copies none of 2.5'
 writes nothing under `/opt/docker/shekel/secrets/`. A card whose change needs the host changed too
 writes the steps here, one subsection naming the card, each with its rollback and what was measured;
 `/release` runs them at its step 11 for each card the release carries, after the developer's "Logged
-out, deploy now", from `~/projects/Shekel` at `main`. Once production runs a card, its subsection is
-history, and the next change to this section deletes it.
+out, deploy now", from `~/projects/Shekel` at `main`. A step marked as coming before the merge into
+`main` runs at `/release` step 5 instead. Once production runs a card, its subsection is history,
+and the next change to this section deletes it.
+
+#### The update App's key, before the merge into `main` (plan#1183)
+
+**These steps are the developer's, in GitHub's settings, and they come before the merge into
+`main`**, which brings `updates.yml` there (ruling plan#2472, built by plan#2728). `updates.yml`
+signs in as the update App with a private key only a run on `main` may reach: the secret of an
+environment named `update`, whose deployment branches are `main` alone.
+
+1. Create the environment `update`, in
+   [Shekel's environments](https://github.com/saltyreformed-labs/Shekel/settings/environments).
+2. Set its deployment branches to `main` alone: **Selected branches and tags**, with one rule, a
+   branch rule and not a tag rule, named `main`.
+3. Add the `UPDATE_APP_KEY` secret to it. This needs the App's private key file, or a new key from
+   the App's page, as GitHub never shows a stored secret again.
+4. Delete the repository secret `UPDATE_APP_KEY`, in
+   [Shekel's Actions secrets](https://github.com/saltyreformed-labs/Shekel/settings/secrets/actions).
+
+`UPDATE_APP_CLIENT_ID` stays a repository variable, and `PLAN_READER_KEY` a repository secret: the
+landing job runs on every pull request and queue group, which a `main`-only environment would
+refuse.
+
+**The order is the point, and nothing but the read-back checks it.** Were the release to land first,
+the first keyed run would have GitHub create `update` with no rules and no secrets,
+`secrets.UPDATE_APP_KEY` would resolve to the repository secret, the mint would succeed, and every
+branch could still name the key, with no red run and no alert. Likewise with every step done but the
+last. (plan#2728's review, read in GitHub's documentation; not measured.)
+
+**The read-back**, which reads only, before the approval:
+
+```bash
+REPO=repos/saltyreformed-labs/Shekel
+gh api "$REPO/environments/update" --jq .deployment_branch_policy; echo "exit=$?"
+gh api "$REPO/environments/update/deployment-branch-policies" --jq '[.branch_policies[] | {name, type}]'; echo "exit=$?"
+gh api "$REPO/environments/update/secrets" --jq '[.secrets[].name]'; echo "exit=$?"
+gh api "$REPO/actions/secrets" --jq '[.secrets[].name]'; echo "exit=$?"
+```
+
+Each must exit 0. The first must say `custom_branch_policies` is true, as a rule listed but not
+enforced restricts nothing; the second must list exactly one policy, `name` `main` and `type`
+`branch`; the third must list `UPDATE_APP_KEY`; the fourth must not. Anything else is a STOP:
+nothing merges.
+
+**Rollback:** none. Until the merge, no workflow on `main` names the key, so the steps can stay
+whether or not the release goes on, and `shekel-deploy`'s rollback leaves them as they are.
+
+**Measured** 2026-11-05, before the steps: the first three reads answered 404 and exit 1, and the
+fourth printed `["PLAN_READER_KEY","UPDATE_APP_KEY"]`, so the read-back refuses until they are done.
+No environment exists to read yet, so what it reads of an environment and a policy comes from
+GitHub's REST reference, not a run.
 
 #### The Valkey switch (plan#1183)
 
-**This ships as its own release**, cut at plan#1183's merge, or at plan#2718's where that step
-landed after it. plan#2718 deletes the source-build deploy, which cannot cross this switch, so it
-lands before or with this release. Nothing that needs a rehearsal kit rides with it: the kit's bench
-refuses a side with no `uv.lock`, which `main` is until this release. So when plan#1183 is queued,
-`dev` holds nothing unreleased that needs a kit. The switch has no rehearsal of its own (ruling
-plan#2473): CI's real-store test, the rehearsal measured below and `verify_prod_deploy.sh`'s
+**This release is cut at or after plan#2718's merge**, which landed after plan#1183's and deleted
+the source-build deploy, as that could not cross this switch. The switch has no rehearsal of its own
+(ruling plan#2473): CI's real-store test, the rehearsal measured below and `verify_prod_deploy.sh`'s
 `GET /login` answer for it.
+
+**Until question plan#2944 is ruled, it stops at `/release` step 3.** `dev` also holds plan#1192,
+whose pull request #655 landed just after the last release reached `main`. It moves money and has no
+rehearsal kit, so `release plan` refuses the cut (measured 2026-11-05 at `84bae6be8`:
+`newest earlier cut that passes: none`). A kit cannot ride with this release: its bench refuses a
+side with no `uv.lock`, which `main` is until this release, so any other carried card that needs a
+kit is the same STOP.
 
 The release carrying plan#1183 moves the rate limiter's store from Redis to Valkey (R-BAL298). The
 image and the host files must move together, and only the steps below move them back:
@@ -1726,7 +1643,8 @@ curl -s https://<domain>/health
 Health checks are also performed automatically by:
 
 - **Docker:** Every 30 seconds for the `app` and `nginx` containers
-- **deploy.sh:** After each deployment (60s timeout, 5s interval)
+- **`shekel-deploy`:** After each deployment, by the container's health status (240s timeout, 5s
+  interval)
 
 ---
 
@@ -1989,11 +1907,10 @@ curl -s https://<domain>/health
 | 500 on every login attempt | Valkey container down or unreachable, the app's Valkey password wrong, or a grant missing from Valkey's ACL | App is configured fail-closed: rate-limit storage outage rejects every limited request. `docker compose ps valkey` to check status; `docker logs shekel-prod-valkey --tail 50` for errors (start.sh names an empty password or a missing `user shekel` rule); `docker compose up -d valkey` to restart. A healthy Valkey with 500s still is a password the two do not share (production's override must mount `secrets/valkey_password` into both, and blank both `VALKEY_PASSWORD` variables) or a socket the app cannot reach: `docker compose exec valkey stat -c '%a %u:%g %n' /run/valkey /run/valkey/valkey.sock` must print `2710 999:1000` and `660 999:1000`, and the app must mount the `valkey-socket` volume as `docker-compose.yml` declares. A grant missing from the host's copy of `deploy/valkey/users.acl` shows in the app's log as `ACL failure in script: User shekel has no permissions to run the '<command>' command` for a command the limiter's scripts call (`lindex`, `lpush`, `ltrim`, `expire`), or as `NoPermissionError: User shekel has no permissions to run the '<command>' command` for one it sends itself (`evalsha`, `script|load`): correct the copy, then `cd /opt/docker/shekel && docker compose up -d --wait --force-recreate valkey`. Login resumes immediately once Valkey accepts the app's login |
 | Wrong IP in logs (127.0.0.1) | Nginx real IP config issue | Verify `set_real_ip_from` and `real_ip_header CF-Connecting-IP` in the active Nginx config: `deploy/nginx-bundled/nginx.conf` (bundled mode) or `deploy/nginx-shared/nginx.conf` (shared mode -- the runtime copy is `/opt/docker/nginx/nginx.conf`) |
 | No logs in Grafana | Promtail not scraping | `docker logs promtail`. Verify `monitoring` network exists. Verify app is on the network: `docker network inspect monitoring` |
-| CSS/JS not loading | Static files volume issue | `docker exec shekel-prod-nginx ls /var/www/static/` to verify files exist. Rebuild app (a source build, `/opt/shekel`): `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build` |
+| CSS/JS not loading | Static files volume issue | `docker exec shekel-prod-nginx ls /var/www/static/` to verify files exist. The entrypoint copies them on every start, so restart the app: `docker compose restart app` |
 | Health check returns 500 | Database connection issue | `docker exec shekel-prod-db pg_isready -U shekel_user -d shekel`. Check `docker logs shekel-prod-app --tail 20` |
 | Database backup failed | Container down or disk full | `docker ps` to check shekel-prod-db. `df -h` to check disk space |
 | NAS backup failed | NAS not mounted | `mount \| grep nas`. Remount: `sudo mount -a` |
-| Deploy script rollback failed | No previous image tagged | Manual intervention: `docker logs shekel-prod-app` to diagnose, then fix and redeploy |
 | App fails with `connection requires SSL` | Shared-mode TLS not staged | Run `sudo ./scripts/generate_pg_cert.sh` (Commit C-37). See §4.12 Postgres TLS for the full procedure. |
 | Postgres logs `could not load private key file` | `server.key` mode not 0600 or wrong owner | Re-run `sudo ./scripts/generate_pg_cert.sh --force`; the chown step is what closes this. |
 | Postgres logs `private key file has group or world access` | Same as above | Same fix as above. |

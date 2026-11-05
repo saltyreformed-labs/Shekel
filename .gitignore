@@ -27,10 +27,9 @@ env/
 .env.dev
 .flaskenv
 
-# Cosign key material.  The PUBLIC key (deploy/cosign.pub) is
-# committed -- verifiers need it.  Every other cosign key file is a
-# private key that must never reach the repo.  Audit finding F-155 /
-# Commit C-36.
+# Cosign key material.  CI signs keyless (sigstore's OIDC flow), so
+# no cosign key belongs in this repository, and these lines keep a
+# stray one out.  Audit finding F-155 / Commit C-36.
 cosign.key
 cosign.key.pub
 *.cosign.key

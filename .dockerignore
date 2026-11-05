@@ -202,7 +202,7 @@ amortization-fix.patch
 # scripts/check_template_syntax.py CI/dev Jinja parse linter; never
 #                 invoked inside the container.
 # scripts/backup.sh, restore.sh, verify_backup.sh,
-# scripts/backup_retention.sh, deploy.sh, retire_stale_containers.sh
+# scripts/backup_retention.sh, retire_stale_containers.sh
 #                 Host-side ops scripts that talk to ``docker`` from
 #                 outside the container.
 # scripts/generate_pg_cert.sh
@@ -234,7 +234,6 @@ scripts/backup.sh
 scripts/backup_retention.sh
 scripts/restore.sh
 scripts/verify_backup.sh
-scripts/deploy.sh
 scripts/retire_stale_containers.sh
 scripts/generate_pg_cert.sh
 scripts/reconcile_prod_to_canonical.sh

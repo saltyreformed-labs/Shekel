@@ -121,7 +121,7 @@ source "$_container_lib" || {
 # drive this script end to end against a THROWAWAY stack and a restored clone
 # -- planting a failing health check on a migration-bearing deploy and
 # watching it refuse -- and a script whose targets are literals can only be
-# tested by reading it.  `scripts/deploy.sh` states the same convention.
+# tested by reading it.
 SHEKEL_DIR="${SHEKEL_DIR:-/opt/docker/shekel}"
 ENV_FILE="${SHEKEL_ENV_FILE:-${SHEKEL_DIR}/.env}"
 COMPOSE_SERVICE="${SHEKEL_COMPOSE_SERVICE:-app}"

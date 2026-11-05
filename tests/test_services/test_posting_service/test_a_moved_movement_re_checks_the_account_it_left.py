@@ -18,8 +18,9 @@ from decimal import Decimal
 import pytest
 
 from app.extensions import db as _db
-from app.services import anchor_service, posting_service, transaction_service
+from app.services import anchor_service, transaction_service
 from app.services.anchor_service import AnchorTrueUpOutcome
+from tests._ledger_reads import account_net
 from tests._test_helpers import create_account_of_type, freeze_today
 from ._helpers import (
     _TODAY,
@@ -73,21 +74,21 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
                 seed_user, seed_periods[0], card, _opening_day(card),
             )
             scenario_id = row.scenario_id
-            assert posting_service.account_posting_total(
-                card.id, scenario_id,
+            assert account_net(
+                _db.session, card.id, scenario_id,
             ) == Decimal("-500.00"), "CONTROL: the opening absorbs the payment"
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00"), "CONTROL: Checking holds no payment yet"
 
             _move_paid_from(row, checking)
 
             assert row.covering_movements[0].account_id == checking.id
-            assert posting_service.account_posting_total(
-                card.id, scenario_id,
+            assert account_net(
+                _db.session, card.id, scenario_id,
             ) == Decimal("-500.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("880.00")
 
     def test_a_paid_from_moved_off_checking_re_checks_checking(
@@ -118,22 +119,22 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
                 seed_user, seed_periods[0], checking, day, account=savings,
             )
             scenario_id = row.scenario_id
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("880.00"), "CONTROL: the payment rides on the 2024 opening"
             assert anchor_service.apply_anchor_true_up(
                 account=checking, new_balance=Decimal("1000.00"),
                 observed_on=day,
             ).outcome is AnchorTrueUpOutcome.COMMITTED
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00"), "CONTROL: the true-up absorbs the payment"
 
             _move_paid_from(row, savings)
 
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("300.00")

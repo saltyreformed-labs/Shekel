@@ -15,7 +15,7 @@ from app.services import posting_service, transfer_legs
 from app.services._posting_write import _emit_balanced_entry, _PostingLeg
 from app.services.ledger_lines import transit_key
 from app.services.posting_service import PostingError
-from tests._ledger_reads import ledger_net
+from tests._ledger_reads import account_net, ledger_net
 from tests._test_helpers import (
     add_txn,
     create_settled_transfer,
@@ -158,8 +158,8 @@ class TestFailLoud:
                 _db.session, transit_key(), _scenario_id(seed_user),
             ) == Decimal("100.00")
             # The missing side posted nothing: Savings sits on its opening.
-            assert posting_service.account_posting_total(
-                savings.id, _scenario_id(seed_user),
+            assert account_net(
+                _db.session, savings.id, _scenario_id(seed_user),
             ) == Decimal("100.00")
             assert posting_service.sync_transfer_postings(transfer) == []
 

@@ -12,8 +12,13 @@ from app.enums import PostingKindEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
 from app.models.journal_entry import Posting
 from app.services import posting_service, transfer_legs, transfer_service
-from app.services.ledger_lines import transit_key
-from tests._ledger_reads import ledger_net
+from app.services.ledger_lines import linked_key, transit_key
+from tests._ledger_reads import (
+    account_net,
+    ledger_net,
+    net_posted_by_day,
+    transfer_family_movement_ids,
+)
 from tests._test_helpers import create_account_of_type, create_settled_transfer
 from app.services.amount_ownership import state_own_amount
 from app.models.amount_ownership import AmountOwnership
@@ -25,6 +30,7 @@ from ._helpers import (
     _side_entries,
     _covering_movement_of_side,
     _legs_by_ledger,
+    _period_nets_for_transfer,
     _scenario_id,
 )
 
@@ -142,27 +148,15 @@ class TestSyncSettlePostsBalancedEntry:
                 seed_user["bootstrap_period"], amount=Decimal("250.00"),
             )
             _db.session.commit()
-            checking_ledger = _ledger_id(seed_user["account"])
-            mortgage_ledger = _ledger_id(mortgage)
-            transit_ledger = _transit_ledger_id(seed_user)
 
-            # Commit-5 wiring: the mortgage pay-down auto-posted on settle as
-            # two per-movement entries (plan step ``balance:X-bi-6-3``); read
-            # them back by side (a re-sync would no-op).
-            by_side = _side_entries(transfer.id)
-            [from_entry] = by_side[seed_user["account"].id]
-            [to_entry] = by_side[mortgage.id]
-            assert _legs_by_ledger(from_entry.id) == {
-                checking_ledger: Decimal("-250.00"),
-                transit_ledger: Decimal("250.00"),
+            # Commit-5 wiring: the mortgage pay-down auto-posted on settle.
+            assert _period_nets_for_transfer(transfer.id, _scenario_id(seed_user)) == {
+                seed_user["bootstrap_period"].id: {
+                    linked_key(seed_user["account"]): Decimal("-250.00"),
+                    linked_key(mortgage): Decimal("250.00"),
+                    transit_key(): Decimal("0.00"),
+                },
             }
-            assert _legs_by_ledger(to_entry.id) == {
-                mortgage_ledger: Decimal("250.00"),
-                transit_ledger: Decimal("-250.00"),
-            }
-            assert ledger_net(
-                _db.session, transit_key(), _scenario_id(seed_user),
-            ) == Decimal("0.00")
 
     def test_settle_uses_effective_amount_not_transfer_amount(
         self, app, db, seed_user, savings,
@@ -186,23 +180,14 @@ class TestSyncSettlePostsBalancedEntry:
                 settled_amount=Decimal("97.50"),
             )
             _db.session.commit()
-            checking_ledger = _ledger_id(seed_user["account"])
-            savings_ledger = _ledger_id(savings)
-            transit_ledger = _transit_ledger_id(seed_user)
 
-            # Commit-5 wiring: the divergent settled figure auto-posted as two
-            # per-movement entries (plan step ``balance:X-bi-6-3``); read them
-            # back by side (a re-sync would no-op).
-            by_side = _side_entries(transfer.id)
-            [from_entry] = by_side[seed_user["account"].id]
-            [to_entry] = by_side[savings.id]
-            assert _legs_by_ledger(from_entry.id) == {
-                checking_ledger: Decimal("-97.50"),
-                transit_ledger: Decimal("97.50"),
-            }
-            assert _legs_by_ledger(to_entry.id) == {
-                savings_ledger: Decimal("97.50"),
-                transit_ledger: Decimal("-97.50"),
+            # Commit-5 wiring: the divergent settled figure auto-posted.
+            assert _period_nets_for_transfer(transfer.id, _scenario_id(seed_user)) == {
+                seed_user["bootstrap_period"].id: {
+                    linked_key(seed_user["account"]): Decimal("-97.50"),
+                    linked_key(savings): Decimal("97.50"),
+                    transit_key(): Decimal("0.00"),
+                },
             }
 
 
@@ -261,11 +246,10 @@ class TestSyncSettleEntryDate:
             # back.  Each entry is dated by ITS movement's recorded day (plan
             # step ``balance:X-bi-6-3``); the helper presses Paid on the one
             # day, which both sides then borrow, so the two entries share it.
-            entries = _entries_for_transfer(transfer.id)
-            assert len(entries) == 2
+            assert len(_entries_for_transfer(transfer.id)) == 2
             # The recorded day, verbatim -- no conversion, no fallback.
-            assert {entry.entry_date for entry in entries} == {
-                _A_RECORDED_SETTLE_DAY,
+            assert net_posted_by_day(transfer_family_movement_ids(transfer.id)) == {
+                _A_RECORDED_SETTLE_DAY: Decimal("100.00"),
             }
 
 
@@ -405,7 +389,9 @@ class TestSyncReversal:
                 transit_ledger: Decimal("-100.00"),
             }
             # Settled then reversed: the Savings ledger nets back to its
-            # $100.00 opening (the absolute Step-5 semantics).
+            # $100.00 opening (the absolute Step-5 semantics).  On the store:
+            # the reversal ran past the records, which stay dated, so the
+            # worked-out read still books the settle.
             assert posting_service.account_posting_total(
                 savings.id, _scenario_id(seed_user),
             ) == Decimal("100.00")
@@ -465,8 +451,8 @@ class TestSyncReversal:
             scenario_id = _scenario_id(seed_user)
             # 100 (opening) + 100 (settle) - 100 (reverse) + 150 (re-settle)
             # = +250.
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("250.00")
             assert posting_service.settled_transfer_effect(
                 savings.id, scenario_id,
@@ -508,14 +494,14 @@ class TestReconciliationHelpers:
 
             scenario_id = _scenario_id(seed_user)
             checking = seed_user["account"]
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("200.00")
             assert posting_service.settled_transfer_effect(
                 savings.id, scenario_id,
             ) == Decimal("100.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("900.00")
             assert posting_service.settled_transfer_effect(
                 checking.id, scenario_id,
@@ -554,8 +540,8 @@ class TestReconciliationHelpers:
                 (savings, Decimal("100.00")),
                 (seed_user["account"], Decimal("1000.00")),
             ):
-                assert posting_service.account_posting_total(
-                    account.id, scenario_id,
+                assert account_net(
+                    _db.session, account.id, scenario_id,
                 ) == opening
                 assert posting_service.settled_transfer_effect(
                     account.id, scenario_id,
@@ -584,6 +570,6 @@ class TestReconciliationHelpers:
             assert posting_service.settled_transfer_effect(
                 savings.id, scenario_id,
             ) == Decimal("97.50")
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("197.50")

@@ -133,28 +133,6 @@ def _entries_for_transaction(transaction_id):
     )
 
 
-def _period_nets(entries):
-    """Return ``{pay_period_id: {ledger_account_id: net}}`` over stored *entries*.
-
-    A re-grouping of what a writer returned, by the entry's pay period and the
-    leg's ledger account: the writer's own output, so it goes with the store.
-    :func:`tests._ledger_reads.period_nets_of_movements` is the worked-out view.
-    """
-    nets: dict[int, dict] = {}
-    for entry in entries:
-        per_ledger = nets.setdefault(entry.pay_period_id, {})
-        for leg in (
-            _db.session.query(Posting)
-            .filter_by(journal_entry_id=entry.id)
-            .all()
-        ):
-            per_ledger[leg.ledger_account_id] = (
-                per_ledger.get(leg.ledger_account_id, Decimal("0.00"))
-                + leg.amount
-            )
-    return nets
-
-
 def _period_nets_for_transaction(transaction_id, scenario_id):
     """Per-period, per-key nets over the lines of a transaction's family."""
     return period_nets_of_movements(family_movement_ids(transaction_id), scenario_id)

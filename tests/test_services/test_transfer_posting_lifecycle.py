@@ -29,7 +29,7 @@ the pair when the shape moved (each docstring says how).  The truth table:
     path correct).
 
 After each mutation the per-account reconciliation invariant is asserted in
-its Build-Order Step 5 ABSOLUTE form: ``account_posting_total == opening
+its Build-Order Step 5 ABSOLUTE form: the account's worked-out net ``== opening
 anchor + settled_transfer_effect``.  ``create_account`` posts each fixture
 account's opening correction at create time (Checking $1000.00, the Savings
 $100.00 sentinel), and every settle here is stamped at server-now -- AFTER the
@@ -53,6 +53,13 @@ from app.models.journal_entry import JournalEntry, Posting
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import posting_service, transfer_service
+from app.services.ledger_lines import linked_key, transit_key
+from tests._ledger_reads import (
+    account_net,
+    ledger_net,
+    period_nets_of_movements,
+    transfer_family_movement_ids,
+)
 from tests._stored_ledger import (
     linked_ledger_account,
     transfer_family_journal_filter,
@@ -145,6 +152,17 @@ def _legs_by_ledger(entry_id):
     }
 
 
+def _family_nets(transfer, scenario_id):
+    """Return ``{chart key: net}`` over the lines of the transfer's two records.
+
+    Both sides file in the transfer's one paycheck, and the unpacking says so.
+    """
+    (nets,) = period_nets_of_movements(
+        transfer_family_movement_ids(transfer.id), scenario_id,
+    ).values()
+    return nets
+
+
 def _create_projected_transfer(seed_user, from_account, to_account, amount):
     """Create a Projected ad-hoc transfer via the service (posts nothing yet).
 
@@ -195,7 +213,7 @@ def _assert_reconciles(scenario_id, *accounts):
     from independent producers so a divergence fails loudly.
     """
     for account in accounts:
-        posted = posting_service.account_posting_total(account.id, scenario_id)
+        posted = account_net(_db.session, account.id, scenario_id)
         effect = posting_service.settled_transfer_effect(account.id, scenario_id)
         opening = cash_ledger.resolve_anchor(account).balance
         assert posted == opening + effect, (
@@ -259,16 +277,13 @@ class TestSettlePostsEntry:
             assert len(entries) == 2
             for entry in entries:
                 assert sum(_legs_by_ledger(entry.id).values()) == Decimal("0.00")
-            assert _real_legs(
-                entries, _ledger_id(checking), _ledger_id(savings),
-                _transit_id(seed_user),
-            ) == {
-                _ledger_id(checking): Decimal("-100.00"),
-                _ledger_id(savings): Decimal("100.00"),
-                _transit_id(seed_user): Decimal("0.00"),
+            assert _family_nets(transfer, scenario_id) == {
+                linked_key(checking): Decimal("-100.00"),
+                linked_key(savings): Decimal("100.00"),
+                transit_key(): Decimal("0.00"),
             }
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("200.00")
             _assert_reconciles(scenario_id, checking, savings)
 
@@ -300,8 +315,8 @@ class TestSettlePostsEntry:
             _db.session.commit()
 
             assert len(_entries_for_transfer(transfer.id)) == 2
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("200.00")
             _assert_reconciles(scenario_id, seed_user["account"], savings)
 
@@ -356,8 +371,8 @@ class TestRevertReverses:
                 _ledger_id(checking): Decimal("100.00"),
                 _transit_id(seed_user): Decimal("0.00"),
             }
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("100.00")
             _assert_reconciles(scenario_id, checking, savings)
 
@@ -396,8 +411,8 @@ class TestCancelPostsNothing:
             _db.session.commit()
 
             assert _entries_for_transfer(transfer.id) == []
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("100.00")
             _assert_reconciles(scenario_id, checking, savings)
 
@@ -446,8 +461,8 @@ class TestDeleteAndRestore:
             _db.session.commit()
             assert len(_movement_sourced_entries(user_id)) == 4
             assert _entries_for_transfer(transfer.id) == []
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("100.00")
             # The reverted shadows are soft-deleted, so the effect is 0 too.
             _assert_reconciles(scenario_id, checking, savings)
@@ -461,8 +476,8 @@ class TestDeleteAndRestore:
                 | (TransactionEntry.income_transfer_id == transfer.id),
             ).count() == 0
             assert len(_movement_sourced_entries(user_id)) == 4
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("100.00")
             _assert_reconciles(scenario_id, checking, savings)
 
@@ -497,7 +512,6 @@ class TestDeleteAndRestore:
             _settle(transfer, user_id)
             _db.session.commit()
             transfer_id = transfer.id
-            transit_ledger = _transit_id(seed_user)
 
             transfer_service.delete_transfer(transfer_id, user_id, soft=True)
             _db.session.commit()
@@ -508,12 +522,10 @@ class TestDeleteAndRestore:
 
             assert _db.session.get(Transfer, transfer_id) is None
             assert len(_movement_sourced_entries(user_id)) == 4
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("100.00")
-            assert _db.session.query(
-                _db.func.coalesce(_db.func.sum(Posting.amount), 0)
-            ).filter(Posting.ledger_account_id == transit_ledger).scalar() == 0
+            assert ledger_net(_db.session, transit_key(), scenario_id) == 0
 
     def test_hard_delete_settled_reverses_and_pairs_survive_null_links(
         self, app, db, seed_user, savings,
@@ -610,8 +622,8 @@ class TestDeleteAndRestore:
             )
             assert len(savings_legs) == 2
             assert sum(leg.amount for leg in savings_legs) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("100.00")
 
 
@@ -682,17 +694,13 @@ class TestZeroCorrectionWithdrawsTheLegs:
             assert len(movement_sourced) == 4
             assert {e.transaction_entry_id for e in movement_sourced} == {None}
             assert _entries_for_transfer(transfer.id) == []
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("100.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
-            assert _db.session.query(
-                _db.func.coalesce(_db.func.sum(Posting.amount), 0)
-            ).filter(
-                Posting.ledger_account_id == _transit_id(seed_user),
-            ).scalar() == 0
+            assert ledger_net(_db.session, transit_key(), scenario_id) == 0
             _assert_reconciles(scenario_id, checking, savings)
 
 
@@ -729,8 +737,8 @@ class TestDoubleMarkDoneIdempotent:
             _db.session.commit()
 
             assert len(_entries_for_transfer(transfer.id)) == 2
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("200.00")
             _assert_reconciles(scenario_id, seed_user["account"], savings)
 
@@ -774,15 +782,11 @@ class TestSettleWithActualSameCall:
             _settle(transfer, user_id, figure=typed(Decimal("88.00")))
             _db.session.commit()
 
-            entries = _entries_for_transfer(transfer.id)
-            assert len(entries) == 2
-            assert _real_legs(
-                entries, _ledger_id(checking), _ledger_id(savings),
-            ) == {
-                _ledger_id(checking): Decimal("-88.00"),
-                _ledger_id(savings): Decimal("88.00"),
-            }
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert len(_entries_for_transfer(transfer.id)) == 2
+            nets = _family_nets(transfer, scenario_id)
+            assert nets[linked_key(checking)] == Decimal("-88.00")
+            assert nets[linked_key(savings)] == Decimal("88.00")
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("188.00")
             _assert_reconciles(scenario_id, checking, savings)

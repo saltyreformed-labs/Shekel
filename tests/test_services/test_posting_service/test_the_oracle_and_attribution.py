@@ -13,6 +13,7 @@ from app.extensions import db as _db
 from app.services import posting_service, status_seam, transfer_service
 from app.services.ledger_lines import category_key, linked_key
 from app.utils.dates import display_today
+from tests._ledger_reads import account_net
 from tests._test_helpers import (
     add_txn,
     an_entered_day,
@@ -83,8 +84,8 @@ class TestPostedPurchaseEffect:
             assert posting_service.posted_purchase_effect(
                 account_id, scenario_id,
             ) == Decimal("1950.00")
-            assert posting_service.account_posting_total(
-                account_id, scenario_id,
+            assert account_net(
+                _db.session, account_id, scenario_id,
             ) == Decimal("2950.00")
 
     def test_effect_excludes_credit_portion(self, app, db, seed_user):

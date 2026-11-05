@@ -16,12 +16,15 @@ from app.models.journal_entry import JournalEntry, Posting
 from app.services import account_posting_service, anchor_service, cash_ledger, posting_service
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.utils.dates import display_today
+from app.services.ledger_lines import account_counter_key
+from tests._ledger_reads import ledger_net
+from tests._stored_ledger import (
+    ledger_account_of_kind,
+    linked_ledger_account,
+)
 from tests._test_helpers import (
     create_account_of_type,
     create_account_via_service,
-    ledger_account_of_kind,
-    ledger_net,
-    linked_ledger_account,
     observed_day_of,
 )
 
@@ -214,11 +217,10 @@ class TestNegativelyAnchoredLiability:
             assert posting_service.account_posting_total(
                 card.id, scenario_id,
             ) == Decimal("-620.00")
-            equity = ledger_account_of_kind(
-                db.session, card.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
-            )
             assert ledger_net(
-                db.session, equity.id, scenario_id,
+                db.session,
+                account_counter_key(LedgerAccountKindEnum.ANCHOR_EQUITY, card.id),
+                scenario_id,
             ) == Decimal("500.00")  # ledger-native: +500 against the -500 anchor
             _assert_account_anchors_reconcile(scenario_id)
 

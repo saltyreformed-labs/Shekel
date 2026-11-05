@@ -30,11 +30,13 @@ from app.services import (
 )
 from app.services.ledger_lines import linked_key
 from app.models.amount_ownership import AmountOwnership
+from tests._ledger_reads import (
+    owner_worked_out_lines,
+    worked_out_totals,
+)
 from tests._ledger_parity import (
     assert_ledger_parity,
     ledger_parity_differences,
-    owner_worked_out_lines,
-    worked_out_totals,
 )
 from tests._test_helpers import (
     add_entry,

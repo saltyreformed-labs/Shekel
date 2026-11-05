@@ -18,7 +18,12 @@ from app.services import pay_calendar, status_seam
 from app.services.cash_ledger import derived_amount_basis
 from app.services.statement_match import RowKind, _valuation, accept_match, matched_subjects
 from app.services.transaction_service import settle_transaction
-from tests._test_helpers import ledger_net, linked_ledger_account, state_template_price, typed
+from app.services.ledger_lines import linked_key
+from tests._ledger_reads import ledger_net
+from tests._test_helpers import (
+    state_template_price,
+    typed,
+)
 from tests.test_services.test_statement_match._builders import (
     a_bank_line,
     a_scope,
@@ -89,11 +94,11 @@ class TestThePaymentIsTheCardScreensCandidate:
             checking = seed_user["account"]
             card = _card(seed_user)
             scenario_id = seed_user["scenario"].id
-            card_ledger = linked_ledger_account(db.session, card.id)
-            checking_ledger = linked_ledger_account(db.session, checking.id)
+            card_ledger = linked_key(card)
+            checking_ledger = linked_key(checking)
             # The two ledgers BEFORE the bill exists: each holds its opening.
-            card_before = ledger_net(db.session, card_ledger.id, scenario_id)
-            checking_before = ledger_net(db.session, checking_ledger.id, scenario_id)
+            card_before = ledger_net(db.session, card_ledger, scenario_id)
+            checking_before = ledger_net(db.session, checking_ledger, scenario_id)
             settled_day = _first_day(seed_user)
             bank_day = settled_day + timedelta(days=2)
             txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
@@ -133,10 +138,10 @@ class TestThePaymentIsTheCardScreensCandidate:
             # The posted ledger: the card carries the payment ONCE, checking
             # nothing -- the accept re-dated the one posting, it added none.
             assert ledger_net(
-                db.session, card_ledger.id, scenario_id,
+                db.session, card_ledger, scenario_id,
             ) == card_before - _HOTEL
             assert ledger_net(
-                db.session, checking_ledger.id, scenario_id,
+                db.session, checking_ledger, scenario_id,
             ) == checking_before
 
     def test_the_door_settles_the_payments_row_and_not_the_row_sharing_its_id(

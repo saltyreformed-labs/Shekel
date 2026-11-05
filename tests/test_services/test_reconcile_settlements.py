@@ -60,11 +60,14 @@ from app.utils.log_events import (
     EVT_SETTLEMENTS_RECONCILED,
     EVT_TRANSACTIONS_RECONCILED,
 )
+from tests._ledger_reads import (
+    ledger_net,
+    linked_key_of,
+)
+from tests._stored_ledger import linked_ledger_account
 from tests._test_helpers import (
     create_account_of_type,
     generate_row_of,
-    ledger_net,
-    linked_ledger_account,
     make_expense_template,
     make_income_template,
     state_template_price,
@@ -757,7 +760,7 @@ class TestTheCardsGapClosesByThePayment:
             )
             assert statement.observed_on == _OBSERVED_ON
             card_ledger = linked_ledger_account(db.session, card.id).id
-            checking_ledger = linked_ledger_account(db.session, checking_id).id
+            checking_ledger = linked_key_of(db.session, checking_id)
 
             def correction():
                 """The 1/10 assertion's OWN posted correction: its true-up legs dated 1/10."""

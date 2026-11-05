@@ -24,7 +24,7 @@ from app.services import (
     pay_schedule_service,
 )
 from app.services.pay_rhythm import Monthly, Rhythm
-from tests._ledger_parity import worked_out_totals
+from tests._ledger_reads import worked_out_totals
 from tests._test_helpers import (
     all_periods,
     assert_pay_period_invariants,

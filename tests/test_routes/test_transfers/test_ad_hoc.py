@@ -8,10 +8,10 @@ from app.models.journal_entry import JournalEntry
 from app.models.transfer import Transfer
 from app.services import transfer_service
 from app.utils.dates import display_today
+from tests._stored_ledger import transfer_family_journal_filter
 from tests._test_helpers import (
     an_entered_day,
     on_both_sides,
-    transfer_family_journal_filter,
     transfer_side_record,
 )
 

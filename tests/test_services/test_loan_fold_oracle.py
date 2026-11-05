@@ -3,7 +3,7 @@
 Plan step B2 (``docs/audits/balance_architecture/README.md``).  Parallel-runs
 the loan fold (:func:`app.services.balance_at._fold.fold_loan_balances`) against
 the sum of the POSTED legs
-(:func:`tests._test_helpers.posted_loan_balance_at`) on
+(:func:`tests._ledger_reads.posted_loan_balance_at`) on
 **EVERY DAY** of each generated loan shape's domain -- the shape matrix step C3
 must not move money across (plan Section 7.4).
 
@@ -54,6 +54,7 @@ from app.models.transaction import Transaction
 from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.services.balance_at._fold import fold_loan_balances
 from app.services.rate_period_engine import period_for_date
+from tests._ledger_reads import posted_loan_balance_at
 from tests._test_helpers import (
     create_loan_account,
     create_loan_with_trueup,
@@ -62,7 +63,6 @@ from tests._test_helpers import (
     freeze_today,
     insert_tracking_start_event,
     last_covered_day,
-    posted_loan_balance_at,
 )
 
 # The controlled loan terms, shared with B1's hand-computed suite

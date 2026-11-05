@@ -16,8 +16,12 @@ from app.models.transaction_template import TransactionTemplate
 from app.services import statement_match
 from app.services.statement_match import review_set
 
+from tests._stored_ledger import family_journal_filter
 from tests.test_services.test_statement_match._builders import a_later_period, a_scope
-from tests._test_helpers import family_journal_filter, last_covered_day, resolved_amount
+from tests._test_helpers import (
+    last_covered_day,
+    resolved_amount,
+)
 
 from ._helpers import _a_deposit, _record
 from tests._definition_price import newest_price

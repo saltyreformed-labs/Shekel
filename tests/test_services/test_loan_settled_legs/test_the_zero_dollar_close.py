@@ -19,11 +19,13 @@ from app.services.loan_ledger import (
     walk_loan_ledger,
 )
 from app.services.posting_service import _ledger_account_for
+from tests._stored_ledger import (
+    find_loan_ledger_account,
+    loan_correction_entries_at,
+)
 from tests._test_helpers import (
     create_loan_account,
     create_settled_transfer,
-    find_loan_ledger_account,
-    loan_correction_entries_at,
     loan_params_for,
 )
 

@@ -21,17 +21,19 @@ from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.installment_calendar import monthly_due_date
 from app.services.balance_at import BalanceContext
 from app.services.liability_sign import owed
+from tests._stored_ledger import (
+    stored_loan_balance_at,
+    stored_loan_balance_map,
+)
 from tests._test_helpers import (
-    rhythm_of,
     amount_basis_for_scenario,
     create_account_of_type,
     create_loan_account,
     create_settled_transfer,
-    freeze_today,
     derived_span,
+    freeze_today,
     last_covered_day,
-    posted_loan_balance_at,
-    posted_loan_balance_map,
+    rhythm_of,
 )
 
 from ._helpers import (
@@ -576,10 +578,10 @@ class TestReaderParallelRunAgainstResolver:
             )
             # A scenario the loan was never opened into -> None (needs-setup),
             # never the baseline's balance or a bare $0.  Both readers agree.
-            assert posted_loan_balance_at(
+            assert stored_loan_balance_at(
                 loan.id, unopened.id, _AS_OF,
             ) is None
-            assert posted_loan_balance_map(
+            assert stored_loan_balance_map(
                 loan.id, unopened.id, seed_periods,
             ) is None
             _assert_loan_reconciles(loan, baseline.id, _AS_OF)

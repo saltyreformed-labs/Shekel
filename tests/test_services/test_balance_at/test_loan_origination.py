@@ -10,7 +10,11 @@ from decimal import Decimal
 from app.services import balance_at, liability_sign
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
-from tests._test_helpers import current_pay_period, last_covered_day, posted_loan_balance_at
+from tests._ledger_reads import posted_loan_balance_at
+from tests._test_helpers import (
+    current_pay_period,
+    last_covered_day,
+)
 
 
 class TestLoanNotYetOriginated:

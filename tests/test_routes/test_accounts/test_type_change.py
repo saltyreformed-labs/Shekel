@@ -178,7 +178,7 @@ class TestTypeChangeBoundaryGuard:
         # that needs these helpers, matching the file's convention.
         # pylint: disable=import-outside-toplevel
         from app.enums import LedgerAccountClassEnum
-        from tests._test_helpers import linked_ledger_account
+        from tests._stored_ledger import linked_ledger_account
 
         with app.app_context():
             account = _mistaken_card(seed_user)
@@ -220,7 +220,7 @@ class TestTypeChangeBoundaryGuard:
         # that needs these helpers, matching the file's convention.
         # pylint: disable=import-outside-toplevel
         from app.enums import LedgerAccountClassEnum
-        from tests._test_helpers import linked_ledger_account
+        from tests._stored_ledger import linked_ledger_account
 
         with app.app_context():
             custom_type = AccountType(
@@ -447,7 +447,7 @@ class TestTypeChangeBoundaryGuard:
         # that needs these helpers, matching the file's convention.
         # pylint: disable=import-outside-toplevel
         from app.enums import LedgerAccountClassEnum
-        from tests._test_helpers import linked_ledger_account
+        from tests._stored_ledger import linked_ledger_account
 
         with app.app_context():
             savings_type = (
@@ -629,7 +629,7 @@ class TestTypeChangeBoundaryGuard:
         # that needs these helpers, matching the file's convention.
         # pylint: disable=import-outside-toplevel
         from app.enums import LedgerAccountClassEnum
-        from tests._test_helpers import linked_ledger_account
+        from tests._stored_ledger import linked_ledger_account
 
         with app.app_context():
             custom_type = AccountType(

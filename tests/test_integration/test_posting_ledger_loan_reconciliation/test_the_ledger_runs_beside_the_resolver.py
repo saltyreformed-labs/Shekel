@@ -15,16 +15,18 @@ from app.models.ledger_account import LedgerAccount
 from app.models.loan_features import RateHistory
 from app.models.scenario import Scenario
 from app.services import loan_ledger, loan_loaders, loan_posting_service, posting_service
+from app.services.ledger_lines import loan_key
+from tests._ledger_reads import ledger_net
+from tests._stored_ledger import (
+    loan_correction_entries,
+    stored_loan_balance_at,
+    stored_loan_balance_map,
+)
 from tests._test_helpers import (
     create_loan_account,
-    find_loan_ledger_account,
-    insert_tracking_start_event,
     derived_span,
-    ledger_net,
+    insert_tracking_start_event,
     load_migration_module,
-    loan_correction_entries,
-    posted_loan_balance_at,
-    posted_loan_balance_map,
 )
 
 from ._helpers import (
@@ -123,11 +125,8 @@ def _clear_all_loan_postings():
 
 
 def _loan_ledger_net(loan, kind, scenario_id: int) -> Decimal:
-    """Return the net of a loan's per-loan ledger of *kind* (0 if not minted)."""
-    ledger = find_loan_ledger_account(_db.session, loan.id, kind)
-    if ledger is None:
-        return Decimal("0")
-    return ledger_net(_db.session, ledger.id, scenario_id)
+    """Return the net of a loan's own line of *kind*."""
+    return ledger_net(_db.session, loan_key(kind, loan.id), scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -736,7 +735,7 @@ class TestBackfillEqualsGoForward:
             # go-forward reader already matches it (the C6 gate); the contrast is the
             # point: authoritative now, None in a moment, == again after.
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            assert _posted_balance(loan.id, scenario_id) == resolver
+            assert stored_loan_balance_at(loan.id, scenario_id, _AS_OF) == resolver
 
             # Reproduce the pre-wiring historical state (no loan postings).
             _clear_all_loan_postings()
@@ -744,10 +743,10 @@ class TestBackfillEqualsGoForward:
             # BEFORE: the unposted-opening gap.  No OPENING leg -> the reader cannot
             # produce a balance (both producers return None), yet the resolver -- which
             # never read the ledger -- is unchanged, so the gap is purely the ledger's.
-            assert posted_loan_balance_at(
+            assert stored_loan_balance_at(
                 loan.id, scenario_id, _AS_OF,
             ) is None
-            assert posted_loan_balance_map(
+            assert stored_loan_balance_map(
                 loan.id, scenario_id, seed_periods,
             ) is None
             assert _resolver_balance(loan.id, scenario_id, _AS_OF) == resolver
@@ -757,9 +756,9 @@ class TestBackfillEqualsGoForward:
 
             # AFTER: zero mismatch.  The scalar (C8 producer) and every period of the
             # map (C9 producer) read back == the resolver to the penny.
-            reader = _posted_balance(loan.id, scenario_id)
+            reader = stored_loan_balance_at(loan.id, scenario_id, _AS_OF)
             assert reader == resolver, f"reader {reader} != resolver {resolver}"
-            balance_map = _posted_period_map(loan.id, scenario_id, seed_periods)
+            balance_map = stored_loan_balance_map(loan.id, scenario_id, seed_periods)
             for period in seed_periods:
                 assert balance_map[period.id] == _resolver_balance(
                     loan.id, scenario_id, period.start_date,

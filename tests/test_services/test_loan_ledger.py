@@ -30,6 +30,7 @@ from app.models.loan_features import RateHistory
 from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.services.balance_at._fold import fold_loan_balances
 from app.services.rate_period_engine import period_for_date
+from tests._ledger_reads import posted_loan_balance_at
 from tests._test_helpers import (
     create_loan_account,
     create_loan_with_trueup,
@@ -37,7 +38,6 @@ from tests._test_helpers import (
     create_settled_transfer,
     insert_tracking_start_event,
     last_covered_day,
-    posted_loan_balance_at,
 )
 
 # The controlled loan: $250,000 originated 2025-01-01 at 6%, trued up to

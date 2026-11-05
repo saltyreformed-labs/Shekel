@@ -10,7 +10,10 @@ from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingKindEnum
 from app.extensions import db as _db
 from app.utils.money import accrue_monthly_interest
-from tests._test_helpers import find_loan_ledger_account, loan_correction_entries
+from tests._stored_ledger import (
+    find_loan_ledger_account,
+    loan_correction_entries,
+)
 
 from ._helpers import (
     _P1,

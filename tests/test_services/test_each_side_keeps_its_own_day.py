@@ -22,15 +22,17 @@ from app.models.account import AccountAnchorHistory
 from app.services import transfer_legs, transfer_service
 from app.services.settle_day import SettleDay, record_settle_day
 from app.utils.dates import display_today
+from tests._ledger_reads import (
+    net_posted_by_day,
+    transfer_family_movement_ids,
+)
 from tests._test_helpers import (
     an_entered_day,
     an_observed_day,
     create_savings_account,
     create_transfer,
-    net_posted_by_day,
     open_books_before_the_first_assertion,
     refused_by_database_rule,
-    transfer_family_journal_filter,
     transfer_side_record,
     transfer_side_settle_day,
     typed,
@@ -160,7 +162,7 @@ class TestACorrection:
             db.session.commit()
 
             assert _days(xfer) == (an_entered_day(corrected), _borrowed(corrected))
-            assert net_posted_by_day(transfer_family_journal_filter(xfer.id)) == {
+            assert net_posted_by_day(transfer_family_movement_ids(xfer.id)) == {
                 corrected: Decimal("300.00"),
             }
 
@@ -192,7 +194,7 @@ class TestACorrection:
             db.session.commit()
 
             assert _days(xfer) == (an_observed_day(left), an_entered_day(arrived))
-            assert net_posted_by_day(transfer_family_journal_filter(xfer.id)) == {
+            assert net_posted_by_day(transfer_family_movement_ids(xfer.id)) == {
                 left: Decimal("300.00"), arrived: Decimal("300.00"),
             }
 

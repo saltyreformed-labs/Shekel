@@ -15,12 +15,12 @@ from app.extensions import db as _db
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
 from app.services import account_posting_service, posting_service, status_seam
+from app.services.ledger_lines import account_counter_key
+from tests._ledger_reads import ledger_net
+from tests._stored_ledger import linked_ledger_account
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
-    ledger_account_of_kind,
-    ledger_net,
-    linked_ledger_account,
     observed_day_of,
 )
 
@@ -144,11 +144,10 @@ class TestAbsoluteInvariantPerAccount:
             ) == Decimal("-300.00")  # both spends' movements, the ledger-native cash effect
 
             # The equity twin nets -(opening 500 + true-up 50) = -550.00.
-            equity = ledger_account_of_kind(
-                db.session, savings.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
-            )
             assert ledger_net(
-                db.session, equity.id, scenario_id,
+                db.session,
+                account_counter_key(LedgerAccountKindEnum.ANCHOR_EQUITY, savings.id),
+                scenario_id,
             ) == Decimal("-550.00")
 
             _assert_account_anchors_reconcile(scenario_id)

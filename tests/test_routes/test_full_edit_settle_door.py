@@ -44,16 +44,19 @@ from app.services import transaction_service
 from app.services.settle_day import record_settle_day, recorded_settle_day
 from app.services.state_machine import allowed_transitions
 from app.utils.dates import display_today
+from tests._ledger_reads import (
+    family_movement_ids,
+    net_posted_by_day,
+)
+from tests._stored_ledger import family_journal_filter
 from tests._test_helpers import (
-    typed,
-    family_journal_filter,
     add_entry,
     amount_basis_for,
     an_asserted_day,
     an_entered_day,
     create_envelope_txn,
     generate_row_of,
-    net_posted_by_day,
+    typed,
 )
 from app.services import entry_service, status_seam, transaction_service
 from app.services.cash_ledger import contribution_of, resolve_transaction_amount
@@ -163,7 +166,7 @@ def _cash_leg(txn_id, account_id):
     """
     # pylint: disable=import-outside-toplevel  -- collection-time safety, the
     # convention the shared helpers use.
-    from tests._test_helpers import linked_ledger_account
+    from tests._stored_ledger import linked_ledger_account
 
     ledger_id = linked_ledger_account(db.session, account_id).id
     return (
@@ -1082,7 +1085,7 @@ class TestAFigureArrivingALONEAtTheTransactionPATCH:
                 "a figure correction moved the day the money moved"
             )
             assert net_posted_by_day(
-                family_journal_filter(txn_id),
+                family_movement_ids(txn_id),
             ) == {day: Decimal("245.32")}
 
     def test_a_SECOND_correction_replaces_the_first(
@@ -1128,7 +1131,7 @@ class TestAFigureArrivingALONEAtTheTransactionPATCH:
                 Decimal("251.08"), MovementFigureSourceEnum.TYPED,
             )
             assert net_posted_by_day(
-                family_journal_filter(txn_id),
+                family_movement_ids(txn_id),
             ) == {day: Decimal("251.08")}
 
     def test_re_posting_a_CORRECTED_figure_unchanged_writes_nothing(

@@ -13,7 +13,10 @@ import app.services
 from app import ref_cache
 from app.enums import PostingKindEnum
 from app.extensions import db as _db
-from tests._test_helpers import linked_ledger_account, loan_correction_entries
+from tests._stored_ledger import (
+    linked_ledger_account,
+    loan_correction_entries,
+)
 
 from ._helpers import _P1, _AS_OF, _make_loan, _settle, _resolver_balance, _ledger_balance
 

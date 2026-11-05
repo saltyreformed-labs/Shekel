@@ -18,10 +18,10 @@ from app.services import transfer_legs
 from app.services.pay_calendar import calendar_for
 from app.services import transfer_service
 from app.utils.dates import display_today
+from tests._stored_ledger import transfer_family_journal_filter
 from tests._test_helpers import (
     an_entered_day,
     on_both_sides,
-    transfer_family_journal_filter,
     transfer_side_record,
 )
 from app.services.row_valuation import settled_contribution

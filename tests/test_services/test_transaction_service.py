@@ -44,20 +44,23 @@ from app.services.cash_ledger import (
     derived_amount_basis,
     resolve_transaction_amount,
 )
+from tests._ledger_reads import (
+    family_movement_ids,
+    net_posted_by_day,
+)
+from tests._stored_ledger import family_journal_filter
 from tests._test_helpers import NO_TAX_LAW
 from tests._test_helpers import (
-    typed,
     amount_basis_for,
     an_entered_day,
-    family_journal_filter,
     figure_source_columns,
     generate_row_of,
     make_expense_template,
     make_income_template,
-    net_posted_by_day,
     repriced_by_the_owner,
     settlement_if_settling,
     start_test_pay_list,
+    typed,
 )
 from app.models.amount_ownership import AmountOwnership
 from app.services.amount_ownership import state_own_amount
@@ -1704,7 +1707,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
             # door leaves it green (measured by a neutral review, 2026-08-18).
             # The net per day is what separates "re-booked" from "booked twice".
             assert net_posted_by_day(
-                family_journal_filter(txn),
+                family_movement_ids(txn),
             ) == {day: Decimal("87.10")}
 
     def test_a_REVERT_carrying_a_figure_is_refused_and_changes_nothing(
@@ -1730,7 +1733,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
             # The row's FAMILY, its movements' entries: it read the row's own
             # ``transaction_id`` link until card plan#1845 deleted it, which
             # had found nothing since plan step ``balance:X-bi-4a``.
-            ledger_before = net_posted_by_day(family_journal_filter(txn))
+            ledger_before = net_posted_by_day(family_movement_ids(txn))
             assert ledger_before == {txn.settled_on: Decimal("100.00")}
 
             with pytest.raises(ValidationError) as exc:
@@ -1742,7 +1745,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
             assert "has nothing to record" in str(exc.value)
             assert txn.status_id == ref_cache.status_id(StatusEnum.DONE)
             assert settled_figure(txn) == Decimal("100.00")
-            assert net_posted_by_day(family_journal_filter(txn)) == ledger_before, (
+            assert net_posted_by_day(family_movement_ids(txn)) == ledger_before, (
                 "a refused request posted to the ledger anyway"
             )
 

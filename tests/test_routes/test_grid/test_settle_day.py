@@ -13,15 +13,18 @@ from app.services import balance_at, posting_service, status_seam, transaction_s
 from app.services.balance_at import BalanceContext
 from app.utils.dates import display_today
 
+from tests._ledger_reads import (
+    family_movement_ids,
+    net_posted_by_day,
+)
+from tests._stored_ledger import family_journal_filter
 from tests._test_helpers import (
-    typed as typed_figure,
     an_entered_day,
     current_pay_period,
-    family_journal_filter,
     field_is_disabled,
-    net_posted_by_day,
     one_off_row_of,
     settlement_if_settling,
+    typed as typed_figure,
 )
 
 
@@ -435,12 +438,12 @@ class TestSettleDayLifecycle:
         """Return ``{entry_date: net posted magnitude}`` for one transaction.
 
         Thin wrapper over the shared
-        :func:`tests._test_helpers.net_posted_by_day` -- the transfer suite asks
+        :func:`tests._ledger_reads.net_posted_by_day` -- the transfer suite asks
         the same question through the same reduction with a different filter
         clause, and carrying two copies is the duplication R0801 cannot see
         because it does not run on ``tests/``.
         """
-        return net_posted_by_day(family_journal_filter(txn_id))
+        return net_posted_by_day(family_movement_ids(txn_id))
 
     def test_reverting_to_projected_ignores_the_submitted_settle_day(
         self, app, auth_client, seed_user, seed_periods_today

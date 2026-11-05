@@ -18,11 +18,11 @@ from app.enums import TxnTypeEnum
 from app.services import posting_service
 from app.services.liability_sign import owed
 
+from tests._ledger_reads import posted_loan_balance_at
 from tests._test_helpers import (
     create_loan_account,
     current_pay_period,
     one_off_row_of,
-    posted_loan_balance_at,
     resolved_amount,
 )
 

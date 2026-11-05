@@ -19,7 +19,7 @@ with it, both -99000 -> -100000 and both named in their own docstrings
 deleted direct doors produced -- the split reversed with the cash leg still
 posted -- which no production door reaches.  What the posted legs SUM to is
 read back through the test
-suite's dated posting window (``tests._test_helpers.posted_loan_balance_at`` /
+suite's dated posting window (``tests._ledger_reads.posted_loan_balance_at`` /
 ``posted_loan_balance_map``) -- plan step E1e deleted the production readers that
 used to answer that, since nothing in ``app/`` called them; the values pinned
 below are the LEDGER's, and the window is only how the test looks at it.  Those
@@ -73,30 +73,37 @@ from app.services import (
 )
 from app.services._posting_write import _emit_balanced_entry, _PostingLeg
 from app.services.transfer_legs import transfer_side_leg
+from tests._ledger_reads import (
+    correction_net_in_period,
+    linked_key_of,
+    posted_loan_balance_at,
+    posted_loan_balance_map,
+)
+from tests._stored_ledger import (
+    find_loan_ledger_account,
+    ledger_accounts_for_account,
+    loan_correction_entries,
+    loan_correction_entries_at,
+    stored_ledger_net,
+    stored_loan_balance_at,
+    stored_loan_balance_map,
+    stored_net_by_date,
+    transfer_family_journal_filter,
+)
 from tests._test_helpers import (
-    SPLIT_LOAN,
     add_escrow_line,
     an_entered_day,
     clear_loan_ledger,
-    correction_net_in_period,
     create_loan_account,
     create_loan_with_trueup,
     create_settled_cash_transaction,
     create_settled_transfer,
-    find_loan_ledger_account,
     freeze_today,
     insert_tracking_start_event,
     insert_trueup_event,
     last_covered_day,
-    ledger_accounts_for_account,
-    ledger_net,
-    linked_net_by_date,
-    loan_correction_entries,
-    loan_correction_entries_at,
     on_both_sides,
-    posted_loan_balance_at,
-    posted_loan_balance_map,
-    transfer_family_journal_filter,
+    SPLIT_LOAN,
     transfer_side_record,
     typed,
 )
@@ -198,7 +205,7 @@ def _find_loan_ledger(loan_id, kind):
 
 def _ledger_net(ledger_id, scenario_id):
     """Return the net of a ledger account's posting legs (shared query helper)."""
-    return ledger_net(_db.session, ledger_id, scenario_id)
+    return stored_ledger_net(_db.session, ledger_id, scenario_id)
 
 
 def _genesis_entry_count(user_id):
@@ -2404,14 +2411,13 @@ class TestSyncLoanAnchorCorrections:
 def _anchor_net_in_period(loan_id, scenario_id, source_enum, period_id):
     """Sum a loan's anchor-correction legs on its LINKED ledger in ONE period.
 
-    Resolves the loan's linked ledger, then defers to the shared
-    ``tests._test_helpers.correction_net_in_period`` -- the same reading the
-    account anchor suite makes, so the two halves of the R2 fix are graded by
-    one query rather than two that happen to agree.
+    Defers to the shared ``tests._ledger_reads.correction_net_in_period`` -- the
+    same reading the account anchor suite makes, so the two halves of the R2 fix
+    are graded by one read rather than two that happen to agree.
     """
-    linked_id = ledger_accounts_for_account(_db.session, loan_id)[0].id
     return correction_net_in_period(
-        _db.session, linked_id, scenario_id, source_enum, period_id,
+        _db.session, linked_key_of(_db.session, loan_id), scenario_id,
+        source_enum, period_id,
     )
 
 
@@ -2645,7 +2651,7 @@ class TestPostedLoanBalanceSums:
     **These pin the LEDGER, not a reader.**  Plan step E1e deleted the two
     production sum-of-postings readers -- nothing in ``app/`` called them once the
     balance seam folded a loan from source events -- so the sum is read through
-    the test suite's own window (:func:`tests._test_helpers.posted_loan_balance_at`).
+    the test suite's own window (:func:`tests._ledger_reads.posted_loan_balance_at`).
     Every expected value here is unchanged by that move: it was always the
     ledger's number.
     """
@@ -2912,10 +2918,10 @@ class TestPostedLoanBalanceSums:
             )
             clear_loan_ledger(loan.id)
 
-            assert posted_loan_balance_at(
+            assert stored_loan_balance_at(
                 loan.id, scenario_id, _AS_OF,
             ) is None
-            assert posted_loan_balance_map(
+            assert stored_loan_balance_map(
                 loan.id, scenario_id, seed_periods,
             ) is None
 
@@ -2981,10 +2987,10 @@ class TestPostedLoanBalanceSums:
             assert posted_loan_balance_at(
                 loan.id, baseline.id, _AS_OF,
             ) == Decimal("99500.00")
-            assert posted_loan_balance_at(
+            assert stored_loan_balance_at(
                 loan.id, whatif.id, _AS_OF,
             ) is None
-            assert posted_loan_balance_map(
+            assert stored_loan_balance_map(
                 loan.id, whatif.id, seed_periods,
             ) is None
 
@@ -3257,12 +3263,12 @@ class TestPrePeriodAnchor:
 def _linked_net_by_date(ledger_id, scenario_id):
     """Return ``{entry_date: net}`` over one ledger's postings in a scenario.
 
-    Delegates to the shared :func:`tests._test_helpers.linked_net_by_date` -- an
+    Delegates to the shared :func:`tests._stored_ledger.stored_net_by_date` -- an
     INDEPENDENT re-implementation of the grouped read the checked-projection assert
     performs (production groups via ``_visible_nets``), kept independent of the
     production query so this suite still has teeth if that query drifts.
     """
-    return linked_net_by_date(_db.session, ledger_id, scenario_id)
+    return stored_net_by_date(_db.session, ledger_id, scenario_id)
 
 
 def _source_entry_count(transfer_id, loan_account_id):

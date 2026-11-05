@@ -30,16 +30,21 @@ from app.services import (
 from app.services.cash_ledger import settled_cash_facts
 from app.services.transfer_legs import parent_of
 from app.services.settle_day import SettleDay
+from tests._ledger_reads import (
+    ledger_net,
+    linked_key_of,
+)
+from tests._stored_ledger import (
+    linked_ledger_account,
+    stored_loan_balance_at,
+    transit_ledger_account,
+)
 from tests._test_helpers import (
     create_loan_account,
     create_savings_account,
     generate_row_of,
-    ledger_net,
-    linked_ledger_account,
     make_income_template,
     on_both_sides,
-    posted_loan_balance_at,
-    transit_ledger_account,
 )
 
 from ._helpers import (
@@ -133,11 +138,11 @@ class TestAPaycheckIsCoveredInItsOwnDirection:
         """
         with app.app_context():
             txn = _paycheck(seed_user, seed_periods[0])
-            cash = linked_ledger_account(db.session, txn.account_id)
-            before = ledger_net(db.session, cash.id, txn.scenario_id)
+            cash = linked_key_of(db.session, txn.account_id)
+            before = ledger_net(db.session, cash, txn.scenario_id)
             _settle(txn)
             db.session.flush()
-            after = ledger_net(db.session, cash.id, txn.scenario_id)
+            after = ledger_net(db.session, cash, txn.scenario_id)
             assert after - before == Decimal("2572.78")
             movement = _only_movement(txn)
             legs = (
@@ -147,15 +152,16 @@ class TestAPaycheckIsCoveredInItsOwnDirection:
                 .filter(JournalEntry.transaction_entry_id == movement.id)
                 .all()
             )
+            cash_row = linked_ledger_account(db.session, txn.account_id)
             assert {leg.ledger_account_id: leg.amount for leg, _ in legs} == {
-                cash.id: Decimal("2572.78"),
+                cash_row.id: Decimal("2572.78"),
                 next(
-                    account.id for _, account in legs if account.id != cash.id
+                    account.id for _, account in legs if account.id != cash_row.id
                 ): Decimal("-2572.78"),
             }
             income_kind = ref_cache.posting_kind_id(PostingKindEnum.INCOME)
             assert {leg.posting_kind_id for leg, _ in legs} == {income_kind}
-            counter = next(account for _, account in legs if account.id != cash.id)
+            counter = next(account for _, account in legs if account.id != cash_row.id)
             assert counter.class_id == ref_cache.ledger_account_class_id(
                 LedgerAccountClassEnum.INCOME,
             )
@@ -165,19 +171,19 @@ class TestAPaycheckIsCoveredInItsOwnDirection:
     ):
         with app.app_context():
             txn = _paycheck(seed_user, seed_periods[0])
-            cash = linked_ledger_account(db.session, txn.account_id)
-            before = ledger_net(db.session, cash.id, txn.scenario_id)
+            cash = linked_key_of(db.session, txn.account_id)
+            before = ledger_net(db.session, cash, txn.scenario_id)
             _settle(txn)
             db.session.flush()
             movement_id = _only_movement(txn).id
-            assert ledger_net(db.session, cash.id, txn.scenario_id) - before == Decimal("2572.78")
+            assert ledger_net(db.session, cash, txn.scenario_id) - before == Decimal("2572.78")
             _revert(txn)
             db.session.flush()
             survivor = _only_movement(txn)
             assert survivor.id == movement_id
             assert survivor.settled_on is None
             assert survivor.amount == Decimal("2572.78")
-            assert ledger_net(db.session, cash.id, txn.scenario_id) == before
+            assert ledger_net(db.session, cash, txn.scenario_id) == before
 
 
 def _leg_again(leg):
@@ -616,7 +622,7 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
                 ctx = balance_at.BalanceContext.build(user_id, as_of=as_of)
                 return (
                     balance_at.positions(loan, ctx, [as_of])[as_of],
-                    posted_loan_balance_at(loan.id, scenario_id, as_of),
+                    stored_loan_balance_at(loan.id, scenario_id, as_of),
                 )
 
             assert row_valuation.settled_contribution(parent_of(income)) == Decimal("1910.95")

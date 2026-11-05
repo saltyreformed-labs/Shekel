@@ -26,6 +26,7 @@ from app.services import statement_match
 from app.services.row_valuation import settled_figure
 from app.services.statement_match._sides import MatchSides
 
+from tests._stored_ledger import family_journal_filter
 from tests.test_services.test_statement_match._builders import (
     accepted_acts,
     a_bank_line,
@@ -34,7 +35,7 @@ from tests.test_services.test_statement_match._builders import (
     a_transaction,
     an_import,
 )
-from tests._test_helpers import family_journal_filter, resolved_amount
+from tests._test_helpers import resolved_amount
 
 from ._helpers import _submit, _minted, _uncategorized_net, _ALine, _ARow, _payroll
 

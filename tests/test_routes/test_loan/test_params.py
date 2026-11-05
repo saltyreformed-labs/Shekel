@@ -14,7 +14,8 @@ from app.models.loan_features import RateHistory
 from app.models.ref import AccountType
 from app.services import account_service
 
-from tests._test_helpers import create_settled_transfer, posted_loan_balance_at
+from tests._ledger_reads import posted_loan_balance_at
+from tests._test_helpers import create_settled_transfer
 
 from ._helpers import _TRACKED_FROM, _create_auto_loan, _create_mortgage, _create_other_loan
 

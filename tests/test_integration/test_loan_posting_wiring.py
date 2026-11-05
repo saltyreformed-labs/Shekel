@@ -42,14 +42,14 @@ from app.services import (
     transfer_service,
 )
 from app.services.anchor_service import AnchorTrueUpOutcome
+from app.services.ledger_lines import loan_key
+from tests._ledger_reads import ledger_net
+from tests._stored_ledger import loan_correction_entries
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_with_trueup,
     create_settled_transfer,
-    find_loan_ledger_account,
     freeze_today,
-    ledger_net,
-    loan_correction_entries,
     SPLIT_LOAN,
     transfer_side_record,
 )
@@ -91,13 +91,9 @@ def _settle(seed_user, loan, period, amount=Decimal("1000.00"), scenario=None):
     )
 
 
-def _interest_ledger(loan):
-    """Return the loan's per-loan interest ledger account (must exist)."""
-    ledger = find_loan_ledger_account(
-        _db.session, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-    )
-    assert ledger is not None, "interest ledger not minted by the wiring"
-    return ledger
+def _interest_key(loan):
+    """Return the chart key of the loan's interest line."""
+    return loan_key(LedgerAccountKindEnum.LOAN_INTEREST, loan.id)
 
 
 class TestSettleWiringAutoPosts:
@@ -131,7 +127,7 @@ class TestSettleWiringAutoPosts:
                 loan.id, scenario_id,
             ) == Decimal("-99500.00")
             assert ledger_net(
-                db.session, _interest_ledger(loan).id, scenario_id,
+                db.session, _interest_key(loan), scenario_id,
             ) == Decimal("500.00")
             assert posting_service.account_posting_total(
                 checking.id, scenario_id,
@@ -166,15 +162,13 @@ class TestSettleWiringAutoPosts:
             )
             db.session.commit()
 
-            refund_ledger = find_loan_ledger_account(
-                db.session, loan.id, LedgerAccountKindEnum.LOAN_REFUND,
-            )
-            assert refund_ledger is not None, (
+            assert ledger_net(
+                db.session,
+                loan_key(LedgerAccountKindEnum.LOAN_REFUND, loan.id),
+                scenario_id,
+            ) == Decimal("698.50"), (
                 "no Refund leg -- the split did not read the overpaying actual"
             )
-            assert ledger_net(
-                db.session, refund_ledger.id, scenario_id,
-            ) == Decimal("698.50")
             # Paid off: opening (-250000) + true-up (+249700) + principal (+300).
             assert posting_service.account_posting_total(
                 loan.id, scenario_id,
@@ -225,7 +219,7 @@ class TestRevertAndDeletePostFullCashReversal:
                 loan.id, scenario_id,
             ) == Decimal("-100000.00")
             assert ledger_net(
-                db.session, _interest_ledger(loan).id, scenario_id,
+                db.session, _interest_key(loan), scenario_id,
             ) == Decimal("0.00")
 
     def test_hard_delete_strands_nothing_and_full_cash_reversal(
@@ -248,7 +242,7 @@ class TestRevertAndDeletePostFullCashReversal:
             loan = _make_loan(seed_user)
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
-            interest_ledger_id = _interest_ledger(loan).id
+            interest_key = _interest_key(loan)
 
             transfer_service.delete_transfer(
                 xfer.id, seed_user["user"].id, soft=False,
@@ -263,7 +257,7 @@ class TestRevertAndDeletePostFullCashReversal:
                 loan.id, scenario_id,
             ) == Decimal("-100000.00")
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("0.00")
 
     def test_soft_delete_reverses_correction_and_full_cash(
@@ -314,9 +308,9 @@ class TestRevertAndDeletePostFullCashReversal:
             x1 = _settle(seed_user, loan, seed_periods[_P1])
             _settle(seed_user, loan, seed_periods[_P2])
             db.session.commit()
-            interest_ledger_id = _interest_ledger(loan).id
+            interest_key = _interest_key(loan)
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("997.50")
 
             transfer_service.delete_transfer(
@@ -325,7 +319,7 @@ class TestRevertAndDeletePostFullCashReversal:
             db.session.commit()
 
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("1000.00")
 
 
@@ -409,9 +403,9 @@ class TestTrueUpWiring:
             _settle(seed_user, loan, seed_periods[_P1])
             _settle(seed_user, loan, seed_periods[_P2])
             db.session.commit()
-            interest_ledger_id = _interest_ledger(loan).id
+            interest_key = _interest_key(loan)
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("997.50")
             checking_before = posting_service.account_posting_total(
                 checking.id, scenario_id,
@@ -426,7 +420,7 @@ class TestTrueUpWiring:
 
             # P1 (before 02-15) keeps 500.00; P2 (after) re-splits to 450.00.
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("950.00")
             assert posting_service.account_posting_total(
                 checking.id, scenario_id,
@@ -456,12 +450,12 @@ class TestTrueUpWiring:
             _settle(seed_user, loan, seed_periods[_P1], scenario=baseline)
             _settle(seed_user, loan, seed_periods[_P1], scenario=whatif)
             db.session.commit()
-            interest_ledger_id = _interest_ledger(loan).id
+            interest_key = _interest_key(loan)
             assert ledger_net(
-                db.session, interest_ledger_id, baseline.id,
+                db.session, interest_key, baseline.id,
             ) == Decimal("500.00")
             assert ledger_net(
-                db.session, interest_ledger_id, whatif.id,
+                db.session, interest_key, whatif.id,
             ) == Decimal("500.00")
 
             outcome = loan_anchor_service.apply_loan_anchor_true_up(
@@ -472,10 +466,10 @@ class TestTrueUpWiring:
 
             # BOTH scenarios re-split to 450.00.
             assert ledger_net(
-                db.session, interest_ledger_id, baseline.id,
+                db.session, interest_key, baseline.id,
             ) == Decimal("450.00")
             assert ledger_net(
-                db.session, interest_ledger_id, whatif.id,
+                db.session, interest_key, whatif.id,
             ) == Decimal("450.00")
 
     def test_trueup_resubmit_is_idempotent(
@@ -502,7 +496,7 @@ class TestTrueUpWiring:
             )
             assert first is AnchorTrueUpOutcome.COMMITTED
             interest_after_first = ledger_net(
-                db.session, _interest_ledger(loan).id, scenario_id,
+                db.session, _interest_key(loan), scenario_id,
             )
             assert interest_after_first == Decimal("450.00")
 
@@ -512,7 +506,7 @@ class TestTrueUpWiring:
             )
             assert second is AnchorTrueUpOutcome.UNCHANGED
             assert ledger_net(
-                db.session, _interest_ledger(loan).id, scenario_id,
+                db.session, _interest_key(loan), scenario_id,
             ) == Decimal("450.00")
 
 
@@ -591,9 +585,9 @@ class TestRouteChokepointWiring:
             _settle(seed_user, loan, seed_periods[_P1])
             _settle(seed_user, loan, seed_periods[_P2])
             db.session.commit()
-            interest_ledger_id = _interest_ledger(loan).id
+            interest_key = _interest_key(loan)
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("997.50")
 
             resp = auth_client.post(
@@ -603,7 +597,7 @@ class TestRouteChokepointWiring:
             assert resp.status_code == 200
 
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("1495.00")
 
     def test_params_update_origination_rate_resplits_interest(
@@ -622,9 +616,9 @@ class TestRouteChokepointWiring:
             loan = _make_loan(seed_user)
             _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
-            interest_ledger_id = _interest_ledger(loan).id
+            interest_key = _interest_key(loan)
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("500.00")
 
             resp = auth_client.post(
@@ -634,7 +628,7 @@ class TestRouteChokepointWiring:
             assert resp.status_code == 302
 
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("666.67")
 
     def test_params_payment_day_change_resplits_across_trueup(
@@ -670,9 +664,9 @@ class TestRouteChokepointWiring:
             )
             _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
-            interest_ledger_id = _interest_ledger(loan).id
+            interest_key = _interest_key(loan)
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("500.00")
 
             resp = auth_client.post(
@@ -683,7 +677,7 @@ class TestRouteChokepointWiring:
 
             # P1 crosses to pre-trueup -> re-split on origination, not reversed.
             assert ledger_net(
-                db.session, interest_ledger_id, scenario_id,
+                db.session, interest_key, scenario_id,
             ) == Decimal("1250.00")
 
     def test_params_created_after_settle_backposts(
@@ -732,5 +726,5 @@ class TestRouteChokepointWiring:
             entries = loan_correction_entries(db.session, xfer.id, loan.id)
             assert len(entries) == 1
             assert ledger_net(
-                db.session, _interest_ledger(loan).id, scenario_id,
+                db.session, _interest_key(loan), scenario_id,
             ) == Decimal("500.00")

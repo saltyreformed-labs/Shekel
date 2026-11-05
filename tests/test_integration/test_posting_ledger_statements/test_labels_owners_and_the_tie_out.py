@@ -21,11 +21,11 @@ from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 import sqlalchemy as sa
 
+from tests._stored_ledger import linked_ledger_account
 from tests._test_helpers import (
     capture_sql_statements,
     create_account_of_type,
     create_settled_cash_transaction,
-    linked_ledger_account,
 )
 
 from ._helpers import (

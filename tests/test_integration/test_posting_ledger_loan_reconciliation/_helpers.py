@@ -23,15 +23,17 @@ from app.utils.money import round_money
 from app.utils.balance_predicates import settled_status_ids
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
-from tests._ledger_parity import assert_ledger_parity
-from tests._test_helpers import (
-    SPLIT_LOAN,
-    create_loan_with_trueup,
-    create_settled_transfer,
-    loan_correction_entries,
+from tests._ledger_reads import (
     posted_loan_balance_at,
     posted_loan_balance_map,
+)
+from tests._stored_ledger import loan_correction_entries
+from tests._ledger_parity import assert_ledger_parity
+from tests._test_helpers import (
+    create_loan_with_trueup,
+    create_settled_transfer,
     seam_confirmed_view,
+    SPLIT_LOAN,
 )
 
 
@@ -419,7 +421,7 @@ def _posted_balance(
 ) -> Decimal:
     """Return what the postings say the loan owed on a DATE (the dated window).
 
-    :func:`tests._test_helpers.posted_loan_balance_at`: the same linked-ledger
+    :func:`tests._ledger_reads.posted_loan_balance_at`: the same linked-ledger
     legs :func:`_ledger_balance` sums, but bounded by ``entry_date <= as_of``
     and guarded by the OPENING sentinel.  A distinct derivation, so the two
     windows agreeing is a real check rather than one query written twice, and
@@ -443,7 +445,7 @@ def _posted_period_map(
 ) -> "dict[int, Decimal]":
     """Return the dated posting window at every period END (the per-period form).
 
-    :func:`tests._test_helpers.posted_loan_balance_map` -- the scalar window
+    :func:`tests._ledger_reads.posted_loan_balance_map` -- the scalar window
     applied at each period's END, which is what lets the early-settle parallel
     run below check period boundaries past the frozen today (no posted entry in
     these fixtures is dated later, so such a period carries the confirmed sum

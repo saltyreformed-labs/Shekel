@@ -46,12 +46,18 @@ from app.services import account_posting_service, ledger_report_service
 from app.services.ledger_report_service import StatementWindow
 from app.utils.dates import display_today
 from app.services.pay_calendar import calendar_for
+from app.services.ledger_lines import (
+    account_counter_key,
+    linked_key,
+)
+from tests._ledger_reads import ledger_net
+from tests._stored_ledger import (
+    ledger_account_of_kind,
+    linked_ledger_account,
+)
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
-    ledger_account_of_kind,
-    ledger_net,
-    linked_ledger_account,
 )
 
 # The account types this step's dispatch actually separates, and the counter
@@ -374,13 +380,8 @@ class TestTheTrueUpCounterLegNamesTheDifference:
 
             _true_up(account, "1150.00")
 
-            gain = ledger_account_of_kind(
-                _db.session, account.id,
-                LedgerAccountKindEnum.UNREALIZED_CHANGE,
-            )
-            assert gain is not None, (
-                "a market gain after an opening the records explained was "
-                "booked as capital, which is the defect R-FO closes"
+            gain = account_counter_key(
+                LedgerAccountKindEnum.UNREALIZED_CHANGE, account.id,
             )
             # +$1,000.00 from the opening-day correction, less the $150.00
             # market gain.  **The $1,000.00 is finding N-378 wearing this
@@ -393,8 +394,11 @@ class TestTheTrueUpCounterLegNamesTheDifference:
             # it at the write door; until then this is what the ledger says and
             # a test that hid it would be worse than one that states it.
             assert ledger_net(
-                _db.session, gain.id, seed_user["scenario"].id,
-            ) == Decimal("850.00")
+                _db.session, gain, seed_user["scenario"].id,
+            ) == Decimal("850.00"), (
+                "a market gain after an opening the records explained was "
+                "booked as capital, which is the defect R-FO closes"
+            )
 
     def test_a_zero_opening_is_still_the_opening(
         self, app, db, seed_user,
@@ -447,11 +451,11 @@ class TestTheTrueUpCounterLegNamesTheDifference:
                 _true_up(account, "1150.00")
 
             scenario_id = seed_user["scenario"].id
-            plain_linked = linked_ledger_account(_db.session, plain.id)
-            modelled_linked = linked_ledger_account(_db.session, modelled.id)
-            assert ledger_net(_db.session, plain_linked.id, scenario_id) == Decimal("1150.00")
-            assert ledger_net(_db.session, modelled_linked.id, scenario_id) == (
-                ledger_net(_db.session, plain_linked.id, scenario_id)
+            plain_linked = linked_key(plain)
+            modelled_linked = linked_key(modelled)
+            assert ledger_net(_db.session, plain_linked, scenario_id) == Decimal("1150.00")
+            assert ledger_net(_db.session, modelled_linked, scenario_id) == (
+                ledger_net(_db.session, plain_linked, scenario_id)
             )
 
 
@@ -482,31 +486,30 @@ class TestThePostedLedgerSelfMigrates:
             _true_up(account, "1150.00")
 
             scenario_id = seed_user["scenario"].id
-            equity = ledger_account_of_kind(
-                _db.session, account.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
+            equity = account_counter_key(
+                LedgerAccountKindEnum.ANCHOR_EQUITY, account.id,
             )
-            linked = linked_ledger_account(_db.session, account.id)
-            assert ledger_net(_db.session, equity.id, scenario_id) == (
+            linked = linked_key(account)
+            assert ledger_net(_db.session, equity, scenario_id) == (
                 Decimal("-1150.00")
             )
-            linked_before = ledger_net(_db.session, linked.id, scenario_id)
+            linked_before = ledger_net(_db.session, linked, scenario_id)
 
             # The account is now an INVESTMENT, so the dispatch names a
             # different counter row for its true-up.
             _retype(account, "Roth IRA")
 
-            gain = ledger_account_of_kind(
-                _db.session, account.id, LedgerAccountKindEnum.UNREALIZED_CHANGE,
+            gain = account_counter_key(
+                LedgerAccountKindEnum.UNREALIZED_CHANGE, account.id,
             )
-            assert gain is not None
-            assert ledger_net(_db.session, gain.id, scenario_id) == (
+            assert ledger_net(_db.session, gain, scenario_id) == (
                 Decimal("-150.00")
             )
             # The opening stays on equity; only the true-up's $150.00 moved.
-            assert ledger_net(_db.session, equity.id, scenario_id) == (
+            assert ledger_net(_db.session, equity, scenario_id) == (
                 Decimal("-1000.00")
             )
-            assert ledger_net(_db.session, linked.id, scenario_id) == (
+            assert ledger_net(_db.session, linked, scenario_id) == (
                 linked_before
             )
 

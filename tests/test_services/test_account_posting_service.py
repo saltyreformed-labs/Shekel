@@ -66,17 +66,16 @@ from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.pay_calendar import PayCalendarError
 from app.services.auth_service import hash_password
 from app.utils.dates import display_today, to_display_date
+from app.services.ledger_lines import account_counter_key
+from tests._ledger_reads import (
+    correction_net_in_period,
+    ledger_net,
+    linked_key_of,
+)
 from tests._test_helpers import (
     add_entry,
-    figure_source_columns,
-    generate_row_of,
-    make_expense_template,
-    typed,
-    record_paydays_across_a_hole,
-    rhythm_of,
     an_entered_day,
     append_only_guard_lifted,
-    correction_net_in_period,
     create_account_of_type,
     create_account_via_service,
     create_envelope_txn,
@@ -84,13 +83,18 @@ from tests._test_helpers import (
     create_settled_cash_transaction,
     create_settled_transfer,
     derived_span,
-    ledger_net,
+    figure_source_columns,
+    generate_row_of,
+    make_expense_template,
     observed_day_of,
     open_owner_calendar,
+    record_paydays_across_a_hole,
     restate_account_opening,
+    rhythm_of,
     settle_day_columns,
     settle_instant_on,
     transfer_side_record,
+    typed,
 )
 from app.services.settle_day import record_settle_day
 
@@ -297,14 +301,13 @@ def _entry_legs(entry_id):
 def _correction_net_in_period(account_id, scenario_id, source_enum, period_id):
     """Sum an account's correction legs on its LINKED ledger in ONE pay period.
 
-    Resolves the account's linked ledger, then defers to the shared
-    ``tests._test_helpers.correction_net_in_period`` -- the same reading the
-    loan anchor suite makes, so the two halves of the R2 fix are graded by one
-    query rather than two that happen to agree.
+    Defers to the shared ``tests._ledger_reads.correction_net_in_period`` -- the
+    same reading the loan anchor suite makes, so the two halves of the R2 fix are
+    graded by one read rather than two that happen to agree.
     """
-    linked = _ledger_of_kind(account_id, LedgerAccountKindEnum.LINKED)
     return correction_net_in_period(
-        _db.session, linked.id, scenario_id, source_enum, period_id,
+        _db.session, linked_key_of(_db.session, account_id), scenario_id,
+        source_enum, period_id,
     )
 
 
@@ -999,7 +1002,9 @@ class TestSyncAccountAnchorPostings:
             )
             assert equity is not None
             assert ledger_net(
-                _db.session, equity.id, scenario_id,
+                _db.session,
+                account_counter_key(LedgerAccountKindEnum.ANCHOR_EQUITY, account.id),
+                scenario_id,
             ) == Decimal("-500.00")
 
             entries = _correction_entries(
@@ -1114,7 +1119,9 @@ class TestSyncAccountAnchorPostings:
                 account.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
             )
             assert ledger_net(
-                _db.session, equity.id, scenario_id,
+                _db.session,
+                account_counter_key(LedgerAccountKindEnum.ANCHOR_EQUITY, account.id),
+                scenario_id,
             ) == Decimal("-550.00")
             trueups = _correction_entries(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
@@ -1404,7 +1411,9 @@ class TestSyncAccountAnchorPostings:
                 account.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
             )
             assert ledger_net(
-                _db.session, equity.id, scenario_id,
+                _db.session,
+                account_counter_key(LedgerAccountKindEnum.ANCHOR_EQUITY, account.id),
+                scenario_id,
             ) == Decimal("500.00")
 
 

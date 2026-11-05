@@ -94,11 +94,11 @@ def _build_surprises(
         # plan, with no refusals.  The seven that differ are salary INCOME,
         # which the loader feeding this list cannot return (it filters
         # ``transaction_type_id`` to the expense type), and they differ because
-        # ``salary.calibration_overrides`` is REPLACED in place rather than
-        # effective-dated, so a past paycheck re-derives under today's
-        # calibration -- findings **N-441** and **N-535**, owned by salary:S1.
-        # (Measured while the calibration priced paychecks; since plan step
-        # salary:S11-c-2c the dated pay stubs do.)
+        # ``salary.calibration_overrides`` was REPLACED in place rather than
+        # effective-dated, so a past paycheck re-derived under the day's
+        # calibration -- findings **N-441** and **N-535**.  (Measured while the
+        # calibration priced paychecks; since plan step salary:S11-c-2c the
+        # dated pay stubs do, and plan step salary:S11-d dropped the table.)
         #
         # *The headline was WRONG in a first draft of this comment, which said
         # "109 of 109 settled EXPENSE rows".  109 was the count over every

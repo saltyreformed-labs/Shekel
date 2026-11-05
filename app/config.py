@@ -166,17 +166,17 @@ class BaseConfig:
     # cookie.  Flask's default is 31 days, which is too generous for a
     # money app: a stolen browser profile would carry valid auth for a
     # month with no further interaction required.  12 hours covers a
-    # normal work day; "remember me" is the supported path for users
-    # who want a longer window (see REMEMBER_COOKIE_DURATION below).
-    # Operators can override via SESSION_LIFETIME_HOURS in .env -- the
-    # range is intentionally wide to support short-lived test envs and
-    # longer-lived dev shells.  NOTE: this cap only bites on a
-    # ``permanent`` session, and the app deliberately leaves sessions
+    # normal work day.  Operators can override via SESSION_LIFETIME_HOURS
+    # in .env -- the range is intentionally wide to support short-lived
+    # test envs and longer-lived dev shells.  NOTE: this cap only bites
+    # on a ``permanent`` session, and the app deliberately leaves sessions
     # non-permanent so Flask-Login's ``strong`` session protection
     # (F-038 / C-07) keeps wiping the session on IP / User-Agent drift
     # -- a permanent session is exempt from that wipe.  The effective
     # bound on an open session is therefore IDLE_TIMEOUT_MINUTES below,
-    # not this value; "remember me" is the supported cross-restart path.
+    # not this value.  Nothing signs a browser back in once its session
+    # cookie is gone: plan#2173 deleted "Remember me", whose cookie could
+    # not be revoked (ruling plan#2406).
     PERMANENT_SESSION_LIFETIME = timedelta(
         hours=int(os.getenv("SESSION_LIFETIME_HOURS", "12"))
     )
@@ -208,19 +208,6 @@ class BaseConfig:
     # cannot ride a stolen cookie into a destructive operation.
     FRESH_LOGIN_MAX_AGE_MINUTES = int(
         os.getenv("FRESH_LOGIN_MAX_AGE_MINUTES", "5")
-    )
-
-    # Flask-Login "remember me" cookie lifetime.  Shortened from the
-    # historical 30-day default to 7 days per ASVS L2 guidance for
-    # financial apps -- a stolen remember-me cookie is a password-
-    # equivalent credential, and 7 days is the right tradeoff between
-    # legitimate "stay logged in on my home machine" UX and stolen-
-    # device blast radius.  Operators who need a different window can
-    # set REMEMBER_COOKIE_DURATION_DAYS in .env without code changes;
-    # the ProdConfig further hardens this cookie with Secure, HttpOnly,
-    # and SameSite flags (see audit finding F-017).
-    REMEMBER_COOKIE_DURATION = timedelta(
-        days=int(os.getenv("REMEMBER_COOKIE_DURATION_DAYS", "7"))
     )
 
     # Largest request body the app will read, in bytes.  Set because plan
@@ -444,10 +431,10 @@ class DevConfig(BaseConfig):
     """Development configuration -- debug mode, local PostgreSQL.
 
     Cookie-flag pragma (audit finding F-112):
-        DevConfig deliberately does NOT set ``SESSION_COOKIE_SECURE``,
-        ``REMEMBER_COOKIE_SECURE``, or the ``__Host-`` session cookie
-        prefix that ProdConfig sets.  ``flask run`` serves over plain
-        HTTP on ``http://localhost:5000``: a ``Secure``-flagged cookie
+        DevConfig deliberately does NOT set ``SESSION_COOKIE_SECURE``
+        or the ``__Host-`` session cookie prefix that ProdConfig sets.
+        ``flask run`` serves over plain HTTP on
+        ``http://localhost:5000``: a ``Secure``-flagged cookie
         would never ride that connection, so an authenticated dev
         session would silently break -- ``/login`` would 200 but the
         cookie never reaches the client and every subsequent request
@@ -584,15 +571,9 @@ class ProdConfig(BaseConfig):
     # treat it as an opaque cookie name.
     SESSION_COOKIE_NAME = "__Host-session"
 
-    # Remember-me cookie hardening.  Flask-Login's Secure/HttpOnly/SameSite
-    # defaults are False/False/None, so a 30-day authentication credential
-    # would otherwise leak in cleartext on any HTTP fall-through and ride
-    # cross-site requests in a login-CSRF chain.  Mirror the session
-    # cookie's flags exactly so the longer-lived credential is at least
-    # as protected.  See audit finding F-017.
-    REMEMBER_COOKIE_SECURE = True
-    REMEMBER_COOKIE_HTTPONLY = True
-    REMEMBER_COOKIE_SAMESITE = "Lax"
+    # No REMEMBER_COOKIE_* flags: the app issues no remember-me cookie
+    # since plan#2173 deleted "Remember me" (ruling plan#2406), so the
+    # flags audit finding F-017 set would harden a cookie nothing sends.
 
     # Production rate-limit storage: shared Redis on the backend Docker
     # network.  Defaults assume the bundled docker-compose ``redis``

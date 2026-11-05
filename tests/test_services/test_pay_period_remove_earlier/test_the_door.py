@@ -1,12 +1,13 @@
 """The DOOR (``pay_period_admin.remove_earlier_pay_periods``) on an owner with no money: what it
 removes, where it moves the phase, that the paycheck it starts from stays, that the earliest
-rhythm keeps a paycheck (R-PC110), the refusals that name no paycheck, a stated history the
-removal cannot put above the record, and an add undone that leaves nothing behind.
+rhythm keeps a paycheck (R-PC110) and that its refusal writes nothing, the refusals that name no
+paycheck, a stated history the removal cannot put above the record, and an add undone that leaves
+nothing behind.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -19,11 +20,11 @@ from app.services import (
     account_posting_service,
     loan_posting_service,
     pay_period_admin,
-    pay_period_locks,
     pay_period_write,
     pay_schedule_service,
 )
 from app.services.pay_rhythm import Monthly, Rhythm
+from tests._ledger_parity import worked_out_totals
 from tests._test_helpers import (
     all_periods,
     assert_pay_period_invariants,
@@ -43,6 +44,7 @@ from ._helpers import (
     _monthly_bill_from,
     _monthly_transfer_from,
     _entries_in,
+    _stored_totals,
 )
 
 
@@ -248,6 +250,54 @@ class TestTheEarliestRhythmKeepsAPaycheck:
             assert_pay_period_invariants(db.session, user_id)
 
 
+    def test_its_refusal_leaves_the_rows_and_the_ledger_the_head_holds(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """R-PC110 refuses before the writer's first statement, so no savepoint is owed.
+
+        A head the gate lets go, holding template rows and the books' opening
+        re-synced into it, and the later rhythm's first paycheck chosen: only
+        R-PC110 can refuse.  Read after a COMMIT and a fresh session
+        (``_unchanged``'s reason), with nothing rolled back here, so a delete
+        or a re-sync staged ahead of the refusal shows in the paydays, the
+        rows, the head's entries or either ledger's totals.
+        """
+        with app.app_context():
+            user_id = seed_user["user"].id
+            _monthly_bill_from(seed_user, date(2025, 11, 24))
+            db.session.commit()
+            head = {period.id for period in _added_head(user_id, 3)}
+            account_posting_service.resync_user_account_anchor_postings(user_id)
+            db.session.commit()
+            # 05-08, the fortnight's last, plus the three weeks R-PC110's
+            # worked owner leaves between its rhythms.
+            last = seed_periods[-1].start_date
+            assert last == date(2026, 5, 8)
+            _record(user_id, last + timedelta(days=21), 3, rhythm_of(7))
+            paydays, eras = _paydays(user_id), _stored_eras(user_id)
+            rows, entries = _rows_by_period(user_id), set(_entries_in(head))
+            stored, worked_out = _stored_totals(user_id), worked_out_totals(_db.session, user_id)
+            assert entries, "the re-sync must file the opening in the head"
+            assert _db.session.query(Transaction).filter(
+                Transaction.pay_period_id.in_(head),
+            ).count() == 2, "the head must hold the template bill the delete would take"
+
+            with pytest.raises(PayPeriodRemovalRefused) as refused:
+                pay_period_admin.remove_earlier_pay_periods(
+                    user_id, _period_on(user_id, last + timedelta(days=21)).id,
+                )
+
+            assert str(refused.value) == (
+                "Keep at least 2026-05-08, your last paycheck paid every 14 "
+                "days. Removing it would erase that pay rhythm."
+            )
+            _unchanged(user_id, paydays, eras)
+            assert _rows_by_period(user_id) == rows
+            assert set(_entries_in(head)) == entries
+            assert _stored_totals(user_id) == stored
+            assert worked_out_totals(_db.session, user_id) == worked_out
+
+
 class TestTheDoorRefusesAnIdItCannotResolve:
     """An id that is not the owner's removes nothing, as at truncate."""
 
@@ -349,8 +399,9 @@ class TestAnAddUndoneLeavesNothingBehind:
 
         Compared: the paydays, the stored eras, every row's period, id,
         name, status and delete flag, every transfer's period, id, status
-        and delete flag, and every posted total per scenario and ledger
-        account.  Not compared: journal entry ROWS, which a re-sync appends to
+        and delete flag, every stored total per scenario and ledger account,
+        and every worked-out total per scenario and chart key.  Not compared:
+        journal entry ROWS, which a re-sync appends to
         by design (a reversal and a re-post), and amounts on rows, which no
         door here writes.
 
@@ -379,7 +430,7 @@ class TestAnAddUndoneLeavesNothingBehind:
             db.session.commit()
             paydays, eras = _paydays(user_id), _stored_eras(user_id)
             rows = _rows_by_period(user_id)
-            totals = pay_period_locks.posted_totals(user_id)
+            stored, worked_out = _stored_totals(user_id), worked_out_totals(_db.session, user_id)
 
             head = _added_head(user_id, 3)
             added = {period.id for period in head}
@@ -403,5 +454,6 @@ class TestAnAddUndoneLeavesNothingBehind:
             assert _paydays(user_id) == paydays
             assert _stored_eras(user_id) == eras
             assert _rows_by_period(user_id) == rows
-            assert pay_period_locks.posted_totals(user_id) == totals
+            assert _stored_totals(user_id) == stored
+            assert worked_out_totals(_db.session, user_id) == worked_out
             assert_pay_period_invariants(db.session, user_id)

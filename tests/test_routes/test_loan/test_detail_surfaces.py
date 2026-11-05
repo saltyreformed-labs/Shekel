@@ -360,6 +360,34 @@ class TestLoanDetailMeasuredSurfaces:
         assert "Balance anchors" in html
         assert "Origination" in html
 
+    def test_a_loan_with_no_confirmed_payment_shows_no_payment_history(
+        self, auth_client, seed_user, db, seed_periods,
+    ):
+        """A configured loan with no payment hides the table and reads "Projected".
+
+        The empty table is the page's whole answer for a loan the walk opened
+        with nothing paid: no section, and the hero's caption says the balance
+        is projected.  The scorecard still shows, so the page rendered its
+        measured surfaces.
+        """
+        loan = create_loan_with_trueup(
+            seed_user, db.session,
+            origination_principal=Decimal("250000.00"),
+            anchor_balance=Decimal("100000.00"),
+            anchor_date=date(2026, 1, 1),
+            rate=Decimal("0.06000"),
+            origination_date=date(2023, 6, 1),
+            name="Unpaid Mortgage",
+        )
+        db.session.commit()
+
+        resp = auth_client.get(f"/accounts/{loan.id}/loan")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Payment history" not in html
+        assert "Projected from schedule" in html
+        assert "Balance anchors" in html
+
     def test_no_duplicate_oob_chip_ids_on_initial_load(
         self, auth_client, seed_user, db, seed_periods,
     ):

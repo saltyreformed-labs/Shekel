@@ -35,7 +35,7 @@ carries the reason for the wait and pins the state it now refuses.
 Every rule here is built COLUMN BY COLUMN rather than through
 ``recurrence.author_rule``, and deliberately: the door refuses each of these
 values before it writes, so authoring one would exercise the door and prove
-nothing about the table.  :func:`_storable_columns` supplies the four ``NOT
+nothing about the table.  :func:`_storable_columns` supplies the five ``NOT
 NULL`` columns every row needs so that the INSERT reaches the CHECK under test
 rather than dying on a null.
 
@@ -90,6 +90,9 @@ def _storable_columns(**overrides):
     """
     columns = {
         "unit_id": ref_cache.recurrence_unit_id(RecurrenceUnitEnum.MONTH),
+        "unit_has_day_of_month": ref_cache.recurrence_unit_has_day_of_month(
+            RecurrenceUnitEnum.MONTH,
+        ),
         "placement_id": ref_cache.period_placement_id(
             PeriodPlacementEnum.CONTAINING_DATE,
         ),

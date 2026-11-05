@@ -40,7 +40,6 @@ rule that every write of a transfer goes through ``transfer_service``
 (the transfer paragraph of ``CLAUDE.md``'s Architecture).
 """
 import logging
-from decimal import Decimal
 from typing import Any
 
 from flask import Response, abort, flash, request
@@ -147,7 +146,6 @@ def build_recurring_transfer_template(
     source_account: Account,
     dest_account: Account,
     name: str,
-    default_amount: Decimal,
 ) -> TransferTemplate:
     """Construct + session-add a recurring :class:`TransferTemplate`.
 
@@ -173,13 +171,17 @@ def build_recurring_transfer_template(
     the returned row before the flush, keeping that loan-only concern at the
     loan call site.
 
+    **It takes no amount, since plan step X-bp** dropped the template's
+    ``default_amount`` copy (rulings R-IY, R-BAL16): a definition that states
+    its price states it through ``template_amount_service.set_amount``, which
+    each caller calls, and a loan payment that follows its loan states none.
+
     Args:
         source_account: The owned, active funding account
             (``from_account``).
         dest_account: The investment / loan destination account
             (``to_account``).
         name: Display name for the template.
-        default_amount: Per-period transfer amount (Decimal).
 
     Returns:
         The added (not yet flushed) :class:`TransferTemplate`, with no
@@ -191,7 +193,6 @@ def build_recurring_transfer_template(
         from_account_id=source_account.id,
         to_account_id=dest_account.id,
         name=name,
-        default_amount=default_amount,
     )
     db.session.add(template)
     return template

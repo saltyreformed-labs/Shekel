@@ -78,7 +78,6 @@ def _make_every_n_template(db_session, seed_user, start_period, interval_n=2):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name="Every-other Bill",
-        default_amount=Decimal("300.00"),
     )
     db_session.add(template)
     db_session.flush()

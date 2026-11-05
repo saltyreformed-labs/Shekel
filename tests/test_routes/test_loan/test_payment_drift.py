@@ -9,13 +9,27 @@ from decimal import Decimal
 
 import pytest
 
+from app.models.escrow_line import EscrowComponentVersion
 from app.services.balance_at import BalanceContext
 from app.services import balance_at, escrow_calculator, loan_loaders
+from app.services.obligations_aggregator import todays_price
 
 from tests._test_helpers import add_escrow_line, make_cadence_rule, state_template_price
 from tests.oracles.recurrence_baseline import MONTHLY
 
 from ._helpers import _payment_template, _create_mortgage
+from tests._definition_price import newest_price
+
+
+def _todays_figure(template, seed_user):
+    """What the Recurring and savings pages show for *template* today.
+
+    The figure Track's reset of the stored base existed to keep current, read
+    from the producer those pages read since plan step X-bp
+    (``obligations_aggregator.todays_price``): amount rule 4, the standing
+    extra included.
+    """
+    return todays_price(template, BalanceContext.build(seed_user["user"].id)).amount
 
 
 # ── Payment Drift Warning + Auto-Track Switch Tests (C7 / ruling D3) ──
@@ -56,7 +70,7 @@ class TestPaymentDrift:
 
         Mirrors the two real production loans (a payment created before the
         loan_payment_settings feature): an active monthly TransferTemplate with a
-        recurrence rule and a stored ``default_amount``, and no 1:1 settings row --
+        recurrence rule and a stated price, and no 1:1 settings row --
         which every reader treats as manual mode (derive_from_loan False, no extra).
         Its price is STATED, as both production definitions' are (the
         template-amount backfill gave every existing template a version):
@@ -71,12 +85,11 @@ class TestPaymentDrift:
             from_account_id=seed_user["account"].id,
             to_account_id=acct.id,
             name="Legacy Mortgage Payment",
-            default_amount=amount,
             is_active=True,
         )
         db_session.add(tpl)
         db_session.commit()
-        state_template_price(tpl)
+        state_template_price(tpl, amount)
         db_session.commit()
         # The definition first, then the cadence onto it (plan step R-F6),
         # then COMMITTED (plan step X-i3) -- every caller of this helper goes
@@ -148,12 +161,12 @@ class TestPaymentDrift:
         """A short BASE warns even when a standing extra pushes total cash over contract.
 
         The firing control for ruling D3's ``extra_principal``-cancellation
-        property: the warning compares the extra-free BASE (``default_amount``) to
+        property: the warning compares the extra-free BASE (its stated price) to
         the contractual P&I + escrow, so a manual payment with base = contract-$50
         and a $75 standing extra -- total live cash contract+$25, ABOVE contract --
         must STILL warn, because the base under-covers P&I + escrow.  A regression
-        that added the extra to the compared (stored) side (``stored =
-        default_amount + extra``) would suppress this warning and still pass every
+        that added the extra to the compared (stated) side (``stated =
+        base + extra``) would suppress this warning and still pass every
         other test in the class; this asserts the $50.00 base shortfall renders.
         """
         acct = _create_mortgage(seed_user, db.session)
@@ -201,40 +214,63 @@ class TestPaymentDrift:
     def test_dashboard_no_warning_when_derive_even_after_escrow_rise(
         self, auth_client, seed_user, db, seed_periods,
     ):
-        """A DERIVE payment never warns, even when its stored base is now stale.
+        """A DERIVE payment never warns, even while its next row is below today's contract.
 
-        The control that proves derive mode is EXCLUDED, not merely free of drift:
-        a derive transfer is created (default_amount = contract at creation), then a
-        $200/mo escrow line is added so the contract rises ABOVE the stored base.
-        The underpayment predicate (stored < contract) is now TRUE -- asserted
-        directly -- yet no warning shows, because a derive payment recomputes its
-        cash to the contract on every read and cannot drift.
+        The control that proves derive mode is EXCLUDED, not merely free of
+        drift.  A derive transfer is created, then a $200/mo escrow line is
+        added so TODAY's contract rises $200.00 above what it was at creation
+        (both figures asserted), and the line is removed from the next
+        installment's due date on.  Amount rule 4 prices that installment on
+        its own due date, so the payment's next row is the creation-day
+        contract: its base sits $200.00 BELOW today's contract, the shape a
+        fixed payment warns on (:meth:`test_dashboard_warns_when_manual_payment_short`).
+        No warning shows, because the card never asks a payment that tracks
+        the loan for its drift (``routes/loan/dashboard.py``,
+        ``_payment_strips``).  An escrow rise alone cannot grade that: with
+        nothing changing between today and the due date, rule 4 prices the
+        row at today's contract and ``_payment_drift`` answers ``None`` with
+        or without the exclusion, which is how this case stayed green with
+        the exclusion deleted (plan#2686's review).
         """
-        from app.models.transfer_template import TransferTemplate  # pylint: disable=import-outside-toplevel
-
         acct = _create_mortgage(seed_user, db.session)
         checking = seed_user["account"]
+        creation_contract = self._contract(acct, seed_user["user"].id)
         auth_client.post(
             f"/accounts/{acct.id}/loan/create-transfer",
             data={"source_account_id": str(checking.id)},   # derive default
         )
-        # Raise the contract above the stored base by adding escrow AFTER creation.
-        add_escrow_line(db.session, acct.id, "Taxes", Decimal("2400.00"))
+        # Today is 2026-03-20 (this package's conftest) and the mortgage pays
+        # on the 1st, so the next installment is due 2026-04-01.  A $2,400 a
+        # year escrow line in effect since origination raises today's
+        # contract; its removal from that due date on leaves the installment
+        # at the creation-day contract.
+        next_due = date(2026, 4, 1)
+        taxes = add_escrow_line(db.session, acct.id, "Taxes", Decimal("2400.00"))
+        db.session.add(EscrowComponentVersion(
+            line_id=taxes.line.id, effective_date=next_due,
+            annual_amount=Decimal("0.00"), is_removed=True,
+        ))
         db.session.commit()
 
-        tpl = (
-            db.session.query(TransferTemplate)
-            .filter_by(to_account_id=acct.id, user_id=seed_user["user"].id)
-            .first()
-        )
-        new_contract = self._contract(acct, seed_user["user"].id)
-        # The control: the stored base is now below contract (would warn if manual).
-        assert tpl.default_amount < new_contract
+        tpl = _payment_template(db.session, seed_user, acct)
+        todays_contract = self._contract(acct, seed_user["user"].id)
+        # The contract rose: $2,400.00 / 12 = $200.00 a month of escrow.
+        assert todays_contract == creation_contract + Decimal("200.00")
+        assert newest_price(tpl) is None
         assert tpl.settings.derive_from_loan is True
 
         resp = auth_client.get(f"/accounts/{acct.id}/loan")
         assert resp.status_code == 200
-        assert "short of the" not in resp.data.decode()
+        html = resp.data.decode()
+        # The precondition the claim rests on: the strip prices the next
+        # installment at the creation-day contract, $200.00 below today's.
+        assert re.search(
+            rf'loan-payment__figure">\s*\${creation_contract:,.2f}\s*<', html,
+        ), "the derive payment's next row is not priced at the creation-day contract"
+        assert "next payment, Apr 1" in html
+        assert f"${todays_contract:,.2f}" in html   # the loan card's Total Monthly
+        assert "short of the" not in html
+        assert "loan-payment--short" not in html
 
     def test_track_payment_flips_to_derive_and_clears_warning(
         self, auth_client, seed_user, db, seed_periods,
@@ -242,8 +278,11 @@ class TestPaymentDrift:
         """The one-click switch flips a short manual payment to auto-track.
 
         A manual payment $50 below contract warns; POSTing track-payment sets
-        derive_from_loan True and resets the stored base to the contract, so a
-        re-render shows no warning and the loan now tracks the contract.
+        derive_from_loan True, so a re-render shows no warning and the payment's
+        figure on the Recurring and savings pages is the contract.  The door
+        reset the stored base to the contract until plan step X-bp; those pages
+        price the payment by amount rule 4 now
+        (``obligations_aggregator.todays_price``), so the figure is read there.
         """
         acct = _create_mortgage(seed_user, db.session)
         checking = seed_user["account"]
@@ -268,7 +307,7 @@ class TestPaymentDrift:
 
         db.session.expire(tpl)
         assert tpl.settings.derive_from_loan is True
-        assert tpl.default_amount == contract
+        assert _todays_figure(tpl, seed_user) == contract
 
         post = auth_client.get(f"/accounts/{acct.id}/loan")
         assert "short of the" not in post.data.decode()
@@ -279,8 +318,8 @@ class TestPaymentDrift:
         """Switching a legacy no-settings payment creates the settings row (derive).
 
         The real-loan shape has no loan_payment_settings row; the switch must
-        create one with derive_from_loan True (a missing row is manual mode), keep
-        the extra at zero, and reset the stored base to the contract.
+        create one with derive_from_loan True (a missing row is manual mode) and
+        keep the extra at zero, so the payment's figure is the contract.
         """
         acct = _create_mortgage(seed_user, db.session)
         contract = self._contract(acct, seed_user["user"].id)
@@ -298,7 +337,7 @@ class TestPaymentDrift:
         assert tpl.settings is not None
         assert tpl.settings.derive_from_loan is True
         assert tpl.settings.extra_principal == Decimal("0.00")
-        assert tpl.default_amount == contract
+        assert _todays_figure(tpl, seed_user) == contract
 
     def test_track_payment_preserves_standing_extra(
         self, auth_client, seed_user, db, seed_periods,
@@ -307,7 +346,8 @@ class TestPaymentDrift:
 
         A manual payment with a $75 standing extra, $50 below contract on its base:
         the switch flips derive True and keeps extra at $75 (the extra rides on top
-        of the tracked base, unchanged), resetting the base to the contract.
+        of the tracked base, unchanged), so the payment's figure is the contract
+        plus $75.00.
         """
         acct = _create_mortgage(seed_user, db.session)
         checking = seed_user["account"]
@@ -330,7 +370,7 @@ class TestPaymentDrift:
         db.session.expire(tpl)
         assert tpl.settings.derive_from_loan is True
         assert tpl.settings.extra_principal == Decimal("75.00")
-        assert tpl.default_amount == contract
+        assert _todays_figure(tpl, seed_user) == contract + Decimal("75.00")
 
     def test_track_payment_unknown_template_404s(
         self, auth_client, seed_user, db, seed_periods,
@@ -386,9 +426,9 @@ class TestPaymentDrift:
 
         db.session.expire_all()
         assert payment.settings.derive_from_loan is True
-        assert payment.default_amount == contract
+        assert _todays_figure(payment, seed_user) == contract
         assert sweep.settings is None
-        assert sweep.default_amount == Decimal("50.00")
+        assert newest_price(sweep) == Decimal("50.00")
 
     def test_track_payment_refuses_another_loans_template(
         self, auth_client, seed_user, db, seed_periods,
@@ -412,7 +452,7 @@ class TestPaymentDrift:
         assert resp.status_code == 404
         db.session.expire(other_tpl)
         assert other_tpl.settings is None
-        assert other_tpl.default_amount == contract - Decimal("50.00")
+        assert newest_price(other_tpl) == contract - Decimal("50.00")
 
     def test_the_card_renders_one_strip_per_definition_with_its_own_controls(
         self, auth_client, seed_user, db, seed_periods,
@@ -500,8 +540,8 @@ class TestPaymentDrift:
         """A fixed payment's figure and drift are its NEXT row's price, per the amount model.
 
         The owner states a future price on a fixed payment ($9,999.00 from
-        2028).  ``default_amount`` follows the NEWEST statement
-        (``template_amount_service._resync_scalar``), so the first cut of the
+        2028).  ``default_amount`` followed the NEWEST statement
+        (``_resync_scalar``, until plan step X-bp), so the first cut of the
         card -- and the drift before it -- would have shown $9,999.00 as what
         the loan is paid and judged the drift on it.  The strip prices the
         next occurrence through ``cash_ledger.definition_cash`` (ruling
@@ -517,8 +557,8 @@ class TestPaymentDrift:
         )
         db.session.commit()
         db.session.expire(tpl)
-        assert tpl.default_amount == Decimal("9999.00"), (
-            "precondition: the scalar follows the newest statement"
+        assert newest_price(tpl) == Decimal("9999.00"), (
+            "precondition: the newest stated price is the $9,999.00 one"
         )
 
         resp = auth_client.get(f"/accounts/{acct.id}/loan")
@@ -573,7 +613,7 @@ class TestPaymentDrift:
         assert "cannot track it too" in page
         db.session.expire_all()
         assert sweep.settings is None
-        assert sweep.default_amount == Decimal("50.00")
+        assert newest_price(sweep) == Decimal("50.00")
 
         # The tracker's own door is not refused by its own tracking.
         resp = auth_client.post(
@@ -606,4 +646,4 @@ class TestPaymentDrift:
         assert resp.status_code == 404
         db.session.expire(tpl)
         assert tpl.settings is None
-        assert tpl.default_amount == contract - Decimal("50.00")
+        assert newest_price(tpl) == contract - Decimal("50.00")

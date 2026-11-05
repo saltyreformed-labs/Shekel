@@ -53,18 +53,15 @@ What an occurrence IS, per unit
   what keeps a day-31 rule on the last day of every month instead of decaying
   to the 30th forever.  Both are read through
   :attr:`ResolvedRecurrence.day_of_month`, the one place that join is written.
-* ``WEEK`` -- ``starts_on`` plus multiples of ``7 * interval_n`` days.  **This
-  walk is correct and unreachable**, and plan step R8-a re-stated why: the unit
-  is kept out of the offer set by
-  :func:`~app.services.recurrence._offer.has_row_date_coordinate`, because
-  a weekly occurrence is neither a payday nor a day of the month and
-  ``recurrence.compute_due_date`` dates a row from its occurrence only for
-  a cadence naming a day of the month (plan step R5-a).  Plan step **R8-b**
-  dates a weekly row from its occurrence too, and the unit becomes
-  authorable by deleting that predicate.  It is implemented here rather than
-  refused because a partial function over an enum is the defect this redesign
-  exists to remove, and because a walk that silently ignored the unit would be
-  a wrong answer rather than an error.
+* ``WEEK`` -- ``starts_on`` plus multiples of ``7 * interval_n`` days, through
+  :data:`~app.utils.dates.CALENDAR_DATE_MAX`.  It was correct and unreachable
+  from plan step R3 until plan step **R8-b**: the offer set withheld the unit
+  because ``recurrence.compute_due_date`` would have dated every weekly row on
+  its funding payday, and R8-b dates a weekly row from its occurrence
+  (``_row_day.date_row``) and offers the unit.  It was implemented rather than
+  refused all along because a partial function over an enum is the defect this
+  redesign exists to remove, and because a walk that silently ignored the unit
+  would be a wrong answer rather than an error.
 * ``PERIOD`` -- **the qualifying paycheck's own payday.**  A paycheck qualifies
   when it has not already ENDED before ``starts_on`` -- which is what the
   reverse matcher selected (``p.end_date >= effective_from``) -- and it is
@@ -91,9 +88,9 @@ plan's section 3 says the opposite ("a mid-period bound places differently
 under the two placements"); that claim reads the anchor as the emitted
 occurrence, which the paragraph above is exactly the decision not to do.
 Emitting the payday is what reproduced the reverse matcher's date as well as
-its period: ``compute_due_date`` returns ``period.start_date`` for a rule
-naming no day of the month, so a mid-period bound emitted verbatim would have
-moved the first row's date.
+its period: ``compute_due_date`` returns ``period.start_date`` for a
+paycheck cadence, so a mid-period bound emitted verbatim would have moved the
+first row's date.
 
 The per-month CEILING (plan step salary:R15-a, ruling R-SAL29)
 --------------------------------------------------------------
@@ -261,10 +258,12 @@ the one containing the occurrence, so rent due 1 August is paid from the 17
 July paycheck rather than the 31 July one.  D20 closed on the measurement and
 that capability carries its own ledger row.
 
-Pure: no Flask, no ORM, no clock, no database.
+No Flask, no ORM, no clock, and no database read: what a unit's reference row
+states comes from the reference cache, loaded once per process (ruling
+plan#2748).
 """
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import date
 
 from app.enums import (
     BusinessDayShiftEnum,
@@ -282,6 +281,7 @@ from app.services.recurrence._months import (
     walk_months,
 )
 from app.services.recurrence._resolution import ResolvedRecurrence
+from app.utils.dates import CALENDAR_DATE_MAX
 
 #: Days in a week, for the ``WEEK`` unit's stride.
 _DAYS_PER_WEEK = 7
@@ -307,23 +307,35 @@ class RecurrenceGenerationError(ShekelError):
 
 
 def _week_walk(anchor: date, interval_n: int) -> Iterator[date]:
-    """Yield *anchor*, then every ``7 * interval_n`` days.
+    """Yield *anchor*, then every ``7 * interval_n`` days, through the calendar.
 
-    Unbounded by design; see :func:`_month_ordinal_walk`.
+    **Bounded at** :data:`~app.utils.dates.CALENDAR_DATE_MAX` **on day
+    ORDINALS, exactly as** :func:`~._months.walk_months` **bounds the month
+    walk on month ordinals** (plan step R8-b), so the three walks stop at one
+    day and :func:`_bounded` stays the only place a RULE's bound is applied.
+    It was bounded by ``date`` itself until the unit became authorable, and
+    that was two 500s waiting on the preview and on save: the stride was a
+    ``timedelta``, which raises ``OverflowError`` for an interval the form's
+    box admits (measured at 2,147,483,647, the column's own ceiling), and a
+    stride that stepped past ``date.max`` raised at the next yield.  Integers
+    carry any stride, and an ordinal past the bound is never turned into a
+    ``date``, so neither can be reached.
 
     Args:
         anchor: The first occurrence.
         interval_n: Weeks between occurrences.  Must be positive.
 
     Yields:
-        Occurrence dates, ascending, until the consumer stops pulling.  Walked
-        past ``date.max`` it raises ``OverflowError`` rather than looping.
+        Occurrence dates, ascending, until the consumer stops pulling or the
+        walk leaves the calendar.  A stride carrying the second occurrence
+        past that point fires ONCE, the answer
+        :func:`~._months.walk_months` gives a month stride that does.
     """
-    stride = timedelta(days=_DAYS_PER_WEEK * interval_n)
-    day = anchor
-    while True:
-        yield day
-        day += stride
+    for ordinal in range(
+        anchor.toordinal(), CALENDAR_DATE_MAX.toordinal() + 1,
+        _DAYS_PER_WEEK * interval_n,
+    ):
+        yield date.fromordinal(ordinal)
 
 
 def _period_walk(
@@ -379,9 +391,8 @@ def _period_walk(
     the sequence at :data:`~app.utils.dates.CALENDAR_DATE_MAX` exactly as
     :func:`~._months.walk_months` does -- so this walk stops where the MONTH
     walk stops, and :func:`_bounded` is once again the ONLY place a bound is
-    applied.  (:func:`_week_walk`, the third sibling, is bounded by ``date``
-    itself rather than by that constant; the unit is unreachable until plan
-    step R8-b opens it, and bounding it is that step's.)
+    applied.  (:func:`_week_walk`, the third sibling, is bounded at the same
+    constant since plan step R8-b opened its unit.)
 
     Args:
         resolved: The recurrence's two-axis meaning.
@@ -416,10 +427,9 @@ def _unbounded(
         the sense that nothing about the SCHEDULE stops one -- plan step
         R16-b-1 removed the ``PERIOD`` unit's exception, which was a SILENT
         truncation at the saved horizon rather than a bound anything had
-        chosen.  Where each walk finally runs out still differs: ``PERIOD`` and
-        the month-spanning units stop at
-        :data:`~app.utils.dates.CALENDAR_DATE_MAX`, ``WEEK`` at ``date``'s own
-        maximum.
+        chosen.  Every walk finally runs out at
+        :data:`~app.utils.dates.CALENDAR_DATE_MAX` (the ``WEEK`` walk since
+        plan step R8-b).
 
     Raises:
         RecurrenceGenerationError: When *resolved* names a unit this engine
@@ -466,14 +476,14 @@ def _unbounded(
     # ``months_per_step`` is partial over the enum and is NOT guarded here,
     # because reaching this line already proves membership: ``day_of_month``
     # answers non-``None`` only for ``_frequency.has_day_of_month_coordinate``,
-    # which is a membership test against ``_months.MONTH_SPANNING_UNITS``
-    # itself, which is that function's own key set.  (It read
-    # ``_resolution._DAY_OF_MONTH_UNITS`` until plan step R8-a, an alias of the
-    # same tuple that moved to ``_frequency`` with the predicate.)  A guard
-    # whose only reachability condition is "two hand-written sets
-    # disagree" is the fence this project removes rather than tests, and an
-    # adversarial review of plan step R7b-1 named it: the sets are one now, so
-    # the state is unconstructible rather than merely unreached.
+    # which reads the unit's ``ref.recurrence_units.has_day_of_month`` -- a
+    # column the database GENERATES from the same ``months_per_unit`` that
+    # function reads (ruling plan#2748; until plan step plan#2302 both read one
+    # code tuple, ``_months.MONTH_SPANNING_UNITS``).  A guard whose only
+    # reachability condition is "two hand-written sets disagree" is the fence
+    # this project removes rather than tests, and an adversarial review of plan
+    # step R7b-1 named it: the fact has one home, so the state is
+    # unconstructible rather than merely unreached.
     start = month_ordinal(resolved.starts_on)
     return walk_months(
         start, month_day, months_per_step(unit, resolved.interval_n),
@@ -690,7 +700,7 @@ def occurrences(
     paths, ``period_population``'s batch boundary, the preview's display
     choice, and ``recurring_view``'s ``as_of``.  The paths that state NOTHING
     pass ``None`` since plan step R4b-1 -- the template create path,
-    ``generate_transfers_for_all_periods`` and ``can_generate_in_period`` --
+    ``generate_transfers_for_all_periods`` and ``rows_to_generate_in_period`` --
     because the two defaults ``resolve_generation_plan`` used to apply were
     already inside the anchor.  That is a per-call display / regeneration
     boundary rather than a property of the recurrence, and conflating the two

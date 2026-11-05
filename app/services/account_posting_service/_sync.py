@@ -1,7 +1,7 @@
 """Account anchor-posting orchestration: per-scenario sync, all-scenarios, per-user.
 
 The entry points that drive a non-loan account's anchor reconcile -- one walk
-(:func:`._walk.walk_account_ledger`) feeding one reconcile
+(:func:`app.services.ledger_lines.walk_account_ledger`) feeding one reconcile
 (:func:`._anchors.reconcile_account_anchor_corrections`) per (account,
 scenario):
 
@@ -24,9 +24,10 @@ scenario):
 * :func:`self_heal_anchor_corrections` -- the effect-time self-heal the
   tails of ``posting_service.sync_transfer_postings`` /
   ``sync_transaction_postings`` invoke after emitting source delta entries:
-  a source whose posted effect changed at-or-before an account's latest
-  anchor assertion moved that anchor's walked ``ledger_before``, so the
-  stale correction is re-derived in the same transaction.
+  a source whose records moved at-or-before an account's latest anchor
+  assertion, as the deltas it posted show, moved that anchor's walked
+  ``ledger_before``, so the stale correction is re-derived in the same
+  transaction.
 
 An amortizing loan is a documented NO-OP at every entry point (never an
 error: the chokepoints legitimately iterate all of a user's accounts): loans
@@ -42,13 +43,13 @@ commits -- the caller owns the transaction boundary.
 """
 
 import logging
-from collections.abc import Iterable
 
 from app import ref_cache
-from app.enums import PostingSourceEnum
+from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db
 from app.models.account import Account
 from app.models.journal_entry import JournalEntry, Posting
+from app.models.ledger_account import LedgerAccount
 from app.models.ref import AccountType
 from app.services.account_projection import (
     AccountProjectionKind,
@@ -57,10 +58,10 @@ from app.services.account_projection import (
 from app.services._posting_reconcile import account_chart_row_ids
 from app.services.cash_ledger import reconciled_through
 from app.services.scenario_resolver import get_baseline_scenario
+from app.services.ledger_lines import walk_account_ledger
 from app.services.user_write_lock import lock_every_user_writes
 
 from ._anchors import reconcile_account_anchor_corrections
-from ._walk import walk_account_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +95,10 @@ def sync_account_anchor_postings(account_id: int, scenario_id: int) -> None:
     """Reconcile one non-loan account's anchor corrections in one scenario.
 
     The per-scenario chokepoint: walks the account's anchor assertions
-    against the scenario's posted sources
-    (:func:`._walk.walk_account_ledger`) and reconciles the resulting
-    opening / true-up corrections to the ledger
-    (:func:`._anchors.reconcile_account_anchor_corrections`).
+    against the scenario's settled RECORDS, never what is posted
+    (:func:`app.services.ledger_lines.walk_account_ledger`, plan task
+    plan#2525), and reconciles the resulting opening / true-up corrections
+    to the ledger (:func:`._anchors.reconcile_account_anchor_corrections`).
 
     Idempotent and self-healing: a re-run at the same state writes nothing.
     Touches ONLY the account's own chart rows.  A
@@ -232,7 +233,6 @@ def sync_account_anchor_postings_all_scenarios(account_id: int) -> None:
 
 
 def self_heal_anchor_corrections(
-    account_ids: Iterable[int],
     scenario_id: int,
     delta_entries: list[JournalEntry],
 ) -> None:
@@ -240,10 +240,23 @@ def self_heal_anchor_corrections(
 
     The effect-time self-heal (Build-Order Step 5, C6): the tails of
     ``posting_service.sync_transfer_postings`` /
-    ``sync_transaction_postings`` (which
-    ``reverse_postings_before_delete`` routes through) call this after
-    emitting source delta entries, and ``resync_all_cash_postings`` calls it
-    ONCE per scenario after re-booking every source (ruling **R-BAL103**).
+    ``sync_transaction_postings`` call this after emitting source delta
+    entries, and ``posting_service.re_check_held_anchor_corrections`` calls it
+    ONCE per scenario after a batch: ``resync_all_cash_postings`` after
+    re-booking every source (ruling **R-BAL103**), and the one removal act
+    after deleting the movements it reversed (ruling **plan#2564**).
+
+    **The accounts it visits are the deltas' own** (plan task plan#2613):
+    every real account whose LINKED row one of *delta_entries* posts on
+    (:func:`_accounts_the_deltas_post_on`).  A delta is booked where the
+    money moved and where an earlier posting of it is unwound, so its own
+    legs name every account whose records walk it can have moved.  Each
+    caller named the accounts from its source rows' CURRENT columns until
+    that task, which cannot see an account a reversal just LEFT: a settled
+    $120.00 payment whose Paid from was moved off a card reversed the card's
+    leg and never re-checked the card, whose ledger read -$380.00 against its
+    asserted -$500.00 (review plan#2521, finding A1; a defect at the merge
+    base too).
 
     **What it decides is whether the reconcile can be SKIPPED, and that is
     the honest way round.**  :func:`sync_account_anchor_postings` is
@@ -328,9 +341,6 @@ def self_heal_anchor_corrections(
     Flushes but does not commit (the caller owns the transaction).
 
     Args:
-        account_ids: The real accounts the emitted deltas' LINKED legs can
-            touch (the transfer's two endpoints / the transaction's cash
-            account -- both immutable on their source rows).
         scenario_id: The scenario the deltas were emitted in (postings are
             scenario-scoped, so only that scenario's corrections can have
             moved).
@@ -359,7 +369,7 @@ def self_heal_anchor_corrections(
     # blocks before its first read, then reads a boundary that already covers
     # its own entry, and fires.
     earliest = min(entry.entry_date for entry in delta_entries)
-    for account_id in sorted(set(account_ids)):
+    for account_id in _accounts_the_deltas_post_on(delta_entries):
         # ONE statement of "the account's coverage boundary", asked through the
         # rule's ONE implementation rather than re-spelled as a ``<=`` here.
         # This module had its own copy of both; a second copy of this question
@@ -378,6 +388,43 @@ def self_heal_anchor_corrections(
             account_id, scenario_id,
         ):
             sync_account_anchor_postings(account_id, scenario_id)
+
+
+def _accounts_the_deltas_post_on(delta_entries: list[JournalEntry]) -> list[int]:
+    """Return the real accounts whose LINKED row the deltas post on, ascending.
+
+    :func:`self_heal_anchor_corrections`' account set, read off the legs the
+    caller just emitted: each entry's postings are the ones the balanced
+    write attached in this session, so naming their chart rows reads no
+    statement, and one statement maps those rows to the accounts they are
+    linked to.  A category, transit or owner-bucket leg names no account,
+    and a counter row is never a source delta's leg.
+
+    Args:
+        delta_entries: The just-emitted delta entries (non-empty).
+
+    Returns:
+        The distinct account ids, ascending; a loan's included, which
+        :func:`sync_account_anchor_postings` skips structurally.
+    """
+    ledger_ids = {
+        posting.ledger_account_id
+        for entry in delta_entries
+        for posting in entry.postings
+    }
+    rows = (
+        db.session.query(LedgerAccount.account_id)
+        .filter(
+            LedgerAccount.id.in_(ledger_ids),
+            LedgerAccount.kind_id == ref_cache.ledger_account_kind_id(
+                LedgerAccountKindEnum.LINKED,
+            ),
+        )
+        .distinct()
+        .order_by(LedgerAccount.account_id)
+        .all()
+    )
+    return [account_id for (account_id,) in rows]
 
 
 def _has_posted_anchor_correction(account_id: int, scenario_id: int) -> bool:

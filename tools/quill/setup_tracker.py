@@ -59,9 +59,10 @@ board item is a difference (the coordinator's call, 14:4x 2026-10-21).
 **The organization's issue fields are exactly the five declared** (:data:`ISSUE_FIELDS`;
 rulings ``balance:R-BAL348``, ``R-BAL354``, and the developer's word of 2026-10-25): Arc, a
 single select of the arcs, which a card's arc moves into after the cutover, its matching
-label then kept as display; and GitHub's four defaults, Priority, Effort, Start date and
-Target date, which the developer keeps, empty for now.  Any other is a difference, deleted
-on the web.  The board lists each one it shows as a field of its own, which GitHub marks
+label then kept as display; and GitHub's four defaults, which the developer keeps: Priority
+and Effort, which quill writes (plan#2491; Effort's options the sessions a card's work takes,
+ruling plan#2508), and Start date and Target date, empty for now.  Any other is a difference,
+deleted on the web.  The board lists each one it shows as a field of its own, which GitHub marks
 ``isIssueField``: its value is the issue's, so the board stores nothing for it (finding
 plan#1839, measured 2026-10-27), and it is no stored field.  **Every card's arc labels display
 its Arc** (R-BAL354, views_spec s.6): each card the rule ``quill sync``'s label pass reports
@@ -96,6 +97,7 @@ from tools.quill._board_fields import (
     stores_values,
 )
 from tools.quill._exits import described
+from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD, PRIORITY_OPTIONS
 from tools.quill._github import (
     APP_DIR,
     CredentialsError,
@@ -184,16 +186,21 @@ class IssueField:
 #: makes four more when issue fields are switched on, Priority, Effort, Start date and Target
 #: date.  R-BAL348 ruled them deleted, a click on the web that was never made, and on
 #: 2026-10-25 the developer kept them ("I want to use those fields even if they are empty for
-#: now"), so each is declared exactly as the organization held it that day.  An
+#: now"), so each is declared exactly as the organization held it that day, but Effort, and
+#: Priority, which gained On hold (ruling plan#1832).
+#: Priority and Effort (:mod:`_fields`) are quill's to write since plan#2491; Effort counts the
+#: sessions a card's work takes, its options the ones the developer set on the web on
+#: 2026-11-01 (ruling plan#2508; read by GraphQL at 10:42 EST, in this order).  An
 #: organization's issue fields, like its issue types, are changed only with the ``admin:org``
 #: scope, so the developer changes them on the web and this module checks them; any other
-#: field is a difference.
+#: field is a difference.  Each single select's options here are also the choices quill
+#: offers for it.
 ISSUE_FIELDS = {
     ARC_FIELD: IssueField("SINGLE_SELECT", ARCS, "the arcs"),
-    "Priority": IssueField("SINGLE_SELECT", ("Urgent", "High", "Medium", "Low")),
+    PRIORITY_FIELD: IssueField("SINGLE_SELECT", PRIORITY_OPTIONS),
     "Start date": IssueField("DATE"),
     "Target date": IssueField("DATE"),
-    "Effort": IssueField("SINGLE_SELECT", ("High", "Medium", "Low")),
+    EFFORT_FIELD: IssueField("SINGLE_SELECT", ("1", "2", "3", "4", "5+")),
 }
 ISSUE_FIELDS_URL = f"https://github.com/organizations/{ORG}/settings/issue-fields"
 

@@ -209,6 +209,60 @@ def recurrence_unit_id(member):
     return cache().enum_ids[RecurrenceUnitEnum][member]
 
 
+def recurrence_unit_months(member: RecurrenceUnitEnum) -> int | None:
+    """Return how many months one *member* unit spans, or ``None``.
+
+    The ONE statement of which recurrence units are measured in months, and
+    how many (plan step plan#2302, ruling plan#2748): the unit's
+    ``ref.recurrence_units.months_per_unit``.  The occurrence engine's month
+    stride reads it (``recurrence._months.months_per_step``).
+
+    **``None`` rather than a ``KeyError`` for a value no row names**, unlike
+    :func:`ledger_class_is_debit_normal`, and that is the code table this
+    replaced keeping its answer (``_MONTHS_PER_UNIT.get``): the stride refuses
+    a unit with no span (``MonthStepError``), so an unmodelled value is
+    refused INSIDE the recurrence package's error hierarchy, not by the cache.
+
+    Args:
+        member: A ``RecurrenceUnitEnum`` member.
+
+    Returns:
+        int | None -- 1 for a month, 12 for a year; ``None`` for the paycheck
+        and week units, which are not measured in months at all.
+
+    Raises:
+        RuntimeError: If the cache has not been initialized.
+    """
+    require_init()
+    return cache().recurrence_unit_months.get(member)
+
+
+def recurrence_unit_has_day_of_month(member: RecurrenceUnitEnum) -> bool:
+    """Return whether a cadence measured in *member* fires on a day of the month.
+
+    The unit's ``ref.recurrence_units.has_day_of_month``, which the DATABASE
+    generates from :func:`recurrence_unit_months` (``months_per_unit IS NOT
+    NULL``) -- so it is read here rather than re-derived, and the flag the
+    engine asks and the one a rule's CHECKs hold it to are the same column.
+
+    A MEMBERSHIP answer, as the code tuple it replaced gave
+    (``unit in MONTH_SPANNING_UNITS``): ``False`` for a value no row names,
+    so the occurrence engine reaches its own refusal of a unit it has no walk
+    for (``RecurrenceGenerationError``) rather than a ``KeyError`` here.
+
+    Args:
+        member: A ``RecurrenceUnitEnum`` member.
+
+    Returns:
+        bool -- True for the month and year units.
+
+    Raises:
+        RuntimeError: If the cache has not been initialized.
+    """
+    require_init()
+    return member in cache().recurrence_day_of_month_units
+
+
 def period_placement_id(member):
     """Return the integer primary key for a PeriodPlacementEnum member.
 

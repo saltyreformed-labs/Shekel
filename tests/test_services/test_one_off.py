@@ -50,6 +50,7 @@ from app.services.amount_ownership import state_own_amount
 from app.services.recurrence_engine import unruled_row_fields
 from app.services.template_amount_service import amount_as_of, amount_versions
 from tests._test_helpers import resolved_amount
+from tests._definition_price import newest_price
 
 
 def _spec(seed_user, **overrides):
@@ -111,7 +112,7 @@ class TestWhatTheProducerMints:
     def test_the_series_holds_one_version_dated_on_the_rows_due_date(
         self, app, seed_user, seed_periods_today,
     ):
-        """R-BAL21: one version, on the due date, and the scalar agrees."""
+        """R-BAL21: one version, on the due date, and it is the newest price."""
         with app.app_context():
             period = _period(seed_user, seed_periods_today, 4)
             row = place_one_off(
@@ -123,7 +124,7 @@ class TestWhatTheProducerMints:
             assert len(versions) == 1
             assert versions[0].effective_date == row.due_date
             assert Decimal(str(versions[0].amount)) == Decimal("162.25")
-            assert row.template.default_amount == Decimal("162.25")
+            assert newest_price(row.template) == Decimal("162.25")
 
     def test_the_row_states_no_figure_and_resolves_to_the_amount_on_any_date(
         self, app, seed_user, seed_periods_today,
@@ -385,7 +386,7 @@ class TestRestatePrice:
             assert [(v.effective_date, v.amount) for v in amount_versions(row.template)] == [
                 (row.due_date, Decimal("170.00")),
             ]
-            assert row.template.default_amount == Decimal("170.00")
+            assert newest_price(row.template) == Decimal("170.00")
             assert row.estimated_amount is None
             assert row.amount_source_id == ref_cache.amount_source_id(
                 AmountSourceEnum.TEMPLATE,
@@ -412,7 +413,7 @@ class TestRestatePrice:
             assert row.estimated_amount is None
             assert row.is_override is False
             assert resolved_amount(row) == Decimal("180.00")
-            assert row.template.default_amount == Decimal("180.00")
+            assert newest_price(row.template) == Decimal("180.00")
 
     def test_the_version_the_rows_own_date_reads_is_the_one_corrected(
         self, app, seed_user, seed_periods_today,

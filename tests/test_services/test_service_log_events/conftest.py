@@ -135,7 +135,6 @@ def _recurrence_setup(app, db, seed_user, seed_periods):
         category_id=seed_user["categories"]["Groceries"].id,
         transaction_type_id=expense_type.id,
         name="Recurring Test",
-        default_amount=Decimal("100.00"),
         is_active=True,
     )
     db.session.add(template)

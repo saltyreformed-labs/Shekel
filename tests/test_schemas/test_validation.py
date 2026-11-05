@@ -174,20 +174,20 @@ class TestTemplateCreateSchema:
         """
         data = TemplateCreateSchema().load({
             "name": "Monthly Rent",
-            "default_amount": "1200.00",
+            "amount": "1200.00",
             "category_id": "1",
             "transaction_type_id": "1",
             "account_id": "1",
             **cadence_payload(),
         })
         assert data["name"] == "Monthly Rent"
-        assert data["default_amount"] == Decimal("1200.00")
+        assert data["amount"] == Decimal("1200.00")
 
     def test_no_cadence_is_refused(self):
         """Absent and empty units are one statement on a create: refused (R-BAL23)."""
         base = {
             "name": "Monthly Rent",
-            "default_amount": "1200.00",
+            "amount": "1200.00",
             "category_id": "1",
             "transaction_type_id": "1",
             "account_id": "1",
@@ -201,7 +201,7 @@ class TestTemplateCreateSchema:
         """Missing name raises ValidationError."""
         with pytest.raises(ValidationError) as exc:
             TemplateCreateSchema().load({
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": "1",
                 "transaction_type_id": "1",
                 "account_id": "1",
@@ -221,7 +221,7 @@ class TestTemplateCreateSchema:
         with pytest.raises(ValidationError) as exc:
             TemplateCreateSchema().load({
                 "name": "Test",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": "1",
                 "transaction_type_id": "1",
                 "account_id": "1",
@@ -243,7 +243,7 @@ class TestTemplateCreateSchema:
         assert "offset_periods" not in TemplateCreateSchema().fields
         data = TemplateCreateSchema().load({
             "name": "Test",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "category_id": "1",
             "transaction_type_id": "1",
             "account_id": "1",
@@ -266,7 +266,7 @@ class TestTemplateCreateSchema:
         with pytest.raises(ValidationError) as exc:
             TemplateCreateSchema().load({
                 "name": "Test",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": "1",
                 "transaction_type_id": "1",
                 "account_id": "1",
@@ -306,7 +306,7 @@ class TestTemplateCreateSchema:
         schema = TemplateCreateSchema()
         data = _normalize_empty_inputs(schema, {
             "name": "Test",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "category_id": "1",
             "transaction_type_id": "1",
             "account_id": "1",
@@ -343,10 +343,10 @@ class TestTemplateUpdateSchema:
         """Empty update (after stripping) is valid."""
         data = TemplateUpdateSchema().load({
             "name": "",
-            "default_amount": "",
+            "amount": "",
         })
         assert "name" not in data
-        assert "default_amount" not in data
+        assert "amount" not in data
 
     def test_effective_from_date_parsing(self):
         """effective_from parses a valid date string."""
@@ -375,19 +375,19 @@ class TestTransferTemplateCreateSchema:
         """Valid transfer template data loads successfully."""
         data = TransferTemplateCreateSchema().load({
             "name": "Savings Transfer",
-            "default_amount": "500.00",
+            "amount": "500.00",
             "from_account_id": "1",
             "to_account_id": "2",
             "category_id": "1",
         })
-        assert data["default_amount"] == Decimal("500.00")
+        assert data["amount"] == Decimal("500.00")
 
     def test_same_accounts_rejected(self):
         """from_account_id == to_account_id raises ValidationError."""
         with pytest.raises(ValidationError) as exc:
             TransferTemplateCreateSchema().load({
                 "name": "Bad Transfer",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": "1",
                 "to_account_id": "1",
                 "category_id": "1",
@@ -395,15 +395,15 @@ class TestTransferTemplateCreateSchema:
         assert "_schema" in exc.value.messages
 
     def test_zero_amount_rejected(self):
-        """default_amount=0 fails Range(min=0, min_inclusive=False)."""
+        """amount=0 fails Range(min=0, min_inclusive=False)."""
         with pytest.raises(ValidationError) as exc:
             TransferTemplateCreateSchema().load({
                 "name": "Zero Transfer",
-                "default_amount": "0",
+                "amount": "0",
                 "from_account_id": "1",
                 "to_account_id": "2",
             })
-        assert "default_amount" in exc.value.messages
+        assert "amount" in exc.value.messages
 
 
 # ── TransferCreateSchema ─────────────────────────────────────────────
@@ -1030,7 +1030,7 @@ class TestDeductionCreateSchema:
     def test_a_target_account_is_accepted_on_a_deduction_and_refused_on_an_earning(
         self, member,
     ):
-        """The one side-specific rule, swept over all four kinds (plan step salary:R18-b).
+        """The one side-specific rule, swept over every kind (plan step salary:R18-b).
 
         A deduction may name the account it funds; an earning funds nothing,
         so the pair is refused on ``target_account_id`` with the sentence the
@@ -1104,7 +1104,7 @@ class TestDeductionCreateSchema:
         with pytest.raises(ValidationError) as exc:
             TemplateCreateSchema().load({
                 "name": "Rent", "account_id": "1", "category_id": "1",
-                "transaction_type_id": "1", "default_amount": "100.00",
+                "transaction_type_id": "1", "amount": "100.00",
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.MONTH,
                     placement=PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
@@ -1376,7 +1376,7 @@ class TestTemplateCreateSchemaBoundary:
         """
         data = {
             "name": "Test Template",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "category_id": "1",
             "transaction_type_id": "1",
             "account_id": "1",

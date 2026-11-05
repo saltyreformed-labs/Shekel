@@ -38,7 +38,6 @@ from app.services.recurrence import (
     AuthorableCadence,
     Cadence,
     RecurrenceFrequencyError,
-    RecurrenceResolutionError,
     authorable_cadences,
     can_repeat_within_month,
     canonical_cadence,
@@ -46,15 +45,6 @@ from app.services.recurrence import (
     fires_on_day_of_month,
     has_day_of_month_coordinate,
     is_authorable,
-)
-# The row-date rule is package-internal -- ``__init__`` re-exports the two
-# predicates a consumer outside the package asks and not this one, because it
-# states a TRANSITIONAL limit plan step R5 deletes.  Naming its definition site
-# is what lets the offer-set sweep below grade the SET against the thing that
-# withholds, rather than against a second list.
-from app.services.recurrence._offer import (
-    has_row_date_coordinate,
-    require_row_date_coordinate,
 )
 
 #: 14 days between paydays, 26 a year.
@@ -271,32 +261,38 @@ class TestTheOfferSetIsWhatTheAppCanHonour:
     storable and left the gate on ``anchor_family``, which asked whether a
     FIRST OCCURRENCE could be derived -- a question ruling **R-R16** had
     already answered for every unit by making that date authored.  R8-a
-    replaced the router with the two live rules below.  These cases grade the
-    set against those rules rather than against a list written here, which is
-    the difference between a derivation and an enumeration that happens to
-    agree.
+    replaced the router with two live rules, and plan step R8-b deleted the
+    one that withheld the ``WEEK`` unit by dating a weekly row from its
+    occurrence.  These cases grade the set against the rule that is left
+    rather than against a list written here, which is the difference between
+    a derivation and an enumeration that happens to agree.
     """
 
-    def test_the_offer_set_is_exactly_these_five_readings(self):
+    def test_the_offer_set_is_exactly_these_seven_readings(self):
         """The offer set's EXTENSION, written out, beside the derivation.
 
         **This case used to assert ``has_row_date_coordinate(offer.unit)`` over
-        the offer set**, which is the condition ``authorable_cadences`` filters
+        the offer set**, which is the condition ``authorable_cadences`` filtered
         ON -- a tautology whose docstring claimed it proved a row could be
         dated.  Both adversarial reviews of plan step R8-a named it.  What a
-        test can honestly hold here is the EXTENSION: five readings, written
-        out, so a change to either derived rule surfaces as a diff a reader has
-        to justify rather than as a silently different set.
+        test can honestly hold here is the EXTENSION: seven readings since plan
+        step R8-b (paychecks once, weeks / months / years at both placements),
+        written out, so a change to the derived rule surfaces as a diff a reader
+        has to justify rather than as a silently different set.
 
-        The two sweeps below still grade the DERIVATION; this grades the
-        ANSWER, and the pair is the point -- a derivation asserted only against
-        itself agrees with any rule at all.
+        The sweep below still grades the DERIVATION; this grades the ANSWER,
+        and the pair is the point -- a derivation asserted only against itself
+        agrees with any rule at all.
         """
         assert set(authorable_cadences()) == {
             AuthorableCadence(unit=unit, placement=placement)
             for unit, placement in [
                 (RecurrenceUnitEnum.PERIOD,
                  PeriodPlacementEnum.CONTAINING_DATE),
+                (RecurrenceUnitEnum.WEEK,
+                 PeriodPlacementEnum.CONTAINING_DATE),
+                (RecurrenceUnitEnum.WEEK,
+                 PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER),
                 (RecurrenceUnitEnum.MONTH,
                  PeriodPlacementEnum.CONTAINING_DATE),
                 (RecurrenceUnitEnum.MONTH,
@@ -320,8 +316,6 @@ class TestTheOfferSetIsWhatTheAppCanHonour:
         """
         honourable = set()
         for unit in RecurrenceUnitEnum:
-            if not has_row_date_coordinate(unit):
-                continue
             for placement in PeriodPlacementEnum:
                 if emits_period_starts(unit) and (
                     placement is not PeriodPlacementEnum.CONTAINING_DATE
@@ -330,36 +324,6 @@ class TestTheOfferSetIsWhatTheAppCanHonour:
                 honourable.add(AuthorableCadence(unit=unit, placement=placement))
 
         assert set(authorable_cadences()) == honourable
-
-    def test_the_week_unit_is_the_ONE_gap_and_it_names_its_step(self):
-        """The single remaining gap, named so the step that closes it sees this.
-
-        A weekly occurrence is neither a payday nor a day of the month, and
-        ``recurrence.compute_due_date`` dates a generated row from
-        nothing else -- so every weekly row would carry the funding PAYDAY and
-        the authored weekday would be discarded.  Plan step **R5** gives a row
-        its own ``occurs_on``; :func:`has_row_date_coordinate` goes with the
-        function it names, and the unit becomes offerable by that deletion.
-
-        Asserted explicitly as well as by the sweep above, because a sweep that
-        agreed with a rule that had quietly started admitting the unit would go
-        green while the form began offering a cadence whose rows are misdated.
-        """
-        offered = set(authorable_cadences())
-        withheld = {
-            AuthorableCadence(unit=unit, placement=placement)
-            for unit in RecurrenceUnitEnum
-            for placement in PeriodPlacementEnum
-            if not has_row_date_coordinate(unit)
-        }
-
-        assert withheld == {
-            AuthorableCadence(
-                unit=RecurrenceUnitEnum.WEEK, placement=placement,
-            )
-            for placement in PeriodPlacementEnum
-        }
-        assert not offered & withheld
 
     def test_the_year_unit_offers_BOTH_placements(self):
         """The one reading plan step R8-a WIDENED.
@@ -402,37 +366,6 @@ class TestTheOfferSetIsWhatTheAppCanHonour:
             by_unit[RecurrenceUnitEnum.YEAR]
         )
 
-    def test_the_row_date_rule_has_a_RAISING_twin(self):
-        """A reader holding an unhonourable rule refuses rather than answers.
-
-        **The refusal deleting the router deleted by accident** (plan step
-        R8-a).  ``anchor_family`` RAISED for the ``WEEK`` unit, so
-        ``scheduling_day_of_month`` inherited a refusal through
-        ``fires_on_day_of_month``; stating that predicate directly made it
-        answer ``False``, which ``recurrence.compute_due_date`` reads as
-        "date this row from its paycheck" -- so every weekly row would have
-        been dated on the funding payday, silently, with the authored weekday
-        discarded.  An existing migration case caught it, and this pins the
-        rule at its own door.
-
-        **Named rather than branched on the predicate**, because the branching
-        form asserted the twin's own body against itself: it read
-        ``if has_row_date_coordinate(unit): pass else: raises``, which is what
-        the function does.  Naming ``WEEK`` is what makes this fail if the
-        refused SET moves -- which is exactly what plan step **R5** will do to
-        it, and the point at which both functions are deleted.
-        ``test_the_week_unit_is_the_ONE_gap_and_it_names_its_step`` grades the
-        same set from the offer side; the two together are what keep the
-        predicate and its twin from covering different units.
-        """
-        for unit in RecurrenceUnitEnum:
-            if unit is RecurrenceUnitEnum.WEEK:
-                continue
-            require_row_date_coordinate(unit, "a test")
-
-        with pytest.raises(RecurrenceResolutionError, match="generated row"):
-            require_row_date_coordinate(RecurrenceUnitEnum.WEEK, "a test")
-
     def test_a_row_is_dated_from_a_day_for_exactly_these_two_readings(self):
         """``fires_on_day_of_month``'s EXTENSION over the whole product.
 
@@ -448,10 +381,12 @@ class TestTheOfferSetIsWhatTheAppCanHonour:
         ``historical/recurrence_r8a_as_built_2026-08-16.md``.
 
         What a live case can hold is the extension, written out.  It is the
-        answer that decides whether a generated row is dated from the cadence
-        or from its paycheck (``_reading.scheduling_day_of_month``), so a
-        change to it moves DATES -- and writing the pairs down is what makes
-        such a change arrive as a diff rather than as a quietly different set.
+        answer that decides which day of the month a rule schedules its rows on
+        (``_reading.scheduling_day_of_month``); since plan step R8-b it no
+        longer decides whether a row is dated from its occurrence, which a
+        weekly row is with no day of the month (``_row_day.date_row``).
+        Writing the pairs down is what makes a change arrive as a diff rather
+        than as a quietly different set.
         """
         dated_from_a_day = {
             (unit, placement)

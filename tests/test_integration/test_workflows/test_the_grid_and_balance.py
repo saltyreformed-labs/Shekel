@@ -51,11 +51,10 @@ class TestSalaryToGrid:
                 category_id=seed_user["categories"]["Salary"].id,
                 transaction_type_id=income_type.id,
                 name="Paycheck",
-                default_amount=Decimal("2884.62"),
             )
             db.session.add(template)
             db.session.flush()
-            state_template_price(template)
+            state_template_price(template, Decimal("2884.62"))
             # The definition first, then the cadence onto it (plan step R-F6).
             make_every_period_rule(db.session, template)
 
@@ -91,11 +90,10 @@ class TestTemplateRecurrenceToGrid:
                 category_id=seed_user["categories"]["Rent"].id,
                 transaction_type_id=expense_type.id,
                 name="Rent",
-                default_amount=Decimal("1200.00"),
             )
             db.session.add(template)
             db.session.flush()
-            state_template_price(template)
+            state_template_price(template, Decimal("1200.00"))
             # The definition first, then the cadence onto it (plan step R-F6).
             make_cadence_rule(
                 template,

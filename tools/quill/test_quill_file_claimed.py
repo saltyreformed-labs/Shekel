@@ -183,7 +183,8 @@ def test_a_finding_is_filed_under_a_claimed_step(code):
     tracker = FakeTracker()
     tracker.add(1)
     _claimed_by_a_race(code, 1)
-    assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Off by one",
+    assert run(tracker, code, "file", "finding", "--effort", "1", "--arc", "balance",
+               "--title", "Off by one",
                "--owner", "plan#1", "--text", "The total is one cent short.") == 0
     finding = tracker.cards_by_number[2]
     assert (finding.kind, finding.parent, finding.blocked_by) == ("finding", None, (1,))

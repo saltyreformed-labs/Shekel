@@ -126,7 +126,7 @@
             <tr class="text-muted">
               <td>{{ t.name }}</td>
               <td>{% if t.transaction_type_id == TXN_TYPE_INCOME %}Income{% else %}Expense{% endif %}</td>
-              <td class="text-end font-mono">{{ money(t.default_amount) }}</td>
+              <td class="text-end font-mono">{{ money(row.amount) }}</td>
               <td>{{ recurrence_cell(row.recurrence) }}</td>
               <td class="text-nowrap text-end">
                 <form method="POST" action="{{ url_for('templates.unarchive_template', template_id=t.id) }}"
@@ -152,7 +152,7 @@
             <tr class="text-muted">
               <td>{{ t.name }}</td>
               <td>Transfer</td>
-              <td class="text-end font-mono">{{ money(t.default_amount) }}</td>
+              <td class="text-end font-mono">{{ money(row.amount) }}</td>
               <td>{{ recurrence_cell(row.recurrence) }}</td>
               <td class="text-nowrap text-end">
                 <form method="POST" action="{{ url_for('transfers.unarchive_transfer_template', template_id=t.id) }}"

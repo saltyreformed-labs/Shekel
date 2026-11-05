@@ -6,7 +6,7 @@ The posting ledger is append-only and balances through a deferred trigger
 (``budget.assert_journal_entry_balanced``); every write goes through
 ``posting_service._emit_balanced_entry`` and every confirmed read through the
 sanctioned reader packages (``posting_reads``, the loan / account posting
-packages, the ledger report service). A consumer that holds one of these model
+packages). A consumer that holds one of these model
 classes -- or the module that defines it -- can query the ledger, or
 construct/mutate a row, OUTSIDE those seams: the exact bypass Build-Order
 Steps 2-5 built the seams to prevent (``docs/audits/balance_architecture/``).
@@ -71,12 +71,11 @@ _LEDGER_MODEL_NAMES = frozenset({"Posting", "JournalEntry", "LedgerAccount"})
 # ``_posting_legacy`` leaf sat here from ``balance:X-bi-6-3`` leaf 3b until
 # ``X-bi-6-5``'s second leaf, card plan#1845, deleted it), the readers
 # (``posting_reads``, the
-# loan / account posting packages, the ledger report package), the
+# loan / account posting packages), the
 # chart-of-accounts resolver
-# (``ledger_account_service``), the pay-period LOCK CLASSIFIER whose
-# ``LEDGER_POSTINGS`` gate sums a period's postings, and the archive
+# (``ledger_account_service``), and the archive
 # guard that counts a linked account's postings. Fully-qualified names, matched
-# exactly or as a package prefix (the three packages) via the fail-closed
+# exactly or as a package prefix (the packages) via the fail-closed
 # :func:`_module_in_allowlist` -- the same match/prefix/fail-closed contract the
 # balance-producer fence relied on. ``app.models`` is listed as a package prefix ON PURPOSE:
 # a model legitimately references sibling models (relationships, FK type hints),
@@ -93,14 +92,16 @@ _LEDGER_MODEL_ALLOWLIST = frozenset({
     "app.services.loan_posting_service",
     "app.services.account_posting_service",
     "app.services.ledger_account_service",
-    "app.services.ledger_report_service",
+    # ``app.services.ledger_report_service`` until X-ew's second leaf (plan
+    # task plan#2771) moved the statements onto the worked-out ledger
+    # (``app.services.ledger_lines``), which reads no ledger model.
     # ``app.services.pay_period_admin`` until plan step C3-a MOVED the lock
-    # classifier out of it: the only ledger-model use in that module was
-    # ``_period_ids_with_unbalanced_ledger``, so the entry moved with the
-    # function rather than being duplicated, and the writers now hold no
-    # ledger import at all.  The fence got tighter, not wider.
-    "app.services.pay_period_locks",
-    "app.utils.archive_helpers",
+    # classifier out of it, and ``app.services.pay_period_locks`` until X-ew's
+    # second leaf (plan task plan#2777, ruling plan#2782) deleted the
+    # ``LEDGER_POSTINGS`` lock, the classifier's only ledger-model use.
+    # ``app.utils.archive_helpers`` until X-ew's second leaf (plan task
+    # plan#2778, rulings plan#2784, plan#2785) deleted
+    # ``account_has_ledger_postings``, its only ledger-model use.
 })
 
 
@@ -137,12 +138,12 @@ class ShekelLedgerModelFenceChecker(BaseChecker):
             "must go through posting_service._emit_balanced_entry and every "
             "confirmed read through the sanctioned reader packages "
             "(posting_reads, the loan_posting_service / account_posting_service "
-            "packages, ledger_report_service); a module that imports a ledger "
+            "packages); a module that imports a ledger "
             "model -- or its defining module -- can query or construct/mutate a "
             "row outside those seams, the bypass class Build-Order Steps 2-5 "
             "built the seams to prevent (docs/audits/balance_architecture/). "
-            "Only the posting-ledger write core, its readers, "
-            "ledger_account_service, pay_period_admin, and archive_helpers may "
+            "Only the posting-ledger write core, its readers, and "
+            "ledger_account_service may "
             "import a ledger model. The fence binds by NAME (importing Posting / "
             "JournalEntry / LedgerAccount is flagged wherever it comes from -- "
             "the app.models re-export F-1 shape, the defining submodule, a "

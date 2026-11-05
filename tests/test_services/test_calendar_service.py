@@ -207,11 +207,10 @@ def _make_template_with_cadence(
         category_id=list(seed_user["categories"].values())[0].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name=name,
-        default_amount=Decimal("100.00"),
     )
     db_session.add(template)
     db_session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("100.00"))
     # The definition first, then the cadence onto it (plan step R-F6).
     make_cadence_rule(
         template, cadence, interval_n=interval_n,

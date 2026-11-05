@@ -1,0 +1,118 @@
+{# The card's terms form (plan step credit_card:CC-2, developer ruling R-CC24:
+   one door, one schema), in a partial of its own since plan#2331's review
+   (plan#2576) so the Card terms card and the version-correcting fragment
+   (card.edit_terms) render ONE form.
+
+   Every control renders every time, so a submit is a WHOLE version, stated
+   from the "Effective from" date; the door it posts to (card.save_terms)
+   creates that version or corrects the one already on that date (developer
+   rulings plan#2333 and plan#2587).  So the version the controls start from
+   decides every term the owner does not retype, and this partial names it:
+
+   * On the page (editing false) the controls start from the version in force
+     today, and the date is left blank, as the APR's is: a change of terms
+     must name its day, and a pre-filled date would turn a forgotten edit
+     into a correction that re-cuts the past.
+   * From a version's Edit button (editing true) they start from THAT
+     version, its date included: the owner asked to correct it, and a
+     correction from today's terms would write them over its other terms.
+
+   The five NOT NULL terms are required controls (cash back pre-filled 0.00
+   for a card with no terms), the two nullable ones may be left blank.  Rates
+   are entered as percents and stored as fractions (E-28): the schema
+   divides, the template multiplies back through |to_percent.
+
+   Context: account, form_terms (the CreditCardParams version the controls
+   start from, or None for a dormant card), editing (true when the owner
+   chose form_terms to correct).  The form itself is #card-terms-form, the
+   element each Edit button's fragment replaces. #}
+<form id="card-terms-form" method="POST" action="{{ url_for('card.save_terms', account_id=account.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if editing %}
+  <p class="small mb-2" id="card-terms-editing">
+    Editing the terms from {{ form_terms.effective_date.strftime('%b %-d, %Y') }}.
+    Saving with this date corrects them; a different date adds a new set of
+    terms starting from these.
+    <a href="{{ url_for('accounts.cash_detail', account_id=account.id) }}#card-terms-form">Start from today's terms instead</a>
+  </p>
+  {% elif form_terms is not none %}
+  <p class="text-muted small mb-2">
+    Filled in with the terms in effect today. To correct an earlier set of
+    terms, use its Edit button below.
+  </p>
+  {% endif %}
+  <div class="row g-3">
+    <div class="col-sm-6 col-lg-3">
+      <label for="effective_date" class="form-label">Effective from</label>
+      <input type="date" class="form-control" id="effective_date" name="effective_date"{% if editing %} value="{{ form_terms.effective_date.isoformat() }}"{% endif %} required>
+      <div class="form-text">The day these terms took effect. A date already listed is corrected.</div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label for="statement_close_day" class="form-label">Statement closes on day</label>
+      <input type="number" class="form-control" id="statement_close_day" name="statement_close_day"
+             value="{{ form_terms.statement_close_day if form_terms is not none else '' }}"
+             min="1" max="31" step="1" required>
+      <div class="form-text">1-31; a 31 means the month's last day.</div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label for="payment_due_day" class="form-label">Payment due on day</label>
+      <input type="number" class="form-control" id="payment_due_day" name="payment_due_day"
+             value="{{ form_terms.payment_due_day if form_terms is not none else '' }}"
+             min="1" max="31" step="1" required>
+      <div class="form-text">The first such day after the close.</div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label for="min_payment_percent" class="form-label">Minimum payment</label>
+      <div class="input-group">
+        <input type="number" class="form-control" id="min_payment_percent" name="min_payment_percent"
+               value="{{ "%.2f"|format(form_terms.min_payment_percent|to_percent) if form_terms is not none else '' }}"
+               step="0.01" min="0" max="100" required>
+        <span class="input-group-text">%</span>
+      </div>
+      <div class="form-text">Of the statement balance.</div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label for="min_payment_floor" class="form-label">Minimum payment floor</label>
+      <div class="input-group">
+        <span class="input-group-text">$</span>
+        <input type="number" class="form-control" id="min_payment_floor" name="min_payment_floor"
+               value="{{ form_terms.min_payment_floor if form_terms is not none else '' }}"
+               step="0.01" min="0" required>
+      </div>
+      <div class="form-text">The minimum is never below this.</div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label for="cashback_rate" class="form-label">Cash back</label>
+      <div class="input-group">
+        <input type="number" class="form-control" id="cashback_rate" name="cashback_rate"
+               value="{{ "%.2f"|format(form_terms.cashback_rate|to_percent) if form_terms is not none else '0.00' }}"
+               step="0.01" min="0" max="100" required>
+        <span class="input-group-text">%</span>
+      </div>
+      <div class="form-text">Flat rate on purchases; 0 for none.</div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label for="auto_redeem_threshold" class="form-label">Auto-redeem rewards at</label>
+      <div class="input-group">
+        <span class="input-group-text">$</span>
+        <input type="number" class="form-control" id="auto_redeem_threshold" name="auto_redeem_threshold"
+               value="{{ form_terms.auto_redeem_threshold if form_terms is not none and form_terms.auto_redeem_threshold is not none else '' }}"
+               step="0.01" min="0.01">
+      </div>
+      <div class="form-text">Blank: redeem by hand only.</div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label for="credit_limit" class="form-label">Credit limit</label>
+      <div class="input-group">
+        <span class="input-group-text">$</span>
+        <input type="number" class="form-control" id="credit_limit" name="credit_limit"
+               value="{{ form_terms.credit_limit if form_terms is not none and form_terms.credit_limit is not none else '' }}"
+               step="0.01" min="0.01">
+      </div>
+      <div class="form-text">Blank: utilization not tracked.</div>
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary btn-sm mt-3">
+    <i class="bi bi-check-lg"></i> Save terms
+  </button>
+</form>

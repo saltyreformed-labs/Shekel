@@ -280,21 +280,18 @@ class TestClassifyPeriodLock:
             )
             assert _lock(periods[1], display_today()) is None
 
-    def test_anchor_period_with_opening_reports_ledger_postings(
+    def test_a_paycheck_holding_only_an_opening_is_not_locked(
         self, app, seed_user,
     ):
-        """The seeded anchor period -> LEDGER_POSTINGS (the opening lives there).
+        """The seeded first paycheck holds Checking's $1000.00 opening: no lock.
 
-        The Step-5 accepted behavior change (plan Section 3.5): the seed
-        Checking's $1000.00 opening correction is attributed to its anchor
-        period, whose per-ledger nets are therefore non-zero, and the
-        double-entry gate precedes ACCOUNT_ANCHOR.  ``as_of`` is set before
-        the bootstrap period ends so the historical check does not pre-empt
-        either reason.
+        ``LEDGER_POSTINGS``, deleted at plan task plan#2777 (ruling plan#2782),
+        locked it.  ``as_of`` is set before the bootstrap period ends so the
+        historical check does not pre-empt the answer.
         """
         with app.app_context():
             bootstrap = seed_user["bootstrap_period"]
-            assert _lock(bootstrap, _BOOTSTRAP_AS_OF) == PeriodLockReason.LEDGER_POSTINGS
+            assert _lock(bootstrap, _BOOTSTRAP_AS_OF) is None
 
     def test_a_recurrence_rules_start_no_longer_locks_a_period(
         self, app, db, seed_user,

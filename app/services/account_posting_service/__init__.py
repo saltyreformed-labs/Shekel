@@ -21,13 +21,15 @@ a change in value, or the equity opening (ruling **R-FO**, plan step X-f3d).
 
 Mirrors :mod:`app.services.loan_posting_service` (split by concern):
 
-* :mod:`._walk` -- the pure DAY-granular walk: replay the account's
-  :class:`~app.models.account.AccountAnchorHistory` rows against the source
-  facts read back from its linked ledger, producing one
-  :class:`AccountAnchorCorrection` per assertion.
-* :mod:`._anchors` -- the opening + true-up reconcile: per-(source kind,
-  pay period, civil date) targets, posted-leg read-back, one balanced delta
-  per key that differs.
+* :mod:`._anchors` -- the opening + true-up reconcile: posted-leg read-back
+  against the worked-out ledger's targets, one balanced delta per key that
+  differs.  The walk that frames each correction
+  (:func:`app.services.ledger_lines.walk_account_ledger`, the read fold's own
+  assertion replay over the account's settled records, plan task plan#2525)
+  and the per-(source kind, pay period, civil date) targets
+  (:func:`app.services.ledger_lines.account_correction_targets`) were this
+  package's ``_walk`` and ``_anchors`` until plan task plan#2526 moved them
+  into the worked-out ledger, which sums the same targets.
 * :mod:`._sync` -- the entry points: per-scenario, all-scenarios (baseline
   UNION scenarios with postings on the linked ledger), and per-user.
 
@@ -45,7 +47,7 @@ rows are minted only via
 whose non-loan guard keeps the loan and account correction families on
 disjoint charts, and WHICH counter row a correction books into is ruling
 **R-FO**'s total dispatch over the account's projection kind
-(:func:`app.services.ledger_account_service.anchor_correction_counter_kind`).
+(:func:`app.services.ledger_lines.anchor_correction_counter_kind`).
 Flask-isolated: plain data in, plain values out; flushes but never commits
 (the caller owns the transaction boundary).
 
@@ -54,15 +56,16 @@ create (``account_service.create_account``), the anchor true-up
 (``anchor_service.apply_anchor_true_up``), the account-type change
 (``routes.accounts.crud.update_account`` -- which was the *direct anchor edit*
 until plan step X-f1e deleted that door, and now reaches this package only when
-a re-type crosses a posting boundary), the pay-period reset
+an account is re-typed), the pay-period reset
 (``pay_period_admin.reset_pay_periods``) and, since plan step
 ``pay_calendar:C21``, "Remove earlier paychecks"
 (``pay_period_admin.remove_earlier_pay_periods``), both through
 ``pay_period_admin._refile_ledger``, the effect-time self-heal at the
 ``posting_service`` sync tails (:func:`self_heal_anchor_corrections`), the
 ``create_baseline`` recovery path, and the account-type boundary changes
-(the crud/type routes re-sync an allowed crossing; the validation guards
-refuse one on a posted account).  C7 adds the deploy-wide historical
+(the crud/type routes re-sync an allowed crossing; the validation guard
+refuses one across the loan boundary on an account holding a line).  C7 adds
+the deploy-wide historical
 backfill (:func:`backfill_all_account_anchor_postings`), reusing the
 identical go-forward sync so a backfilled correction is identical to a
 go-forward one.
@@ -76,18 +79,12 @@ from ._sync import (
     sync_account_anchor_postings,
     sync_account_anchor_postings_all_scenarios,
 )
-from ._walk import (
-    AccountAnchorCorrection,
-    walk_account_ledger,
-)
 
 __all__ = [
-    "AccountAnchorCorrection",
     "backfill_all_account_anchor_postings",
     "reconcile_account_anchor_corrections",
     "resync_user_account_anchor_postings",
     "self_heal_anchor_corrections",
     "sync_account_anchor_postings",
     "sync_account_anchor_postings_all_scenarios",
-    "walk_account_ledger",
 ]

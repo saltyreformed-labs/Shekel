@@ -272,10 +272,17 @@ def _reject_settled_addition(txn: Transaction) -> None:
       `$0.00`.  Both legs still net to `-163.95`, which is why the balance
       instrument is BLIND to it.
 
-    **Nothing else keeps that state unrepresentable** (finding **N-318**):
-    :func:`app.services.cash_ledger.cash_leg_of` is total in every other
-    direction, states no precondition and cannot see one, so THIS function is
-    the guarantee.  Production holds no instance -- measured 2026-08-19, 137
+    **Nothing else refuses that addition**: no constraint refuses a purchase
+    beside a covering movement
+    (``uq_transaction_entries_one_settlement_record`` counts settlement
+    records alone), and the ledger and the cash fold book each movement at
+    its own figure (``ledger_lines.purchase_posts``,
+    :func:`app.services.cash_ledger.movement_cash_leg`), so THIS function is
+    the guarantee.  Finding **N-318** named a second exposure, the row's own
+    leg turning that state into the inflow measured above; no reader has read
+    that leg since plan step ``balance:X-bi-4a``, and plan step plan#2513
+    closes the finding, re-measured through the worked-out read.
+    Production holds no instance -- measured 2026-08-19, 137
     settled rows carry a stored-figure settlement (8 of them envelopes on the
     developer's checking account) and every one holds ZERO purchases; 0 rows
     hold a covering movement beside a purchase on the 2026-09-19 restore --

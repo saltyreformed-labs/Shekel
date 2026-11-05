@@ -23,6 +23,7 @@ from app.utils.money import round_money
 from app.utils.balance_predicates import settled_status_ids
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
+from tests._ledger_parity import assert_ledger_parity
 from tests._test_helpers import (
     SPLIT_LOAN,
     create_loan_with_trueup,
@@ -524,7 +525,14 @@ def _assert_loan_reconciles(
       the posted-ledger readers the balance sheet and statements consume satisfy
       it too;
     * (d) completeness -- every eligible payment owing a correction has one;
-    * (e) per-entry balance and a zero whole-ledger trial balance.
+    * (e) per-entry balance and a zero whole-ledger trial balance;
+    * (f) the ledger worked out from the records equals the stored one to the
+      cent per (chart row, paycheck, day) over the scenario owner's whole
+      ledger, every loan's anchors and payment splits included (plan task
+      plan#2527).  It grades the STORE against the loan walk -- its filing,
+      its chart rows, whether it has caught up -- and no split VALUE: the
+      read and the writer take the split from the one walk, so a wrong split
+      moves both alike.
 
     IMPORTANT -- this is a STRUCTURAL / reader-consistency sweep, NOT a split-VALUE
     check.  (a)/(b)/(c)/(e) are accounting IDENTITIES: given Step 2 is correct and
@@ -576,3 +584,5 @@ def _assert_loan_reconciles(
     # (e) per-entry balance + trial balance (whole-ledger self-checks).
     assert _entries_violating_balance() == []
     assert _trial_balance() == Decimal("0")
+    # (f) parity with the worked-out ledger.
+    assert_ledger_parity(_db.session, scenario_id)

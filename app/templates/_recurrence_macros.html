@@ -16,8 +16,8 @@
    The phrase now arrives already worded from
    app.services.recurrence.describe, which is one function over
    (interval_n, unit) -- so it read "Every 2 months" correctly before plan
-   step R7c-c made that cadence authorable, and reads "Weekly" correctly
-   while plan step R8 still owes the WEEK unit.  Imported WITHOUT context:
+   step R7c-c made that cadence authorable, and "Weekly" before plan step
+   R8-b made the WEEK unit authorable.  Imported WITHOUT context:
    this macro reads nothing but its argument.
 
      {% from "_recurrence_macros.html" import recurrence_cell %}

@@ -107,7 +107,7 @@ correct; they just have nowhere isolated to run locally.
 
 ## Why CI is already fine
 
-`.github/workflows/ci.yml` runs its suite shards on `ubuntu-24.04` (through `scripts/test.sh` since
+`.github/workflows/ci.yml` runs its suite shards on `ubuntu-26.04` (through `scripts/test.sh` since
 `bank_import:X-gy`, directly before) on an
 **ephemeral runner with its own throwaway docker daemon**. Containers there are created and
 discarded on infrastructure that no homelab observability watches. So the collision is
@@ -355,5 +355,6 @@ actually keeps test containers off the production daemon (and out of cadvisor/al
 - Docker helper / gate: `…:849` (`_docker`), `…:87` (`_docker_available`)
 - Test config: `pytest.ini` (`addopts … -n 12`, `markers =` :47)
 - Entrypoint: `scripts/test.sh`
-- CI (already isolated): `.github/workflows/ci.yml:477` (`ubuntu-24.04`), `:559` (`scripts/test.sh`)
+- CI (already isolated): `.github/workflows/ci.yml`, the `test` job (`runs-on: ubuntu-26.04`) and
+  its step 7 (`scripts/test.sh`)
 - Rootless Docker: <https://docs.docker.com/engine/security/rootless/>

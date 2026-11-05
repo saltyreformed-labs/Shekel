@@ -1,0 +1,9 @@
+# jactionlint, the workflow linter (ruling plan#2355): the one home of its
+# settings, read by the pre-commit hook and by ci.yml's polyglot-lint job.
+#
+# ``correctness`` runs every check of actionlint, which it replaced, and adds
+# correctness rules of its own.  The ``default`` profile adds more correctness
+# rules and its security and policy rules; on 2026-10-30 it reported 13
+# findings on these workflows that zizmor does not, and adopting it, each
+# finding fixed or ruled, is step plan#2361.
+profile: correctness

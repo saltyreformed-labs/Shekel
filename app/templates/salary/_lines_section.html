@@ -3,9 +3,10 @@
 {# The profile's PAYROLL LINES (plan step salary:R18-b, ruling R-SAL38): a
    paycheck is base pay plus a list of lines, and a line's KIND is its
    position in the waterfall -- a taxable earning joins gross, a pre-tax
-   deduction leaves before tax, a post-tax deduction after, an after-tax
-   earning joins the deposit.  One section and one form for all four; the
-   kind's label comes from the one producer
+   deduction leaves before tax (an all-payroll-taxes one before Social
+   Security and Medicare too, plan step salary:S11-e), a post-tax deduction
+   after, an after-tax earning joins the deposit.  One section and one form
+   for all five kinds; the kind's label comes from the one producer
    (app.services.paycheck_line_kinds), never derived from the ref name. #}
 <div class="card mb-3" id="lines-section">
   <div class="card-header d-flex justify-content-between align-items-center">
@@ -44,13 +45,14 @@
         <tr>
           <td>{{ d.name }}</td>
           <td>
-            {# Kind chip on the shared flag-chip (P-SA2 / RC3): pre-tax
-               wears the accent -- matching the cockpit's accent pre-tax
+            {# Kind chip on the shared flag-chip (P-SA2 / RC3): both pre-tax
+               kinds wear the accent -- matching the cockpit's accent pre-tax
                bars -- and every other kind the neutral variant; the label,
-               not the color, carries the meaning.  ID comparison, never the
-               ref name string; the label from the kind vocabulary's one
-               producer. #}
-            <span class="flag-chip {{ '' if d.paycheck_line_kind_id == LINE_KIND_PRE_TAX_DEDUCTION else 'flag-chip--neutral' }}">
+               not the color, carries the meaning (and tells the two pre-tax
+               kinds apart, plan step salary:S11-e).  ID comparison, never the
+               ref name string; the label and the pre-tax ids from the kind
+               vocabulary's one producer. #}
+            <span class="flag-chip {{ '' if d.paycheck_line_kind_id in pre_tax_kind_ids else 'flag-chip--neutral' }}">
               {{ kind_labels[d.paycheck_line_kind_id] }}
             </span>
           </td>
@@ -162,7 +164,7 @@
           </div>
           <div class="col-md-6">
             <label class="form-label">Kind</label>
-            {# The four kinds in waterfall order, labelled by the vocabulary's
+            {# The five kinds in waterfall order, labelled by the vocabulary's
                one producer (kind_options); the value is the id. #}
             <select name="paycheck_line_kind_id" class="form-select form-select-sm" required>
               {% for kind_id, kind_label in kind_options %}
@@ -213,9 +215,12 @@
            step salary:R15-c, ruling R-SAL31), where the 26 / 24 / 12 select
            stood until R15-b: the unit, the interval, the per-month ceiling
            (R15-a's "at most N a month", which is what a 24-per-year line IS)
-           and the funding placement, from the same partial and the same
-           offer set (ruling R-SAL37: the whole set) as the recurring-
-           transaction and transfer forms.  "Does not repeat" here means
+           and the funding placement, from the same partial as the recurring-
+           transaction and transfer forms and their offer set narrowed to the
+           units a line may repeat by (ruling plan#2591, amending R-SAL37's
+           "the whole set": paychecks, months and years -- a line's rule
+           picks which paychecks take it, so a weekly amount would be taken once a
+           paycheck however many weeks the paycheck holds).  "Does not repeat" here means
            every paycheck (ruling R-SAL3), and so does "Paychecks, every 1"
            with no ceiling and no span, which the route canonicalises to no
            rule (R-SAL29).  Since plan step salary:R18-c (ruling R-SAL38 (2),

@@ -413,19 +413,20 @@ class TestEveryRecurrenceRefusalIsHeard:
     def test_an_unauthorable_pair_is_flashed_verbatim(self, app):
         """The cross-field rule's message, on the door a crafted POST meets.
 
-        **The unauthorable cadence has MOVED TWICE, and each move closed a
-        real gap.**  It was ``(2, MONTH, covering paycheck)`` -- well defined,
-        walked correctly, and with no closed-set pattern to be stored as --
-        until plan step R7c-c freed the interval.  It was then
+        **The unauthorable cadence has MOVED THREE TIMES, and each move
+        closed a real gap.**  It was ``(2, MONTH, covering paycheck)`` -- well
+        defined, walked correctly, and with no closed-set pattern to be stored
+        as -- until plan step R7c-c freed the interval.  It was then
         ``(1, YEAR, first paycheck)``, refused because ``anchor_family`` had no
         first-occurrence derivation for it; plan step **R8-a** measured that
         refusal stale -- ruling **R-R16** made the first occurrence AUTHORED
-        and deleted the derivation it cited -- and admitted the pair.
+        and deleted the derivation it cited -- and admitted the pair.  Then the
+        ``WEEK`` unit, until plan step **R8-b** dated a weekly row from its
+        occurrence.
 
-        What is unauthorable now is the ``WEEK`` unit, at either placement: a
-        weekly occurrence is neither a payday nor a day of the month, so
-        ``recurrence.compute_due_date`` has nothing to date its
-        generated rows from until plan step **R5**.
+        What is unauthorable now is a pay-period cadence funded from a LATER
+        paycheck: the placement is inert there, so offering it would store a
+        choice the edit form cannot preselect.
 
         The picker cannot offer it, so a user only reaches this by hand -- and
         the message must still say which control to change rather than "correct
@@ -434,11 +435,11 @@ class TestEveryRecurrenceRefusalIsHeard:
         with app.app_context():
             errors = TemplateCreateSchema().validate({
                 "recurrence_unit": str(
-                    ref_cache.recurrence_unit_id(RecurrenceUnitEnum.WEEK),
+                    ref_cache.recurrence_unit_id(RecurrenceUnitEnum.PERIOD),
                 ),
                 "recurrence_placement": str(
                     ref_cache.period_placement_id(
-                        PeriodPlacementEnum.CONTAINING_DATE,
+                        PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
                     ),
                 ),
                 "interval_n": "1",
@@ -497,8 +498,8 @@ class TestTheGenericFallbackSurvives:
         that "Not a valid integer." beside a visible widget adds noise.
         """
         with app.app_context():
-            # ``default_amount`` since plan step recurrence:R5-a.  The subject
-            # has moved three times now and for the same reason each time: this
+            # The amount field since plan step recurrence:R5-a (``amount`` since
+            # X-bp renamed ``default_amount``).  The subject has moved three times now and for the same reason each time: this
             # arm needs a field that is DECLARED (an unknown key is dropped by
             # ``unknown = EXCLUDE`` and produces no error at all, which would
             # make the assertion below pass against an EMPTY dict -- the
@@ -508,14 +509,14 @@ class TestTheGenericFallbackSurvives:
             # naming the control; R5-a dropped ``due_day_of_month`` with its
             # column (ruling R-R96).
             #
-            # ``default_amount`` is the right subject and not merely the next
+            # ``amount`` is the right subject and not merely the next
             # one available: no layer authors a refusal against it, and a
             # negative figure is outside its ``Range(min=0)`` -- so what comes
             # back is marshmallow's own stock Range sentence, which is the
             # shape under test.
             errors = TemplateCreateSchema().validate(
-                {"default_amount": "-1.00"}, partial=True,
+                {"amount": "-1.00"}, partial=True,
             )
 
-            assert "default_amount" in errors
+            assert "amount" in errors
             assert flash_message_for_errors(errors) == GENERIC_VALIDATION_FLASH

@@ -5,8 +5,10 @@ import pytest
 
 from tools.quill.check import (
     BODY,
+    EFFORT,
     FINDING_CAP,
     OWNER,
+    PRIORITY,
     RULING_CAP,
     TITLE,
     TITLE_CAP,
@@ -342,3 +344,77 @@ def test_a_tasks_title_is_held_as_any_cards_is():
     assert violations(_task(title="t" * (TITLE_CAP + 1)), {TITLE}) == [
         f"its title is a short name of at most {TITLE_CAP} characters; it is {TITLE_CAP + 1}"]
     assert not violations(_task(title="t" * (TITLE_CAP + 1)), LABELS_ONLY)
+
+
+# -- Priority and Effort (rulings plan#2506, plan#2507) -------------------------------------
+
+#: The ruling holding each field to its kinds, as its refusal names it.
+_EFFORT_RULE = "Effort is held by a step or finding alone (ruling plan#2506)"
+_PRIORITY_RULE = "Priority is held by a step, finding or question alone (ruling plan#2507)"
+
+
+def _kind(kind, **changes):
+    """A card of ``kind`` that passes every rule, with ``changes`` applied."""
+    if kind == "finding":
+        return _finding(**changes)
+    if kind == "ruling":
+        return _ruling(**changes)
+    if kind == "task":
+        return _task(**changes)
+    return Draft(**{"kind": kind, "title": "t", "body": "b", "labels": (), "arc": "balance",
+                    **changes})
+
+
+@pytest.mark.parametrize("kind", ["step", "finding"])
+def test_an_effort_is_held_by_the_work_a_branch_builds(kind):
+    """Ruling plan#2506: a step or a finding holds an Effort, written or filed."""
+    assert not violations(_kind(kind, effort="2"), {EFFORT})
+    assert not violations(_kind(kind, effort="5+"))
+
+
+@pytest.mark.parametrize("kind", ["question", "ruling", "task"])
+def test_an_effort_on_any_other_kind_is_refused_when_written(kind):
+    """Ruling plan#2506: a question is answered, not built, a ruling is a record, and a task is
+    a piece of its card, whose Effort counts it; a new card writes its Effort too."""
+    assert violations(_kind(kind, effort="1"), {EFFORT}) == [
+        f"{_EFFORT_RULE}; this {kind} would hold '1'"]
+    assert violations(_kind(kind, effort="1")) == [f"{_EFFORT_RULE}; this {kind} would hold '1'"]
+
+
+@pytest.mark.parametrize("kind", ["step", "finding", "question"])
+def test_a_priority_is_held_by_what_waits_on_work_or_an_answer(kind):
+    """Ruling plan#2507: a step, a finding or a question holds a Priority."""
+    assert not violations(_kind(kind, priority="High"), {PRIORITY})
+    assert not violations(_kind(kind, priority="Urgent"))
+
+
+@pytest.mark.parametrize("kind", ["ruling", "task"])
+def test_a_priority_on_a_ruling_or_a_task_is_refused_when_written(kind):
+    """Ruling plan#2507: a ruling is a record and a task belongs to its card."""
+    assert violations(_kind(kind, priority="Low"), {PRIORITY}) == [
+        f"{_PRIORITY_RULE}; this {kind} would hold 'Low'"]
+
+
+@pytest.mark.parametrize("kind", ["step", "finding", "question", "ruling", "task"])
+def test_a_field_not_written_or_written_as_none_is_never_refused(kind):
+    """Only what a change writes is graded (R-BAL136): a value set on the web on a card that
+    may not hold it stands until a change writes it, and a clear, which writes none, any card
+    takes, so quill can take such a value off."""
+    held = _kind(kind, priority="High", effort="3")
+    assert not violations(held, LABELS_ONLY)
+    assert not violations(held, {TITLE})
+    assert not violations(_kind(kind), {PRIORITY, EFFORT})
+
+
+def test_each_field_is_graded_by_its_own_part():
+    """A change writing the Priority alone grades no Effort, and the other way about."""
+    ruling = _ruling(priority="High", effort="2")
+    assert violations(ruling, {PRIORITY}) == [f"{_PRIORITY_RULE}; this ruling would hold 'High'"]
+    assert violations(ruling, {EFFORT}) == [f"{_EFFORT_RULE}; this ruling would hold '2'"]
+
+
+def test_a_card_with_no_type_is_named_so_by_the_field_rule():
+    """A card with no type holds no kind that may hold either, beside its type's refusal."""
+    assert violations(Draft(None, "t", "b", (), "balance", effort="2"), {EFFORT}) == [
+        "its type is None, not one of step, finding, ruling, question",
+        f"{_EFFORT_RULE}; this card with no type would hold '2'"]

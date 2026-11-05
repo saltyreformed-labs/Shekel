@@ -11,6 +11,7 @@ question                        here                      loan analog
 ==============================  ========================  ======================
 what is stored?                 :mod:`._facts`            ``loan_loaders``
 what happened, when?            :mod:`._events`           ``loan_ledger._events``
+whose movements?                :mod:`._movement_scope`   (no loan analog)
 where do books open?            :mod:`._books`            (no loan analog)
 what IS the amount?             :mod:`._amount_source`    (see below)
 what would a row be worth?      :mod:`._definition_cash`  (see below)
@@ -150,11 +151,13 @@ since plan step X-f3c-1: that is a policy an account's KIND decides (ruling
 **R-FO**), this package is kind-blind (ruling **R-J**), and the replay lives in
 ``balance_at._assertions`` beside the total it is a policy about.  The seam's
 read fold TAKES these facts, and since plan step X-c2b2 every cash figure on
-every screen is that fold sampled at a date.  The second consumer is still to come: at step
-X-d the posting WRITER reads this walk too, replacing the postings-sourced
-:func:`app.services.account_posting_service.walk_account_ledger`, which is what
-makes a stale posting a detectable cache inconsistency rather than a second
-opinion.  Still-Projected rows are NOT in the walk: their effective date depends
+every screen is that fold sampled at a date.  The posting WRITER is the second
+consumer since plan task plan#2525:
+:func:`app.services.ledger_lines.walk_account_ledger` books the
+fold's own assertion replay over this walk, where it had replayed the
+assertions over its own STORED postings -- so a stale posting is a detectable
+difference from the records rather than a second opinion about them.
+Still-Projected rows are NOT in the walk: their effective date depends
 on the reader's as-of (ruling R-G), so they are the seam fold's tier.
 
 **Why a package (plan step D1c).**  These names were spread across three flat
@@ -198,7 +201,9 @@ from app.services.row_valuation import settled_amounts_by_key
 from app.utils.amount_relationships import (
     pricing_load_options,
     settlement_load_options,
+    template_pricing_load_options,
     transfer_pricing_load_options,
+    transfer_template_pricing_load_options,
     valuation_load_options,
 )
 # The loan-pricing leaf FIRST, because it is the bottom of this package's
@@ -220,7 +225,7 @@ from ._amount_rule import (
     is_loan_payment_definition,
     transfer_amount_rule,
 )
-from ._definition_cash import DefinitionRow, definition_cash
+from ._definition_cash import DefinitionRow, definition_cash, stated_price
 from ._amount_source import (
     amounts_by_key,
     resolve_amount,
@@ -261,13 +266,10 @@ from ._books import (
 )
 from ._events import (
     CashAnchorFact,
-    CashOpeningFact,
     CashSourceFact,
     InFlightMovement,
-    account_opening_fact,
     cash_anchor_facts,
     coverage_for,
-    governing_account_opening,
     in_flight_movements,
     settled_cash_facts,
 )
@@ -280,9 +282,16 @@ from ._facts import (
     resolve_anchor,
 )
 from ._flows import sum_projected
+from ._openings import (
+    CashOpeningFact,
+    account_opening_fact,
+    governing_account_opening,
+)
 from ._walk import (
     CashLedgerWalk,
+    OwnerCashRecords,
     dated_deltas,
+    owner_cash_records,
     walk_cash_ledger,
 )
 
@@ -298,6 +307,7 @@ __all__ = [
     "governing_anchor_on",
     "CashAnchorFact",
     "CashLedgerWalk",
+    "OwnerCashRecords",
     "CashOpeningFact",
     "CashSourceFact",
     "InFlightMovement",
@@ -330,6 +340,7 @@ __all__ = [
     "movement_cash_leg",
     "movement_figure_for",
     "off_statement_sum",
+    "owner_cash_records",
     "settled_contribution",
     "planned_cash_rows",
     "posted_purchase_sum",
@@ -343,12 +354,15 @@ __all__ = [
     "reject_books_open_on_or_after_movements",
     "pricing_load_options",
     "settlement_load_options",
+    "template_pricing_load_options",
     "transfer_pricing_load_options",
+    "transfer_template_pricing_load_options",
     "valuation_load_options",
     "reject_line_before_books_open",
     "reject_movement_before_books_open",
     "settled_amounts_by_key",
     "settled_cash_facts",
+    "stated_price",
     "statement_coverage",
     "sum_projected",
     "walk_cash_ledger",

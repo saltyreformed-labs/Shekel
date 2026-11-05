@@ -133,7 +133,6 @@ class TestHardDeletingADefinitionDisposesOfItsRule:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Sweep",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(template)
             db.session.flush()
@@ -254,6 +253,9 @@ class TestTheOwningArcRefusesWhatItIsFor:
         return RecurrenceRule(
             interval_n=1,
             unit_id=ref_cache.recurrence_unit_id(RecurrenceUnitEnum.MONTH),
+            unit_has_day_of_month=ref_cache.recurrence_unit_has_day_of_month(
+                RecurrenceUnitEnum.MONTH,
+            ),
             placement_id=ref_cache.period_placement_id(
                 PeriodPlacementEnum.CONTAINING_DATE,
             ),
@@ -296,7 +298,6 @@ class TestTheOwningArcRefusesWhatItIsFor:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Two Owners",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(transfer)
             expense = bare_expense_template(db.session, seed_user)
@@ -359,7 +360,6 @@ class TestTheOwningArcRefusesWhatItIsFor:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="One Cadence Only",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(template)
             db.session.flush()
@@ -400,7 +400,6 @@ class TestTheOwnerIsTheOneStatementOfWhoOwnsARule:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Reads Through",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(transfer)
             db.session.flush()

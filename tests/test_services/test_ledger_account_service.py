@@ -63,7 +63,7 @@ from sqlalchemy.exc import IntegrityError
 from app.extensions import db as _db
 from app.models.category import Category
 from app.models.ledger_account import LedgerAccount
-from app.services import ledger_account_service, posting_reads
+from app.services import ledger_account_service, ledger_lines, posting_reads
 from app.services.account_projection import AccountProjectionKind
 # The shared race handler is PACKAGE-PRIVATE.  Plan step X-f3d split the
 # 962-line module into ``ledger_account_service/`` by the kind of chart row
@@ -1469,7 +1469,7 @@ class TestTrueUpCounterKindIsTotal:
         measured investment return off the income statement -- which is the
         defect this step exists to close.
         """
-        assert ledger_account_service.anchor_correction_counter_kind(
+        assert ledger_lines.anchor_correction_counter_kind(
             projection_kind, is_opening=False,
         ) is expected
 
@@ -1484,7 +1484,7 @@ class TestTrueUpCounterKindIsTotal:
         arm answers before the dispatch is consulted, and that is exactly the
         property worth pinning.
         """
-        assert ledger_account_service.anchor_correction_counter_kind(
+        assert ledger_lines.anchor_correction_counter_kind(
             projection_kind, is_opening=True,
         ) is LedgerAccountKindEnum.ANCHOR_EQUITY
 
@@ -1496,7 +1496,7 @@ class TestTrueUpCounterKindIsTotal:
         a loan's balance on two equity accounts.
         """
         with pytest.raises(ValueError, match="no true-up counter rule"):
-            ledger_account_service.anchor_correction_counter_kind(
+            ledger_lines.anchor_correction_counter_kind(
                 AccountProjectionKind.AMORTIZING, is_opening=False,
             )
 
@@ -1512,7 +1512,7 @@ class TestTrueUpCounterKindIsTotal:
         answered, refused = [], []
         for projection_kind in AccountProjectionKind:
             try:
-                ledger_account_service.anchor_correction_counter_kind(
+                ledger_lines.anchor_correction_counter_kind(
                     projection_kind, is_opening=False,
                 )
             except ValueError:

@@ -25,6 +25,13 @@ between them -- plan ledger row **D18**.  Every caller already holds the
 placement that seated the row, so the day the cadence names is in hand; the
 rule's ``due_day_of_month`` went in the same step (ruling **R-R96**).
 
+**It reads the rule's UNIT and PLACEMENT since plan step recurrence:R8-b**,
+and no longer whether :func:`~app.services.recurrence.scheduling_day_of_month`
+answers ``None``.  That answer meant "date this row from its paycheck" for
+every unit but the week, whose occurrences name no day of the month and yet
+are dated on themselves; the week unit was withheld from the offer set until
+the reading changed.
+
 Pure: a rule, a date and a :class:`~app.services.pay_calendar.DerivedPeriod`
 in, a date out.  No Flask, no ORM query, no clock.  A PROJECTED period (one
 past the saved horizon, ``period_id`` ``None``) dates a row exactly as a saved
@@ -35,7 +42,7 @@ from datetime import date
 
 from app.models.recurrence_rule import RecurrenceRule
 from app.services.pay_calendar import DerivedPeriod
-from app.services.recurrence._reading import scheduling_day_of_month
+from app.services.recurrence._frequency import placement_member, unit_member
 from app.services.recurrence._row_day import date_row
 
 
@@ -45,11 +52,12 @@ def compute_due_date(
     """Return the date a generated row answering *occurrence* is due on.
 
     Ruling **R-R94**'s formula over the PLACED occurrence (plan step
-    recurrence:R5-a): the occurrence itself for a rule whose rows are dated
-    from a day of the month, and the FUNDING paycheck's payday for one naming
-    no day -- every paycheck, every N paychecks, and a calendar cadence funded
-    from a later paycheck such as ``Monthly First`` (ruling **R-R95**, the
-    answer R-BAL22 gives a one-off).  The transfer engine, the transaction
+    recurrence:R5-a): the occurrence itself for a calendar cadence -- weeks
+    since plan step R8-b, months, years -- funded by the paycheck containing
+    it, and the FUNDING paycheck's payday for every other -- every paycheck,
+    every N paychecks, and a calendar cadence funded from a later paycheck
+    such as ``Monthly First`` (ruling **R-R95**, the answer R-BAL22 gives a
+    one-off).  The transfer engine, the transaction
     engine, the Recurring surface, the carry-forward executor and the balance
     seam's ESTIMATED loan tier all date a row through this same pure helper,
     so it is deliberately part of this package's public surface (like
@@ -59,11 +67,8 @@ def compute_due_date(
     :func:`~app.services.recurrence._row_day.date_row` **since plan step
     ``pay_calendar:C18-a``**, so the occurrence walk dates a placement
     exactly as this dates the row (ruling **R-PC86** bounds generation by
-    the row's CASH day); this function reads which of the two a rule is and
-    hands it there.  Which of the two is
-    :func:`~app.services.recurrence.scheduling_day_of_month`'s ``None`` --
-    "date this row from its PAYCHECK" -- so the refusals that function makes
-    for a cadence nothing can date are this function's too.
+    the row's CASH day); this function reads the rule's unit and placement
+    and hands them there.
 
     Args:
         rule: The RecurrenceRule the row is generated from.
@@ -81,18 +86,17 @@ def compute_due_date(
 
     Raises:
         RecurrenceResolutionError: When the rule names a unit or a placement
-            this application does not model, or a unit whose occurrences a
-            generated row cannot carry the date of -- see
-            :func:`~app.services.recurrence.scheduling_day_of_month`.  A
-            plausible wrong date on a generated row is worse than an error.
+            this application does not model (``unit_member`` /
+            ``placement_member``).  A plausible wrong date on a generated row
+            is worse than an error.
     """
-    # Which kind of cadence this is, and the dating itself in the pure leaf
-    # the occurrence walk asks too (plan step pay_calendar:C18-a, ruling
-    # R-PC86): one body for "the day a row carries", whichever caller holds
-    # the rule.
+    # The dating itself is the pure leaf the occurrence walk asks too (plan
+    # step pay_calendar:C18-a, ruling R-PC86): one body for "the day a row
+    # carries", whichever caller holds the rule.
     return date_row(
         occurrence, period,
-        from_paycheck=scheduling_day_of_month(rule) is None,
+        unit=unit_member(rule.unit_id),
+        placement=placement_member(rule.placement_id),
     )
 
 

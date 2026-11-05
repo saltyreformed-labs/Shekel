@@ -78,11 +78,10 @@ def _create_template(seed_user, savings_acct, with_rule=True):
         from_account_id=seed_user["account"].id,
         to_account_id=savings_acct.id,
         name="Monthly Savings",
-        default_amount=Decimal("200.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("200.00"))
     if with_rule:
         # The definition first, then the cadence onto it (plan step R-F6).
         make_every_period_rule(db.session, template)

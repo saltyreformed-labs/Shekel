@@ -96,6 +96,17 @@ kill.
   true-up), which is where the bank comparison's drawn days end when the
   records run past the last statement line (finding BAL-651, rulings
   plan#2346, plan#2399 and plan#2400).
+* The ASSERTION REPLAY (:func:`assertion_corrections`, its record
+  :class:`CashAnchorCorrection`) is published for the LEDGER, which is not a
+  screen: each assertion's balance just before it and the jump it booked, over
+  an account's :func:`app.services.cash_ledger.walk_cash_ledger`.  It is the
+  one replay the read fold applies, published rather than moved because its
+  ``balance_before`` is a balance-at-T and the ``cash_ledger`` leaf's producer
+  set is empty and stays empty (W9909).  The posting writer's
+  ``ledger_lines.walk_account_ledger`` reads it (plan task
+  plan#2525), so the posted corrections and the fold's are one walk where
+  they were two: the writer had summed its own STORED postings.  See
+  :mod:`._assertions`.
 * The LIABILITY entry (:func:`liability_owed_at_dates`) answers what every
   debt OWES at a list of FORWARD calendar dates in one resolution pass --
   the shape a long-horizon liability band needs, which neither the period-keyed
@@ -249,6 +260,7 @@ All three classify asset-vs-liability through the one
 ``account_category.is_liability_account`` home.
 """
 
+from ._assertions import CashAnchorCorrection, assertion_corrections
 from ._cash_fold import CashDayFacts, CashDaySeries
 from ._cash_flow import (
     CashAnchorHistory,
@@ -364,6 +376,7 @@ __all__ = [
     "ZERO",
     "BalanceContext",
     "BooksSpan",
+    "CashAnchorCorrection",
     "CashAnchorHistory",
     "CashAnchorRow",
     "CashOpeningRow",
@@ -382,6 +395,7 @@ __all__ = [
     "TIER_ESTIMATED",
     "TIER_PROJECTED",
     "_contribution_inputs_for_account",
+    "assertion_corrections",
     "balance_at",
     "balance_map",
     "build_maps",

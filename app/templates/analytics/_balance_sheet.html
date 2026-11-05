@@ -34,13 +34,13 @@
 </div>
 
 {# ``has_content`` drops the DERIVED equity lines (the only lines whose
-   ``ledger_account_id`` is None -- Retained Earnings always, Accumulated
-   Change in Value when non-zero) so a no-baseline user -- whose sole
-   equity line is a $0.00 Retained Earnings -- renders the empty state rather
-   than an all-zero sheet.  ``rejectattr(..., 'none')`` states the intent
-   exactly (drop the id-less derived lines), not "drop falsy ids", which is
-   why ruling R-FO's second derived line needed no edit here. #}
-{% set posted_equity = report.equity.lines | rejectattr('ledger_account_id', 'none') | list %}
+   chart ``key`` is None -- Retained Earnings always, Accumulated Change in
+   Value when non-zero) so an owner with nothing booked -- whose sole equity
+   line is a $0.00 Retained Earnings -- renders the empty state rather than an
+   all-zero sheet.  ``rejectattr(..., 'none')`` states the intent exactly
+   (drop the keyless derived lines), not "drop falsy keys", which is why
+   ruling R-FO's second derived line needed no edit here. #}
+{% set posted_equity = report.equity.lines | rejectattr('key', 'none') | list %}
 {% set has_content = report.assets.lines or report.liabilities.lines or posted_equity %}
 
 {% if not has_content %}
@@ -78,7 +78,7 @@
            half is only mentioned when the owner has one -- the service
            drops that line at zero. #}
         <div class="calendar-chip-cap">
-          {% if report.equity.lines | selectattr('ledger_account_id', 'none') | list | length > 1 %}
+          {% if report.equity.lines | selectattr('key', 'none') | list | length > 1 %}
           incl. retained earnings &amp; value change
           {% else %}
           incl. retained earnings

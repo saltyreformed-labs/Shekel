@@ -17,7 +17,7 @@ once terms exist).  What is pinned:
 """
 
 import re
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -31,6 +31,7 @@ from tests._test_helpers import create_account_of_type
 
 #: Terms for a configured card (the values do not matter to the APR).
 _TERMS = {
+    "effective_date": date(2026, 1, 1),
     "statement_close_day": 20,
     "payment_due_day": 15,
     "min_payment_percent": Decimal("0.0250"),

@@ -237,6 +237,8 @@ python -m tools.quill.quill start plan#T              # begin task T: each commi
 python -m tools.quill.quill task-file plan#T          # write task T's file on its card's branch
 python -m tools.quill.quill arc plan#N --to ARC      # move card N to an arc, its label following
 python -m tools.quill.quill label plan#N --add security  # add (or --remove) a chosen label
+python -m tools.quill.quill priority plan#N --to High  # or --clear: a step, finding or question
+python -m tools.quill.quill effort plan#N --to 2       # or --clear: a step's or finding's sessions
 python -m tools.quill.quill note plan#N --body-file NOTE     # a stop's note; prints Resume plan#T
 python -m tools.quill.quill pr plan#N --title T --body-file B  # N's pull request into dev, linked
 python -m tools.quill.quill sync                      # write every card's state from git
@@ -342,12 +344,13 @@ hardening, and prod-override-sync conventions auto-load via `.claude/rules/deplo
 the single source of truth for what to do next** (R-BAL170). Every step, finding, ruling and
 question is one card, `plan#N`, and every read and write goes through quill (Common Commands). The
 board holds the steps and questions in the order the developer drags them (R-BAL177);
-**the next step is `python -m tools.quill.quill next`'s answer.** A card's spec is its body, and a
-review reads its edits since the work started (`/charter`, R-BAL174). A step split into leaves holds
-them as sub-issues, and a piece of work inside a card's one pull request is a task under it (Git
-Workflow). Whether a card SHIPPED is git's answer, never the card's state: its done file
-`plan/ships/N` in the merge of `dev` and `main` (R-BAL359), from which `quill sync` writes each
-card's state.
+**the next step is `python -m tools.quill.quill next`'s answer**: Priority Urgent, then High, then
+that order, a step's unfinished prerequisites just ahead of it, and never a step On hold (rulings
+plan#1831, plan#1832). A card's spec is its body, and a review reads its edits since the work
+started (`/charter`, R-BAL174). A step split into leaves holds them as sub-issues, and a piece of
+work inside a card's one pull request is a task under it (Git Workflow). Whether a card SHIPPED is
+git's answer, never the card's state: its done file `plan/ships/N` in the merge of `dev` and `main`
+(R-BAL359), from which `quill sync` writes each card's state.
 
 Every card but a task carries its arc (a task's is its card's). Each arc's argument, the reasoning
 behind its steps, stays in its own document: `docs/audits/balance_architecture/README.md` (balance),

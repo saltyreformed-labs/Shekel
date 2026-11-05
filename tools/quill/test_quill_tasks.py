@@ -144,8 +144,8 @@ def test_a_leaf_is_never_filed_under_a_step_with_a_task_still_open(code, tmp_pat
     tracker.add_task(3, 1, is_open=False, state_reason="NOT_PLANNED", closed_by_tool=True)
     spec = tmp_path / "leaf.md"
     spec.write_text("Build the leaf.")
-    leaf = ("file", "step", "--parent", "plan#1", "--arc", "balance", "--title", "leaf",
-            "--body-file", str(spec))
+    leaf = ("file", "step", "--effort", "2", "--parent", "plan#1", "--arc", "balance",
+            "--title", "leaf", "--body-file", str(spec))
     assert run(tracker, code, *leaf) == 1
     assert ("plan#1 has tasks still open (plan#2): a step split into smaller steps is never "
             "shipped itself (R-BAL177)") in capsys.readouterr().err

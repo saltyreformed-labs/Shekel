@@ -93,10 +93,12 @@ def _plant_rule(seed_user, starts_on, nominal_day=None):
     """
     return db.session.execute(sa.text(
         "INSERT INTO budget.recurrence_rules "
-        "(transaction_template_id, interval_n, unit_id, placement_id, shift_id, "
-        " starts_on, nominal_day) "
-        "VALUES (:owner, 1, :unit, :placement, :shift, "
-        "        CAST(:starts_on AS date), :nominal_day) RETURNING id"
+        "(transaction_template_id, interval_n, unit_id, unit_has_day_of_month, "
+        " placement_id, shift_id, starts_on, nominal_day) "
+        "VALUES (:owner, 1, :unit, "
+        "        (SELECT has_day_of_month FROM ref.recurrence_units WHERE id = :unit), "
+        "        :placement, :shift, CAST(:starts_on AS date), :nominal_day) "
+        "RETURNING id"
     ), {
         "owner": bare_expense_template(db.session, seed_user).id,
         "unit": _ref_id("recurrence_units", "month"),

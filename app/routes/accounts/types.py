@@ -136,12 +136,12 @@ def update_account_type(type_id):
             flash("An account type with that name already exists.", "warning")
             return redirect(url_for("settings.show", section="account-types"))
 
-    # C6 boundary guard (Build-Order Step 5): an in-place edit of
-    # ``has_amortization`` / ``category_id`` that crosses the amortizing or
-    # Asset/Liability boundary is refused while any of the owner's accounts
-    # of this type carries ledger postings -- the second crossing vector
-    # (C4 adversarial review M2), with no ``account_type_id`` change for
-    # the account-update guard to see.
+    # The loan-boundary guard (ruling plan#2785): an in-place edit of
+    # ``has_amortization`` that crosses between a loan type and a non-loan
+    # type is refused while any account of this type holds a line of the
+    # worked-out ledger -- the second crossing vector (C4 adversarial review
+    # M2), with no ``account_type_id`` change for the account-update guard to
+    # see.
     failure = _validate_account_type_boundary_edit(account_type, data)
     if failure is not None:
         flash(failure[0], failure[1])
@@ -182,12 +182,13 @@ def update_account_type(type_id):
     for account in affected_accounts:
         ensure_type_params(account, classify_account(account))
 
-    # An ALLOWED boundary crossing (every affected ledger is empty, per the
-    # guard above) still leaves each account's pairing stale: re-class the
-    # empty linked rows to the new category's class and re-sync the anchor
-    # corrections so an amortizing crossing swaps correction families
-    # instead of stranding one (the sync structurally no-ops for loans and
-    # for the $0 anchors that made the ledgers empty in the first place).
+    # An ALLOWED crossing (an Asset/Liability one, or a loan one holding no
+    # line, per the guard above) still leaves each account's stored pairing
+    # stale: re-class the linked rows to the new category's class and re-sync
+    # the anchor corrections so an amortizing crossing swaps correction
+    # families instead of stranding one (the sync structurally no-ops for
+    # loans).  The worked-out ledger needs none of it: it classes each line by
+    # its account's current type.
     if boundary_crossed:
         for account in affected_accounts:
             ledger_account_service.sync_linked_ledger_class(account)

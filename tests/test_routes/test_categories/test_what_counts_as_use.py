@@ -209,7 +209,6 @@ class TestArchiveHelpers:
                 category_id=category.id,
                 transaction_type_id=expense_type.id,
                 name="Category Usage Template",
-                default_amount=Decimal("1200.00"),
             )
             db.session.add(template)
             db.session.commit()
@@ -253,7 +252,6 @@ class TestArchiveHelpers:
                 category_id=user_b_cat.id,
                 transaction_type_id=expense_type.id,
                 name="User B Rent Template",
-                default_amount=Decimal("900.00"),
             )
             db.session.add(template_b)
             db.session.commit()

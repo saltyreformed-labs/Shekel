@@ -39,12 +39,15 @@ from app.enums import PaycheckLineKindEnum, WithholdingKindEnum
 from app.exceptions import PayStubRefused
 from app.extensions import db
 from app.models.pay_stub import PayStub
-from app.services import pay_stub_service
+from app.services import pay_stub_gross, pay_stub_service
 from app.services.pay_stub_service import LineFigure, OneOffFigure
+from app.services.paycheck_calculator import StubTotals
 
 # The worked example and its helpers have one home (plan step salary:S11-c-2c,
 # SAL-594); each is imported under the name this suite always used, and
 # importing ``world_fixture`` registers the ``world`` fixture here.
+# Pylint: ``unused-import`` -- importing ``world_fixture`` IS its use: pytest
+# finds the ``world`` fixture by the module-level name.
 from tests.test_services._pay_stub_example import (  # pylint: disable=unused-import
     TODAY as _TODAY,
     example_figures as _figures,
@@ -673,3 +676,50 @@ class TestTheJobSaysWhatItsGrossHolds:
         report = pay_stub_service.stub_report(world["profile"], stub, _ctx(world))
         phone = {row.name: row for row in report.lines}["Phone Allowance"]
         assert phone.kind_agrees is False
+
+
+class TestTheCheckedGross:
+    """The ONE spelling of what Gross Pay a stub's figures make (ruling R-SAL127).
+
+    :func:`app.services.pay_stub_gross.checked_gross` is the rule the door's
+    check reads and plan step salary:S11-d's rehearsal measure adds a saved
+    stub up with: base pay plus the taxable earnings (R-SAL99), and on a "yes"
+    job the after-tax earnings too (R-SAL102).  Graded on totals built by
+    hand, so a figure here moves only with the rule.
+    """
+
+    #: Base pay 2884.62 + taxable 115.00 = gross 2999.62; after-tax 20.00.
+    _TOTALS = StubTotals(
+        gross=Decimal("2999.62"), pre_tax=Decimal("315.00"), pre_fica=Decimal("0.00"),
+        taxes=Decimal("472.00"),
+        post_tax=Decimal("110.00"), after_tax=Decimal("20.00"), net=Decimal("2122.62"),
+    )
+
+    def test_a_no_job_counts_the_taxable_earnings_alone(self):
+        """A "no" job: the totals' gross, 2999.62, the after-tax 20.00 left out."""
+        assert pay_stub_gross.checked_gross(
+            self._TOTALS, includes_after_tax=False,
+        ) == Decimal("2999.62")
+
+    def test_a_yes_job_adds_the_after_tax_earnings(self):
+        """A "yes" job: 2999.62 + 20.00 = 3019.62."""
+        assert pay_stub_gross.checked_gross(
+            self._TOTALS, includes_after_tax=True,
+        ) == Decimal("3019.62")
+
+    def test_the_door_refuses_by_the_same_figure(self, world):
+        """The door's refusal quotes the figure the rule makes, on a "no" job.
+
+        Base pay 2884.62 + Phone 60.00 + Retro pay 55.00 = 2999.62 (the worked
+        example), printed as 3000.62: the refusal names $2,999.62, which is
+        :func:`checked_gross` over the same figures' totals.
+        """
+        figures = _figures(world)
+        totals = pay_stub_service.totals_of(world["profile"], figures)
+        checked = pay_stub_gross.checked_gross(totals, includes_after_tax=False)
+        with pytest.raises(PayStubRefused) as refused:
+            _record(world, figures, printed_gross=Decimal("3000.62"))
+        assert checked == Decimal("2999.62")
+        assert refused.value.errors["printed_gross"].startswith(
+            f"Base pay plus your taxable earnings come to ${checked:,.2f}, "
+        )

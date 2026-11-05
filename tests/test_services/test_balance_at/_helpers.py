@@ -24,6 +24,7 @@ from tests._test_helpers import (
     make_every_period_rule,
     one_off_row_of,
 )
+from tests._definition_price import newest_price
 
 
 def _no_baseline(user_id):
@@ -39,11 +40,11 @@ def _no_baseline(user_id):
     return BalanceContext(user_id=user_id, scenario=None, as_of=date.today())
 
 
-#: What a template's ``default_amount`` says when the graded figure is its
-#: price SERIES.  Distinct from every amount the cases below state, so a
-#: producer reading the scalar instead of the series answers a number no
-#: assertion expects (see :func:`_derived_income_row` for how the scalar is
-#: made to hold it).
+#: The NEWEST price a definition states when the graded figure is its price
+#: on the row's own day: what its ``default_amount`` copy held until plan step
+#: X-bp.  Distinct from every amount the cases below state, so a producer
+#: reading the newest price instead answers a number no assertion expects
+#: (see :func:`_derived_income_row` for how the series is made to hold it).
 _NOT_THE_SERIES = Decimal("7.77")
 
 
@@ -64,24 +65,26 @@ def _derived_income_row(db, seed_user, account, period, amount):
     balance:X-cf), written into the owner's baseline scenario, which is
     what both callers price against.
 
-    **``default_amount`` is deliberately NOT the graded figure.**  An
+    **The newest price is deliberately NOT the graded figure.**  An
     adversarial review of plan step X-au-d found a first version setting both
-    to *amount*, which makes the series and the scalar the same number -- and
-    ``_stated_amount``'s empty-series refusal is then invisible: replacing that
-    refusal with ``return template.default_amount``, the exact fallback its own
-    message forbids, survives every case built on this helper.  A distinct
-    scalar is what makes the series load-bearing.
+    to *amount*, which made the series and the ``default_amount`` scalar the
+    same number -- and ``_stated_amount``'s empty-series refusal was then
+    invisible: replacing that refusal with ``return template.default_amount``,
+    the exact fallback its own message forbids, survived every case built on
+    this helper.  A newest price distinct from the row's own is what makes the
+    series on the row's date load-bearing.
 
     **Passing ``_NOT_THE_SERIES`` to the constructor did not achieve that, and
-    plan step balance:X-cf-3 measured it.**  ``set_amount`` re-syncs
+    plan step balance:X-cf-3 measured it.**  ``set_amount`` re-synced
     ``default_amount`` onto the NEWEST version it states
     (``template_amount_service._resync_scalar``), so the constructor's
     ``7.77`` was overwritten with *amount* on the next line and the resolver
-    mutated to read the scalar passed both cases.  The scalar holds
-    ``_NOT_THE_SERIES`` the only way it can: as a SECOND version, effective
-    the day after this row's due date, which the re-sync copies into the
-    column while ``amount_as_of`` on the row's own day still answers
-    *amount*.  Red with the mutation, green without.
+    mutated to read the scalar passed both cases.  The newest price is
+    ``_NOT_THE_SERIES`` here as a SECOND version, effective the day after
+    this row's due date, while ``amount_as_of`` on the row's own day still
+    answers *amount*.  Red with the mutation, green without; measured again
+    2026-11-02, after plan step X-bp dropped the column, with
+    ``_stated_amount`` reading the newest version: both cases fail.
 
     Args:
         db: The test session fixture.
@@ -100,7 +103,6 @@ def _derived_income_row(db, seed_user, account, period, amount):
         category_id=next(iter(seed_user["categories"].values())).id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
         name="Priced income",
-        default_amount=_NOT_THE_SERIES,
     )
     db.session.add(template)
     db.session.flush()
@@ -111,7 +113,7 @@ def _derived_income_row(db, seed_user, account, period, amount):
         template, _NOT_THE_SERIES,
         effective_on=period.start_date + timedelta(days=1),
     )
-    assert template.default_amount == _NOT_THE_SERIES
+    assert newest_price(template) == _NOT_THE_SERIES
     # The definition first, then the cadence onto it (plan step R-F6).
     make_every_period_rule(db.session, template)
     return generate_row_of(template, period)

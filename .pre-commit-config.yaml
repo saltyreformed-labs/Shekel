@@ -284,8 +284,8 @@ repos:
       # plus .djlint_rules.yaml, which carries this project's own djlint
       # rule SHK01 (inline styles; bank_import:N-405).
       # All run language:system. The host binaries (shellcheck, shfmt,
-      # biome, actionlint, typos, gitleaks, hadolint) come off PATH; the
-      # four pip tools (yamllint, zizmor, djlint, rumdl) are invoked as
+      # biome, typos, gitleaks, hadolint) come off PATH; the pip tools
+      # (yamllint, jactionlint, zizmor, djlint, rumdl) are invoked as
       # `.venv/bin/<tool>` -- the repo's pinned copy from requirements-dev.txt
       # -- and NOT off PATH, because a shell without the venv first on PATH
       # would otherwise run the host's package at whatever version Arch
@@ -311,11 +311,16 @@ repos:
         entry: .venv/bin/yamllint
         language: system
         types: [yaml]
-      - id: actionlint
-        name: actionlint (GitHub workflows)
-        entry: actionlint
+      - id: jactionlint
+        name: jactionlint (GitHub workflows)
+        # Its profile is .github/jactionlint.yaml's (ruling plan#2355).  The
+        # whole .github/ tree fires it, as it does zizmor: a run with no
+        # operands checks dependabot.yml beside the workflows, and the config
+        # file is itself under .github/.  Naming shellcheck makes a missing
+        # one exit 3 rather than skip its rule unsaid, as in ci.yml.
+        entry: .venv/bin/jactionlint --shellcheck=shellcheck
         language: system
-        files: ^\.github/workflows/.*\.ya?ml$
+        files: ^\.github/.*\.ya?ml$
         pass_filenames: false
       - id: zizmor
         name: zizmor (workflow security)

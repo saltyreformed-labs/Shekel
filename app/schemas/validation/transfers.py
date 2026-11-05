@@ -82,7 +82,7 @@ class TransferTemplateCreateSchema(RecurrenceFormFieldsMixin, BaseSchema):
         return _normalize_empty_inputs(self, data)
 
     name = fields.String(required=True, validate=validate.Length(min=1, max=200))
-    default_amount = fields.Decimal(
+    amount = fields.Decimal(
         required=True, places=2, as_string=True,
         validate=validate.Range(min=0, min_inclusive=False),
     )
@@ -129,7 +129,7 @@ class TransferTemplateUpdateSchema(TransferTemplateCreateSchema):
 
     # Override -- all fields optional for update.
     name = fields.String(validate=validate.Length(min=1, max=200))
-    default_amount = fields.Decimal(
+    amount = fields.Decimal(
         places=2, as_string=True, validate=validate.Range(min=0, min_inclusive=False)
     )
     from_account_id = RowId()

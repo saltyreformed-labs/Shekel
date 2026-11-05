@@ -129,7 +129,6 @@ class TestTheCheapAccessorRefusesAnUnsettledRow:
                 from_account_id=seed_full_user_data["account"].id,
                 to_account_id=seed_full_user_data["savings_account"].id,
                 name="States No Price",
-                default_amount=Decimal("100.00"),
             )
             db.session.add(template)
             db.session.flush()

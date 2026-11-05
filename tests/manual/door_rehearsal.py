@@ -28,6 +28,7 @@ htmx sends it (:func:`buttons_in`, :meth:`Operator.press`).
 
 import json
 import os
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -37,6 +38,7 @@ from werkzeug.datastructures import MultiDict
 from app import create_app
 from app.extensions import db, limiter, login_manager
 from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
+from app.utils.session_helpers import login_session_stamps
 
 #: The flash categories that mean a door REFUSED.  Read after every submission,
 #: because two of the account-10 repair's doors answered a refusal with ``302``
@@ -356,6 +358,11 @@ class Operator:
             session["_user_id"] = str(self.user_id)
             session["_fresh"] = True
             session["_id"] = None
+            # The stamps a sign-in writes, the user's among them: ``load_user``
+            # refuses a session without them (plan#2173).
+            session.update(login_session_stamps(
+                datetime.now(timezone.utc), self.user_id,
+            ))
         self.acts = 0
         #: What the last submission flashed, ``[(category, message), ...]``:
         #: a door that answers by flashing, such as the statement import,

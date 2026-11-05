@@ -112,6 +112,14 @@ checkout's models must read production's schema**: measured 2026-10-31, `migrati
 from the deployed revision's only in comments. A checkout carrying a migration production lacks
 fails the act sheet at its first read, and is not run.
 
+**Since `card/1192` took in `dev` on 2026-11-04, these blocks wait on a release.** The harness now
+imports `login_session_stamps` (plan#2173), which the revision deployed that day lacks, so it stops
+with an `ImportError` on production's `app/`, and `migrations/` holds seven migrations production
+lacks. They run again once production runs a release holding both. Measured that night on copies
+of the performance's two dumps, each migrated by `scripts/init_database.py` as a deploy does: the
+merged tree's own `app/` performed all 18 acts, and its check, its disagreement list and every
+balance came out as the deployed app's had, its sheet differing only in its header line.
+
 First the SETUP block. It only defines names and runs nothing, so it can be pasted again at any
 time; fill in the six values in capitals.
 

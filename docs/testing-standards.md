@@ -85,8 +85,20 @@ must-knows; a fact lives in one tier and the other tiers point at it.
 
   So what remains is a resource fact rather than a defect, and the instrument is information: the
   wrapper prints any other live pytest it can see, with its worktree, and proceeds.
-  **The cwd locates a peer and the argv does not** -- every worktree on this host shares one venv,
-  so a peer's command line names the main checkout whatever tree it is testing.
+  **The cwd locates a peer and the argv does not** -- a lane still before the lock links the main
+  checkout's venv, so its command line names the main checkout whatever tree it is testing.
+- **A suite runs what its tree's lock names** (ruling plan#2828). Each lane has its own venv:
+  `tools/quill/lane.py` builds a new lane's, and where the tree holds `uv.lock`, outside CI, the
+  wrapper replaces an older lane's `.venv` link and runs `uv sync --locked` before each run.
+  Measured 2026-11-04, this lock, three runs each: at most 0.04 s when nothing moved and 0.06 s to
+  build one with uv's cache warm, both also with no network; uv writes through a link into its
+  target, `rm` of the link leaves the target whole, a dangling link makes uv refuse (`File exists`),
+  and with `VIRTUAL_ENV` naming another venv uv warns and writes only the project's. The wrapper
+  puts the venv first on `PATH` as well, because it finds `pytest` on `PATH`, and a session an older
+  lane's start began holds the main checkout's venv first there: replacing the link alone left that
+  session's suite stopping at `import valkey`. A lane's commands typed before its first run after
+  merging the lock still run its link. CI's install action builds each job's own set, so the wrapper
+  leaves CI's venv alone, reading `CI` through `scripts/private_cluster.py`.
 - **First-time setup: none, and a migration needs no manual rebuild.** The template is baked into a
   tagged image whose cache key is derived from every input the build reads, and the wrapper
   re-verifies that image on EVERY invocation rather than trusting the tag -- so a stale or damaged

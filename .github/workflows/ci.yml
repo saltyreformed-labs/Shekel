@@ -1,7 +1,7 @@
 # Shekel Budget App -- Continuous Integration
 #
-# Six jobs grade a pull request, and a seventh -- lint-and-test -- answers
-# for the five it needs (polyglot-lint is a required check of its own).
+# Seven jobs grade a pull request, and an eighth -- lint-and-test -- answers
+# for the six it needs (polyglot-lint is a required check of its own).
 # Every pull request runs every one of them: ruling balance:R-BAL399 deleted
 # the scope that let a change set touching only planning documents skip lint
 # and the shards.
@@ -16,9 +16,11 @@
 #   test           the suite in six shards, each on its own runner through
 #                  ``scripts/test.sh`` (steps 5d-7b), and the rehearsal kit's
 #                  cluster tests on one of them (step 7c).
+#   image          builds the app image from the Dockerfile, never pushed,
+#                  and checks what it holds (step 8).
 #   polyglot-lint  the non-Python linters (its own check).
 #   lint-and-test  the check the ``dev`` and ``main`` rulesets require.  It
-#                  NEEDS the first five and runs ``if: always()``, because a
+#                  NEEDS the first six and runs ``if: always()``, because a
 #                  SKIPPED required check counts as passing and a job that
 #                  merely depended on a failed shard would be skipped --
 #                  green.  tools/ci/ci_verdict.py judges every result.
@@ -36,12 +38,16 @@
 # runners; six shards at ``-n logical`` ran 6.4-9.7 min each.
 #
 # THE STEP NUMBERS are kept from the single-job era, on the same steps, because
-# .pre-commit-config.yaml and pytest.ini cite them.  Python matches the
-# production Dockerfile (3.14) in every job.
+# .pre-commit-config.yaml and pytest.ini cite them.  Every job that runs
+# Python on the runner takes it and its packages from
+# .github/actions/install-lock: ``.python-version``'s interpreter and
+# ``uv.lock``'s packages, installed by the Dockerfile's uv.  The image job runs
+# Python only inside the image it builds.
 #
 # THE TIME LIMITS (rulings plan#2328, plan#2330).  Every job carries a
 # ``timeout-minutes`` of twice its longest successful run, rounded up to a
-# whole five minutes, so a stalled runner fails its job rather than holding a
+# whole five minutes, so GitHub cancels a stalled job (the verdict reads a
+# cancelled grader as red, tools/ci/ci_verdict.py) rather than it holding a
 # pull request's check, which its enqueue waits on, for GitHub's default of
 # 360 minutes (run 38541852835, 2026-10-14: a shard still crawling when it was
 # cancelled by hand at 37.9 min).  The merge queue already drops a group
@@ -49,7 +55,10 @@
 # longest runs are every successful job of every run of this workflow created
 # 2026-10-01 to 2026-10-30, on ubuntu-24.04 (212 runs, every attempt, read
 # from GitHub's jobs API; a job GitHub lists again, unchanged, under a re-run
-# attempt counts once), each job's figure on its own limit's line.
+# attempt counts once), each job's figure on its own limit's line.  Re-checked
+# on ubuntu-26.04 with every install uncached (run 41845380601, 2026-11-04):
+# each job took under half its limit, and the image job, with no run before
+# it, is sized from that one.
 
 name: CI
 
@@ -138,23 +147,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-
       # This job holds a token, so it runs the least third-party code it can:
       # the two packages the check imports (``requests``, and ``cryptography``
-      # through quill's GitHub client), at the versions requirements.txt pins
-      # -- read from that file, their one home -- and no pip upgrade.  (A
-      # constraints file cannot be used: pip refuses one holding extras, and
-      # requirements.txt has two.)  A package the check comes to import
-      # beyond these fails the job red.
-      - name: Install dependencies
-        run: |
-          set -euo pipefail
-          grep -E '^(requests|cryptography)==' requirements.txt > "${RUNNER_TEMP}/landing-requirements.txt"
-          python -m pip install -r "${RUNNER_TEMP}/landing-requirements.txt"
+      # through quill's GitHub client), pyproject.toml's ``landing`` group,
+      # with the indirect packages they need, at the lock's versions and
+      # hashes.  A package the check comes to import beyond these fails the
+      # job red.
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
+        with:
+          install: landing
 
       # The tracker's owner and repository, from quill's PLAN
       # (tools/quill/setup_tracker.py), their one home: the mint reads them
@@ -174,7 +176,10 @@ jobs:
       # as balance:R-BAL311 makes it: the read-only App "Shekel plan reader"
       # (Issues read-only, installed on the tracker only), its private key in
       # the PLAN_READER_KEY secret and its Client ID in the
-      # PLAN_READER_CLIENT_ID variable.  GitHub's own action mints an
+      # PLAN_READER_CLIENT_ID variable.  The key is a repository secret, not
+      # an environment's as the update App's is (ruling plan#2472): this job
+      # runs on every pull request and queue group, which an environment only
+      # main may use would refuse.  GitHub's own action mints an
       # installation token for this run, narrowed again here to reading
       # issues of that one repository, and revokes it when the job ends
       # (GitHub expires one within the hour in any case).
@@ -231,29 +236,16 @@ jobs:
         with:
           # The default depth-1 checkout: no tools test reads this checkout's
           # history (the plan gate's git arms did, until step X-cx's S3b deleted
-          # the gate; the rehearsal bench's HEAD~1 case runs in the test job).
+          # the gate).
           # Nothing here pushes, so the GITHUB_TOKEN need not persist in
           # .git/config.  Avoids the credential-persistence vector (zizmor
           # artipacked).
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      - name: Cache pip packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          install: all
 
       # ── 4b. Every tools package, at one floor, in one step ───────
       # Each package's 10.00/10 pylint floor and its tests: quill
@@ -262,11 +254,15 @@ jobs:
       # archive banner and the arc list the tools read; step X-cx's L4),
       # ``tools/release`` (what a release carries; step X-cx's L9a),
       # ``tools/split`` (the proved test-file split; step balance:X-er, ruling
-      # R-BAL301) and ``tools/rehearsal`` (the release rehearsal kit; step
-      # X-cx's K1, rulings R-BAL314 and R-BAL315).  A job of its own, beside
-      # lint and the shards rather than ahead of them.  ``yaml`` (PyYAML,
-      # pinned in requirements-dev.txt) is what ``tools/ci/test_ci_workflow.py``
-      # reads THIS file with, which is why the step follows the install.
+      # R-BAL301), ``tools/rehearsal`` (the release rehearsal kit; step X-cx's
+      # K1, rulings R-BAL314 and R-BAL315) and ``tools/update`` (the weekly
+      # dependency update: the Monday lock refresh, its publish, the daily
+      # queue and the daily issue saying a release is due, which updates.yml
+      # runs; rulings plan#2351, plan#2449, plan#2829).  A job
+      # of its own, beside
+      # lint and the shards rather than ahead of them.  ``yaml`` (PyYAML, in
+      # the lock's dev group) is what ``tools/ci/test_ci_workflow.py`` reads
+      # THIS file with, which is why the step follows the install.
       #
       # The rehearsal kit's tests that start a real private cluster carry the
       # ``cluster`` marker and are deselected here, so they run once, in the
@@ -283,6 +279,8 @@ jobs:
           pytest tools/split -c /dev/null -q
           pylint tools/rehearsal/ --fail-under=10 --fail-on=E,F --output-format=colorized
           pytest tools/rehearsal -c /dev/null -q -m "not cluster"
+          pylint tools/update/ --fail-under=10 --fail-on=E,F --output-format=colorized
+          pytest tools/update -c /dev/null -q
 
   tax-law:
     runs-on: ubuntu-26.04
@@ -293,29 +291,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # The runtime set only: importing the law imports the ``app`` package,
+      # and the check needs nothing the dev tools add.
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      # Its OWN key: this job installs the runtime requirements only, and a
-      # cache saved under the key the other jobs share would lack every dev
-      # wheel -- and a saved key is never overwritten, so each of them would
-      # re-download those until the requirements next changed.
-      - name: Cache pip packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-runtime-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-runtime-
-
-      # The runtime requirements only: importing the law imports the ``app``
-      # package, and the check needs nothing the dev tools add.
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          install: runtime
 
       # ── 4c. Next year's tax law ──────────────────────────────────
       # From December 1 this job fails every pull request -- a release to
@@ -349,23 +330,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      - name: Cache pip packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          install: all
 
       # ── 5. Run pylint ────────────────────────────────────────────
       # Layered pylint gate:
@@ -482,31 +450,15 @@ jobs:
         # so a check named ``test (0)`` runs shard 0.
         shard: [0, 1, 2, 3, 4, 5]
     steps:
-      # Depth 2, not the default 1: step 7c's bench case checks out ``HEAD~1``
-      # as its base state, and a depth-1 clone does not hold that commit.
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      - name: Cache pip packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          install: all
 
       # ── 5d. Record the runner's capacity ─────────────────────────
       # The hosted fleet is not one machine: the X-gy measurement drew AMD
@@ -604,14 +556,149 @@ jobs:
       #
       # Shard 3 because it had the lowest mean wall time of the six over the
       # six newest green runs (449-693 s, against 704-742 s for shard 0, which
-      # carries step 7b), measured 2026-10-20.  The bench case's base state is
-      # ``HEAD~1``: hence the checkout's depth of 2.
+      # carries step 7b), measured 2026-10-20.  The bench case's second state
+      # is a commit it makes of HEAD's own tree, so the default depth-1 clone
+      # holds both; the bench runs uv, which the install step put on PATH.
       - name: Run the rehearsal kit's cluster tests (shard 3)
         if: strategy.job-index == 3
         run: pytest tools/rehearsal -c /dev/null -q -m cluster
 
+  # ── 8. The app image, built and checked before a merge ───────────
+  # docker-publish.yml builds the release image only on a push to main, so
+  # without this job a change that breaks the build -- a lock moving
+  # psycopg-c past what compiles here, a base or uv image a digest update
+  # moves -- would land in dev and fail only at the release (task plan#2366;
+  # a version-only update lands with no card once CI is green, ruling
+  # plan#2351).  The image is built from the Dockerfile as the release builds
+  # it, loaded into this runner's docker, never pushed; the job holds no
+  # secret.
+  #
+  # ONE RECIPE, THE RELEASE'S.  The build is .github/actions/build-image's,
+  # which the release builds by too (ruling plan#2752); its header says what
+  # the two share and why, and which of its refusals is read rather than
+  # measured.  This job runs on the release's runner label.
+  #
+  # Its time limit has no run of its own to be sized from yet (rulings
+  # plan#2328, plan#2330): it is twice the release build's longest
+  # (docker-publish.yml's build-and-push: this build plus its push and
+  # signing, longest of 200 successful runs to 2026-10-30, each with the
+  # layer cache on, whether or not it restored one), rounded up to a whole
+  # five minutes, until this job's own runs, which restore none, re-size it.
+  #
+  # Each check's refusal is measured against real images, dated where it is
+  # written.  Measured 2026-10-30, the checks' texts run on the rootless
+  # daemon: the built image passes them, and an extra package, a missing one
+  # and no psycopg-c are each refused.
+  image:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5  # longest of 1 run: 1.35 min (run 41845380601)
+    env:
+      # The local name the build loads the image under; it is never pushed.
+      IMAGE: shekel:ci
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the image
+        id: build
+        uses: $/.github/actions/build-image
+        with:
+          push: false
+          load: true
+          tags: ${{ env.IMAGE }}
+
+      # The digest the build action hands back is the one the release signs.
+      # Read here on every pull request, an action that hands back none fails
+      # a pull request, not first the release's signing.  Measured 2026-11-03
+      # on the rootless daemon: a load's metadata names the loaded image's
+      # digest (``containerimage.digest``), which the action's ``digest``
+      # output reads.
+      - name: The build hands back a digest
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          if [[ "${DIGEST}" =~ ^sha256:[0123456789abcdef]{64}$ ]]; then
+              echo "The build's digest: ${DIGEST}"
+          else
+              echo "The build handed back no digest ('${DIGEST}'): the release's signing would sign none." >&2
+              exit 1
+          fi
+
+      # uv for the package check, from the Dockerfile's own uv stage by the
+      # one recipe every job's install takes it by: the binary the build ran,
+      # which the image never carries.
+      - name: The Dockerfile's uv
+        id: uv
+        uses: $/.github/actions/dockerfile-uv
+
+      # The Dockerfile's PSYCOPG_IMPL=c (ruling balance:R-BAL209) already makes
+      # the import fail without psycopg-c; the implementation is also read and
+      # compared, so the check does not rest on that one line.
+      - name: The image runs psycopg's C implementation
+        shell: bash
+        run: |
+          docker run --rm --network none --entrypoint python "${IMAGE}" -c '
+          import sys
+          import psycopg
+          impl = psycopg.pq.__impl__
+          print(f"psycopg implementation: {impl}")
+          sys.exit(impl != "c")
+          '
+
+      # The image's venv holds EXACTLY the lock's runtime set and its server
+      # group: uv, run inside the image against /opt/venv with the checkout
+      # read-only and no network, refuses a package missing, extra or at
+      # another version, and ``--check`` changes nothing.  The set is spelled
+      # here, not read from the Dockerfile, so a build that installs the wrong
+      # set is caught rather than agreed with.  uv is run by the path it is
+      # mounted at: by its bare name, the venv's bin, first on the image's
+      # PATH, would run a uv the image held in place of this one (measured
+      # 2026-11-01).
+      - name: The image holds exactly the lock's runtime and server set
+        shell: bash
+        env:
+          UV: ${{ steps.uv.outputs.bin }}
+          # Where the image sees uv: its mount and the path it is run by.
+          MOUNTED_UV: /usr/local/bin/uv
+        run: |
+          docker run --rm --network none \
+              --volume "${UV}:${MOUNTED_UV}:ro" \
+              --volume "${GITHUB_WORKSPACE}:/src:ro" \
+              --env UV_PROJECT_ENVIRONMENT=/opt/venv \
+              --env UV_PYTHON_DOWNLOADS=never \
+              --env UV_NO_CACHE=1 \
+              --env UV_OFFLINE=1 \
+              --entrypoint "${MOUNTED_UV}" "${IMAGE}" \
+              sync --project /src --locked --check --no-install-project \
+              --no-default-groups --group server
+
+      # The runtime stage deletes the base image's pip (rulings plan#2443,
+      # plan#2446) and takes no uv, yet a uv the builder puts in /opt/venv
+      # reaches it through the venv copy.  The package check above compares
+      # packages, not files: it passes a uv binary copied in, and would pass
+      # uv from PyPI once the lock's runtime or server set held it (task
+      # plan#2543).  So the image's whole filesystem is searched, as root so
+      # no directory is unreadable, for every name pip's files take (the
+      # package and its dist-info, the commands, the wheel ensurepip keeps)
+      # and uv's (its two commands, and the package and dist-info of uv from
+      # PyPI), and one found fails the step.  Measured 2026-10-31: the pinned
+      # base image holds seven, each pip's, and the built image none;
+      # 2026-11-01: a uv or a uvx copied into the venv, and the uv package
+      # installed into it, each found, and the built image none.
+      - name: The image holds no pip and no uv
+        shell: bash
+        run: |
+          docker run --rm --network none --user 0 --entrypoint sh "${IMAGE}" -c '
+          found="$(find / -xdev \( -name pip -o -name "pip[0-9]*" -o -name "pip-*" -o -name uv -o -name uvx -o -name "uv-*" \) -print)" || exit 1
+          echo "${found:-no pip and no uv}"
+          test -z "${found}"
+          '
+
   lint-and-test:
-    needs: [landing, tools, tax-law, lint, test]
+    needs: [landing, tools, tax-law, lint, test, image]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5  # longest of 197 runs: 0.55 min
@@ -621,10 +708,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # The interpreter alone: the verdict reads its input with the
+      # standard library.
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
+          install: python
 
       # The verdict, fail-closed: every grader succeeded.  A failed,
       # cancelled or skipped job, a job the verdict does not know, or one
@@ -640,8 +729,8 @@ jobs:
   # (shell, JS/CSS, Jinja templates, workflows, Dockerfile, YAML,
   # secrets, spelling). Mirrors the local .pre-commit-config.yaml hooks.
   # Binary tools are pinned by version and downloaded (no extra
-  # third-party actions to SHA-pin); the pip tools (yamllint, jactionlint,
-  # zizmor, djlint, rumdl) come from requirements-dev.txt. Each tool reads
+  # third-party actions to SHA-pin); the Python tools (yamllint,
+  # jactionlint, zizmor, djlint, rumdl) come from the lock. Each tool reads
   # its own in-repo config file. The dev and main rulesets require it beside
   # lint-and-test, so the floor blocks merges.
   polyglot-lint:
@@ -653,32 +742,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # The Python linters (yamllint, jactionlint, zizmor, djlint, rumdl) and
+      # jinja2 for the template parse check, all from the lock.
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      - name: Cache pip packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      # pip-installable linters (yamllint, jactionlint, zizmor, djlint, rumdl)
-      # + jinja2 for the template parse check, all pinned in
-      # requirements-dev.txt.
-      - name: Install pip linters
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          install: all
 
       # Version-pinned standalone binaries, extracted to ~/.local/bin via
       # `find` so a change in an archive's internal layout cannot break the
-      # step. shellcheck is pinned to 0.11.0 specifically: the optional
-      # masked-errexit groups in .shellcheckrc need >= 0.10 and the runner's
-      # preinstalled build may lag.
+      # step. shellcheck is pinned rather than the runner's own, whose version
+      # moves with the runner image; the optional masked-errexit groups
+      # .shellcheckrc enables need 0.8 or later (both are in v0.8.0's source
+      # and in neither of v0.7.2's, read 2026-11-01).
       - name: Install pinned binary linters
         run: |
           set -euo pipefail

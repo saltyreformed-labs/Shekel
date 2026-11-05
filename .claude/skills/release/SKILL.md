@@ -26,14 +26,15 @@ everything with a person or a judgment in it is here.
   session reads its hooks from its own worktree when it starts (measured 2026-10-26):
 
   ```bash
-  cd ~/projects/shekel-release && git fetch --prune origin && git merge --ff-only origin/dev && claude "/release"
+  cd ~/projects/shekel-release && git fetch --prune origin && git merge --ff-only origin/dev && { [ ! -L .venv ] || rm .venv; } && uv sync --locked && claude "/release"
   ```
 
   It runs this skill to the end and stops. A session building a card does not run it: it gives Josh
   that line and does not start the release. The worktree is made once, by `git worktree add
-  ~/projects/shekel-release dev` (git refuses while another worktree holds `dev`) and `ln -s
-  ~/projects/Shekel/.venv ~/projects/shekel-release/.venv`. Never in `~/projects/Shekel`, which
-  stays clean on `main` because production's deploy script is a symlink into it (trap u).
+  ~/projects/shekel-release dev` (git refuses while another worktree holds `dev`), and that line
+  keeps its venv its own, on `dev`'s lock (ruling plan#2828): it removes a link an earlier release
+  left, as `uv sync` writes through one into the main checkout's venv. Never in `~/projects/Shekel`,
+  which stays clean on `main` because production's deploy script is a symlink into it (trap u).
 - **The auto-mode classifier can refuse an act outright, even one Josh's word already covers**
   (10-20: inside the approved release, a copy into `/opt/docker/shekel` as 'Production Deploy';
   after it, a repository settings change as 'Permission Grant'; and under his standing merge
@@ -151,6 +152,12 @@ Then, line by line:
 - A refusal naming a card the tracker does not hold, a card that is no work, or an entry under
   `plan/ships/` that is no card's marker (R-BAL287, R-BAL289) is no judgment for this run to make:
   STOP and report it to Josh.
+- Once production's tree holds the weekly update's workflow (`.github/workflows/updates.yml`),
+  `plan` reads its runs on GitHub, with no credential, and prints `monday update: lock refreshed
+  <date> UTC, published by <run>`; a week with nothing to move still counts. None in the 8 days
+  before the run refuses the release whatever the cut (ruling plan#2351), so no earlier cut
+  answers it. Before `main` holds the workflow there is no such line and no such refusal: GitHub
+  runs it only from `main`.
 
 Re-run with every flag at once until nothing more changes; the last run is `plan.txt`.
 
@@ -158,6 +165,11 @@ Re-run with every flag at once until nothing more changes; the last run is `plan
 
 The answer moves the cut, so this comes before any rehearsal.
 
+- **The Monday update stopped** (`REFUSED -- no Monday update published ...`): STOP before
+  anything else, whatever else `plan` printed. Tell Josh in plain words that the weekly package
+  update has not finished a run in 8 days, with the page the line names. The release resumes at
+  step 2 once a run has published: fixing what stopped it is a card's work, and then
+  `gh workflow run updates.yml --ref main` starts a run.
 - **Refused (exit 1):** name the rule and the cards in plain words, then offer the line
   `newest earlier cut that passes`: "Release up to <its subject> (<its cards>); <the rest> goes in
   the next release", or "Stop". When that line says `none`, say no earlier cut passes and the one
@@ -195,9 +207,9 @@ echo "kit <its directory>: <the kit's command> $DUMP" >> "$R/rehearsal.txt"
 ```
 
 One such block per kit, each headed by its directory and command. A rehearsal of
-a driver or library change needs each side's own venv; the shared venv tracks the dev tip (trap
-k). A kit that fails is a STOP: the release is not put to Josh as rehearsed; report the failing
-grade to the lane.
+a driver or library change needs each side's own venv; this worktree's holds `dev`'s lock alone
+(trap k). A kit that fails is a STOP: the release is not put to Josh as rehearsed; report the
+failing grade to the lane.
 
 **What a lane writing a kit is told:**
 
@@ -224,8 +236,9 @@ grade to the lane.
 First list what the release changes of what production runs: the cut's tree against the base's,
 which is what step 6 releases, read as CI's write rule reads it (`tools/quill/_production.py`: the
 files the image holds, by Docker's own reading of `.dockerignore`, and the files outside it that
-build or run production), with each pull request's own part of it and, apart, each file no pull
-request's own change made:
+build or run production), with each pull request's own part of it, apart each file no pull request's
+own change made, and each version it moves in the files that pin versions, those outside production
+under a heading of their own:
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -250,6 +263,33 @@ Header "Release ok". The question lists, in plain words with each id after its w
   `git diff "$BASE" "$CUT" -- <file>` shows the release does to it: a merge's resolution kept or
   dropped a side there, and a hotfix a resync dropped leaves production. This skill keeps no list
   of production's files: its last one missed `docker-compose.yml`;
+- every version the release moves, each line under both of `production.txt`'s version headings, in
+  plain words: what moves (a package, an image, an action) from which version to which, `none` on a
+  side being one added or removed there, and a digest or commit cut to its first 12 characters; past
+  what the question holds (the lock's first release adds every package), say how many of each file
+  and that `production.txt` lists each. A change moving pinned versions alone lands with no card
+  (ruling plan#2351), so no card above names it. Keep the two lists apart and say what each covers
+  (neither heading prints when it has none):
+  - `versions moved`: production's files, which the app runs or is built from;
+  - `versions moved outside production`: the other files `tools/quill/_versions.py` reads for pins
+    (ruling plan#2876). A move here changes no file the app runs. A line of a workflow or of this
+    repository's own action is what `main`'s own workflows run from the merge;
+    `docker-compose.dev.yml`'s is what a development checkout pulls.
+
+  A file under both headings crossed production's line in this release: say that it left or entered
+  what production runs, never that its version was removed.
+
+  A release whose verdict reads `0 of production's files change` still comes to this question,
+  whether or not it moves a version. Say in plain words that no file of this repository's that the
+  app runs changes, and that the run goes on as any other: the merge builds a new image and step 10
+  asks him to log out for its deploy, as step 1 refuses the next release until production's image
+  names `main`'s commit. Say too that the new image is not the old one byte for byte: each build
+  installs Debian's newest system packages (the `Dockerfile`'s `apt-get` lines: OpenSSL, the
+  database client and its library) and compiles the database driver against them;
+- each card the release carries that `docs/runbook.md` 2.6 holds host steps for, in plain words:
+  what they change on the host, and that `shekel-deploy`'s own rollback cannot undo them; and each
+  host copy in 2.5's table that `production.txt` lists and no such step copies, which the deploy
+  leaves as it is on the host (finding plan#2567);
 - each kit's verdict, or that nothing needed rehearsal.
 
 Options: "Approve this release" or "Not now". "Not now" merges nothing (step 0's early end).
@@ -382,6 +422,18 @@ git -C ~/projects/Shekel fetch origin && git -C ~/projects/Shekel merge --ff-onl
 `scripts/_container_lib.sh`, which the deploy script sources from beside it (R-BAL254), is live from
 this moment: `shekel-deploy` runs that checkout's copy (trap u).
 
+Then that checkout's venv, at every release: the edit hooks in every worktree (ruling plan#1848) and
+the tracker's sync service run it, and each lane has its own for the rest (ruling plan#2828).
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+uv sync --locked --directory ~/projects/Shekel; echo "exit=$?"
+```
+
+Where a card this release carries names another sync in `docs/runbook.md` 2.6, that one runs in its
+place. Production reads nothing in this venv, so a failure holds nothing of the deploy: name it in
+the record (step 13) with uv's own words.
+
 Then `dev`. No one can push to `dev` (ruleset `dev-queue`, whose bypass list is empty, R-BAL322),
 so `main` reaches it as a pull request from `main` through `dev`'s merge queue, as CLAUDE.md's Git
 Workflow resyncs `dev` (measured on a throwaway repository 10-18: it lands, and `main` is not
@@ -429,6 +481,15 @@ deploy now" or "Not now". On "Not now" nothing deploys and `main` is ahead of pr
 record says so, and the next `/release` stops at step 1 until this one resumes here at step 9.
 
 ## 11. Deploy, verify, read main's CI
+
+**Host steps first.** `shekel-deploy` re-pins the image and nothing else, and its rollback restores
+the image alone. For each card the release carries that `docs/runbook.md` 2.6 holds host steps for,
+run them as 2.6 orders them around the block below, each block a call of its own opening with the
+source line, its output into `$R/host_<card>_<step>.txt`, and append the snapshot path a step prints
+for its rollback to `current.sh` as `HS`. A step, deploy or verify that fails after them is never
+answered by running `shekel-deploy` again: run their rollback only where 2.6 says it applies, then
+STOP and tell Josh, as for any rolled-back release; where 2.6 says it does not apply, STOP and ask
+Josh, with the ways out 2.6 names, before anything else.
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -481,10 +542,12 @@ With kits, the guard names `"${KITS:?}"` too, and each directory gets a `--kit` 
 
 `$R/README.md`: the base (production's commit), the cut, the release branch, the PR, the merge
 sha, the resync PR and its merge sha (`RS`, `RM`), the image digest old -> new, the dry run's
-stamp, the dump's path, and each verdict with its exit (plan, each kit, the checks, each queue run,
-the build, the dry run, the deploy, verify, main's CI, the census); a run that ended early says
+stamp, the dump's path, the host steps run and their snapshot (`HS`), and each verdict with its exit
+(plan, each kit, the checks, each queue run, the build, each host step, the dry run, the deploy,
+verify, main's CI, the census); a run that ended early says
 where and why, and names what it left open. Beside it: `plan.txt`, `production.txt`, `dump.txt`,
-`dump_err.txt` and `rehearsal.txt` (when rehearsed), `checks_<PR>.txt`, `checks_<RS>.txt`, each
+`dump_err.txt` and `rehearsal.txt` (when rehearsed), each `host_<card>_<step>.txt`,
+`checks_<PR>.txt`, `checks_<RS>.txt`, each
 `queue_<run>.txt`, `build_<run>.txt`, `build_log_<run>.txt`, `dryrun.txt`, `deploy_since.txt`,
 `deploy.txt`, `verify.txt`, `main_ci_<run>.txt`, `cleanup.txt`.
 

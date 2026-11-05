@@ -6,8 +6,8 @@ in the other mode.
 
 | Mode | Reverse proxy | Scope | Active files |
 |------|---------------|-------|--------------|
-| Bundled | `shekel-prod-nginx` (in-stack) | Single-stack hosts, fresh-host bring-up, the README Quick Start | `nginx-bundled/nginx.conf` |
-| Shared | A separate Nginx managed outside this stack | Hosts that already run a homelab Nginx in front of multiple services | `nginx-shared/nginx.conf`, `nginx-shared/conf.d/shekel.conf`, `docker-compose.prod.yml` |
+| Bundled | `shekel-prod-nginx` (in-stack) | Single-stack hosts, fresh-host bring-up, the README Quick Start | `nginx-bundled/nginx.conf`, `valkey/` |
+| Shared | A separate Nginx managed outside this stack | Hosts that already run a homelab Nginx in front of multiple services | `nginx-shared/nginx.conf`, `nginx-shared/conf.d/shekel.conf`, `docker-compose.prod.yml`, `valkey/` |
 
 The maintainer's production homelab runs **shared mode**. Generic deployments default to
 **bundled mode**.
@@ -29,6 +29,19 @@ deploy/
 │                                       conf.d/shekel.conf (per-service
 │                                       vhost included by the file
 │                                       above).
+├── valkey/
+│   ├── users.acl                       Valkey's ACL users and the
+│   │                                   commands each may run, the one
+│   │                                   home of those rules (ruling
+│   │                                   plan#2350).
+│   └── start.sh                        The valkey service's command in
+│                                       every compose file: adds the
+│                                       app user's password hash to the
+│                                       rules and starts the server.
+│                                       Both are mounted at
+│                                       /etc/valkey; a production host
+│                                       keeps a copy at /opt/docker/
+│                                       shekel/deploy/valkey/.
 └── docker-compose.prod.yml             Compose override that selects
                                         shared mode (joins the app to
                                         the dedicated shekel-frontend
@@ -73,7 +86,7 @@ In shared mode:
 
 - `deploy/docker-compose.prod.yml` joins `shekel-prod-app` to the external `shekel-frontend` bridge
   network (NOT the wider `homelab` network) and parks the bundled `shekel-prod-nginx` service in the
-  `disabled` profile, so `docker compose up -d` starts only `db`, `redis`, and `app`.
+  `disabled` profile, so `docker compose up -d` starts only `db`, `valkey`, and `app`.
 - The shared Nginx (managed under `/opt/docker/nginx/` on the host) proxies traffic to
   `shekel-prod-app:8000` over the `shekel-frontend` bridge, using the vhost in
   `deploy/nginx-shared/conf.d/shekel.conf`. Co-tenants like Jellyfin, Immich, and UniFi remain on
@@ -117,7 +130,9 @@ truth.
    git pull --ff-only
    sudo cp deploy/nginx-shared/nginx.conf            /opt/docker/nginx/nginx.conf
    sudo cp deploy/nginx-shared/conf.d/shekel.conf    /opt/docker/nginx/conf.d/shekel.conf
+   sudo cp docker-compose.yml                        /opt/docker/shekel/docker-compose.yml
    sudo cp deploy/docker-compose.prod.yml            /opt/docker/shekel/docker-compose.override.yml
+   sudo cp deploy/valkey/users.acl deploy/valkey/start.sh /opt/docker/shekel/deploy/valkey/
    ```
 
 3. Validate the Nginx config before reloading:
@@ -132,12 +147,17 @@ truth.
    sudo docker exec nginx nginx -s reload
    ```
 
-5. If only the compose override changed, recreate the affected containers:
+5. If a compose file or `deploy/valkey/` changed, recreate the affected containers. Valkey reads its
+   rules when it starts, and a rules change alters no compose setting, so restart it by name:
 
    ```bash
    cd /opt/docker/shekel
    docker compose up -d
+   docker compose up -d --force-recreate valkey   # when deploy/valkey/ changed
    ```
+
+A change that needs more than a copy (a renamed `.env` variable, a new file under `secrets/`)
+carries host steps of its own, in `docs/runbook.md` 2.6, which `/release` runs.
 
 See `docs/runbook.md` -> "Shared-mode deployment" for full details including the rollback procedure
 and the planned `scripts/config_audit.py` drift check.

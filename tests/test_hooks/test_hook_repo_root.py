@@ -46,7 +46,7 @@ introduced before review caught it: ``hook_repo_root`` had consumers in five
 files, and a further one inside ``_hooklib.sh`` itself -- the ``_hook_venv_bin``
 PATH prefix -- was asking "where does the pinned toolchain live", not "which
 tree is being edited".  For that question the MAIN checkout is the right
-answer, because worktrees carry no ``.venv`` of their own.  Re-pointing it at
+answer, because a worktree may carry no ``.venv`` of its own.  Re-pointing it at
 the session's worktree left the venv path naming a directory that does not
 exist, so ``pylint`` became unresolvable and the two gates that invoke it (the
 Python per-edit gate and the Stop floor) hard-blocked on "command not found"
@@ -300,9 +300,10 @@ class TestTheToolchainRootIsTheMainCheckout:
     """The H-1 regression's guard: two questions, two answers.
 
     ``_hook_venv_bin`` asks where the PINNED toolchain lives, which is not the
-    tree being edited.  Worktrees carry no ``.venv`` of their own -- measured
+    tree being edited.  A worktree may carry no ``.venv`` of its own -- measured
     across the eight on this machine on 2026-09-04: a real one in the primary,
-    a symlink in one worktree, nothing in the other six.  So this answers the
+    a symlink in one worktree, nothing in the other six; since ruling plan#2828 a
+    lane's is its own, but one made by hand still holds none.  So this answers the
     repository's MAIN worktree, as git names it from the library's own
     directory, whatever directory the session is in and whatever
     ``CLAUDE_PROJECT_DIR`` names (ruling plan#1848).  Otherwise the PATH prefix

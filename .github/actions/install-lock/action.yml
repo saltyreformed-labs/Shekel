@@ -1,0 +1,101 @@
+# Shekel Budget App -- a job's Python and packages, from uv.lock
+#
+# Every workflow job that runs Python on the runner takes it from here
+# (ruling balance:R-BAL294, plan#1027) but the update alert, which installs
+# nothing so a failed install cannot stop it (plan#2481); the two jobs that
+# build the app image (ci.yml's ``image`` and the release's) run Python only
+# inside it.  tools/ci/test_ci_workflow.py's INSTALLS and RUNNER_PYTHON hold
+# which job is which.  uv installs the interpreter ``.python-version`` names
+# and the packages ``uv.lock`` pins, every file checked against its sha256
+# (``--locked`` also refuses a lock that no longer matches pyproject.toml),
+# into ``.venv``, whose ``bin`` the job's later steps then find first on
+# PATH, beside the uv that installed it (the release rehearsal's bench runs
+# uv itself).  One recipe, so no job states a Python version or a package
+# version of its own.
+#
+# UV IS THE DOCKERFILE'S.  The first step below takes the binary its ``uv``
+# stage holds from .github/actions/dockerfile-uv, the one recipe for it, which
+# ci.yml's ``image`` job calls too: CI and the image's build run one uv
+# binary, and no third-party action installs it.
+#
+# THE INTERPRETER IS uv's OWN BUILD OF CPYTHON (``UV_PYTHON_PREFERENCE``
+# below): the newest release of ``.python-version``'s minor that this uv
+# lists, checked against the hash uv carries for it, whatever Python the
+# runner image holds, so it too moves only when the Dockerfile's uv does.
+# The image runs its base image's Python of the same minor (the Dockerfile's
+# FROM tags, which tests/test_deploy/test_image_supply_chain.py holds to
+# ``.python-version``); the patch releases can differ.
+#
+# NO WORKFLOW RESTORES A CACHE (ruling plan#2471).  Any job on main can
+# write main's Actions cache, whatever its token's permissions, and package
+# code runs there on every push and schedule: CI's jobs and the release's
+# tax-law check on each push to main, and the calendar sweep, the tax-law
+# watch and the dependency update on their schedules, the Monday refresh's
+# ``uv lock`` building source packages (.github/workflows/updates.yml).  A
+# cache restored from that scope would hand the bytes that code left to the
+# run restoring it, a pull request's, a queue group's or the release's.  So
+# uv's cache here is a directory of the job's own under ``RUNNER_TEMP``,
+# which the runner empties as each job starts and ends, and every package
+# the install reads is a download checked against the lock's hash.  The
+# app image's build, .github/actions/build-image (both image builds' one
+# recipe), reads no layer cache.  No check is built to refuse a cache coming
+# back: the exact-shape tests of this action and of the build action refuse
+# some forms in passing.  Review holds that line.
+
+name: Install the lock
+description: The job's Python from .python-version and its packages from uv.lock, by the Dockerfile's uv.
+
+inputs:
+  install:
+    description: >-
+      What the job installs from the lock: ``all`` (what ``uv sync``
+      installs: the runtime set and the dev group), ``runtime`` (the
+      runtime set alone; no dev tools), ``landing`` (the landing check's
+      packages alone, pyproject.toml's ``landing`` group) or ``python``
+      (the interpreter and no package).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: The Dockerfile's uv
+      id: uv
+      uses: $/.github/actions/dockerfile-uv
+
+    # pyproject.toml's ``require-build-hashes`` refuses a source build whose
+    # build tools no hash covers (its ``build-constraint-dependencies``, which
+    # uv records in the lock; ruling plan#2494) in this sync, which reads its
+    # settings.  An install set not named here fails.
+    #
+    # The PATH line is the one zizmor's github-env check flags: from this
+    # file it cannot see what triggers the workflows that call the action,
+    # and a PATH write is dangerous only under ``pull_request_target`` or
+    # ``workflow_run``.  It is ignored on that step alone (ruling plan#2376),
+    # and tools/ci/test_ci_workflow.py refuses any workflow that calls this
+    # action under either trigger, so the reason is checked, not only stated.
+    # The directories written are the workspace's own venv and the one the
+    # first step exported uv into, no input's value.
+    - name: Install from the lock
+      shell: bash
+      env:
+        UV: ${{ steps.uv.outputs.bin }}
+        INSTALL: ${{ inputs.install }}
+        UV_PYTHON_PREFERENCE: only-managed
+      run: | # zizmor: ignore[github-env]
+        set -euo pipefail
+        export UV_CACHE_DIR="${RUNNER_TEMP}/uv-cache"
+        sync=("${UV}" sync --locked)
+        case "${INSTALL}" in
+            all) "${sync[@]}" ;;
+            runtime) "${sync[@]}" --no-dev ;;
+            landing) "${sync[@]}" --only-group landing ;;
+            python) "${UV}" venv ;;
+            *)
+                echo "No install set '${INSTALL}': all, runtime, landing or python." >&2
+                exit 1
+                ;;
+        esac
+        {
+            echo "${GITHUB_WORKSPACE}/.venv/bin"
+            dirname "${UV}"
+        } >> "${GITHUB_PATH}"

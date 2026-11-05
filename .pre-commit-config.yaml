@@ -263,6 +263,27 @@ repos:
         files: ^tools/(rehearsal|ci)/.*\.py$
         pass_filenames: false
         args: [tools/rehearsal, -c, /dev/null, -q, -m, not cluster]
+      # tools/update: the Monday lock refresh (ruling plan#2351).  The same
+      # 10.00/10 floor and the same tests ci.yml step 4b runs.  It judges its
+      # lock through quill's door, so an edit to quill runs its tests too.
+      - id: pylint-update
+        name: pylint tools/update (10.00/10 floor)
+        entry: pylint
+        language: system
+        types: [python]
+        files: ^tools/update/.*\.py$
+        pass_filenames: false
+        args:
+          - tools/update/
+          - --fail-under=10
+          - --fail-on=E,F
+      - id: update-tests
+        name: tools/update unit tests
+        entry: pytest
+        language: system
+        files: ^tools/(update|quill)/.*\.py$
+        pass_filenames: false
+        args: [tools/update, -c, /dev/null, -q]
 
       # Every archived document says so on its first line (tools/ci/archive.py,
       # moved out of the plan gate when step X-cx's S3b deleted it): graded
@@ -286,15 +307,16 @@ repos:
       # All run language:system. The host binaries (shellcheck, shfmt,
       # biome, typos, gitleaks, hadolint) come off PATH; the pip tools
       # (yamllint, jactionlint, zizmor, djlint, rumdl) are invoked as
-      # `.venv/bin/<tool>` -- the repo's pinned copy from requirements-dev.txt
+      # `.venv/bin/<tool>` -- the repo's locked copy from uv.lock
       # -- and NOT off PATH, because a shell without the venv first on PATH
       # would otherwise run the host's package at whatever version Arch
       # ships (measured 2026-09-20: rumdl 0.2.73 on the host against 0.2.74
       # pinned, and the two reject each other's line wrapping), failing a
-      # commit for a reason belonging to neither the author nor CI. Every
-      # checkout carries `.venv` (CLAUDE.md: a worktree symlinks the main
-      # one), so the path is the one home of each pin and the host package
-      # is irrelevant. These mirror the ci.yml polyglot-lint job, which
+      # commit for a reason belonging to neither the author nor CI. A lane
+      # carries `.venv` (tools/quill/lane.py builds it from the lock, and
+      # scripts/test.sh builds it, or replaces an older lane's link, in any
+      # tree holding uv.lock), so the path is the one home of each pin and the
+      # host package is irrelevant. These mirror the ci.yml polyglot-lint job, which
       # installs the same pins; CI remains the enforced gate.
       - id: shellcheck
         name: shellcheck (shell; masked-errexit groups via .shellcheckrc)

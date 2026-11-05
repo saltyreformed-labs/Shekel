@@ -905,7 +905,6 @@ class TestProdConfigRejectsDockerSecretPlaceholder:
         # exception in the test body still rolls the env back.
         monkeypatch.setenv("SECRET_KEY", placeholder_value)
         monkeypatch.setenv("DATABASE_URL", "postgresql://x:x@x:5432/x")
-        monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://x:6379/0")
         try:
             reload(config_module)
             with pytest.raises(ValueError, match="known placeholder"):
@@ -1012,6 +1011,7 @@ class TestEntrypointLoaderSourceShape:
             ("APP_ROLE_PASSWORD", "app_role_password"),
             ("TOTP_ENCRYPTION_KEY", "totp_encryption_key"),
             ("TOTP_ENCRYPTION_KEY_OLD", "totp_encryption_key_old"),
+            ("VALKEY_PASSWORD", "valkey_password"),
         ],
     )
     def test_loader_is_invoked_for_each_secret(
@@ -1489,6 +1489,7 @@ class TestProdComposeSecretsBlock:
             "postgres_password",
             "app_role_password",
             "totp_encryption_key",
+            "valkey_password",
         ],
     )
     def test_top_level_secrets_block_declares_secret(
@@ -1516,6 +1517,7 @@ class TestProdComposeSecretsBlock:
             "postgres_password",
             "app_role_password",
             "totp_encryption_key",
+            "valkey_password",
         ],
     )
     def test_app_service_grants_access_to_secret(
@@ -1626,8 +1628,9 @@ class TestProdComposeMergedConfig:
             "SECRET_KEY": "test-secret-key",
             "APP_ROLE_PASSWORD": "test-app-role-password",
             "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # Phase B3 Redis ACL hardening interpolation.
-            "SHEKEL_REDIS_PASSWORD": "test-redis-password",
+            # The Valkey password the app and the valkey service
+            # interpolate (``${SHEKEL_VALKEY_PASSWORD:?...}``).
+            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
         }
         result = subprocess.run(
             [

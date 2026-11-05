@@ -19,7 +19,7 @@ salary:R-SAL74, R-SAL86, R-SAL87).  The GitHub alarms run it:
   starts (``--starts-epoch``), and the build refuses once that has passed.
 
 The third alarm, the banner on every owner page, reads the same check in
-``app/__init__.py``; this script is not in its path.
+``app/context_processors.py``; this script is not in its path.
 
 Usage:
     python scripts/check_tax_law.py notice    # fails from November 1

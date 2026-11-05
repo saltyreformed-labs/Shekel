@@ -20,6 +20,7 @@ import functools
 import os
 import re
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 #: What no user setting may add to git's output (``log.showSignature`` puts gpg
@@ -61,29 +62,36 @@ def _binding_variables() -> frozenset[str]:
     return frozenset(done.stdout.split())
 
 
-def run(root: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+def run(root: Path, *args: str, stdin: str | None = None,
+        environment: Mapping[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     """Run one git command in ``root`` and in no other repository; the finished process.
 
     The environment it inherits loses :func:`_binding_variables`, so whatever
     the caller is bound to, ``root`` is the repository touched.  ``stdin`` is
     the text the command reads (``git mktree``, ``git hash-object --stdin``);
     None leaves it the caller's own, as every call was before ``stdin`` existed.
+    ``environment`` holds variables set beside what it inherits
+    (``GIT_TERMINAL_PROMPT``, for a read of a remote that must never wait on a
+    terminal).
     """
     binding = _binding_variables()
     return subprocess.run(
         ["git", *_PLAIN, "-C", str(root), *args], capture_output=True, text=True, check=False,
         input=stdin,
-        env={name: value for name, value in os.environ.items() if name not in binding},
+        env={**{name: value for name, value in os.environ.items() if name not in binding},
+             **(environment or {})},
     )
 
 
-def git(root: Path, *args: str, stdin: str | None = None) -> str:
-    """Run one git command in ``root``, reading ``stdin`` (:func:`run`); its standard output.
+def git(root: Path, *args: str, stdin: str | None = None,
+        environment: Mapping[str, str] | None = None) -> str:
+    """Run one git command in ``root``, reading ``stdin``, with ``environment`` beside what it
+    inherits (:func:`run`); its standard output.
 
     Raises:
         GitError: when git exits non-zero, with its stderr.
     """
-    done = run(root, *args, stdin=stdin)
+    done = run(root, *args, stdin=stdin, environment=environment)
     if done.returncode:
         raise GitError(f"git {' '.join(args)}: {done.stderr.strip()}")
     return done.stdout

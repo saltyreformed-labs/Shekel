@@ -9,10 +9,10 @@ def production_env(database_url: str) -> dict:
     """Build the child's environment: the production config, on *database_url*.
 
     Only what Python needs to run is inherited.  ``ProdConfig`` refuses to
-    start without a SECRET_KEY of real length and a non-memory rate-limit
-    store; neither is contacted by a child that only reads and writes its
-    database.  An explicitly EMPTY ``DATABASE_URL_APP`` (the config resolver
-    reads it as unset) leaves no other database to reach.
+    start without a SECRET_KEY of real length and its rate-limit store's
+    password; a child that only reads and writes its database uses neither.
+    An explicitly EMPTY ``DATABASE_URL_APP`` (the config resolver reads it as
+    unset) leaves no other database to reach.
 
     Args:
         database_url: The URL of this test's database, password included.
@@ -31,6 +31,6 @@ def production_env(database_url: str) -> dict:
         "DATABASE_URL": database_url,
         "DATABASE_URL_APP": "",
         "SECRET_KEY": secrets.token_hex(32),
-        "RATELIMIT_STORAGE_URI": "redis://127.0.0.1:6379/0",
+        "VALKEY_PASSWORD": secrets.token_hex(16),
     })
     return env

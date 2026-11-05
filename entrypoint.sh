@@ -19,7 +19,7 @@ entrypoint_failed() {
     echo "Common causes:"
     echo "  - PostgreSQL is not ready or not reachable"
     echo "  - Missing or invalid values in .env (POSTGRES_PASSWORD,"
-    echo "    SECRET_KEY, APP_ROLE_PASSWORD)"
+    echo "    SECRET_KEY, APP_ROLE_PASSWORD, SHEKEL_VALKEY_PASSWORD)"
     echo "  - Database migration conflict"
     echo "  - Audit triggers absent or short of the expected count"
     echo ""
@@ -105,6 +105,11 @@ _load_secret POSTGRES_PASSWORD postgres_password
 _load_secret APP_ROLE_PASSWORD app_role_password
 _load_secret TOTP_ENCRYPTION_KEY totp_encryption_key
 _load_secret TOTP_ENCRYPTION_KEY_OLD totp_encryption_key_old
+# The rate-limit store's password, from the file the valkey service's
+# deploy/valkey/start.sh reads first too, so the two read one source
+# (ruling plan#2633).  The app's configuration refuses to build without
+# it (app/config.py, _ValkeyStore).
+_load_secret VALKEY_PASSWORD valkey_password
 
 # Rebuild DATABASE_URL and DB_PASSWORD when POSTGRES_PASSWORD came
 # from a secret file.  The compose file's interpolation baked the
@@ -132,10 +137,10 @@ fi
 unset _postgres_password_loaded_from_file
 
 # ── 0a. Validate SECRET_KEY shape ─────────────────────────────────
-# Flask's ProdConfig.__init__ also validates SECRET_KEY, but it only
-# fires once Python imports the config -- after entrypoint has already
-# run migrations.  We catch misconfiguration here so the database is
-# never touched under a placeholder key.  The placeholder list below
+# Flask's ProdConfig.__init__ also validates SECRET_KEY, but it fires
+# only once a script builds the app (init_database.py, step 3) -- after
+# steps 2 and 2b have run psql.  We catch misconfiguration here so the
+# database is never touched under a placeholder key.  The placeholder list below
 # must stay in sync with _KNOWN_DEFAULT_SECRETS in app/config.py.
 # 32 is the minimum length matching _MIN_SECRET_KEY_LENGTH.
 if [ -z "${SECRET_KEY:-}" ]; then

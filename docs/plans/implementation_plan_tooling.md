@@ -25,7 +25,7 @@ than one arc's argument:
   harness a test runs in, as distinct from what a test asserts about the app.
 - **Deploy and the host**: the images, compose files, nginx, cloudflared, backups, the deploy
   scripts and the release tool.
-- **Dependencies**: `requirements*.txt`, the Python version, and the base images.
+- **Dependencies**: `pyproject.toml` and `uv.lock`, the Python version, and the base images.
 - **The development environment**: worktrees, virtualenvs and the dev server.
 - **Security work that no other arc's argument covers**: the host, the image, the network in front
   of the app, sign-in and sessions.

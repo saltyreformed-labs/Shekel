@@ -19,13 +19,32 @@ production already runs names nothing of it.  A file the release changes that no
 request's own change touches is named apart (:attr:`Changes.unowned`): a merge's resolution
 that kept or dropped a side, or an ignore-file edit meeting a file the other branch brought;
 the sum of the pull requests' own changes would miss it.
+
+**And each version it moves** (:attr:`Changes.versions`, ruling plan#2351): a change moving
+pinned versions alone lands with no card, so no card the approval question names carries it.
+Each file that pins versions the release changes is read on each side for what it pins
+(:func:`tools.quill.door.versions_moved`), by the lock reader and the line patterns the landing
+check reads a move with (``tools/quill/_versions.py``), and never asked whether the change is
+version-only: a release carries cards' own edits to the Dockerfile and the lock beside what an
+update moved.
+
+**And apart, each version it moves outside production** (:attr:`Changes.outside`, ruling
+plan#2876): ``main`` runs its own copy of every workflow from the merge, so a pin only they hold
+waits for a release too, the release-due issue names it, and the approval question is the
+developer's one gate.  By the same walk over the rest of each side's tree
+(:func:`tools.quill.door.changed_outside`).  A file that crosses production's line in the release
+is on both lists, against none on the side each does not hold it: ``v1 -> none`` on the one it
+leaves and ``none -> v2`` on the one it enters, so no version either side pins is named nowhere.
+For a file staying on its side, the two lists together are the whole tree's moves, which the issue
+lists; for one crossing, the issue names ``v1 -> v2`` where these name two lines, and nothing at
+all where its version did not move.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.quill.door import changed
+from tools.quill.door import Moved, changed, changed_outside, versions_moved
 from tools.release._model import first_parent_line
 
 
@@ -43,11 +62,15 @@ class Change:
 @dataclass(frozen=True)
 class Changes:
     """What a release changes of what production runs: ``net``, each path where production
-    built from the cut differs from production built from the base, in order; and ``pulls``,
-    each pull request, newest first, with its own part of it."""
+    built from the cut differs from production built from the base, in order; ``pulls``,
+    each pull request, newest first, with its own part of it; ``versions``, each thing whose
+    versions it moves in those paths, by path and then by what it is; and ``outside``, each it
+    moves in the rest of each side's tree, likewise."""
 
     net: tuple[str, ...]
     pulls: tuple[Change, ...]
+    versions: tuple[Moved, ...] = ()
+    outside: tuple[Moved, ...] = ()
 
     @property
     def unowned(self) -> tuple[str, ...]:
@@ -57,16 +80,19 @@ class Changes:
 
 
 def changes(root: Path, base: str, cut: str) -> Changes:
-    """What the release ``<base>..<cut>`` changes of what production runs, and each pull
-    request's own part of it.
+    """What the release ``<base>..<cut>`` changes of what production runs, each pull
+    request's own part of it, and each version it moves there and, apart, outside it.
 
     Raises:
         tools.quill.door.IgnoreFileError: when an ignore file at the base, the cut or either
             side of a merge holds a pattern Docker refuses.
+        tools.quill.door.NotVersions: as :func:`tools.quill.door.versions_moved` raises it.
         tools.ci.gitcmd.GitError: when git cannot read the range or a commit.
     """
-    net = changed(root, base, cut)
+    production = changed(root, base, cut)
+    net = tuple(production)
     pulls = tuple(Change(sha, subject,
                          tuple(path for path in changed(root, f"{sha}^1", sha) if path in net))
                   for sha, subject in first_parent_line(root, base, cut))
-    return Changes(net, pulls)
+    return Changes(net, pulls, versions_moved(root, production),
+                   versions_moved(root, changed_outside(root, base, cut)))

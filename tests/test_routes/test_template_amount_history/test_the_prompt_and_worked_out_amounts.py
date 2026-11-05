@@ -29,6 +29,7 @@ from tests._test_helpers import (
     transfer_amount,
     transfer_repriced_by_the_owner,
 )
+from tests.conftest import log_in_seed_user
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 from tests._definition_price import newest_price
 
@@ -553,15 +554,25 @@ class TestTheBoxIsReadOnTheOwnersDay:
     _RISE = "200.00"
 
     @staticmethod
-    def _split_the_clocks(monkeypatch):
+    def _split_the_clocks(monkeypatch, client):
         """Freeze the process day one ahead of the owner's; return the owner's day.
 
         1:00 UTC on the process day is the previous evening in the owner's
         timezone (America/New_York, UTC-4 or UTC-5), so ``date.today()``,
         the read pass's day, answers one day after ``display_today()``.
+
+        ``client`` posts the login form again on the moved clock: it signed in
+        on the real one, and the idle timeout measures against the clock this
+        freeze moves.  Where the process runs more than eleven hours ahead of
+        UTC, 1:00 UTC on its day can be over the timeout's twelve hours past the
+        sign-in (from 10:00 to 13:00 UTC a day under CI's Pacific/Kiritimati),
+        which logs the session out and leaves the edit route a redirect with no
+        form.  An aged-out session then signs in anew; a live one only has its
+        activity stamped on the moved clock.
         """
         process_day = date.today()
         freeze_today(monkeypatch, process_day, at_time=time(1, 0))
+        log_in_seed_user(client)
         owners_day = display_today()
         assert owners_day == process_day - timedelta(days=1), (
             "precondition: the process day runs one ahead of the owner's"
@@ -591,7 +602,7 @@ class TestTheBoxIsReadOnTheOwnersDay:
     ):
         """$178.00 today, $200.00 from the owner's tomorrow: a rename keeps both as they are."""
         with app.app_context():
-            owners_day = self._split_the_clocks(monkeypatch)
+            owners_day = self._split_the_clocks(monkeypatch, auth_client)
             template = _template_with_history(seed_user, [
                 (date(2020, 4, 1), self._PRICE),
                 (owners_day + timedelta(days=1), self._RISE),
@@ -620,7 +631,7 @@ class TestTheBoxIsReadOnTheOwnersDay:
     ):
         """The transfer twin: the box offers $178.00, and the rename restates nothing."""
         with app.app_context():
-            owners_day = self._split_the_clocks(monkeypatch)
+            owners_day = self._split_the_clocks(monkeypatch, auth_client)
             template = _transfer_template(seed_user, amount=self._PRICE)
             tas.set_amount(
                 template, Decimal(self._RISE),

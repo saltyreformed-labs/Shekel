@@ -42,8 +42,10 @@ def rewind_rule_unit_flag(db_session):
     """Take the weekday reading, then the flag, its key and its two CHECKs, off the rules.
 
     It leaves head's schema without those objects and NOT any particular
-    revision.  The ORM model on this tree maps the flag and the reading, so an
-    ORM read of a rule finds no column until :func:`replay_rule_unit_flag` runs.
+    revision, and ``897a6663d221``'s ``downgrade()`` puts back what that revision
+    dropped: ``budget.recurrence_weekday_anchors`` and its audit trigger.  The ORM
+    model on this tree maps the flag and the reading, so an ORM read of a rule
+    finds no column until :func:`replay_rule_unit_flag` runs.
 
     Args:
         db_session: The test ``db.session``, in the scope that holds the

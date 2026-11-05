@@ -9001,13 +9001,10 @@ def validated_cadence(
     # module is imported by tests that run before the Flask app, and therefore
     # the ref cache, exists.
     # Pylint: ``import-outside-toplevel`` is the point, not an oversight.
-    from app.enums import (  # pylint: disable=import-outside-toplevel
-        PeriodPlacementEnum,
-        RecurrenceUnitEnum,
-    )
-    from app.routes._recurrence_form_render import (  # pylint: disable=import-outside-toplevel
-        create_form_default_starts_on,
-    )
+    # pylint: disable=import-outside-toplevel
+    from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
+    from app.routes._recurrence_form_render import create_form_default_starts_on
+    from app.services.recurrence import MonthReading
 
     payload = {
         "recurrence_unit": (
@@ -9025,11 +9022,6 @@ def validated_cadence(
             else create_form_default_starts_on()
         )
     if nominal_day is not None:
-        # The schema hands the "repeating on" choice to a helper as the ONE
-        # value its token names (plan step recurrence:R8-c).
-        from app.services.recurrence import (  # pylint: disable=import-outside-toplevel
-            MonthReading,
-        )
         payload["repeats_on"] = MonthReading(nominal_day=nominal_day)
     if max_per_month is not None:
         payload["max_per_month"] = max_per_month

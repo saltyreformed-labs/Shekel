@@ -17,8 +17,10 @@ is reached through :func:`_price`, which dispatches on what the tree HAS.  The
 card statement's three functions, which take the card's dated terms SERIES
 since plan#2331 (ruling plan#2333), are reached the same way, through
 :func:`_card_due_date`, :func:`_card_cycle` and :func:`_card_statements`: on a
-one-version series every answer is the bare day's, so the digests stand.  The
-first line names the side; diff from line 2.
+one-version series every answer is the bare day's, so the digests stand.  So is
+the month walk, which takes a coordinate's day since plan step recurrence:R8-c
+and a bare day before it (:func:`_walk_months`).  The first line names the side;
+diff from line 2.
 
 **Two halves, because each is blind where the other looks.**
 
@@ -82,7 +84,8 @@ from app.services.cash_ledger import _loan_installment
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.pay_calendar import _grid
 from app.services.pay_rhythm import Monthly, SemiMonthly
-from app.services.recurrence import DayOfMonth, _months
+from app.services import recurrence
+from app.services.recurrence import _months
 from app.utils.dates import (
     CALENDAR_DATE_MAX,
     CALENDAR_DATE_MIN,
@@ -155,6 +158,14 @@ def _card_series(close_day, due_day):
         effective_date=CALENDAR_DATE_MIN, statement_close_day=close_day,
         payment_due_day=due_day,
     )]
+
+
+def _walk_months(start, nominal, step):
+    """``_months.walk_months`` on whichever signature this tree has."""
+    if "nominal_day" in inspect.signature(_months.walk_months).parameters:
+        return _months.walk_months(start, nominal, step)
+    day_of_month = getattr(recurrence, "DayOfMonth")
+    return _months.walk_months(start, day_of_month(nominal).date_in, step)
 
 
 def _card_due_date(closes, due_day):
@@ -260,8 +271,7 @@ def pure_sequences():
     for start in MONTHS[::7]:
         for nominal in NOMINAL_DAYS:
             for step in (1, 2, 3, 6, 12, 24, 120):
-                dates = list(_months.walk_months(
-                    start, DayOfMonth(nominal).date_in, step))
+                dates = list(_walk_months(start, nominal, step))
                 walk.add((len(dates), dates[:30], dates[-3:]))
     for digest in (installments, statements, walk):
         print(digest.line())

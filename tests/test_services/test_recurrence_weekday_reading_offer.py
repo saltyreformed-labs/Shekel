@@ -15,7 +15,9 @@ what :func:`~app.services.recurrence.describe` says of the same rule, so the
 form offers a reading in the words the Recurring row then shows.  Nov 1 2026
 is a Sunday and Nov 30 2026 a Monday.
 
-Pure: no database, so no ``app`` fixture.
+No database read: what a unit's reference row states comes from the reference
+cache, which the session-wide ``setup_database`` loads, so no case here asks for
+the ``app`` fixture.
 """
 import calendar
 import json

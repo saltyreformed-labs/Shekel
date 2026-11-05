@@ -6,9 +6,8 @@ the one fact the date cannot carry itself** (plan step ``recurrence:R8-c``,
 rulings **plan#2668** and **plan#2670**, amending **R-R25**), so a rule states
 it and nothing else:
 
-* **by its day of the month** -- today's only reading.  ``nominal_day`` holds
-  the meant day when ``starts_on``'s own month clamped it (ruling **R-R3**,
-  :mod:`._nominal_day`).
+* **by its day of the month** -- ``nominal_day`` holds the meant day when
+  ``starts_on``'s own month clamped it (ruling **R-R3**, :mod:`._nominal_day`).
 * **by its weekday counted from the month's start** -- "the third Tuesday".
   The week number ``(day - 1) // 7 + 1`` and the weekday both come from
   ``starts_on``, so neither is stored and neither can disagree with the date
@@ -38,7 +37,9 @@ both value types hold (:func:`_require_weekday_reading_pair`).
 :mod:`._nominal_day` (the month's last day a week is counted back from), neither
 of which imports it, and nothing of :mod:`._resolution`, which imports it.
 
-Pure: no Flask, no ORM, no clock, no database.
+No Flask, no ORM, no clock, and no database read: what a unit's reference row
+states comes from the reference cache, loaded once per process (ruling
+plan#2748).
 """
 import enum
 from abc import ABC, abstractmethod
@@ -118,8 +119,10 @@ class MonthCoordinate(ABC):
     here would be a partial function over a closed set, and a shape added
     without its date would walk on a day nobody chose.
 
-    Built by :func:`month_coordinate` and nowhere else in the application, so
-    a shape always agrees with the first date it was read from.
+    A shape that walks is built by :func:`month_coordinate` and nowhere else in
+    the application, so it always agrees with the first date it was read from.
+    The form's offer also asks :func:`weekday_shape` for shapes read from no
+    date (``_picker._weekday_label``), and only for their words.
     """
 
     @abstractmethod
@@ -292,8 +295,9 @@ class WeekdayReadingWindow:
 
 
 #: The ONE statement of which dates each weekday reading can read, keyed by
-#: the reading so a member added to :class:`WeekdayReading` without a window
-#: raises ``KeyError`` rather than being offered for every date.
+#: the reading.  A member added to :class:`WeekdayReading` without a window is
+#: never offered, because :func:`offerable_weekday_readings` iterates this table,
+#: and :func:`month_coordinate` refuses it (:func:`_unshaped`).
 #:
 #: * From the start, the 1st-4th of a weekday: no fifth (ruling plan#2670).
 #: * From the end, the month's last such weekday: the 1st counted back.
@@ -455,8 +459,8 @@ def offerable_weekday_readings(
     (``_picker._PLACES``), so the browser and the write door apply one rule.
 
     A 22nd-28th that is also within a week of the end offers both, and they
-    are different cadences: Fri 2027-01-22 is the fourth Friday and Jan 29
-    the last, so from February on the two part wherever a month holds five.
+    are different cadences: Mon 2027-01-25 is the fourth Monday and the last,
+    and the two part wherever a month holds five, first at Mar 22 against Mar 29.
 
     Args:
         unit: The cadence unit.  A cadence not measured in whole months has no

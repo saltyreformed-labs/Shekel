@@ -329,8 +329,9 @@ def scheduling_day_of_month(rule: RecurrenceRule) -> int | None:
     It is ``_authoring._author``'s own expression, moved rather than restated:
     the day the cadence fires on
     (:attr:`~app.services.recurrence.ResolvedRecurrence.day_of_month`, the join
-    of ``starts_on``'s day with ``nominal_day``), gated on the ``(unit,
-    placement)`` PAIR rather than on the unit alone.  Measured on a 2026-08-16
+    of ``starts_on``'s day with ``nominal_day``, and no day for a rule read by
+    its weekday), gated on the ``(unit, placement)`` PAIR rather than on the
+    unit alone.  Measured on a 2026-08-16
     production clone: 0 of
     46 live rules disagree with the stored column, and the migration that drops
     it asserts the same equality in SQL before the ``ALTER TABLE``.
@@ -363,7 +364,8 @@ def scheduling_day_of_month(rule: RecurrenceRule) -> int | None:
     Returns:
         The day 1-31 the rule's rows are scheduled on, or ``None`` for a
         cadence that schedules on no day of the month -- a pay-period or
-        weekly cadence, or a calendar one funded from a later paycheck.
+        weekly cadence, a calendar one funded from a later paycheck, or one
+        read by its weekday, whose day moves from month to month.
 
     Raises:
         RecurrenceResolutionError: When the row names a unit or a placement

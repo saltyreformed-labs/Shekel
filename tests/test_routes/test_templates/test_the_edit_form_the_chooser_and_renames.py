@@ -110,13 +110,11 @@ class TestTemplateUpdate:
             # step R7c-c**: ``nominal_day`` (now ``repeats_on``) joined
             # ``_form_errors.ACTIONABLE_FLASH_FIELDS`` there, because the pair
             # rule beside this domain check authors a real sentence naming the
-            # control and it was reaching nobody.  The stock Range message
+            # control and it was reaching nobody.  The field's own refusal
             # rides in with it, which is the better of the two answers -- it
             # names the control, where the banner states nothing on a redirect
             # that highlights nothing.  Only a crafted POST sees it: the
             # control is a ``<select>`` whose options post their own tokens.
-            # Marshmallow's range sentence stood here until the field became
-            # a token field at R8-c; its own refusal took the sentence's place.
             assert b"Invalid repeat day." in resp.data
 
     def test_update_template_idor(self, app, auth_client, seed_user):

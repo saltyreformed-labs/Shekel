@@ -9,7 +9,9 @@ counted by hand off a calendar, never recomputed with the function under test:
 Nov 1 2026 is a Sunday, Jan 1 2027 a Friday, Nov 1 2027 a Monday, Nov 1 2028
 a Wednesday and Dec 31 2100 a Friday.
 
-Pure: no database, so no ``app`` fixture.
+No database read: what a unit's reference row states comes from the reference
+cache, which the session-wide ``setup_database`` loads, so no case here asks for
+the ``app`` fixture.
 """
 import calendar
 from datetime import date, timedelta

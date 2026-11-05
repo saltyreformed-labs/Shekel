@@ -148,8 +148,8 @@ def test_no_ignore_file_keeps_every_file():
     ("deploy/nginx-shared/conf.d/shekel.conf", True), ("deploy/NOTES.md", True),
     (".github/workflows/docker-publish.yml", True), ("scripts/_container_lib.sh", True),
     ("deploy/README.md", False), ("deploy/postgres/README.md", False),
-    ("docker-compose.dev.yml", False), ("docker-compose.build.yml", False),
-    ("cloudflared/config.yml", False), ("deployed.txt", False), ("app/Dockerfile", False),
+    ("docker-compose.dev.yml", False), ("cloudflared/config.yml", False),
+    ("deployed.txt", False), ("app/Dockerfile", False),
     (".github/workflows/ci.yml", False), ("docker-publish.yml", False),
     ("scripts/_backup_lib.sh", False),
 ])

@@ -537,7 +537,7 @@ Last evaluated: 2026-03-23
 | 8A                       | Security Hardening             | Complete    | MFA/TOTP, rate limiting, session mgmt, CSP          |
 | 8B                       | Audit & Structured Logging     | Complete    | PG triggers on 22 tables, JSON logs, Promtail       |
 | 8C                       | Backups & Disaster Recovery    | Complete    | pg_dump, retention, restore, integrity checks       |
-| 8D                       | Production Deployment          | Complete    | Docker, Nginx, Cloudflare Tunnel, CI, deploy.sh     |
+| 8D                       | Production Deployment          | Complete    | Docker, Nginx, Cloudflare Tunnel, CI, shekel-deploy |
 | 8E                       | Multi-User Groundwork          | Complete    | Registration, user_id audit, data isolation tests   |
 | UI/UX                    | Remediation                    | Complete    | Nav restructure, settings consolidation, polish     |
 | --                       | Production Readiness Audit     | Complete    | IDOR fixes, ownership guards, pool config, docs     |

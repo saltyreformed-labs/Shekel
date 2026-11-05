@@ -125,8 +125,8 @@ Crontab entries (replace `/opt/shekel` with your actual path):
 ### 2.1 Deploying a New Version
 
 Production deploys with `shekel-deploy`, which pins `ghcr.io/saltyreformed-labs/shekel@sha256:...`,
-cosign-verified, on the hardened stack at `/opt/docker/shekel`. A self-hosted install runs the same
-signed image and updates by 2.2. Development is `docker-compose.dev.yml`.
+cosign-verified, on the hardened stack at `/opt/docker/shekel`. A self-hosted install runs the image
+CI builds and signs, and updates by 2.2. Development is `docker-compose.dev.yml`.
 
 ```bash
 shekel-deploy                  # pull :latest, deploy if the digest is new
@@ -180,7 +180,8 @@ sudo ln -sfn /home/josh/projects/Shekel/deploy/shekel-deploy.sh \
 
 A self-hosted install is the README's Quick Start: the image CI builds and signs on `main`, and the
 configuration files of the commit that image was built from. A release changes both, so an update
-takes both, by the README's Updating section. Migrations run on the new container's start.
+takes both, by the README's Updating section. Migrations run on the new container's start. The
+README's steps check no signature; `deploy/README.md`'s `cosign verify` command does.
 
 ### 2.3 Rolling Back
 
@@ -583,30 +584,38 @@ last. (plan#2728's review, read in GitHub's documentation; not measured.)
 
 ```bash
 REPO=repos/saltyreformed-labs/Shekel
+gh api "$REPO/environments/update" --jq .deployment_branch_policy; echo "exit=$?"
 gh api "$REPO/environments/update/deployment-branch-policies" --jq '[.branch_policies[] | {name, type}]'; echo "exit=$?"
 gh api "$REPO/environments/update/secrets" --jq '[.secrets[].name]'; echo "exit=$?"
 gh api "$REPO/actions/secrets" --jq '[.secrets[].name]'; echo "exit=$?"
 ```
 
-Each must exit 0. The first must list exactly one policy, `name` `main` and `type` `branch`; the
-second must list `UPDATE_APP_KEY`; the third must not. Anything else is a STOP: nothing merges.
+Each must exit 0. The first must say `custom_branch_policies` is true, as a rule listed but not
+enforced restricts nothing; the second must list exactly one policy, `name` `main` and `type`
+`branch`; the third must list `UPDATE_APP_KEY`; the fourth must not. Anything else is a STOP:
+nothing merges.
 
 **Rollback:** none. Until the merge, no workflow on `main` names the key, so the steps can stay
 whether or not the release goes on, and `shekel-deploy`'s rollback leaves them as they are.
 
-**Measured** 2026-11-05T12:26Z, before the steps: the first two reads answered 404 and exit 1, and
-the third printed `["PLAN_READER_KEY","UPDATE_APP_KEY"]`, so the read-back refuses until they are
-done. No environment exists to read yet, so what it reads of a policy comes from GitHub's REST
-reference, not a run.
+**Measured** 2026-11-05, before the steps: the first three reads answered 404 and exit 1, and the
+fourth printed `["PLAN_READER_KEY","UPDATE_APP_KEY"]`, so the read-back refuses until they are done.
+No environment exists to read yet, so what it reads of an environment and a policy comes from
+GitHub's REST reference, not a run.
 
 #### The Valkey switch (plan#1183)
 
-**This ships as its own release**, cut at plan#2718's merge, which landed after plan#1183's and
-deleted the source-build deploy, as that could not cross this switch. Nothing that needs a rehearsal
-kit rides with it: the kit's bench refuses a side with no `uv.lock`, which `main` is until this
-release, so a card landed between the two merges that needs a kit is a STOP for the developer. The
-switch has no rehearsal of its own (ruling plan#2473): CI's real-store test, the rehearsal measured
-below and `verify_prod_deploy.sh`'s `GET /login` answer for it.
+**This release is cut at or after plan#2718's merge**, which landed after plan#1183's and deleted
+the source-build deploy, as that could not cross this switch. The switch has no rehearsal of its own
+(ruling plan#2473): CI's real-store test, the rehearsal measured below and `verify_prod_deploy.sh`'s
+`GET /login` answer for it.
+
+**Until question plan#2944 is ruled, it stops at `/release` step 3.** `dev` also holds plan#1192,
+whose pull request #655 landed just after the last release reached `main`. It moves money and has no
+rehearsal kit, so `release plan` refuses the cut (measured 2026-11-05 at `84bae6be8`:
+`newest earlier cut that passes: none`). A kit cannot ride with this release: its bench refuses a
+side with no `uv.lock`, which `main` is until this release, so any other carried card that needs a
+kit is the same STOP.
 
 The release carrying plan#1183 moves the rate limiter's store from Redis to Valkey (R-BAL298). The
 image and the host files must move together, and only the steps below move them back:

@@ -284,10 +284,7 @@ from app.services.recurrence._months import (
     walk_months,
 )
 from app.services.recurrence._resolution import ResolvedRecurrence
-from app.utils.dates import CALENDAR_DATE_MAX
-
-#: Days in a week, for the ``WEEK`` unit's stride.
-_DAYS_PER_WEEK = 7
+from app.utils.dates import CALENDAR_DATE_MAX, DAYS_PER_WEEK
 
 
 class RecurrenceGenerationError(ShekelError):
@@ -336,7 +333,7 @@ def _week_walk(anchor: date, interval_n: int) -> Iterator[date]:
     """
     for ordinal in range(
         anchor.toordinal(), CALENDAR_DATE_MAX.toordinal() + 1,
-        _DAYS_PER_WEEK * interval_n,
+        DAYS_PER_WEEK * interval_n,
     ):
         yield date.fromordinal(ordinal)
 

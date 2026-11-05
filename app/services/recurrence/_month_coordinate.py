@@ -35,11 +35,11 @@ readings a date allows (:func:`offerable_weekday_readings`) and the refusal
 both value types hold (:func:`_require_weekday_reading_pair`).
 
 **The dependency runs ONE way**: this module imports :mod:`._frequency` and
-nothing of :mod:`._resolution`, which imports it.
+:mod:`._nominal_day` (the month's last day a week is counted back from), neither
+of which imports it, and nothing of :mod:`._resolution`, which imports it.
 
 Pure: no Flask, no ORM, no clock, no database.
 """
-import calendar as calendar_module
 import enum
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -50,6 +50,7 @@ from app.services.recurrence._frequency import (
     RecurrenceResolutionError,
     has_day_of_month_coordinate,
 )
+from app.services.recurrence._nominal_day import last_day_of_month
 from app.utils.dates import (
     DAYS_PER_WEEK,
     SHORTEST_MONTH_DAYS,
@@ -319,8 +320,7 @@ def week_of_month(day: date, *, counts_from_end: bool) -> int:
         for the next seven, and so on to 5.
     """
     if counts_from_end:
-        last_day = calendar_module.monthrange(day.year, day.month)[1]
-        return (last_day - day.day) // DAYS_PER_WEEK + 1
+        return (last_day_of_month(day) - day.day) // DAYS_PER_WEEK + 1
     return (day.day - 1) // DAYS_PER_WEEK + 1
 
 

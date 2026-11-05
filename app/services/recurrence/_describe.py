@@ -326,31 +326,16 @@ def _day_phrase(coordinate: DayOfMonth, resolved: ResolvedRecurrence) -> str:
     return f"{_first_month(resolved)} {coordinate.day}"
 
 
-def _nth_weekday_phrase(
-    coordinate: NthWeekday, resolved: ResolvedRecurrence,
+def _weekday_phrase(
+    coordinate: NthWeekday | LastWeekday, resolved: ResolvedRecurrence,
 ) -> str:
-    """Return ``"third Tuesday"``, or ``"fourth Thursday of Nov"`` for one that skips months.
+    """Return ``"third Tuesday"``, or ``"last Friday of Jan"`` for one that skips months.
 
     The shape's own words are :func:`weekday_words`', which the form's
     "repeating on" control shows too.
 
     Args:
-        coordinate: The week number and weekday.
-        resolved: The recurrence's two-axis meaning.
-
-    Returns:
-        The coordinate phrase.
-    """
-    return f"{weekday_words(coordinate)}{_in_which_months(resolved)}"
-
-
-def _last_weekday_phrase(
-    coordinate: LastWeekday, resolved: ResolvedRecurrence,
-) -> str:
-    """Return ``"last Friday"``, or ``"last Friday of Jan"`` for one that skips months.
-
-    Args:
-        coordinate: The weekday.
+        coordinate: A weekday shape.
         resolved: The recurrence's two-axis meaning.
 
     Returns:
@@ -363,7 +348,7 @@ def weekday_words(coordinate: NthWeekday | LastWeekday) -> str:
     """Return a weekday shape's own words: ``"third Tuesday"``, ``"last Friday"``.
 
     **The ONE producer of them** (plan step recurrence:R8-c), asked by the
-    describer's two phrases above and by the form's "repeating on" control
+    describer's phrase above and by the form's "repeating on" control
     (:func:`~app.services.recurrence.weekday_reading_options`), so the form
     offers a reading in the words the Recurring row then shows for it.  The
     weekday is named off the shape's index through the shared table rather
@@ -395,8 +380,8 @@ _COORDINATE_PHRASES: dict[
     type[MonthCoordinate], "Callable[[Any, ResolvedRecurrence], str]",
 ] = {
     DayOfMonth: _day_phrase,
-    NthWeekday: _nth_weekday_phrase,
-    LastWeekday: _last_weekday_phrase,
+    NthWeekday: _weekday_phrase,
+    LastWeekday: _weekday_phrase,
 }
 
 

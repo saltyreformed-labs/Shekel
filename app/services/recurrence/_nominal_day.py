@@ -42,7 +42,7 @@ _NOMINAL_DAY_MIN = 29
 _NOMINAL_DAY_MAX = 31
 
 
-def _last_day_of_month(day: date) -> int:
+def last_day_of_month(day: date) -> int:
     """Return the last day of *day*'s own month.
 
     Args:
@@ -86,7 +86,7 @@ def offerable_nominal_days(
     """
     if not has_day_of_month_coordinate(unit):
         return ()
-    if starts_on.day != _last_day_of_month(starts_on):
+    if starts_on.day != last_day_of_month(starts_on):
         return ()
     return tuple(
         day
@@ -190,5 +190,6 @@ def _require_nominal_day_pair(
 
 __all__ = [
     "is_offerable_nominal_day",
+    "last_day_of_month",
     "offerable_nominal_days",
 ]

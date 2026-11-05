@@ -6,8 +6,8 @@ and its proof is ``verify_statement_baseline.py`` byte-identical on a same-day p
 dump, before the leaf against after, with ``verify_render_surfaces.py`` for the pages that
 render a statement or a lock.  On the release kit's bench (``tools/rehearsal``): one dump
 restored once and cloned per copy, base's copy (the commit the card was claimed from) and
-head's each deployed by its own commit's step (``rows.deploy``) under ONE instant, noon of the
-dump's civil day (``rows.pinned_instant``).  Then each INSTRUMENT runs once per side, from the
+head's each deployed by its own commit's step (``sides.deploy``) under ONE instant, noon of the
+dump's civil day (``sides.pinned_instant``).  Then each INSTRUMENT runs once per side, from the
 side's worktree on the side's copy at that instant (``_dump_runs.run_pinned_on``), and each
 pair is compared byte for byte:
 
@@ -50,6 +50,9 @@ Usage, with production's locale pinned as ``scripts/test.sh`` pins it::
         --dump <pg_dump -Fc file> --out <a directory that does not exist yet> \\
         --base <the commit the card was claimed from> [--head <commit, default HEAD>]
 
+A commit with no ``uv.lock`` is refused, exit 2: the bench builds a side's venv from its lock
+(ruling plan#2404).
+
 It writes into ``--out``: ``run.txt`` (each deploy's verdict, each pair's and each control's),
 and per instrument and side ``<instrument>_<side>.json`` with its ``_log.txt``, a pair that
 parts as ``<instrument>.diff``, and per control ``control_<side>_<plant>.json`` with its
@@ -83,7 +86,8 @@ import psycopg
 
 from tests.manual import _dump_runs
 from tests.manual.run_deploy_rewrites_on_dump import plant_a_cent_and_a_pair
-from tools.rehearsal import bench, rows
+from tools.rehearsal import bench
+from tools.rehearsal.sides import deploy, pinned_instant
 
 #: The instruments, as paths inside a worktree, the statement baseline first:
 #: its pair is the spec's proof and its output the controls' reference.
@@ -250,13 +254,12 @@ def _run(dump, out, revisions, say):
         psycopg.Error: A copy could not be cloned or planted.
     """
     with bench.Bench(dump, dict(zip(_SIDES, revisions))) as made:
-        pinned = _dump_runs.Pinned(rows.pinned_instant(made),
+        pinned = _dump_runs.Pinned(pinned_instant(made),
                                    secrets.token_hex(32))
         say(f"dump {dump}; clock pinned at {pinned.moment.isoformat()}")
         for side in _SIDES:
             state = made.made[side]
-            refused = rows.deploy(state, state.url, pinned.secret,
-                                  pinned.moment)
+            refused = deploy(state, state.url, pinned.secret, pinned.moment)
             say(f"deploy {side} (commit {state.commit}, onto {state.database}): "
                 + ("exit 0" if refused is None else f"REFUSED, {refused}"))
             if refused is not None:

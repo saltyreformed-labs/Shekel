@@ -15,18 +15,26 @@
 # shekel-audits/dev-prod-parity/findings.md): the CONTAINERIZED app is
 # the daily dev server -- full production parity (same entrypoint
 # pipeline incl. the audit-trigger boot gate, least-privilege
-# shekel_app role, redis-backed fail-closed rate limiting, hardened
+# shekel_app role, valkey-backed fail-closed rate limiting, hardened
 # read-only rootfs) with live reload via the source bind mount:
-#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml up -d --remove-orphans
 #   docker logs -f shekel-dev-app
+# --remove-orphans removes a container whose service this file no
+# longer names, as the shekel-dev-redis that Valkey replaced; compose
+# only warns about an orphan without it.
 #
 # Fallback (host flask run -- supported, intentionally NOT prod
-# parity: owner-role DB access, no entrypoint pipeline):
-#   1. docker compose -f docker-compose.dev.yml up -d db redis
-#   2. flask run    (connects to containerized Postgres; reads
-#      RATELIMIT_STORAGE_URI from .flaskenv, so the limiter is
-#      fail-closed against the redis service -- starting db alone
-#      would 500 every non-exempt request)
+# parity: owner-role DB access, no entrypoint pipeline, and the rate
+# limiter in memory):
+#   1. docker compose -f docker-compose.dev.yml up -d --remove-orphans db
+#   2. flask run    (connects to containerized Postgres; the limiter
+#      runs on DevConfig's in-memory store, always, since the valkey
+#      service listens only on a socket in a volume host flask run
+#      cannot reach (ruling plan#2619).  The containerized app runs
+#      its own configuration, development-container, which needs the
+#      store (ruling plan#2651).  Nothing reads RATELIMIT_STORAGE_URI
+#      (ruling plan#2633), so a line naming it in .flaskenv or .env
+#      changes nothing: delete it)
 #
 # There is no test database here.  ``scripts/test.sh`` starts a throwaway
 # postgres container per run from the image ``scripts/build_test_db_image.py``
@@ -50,7 +58,8 @@ services:
     # shekel-audits/dev-prod-parity/findings.md).  Tag-only pins let dev
     # and prod drift to different PG patch levels on pull timing; bump
     # this digest and the one in docker-compose.yml's db service in the
-    # same commit.
+    # same commit, which tests/test_deploy/test_image_supply_chain.py
+    # holds (ruling plan#2560, until plan#2561 gives the pin one home).
     image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     container_name: shekel-dev-db
     restart: unless-stopped
@@ -92,60 +101,60 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Redis (Flask-Limiter storage) ────────────────────────────────
-  # Mirrors the production redis service (parity audit 2026-06-12,
-  # finding D04): same persistence-off flags, same memory bounds, and
-  # the SAME ACL shape (default user disabled, per-app ``shekel`` user
-  # scoped to ``~LIMITS*`` minus @dangerous, nopass ping-only
-  # healthcheck user) so the prod rate-limit path -- fail-closed Redis
-  # storage, ACL key-pattern fit, counters that survive app restarts --
-  # is exercised in dev instead of silently degrading to ``memory://``.
+  # ── Valkey (Flask-Limiter storage) ───────────────────────────────
+  # Mirrors the production valkey service (parity audit 2026-06-12,
+  # finding D04): the SAME image, the SAME start (deploy/valkey/
+  # start.sh, which holds the persistence-off and memory flags) and the
+  # SAME ACL rules (deploy/valkey/users.acl, their one home, ruling
+  # plan#2350), so the prod rate-limit path -- fail-closed Valkey
+  # storage, the ACL's allowlist and key pattern, counters that survive
+  # app restarts -- is exercised in dev instead of silently degrading
+  # to ``memory://``, and a grant production lacks fails here first.
   # The password is a committed dev-only value, consistent with the
   # other public dev credentials in this file (see the db service
-  # comment); the port is loopback-bound so host ``flask run`` can
-  # reach it but the LAN cannot.  No hardening keys, matching the dev
-  # db posture (D08 hardens only the app service, whose writes are the
-  # code under test).
-  redis:
-    image: redis:7.4-alpine
-    container_name: shekel-dev-redis
+  # comment).  It runs as production's does (ruling plan#2619): no
+  # network and no port, reached only over its socket file in the
+  # valkey-socket volume, which the app mounts read-only as production's
+  # does.  No hardening keys beyond ``user`` and the network, matching
+  # the dev db posture (D08 hardens only the app service, whose writes
+  # are the code under test).
+  valkey:
+    # The same image and digest as docker-compose.yml's valkey service;
+    # bump both in the same commit, which
+    # tests/test_deploy/test_image_supply_chain.py holds (ruling
+    # plan#2560, until plan#2561 gives the pin one home).
+    image: valkey/valkey:9.1.2-alpine@sha256:48332870af354a799964c0012ae1194a0bf2bf894eb508f945810596dc2d8d11
+    container_name: shekel-dev-valkey
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"
-    command:
-      - "redis-server"
-      - "--save"
-      - ""
-      - "--appendonly"
-      - "no"
-      - "--maxmemory"
-      - "64mb"
-      - "--maxmemory-policy"
-      - "allkeys-lru"
-      - "--user"
-      - "default"
-      - "off"
-      - "--user"
-      - "shekel"
-      - "on"
-      - ">dev-only-shekel-redis-password"
-      - "resetkeys"
-      - "~LIMITS*"
-      - "&*"
-      - "+@all"
-      - "-@dangerous"
-      - "--user"
-      - "healthcheck"
-      - "on"
-      - "nopass"
-      - "resetkeys"
-      - "+ping"
+    network_mode: none
+    command: ["sh", "/etc/valkey/start.sh"]
+    # Start as the valkey user: the image's entrypoint drops root only
+    # for the command ``valkey-server``, so under ``sh start.sh`` the
+    # server would otherwise run as root (see docker-compose.yml).
+    user: valkey
+    volumes:
+      - type: bind
+        source: ./deploy/valkey
+        target: /etc/valkey
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: valkey-socket
+        target: /run/valkey
+        volume:
+          nocopy: true
+    environment:
+      # The dev-only password, written once: the anchor hands the app
+      # below this same value (ruling plan#2633).  start.sh hashes it
+      # into the ACL.
+      VALKEY_PASSWORD: &valkey-password dev-only-shekel-valkey-password
     healthcheck:
-      # Same probe as prod: PING via the nopass healthcheck ACL user;
-      # ``-a ''`` forces the AUTH frame, grep makes the exit code
-      # reflect the actual response (see docker-compose.yml redis
-      # service for the full rationale).
-      test: ["CMD-SHELL", "redis-cli --user healthcheck -a '' --no-auth-warning ping | grep -q PONG"]
+      # Same probe as prod: PING over the socket via the nopass
+      # healthcheck ACL user; ``-a ''`` forces the AUTH frame, grep
+      # makes the exit code reflect the actual response (see
+      # docker-compose.yml valkey service for the full rationale).
+      test: ["CMD-SHELL", "valkey-cli -s /run/valkey/valkey.sock --user healthcheck -a '' --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -157,15 +166,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      redis:
+      valkey:
         # Mirrors prod: the limiter runs fail-closed (no in-memory
         # fallback, errors not swallowed), so the app must not boot
-        # before Redis answers PING or the first rate-limited request
+        # before Valkey answers PING or the first rate-limited request
         # 500s.
         condition: service_healthy
     environment:
       FLASK_APP: run.py
-      FLASK_ENV: development
+      # The containerized dev app's own configuration (ruling plan#2651):
+      # DevConfig on the valkey store above, refusing to boot without its
+      # password as production does.  Host ``flask run`` keeps
+      # ``development``, in memory.
+      FLASK_ENV: development-container
       FLASK_DEBUG: "1"
       # Match prod's pinned civil timezone (parity audit 2026-06-12,
       # finding M01; see deploy/docker-compose.prod.yml for the full
@@ -212,20 +225,20 @@ services:
       # reads /opt/docker/shekel/.env and its own compose, never this
       # file.
       IDLE_TIMEOUT_MINUTES: ${IDLE_TIMEOUT_MINUTES:-10080}
-      # Rate-limit storage on the dev redis above (parity audit
-      # 2026-06-12, finding D04).  Hardcoded rather than interpolated
-      # so the container value cannot be shadowed by the .env entry
-      # host ``flask run`` uses (which points at localhost instead of
-      # the compose service name).  NOTE the behavior change vs the
-      # old ``memory://`` default: counters now persist across the
-      # reloader's restarts, so the global default limit
-      # (``200 per hour; 30 per minute``, app/config.py) is enforced
-      # for real per client IP.  All host-originated traffic NATs to
-      # the bridge gateway and shares one bucket; an aggressive
-      # automated crawl can now meet 429s that memory:// never
-      # surfaced.  That is prod behavior -- fix the crawl rate, not
-      # the limit.
-      RATELIMIT_STORAGE_URI: redis://shekel:dev-only-shekel-redis-password@redis:6379/0
+      # Rate-limit storage on the dev valkey above (parity audit
+      # 2026-06-12, finding D04), over its socket in the valkey-socket
+      # volume mounted below, at the address the app's code names, as
+      # production's app reaches it; this is its password, the valkey
+      # service's own value.  NOTE the behavior change vs the old
+      # ``memory://`` default: counters
+      # now persist across the reloader's restarts, so the global
+      # default limit (``200 per hour; 30 per minute``, app/config.py)
+      # is enforced for real per client IP.  All host-originated
+      # traffic NATs to the bridge gateway and shares one bucket; an
+      # aggressive automated crawl can now meet 429s that memory://
+      # never surfaced.  That is prod behavior -- fix the crawl rate,
+      # not the limit.
+      VALKEY_PASSWORD: *valkey-password
     ports:
       # Loopback bind for the developer's own browser plus an explicit
       # bind on the shekel-frontend bridge gateway so the operator's
@@ -244,6 +257,13 @@ services:
       # Mount source code for live reload.  Flask's reloader detects
       # file changes and restarts automatically.
       - .:/home/shekel/app
+      # Valkey's socket, read-only, as production's app mounts it.
+      - type: volume
+        source: valkey-socket
+        target: /run/valkey
+        read_only: true
+        volume:
+          nocopy: true
     # Override: use Flask dev server instead of Gunicorn.
     # The entrypoint.sh still runs (DB init, seeding), then exec's
     # this command instead of the Dockerfile CMD (gunicorn).
@@ -261,7 +281,7 @@ services:
       start_period: 120s
       retries: 3
     # Container hardening to prod parity for the APP only (parity
-    # audit 2026-06-12, finding D08; the db/test-db/redis services
+    # audit 2026-06-12, finding D08; the db/test-db/valkey services
     # stay unhardened -- their write patterns are the images' own, not
     # app code under test).  ``read_only`` is the bug-catching one:
     # app code that writes outside /tmp or its mounts works on a rw
@@ -293,3 +313,10 @@ volumes:
   pgdata:
     external: true
     name: shekel-dev_pgdata
+  # Valkey's socket, as docker-compose.yml declares it (that file says
+  # why each option).
+  valkey-socket:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=999,gid=1000,mode=2710

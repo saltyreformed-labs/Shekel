@@ -91,8 +91,9 @@ Environment variables read:
     SHEKEL_ALLOW_HOST_DOCKER  ``1`` accepts a daemon that is not rootless.  Shares its
                        spelling with ``tests/test_deploy/conftest.py`` on purpose.
     CI                 Sanctions a daemon that is not rootless, since a CI daemon is a
-                       throwaway nothing observes.  Read through a vocabulary, NOT by
-                       presence: ``CI=false`` must not sanction anything.
+                       throwaway nothing observes, and ``on-ci`` answers ``test.sh`` from it.
+                       Read through a vocabulary, NOT by presence: ``CI=false`` must not
+                       sanction anything (:func:`_on_ci`).
 
 Standard library only: ``test.sh`` runs it before any environment is known to hold more.
 """
@@ -243,8 +244,8 @@ _CALLERS_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 # The rootless daemon's socket, in ``XDG_RUNTIME_DIR``, where ``dockerd-rootless.sh`` makes it.
 _ROOTLESS_SOCKET = "docker.sock"
-# The values of ``CI`` that sanction a daemon that is not rootless (:func:`_sanctioned`).
-_CI_SANCTIONS = frozenset({"1", "true", "TRUE", "True", "yes", "on"})
+# The values of ``CI`` that mean this run is on CI (:func:`_on_ci`).
+_CI_VALUES = frozenset({"1", "true", "TRUE", "True", "yes", "on"})
 # The operator's own sanction, spelled as ``tests/test_deploy/conftest.py`` spells it.
 _HOST_DOCKER_OVERRIDE = "SHEKEL_ALLOW_HOST_DOCKER"
 
@@ -370,18 +371,25 @@ def _endpoint() -> str:
     return f"unix://{rootless}" if rootless.is_socket() else ""
 
 
+def _on_ci() -> bool:
+    """Whether this run is on CI.
+
+    ``CI`` is read through a VOCABULARY, not by presence.  It sanctions a container per run on
+    the daemon that runs PRODUCTION, the heaviest consequence here (:func:`_sanctioned`), and a
+    presence test made ``CI=false`` and ``CI=0`` sanction it.  An unrecognised value is not CI:
+    it cannot be refused as an operator's typo would be, because CI sets it, not the operator.
+    ``test.sh`` asks this too (``on-ci``), whether CI's install has already built the venv,
+    rather than spelling the vocabulary a second time.
+    """
+    return os.environ.get("CI", "") in _CI_VALUES
+
+
 def _sanctioned() -> bool:
     """Whether a container per run may go to a daemon that is not rootless: on CI, whose daemon
     is a throwaway nothing observes, or when the operator sets ``SHEKEL_ALLOW_HOST_DOCKER=1``
     to accept the churn.
-
-    ``CI`` is read through a VOCABULARY, not by presence.  It sanctions a container per run on
-    the daemon that runs PRODUCTION, the heaviest consequence here, and a presence test made
-    ``CI=false`` and ``CI=0`` sanction it.  An unrecognised value sanctions nothing: it cannot
-    be refused as an operator's typo would be, because CI sets it, not the operator.
     """
-    return (os.environ.get("CI", "") in _CI_SANCTIONS
-            or os.environ.get(_HOST_DOCKER_OVERRIDE) == "1")
+    return _on_ci() or os.environ.get(_HOST_DOCKER_OVERRIDE) == "1"
 
 
 def daemon() -> str:
@@ -873,6 +881,16 @@ def _client(args: argparse.Namespace) -> int:
     return 2
 
 
+def _daemon_command() -> int:
+    """Print the daemon a cluster goes to, or name its refusal; the exit status."""
+    try:
+        print(daemon())
+    except ClusterError as exc:
+        print(f"[private_cluster] {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Make a token, start or stop a cluster, or run a client tool in one, as the module says;
     its exit status."""
@@ -881,6 +899,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("token", help="print a new token, to own a cluster by")
     commands.add_parser("daemon", help="print the daemon a cluster goes to, refusing one "
                         "that is not rootless")
+    commands.add_parser("on-ci", help="exit 0 on CI, 1 anywhere else")
     starting = commands.add_parser("start", help="start a cluster owned by a token; print "
                                    "its socket directory, then its container id")
     starting.add_argument("name")
@@ -906,12 +925,9 @@ def main(argv: list[str] | None = None) -> int:
         print(url(args.socket_dir, args.database))
         return 0
     if args.command == "daemon":
-        try:
-            print(daemon())
-        except ClusterError as exc:
-            print(f"[private_cluster] {exc}", file=sys.stderr)
-            return 2
-        return 0
+        return _daemon_command()
+    if args.command == "on-ci":
+        return 0 if _on_ci() else 1
     if args.command == "client":
         return _client(args)
     return _start(args) if args.command == "start" else _stop(args)

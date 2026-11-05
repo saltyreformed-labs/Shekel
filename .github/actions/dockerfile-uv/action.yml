@@ -1,0 +1,39 @@
+# Shekel Budget App -- the Dockerfile's uv, on the runner
+#
+# The one recipe for the uv binary CI runs (task plan#2484): BuildKit, the
+# reader that builds the image, exports the Dockerfile's ``uv`` stage, the
+# stage the builder copies its uv from (``COPY --from=uv``), so CI and the
+# image's build run one uv binary.  That stage's ``FROM`` line is the one
+# home of uv's version and digest (Dependabot's docker entry moves it), and
+# nothing here reads the Dockerfile but BuildKit: a Dockerfile with no ``uv``
+# stage fails the export.  No third-party action installs uv.
+#
+# Its callers: .github/actions/install-lock, for every job that installs
+# from the lock, and ci.yml's ``image`` job, which runs uv inside the built
+# image.
+# The stage is uv's image whole, so its ``uvx`` is exported beside ``uv``.
+
+name: The Dockerfile's uv
+description: The uv binary the Dockerfile's uv stage holds, exported to the runner.
+
+outputs:
+  bin:
+    description: The exported uv binary's path.
+    value: ${{ steps.export.outputs.bin }}
+
+runs:
+  using: composite
+  steps:
+    # ``--target uv`` builds that stage alone, from the checkout's
+    # Dockerfile, and ``type=local`` writes its files to the runner, with the
+    # runner's Docker Engine and its own BuildKit: no job sets up a builder
+    # of its own (ruling plan#2742).
+    - name: Export the Dockerfile's uv stage
+      id: export
+      shell: bash
+      run: |
+        set -euo pipefail
+        dir="${RUNNER_TEMP}/uv"
+        docker buildx build --target uv --output "type=local,dest=${dir}" .
+        "${dir}/uv" --version
+        echo "bin=${dir}/uv" >> "${GITHUB_OUTPUT}"

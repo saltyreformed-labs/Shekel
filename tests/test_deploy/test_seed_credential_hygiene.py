@@ -20,7 +20,6 @@ tests/test_routes/test_auth.py::TestRegistrationToggle (existing).
 from __future__ import annotations
 
 import re
-import subprocess
 import textwrap
 from pathlib import Path
 
@@ -375,9 +374,11 @@ class TestRegistrationDisabledByDefault:
         # Find the ProdConfig class block and check it carries an
         # explicit override.  We look for the class header + body and
         # then the ``REGISTRATION_ENABLED`` assignment with a
-        # ``"false"`` default inside it.
+        # ``"false"`` default inside it.  The header is matched whatever
+        # its bases (from plan#2634 it also takes the store's settings
+        # from ``_ValkeyStore``; the developer's word, 2026-11-02).
         match = re.search(
-            r"class ProdConfig\(BaseConfig\):(.+?)(?=\nclass |\Z)",
+            r"class ProdConfig\([^)]*\):(.+?)(?=\nclass |\Z)",
             text,
             re.DOTALL,
         )
@@ -432,7 +433,6 @@ class TestDockerignoreCoverage:
         "amortization-fix.patch",
         "diagnostics/",
         "monitoring/",
-        "requirements-dev.txt",
         "pytest.ini",
         # Host-side configs not used by the app container
         "deploy/",
@@ -456,7 +456,6 @@ class TestDockerignoreCoverage:
         "scripts/vendor_google_fonts.py",
         "scripts/backup.sh",
         "scripts/restore.sh",
-        "scripts/deploy.sh",
         "scripts/retire_stale_containers.sh",
         # Host-side cert generator for shared-mode Postgres TLS
         # (audit finding F-154 / Commit C-37).  Runs once on the
@@ -519,7 +518,11 @@ class TestDockerignoreCoverage:
         "entrypoint.sh",
         "gunicorn.conf.py",
         "run.py",
-        "requirements.txt",
+        # The lock the Dockerfile's builder stage copies from the
+        # context and installs; excluded, the build fails.
+        "pyproject.toml",
+        "uv.lock",
+        ".python-version",
     ])
     def test_dockerignore_does_not_exclude_runtime_path(
         self, dockerignore_lines: list[str], pattern: str,

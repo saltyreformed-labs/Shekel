@@ -19,6 +19,8 @@ import re
 import subprocess
 import sys
 import time
+import tomllib
+from pathlib import Path
 
 import yaml
 
@@ -53,9 +55,9 @@ STEP_CONDITIONS = {
     ("landing", "Mint the tracker read token"): "env.PLAN_READER_KEY_PRESENT == 'true'",
 }
 
-#: The jobs whose every step grades: the five ``lint-and-test`` needs, and the
+#: The jobs whose every step grades: the six ``lint-and-test`` needs, and the
 #: aggregate itself.
-GRADED_JOBS = ("landing", "tools", "tax-law", "lint", "test", "lint-and-test")
+GRADED_JOBS = ("landing", "tools", "tax-law", "lint", "test", "image", "lint-and-test")
 
 #: The tools job's one grading step.
 TOOLS_STEP = "Lint and test every tools package"
@@ -63,6 +65,68 @@ TOOLS_STEP = "Lint and test every tools package"
 #: GitHub's ``timeout-minutes`` for a job that names none, and the most a job on a
 #: GitHub-hosted runner may run.
 GITHUB_DEFAULT_TIMEOUT_MINUTES = 360
+
+#: The install action every job that runs Python calls, by the ``$/`` form GitHub loads from
+#: the workflow's own commit (ruling plan#2375).
+INSTALL_LOCK = "$/.github/actions/install-lock"
+#: The step that calls it, named alike in every job.
+INSTALL_STEP = "Install the lock"
+
+#: What each job installs from the lock: every job but the two that build the app image
+#: (ci.yml's ``image`` and the release's), which run no Python on the runner, and the update
+#: alert, which installs nothing so a failed install cannot stop it (plan#2481).  None restores
+#: a cache, as no workflow does (ruling plan#2471).
+INSTALLS = {
+    ("ci.yml", "landing"): {"install": "landing"},
+    ("ci.yml", "tools"): {"install": "all"},
+    ("ci.yml", "tax-law"): {"install": "runtime"},
+    ("ci.yml", "lint"): {"install": "all"},
+    ("ci.yml", "test"): {"install": "all"},
+    ("ci.yml", "lint-and-test"): {"install": "python"},
+    ("ci.yml", "polyglot-lint"): {"install": "all"},
+    ("calendar-sweep.yml", "sweep"): {"install": "all"},
+    ("tax-law.yml", "watch"): {"install": "runtime"},
+    ("docker-publish.yml", "tax-law"): {"install": "runtime"},
+    ("updates.yml", "refresh"): {"install": "landing"},
+    ("updates.yml", "publish"): {"install": "landing"},
+    ("updates.yml", "queue"): {"install": "landing"},
+    ("updates.yml", "due"): {"install": "landing"},
+}
+
+#: The triggers under which a step's PATH write lets a pull request's code run with the
+#: base's authority (zizmor's github-env audit): no workflow calling the install action may
+#: run on one (ruling plan#2376).
+DANGEROUS_TRIGGERS = frozenset({"pull_request_target", "workflow_run"})
+
+#: The one job that runs Python with no install, so the runner's own: the update alert, which
+#: installs nothing so a failed install cannot stop it, and runs on the standard library alone
+#: (plan#2481);
+#: :class:`tools.ci.test_updates_workflow.TestTheUpdateWorkflowKeepsItsKeyFromPackageCode`
+#: holds its ``run`` line.
+RUNNER_PYTHON = frozenset({("updates.yml", "alert")})
+
+#: Where a step's shell starts a command, as the checks below read it: a line's start, after
+#: ``;``, ``&``, ``|``, ``(`` or a backtick (so ``&&``, ``||`` and ``$(`` too), a ``-c``
+#: string's start, or after a word that runs the next (``if``, ``elif``, ``then``, ``do``,
+#: ``else``, ``while``, ``until``, ``{``, ``!``, ``exec``, ``env``, ``sudo``, ``xargs``,
+#: ``time``, ``command``, ``nohup``) and the options that follow it, the command's variable
+#: assignments skipped.  A command started any other way (``timeout 5 uv``, a ``case`` arm,
+#: a function, an option's argument such as ``sudo -u root``, a script that runs one) is
+#: not read.
+COMMAND = (r"(?:^|[;&|(`]|-c\s+[\"']|(?<![\w-])(?:if|elif|then|do|else|while|until|\{|!|exec"
+           r"|env|sudo|xargs|time|command|nohup)\s+(?:-\S+\s+)*)\s*(?:\w+=\S*\s+)*")
+#: Python run as a command (:data:`COMMAND`): ``python``, ``python3`` or ``python3.N`` (a
+#: free-threaded ``t`` build too), by name or by path, or a ``.py`` file.
+PYTHON_COMMAND = re.compile(
+    rf"{COMMAND}(?:(?:\S*/)?python(?:3(?:\.\d+t?)?)?|\S*\.py)(?![\w.-])", re.MULTILINE)
+#: Python's ``-m``, alone or the last of a group of one-letter options (``-Im``).
+RUN_MODULE = r"(?<![\w-])-[A-Za-z]*m\s*"
+#: An installer run as a command (:data:`COMMAND`): ``uv``, ``uvx``, ``pip``, ``pip3[.N]``,
+#: ``pip-`` anything (pip-compile) or ``pipx``, by name or by path; or Python's ``-m``
+#: (:data:`RUN_MODULE`) with pip, ensurepip, venv or uv, anywhere.
+INSTALLER_COMMAND = re.compile(
+    rf"{COMMAND}(?:\S*/)?(?:uvx?|pip(?:x|3(?:\.\d+)?)?)(?![\w.])"
+    rf"|{RUN_MODULE}(?:pip|ensurepip|venv|uv)\b", re.MULTILINE)
 
 
 def _jobs() -> dict[str, dict]:
@@ -74,6 +138,101 @@ def _jobs() -> dict[str, dict]:
 def _steps(job: str) -> dict[str, dict]:
     """One job's steps, keyed by name."""
     return {step["name"]: step for step in _jobs()[job]["steps"]}
+
+
+def _run_step(run: str, env: dict[str, str], cwd: Path | None = None,
+              ) -> subprocess.CompletedProcess:
+    """Run a step's ``run`` text as GitHub runs a ``shell: bash`` step, in ``cwd``.
+
+    ``bash --noprofile --norc -eo pipefail`` is GitHub's invocation for an
+    explicit ``shell: bash``, and for every ``run`` step of a composite action,
+    which must name its shell; a workflow step with NO ``shell:`` gets ``bash -e``
+    instead, which is why the wiring tests require ``shell: bash`` on each
+    workflow step this runs.
+    """
+    return subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run],
+        env={"PATH": "/usr/bin:/bin", **env}, cwd=cwd,
+        capture_output=True, text=True, check=False,
+    )
+
+
+def _workflows() -> dict[str, dict]:
+    """Every workflow file, read, by its file name."""
+    folder = arcs.REPO / ".github/workflows"
+    return {path.name: yaml.safe_load(path.read_text(encoding="utf-8"))
+            for path in sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")])}
+
+
+def _every_step() -> list[tuple[tuple[str, str | int], dict]]:
+    """Each step of every workflow, keyed by the workflow's file name and the job's name, and
+    of every action of this repository's, keyed by the action's directory name and the step's
+    place in it."""
+    found = [((name, job_name), step) for name, workflow in _workflows().items()
+             for job_name, job in workflow["jobs"].items() for step in job.get("steps", [])]
+    for path in sorted((arcs.REPO / ".github/actions").glob("*/action.y*ml")):
+        steps = yaml.safe_load(path.read_text(encoding="utf-8"))["runs"].get("steps", [])
+        found += [((path.parent.name, at), step) for at, step in enumerate(steps)]
+    return found
+
+
+def _is_a_limit(value: object) -> bool:
+    """Whether ``value`` is a ``timeout-minutes`` that limits: a whole number of minutes above
+    none and under :data:`GITHUB_DEFAULT_TIMEOUT_MINUTES`, as a limit of 360 or more is no
+    limit.  ``True`` is an ``int`` to Python but no number of minutes to GitHub."""
+    return (isinstance(value, int) and not isinstance(value, bool)
+            and 0 < value < GITHUB_DEFAULT_TIMEOUT_MINUTES)
+
+
+def _calls_the_install(job: dict) -> bool:
+    """Whether a job has a step naming the install action, in any form."""
+    return any("install-lock" in step.get("uses", "") for step in job.get("steps", []))
+
+
+def _shell(step: dict) -> str:
+    """A step's ``run`` text, each line a trailing backslash continues joined to the next."""
+    return step.get("run", "").replace("\\\n", " ")
+
+
+def _runs_python(step: dict, default_shell: str) -> bool:
+    """Whether a ``run`` step runs Python: its shell, its own or ``default_shell``, naming
+    Python as a word (``python``, ``/usr/bin/env python3 {0}``), or :data:`PYTHON_COMMAND`."""
+    return "run" in step and bool(
+        re.search(r"(?:^|[\s/])python", step.get("shell", default_shell))
+        or PYTHON_COMMAND.search(_shell(step)))
+
+
+def _runner_python(workflows: dict[str, dict]) -> set[tuple[str, str]]:
+    """The jobs, by ``(workflow, job)``, with a step that runs Python (:func:`_runs_python`)
+    before any install action has run: in a job with none, any step; in one with it, a step
+    before it.  A step's shell defaults to its job's ``defaults``, then its workflow's."""
+    found = set()
+    for name, workflow in workflows.items():
+        for job_name, job in workflow["jobs"].items():
+            shell = next((place["defaults"]["run"]["shell"] for place in (job, workflow)
+                          if "shell" in place.get("defaults", {}).get("run", {})), "")
+            for step in job.get("steps", []):
+                if "install-lock" in step.get("uses", ""):
+                    break
+                if _runs_python(step, shell):
+                    found.add((name, job_name))
+    return found
+
+
+def _dangerous_callers(workflows: dict[str, dict]) -> list[str]:
+    """The workflows that call the install action and run on a :data:`DANGEROUS_TRIGGERS`.
+
+    PyYAML reads the bare key ``on`` as the boolean True (YAML 1.1); a trigger written
+    alone, as a list or as a mapping is a trigger all the same.
+    """
+    found = []
+    for name, workflow in workflows.items():
+        on = workflow.get(True, workflow.get("on"))
+        triggers = {on} if isinstance(on, str) else set(on or ())
+        if triggers & DANGEROUS_TRIGGERS and any(
+                _calls_the_install(job) for job in workflow["jobs"].values()):
+            found.append(name)
+    return found
 
 
 class TestTheWorkflowIsWiredToTheAnswer:
@@ -93,15 +252,13 @@ class TestTheWorkflowIsWiredToTheAnswer:
         plan#2328; its size, twice the job's longest recorded run, is plan#2330's, which
         this test does not grade).
 
-        Every job here holds a merge: the five graders through the aggregate, and the
+        Every job here holds a merge: the six graders through the aggregate, and the
         aggregate and the polyglot linters as the required checks.  One with no limit waits
-        out GitHub's 360 minutes behind a stalled runner, and a limit of 360 or more is no
-        limit.  ``True`` is an ``int`` to Python but no number of minutes to GitHub.
+        out GitHub's 360 minutes behind a stalled runner (:func:`_is_a_limit`).
         """
         for name, job in _jobs().items():
             limit = job.get("timeout-minutes")
-            assert isinstance(limit, int) and not isinstance(limit, bool), (name, limit)
-            assert 0 < limit < GITHUB_DEFAULT_TIMEOUT_MINUTES, (name, limit)
+            assert _is_a_limit(limit), (name, limit)
 
     def test_the_code_graders_keep_their_steps(self):
         """The lint job and the test job each still hold every grading step they run."""
@@ -152,19 +309,25 @@ class TestTheWorkflowIsWiredToTheAnswer:
         assert "pylint tools/rehearsal/ --fail-under=10 --fail-on=E,F" in run
         assert 'pytest tools/rehearsal -c /dev/null -q -m "not cluster"' in run
 
-    def test_the_rehearsal_kit_s_cluster_tests_run_on_one_shard_that_holds_their_base(self):
+    def test_the_update_tool_is_linted_and_tested(self):
+        """``tools/update`` (the Monday lock refresh, ruling plan#2351) holds the same floor
+        in the same step."""
+        run = _steps("tools")[TOOLS_STEP]["run"]
+        assert "pylint tools/update/ --fail-under=10 --fail-on=E,F" in run
+        assert "pytest tools/update -c /dev/null -q" in run
+
+    def test_the_rehearsal_kit_s_cluster_tests_run_on_one_shard(self):
         """The ``cluster`` tests the tools job deselects run in the test job, on ONE
         shard, which must be one the matrix still has: a shard index past its end would skip
         the step on every run, and a skipped step reads green (ruling balance:R-BAL327).  The
-        job's checkout fetches depth 2, since the bench case's base state is ``HEAD~1``, which
-        a depth-1 clone does not hold."""
+        job's checkout is the default depth of 1: the bench case's second state is a commit
+        it makes of HEAD's own tree, never an older one."""
         job = _jobs()["test"]
         step = _steps("test")[REHEARSAL_STEP]
         assert step["run"] == "pytest tools/rehearsal -c /dev/null -q -m cluster"
         assert step["if"] == f"strategy.job-index == {REHEARSAL_SHARD}"
         assert REHEARSAL_SHARD in job["strategy"]["matrix"]["shard"]
-        assert _steps("test")["Checkout code"]["with"] == {"fetch-depth": 2,
-                                                            "persist-credentials": False}
+        assert _steps("test")["Checkout code"]["with"] == {"persist-credentials": False}
 
     def test_no_step_in_a_graded_job_carries_a_condition_of_its_own(self):
         """Every step of a graded job runs, bar the serial-benchmark leg and the landing mint.
@@ -254,7 +417,7 @@ class TestTheWorkflowIsWiredToTheAnswer:
         for step in jobs["build-and-push"]["steps"]:
             assert "if" not in step and "continue-on-error" not in step, step.get("name")
         # Both executed steps name ``bash``, so GitHub runs them the way
-        # ``_run_step`` below does (pipefail included).
+        # ``_run_step`` does (pipefail included).
         assert gate["shell"] == "bash" and emit["shell"] == "bash"
 
     @staticmethod
@@ -264,21 +427,6 @@ class TestTheWorkflowIsWiredToTheAnswer:
             encoding="utf-8",
         )
         return yaml.safe_load(text)["jobs"]
-
-    @staticmethod
-    def _run_step(run: str, env: dict[str, str]) -> subprocess.CompletedProcess:
-        """Run a step's ``run`` text as GitHub runs a ``shell: bash`` step.
-
-        ``bash --noprofile --norc -eo pipefail`` is GitHub's invocation for an
-        explicit ``shell: bash``; a step with NO ``shell:`` gets ``bash -e``
-        instead, which is why the wiring test above requires ``shell: bash``
-        on both steps this runs.
-        """
-        return subprocess.run(
-            ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run],
-            env={"PATH": "/usr/bin:/bin", **env},
-            capture_output=True, text=True, check=False,
-        )
 
     def test_the_build_gate_lets_only_a_future_instant_through(self):
         """The build's first step, RUN: through only while the refusal instant is ahead.
@@ -314,7 +462,7 @@ class TestTheWorkflowIsWiredToTheAnswer:
             "9" * 23: (1, malformed),
         }
         for value, (expected, reason) in cases.items():
-            result = self._run_step(run, {"REFUSE_FROM": value})
+            result = _run_step(run, {"REFUSE_FROM": value})
             assert result.returncode == expected, (value, result.stdout, result.stderr)
             assert reason in result.stdout + result.stderr, (value, result.stdout, result.stderr)
 
@@ -340,7 +488,7 @@ class TestTheWorkflowIsWiredToTheAnswer:
         )
         stand_in.chmod(0o755)
         output.write_text("")
-        result = self._run_step(emit["run"], env)
+        result = _run_step(emit["run"], env)
         assert result.returncode == 0, result.stderr
         assert output.read_text() == "epoch=4242424242\n"
 
@@ -349,7 +497,7 @@ class TestTheWorkflowIsWiredToTheAnswer:
         for failing in ("exit 1\n", "echo 4242424242\nexit 1\n"):
             stand_in.write_text("#!/bin/sh\n" + failing)
             output.write_text("")
-            result = self._run_step(emit["run"], env)
+            result = _run_step(emit["run"], env)
             assert result.returncode != 0, failing
             assert output.read_text() == "", failing
 
@@ -400,26 +548,24 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
     CHECK = "Ship markers against the write rule"
     PLACE = "Read the tracker's place"
     #: Every key each step may hold.  A ``shell:`` could run something other than the
-    #: check and exit 0, an ``env:`` could hand a step the key or move pip's index, and a
+    #: check and exit 0, an ``env:`` could hand a step the key or move uv's index, and a
     #: ``continue-on-error`` could fail green: none may be added unseen.
     SHAPES = {
         "Checkout code": {"name", "uses", "with"},
-        "Set up Python 3.14": {"name", "uses", "with"},
-        "Install dependencies": {"name", "run"},
+        INSTALL_STEP: {"name", "uses", "with"},
         PLACE: {"name", "id", "run"},
         MINT: {"name", "id", "if", "uses", "with"},
         CHECK: {"name", "env", "run"},
     }
 
     def test_the_job_judges_the_merge_checked_out_over_full_history_in_order(self):
-        """Unconditional, waiting on nothing, a full checkout, every install before the mint,
+        """Unconditional, waiting on nothing, a full checkout, the install before the mint,
         and the check handed the event, the commit checked out and the pull request the event
         names, with each token under the name the check reads it by."""
         job = _jobs()["landing"]
         assert "needs" not in job and "if" not in job
         assert [step["name"] for step in job["steps"]] == [
-            "Checkout code", "Set up Python 3.14", "Install dependencies", self.PLACE,
-            self.MINT, self.CHECK,
+            "Checkout code", INSTALL_STEP, self.PLACE, self.MINT, self.CHECK,
         ]
         assert job["steps"][0]["with"] == {"fetch-depth": 0, "persist-credentials": False}
         check = _steps("landing")[self.CHECK]
@@ -436,7 +582,9 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         )
 
     def test_the_job_and_every_step_hold_exactly_their_keys(self):
-        """Nothing beyond these keys on the job or any step, and every action pinned by sha.
+        """Nothing beyond these keys on the job or any step, and every action pinned by sha
+        but this repository's own install action, which GitHub loads from the workflow's own
+        commit (``$/``, ruling plan#2375).
 
         A job-level ``defaults`` (a ``shell:`` for every step) could make the check
         exit 0 unrun, and a wider ``permissions:`` widen the job's GitHub token, as each
@@ -449,9 +597,8 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         assert job["permissions"] == {"contents": "read", "pull-requests": "read"}
         assert {step["name"]: set(step) for step in job["steps"]} == self.SHAPES
         for step in job["steps"]:
-            if "uses" in step:
+            if "uses" in step and step["uses"] != INSTALL_LOCK:
                 assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", step["uses"]), step["name"]
-        assert _steps("landing")["Set up Python 3.14"]["with"] == {"python-version": "3.14"}
 
     def test_the_token_is_minted_for_reading_the_trackers_issues_alone(self):
         """The pinned action, its inputs exactly these, and its only condition the key's presence.
@@ -481,8 +628,10 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         (The mint's own post step keeps the token, to revoke it.)  The job's env
         holds the key only as the boolean the mint's condition reads, and no step
         writes GITHUB_ENV or GITHUB_PATH, through which a value set once would
-        reach every later step.  Either context, by attribute or by index
-        (``secrets['PLAN_READER_KEY']``), counts.
+        reach every later step, but the install action's one line putting the
+        workspace's own venv first on PATH, which holds no value of any input
+        (:class:`tools.ci.test_install_action.TestTheInstallActionInstallsTheLock`).  Either
+        context, by attribute or by index (``secrets['PLAN_READER_KEY']``), counts.
         """
         token = re.compile(r"\bsteps\s*(\.\s*token\b|\[\s*['\"]token['\"])")
         for step in _jobs()["landing"]["steps"]:
@@ -531,34 +680,20 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         stand_in.chmod(0o755)
         assert _run(arcs.REPO, {**env, "PATH": f"{tmp_path}:/usr/bin:/bin"}).returncode != 0
 
-    def test_the_install_takes_the_checks_two_pins_from_requirements_and_nothing_else(
-            self, tmp_path):
-        """The install step's shell, RUN with a stand-in ``python``: it is called once, as
-        exactly ``python -m pip install -r <file>`` (no index or other option), the file
-        holding requirements.txt's own ``requests`` and ``cryptography`` lines, and no pip
-        upgrade runs in the job that holds the token."""
-        install = _steps("landing")["Install dependencies"]
-        assert "--upgrade" not in install["run"]
-        stand_in = tmp_path / "python"
-        record = tmp_path / "called"
-        stand_in.write_text(
-            "#!/bin/sh\n"
-            '[ "$#" -eq 5 ] || exit 8\n'
-            'test "$1 $2 $3 $4" = "-m pip install -r" || exit 9\n'
-            f'test ! -e "{record}" || exit 7\n'
-            f'cp "$5" "{record}"\n'
-        )
-        stand_in.chmod(0o755)
-        done = subprocess.run(
-            ["bash", "--noprofile", "--norc", "-e", "-c", install["run"]], cwd=arcs.REPO,
-            env={"PATH": f"{tmp_path}:/usr/bin:/bin", "RUNNER_TEMP": str(tmp_path)},
-            capture_output=True, text=True, check=False)
-        assert done.returncode == 0, done.stderr
-        pins = (arcs.REPO / "requirements.txt").read_text(encoding="utf-8").splitlines()
-        wanted = [line for line in pins if line.split("==")[0] in {"requests", "cryptography"}]
-        assert len(wanted) == 2, wanted
-        assert record.read_text().splitlines() == wanted
-
+    def test_the_install_takes_the_landing_group_alone(self):
+        """The install step syncs pyproject.toml's ``landing`` group alone: exactly the two
+        packages the check imports (``requests``, and ``cryptography`` through quill's GitHub
+        client), with the indirect packages they need, at the lock's versions and hashes.  Each
+        is held to its range by its entry in the runtime ``dependencies``, so the group names
+        which packages and never a version."""
+        assert _steps("landing")[INSTALL_STEP] == {
+            "name": INSTALL_STEP, "uses": INSTALL_LOCK, "with": {"install": "landing"},
+        }
+        project = tomllib.loads((arcs.REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        group = project["dependency-groups"]["landing"]
+        assert group == ["requests", "cryptography"]
+        runtime = {re.match(r"[\w.-]+", entry)[0] for entry in project["project"]["dependencies"]}
+        assert set(group) <= runtime, group
 
 class TestTheRequiredCheckJudgesEveryGrader:
     """``lint-and-test`` -- the check branch protection requires -- answers for every job.
@@ -591,3 +726,131 @@ class TestTheRequiredCheckJudgesEveryGrader:
         assert step["run"].strip() == (
             "printf '%s' \"${NEEDS}\" | python -m tools.ci.ci_verdict"
         )
+
+
+class TestEveryJobInstallsTheLock:
+    """Every job that runs Python installs it through ``.github/actions/install-lock``, but
+    the update alert (:data:`RUNNER_PYTHON`).
+
+    Ruling balance:R-BAL294 (plan#1027) as X-em's plan#2327 builds it: the job's Python is
+    ``.python-version``'s and its packages ``uv.lock``'s, installed by one recipe, so no
+    job states a version of its own.  The action is called by the ``$/`` form (ruling
+    plan#2375), and its PATH write is safe only while no caller runs on a trigger that
+    hands a pull request's code the base's authority (ruling plan#2376).
+    """
+
+    def test_each_job_that_runs_python_installs_its_set_right_after_its_checkout(self):
+        """Exactly the jobs :data:`INSTALLS` names call the action, each once, as the step
+        straight after its checkout (the action reads the checkout's Dockerfile and lock),
+        with its install set alone; no other job calls it."""
+        calls = {}
+        for name, workflow in _workflows().items():
+            for job_name, job in workflow["jobs"].items():
+                steps = job["steps"]
+                at = [i for i, step in enumerate(steps) if "install-lock" in step.get("uses", "")]
+                if not at:
+                    continue
+                assert len(at) == 1, (name, job_name, at)
+                assert at[0] >= 1, (name, job_name)
+                assert steps[at[0] - 1]["uses"].startswith("actions/checkout@"), (name, job_name)
+                assert steps[at[0]]["name"] == INSTALL_STEP, (name, job_name)
+                calls[(name, job_name)] = steps[at[0]]["with"]
+        assert calls == INSTALLS
+
+    def test_the_action_is_called_by_the_self_repository_form(self):
+        """``$/``, which GitHub loads from the workflow's own commit, never ``./``, which
+        reads whatever the checkout holds when the step runs (ruling plan#2375)."""
+        uses = [step["uses"] for workflow in _workflows().values()
+                for job in workflow["jobs"].values() for step in job["steps"]
+                if "install-lock" in step.get("uses", "")]
+        assert len(uses) == len(INSTALLS)
+        assert set(uses) == {INSTALL_LOCK}
+
+    def test_no_job_runs_python_with_no_install_but_the_update_alert(self):
+        """A job that runs Python before any install runs the runner's own, at whatever
+        version the runner holds and with none of the lock's packages: the update alert
+        alone does.  The check sees each spelling it reads in a job with no install and
+        before one, and none after one, nor Python run inside a container, nor the word as
+        an argument."""
+        assert _runner_python(_workflows()) == RUNNER_PYTHON
+        install, ran = {"uses": INSTALL_LOCK}, {("x.yml", "j")}
+
+        def one_job(*steps: dict, **job) -> dict[str, dict]:
+            return {"x.yml": {"jobs": {"j": {"steps": list(steps), **job}}}}
+
+        for step in ({"run": "python -m tools.x"}, {"run": 'python3 -S -m tools.x "${RUN}"'},
+                     {"run": "cd tools && python3.14 x.py"}, {"run": 'v="$(python -c 1)"'},
+                     {"run": "/usr/bin/python3 x"}, {"run": "./scripts/check_tax_law.py notice"},
+                     {"run": "echo start\nenv PYTHONPATH=. python x"},
+                     {"run": "docker pull img \\\n  && python x"}, {"run": 'bash -c "python x"'},
+                     {"run": "if python3 -c 1; then :; fi"},
+                     {"run": "while python3 x; do :; done"},
+                     {"run": "until python3 x; do :; done"}, {"run": "{ python3 x; }"},
+                     {"run": "sudo -E python3 x"}, {"run": "env -i python3 x"},
+                     {"run": "python3.14t x"}, {"shell": "python", "run": "print(1)"},
+                     {"shell": "/usr/bin/env python3 {0}", "run": "print(1)"}):
+            assert _runner_python(one_job(step)) == ran, step
+            assert _runner_python(one_job(step, install)) == ran, step
+            assert not _runner_python(one_job(install, step)), step
+        python = {"run": {"shell": "python"}}
+        assert _runner_python(one_job({"run": "print(1)"}, defaults=python)) == ran
+        assert _runner_python({"x.yml": {"defaults": python, "jobs": {
+            "j": {"steps": [{"run": "print(1)"}]}}}}) == ran
+        assert not _runner_python(one_job({"uses": "actions/checkout@v9"}, defaults=python))
+        for run in ("docker run --rm --entrypoint python img -c 'print(1)'", "echo python",
+                    "docker run --rm --entrypoint \\\n    python img", "pythonista x"):
+            assert not _runner_python(one_job({"run": run})), run
+
+    def test_no_workflow_installs_python_or_packages_any_other_way(self):
+        """No ``setup-python``, no ``python-version``, no ``actions/cache`` step (read by that
+        prefix, so its ``restore`` and ``save`` actions pass) and no installer run
+        (:data:`INSTALLER_COMMAND`): a second recipe would be a second home of what it
+        installs."""
+        for name, workflow in _workflows().items():
+            for job_name, job in workflow["jobs"].items():
+                for step in job["steps"]:
+                    where = (name, job_name, step.get("name"))
+                    uses = step.get("uses", "")
+                    assert not uses.startswith(("actions/setup-python@", "actions/cache@")), where
+                    assert "python-version" not in step.get("with", {}), where
+                    assert not INSTALLER_COMMAND.search(_shell(step)), where
+
+    def test_the_installer_check_refuses_each_spelling_it_reads_and_passes_an_argument(self):
+        """Each installer :data:`INSTALLER_COMMAND` names is refused wherever :data:`COMMAND`
+        reads a command start; uv named as an argument, as the image job runs it inside the
+        image, passes, and so do a word that only starts like one and Python's other modules."""
+        for run in ("pip install requests", "pip3 install requests", "pip3.14 install x",
+                    "python -m pip install x", "python3 -mpip install x", "uv pip install x",
+                    "uv tool install ruff", "uvx ruff check", "uv run --with ruff ruff check",
+                    "pipx install ruff", "pipx run ruff", "pip-compile requirements.in",
+                    "python -m ensurepip", "python -m venv .venv", "python -m uv sync",
+                    "cd app && uv sync", 'v="$(uvx ruff --version)"', "sudo pip install x",
+                    "env UV_SYSTEM_PYTHON=1 uv pip install x", 'bash -c "uvx ruff check"',
+                    '"${HOME}/.local/bin/uv" sync', "echo start\nuv tool install ruff",
+                    "docker pull img \\\n  && uvx ruff", "if uv sync; then :; fi",
+                    "while uvx ruff; do :; done", "{ uv tool install ruff; }",
+                    "sudo -H pip install x", "xargs -n1 pip install < reqs.txt",
+                    "python3 -Im pip install x", "python3 -sm ensurepip"):
+            assert INSTALLER_COMMAND.search(_shell({"run": run})), run
+        for run in ('docker run --rm --entrypoint uv "${IMAGE}" sync --check',
+                    'docker buildx build --target uv --output "type=local,dest=${T}/uv" .',
+                    'docker run --volume "${T}/uv/uv:/usr/local/bin/uv:ro" img',
+                    "docker run --rm --entrypoint \\\n    uv img sync --check",
+                    'cp "${RUNNER_TEMP}/uv" out', "set -o pipefail", 'echo "pip install"',
+                    "find / -name pip",
+                    "uvicorn app:app", 'python -m tools.update.refresh "${RUNNER_TEMP}/update"'):
+            assert not INSTALLER_COMMAND.search(_shell({"run": run})), run
+
+    def test_no_caller_runs_on_a_trigger_that_makes_the_path_write_dangerous(self):
+        """The reason zizmor's github-env flag is ignored on the action's PATH line (ruling
+        plan#2376), checked: no workflow calling the action runs on ``pull_request_target``
+        or ``workflow_run``.  The check is shown to refuse each spelling of such a trigger,
+        and to pass one that calls no install."""
+        assert not _dangerous_callers(_workflows())
+        calling = {"j": {"steps": [{"uses": INSTALL_LOCK}]}}
+        for on in ("workflow_run", ["push", "pull_request_target"],
+                   {"pull_request_target": {"branches": ["dev"]}}):
+            assert _dangerous_callers({"x.yml": {True: on, "jobs": calling}}) == ["x.yml"], on
+        assert _dangerous_callers({"x.yml": {"on": "workflow_run", "jobs": calling}}) == ["x.yml"]
+        other = {"j": {"steps": [{"uses": "actions/checkout@" + "a" * 40}]}}
+        assert not _dangerous_callers({"x.yml": {True: "workflow_run", "jobs": other}})

@@ -224,8 +224,8 @@ was.** Two producers decide "is this daemon isolated" by contradictory methods t
 exact heuristic the wrapper's own comment argues has a hole, since a `tcp://` endpoint aimed at the
 `socket-proxy` container reads as isolated while being the production daemon at another address.
 That is CLAUDE.md rule 14's shape and it wants one of the two deleted. Exporting `DOCKER_HOST` lets
-those 28 tests run, but only for a caller who also passes `PYTEST_MARKER_EXPR=docker`: this wrapper
-defaults to `-m "not docker"`, which deselects them before the conftest is ever consulted.
+the docker-marked tests run, but only for a caller who also passes `PYTEST_MARKER_EXPR=docker`: this
+wrapper defaults to `-m "not docker"`, which deselects them before the conftest is ever consulted.
 
 CI is unaffected: its runners carry no rootless socket, so the wrapper leaves `DOCKER_HOST` unset
 and uses the runner's own throwaway daemon, which `CI=true` sanctions.

@@ -31,7 +31,10 @@ from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.services.balance_at._fold import fold_loan_balances
 from app.services.rate_period_engine import period_for_date
 from tests._ledger_parity import assert_ledger_parity
-from tests._ledger_reads import posted_loan_balance_at, posted_loan_balances_on
+from tests._ledger_reads import (
+    assert_fold_matches_postings_every_day,
+    posted_loan_balance_at,
+)
 from tests._test_helpers import (
     create_loan_account,
     create_loan_with_trueup,
@@ -600,30 +603,13 @@ class TestFoldAgreesWithThePostedSum:
             # Pin today past the window so every settled payment is posted.
             freeze_today(monkeypatch, last + timedelta(days=1))
 
-            days = []
-            day = _ORIGINATION_DATE
-            while day <= last:
-                days.append(day)
-                day += timedelta(days=1)
-            folded = _fold(loan, seed_user, days)
-            read = posted_loan_balances_on(
-                loan.id, seed_user["scenario"].id, days,
+            # An agreement over three days would prove nothing.  This spans
+            # origination to the last payment's period -- the whole pre-true-up
+            # year plus the payment window, day by day.
+            assert_fold_matches_postings_every_day(
+                loan.id, seed_user["scenario"].id, _ORIGINATION_DATE, last,
+                min_days=401,
             )
-
-            mismatches = [
-                (day, folded[day], read[day])
-                for day in days
-                if read[day] != folded[day]
-            ]
-            assert not mismatches, (
-                f"fold and posted ledger disagree on "
-                f"{len(mismatches)}/{len(days)} days: {mismatches[:5]}"
-            )
-            # Guard the loop itself: an agreement over three days would prove
-            # nothing.  This spans origination to the last payment's period --
-            # the whole pre-true-up year plus the payment window, day by day.
-            assert days[0] == _ORIGINATION_DATE and days[-1] == last
-            assert len(days) > 400
 
 
 class TestFoldNegativeControls:

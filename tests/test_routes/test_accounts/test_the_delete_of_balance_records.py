@@ -44,6 +44,7 @@ from app.services import (
     posting_service,
     transfer_service,
 )
+from app.services.installment_calendar import first_installment_date
 from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 from app.utils.dates import display_today
@@ -433,6 +434,10 @@ class TestItWritesNothingOnALoanItIsDeleting:
         The loan opens in a future paycheck, its payment planned in an earlier one
         and hidden.  Truncating to that earlier paycheck takes the one the opening
         is filed in, which the Posted lock once refused.
+
+        The payment states its due date, the loan's first installment.  Left to its
+        paycheck's next payment day, that falls on or before the origination on most
+        days of the year, and the transfer door refuses it.
         """
         with app.app_context():
             owner_id = seed_user["user"].id
@@ -453,6 +458,7 @@ class TestItWritesNothingOnALoanItIsDeleting:
             transfer = create_transfer(
                 seed_user, _db.session, seed_user["account"], loan, kept,
                 amount=Decimal("400.00"),
+                due_date=first_installment_date(taken.start_date, 1),
             )
             _db.session.commit()
             transfer_service.delete_transfer(transfer.id, owner_id, soft=True)

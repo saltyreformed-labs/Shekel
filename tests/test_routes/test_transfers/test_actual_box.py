@@ -11,15 +11,19 @@ from app.extensions import db
 from app.models.transfer import Transfer
 from app.services import transfer_service
 from app.utils.dates import display_today
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import (
+    account_net,
+    linked_key_of,
+    linked_net_by_date,
+    net_posted_by_day,
+    transfer_family_movement_ids,
+)
 from tests._test_helpers import (
     an_entered_day,
     an_observed_day,
     field_is_disabled,
-    linked_ledger_account,
-    linked_net_by_date,
-    net_posted_by_day,
     on_both_sides,
-    transfer_family_journal_filter,
     transfer_side_figure,
     transfer_side_record,
     transfer_side_settle_day,
@@ -315,7 +319,7 @@ class TestTransferActualBox:
                     "a figure correction moved the settle day"
                 )
             assert net_posted_by_day(
-                transfer_family_journal_filter(xfer.id),
+                transfer_family_movement_ids(xfer.id),
             ) == {day: Decimal("214.37")}
             # Each LEG on its own account's ledger, signed as the ledger signs
             # it (out of Checking negative, into Savings positive).  The family
@@ -336,11 +340,12 @@ class TestTransferActualBox:
             ):
                 assert linked_net_by_date(
                     db.session,
-                    linked_ledger_account(db.session, account_id).id,
+                    linked_key_of(db.session, account_id),
                     scenario_id,
                 ).get(day) == posted, (
                     f"the correction did not reach the leg on account {account_id}"
                 )
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_an_ECHO_of_the_recorded_figure_records_nothing(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -538,7 +543,7 @@ class TestTransferActualBox:
                     db.session, xfer.id, account_id,
                 ) == Decimal("187.65")
             assert net_posted_by_day(
-                transfer_family_journal_filter(xfer.id),
+                transfer_family_movement_ids(xfer.id),
             ) == {day: Decimal("187.65")}
             # Each LEG on its own account's ledger, signed as the ledger signs
             # it (out of Checking negative, into Savings positive).  The
@@ -562,7 +567,7 @@ class TestTransferActualBox:
             ):
                 assert linked_net_by_date(
                     db.session,
-                    linked_ledger_account(db.session, account_id).id,
+                    linked_key_of(db.session, account_id),
                     seed_user["scenario"].id,
                 ).get(day) == posted, (
                     f"the correction did not reach the {side}'s leg on "
@@ -656,9 +661,13 @@ class TestTransferActualBox:
             assert self._side_records(xfer.id) == (None, None), (
                 "the refused day wrote a record"
             )
-            assert net_posted_by_day(
-                transfer_family_journal_filter(xfer.id),
-            ) == {}, "the refused day posted money"
+            # Asked of the account, never of the pair's movements: a $0.00
+            # close holds no record, and a read of no movement answers nothing
+            # whatever the ledger holds.  Checking holds its seeded $1,000.00
+            # opening and no line of this pair's.
+            assert account_net(
+                db.session, xfer.from_account_id, seed_user["scenario"].id,
+            ) == Decimal("1000.00"), "the refused day posted money"
 
             version = db.session.get(Transfer, xfer.id).version_id
             repair = auth_client.patch(

@@ -30,7 +30,7 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import StatusEnum, TxnTypeEnum
+from app.enums import LedgerAccountKindEnum, StatusEnum, TxnTypeEnum
 from app.exceptions import ValidationError
 from app.extensions import db as _db
 from app.models.statement_line_skip import StatementLineSkip
@@ -42,6 +42,7 @@ from app.services import (
     status_seam,
     transaction_service,
 )
+from app.services.ledger_lines import account_counter_key
 from app.services.posting_reads import PostingError
 from app.services.row_valuation import settled_figure
 from app.services.statement_match import (
@@ -61,6 +62,7 @@ from app.services.statement_match._outcome import FiledMerchant
 # module reaches into it, which is the allowance every sibling here takes.
 from app.services.statement_match import _create  # pylint: disable=protected-access
 
+from tests._ledger_reads import linked_key_of, nets_by_key_and_day
 from tests._test_helpers import (
     an_entered_day,
     purchases_of,
@@ -1201,22 +1203,8 @@ class TestABatchBooksWhatTheSameActsBookOneAtATime:
             " ORDER BY t.name, e.description, e.amount"
         )).all()
         # The LEDGER, not just the projection.  A balance can agree while the
-        # postings underneath it differ, and the posting writer is what the
-        # settle verbs reach through -- so the ledger is where a re-dated
-        # settle leaving its old posting behind would show up.
-        #
-        # **Keyed by the chart row's NAME, never its id**, which is the lesson
-        # ``tests/manual/verify_statement_baseline.py`` states for itself: a
-        # chart row minted by a run has an id the other run never had, and it
-        # would diff as a moved line where the money did not move.
-        postings = app_db.session.execute(_db.text(
-            "SELECT l.name, e.entry_date, COALESCE(SUM(p.amount), 0)"
-            "  FROM budget.account_postings p"
-            "  JOIN budget.journal_entries e ON e.id = p.journal_entry_id"
-            "  JOIN budget.ledger_accounts l ON l.id = p.ledger_account_id"
-            " GROUP BY l.name, e.entry_date"
-            " ORDER BY l.name, e.entry_date"
-        )).all()
+        # lines underneath it differ, so the ledger is where a re-dated settle
+        # leaving money on its old day would show up.
         return {
             "balances": {
                 day.isoformat(): str(
@@ -1226,7 +1214,7 @@ class TestABatchBooksWhatTheSameActsBookOneAtATime:
             },
             "transactions": [tuple(str(v) for v in row) for row in rows],
             "entries": [tuple(str(v) for v in row) for row in entries],
-            "postings": [tuple(str(v) for v in row) for row in postings],
+            "ledger": nets_by_key_and_day(app_db.session, seed_user["scenario"].id),
         }
 
     @staticmethod
@@ -1379,7 +1367,22 @@ class TestABatchBooksWhatTheSameActsBookOneAtATime:
             assert as_a_batch["balances"] == singly["balances"]
             assert as_a_batch["transactions"] == singly["transactions"]
             assert as_a_batch["entries"] == singly["entries"]
-            assert as_a_batch["postings"] == singly["postings"]
+            assert as_a_batch["ledger"] == singly["ledger"]
+            # The figures, or that comparison could hold between two empty
+            # ledgers.  The bank's day is the seed's assertion day, so Checking's
+            # own line nets nothing there (the assertion takes the -279.96 back
+            # as a true-up): the money shows on its counter, Electricity 180.00
+            # + Water corrected onto it 42.00 + the swipe 57.96 = 279.96 moved
+            # off Anchor equity.  Three days on, the purchase re-dated to where
+            # it posted.  Water's old day holds nothing.
+            cash = linked_key_of(_db.session, seed_user["account"].id)
+            equity = account_counter_key(
+                LedgerAccountKindEnum.ANCHOR_EQUITY, seed_user["account"].id,
+            )
+            day = seed_user["bootstrap_period"].start_date
+            assert singly["ledger"][(equity, day)] == Decimal("-279.96")
+            assert singly["ledger"][(cash, day + timedelta(days=3))] == Decimal("-31.00")
+            assert (cash, day + timedelta(days=4)) not in singly["ledger"]
 
 
 class TestOnePressMintsOneEnvelopePerAnswerPerPeriod:
@@ -1757,14 +1760,6 @@ class TestConvergingMovesTheSameMoneyAsNotConverging:
             "  FROM budget.transaction_entries e"
             " ORDER BY e.amount, e.settled_on"
         )).all()
-        postings = _db.session.execute(_db.text(
-            "SELECT l.name, e.entry_date, SUM(p.amount)"
-            "  FROM budget.account_postings p"
-            "  JOIN budget.journal_entries e ON e.id = p.journal_entry_id"
-            "  JOIN budget.ledger_accounts l ON l.id = p.ledger_account_id"
-            " GROUP BY l.name, e.entry_date"
-            " ORDER BY l.name, e.entry_date"
-        )).all()
         return {
             "balances": {
                 day.isoformat(): str(
@@ -1773,7 +1768,7 @@ class TestConvergingMovesTheSameMoneyAsNotConverging:
                 for day in days
             },
             "entries": [tuple(str(v) for v in row) for row in entries],
-            "postings": [tuple(str(v) for v in row) for row in postings],
+            "ledger": nets_by_key_and_day(_db.session, seed_user["scenario"].id),
         }
 
     def test_the_two_paths_book_the_same_money(self, app, db, seed_user):
@@ -1825,7 +1820,12 @@ class TestConvergingMovesTheSameMoneyAsNotConverging:
 
         assert converged["balances"] == separate["balances"]
         assert converged["entries"] == separate["entries"]
-        assert converged["postings"] == separate["postings"]
+        assert converged["ledger"] == separate["ledger"]
+        # The figures, or that comparison could hold between two empty ledgers:
+        # each purchase books its own line on the day its line posted.
+        cash = linked_key_of(_db.session, seed_user["account"].id)
+        assert separate["ledger"][(cash, day)] == Decimal("-30.00")
+        assert separate["ledger"][(cash, later)] == Decimal("-45.00")
 
 
 class TestThePassHoldsONEAmountBasis:

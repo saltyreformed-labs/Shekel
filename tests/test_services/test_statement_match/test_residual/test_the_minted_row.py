@@ -12,13 +12,12 @@ from app import ref_cache
 from app.enums import (
     AmountSourceEnum,
     LedgerAccountClassEnum,
+    LedgerAccountKindEnum,
     SettledDayBasisEnum,
     StatusEnum,
     TxnTypeEnum,
 )
 from app.exceptions import ValidationError
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.statement_match import StatementMatchMember
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
@@ -26,6 +25,8 @@ from app.services import statement_match
 from app.services.row_valuation import settled_figure
 from app.services.statement_match._sides import MatchSides
 
+from app.services.ledger_lines import linked_key, owner_bucket_key
+from tests._ledger_reads import family_movement_ids, movement_nets_by_key
 from tests.test_services.test_statement_match._builders import (
     accepted_acts,
     a_bank_line,
@@ -34,7 +35,7 @@ from tests.test_services.test_statement_match._builders import (
     a_transaction,
     an_import,
 )
-from tests._test_helpers import family_journal_filter, resolved_amount
+from tests._test_helpers import resolved_amount
 
 from ._helpers import _submit, _minted, _uncategorized_net, _ALine, _ARow, _payroll
 
@@ -283,7 +284,7 @@ class TestTheLedgerBooksItToUncategorized:
         line, salary, allowance = _payroll(seed_user)
         assert _uncategorized_net(
             seed_user, LedgerAccountClassEnum.INCOME,
-        ) is None
+        ) == Decimal("0.00")
 
         _submit(
             seed_user, lines=[line], transactions=[salary, allowance],
@@ -330,19 +331,15 @@ class TestTheLedgerBooksItToUncategorized:
 
         row = _minted(seed_user)[0]
         # The row's FAMILY (plan step X-bi-3b): the minted paycheck settles
-        # covered, its money posted under its movement, so the read widens
-        # to the family and the figures stand.
-        legs = (
-            db.session.query(
-                LedgerAccount.is_owner_bucket, db.func.sum(Posting.amount),
-            )
-            .join(Posting, Posting.ledger_account_id == LedgerAccount.id)
-            .join(JournalEntry, JournalEntry.id == Posting.journal_entry_id)
-            .filter(family_journal_filter(row))
-            .group_by(LedgerAccount.is_owner_bucket)
-            .all()
-        )
-        assert dict(legs) == {True: Decimal("-0.05"), False: Decimal("0.05")}
+        # covered, its money booked under its movement.
+        assert movement_nets_by_key(
+            db.session, family_movement_ids(row), seed_user["scenario"].id,
+        ) == {
+            linked_key(seed_user["account"]): Decimal("0.05"),
+            owner_bucket_key(
+                LedgerAccountKindEnum.FALLBACK, LedgerAccountClassEnum.INCOME,
+            ): Decimal("-0.05"),
+        }
 
 
 class TestTheMintedRowIsAMemberOfTheMatch:

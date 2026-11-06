@@ -53,11 +53,11 @@ from app.services import (
     transfer_legs,
     transfer_service,
 )
-from app.services.posting_reads import account_posting_total
 from app.services.settle_day import SettleDay, recorded_settle_day
 from app.services.statement_match import accept_match
 from app.utils.dates import display_today
 from app.utils.log_events import EVT_STATEMENT_MATCH_WITHDRAWN
+from tests._ledger_reads import account_net
 from tests._test_helpers import (
     an_entered_day,
     an_observed_day,
@@ -551,14 +551,14 @@ class TestAnEndpointMoveMovesTheLedger:
             db.session.commit()
             scenario_id = xfer.scenario_id
             accounts = (xfer.from_account_id, xfer.to_account_id, new_savings.id)
-            before = [account_posting_total(a, scenario_id) for a in accounts]
+            before = [account_net(db.session, a, scenario_id) for a in accounts]
 
             transfer_service.update_transfer(
                 xfer.id, owner, to_account_id=new_savings.id,
             )
             db.session.commit()
 
-            after = [account_posting_total(a, scenario_id) for a in accounts]
+            after = [account_net(db.session, a, scenario_id) for a in accounts]
             assert [b - a for a, b in zip(before, after)] == [
                 Decimal("0.00"), -_AMOUNT, _AMOUNT,
             ]

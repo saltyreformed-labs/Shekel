@@ -112,7 +112,7 @@ class TestAccountingIdentityAtMultipleAsOf:
                 assert sheet.tie_out.in_balance is True, as_of
                 # Independent entry-date fold agrees (valid for noon-UTC dates).
                 _assert_reader_matches_independent(
-                    user_id, scenario_id, sheet, through=as_of,
+                    scenario_id, sheet, through=as_of,
                 )
 
             _assert_ledger_self_consistent()
@@ -181,7 +181,7 @@ class TestArticulation:
 
             equity_delta = end_sheet.equity.total - start_sheet.equity.total
             corrections = _windowed_equity_corrections(
-                user_id, scenario_id, date(_Y, 1, 1), date(_Y, 12, 31),
+                scenario_id, date(_Y, 1, 1), date(_Y, 12, 31),
             )
             # Hand-computed anchors for the three quantities.
             assert income.net_income == Decimal("500.00")

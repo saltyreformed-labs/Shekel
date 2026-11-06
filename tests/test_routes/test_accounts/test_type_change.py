@@ -19,6 +19,7 @@ from app.services.ledger_report_service import (
 from app.services.pay_calendar import calendar_for
 from app.utils.dates import display_today
 from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import account_net
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_account,
@@ -178,7 +179,7 @@ class TestTypeChangeBoundaryGuard:
         # that needs these helpers, matching the file's convention.
         # pylint: disable=import-outside-toplevel
         from app.enums import LedgerAccountClassEnum
-        from tests._test_helpers import linked_ledger_account
+        from tests._stored_ledger import linked_ledger_account
 
         with app.app_context():
             account = _mistaken_card(seed_user)
@@ -220,7 +221,7 @@ class TestTypeChangeBoundaryGuard:
         # that needs these helpers, matching the file's convention.
         # pylint: disable=import-outside-toplevel
         from app.enums import LedgerAccountClassEnum
-        from tests._test_helpers import linked_ledger_account
+        from tests._stored_ledger import linked_ledger_account
 
         with app.app_context():
             custom_type = AccountType(
@@ -447,7 +448,7 @@ class TestTypeChangeBoundaryGuard:
         # that needs these helpers, matching the file's convention.
         # pylint: disable=import-outside-toplevel
         from app.enums import LedgerAccountClassEnum
-        from tests._test_helpers import linked_ledger_account
+        from tests._stored_ledger import linked_ledger_account
 
         with app.app_context():
             savings_type = (
@@ -629,7 +630,7 @@ class TestTypeChangeBoundaryGuard:
         # that needs these helpers, matching the file's convention.
         # pylint: disable=import-outside-toplevel
         from app.enums import LedgerAccountClassEnum
-        from tests._test_helpers import linked_ledger_account
+        from tests._stored_ledger import linked_ledger_account
 
         with app.app_context():
             custom_type = AccountType(
@@ -683,11 +684,6 @@ class TestTypeChangeBoundaryGuard:
         and the posted ledger does not move.  The rest of the edit still
         applies, which is what says the route was narrowed rather than broken.
         """
-        # Pylint: ``import-outside-toplevel`` -- localized to the one test
-        # that needs this reader, matching the file's convention.
-        # pylint: disable=import-outside-toplevel
-        from app.services import posting_service
-
         with app.app_context():
             checking = seed_user["account"]
             checking_id = checking.id
@@ -699,8 +695,8 @@ class TestTypeChangeBoundaryGuard:
                 db.session.query(AccountAnchorHistory)
                 .filter_by(account_id=checking_id).count()
             )
-            assert posting_service.account_posting_total(
-                checking_id, scenario_id,
+            assert account_net(
+                db.session, checking_id, scenario_id,
             ) == Decimal("1000.00")
 
             response = auth_client.post(
@@ -717,8 +713,8 @@ class TestTypeChangeBoundaryGuard:
             assert b"updated" in response.data
             db.session.expire_all()
             # The balance the form submitted reached nothing.
-            assert posting_service.account_posting_total(
-                checking_id, scenario_id,
+            assert account_net(
+                db.session, checking_id, scenario_id,
             ) == Decimal("1000.00")
             assert (
                 db.session.query(AccountAnchorHistory)
@@ -726,3 +722,4 @@ class TestTypeChangeBoundaryGuard:
             ) == assertions_before
             # ...and the edit this door DOES own still landed.
             assert db.session.get(Account, checking_id).name == "Renamed Checking"
+            assert_ledger_parity(db.session, scenario_id)

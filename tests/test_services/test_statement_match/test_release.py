@@ -73,6 +73,7 @@ from app.services.statement_match._release import (  # pylint: disable=protected
     planned_removals,
 )
 
+from tests._ledger_reads import account_net
 from tests._test_helpers import an_entered_day, typed
 
 from ._builders import (
@@ -139,9 +140,7 @@ def _balance_on(seed_user, day):
 
 def _posted_total(seed_user):
     """Return what the posted ledger says this account holds."""
-    return posting_service.account_posting_total(
-        seed_user["account"].id, seed_user["scenario"].id,
-    )
+    return account_net(db.session, seed_user["account"].id, seed_user["scenario"].id)
 
 
 def _a_swipe(seed_user, *, amount="-57.96", offset=5, sequence=0):
@@ -933,7 +932,7 @@ class TestTheSettledParentRuleIsTheArithmetic:
         ``purchases`` close has no covering movement, its purchases carrying
         the money (ruling **R-BAL81**) -- and the account's posted total
         moves ``822.04 -> 880.00``, which is the removed purchase's own
-        `$57.96` leg reversed on its own day and nothing else.  Before this
+        `$57.96` line gone from its own day and nothing else.  Before this
         step the removal was refused outright, and 103 purchases a statement
         pass created in error had no door at all.
         """

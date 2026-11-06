@@ -128,20 +128,21 @@ class TestPreviewRecurrence:
                 MONTHLY, RecurrenceUnitEnum.MONTH, 1,
                 {"starts_on": "0001-01-01"},
             ),
-            # The nominal day took the retired day / month args' place, and
+            # The "repeating on" choice took the retired day / month args'
+            # place (as ``nominal_day`` until plan step recurrence:R8-c), and
             # takes their disposition: a value the date leaves no room for is
             # a second statement of a day ``starts_on`` already carries.
             (
                 MONTHLY, RecurrenceUnitEnum.MONTH, 1,
-                {"starts_on": "2026-04-15", "nominal_day": "30"},
+                {"starts_on": "2026-04-15", "repeats_on": "30"},
             ),
             (
                 MONTHLY, RecurrenceUnitEnum.MONTH, 1,
-                {"starts_on": "2026-02-28", "nominal_day": "99"},
+                {"starts_on": "2026-02-28", "repeats_on": "99"},
             ),
             (
                 MONTHLY, RecurrenceUnitEnum.MONTH, 1,
-                {"starts_on": "2026-02-28", "nominal_day": "0"},
+                {"starts_on": "2026-02-28", "repeats_on": "0"},
             ),
         ],
         # Without this every case collapses to ``cadence0``..``cadence6``: a
@@ -155,7 +156,7 @@ class TestPreviewRecurrence:
     ):
         """Unbounded query args answer a muted line, never a stack trace.
 
-        This endpoint reads ``interval_n`` / ``starts_on`` / ``nominal_day``
+        This endpoint reads ``interval_n`` / ``starts_on`` / ``repeats_on``
         straight from ``request.args``.  The two form schemas bound them and
         the columns carry ``ck_recurrence_rules_positive_interval`` /
         ``ck_recurrence_rules_starts_on_range`` /

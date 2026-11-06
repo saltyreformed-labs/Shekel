@@ -26,7 +26,7 @@ Usage:
     VERIFY_DEV_DATABASE=<the app's database> python tests/manual/verify_retirement_rail_refusal.py
 
 Exit code 0 when every check passes, 1 on a failure, 2 when the preconditions
-are not met.  Paced to the dev app's real Redis limiter (30/minute per IP):
+are not met.  Paced to the dev app's real Valkey limiter (30/minute per IP):
 every field change fires one readiness GET after the 500 ms debounce.
 """
 import os
@@ -41,7 +41,7 @@ from playwright.sync_api import Error as PlaywrightError, sync_playwright
 #: scopes its cookie to.
 DEV_BASE_URL = "http://172.32.0.1:5000"
 
-#: The database THE APP IS POINTED AT (see ``verify_recurrence_form.py`` for
+#: The database THE APP IS POINTED AT (see ``_recurrence_form_kit.py`` for
 #: why this must not be hard-coded to ``shekel``).
 DEV_DATABASE = os.environ.get("VERIFY_DEV_DATABASE", "shekel")
 

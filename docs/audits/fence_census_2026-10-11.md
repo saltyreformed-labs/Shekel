@@ -56,7 +56,7 @@ for a fence, the kind is this record's reading.
 | id | where | what it guards | why it stays |
 |---|---|---|---|
 | T-04 | `tools/pylint/shekel_checkers/disable_rationale.py:54` (W9903) | a `pylint: disable` with no written reason | a process rule; no app state stands behind it |
-| T-18 | `scripts/hooks/post-edit-deps.sh` | a `requirements*.txt` edit nobody approved (it asks) | a developer-approval rule |
+| T-18 | `scripts/hooks/post-edit-deps.sh` | a `pyproject.toml` or `uv.lock` edit nobody approved (it asks) | a developer-approval rule |
 | T-21 | `scripts/hooks/session-start.sh` | nothing; it prints the session's context | process |
 | T-22 | `scripts/hooks/guard-pr-actions.sh` | a pull request opened or merged outside the coordinator (it asks) | an advisory process control; deleted by plan#1819 on the developer's word (plan#1828, asked under `balance:R-BAL268`), each session queueing its own pull request into `dev` |
 | T-56 | `tools/ci/commit_trailers.py`, `tools/ci/trailers.py` | a malformed `Ships:` trailer, a revert git would answer wrongly | git is the truth of what shipped (`balance:R-BAL170`); deleted by the tracker switch (`balance:X-cx`, L8; `balance:R-BAL389`), the done file `plan/ships/N` replacing the trailer (`balance:R-BAL359`) |

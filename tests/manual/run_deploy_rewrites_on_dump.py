@@ -7,8 +7,8 @@ and the read share the target rules, the records walk, the loan walk and ``filin
 under one pinned clock, so every line that step rebuilds agrees by construction, and what the
 step REWROTE went unmeasured.  This run measures it, on the release kit's bench
 (``tools/rehearsal``): one dump restored once and cloned per copy, each copy deployed by its own
-commit's step (``rows.deploy``) under ONE instant, noon of the dump's civil day
-(``rows.pinned_instant``).  The copies are the dump as it was (never deployed), base's (the
+commit's step (``sides.deploy``) under ONE instant, noon of the dump's civil day
+(``sides.pinned_instant``).  The copies are the dump as it was (never deployed), base's (the
 commit the card was claimed from), base's again, and head's.
 
 1. **What the leaf's deploy rewrites**: base's store and head's, their journals diffed line by
@@ -73,6 +73,9 @@ Usage, with production's locale pinned as ``scripts/test.sh`` pins it::
         --dump <pg_dump -Fc file> --out <a directory that does not exist yet> \\
         --base <the commit the card was claimed from> [--head <commit, default HEAD>]
 
+A commit with no ``uv.lock`` is refused, exit 2: the bench builds a side's venv from its lock
+(ruling plan#2404).
+
 It writes into ``--out``: ``run.txt`` (each deploy's verdict, the controls, the summaries and
 each measurement's exit status), ``verify_balance_baseline_<side>.json`` with its ``_log.txt``
 and, where the pair parts, ``verify_balance_baseline.diff``, ``rewrites.txt`` (every key whose
@@ -112,6 +115,7 @@ import psycopg
 
 from tests.manual import _dump_runs
 from tools.rehearsal import bench, rows
+from tools.rehearsal.sides import deploy, pinned_instant
 
 #: The harness and the probe, as paths inside head's worktree.
 _HARNESS = pathlib.Path("tests") / "manual" / "verify_worked_out_ledger.py"
@@ -459,7 +463,7 @@ def _rewrite_fired(made, journals, state, measuring, say):
     clone = bench.State(state.name, state.commit, state.worktree, database,
                         made.clone(bench.PRISTINE, database), state.python)
     removed, exact = _removed(journals["undeployed"], clone.url)
-    refused = rows.deploy(clone, clone.url, measuring.secret, measuring.moment)
+    refused = deploy(clone, clone.url, measuring.secret, measuring.moment)
     rewritten = read_journal(clone.url)
     left = nets_part(journals[state.name], rewritten)
     fired = refused is None and exact and not left
@@ -480,7 +484,7 @@ def _rewrite_fired(made, journals, state, measuring, say):
 def _measured(script, url, name, measuring):
     """Run *script* from head's worktree on the copy at *url*; its exit status.
 
-    In the environment the kit gives a side (``rows.side_environment``),
+    In the environment the kit gives a side (``sides.side_environment``),
     under THIS interpreter, since the suite's helpers need ``pytest`` and a
     side's production pins do not hold it, with the clock pinned at the
     deploys' instant; its report goes to ``<out>/<name>.txt`` and what the
@@ -563,8 +567,8 @@ def _deploy_all(copies, measuring, say):
     """Run each copy's own deploy step on it; whether every one exited 0."""
     deployed = True
     for label, state in copies:
-        refused = rows.deploy(state, state.url, measuring.secret,
-                              measuring.moment)
+        refused = deploy(state, state.url, measuring.secret,
+                         measuring.moment)
         say(f"deploy {label} (commit {state.commit}, onto {state.database}): "
             + ("exit 0" if refused is None else f"REFUSED, {refused}"))
         deployed = deployed and refused is None
@@ -640,7 +644,7 @@ def _run(dump, out, revisions, say):
                             made.clone(bench.PRISTINE, _AGAIN), base.python)
         urls = {"undeployed": made.clone(bench.PRISTINE, _UNDEPLOYED)}
         measuring = Measuring(head, secrets.token_hex(32),
-                              rows.pinned_instant(made), out,
+                              pinned_instant(made), out,
                               rows.read_line(base.url))
         say(f"dump {dump}; clock pinned at {measuring.moment.isoformat()}")
         if not _deploy_all((("base", base), ("base, again", again),

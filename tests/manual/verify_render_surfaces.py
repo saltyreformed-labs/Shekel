@@ -193,7 +193,7 @@ def main(out_path):
     # The rate limiter is switched off on the same terms.  A sweep of every
     # page from one address is far past production's default limit (30 a
     # minute), and a production configuration whose store cannot be reached
-    # fails closed: under the release kit's (``tools.rehearsal.rows``) every
+    # fails closed: under the release kit's (``tools.rehearsal.sides``) every
     # GET answered a 500 before its view ran (plan task plan#2773's first
     # run, 259 of 259 on both sides, byte-identical).
     limiter.enabled = False

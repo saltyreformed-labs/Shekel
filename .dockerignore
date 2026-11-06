@@ -27,10 +27,12 @@
 #   - alembic.ini               Alembic config
 #   - entrypoint.sh             ENTRYPOINT
 #   - gunicorn.conf.py          gunicorn config
-#   - requirements.txt          Pip metadata reference (deps already
-#                               built into /opt/venv in stage 1, but
-#                               kept for forensic ``pip freeze``-style
-#                               diffing inside a debugging exec)
+#   - pyproject.toml, uv.lock, .python-version
+#                               The lock the builder stage installs
+#                               into /opt/venv (the Dockerfile copies
+#                               them from this context); the runtime
+#                               stage's copy of the context carries
+#                               them too
 #   - run.py                    Flask app factory entrypoint
 #
 # Everything else listed below is dev-time tooling, host-side ops
@@ -41,8 +43,8 @@
 # (ruling R-BAL364): CI's write rule refuses a change to any file the
 # image holds unless the change records a plan card (ruling R-BAL362,
 # tools/quill/landing.py, which reads this file with Docker's own
-# rules), so a file the container never runs is excluded here, never
-# left in.  The files OUTSIDE the image that build or run production
+# rules) or moves pinned versions alone (ruling plan#2351), so a file
+# the container never runs is excluded here, never left in.  The files OUTSIDE the image that build or run production
 # (the rule's other half, rulings R-BAL400 and R-BAL401) are not this
 # file's: tools/quill/_production.py lists them, so a file excluded
 # here still needs a card where production runs it from the host.
@@ -93,7 +95,6 @@ conftest.py
 # ── Dev-only toolchain configs ─────────────────────────────────────
 # Read by the linters, pre-commit and CI on the host; nothing in the
 # container runs a linter.
-requirements-dev.txt
 .pylintrc
 .markdownlint.json
 .rumdl.toml
@@ -201,7 +202,7 @@ amortization-fix.patch
 # scripts/check_template_syntax.py CI/dev Jinja parse linter; never
 #                 invoked inside the container.
 # scripts/backup.sh, restore.sh, verify_backup.sh,
-# scripts/backup_retention.sh, deploy.sh, retire_stale_containers.sh
+# scripts/backup_retention.sh, retire_stale_containers.sh
 #                 Host-side ops scripts that talk to ``docker`` from
 #                 outside the container.
 # scripts/generate_pg_cert.sh
@@ -233,7 +234,6 @@ scripts/backup.sh
 scripts/backup_retention.sh
 scripts/restore.sh
 scripts/verify_backup.sh
-scripts/deploy.sh
 scripts/retire_stale_containers.sh
 scripts/generate_pg_cert.sh
 scripts/reconcile_prod_to_canonical.sh

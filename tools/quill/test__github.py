@@ -201,6 +201,16 @@ def test_rest_sends_the_token_and_api_version_and_decodes_the_body():
     assert kwargs["headers"]["X-GitHub-Api-Version"] == "2022-11-28"
 
 
+def test_a_client_given_no_token_sends_no_credential():
+    """A read of a public repository goes with no ``Authorization`` header at all, never a
+    bearer of nothing, which GitHub would refuse as a bad credential."""
+    session = _Session(_Response(200, {"workflow_runs": []}))
+    assert GitHub(None, session).rest("GET", "/repos/o/r/actions/runs") == {"workflow_runs": []}
+    headers = session.sent[0][2]["headers"]
+    assert "Authorization" not in headers
+    assert headers["X-GitHub-Api-Version"] == "2022-11-28"
+
+
 def test_rest_answers_none_for_an_empty_body():
     """A DELETE answers 204 with no body."""
     session = _Session(_Response(204))

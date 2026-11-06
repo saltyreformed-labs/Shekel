@@ -18,12 +18,21 @@ from __future__ import annotations
 
 import pytest
 
-from tools.ci import scratch
+from tools.ci import arcs, scratch
 from tools.ci.scratch import commit as _commit
 from tools.ci.scratch import commit_files as _files
 from tools.ci.scratch import run as _run
 from tools.quill import _production
-from tools.quill._production import IgnoreFileError, changed, files, ignore_file, kept, rules
+from tools.quill._production import (
+    IgnoreFileError,
+    changed,
+    changed_outside,
+    files,
+    ignore_file,
+    kept,
+    outside,
+    rules,
+)
 
 
 def _kept(text, names):
@@ -139,8 +148,8 @@ def test_no_ignore_file_keeps_every_file():
     ("deploy/nginx-shared/conf.d/shekel.conf", True), ("deploy/NOTES.md", True),
     (".github/workflows/docker-publish.yml", True), ("scripts/_container_lib.sh", True),
     ("deploy/README.md", False), ("deploy/postgres/README.md", False),
-    ("docker-compose.dev.yml", False), ("docker-compose.build.yml", False),
-    ("cloudflared/config.yml", False), ("deployed.txt", False), ("app/Dockerfile", False),
+    ("docker-compose.dev.yml", False), ("cloudflared/config.yml", False),
+    ("deployed.txt", False), ("app/Dockerfile", False),
     (".github/workflows/ci.yml", False), ("docker-publish.yml", False),
     ("scripts/_backup_lib.sh", False),
 ])
@@ -217,7 +226,7 @@ def test_production_changes_where_its_files_differ_and_nowhere_else(repo):
         "deploy's README": {"deploy/README.md": "r2\n"},
         "a comment": {".dockerignore": f"# what the image holds\n{ignored}"},
     }
-    found = {name: changed(repo, base, _files(repo, base, name, edit))
+    found = {name: tuple(changed(repo, base, _files(repo, base, name, edit)))
              for name, edit in edits.items()}
     assert found == {
         "an edit": ("app/a.py",), "an add": ("app/new.py",), "a delete": ("app/gone.py",),
@@ -225,7 +234,166 @@ def test_production_changes_where_its_files_differ_and_nowhere_else(repo):
         "the Dockerfile": ("Dockerfile",), "the publish workflow": (publish,),
         "a publish comment": (publish,), "a tools edit": (), "another workflow": (),
         "deploy's README": (), "a comment": ()}
-    assert changed(repo, base, _executable(repo, base, "app/a.py")) == ("app/a.py",)
+    assert tuple(changed(repo, base, _executable(repo, base, "app/a.py"))) == ("app/a.py",)
+
+
+#: Actions the publish workflow loads, one through another, and actions it does not.
+_ACTIONS = {
+    ".dockerignore": ".dockerignore\n.github/\n",
+    _production.PUBLISH: ("jobs:\n  b:\n    steps:\n      - uses: $/.github/actions/lock\n"
+                          "      - uses: './.github/actions/empty'  # holds no action\n"
+                          "      - run: echo .github/actions/named\n"),
+    ".github/actions/lock/action.yml": "runs:\n  steps:\n    - uses: \"./.github/actions/in/\"\n",
+    ".github/actions/in/action.yaml": "runs:\n  steps:\n    - uses: $/.github/actions/lock\n",
+    ".github/actions/empty/README.md": "x\n",
+    ".github/actions/named/action.yml": "runs: {}\n",
+    ".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n      - uses: $/.github/actions/ci\n",
+    ".github/actions/ci/action.yml": "runs: {}\n",
+}
+
+
+def test_each_action_the_publish_workflow_loads_runs_production(repo):
+    """Each action of the repository's that the publish workflow loads by a step's ``uses:``,
+    in either form, quoted or not, and each that one loads in turn, in whichever file GitHub
+    reads it from, though the ignore file excludes them (plan#2482); one loading the other
+    back is read once.  Not a ``uses:`` of a directory holding no action, an action whose
+    directory alone the workflow's text names (its file named would count, as any file
+    named does, ruling plan#2573), nor one only another workflow loads."""
+    sha = _files(repo, _commit(repo, "root"), "base", _ACTIONS)
+    assert sorted(files(repo, sha)) == [
+        ".github/actions/in/action.yaml", ".github/actions/lock/action.yml",
+        _production.PUBLISH]
+
+
+def test_an_action_changes_production_while_the_publish_workflow_loads_it(repo):
+    """An edit to an action the publish workflow loads changes production, and one to an
+    action only another workflow loads nothing; the workflow dropping its ``uses:`` changes
+    the workflow and takes each action it loaded out of production."""
+    base = _files(repo, _commit(repo, "root"), "base", _ACTIONS)
+    lock, inner = ".github/actions/lock/action.yml", ".github/actions/in/action.yaml"
+    edits = {"a loaded action": {lock: _ACTIONS[lock] + "# moved\n"},
+             "another workflow's": {".github/actions/ci/action.yml": "runs: {x: 1}\n"},
+             "dropped": {_production.PUBLISH: "jobs: {}\n"}}
+    found = {name: tuple(changed(repo, base, _files(repo, base, name, edit)))
+             for name, edit in edits.items()}
+    assert found == {"a loaded action": (lock,), "another workflow's": (),
+                     "dropped": (inner, lock, _production.PUBLISH)}
+
+
+def test_the_release_s_tax_law_gate_runs_install_lock():
+    """This repository's own commit: the publish workflow's tax-law gate, which decides
+    whether the image is built, installs the lock by ``.github/actions/install-lock``, so an
+    edit to it changes production (plan#2482)."""
+    assert ".github/actions/install-lock/action.yml" in files(arcs.REPO, "HEAD")
+
+
+def test_each_action_the_release_loads_runs_production(repo):
+    """The publish workflow and the three actions it loads as this checkout holds them,
+    committed to a scratch repository whose ignore file excludes ``.github/`` and itself: the
+    install action the release's tax-law gate runs takes its uv from
+    ``.github/actions/dockerfile-uv`` (plan#2484), and the release builds its image by
+    ``.github/actions/build-image`` (ruling plan#2752), so an edit to either changes
+    production too.  The checkout's files, not HEAD's, so the commit that changes the wiring
+    is graded before it is made."""
+    names = (_production.PUBLISH, ".github/actions/install-lock/action.yml",
+             ".github/actions/dockerfile-uv/action.yml",
+             ".github/actions/build-image/action.yml")
+    held = {name: (arcs.REPO / name).read_text(encoding="utf-8") for name in names}
+    sha = _files(repo, _commit(repo, "root"), "base",
+                 {".dockerignore": ".dockerignore\n.github/\n", **held})
+    assert sorted(files(repo, sha)) == sorted(names)
+
+
+#: A publish workflow naming files each way the reading counts and each way it does not, an
+#: action it loads naming one, another workflow naming one, and the files, which the image
+#: excludes.
+_NAMES = {
+    ".dockerignore": ".dockerignore\n.github/\nscripts/\ndocs/\ntools/\n.tool-config\n",
+    _production.PUBLISH: (
+        "# the release: scripts/yaml_comment.py\n"
+        "jobs:\n  b:\n    steps:\n"
+        "      - uses: $/.github/actions/lock\n"
+        "      - uses: some/build@v1\n"
+        "        with:\n          file: tools/input.txt\n"
+        "      - name: Run scripts/step_name.py\n"
+        "        run: python scripts/run.py refuse\n"
+        "      - run: |\n"
+        "          # a shell comment: scripts/shell_comment.py\n"
+        "          epoch=\"$(python ./scripts/dotted.py --starts-epoch)\"\n"
+        "          bash \"${GITHUB_WORKSPACE}/scripts/workspace.sh\"\n"
+        "          python \"$GITHUB_WORKSPACE/scripts/bare.py\"\n"
+        "          cat .tool-config\n"
+        "          echo \"${#v}\" scripts/after_count.py\n"
+        "          curl https://x.example/#frag -o scripts/after_url.py\n"
+        "          echo \"see docs/echoed.md.\"\n"
+        "          echo ok  # scripts/trailing.py\n"
+        "          python scripts/missing.py\n"),
+    ".github/actions/lock/action.yml": "runs:\n  steps:\n    - run: python scripts/action.py\n",
+    ".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n      - run: python scripts/ci.py\n",
+    "scripts/run.py": "print('scripts/by_named.py')\n",
+    **{name: f"{name}\n" for name in (
+        "tools/input.txt", "scripts/step_name.py", "scripts/dotted.py", "scripts/workspace.sh",
+        "scripts/bare.py", ".tool-config", "scripts/after_count.py", "scripts/after_url.py",
+        "docs/echoed.md", "scripts/action.py", "scripts/yaml_comment.py",
+        "scripts/shell_comment.py", "scripts/trailing.py", "scripts/ci.py",
+        "scripts/by_named.py")},
+}
+
+
+def test_each_file_the_publish_workflow_names_outside_a_comment_runs_production(repo):
+    """Each file of the tree that the publish workflow or an action it loads names outside a
+    comment, though the ignore file excludes it (ruling plan#2573): in a step's input, its
+    name, a ``run:`` line, with a leading ``./``, after a variable's ``/`` braced or bare, a
+    dotfile, after a ``#`` no whitespace precedes (``${#v}``, a URL's fragment), and ending
+    a sentence in an ``echo``.  Not one named in a YAML comment line, a shell comment line or
+    after a ``#`` that follows whitespace, one only another workflow names, or one only a
+    named file names; and what the workflow reaches holds no path the tree does not."""
+    sha = _files(repo, _commit(repo, "root"), "base", _NAMES)
+    reaches = [".github/actions/lock/action.yml", ".tool-config", "docs/echoed.md",
+               "scripts/action.py", "scripts/after_count.py", "scripts/after_url.py",
+               "scripts/bare.py", "scripts/dotted.py", "scripts/run.py", "scripts/step_name.py",
+               "scripts/workspace.sh", "tools/input.txt"]
+    assert sorted(files(repo, sha)) == sorted([*reaches, _production.PUBLISH])
+    assert sorted(_production.reached(repo, _production.tree(repo, sha),
+                                      _production.PUBLISH)) == reaches
+
+
+def test_a_named_file_changes_production_while_the_publish_workflow_names_it(repo):
+    """An edit to a file the publish workflow or its action names changes production; one to
+    a file named only in a comment, only by another workflow or only by a named file changes
+    nothing; and the workflow dropping its name changes the workflow and takes the file out
+    of production."""
+    base = _files(repo, _commit(repo, "root"), "base", _NAMES)
+    publish = _NAMES[_production.PUBLISH]
+    assert publish.count("python scripts/run.py refuse") == 1
+    edits = {"a named file": {"scripts/run.py": "print(1)\n"},
+             "the action's": {"scripts/action.py": "a2\n"},
+             "a commented file": {"scripts/trailing.py": "t2\n"},
+             "another workflow's": {"scripts/ci.py": "c2\n"},
+             "a named file's": {"scripts/by_named.py": "b2\n"},
+             "the name dropped": {_production.PUBLISH: publish.replace(
+                 "python scripts/run.py refuse", "echo done")}}
+    found = {name: tuple(changed(repo, base, _files(repo, base, name, edit)))
+             for name, edit in edits.items()}
+    assert found == {"a named file": ("scripts/run.py",), "the action's": ("scripts/action.py",),
+                     "a commented file": (), "another workflow's": (), "a named file's": (),
+                     "the name dropped": (_production.PUBLISH, "scripts/run.py")}
+
+
+def test_the_release_s_tax_law_gate_runs_its_script(repo):
+    """The publish workflow, its two actions, the ignore file and the tax-law script as this
+    checkout holds them, committed to a scratch repository: the image excludes the script, and
+    the gate that decides whether the image is built runs it, so an edit to it changes
+    production (task plan#2549, ruling plan#2573).  The checkout's files, not HEAD's, so the
+    commit that changes the wiring is graded before it is made."""
+    script = "scripts/check_tax_law.py"
+    names = (_production.PUBLISH, ".github/actions/install-lock/action.yml",
+             ".github/actions/dockerfile-uv/action.yml", ".dockerignore", script)
+    held = {name: (arcs.REPO / name).read_text(encoding="utf-8") for name in names}
+    sha = _files(repo, _commit(repo, "root"), "base", held)
+    assert not kept(rules(held[".dockerignore"]), [script])
+    edited = _files(repo, sha, "an edit", {script: f"{held[script]}# moved\n"})
+    assert tuple(changed(repo, sha, edited)) == (script,)
 
 
 def test_an_ignore_file_docker_refuses_refuses_the_comparison(repo):
@@ -235,3 +403,51 @@ def test_an_ignore_file_docker_refuses_refuses_the_comparison(repo):
     broken = _files(repo, base, "broken", {".dockerignore": "!\n"})
     with pytest.raises(IgnoreFileError):
         changed(repo, base, broken)
+
+
+def test_each_change_names_the_file_on_each_side(repo):
+    """Each path where production differs names its mode and object on each side, None on
+    the side production holds no such file: what the landing check reads to judge a change
+    moving versions alone (:mod:`tools.quill._versions`)."""
+    base = _files(repo, _commit(repo, "root"), "base", {"app/a.py": "a\n", "app/gone.py": "g\n"})
+    edited = _files(repo, base, "edit", {"app/a.py": "a2\n", "app/gone.py": None,
+                                         "app/new.py": "n\n"})
+
+    def held(sha, path):
+        """``path``'s mode and object at ``sha``, as production names them."""
+        return f"100644 {_run(repo, 'rev-parse', f'{sha}:{path}')}"
+
+    assert changed(repo, base, edited) == {
+        "app/a.py": (held(base, "app/a.py"), held(edited, "app/a.py")),
+        "app/gone.py": (held(base, "app/gone.py"), None),
+        "app/new.py": (None, held(edited, "app/new.py"))}
+
+
+def test_each_file_is_production_s_or_outside_it_at_each_commit(repo):
+    """The two readings split a commit's tree: a file the ignore file leaves out is outside, one
+    it leaves in is production's, and none is both or neither."""
+    sha = _files(repo, _commit(repo, "root"), "base", {".dockerignore": "docs\n",
+                                                       "docs/a.md": "0", "app.py": "0"})
+    held, other = files(repo, sha), outside(repo, sha)
+    assert "docs/a.md" in other
+    assert "app.py" in held
+    assert not held.keys() & other.keys()
+    assert held.keys() | other.keys() == _production.tree(repo, sha).keys()
+
+
+def test_changed_outside_reads_each_side_at_its_own_commit(repo):
+    """An ignore-file edit brings ``docs/a.md`` into the image: it is outside at the old commit
+    and production's at the new, so each reading holds it against None on the side it does not.
+    ``docs/b.md``, edited and outside on both sides, is in the second reading alone."""
+    old = _files(repo, _commit(repo, "root"), "base", {".dockerignore": "docs\n",
+                                                       "docs/a.md": "0", "docs/b.md": "0"})
+    new = _files(repo, old, "edit", {".dockerignore": "docs/b.md\n", "docs/b.md": "1"})
+
+    def held(sha, path):
+        """``path``'s mode and object at ``sha``, as the readings name them."""
+        return f"100644 {_run(repo, 'rev-parse', f'{sha}:{path}')}"
+
+    assert changed(repo, old, new)["docs/a.md"] == (None, held(new, "docs/a.md"))
+    assert changed_outside(repo, old, new) == {
+        "docs/a.md": (held(old, "docs/a.md"), None),
+        "docs/b.md": (held(old, "docs/b.md"), held(new, "docs/b.md"))}

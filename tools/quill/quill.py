@@ -149,6 +149,7 @@ from tools.quill import (
     _status,
     _sync,
     _tasks,
+    _versions,
     _watch,
 )
 from tools.quill._arcs import other_labels
@@ -186,7 +187,6 @@ from tools.quill._state import (
     release_hint,
     resolved,
     stale_claims,
-    sync_plan,
     sync_unsplits,
     unfinished_reports,
     unshipped_shown_done,
@@ -219,19 +219,12 @@ CONNECT = partial(Tracker.connect, PLAN)
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
     """The step :func:`_next.next_step` hands out, Urgent, then High, then the board's order, each
     step's unfinished prerequisites just ahead of it, and never one On hold; then how far ``sync``
-    is behind, what it cannot offer that a person must act on, each step waiting on one On hold,
-    by name (ruling plan#1830, plan#1820's spec), and last,
+    is behind (:func:`_sync.behind`), what it cannot offer that a person must act on, each step
+    waiting on one On hold, by name (ruling plan#1830, plan#1820's spec), whether a release is due
+    for a version (:func:`_versions.due_line`, ruling plan#2829), and last,
     after every line no further read can cost, each claimed card, and each task under one,
     holding a comment of the developer's that no answer of quill's has followed (plan#1822,
-    ruling plan#1924, :func:`_comments.unanswered_lines`).
-
-    **Sync is behind** (ruling plan#1815) while git says work shipped or a task is done that
-    the tracker still shows open: the cards ``sync`` would close over what this reads, by
-    its one producer (:func:`_state.sync_plan`), so the count clears at the next ``sync``, a
-    schedule that stopped is seen, and a card a PERSON reopened, which ``sync`` reports
-    and never closes, is never counted.  Each card so counted is read again by its number
-    and decided again, as ``sync`` decides (:func:`_sync_reads`): the open listing can
-    still show a card ``sync`` has just closed."""
+    ruling plan#1924, :func:`_comments.unanswered_lines`)."""
     reads = _git.read(root)
     shipped = reads.shipped.cards
     cards = with_closure(tracker, {**tracker.open_cards(), **_unfinished(tracker)})
@@ -239,10 +232,7 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
     answer = next_step(order, cards, shipped, reads.claims, args.arc)
     scope = f" in {args.arc}" if args.arc else ""
     print(f"next{scope}: {_label(answer.card)}" if answer.card else f"next{scope}: nothing")
-    closes = partial(sync_plan, shipped=shipped, claims=reads.claims, tasks=reads.shipped.tasks)
-    if behind := closes(cards).close:
-        behind = closes({**cards, **tracker.cards(behind)}).close
-    if behind:
+    if behind := _sync.behind(tracker, reads, cards):
         print(f"sync is behind: {len(behind)} shipped cards still open")
     for card in answer.unplaced:
         print(f"NOT ON THE BOARD, so in no order: {_label(card)} -- "
@@ -261,6 +251,8 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
         print(f"OUTSIDE LINK: {line}")
     for line in unfinished_reports(cards, shipped):
         print(f"UNFINISHED FILING: {line}")
+    if (due := _versions.due_line(root)) is not None:
+        print(due)
     for line in _comments.unanswered_lines(tracker, reads.claims, cards):
         print(f"UNANSWERED COMMENT: {line}")
     return 0

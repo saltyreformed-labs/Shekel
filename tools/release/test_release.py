@@ -3,13 +3,16 @@ exit status, and ``census``'s listing.  The dev database listing is injected, so
 calls docker."""
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from tools.ci.scratch import run
-from tools.quill.door import FakeTracker
+from tools.quill.door import FakeTracker, GitHubError
 from tools.release import release
 from tools.release._census import COMPOSE, MANIFEST
-from tools.release.conftest import MONEY, migration, pull_request, ship
+from tools.release._updates import WORKFLOW
+from tools.release.conftest import MONEY, Runs, daily, lock, migration, monday, pull_request, ship
 
 COMPOSED = ("services:\n  db:\n    container_name: dev-db\n    environment:\n"
             "      POSTGRES_USER: someone\n      POSTGRES_DB: budget\n")
@@ -91,6 +94,63 @@ def test_plan_exits_2_on_a_cut_git_does_not_have(repo, capsys):
     assert "nothing was judged" in capsys.readouterr().err
 
 
+def _one_mover_on_the_workflow(repo):
+    """A base whose tree holds the update workflow, a cut on it carrying #40 (moves money),
+    and the tracker holding it: a cut no rule of its own refuses."""
+    base = repo.commit("base", {WORKFLOW: "name: Updates\n"})
+    cut = pull_request(repo, base, ship(40))
+    tracker = FakeTracker()
+    tracker.add(40, labels=MONEY)
+    return base, cut, tracker
+
+
+def test_plan_refuses_a_release_whose_monday_update_stopped_and_offers_no_cut(repo, capsys):
+    """Main holds the workflow and no update published in the eight days: refused, and no
+    earlier cut is offered, as every one would be refused alike."""
+    base, cut, tracker = _one_mover_on_the_workflow(repo)
+    runs = Runs(daily(2, datetime.now(UTC) - timedelta(days=1)),
+                monday(1, datetime.now(UTC) - timedelta(days=9)))
+    assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
+                        connect=lambda: tracker, actions=runs.actions) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert out[-2].startswith("REFUSED -- no Monday update published from main in the 8 days")
+    assert out[-1] == "verdict: refused (exit 1)"
+    assert not [line for line in out if line.startswith(("newest earlier cut", "monday update"))]
+
+
+def test_plan_names_when_the_monday_update_s_lock_was_refreshed(repo, capsys):
+    """A Monday run's publish succeeded, its refresh started two days ago: that start and the
+    run's page are printed, and the release is clean."""
+    base, cut, tracker = _one_mover_on_the_workflow(repo)
+    started = (datetime.now(UTC) - timedelta(days=2)).replace(second=0, microsecond=0)
+    runs = Runs(daily(2, datetime.now(UTC) - timedelta(days=1)), monday(1, started))
+    assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
+                        connect=lambda: tracker, actions=runs.actions) == 0
+    assert capsys.readouterr().out.splitlines()[-2:] == [
+        f"monday update: lock refreshed {started:%Y-%m-%d %H:%M} UTC, "
+        "published by https://github.com/o/n/actions/runs/1",
+        "verdict: clean (exit 0)"]
+
+
+def test_plan_exits_2_and_judges_nothing_when_the_runs_cannot_be_read(repo, capsys):
+    """GitHub refusing the read of the runs judges nothing, never a release read as fresh."""
+    base, cut, tracker = _one_mover_on_the_workflow(repo)
+
+    class Refusing(Runs):
+        """GitHub refusing every read."""
+
+        def rest(self, method, path):
+            """Refuse it, as a private repository answers an anonymous read."""
+            raise GitHubError(404, f"{method} {path} -> 404 Not Found")
+
+    assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
+                        connect=lambda: tracker, actions=Refusing().actions) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("release plan: nothing was judged: ")
+    assert "the update workflow's runs on main, page 1" in captured.err
+
+
 # -- production ------------------------------------------------------------------------------
 
 def test_production_lists_each_pull_request_changing_what_production_runs_and_exits_0(
@@ -131,6 +191,102 @@ def test_production_names_apart_a_change_no_pull_request_made(repo, capsys):
         "  app.py",
         "verdict: 2 of production's files change; 1 of 2 pull requests change them, 1 by "
         "none (exit 0)"]
+
+
+def test_production_lists_each_version_the_release_moves(repo, capsys):
+    """A lock update moving one package and adding another: the report names each version
+    moved under its own heading, one added against none, before its verdict."""
+    base = repo.commit("base", {"app.py": "0", "uv.lock": lock(("flask", "3.1.0"))})
+    cut = pull_request(repo, base, files={"uv.lock": lock(("flask", "3.1.1"),
+                                                          ("olefile", "0.47"))})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {base}, cut {cut}",
+        f"{cut} 'Merge pull request' changes 1 of production's files:",
+        "  uv.lock",
+        "versions moved (2), from the base's to the cut's:",
+        "  uv.lock: flask 3.1.0 -> 3.1.1",
+        "  uv.lock: olefile none -> 0.47",
+        "verdict: 1 of production's files change; 1 of 1 pull requests change them, 0 by "
+        "none (exit 0)"]
+
+
+_WORKFLOW = ".github/workflows/updates.yml"
+#: How the listing names the one move these tests make of the workflow.
+_MOVED = f"  {_WORKFLOW}: acme/mint {'1' * 40} # v3.0.0 -> {'2' * 40} # v3.1.0"
+
+
+def _uses(digit: str, version: str) -> str:
+    """A workflow's text pinning one action at commit ``digit`` x40, at release ``version``."""
+    return f"jobs:\n  a:\n    steps:\n      - uses: acme/mint@{digit * 40} # v{version}\n"
+
+
+def _beside(repo):
+    """A base whose ignore file leaves out a workflow pinning an action: that file pins a version
+    outside production, beside the lock, which is in it."""
+    return repo.commit("base", {".dockerignore": ".dockerignore\n.github\n", "app.py": "0",
+                                "uv.lock": lock(("flask", "3.1.0")),
+                                _WORKFLOW: _uses("1", "3.0.0")})
+
+
+def test_production_lists_a_move_only_outside_production_under_its_own_heading(repo, capsys):
+    """A week moving only a workflow's action: no pull request changes production's files and
+    no ``versions moved`` heading prints, and the move is named under the second heading,
+    above the verdict saying nothing production runs changes."""
+    base = _beside(repo)
+    cut = pull_request(repo, base, files={_WORKFLOW: _uses("2", "3.1.0")})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {base}, cut {cut}",
+        "versions moved outside production (1), from the base's to the cut's:",
+        _MOVED,
+        "verdict: 0 of production's files change; 0 of 1 pull requests change them, 0 by "
+        "none (exit 0)"]
+
+
+def test_production_lists_a_mixed_release_under_each_heading_once(repo, capsys):
+    """A move in each: production's under the first heading, the workflow's under the second,
+    neither line in both, and the counts their own."""
+    base = _beside(repo)
+    cut = pull_request(repo, base, files={"uv.lock": lock(("flask", "3.1.1")),
+                                          _WORKFLOW: _uses("2", "3.1.0")})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {base}, cut {cut}",
+        f"{cut} 'Merge pull request' changes 1 of production's files:",
+        "  uv.lock",
+        "versions moved (1), from the base's to the cut's:",
+        "  uv.lock: flask 3.1.0 -> 3.1.1",
+        "versions moved outside production (1), from the base's to the cut's:",
+        _MOVED,
+        "verdict: 1 of production's files change; 1 of 1 pull requests change them, 0 by "
+        "none (exit 0)"]
+
+
+def test_production_prints_neither_version_heading_when_none_moves(repo, capsys):
+    """Files that pin versions on both sides, none moved: a change to the app's code alone
+    names no version under either heading."""
+    base = _beside(repo)
+    cut = pull_request(repo, base, files={"app.py": "1"})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {base}, cut {cut}",
+        f"{cut} 'Merge pull request' changes 1 of production's files:",
+        "  app.py",
+        "verdict: 1 of production's files change; 1 of 1 pull requests change them, 0 by "
+        "none (exit 0)"]
+
+
+def test_production_exits_2_and_lists_nothing_on_a_lock_no_pin_of_which_can_be_named(
+        repo, capsys):
+    """A cut whose lock is no TOML is an error, never a release moving no version."""
+    base = repo.commit("base", {"app.py": "0", "uv.lock": lock()})
+    cut = pull_request(repo, base, files={"uv.lock": "[[package\n"})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("release production: nothing was judged: uv.lock is no "
+                                   "TOML: ")
 
 
 def test_production_exits_2_and_lists_nothing_on_an_ignore_file_docker_refuses(repo, capsys):

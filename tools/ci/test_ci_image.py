@@ -1,0 +1,221 @@
+"""Controls for ``ci.yml``'s ``image`` job: the app image is built and checked before a merge.
+
+``docker-publish.yml`` builds the release image only on a push to ``main``, so before task
+plan#2366 a change that broke the build landed in ``dev`` and failed only at the release.  The
+job builds the image on every pull request, queue group and push to ``main`` by the release's
+own recipe (:mod:`tools.ci.test_build_image_action`), never pushes it, and checks that it runs
+psycopg's C implementation, holds exactly the lock's runtime set and its ``server`` group, and
+holds no pip and no uv; ``lint-and-test`` grades it (:mod:`tools.ci.ci_verdict`).
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+import yaml
+
+from tools.ci import arcs
+from tools.ci.test_build_image_action import USES as BUILD_IMAGE
+from tools.ci.test_ci_workflow import _jobs, _run_step, _steps, _workflows
+from tools.ci.test_dockerfile_uv_action import USES as DOCKERFILE_UV
+
+
+class TestTheImageIsBuiltAndCheckedBeforeAMerge:
+    """The ``image`` job: the app image built from the Dockerfile on every pull request,
+    queue group and push to ``main``, never pushed, and what it holds checked (task
+    plan#2366).
+
+    Its three ``run`` steps are RUN here with a stand-in ``docker``, and its uv is the one
+    recipe's (:mod:`tools.ci.test_dockerfile_uv_action`); that each check refuses a wrong
+    image is measured against real images, each measurement dated in ``ci.yml``'s comments
+    on the job, and is graded on every run by the job itself.
+    """
+
+    BUILD = "Build the image"
+    DIGEST = "The build hands back a digest"
+    UV = "The Dockerfile's uv"
+    IMPL = "The image runs psycopg's C implementation"
+    PACKAGES = "The image holds exactly the lock's runtime and server set"
+    INSTALLERS = "The image holds no pip and no uv"
+    #: The local name the image is loaded under.
+    IMAGE = "shekel:ci"
+
+    #: A stand-in ``docker``: it writes its arguments to ``LOG`` as JSON, runs the code a
+    #: ``-c`` hands it with the ``--entrypoint`` it names (this Python for ``python``), and
+    #: otherwise exits ``DOCKER_STATUS`` (0 unset).
+    DOCKER = (
+        "import json, os, subprocess, sys\n"
+        "args = sys.argv[1:]\n"
+        "with open(os.environ['LOG'], 'w', encoding='utf-8') as log:\n"
+        "    json.dump(args, log)\n"
+        "if '-c' in args:\n"
+        "    entry = args[args.index('--entrypoint') + 1]\n"
+        "    program = sys.executable if entry == 'python' else entry\n"
+        "    sys.exit(subprocess.run([program, '-c', args[args.index('-c') + 1]],\n"
+        "                            check=False).returncode)\n"
+        "sys.exit(int(os.environ.get('DOCKER_STATUS', '0')))\n"
+    )
+    #: A stand-in ``find``: it writes its arguments to ``FIND_LOG`` as JSON, prints
+    #: ``FOUND`` and exits ``FIND_STATUS``.
+    FIND = (
+        "import json, os, sys\n"
+        "with open(os.environ['FIND_LOG'], 'w', encoding='utf-8') as log:\n"
+        "    json.dump(sys.argv[1:], log)\n"
+        "print(os.environ['FOUND'], end='')\n"
+        "sys.exit(int(os.environ['FIND_STATUS']))\n"
+    )
+
+    def _docker(self, tmp_path: Path) -> dict[str, str]:
+        """Install the stand-in ``docker`` in ``tmp_path``; the env a step runs it under."""
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        docker = bindir / "docker"
+        docker.write_text(f"#!{sys.executable}\n{self.DOCKER}", encoding="utf-8")
+        docker.chmod(0o755)
+        return {"PATH": f"{bindir}:/usr/bin:/bin", "LOG": str(tmp_path / "docker.json"),
+                "IMAGE": self.IMAGE}
+
+    @staticmethod
+    def _called(tmp_path: Path) -> list[str]:
+        """The arguments the stand-in ``docker`` was last called with."""
+        return json.loads((tmp_path / "docker.json").read_text(encoding="utf-8"))
+
+    def test_the_image_is_built_as_the_release_builds_it_and_never_pushed(self):
+        """The image built by the release's own recipe, ``.github/actions/build-image`` by the
+        ``$/`` form (ruling plan#2752; :mod:`tools.ci.test_build_image_action` holds the
+        action and the release's call), loaded into the runner's docker under :attr:`IMAGE`
+        and never pushed.  The job holds no secret and widens no permission, and its steps run
+        in this order; neither it nor the release's build job uses
+        ``docker/setup-buildx-action``, whose builder pulls a BuildKit image (ruling
+        plan#2742).  Another way of setting up a builder is not read here: review holds that
+        line."""
+        job = _jobs()["image"]
+        assert set(job) == {"runs-on", "timeout-minutes", "env", "steps"}
+        assert job["env"] == {"IMAGE": self.IMAGE}
+        assert [step["name"] for step in job["steps"]] == [
+            "Checkout code", self.BUILD, self.DIGEST, self.UV, self.IMPL, self.PACKAGES,
+            self.INSTALLERS,
+        ]
+        steps = _steps("image")
+        assert steps["Checkout code"]["with"] == {"persist-credentials": False}
+        assert steps[self.BUILD] == {"name": self.BUILD, "id": "build", "uses": BUILD_IMAGE,
+                                     "with": {"push": False, "load": True,
+                                              "tags": "${{ env.IMAGE }}"}}
+        publish = _workflows()["docker-publish.yml"]["jobs"]["build-and-push"]
+        actions = [step["uses"].split("@")[0] for step in publish["steps"] if "uses" in step]
+        assert "docker/setup-buildx-action" not in actions
+        assert not re.search(r"\bsecrets\b", yaml.safe_dump(job))
+
+    def test_the_digest_check_passes_a_sha256_digest_alone(self):
+        """The digest step, RUN: it reads the digest the build action handed back, the output
+        the release signs (:mod:`tools.ci.test_build_image_action`), and passes a ``sha256``
+        digest alone; none, a short one, an upper-case one or one of another algorithm fails
+        it, saying the release's signing would sign none."""
+        step = _steps("image")[self.DIGEST]
+        assert step["env"] == {"DIGEST": "${{ steps.build.outputs.digest }}"}
+        good = "sha256:" + "0123456789abcdef" * 4
+        for digest, expected in ((good, 0), ("", 1), (good[:-1], 1), (good.upper(), 1),
+                                 ("sha512:" + "0" * 64, 1), (f"{good}\n", 1)):
+            result = _run_step(step["run"], {"DIGEST": digest})
+            assert result.returncode == expected, (digest, result.stderr)
+            if expected:
+                assert "the release's signing would sign none" in result.stderr, digest
+            else:
+                assert result.stdout == f"The build's digest: {good}\n"
+
+    def test_uv_is_the_dockerfiles_by_the_one_recipe(self):
+        """The job takes uv from the action every job's install takes it from, by the ``$/``
+        form (where, the job's step order says: after the build); the package check mounts
+        the binary it hands on."""
+        steps = _steps("image")
+        assert steps[self.UV] == {"name": self.UV, "id": "uv", "uses": DOCKERFILE_UV}
+        assert steps[self.PACKAGES]["env"] == {"UV": "${{ steps.uv.outputs.bin }}",
+                                               "MOUNTED_UV": "/usr/local/bin/uv"}
+
+    def test_the_psycopg_check_passes_the_c_implementation_alone(self, tmp_path):
+        """The psycopg step, RUN: in the image, offline, it reads which implementation psycopg
+        loaded and passes ``c`` alone; another implementation, or an import that fails, fails
+        the step.  A stand-in ``psycopg`` reports each implementation."""
+        env = self._docker(tmp_path)
+        run = _steps("image")[self.IMPL]["run"]
+        for impl, expected in (("c", 0), ("python", 1), ("binary", 1), (None, 1)):
+            # A directory of its own per case: one module rewritten in place within a second
+            # at the same size would be read back from its stale bytecode.
+            fake = tmp_path / f"site-{impl}" / "psycopg"
+            fake.mkdir(parents=True)
+            body = ("raise ImportError('no implementation')\n" if impl is None
+                    else f"import types\npq = types.SimpleNamespace(__impl__={impl!r})\n")
+            (fake / "__init__.py").write_text(body, encoding="utf-8")
+            result = _run_step(run, {**env, "PYTHONPATH": str(fake.parent)})
+            assert result.returncode == expected, (impl, result.stdout, result.stderr)
+            args = self._called(tmp_path)
+            assert args[:8] == ["run", "--rm", "--network", "none", "--entrypoint", "python",
+                                self.IMAGE, "-c"], impl
+            if impl is not None:
+                assert f"psycopg implementation: {impl}" in result.stdout, impl
+
+    def test_the_package_check_runs_uv_in_the_image_against_the_lock(self, tmp_path):
+        """The package step, RUN: uv, mounted read-only into the image with the checkout and
+        run by the path it is mounted at (never by name, which the image's ``PATH`` resolves
+        to any uv the image holds), offline against the image's own ``/opt/venv``, checking
+        (never changing) it against the lock's runtime set and its ``server`` group; and uv's
+        refusal fails the step."""
+        env = self._docker(tmp_path)
+        uv, workspace = tmp_path / "temp" / "uv" / "uv", tmp_path / "ws"
+        step = _steps("image")[self.PACKAGES]
+        run, mounted = step["run"], step["env"]["MOUNTED_UV"]
+        step_env = {**env, "UV": str(uv), "MOUNTED_UV": mounted,
+                    "GITHUB_WORKSPACE": str(workspace)}
+        assert _run_step(run, step_env).returncode == 0
+        args = self._called(tmp_path)
+        assert args[:4] == ["run", "--rm", "--network", "none"]
+        image = args.index(self.IMAGE)
+        options = args[4:image]
+        assert options[-2:] == ["--entrypoint", mounted]
+        pairs = list(zip(options[:-2:2], options[1:-2:2]))
+        assert sorted(value for flag, value in pairs if flag == "--volume") == sorted([
+            f"{uv}:{mounted}:ro", f"{workspace}:/src:ro",
+        ])
+        assert {value for flag, value in pairs if flag == "--env"} == {
+            "UV_PROJECT_ENVIRONMENT=/opt/venv", "UV_PYTHON_DOWNLOADS=never", "UV_NO_CACHE=1",
+            "UV_OFFLINE=1",
+        }
+        assert {flag for flag, _value in pairs} == {"--volume", "--env"}
+        assert args[image + 1:] == [
+            "sync", "--project", "/src", "--locked", "--check", "--no-install-project",
+            "--no-default-groups", "--group", "server",
+        ]
+        project = tomllib.loads((arcs.REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        assert "server" in project["dependency-groups"]
+        assert _run_step(run, {**step_env, "DOCKER_STATUS": "1"}).returncode != 0
+
+    def test_the_installer_check_fails_on_any_pip_or_uv_the_image_holds(self, tmp_path):
+        """The installer step, RUN: in the image, offline and as root, ``find`` searches its
+        whole filesystem for pip's names and uv's, and the step passes only where it finds
+        none; a path found, or a search that fails, fails it.  A stand-in ``find`` reports
+        each case, whatever names it is handed, so the names searched for are graded by the
+        exact arguments it records."""
+        env = self._docker(tmp_path)
+        find = tmp_path / "bin" / "find"
+        find.write_text(f"#!{sys.executable}\n{self.FIND}", encoding="utf-8")
+        find.chmod(0o755)
+        run = _steps("image")[self.INSTALLERS]["run"]
+        searched = tmp_path / "find.json"
+        for found, status, expected, said in (
+                ("", 0, 0, "no pip and no uv"),
+                ("/usr/local/bin/pip\n", 0, 1, "/usr/local/bin/pip"),
+                ("", 1, 1, "")):
+            result = _run_step(run, {**env, "FIND_LOG": str(searched), "FOUND": found,
+                                     "FIND_STATUS": str(status)})
+            assert result.returncode == expected, (found, status, result.stdout, result.stderr)
+            assert result.stdout.strip() == said, (found, status)
+            assert self._called(tmp_path)[:10] == [
+                "run", "--rm", "--network", "none", "--user", "0", "--entrypoint", "sh",
+                self.IMAGE, "-c"]
+            assert json.loads(searched.read_text(encoding="utf-8")) == [
+                "/", "-xdev", "(", "-name", "pip", "-o", "-name", "pip[0-9]*", "-o", "-name",
+                "pip-*", "-o", "-name", "uv", "-o", "-name", "uvx", "-o", "-name", "uv-*", ")",
+                "-print"]

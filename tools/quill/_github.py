@@ -1,4 +1,4 @@
-"""The one HTTP path quill takes to GitHub, under either of two identities.
+"""The one HTTP path quill takes to GitHub, under either of two identities, or none.
 
 The private tracker (ruling ``balance:R-BAL170``) is written by two identities
 on purpose.  The developer's own login -- the token ``gh`` already holds --
@@ -6,12 +6,16 @@ configures the tracker (:mod:`setup_tracker`).  Every CARD write goes through
 quill's GitHub App instead, a separate identity, so a check can tell a
 tool write from the developer's own edit and never act on his.
 
+**A read of a public repository may carry no token at all** (:class:`GitHub` given None):
+the release tool reads the update workflow's runs so (``tools/release/_updates.py``), as
+GitHub serves a public repository's Actions runs to anyone (measured 2026-10-31).
+
 An App proves who it is with a JSON Web Token signed by its private key, and
 trades that token for an installation token, which quill narrows to the one
 repository it reads and writes (:func:`installation_token`).  The signing is
-done here with ``cryptography`` (pinned in ``requirements.txt``) rather than a
-JWT package, because RS256 over two JSON segments is the whole of what the App
-flow needs.
+done here with ``cryptography`` (pinned in ``uv.lock``) rather than a JWT
+package, because RS256 over two JSON segments is the whole of what the App flow
+needs.
 
 **A redirect is an error, never followed.**  GitHub answers 301 for an issue
 transferred to another repository and for a renamed repository; followed, a read
@@ -254,25 +258,27 @@ def _wait_seconds(response, retry: int, now: float, base: int = BACKOFF_SECONDS)
 
 
 class GitHub:
-    """GitHub's REST and GraphQL APIs under one bearer token.
+    """GitHub's REST and GraphQL APIs under one bearer token, or none.
 
     ``session`` is any object with ``requests.Session.request``'s signature;
     the tests pass one that replays recorded responses.  ``sleep`` and ``clock``
     wait out a rate limit (the module docstring); tests pass ones that do not wait.
     """
 
-    def __init__(self, token: str, session: requests.Session | None = None,
+    def __init__(self, token: str | None, session: requests.Session | None = None,
                  sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], float] = time.time) -> None:
-        """Send every request with ``token``, through ``session`` when one is given."""
+        """Send every request with ``token``, or with no credential when it is None (a read
+        of a public repository), through ``session`` when one is given."""
         self._session = session or requests.Session()
         self._sleep = sleep
         self._clock = clock
         self._headers = {
-            "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": API_VERSION,
         }
+        if token is not None:
+            self._headers["Authorization"] = f"Bearer {token}"
 
     def _send(self, method: str, url: str, body: dict | None) -> requests.Response:
         """Send one request, following no redirect, waiting out a rate limit and re-sending

@@ -95,29 +95,27 @@ class TestTemplateUpdate:
         with app.app_context():
             template = _create_template(seed_user)
 
-            # ``nominal_day`` fails ``Range(min=29, max=31)``.  It replaced
-            # ``day_of_month`` here at plan step R7c-b, which stopped the
-            # schemas declaring that field at all -- so an out-of-domain value
-            # for it is dropped by ``EXCLUDE`` and this test would have been
-            # asserting the banner for a key nothing reads.
+            # ``repeats_on`` names no option.  It replaced ``nominal_day``
+            # here at plan step recurrence:R8-c (developer ruling 2026-11-02),
+            # which replaced ``day_of_month`` at plan step R7c-b: each rename
+            # stopped the schemas declaring the old field, so an out-of-domain
+            # value for it is dropped by ``EXCLUDE`` and this test would have
+            # been asserting the banner for a key nothing reads.
             resp = auth_client.post(f"/templates/{template.id}", data={
-                "nominal_day": "0",
+                "repeats_on": "0",
             }, follow_redirects=True)
 
             assert resp.status_code == 200
             # **The field's OWN message, not the generic banner, since plan
-            # step R7c-c**: ``nominal_day`` joined
+            # step R7c-c**: ``nominal_day`` (now ``repeats_on``) joined
             # ``_form_errors.ACTIONABLE_FLASH_FIELDS`` there, because the pair
             # rule beside this domain check authors a real sentence naming the
-            # control and it was reaching nobody.  The stock Range message
+            # control and it was reaching nobody.  The field's own refusal
             # rides in with it, which is the better of the two answers -- it
-            # states the domain, where the banner states nothing on a redirect
+            # names the control, where the banner states nothing on a redirect
             # that highlights nothing.  Only a crafted POST sees it: the
-            # control is a ``<select>`` offering 29, 30 and 31.
-            assert (
-                b"Must be greater than or equal to 29 and less than or equal "
-                b"to 31." in resp.data
-            )
+            # control is a ``<select>`` whose options post their own tokens.
+            assert b"Invalid repeat day." in resp.data
 
     def test_update_template_idor(self, app, auth_client, seed_user):
         """POST /templates/<id> for another user's template returns 404 (security)."""

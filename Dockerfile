@@ -1,33 +1,17 @@
 # Shekel Budget App -- Multi-Stage Dockerfile
+# Stage 0: uv, the installer (its binary only).
 # Stage 1: Build Python dependencies (includes gcc for psycopg's C module).
 # Stage 2: Slim runtime image (no build tools).
 #
 # BASE-IMAGE PINNING (audit findings F-025, F-060, F-062, F-120 / Commit C-36)
 # ---------------------------------------------------------------------------
-# Both stages pin the base image by sha256 digest, not by floating tag.
-# The digest references the multi-arch image index for ``python:3.14-slim``
-# rebuilt 2026-09-19 (digest refreshed 2026-09-20), which carries:
-#   * Python 3.14.7 (latest 3.14.x)
-#   * Debian 13.7 (trixie) with libssl3t64 / openssl / openssl-provider-legacy
-#     at 3.5.7-1~deb13u2 -- past the CVE-2026-28390 (HIGH) fix that the
-#     2026-05-08 digest first carried (audit F-025).
-#   * pip 26.2.1 -- past the CVE-2026-1703 path-traversal fix
-#     (audit F-120).
-#
-# The digest is the immutable identity; the ``:3.14-slim`` tag in the
-# reference is informational so a casual reader can tell the line
-# refers to the rolling 3.14.x slim variant.  When refreshing the
-# digest:
-#   1. Pull the new image:
-#        docker pull python:3.14-slim
-#   2. Capture the new index digest:
-#        docker buildx imagetools inspect python:3.14-slim
-#      The line ``Digest: sha256:...`` at the top is the OCI image
-#      index digest; that is the value to paste below.
-#   3. Verify the openssl/pip versions in the new image match or
-#      exceed the constraints documented above.
-#   4. Update the digest on BOTH FROM lines below in the same commit
-#      so the builder and runtime stages stay in lockstep.
+# Both Python stages pin the base image by its multi-arch index's sha256
+# digest, not by floating tag: the digest is the immutable identity, and
+# the tag names the Python minor ``.python-version`` holds.  The FROM lines
+# are the one home of what the image pins, so no comment restates it: an
+# update moves them with nothing else to re-measure (ruling plan#2443),
+# and both move in one change, the builder and the runtime in lockstep
+# (tests/test_deploy/test_image_supply_chain.py holds them to one digest).
 #
 # OPENSSL DEFENSE-IN-DEPTH
 # ------------------------
@@ -35,7 +19,17 @@
 # openssl libssl3t64 openssl-provider-legacy`` so a CVE that lands in
 # Debian's trixie repos between digest refreshes is picked up on the
 # next image build.  Belt-and-braces: the digest gives reproducibility,
-# the apt upgrade gives currency.
+# the apt upgrade gives currency.  The upgrade, not the digest, is what
+# holds the image past a Debian OpenSSL fix (audit F-025): every build
+# takes Debian's newest.
+
+# -- Stage 0: uv ------------------------------------------------------
+# uv installs ``uv.lock`` (ruling balance:R-BAL294): every package, indirect
+# ones included, at the version and sha256 the lock records.  Its image is
+# pinned by digest like the base image's, and only its static binary is
+# copied into the builder; uv never reaches the runtime stage.  CI's
+# ``image`` job checks the built image holds no file by uv's names.
+FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
 
 # -- Stage 1: Builder -------------------------------------------------
 FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS builder
@@ -43,7 +37,7 @@ FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6
 # Apply Debian security upgrades to the OpenSSL packages and install
 # the build-only deps (libpq headers + ``pg_config`` + a C toolchain)
 # that ``psycopg-c`` -- psycopg 3's C speed-up, the ``[c]`` extra in
-# requirements.txt (ruling balance:R-BAL209) -- needs to compile from
+# pyproject.toml (ruling balance:R-BAL209) -- needs to compile from
 # source against Debian's libpq.  Combined into a single RUN so the apt
 # cache is removed in the same layer.
 RUN apt-get update \
@@ -53,35 +47,36 @@ RUN apt-get update \
         libpq-dev gcc libc-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade the system pip past the CVE-2026-1703 path-traversal fix
-# (audit finding F-120).  The base image ships pip 26.0.1, but
-# explicit upgrade defends against a future base-image regression.
-# The upper bound prevents a major-version jump that could break
-# the venv pip below.
-RUN pip install --no-cache-dir --upgrade 'pip>=26.0,<27'
+COPY --from=uv /uv /usr/local/bin/uv
 
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# The venv the runtime stage copies.  uv makes it from this image's own
+# Python, the one ``.python-version`` names: with downloads off, a
+# ``.python-version`` this base image does not satisfy fails the build
+# instead of fetching another interpreter.  No pip runs in this build and
+# none is seeded into the venv (audit finding F-120); the runtime stage
+# deletes the base image's own.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_NO_CACHE=1
 
-# A fresh ensurepip-derived venv pip can lag the system pip by one
-# release.  Re-run the upgrade inside the venv so /opt/venv ships
-# with a CVE-fixed pip independent of the base image's pip.
-RUN pip install --no-cache-dir --upgrade 'pip>=26.0,<27'
-
-# Explicit builder working directory so the requirements COPY and the
-# pip install below do not depend on the base image's default working
-# directory (also clears hadolint DL3045).
+# Explicit builder working directory so the lock COPY and the install
+# below do not depend on the base image's default working directory
+# (also clears hadolint DL3045).
 WORKDIR /build
 
-COPY requirements.txt .
-# Install the pinned production dependencies.  gunicorn is pinned HERE
-# rather than in requirements.txt (that file's header keeps it out of
-# the local dev venv) so the WSGI server cannot float to a new major on
-# an image rebuild unreviewed -- matching the ==-pin on every other
-# dependency and the digest-pinned base image.  Bump this in lockstep
-# with a tested gunicorn upgrade.
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir 'gunicorn==26.2.0'
+COPY pyproject.toml uv.lock .python-version ./
+# Install exactly the lock's runtime set plus the ``server`` group
+# (gunicorn), every file checked against its sha256 (``--locked`` also
+# refuses a lock that no longer matches pyproject.toml), and compile its
+# bytecode as pip did, since the read-only runtime cannot write it.  uv
+# builds psycopg-c in an environment of its own, from the build requirement
+# its own source declares, with only the build tools pyproject.toml's
+# ``build-constraint-dependencies`` trust by hash (ruling plan#2494); its
+# ``require-build-hashes`` refuses a tool no hash there covers.  The venv
+# so holds what runs and nothing that only built it.
+RUN uv sync --locked --compile-bytecode --no-install-project \
+        --no-default-groups --group server
 
 # -- Stage 2: Runtime -------------------------------------------------
 FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
@@ -99,6 +94,21 @@ RUN apt-get update \
         libpq5 postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
+# NO PIP IN THE RUNTIME IMAGE (ruling plan#2443; audit finding F-120).  The
+# base image ships pip for its own interpreter: installed, as its commands,
+# and as the wheel ensurepip installs it from.  Nothing here runs it -- the
+# venv below holds every package, from the lock, and no installer -- so it
+# is deleted rather than kept past each pip CVE.  ``rm`` deletes it, so no
+# pip runs (ruling plan#2446); each path is read from this stage's own
+# interpreter, before the venv's comes first on PATH, and with no ``-f`` a
+# path the base image stops holding fails the build rather than leaving a
+# pip behind.  CI's ``image`` job checks the built image holds none.
+RUN purelib="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')" \
+    && scripts="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))')" \
+    && bundled="$(python -c 'import ensurepip, pathlib; print(pathlib.Path(ensurepip.__file__).parent / "_bundled")')" \
+    && rm -r "${purelib}"/pip "${purelib}"/pip-*.dist-info \
+        "${scripts}"/pip "${scripts}"/pip3* "${bundled}"/pip-*.whl
+
 # Create the non-root user at a FIXED uid/gid.  1000 is what Debian's
 # useradd handed out anyway (production has run as uid 1000 since the
 # first deploy), and pinning it lets the USER line below be numeric,
@@ -107,9 +117,10 @@ RUN apt-get update \
 RUN groupadd --gid 1000 shekel && useradd --create-home --uid 1000 --gid 1000 shekel
 WORKDIR /home/shekel/app
 
-# Copy virtualenv from builder.  The venv carries the CVE-fixed pip
-# from stage 1 plus all production dependencies -- the runtime stage
-# never invokes pip itself.
+# Copy virtualenv from builder.  The venv carries the lock's runtime
+# set and gunicorn and no installer at all -- uv stayed in the builder,
+# no pip was seeded and the base image's pip is deleted above -- and the
+# runtime stage installs nothing.
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 

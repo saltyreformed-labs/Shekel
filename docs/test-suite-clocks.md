@@ -247,7 +247,13 @@ Test fails in CI but not locally
   └─ Is the CI job's TZ skewed?  (yes -- Pacific/Kiritimati, by design)
      └─ Does the test build a date the app compares against display_today()?
         └─ YES  -> real defect. Use display_today() in the test.
-        └─ NO   -> keep going; it is not the clock gate.
+        └─ NO   -> does it sign in, then freeze_today on a date read from the wall clock?
+           └─ YES -> the idle timeout measures against the clock the freeze moves, so the
+                     session expires and the route answers 302 /login while the freeze sits
+                     over 12 hours past the sign-in. 01:00 UTC on date.today() does that
+                     from 10:00 to 13:00 UTC a day under Kiritimati (plan#2925), so it
+                     passes on most runs. Sign in again after the freeze (log_in_seed_user).
+           └─ NO  -> keep going; it is not the clock gate.
 
 Test fails in the calendar sweep
   └─ Does it compare a server-stamped timestamp against a Python-derived date?

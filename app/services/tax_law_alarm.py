@@ -6,7 +6,7 @@ ONE pure check (ruling **salary:R-SAL74**, plan step **salary:X-at-4**) that
 every alarm reads, so no two alarms can disagree about which year is missing:
 
 * the banner on every owner page, from November 1 (:data:`Stage.NOTICE`;
-  ruling **R-SAL87** put it on every page), ``app/__init__.py`` and
+  ruling **R-SAL87** put it on every page), ``app/context_processors.py`` and
   ``templates/_tax_law_notice.html``;
 * the weekly scheduled GitHub run, failing from November 1, and from December 1
   (:data:`Stage.REFUSE`) the refusal: the ``tax-law`` job in ``ci.yml`` on

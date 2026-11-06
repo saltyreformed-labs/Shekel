@@ -549,11 +549,10 @@ class TestProdComposeNetworkTopology:
 
         ``yaml.safe_load`` is the standard tool here: we never need
         to construct arbitrary Python objects from this file, just
-        read its mapping/list shape.  PyYAML is in
-        ``requirements.txt`` (used by ``app/utils/observability.py``
-        and similar), so a missing import would surface earlier as
-        a suite-level failure rather than masking a regression
-        here.
+        read its mapping/list shape.  PyYAML is in the lock's dev
+        group (``pyproject.toml``), which every suite run installs,
+        so a missing import would surface earlier as a suite-level
+        failure rather than masking a regression here.
         """
         with PROD_COMPOSE_OVERRIDE.open(encoding="utf-8") as fh:
             return yaml.safe_load(fh)
@@ -601,9 +600,9 @@ class TestProdComposeNetworkTopology:
         assert "shekel-frontend" in app_networks
 
     def test_app_still_joins_backend(self, parsed: dict) -> None:
-        """The internal-only ``backend`` bridge (db, redis) is still
-        required.  Removing it would break Gunicorn's DB/Redis
-        connections.
+        """The internal-only ``backend`` bridge (db) is still
+        required.  Removing it would break Gunicorn's DB connection;
+        Valkey is on no network, reached over its socket file.
         """
         app_networks = parsed["services"]["app"].get("networks") or []
         assert "backend" in app_networks
@@ -701,9 +700,9 @@ class TestBaseComposeNetworkPinning:
         )
 
     def test_backend_still_internal(self, yaml_text: str) -> None:
-        """``backend`` must remain ``internal: true`` so the db /
-        redis / app cannot reach the public internet.  Audit finding
-        F-020 mitigations require this.
+        """``backend`` must remain ``internal: true`` so the db and
+        app cannot reach the public internet (valkey joins no network).
+        Audit finding F-020 mitigations require this.
         """
         # Robustly match the YAML structure: "backend:" header
         # followed by "driver: bridge" and "internal: true" (any

@@ -30,6 +30,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tomllib
 from datetime import date
 from decimal import Decimal
 
@@ -524,7 +525,7 @@ def _earnings(world, db):
     return world
 
 
-#: The repository's root, where both requirements files and ``app`` are.
+#: The repository's root, where ``pyproject.toml`` and ``app`` are.
 _REPO = pathlib.Path(__file__).resolve().parents[2]
 
 #: Run in a fresh interpreter: load the script at ``argv[1]`` by path, under a
@@ -540,24 +541,16 @@ _LOADED_DISTRIBUTIONS = (
 )
 
 
-def _pins(requirements: str) -> set[str]:
-    """Return each distribution a requirements file pins, by its canonical name.
-
-    Its ``-r`` include is not followed: ``requirements-dev.txt`` includes
-    ``requirements.txt``, and what the dev file alone pins is the difference.
+def _named(requirements: list[str]) -> set[str]:
+    """Return each distribution a list of requirements names, by its canonical name.
 
     Args:
-        requirements: The file's name, under the repository's root.
+        requirements: PEP 508 requirements, as ``pyproject.toml`` lists them.
 
     Returns:
         The canonical (PEP 503) names.
     """
-    pinned = set()
-    for line in (_REPO / requirements).read_text(encoding="utf-8").splitlines():
-        requirement = line.split("#", 1)[0].strip()
-        if requirement and not requirement.startswith("-"):
-            pinned.add(canonicalize_name(Requirement(requirement).name))
-    return pinned
+    return {canonicalize_name(Requirement(requirement).name) for requirement in requirements}
 
 
 class TestTheRehearsalMeasure:
@@ -738,14 +731,18 @@ class TestTheRehearsalMeasure:
     def test_it_loads_no_distribution_only_the_dev_pins_hold(self):
         """Loaded by path in a fresh interpreter, it loads no distribution only the dev pins hold.
 
-        The kit runs it under a venv of ``requirements.txt`` and the
-        ``time-machine`` pin, and production's image holds only the first.  The
-        measure is loaded by its path (``runpy``), never through the ``tests``
-        package, whose helpers import ``pytest``; each module it then holds is
-        mapped to its distribution.  A distribution neither file pins (a pin's
-        own dependency) is not graded.
+        The kit runs it under a venv of the cut's lock, the runtime set and the
+        ``rehearsal`` group's ``time-machine``, and production's image holds the
+        runtime set and never the ``dev`` group.  The measure is loaded by its
+        path (``runpy``), never through the ``tests`` package, whose helpers
+        import ``pytest``; each module it then holds is mapped to its
+        distribution.  What only the dev group holds is what ``pyproject.toml``'s
+        ``dev`` group names and its ``[project] dependencies`` do not; a
+        distribution neither names (a dependency's own dependency) is not graded.
         """
-        dev_only = _pins("requirements-dev.txt") - _pins("requirements.txt")
+        declared = tomllib.loads((_REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        dev_only = (_named(declared["dependency-groups"]["dev"])
+                    - _named(declared["project"]["dependencies"]))
         loaded = subprocess.run(
             [sys.executable, "-c", _LOADED_DISTRIBUTIONS, measure.__file__],
             cwd=_REPO, capture_output=True, text=True, check=False,

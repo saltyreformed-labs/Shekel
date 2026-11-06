@@ -211,7 +211,7 @@ class TestDeductionCadenceForm(_TestDeductionCadenceFormMembers):
         """A crafted nominal day beside a blank start does not reach the spec beside the derived 1st.
 
         The schema's nominal-day rule is skipped when no start is stated, so
-        ``nominal_day=31`` beside a blank start passes it; the derived
+        ``repeats_on=31`` beside a blank start passes it; the derived
         2026-01-01 never clamped, and the pair would be refused by the spec as
         a broken invariant -- a 500.  The derivation drops the day with the
         blank it rode beside (the script disables that control; only a
@@ -227,7 +227,7 @@ class TestDeductionCadenceForm(_TestDeductionCadenceFormMembers):
                         PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
                         ceiling=None,
                     )),
-                    "nominal_day": "31",
+                    "repeats_on": "31",
                 },
                 follow_redirects=True,
             )

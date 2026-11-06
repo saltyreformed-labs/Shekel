@@ -57,12 +57,12 @@ from app.routes._redirect_target import RedirectTarget
 from app.schemas.validation import (
     RECURRENCE_END_BOUND_KEY,
     RECURRENCE_MAX_PER_MONTH_KEY,
-    RECURRENCE_NOMINAL_DAY_KEY,
+    RECURRENCE_REPEATS_ON_KEY,
     RECURRENCE_STARTS_ON_KEY,
 )
 from app.services import paycheck_line_kinds, pay_stub_service, payroll_line_cadence
 from app.services.balance_at import BalanceContext
-from app.services.recurrence import NeverEnds, end_bound_from_columns
+from app.services.recurrence import MonthReading, NeverEnds, end_bound_from_columns
 from app.routes.salary._bp import salary_bp
 from app.routes.salary._helpers import (
     _LINE_UPDATE_FIELDS,
@@ -384,10 +384,13 @@ def _settle_line_cadence(
       24 line re-saved with the key missing is still the 24 shape, and a
       bounded line re-saved with the bound's keys missing keeps its stop
       rather than losing its rule.
-    * a derived start carries NO nominal day: the derived zero -- a payday,
-      the 1st, January 1st -- never clamps, and a nominal day posted beside a
-      blank start (a crafted POST; the script disables the control) would
-      otherwise reach the spec as a pair it refuses as a broken invariant.
+    * a derived start is read by its own day of the month: the derived zero
+      -- a payday, the 1st, January 1st -- never clamps, and a "repeating on"
+      choice posted beside a blank start (a crafted POST; the script disables
+      the control while the box is blank) read no date at all, so a nominal
+      day would reach the spec as a pair it refuses as a broken invariant
+      and a weekday reading would read the derived date's weekday, which
+      nobody chose (plan step recurrence:R8-c).
 
     A submission that names no cadence is left alone: ``None`` is the form's
     "Does not repeat", and an ABSENT unit is a form that said nothing about
@@ -435,7 +438,7 @@ def _settle_line_cadence(
         data[RECURRENCE_STARTS_ON_KEY] = payroll_line_cadence.first_occurrence(
             unit, data["interval_n"], ctx.calendar(),
         )
-        data[RECURRENCE_NOMINAL_DAY_KEY] = None
+        data[RECURRENCE_REPEATS_ON_KEY] = MonthReading()
 
 
 @salary_bp.route("/salary/<int:profile_id>/lines", methods=["POST"])

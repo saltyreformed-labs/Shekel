@@ -13,6 +13,9 @@ measure there.  What they share is here, once:
   :data:`~tests.manual.run_pinned.IMPORTED` line), so a pair that reads alike cannot be one
   tree's code measured twice;
 * **a pair's comparison** (:func:`parted`), byte for byte.
+
+``run_worked_out_ledger_on_dump.py`` measures one side with no pair, and takes only that side's
+environment from here (:func:`side_environment`).
 """
 
 import argparse
@@ -25,7 +28,7 @@ from collections import namedtuple
 import psycopg
 
 from tests.manual.run_pinned import IMPORTED
-from tools.rehearsal import bench, rows
+from tools.rehearsal import bench, sides
 
 #: The runner that pins a script's clock, from THIS tree (it imports nothing of either side;
 #: its ``IMPORTED`` is how it names the ``app`` its script imported).
@@ -39,7 +42,7 @@ Pinned = namedtuple("Pinned", "moment secret")
 def side_environment(state, url, secret):
     """Return the environment a measurement from *state*'s tree on *url* runs in.
 
-    The kit's (``rows.side_environment``), but THIS interpreter's directory
+    The kit's (``sides.side_environment``), but THIS interpreter's directory
     first on ``PATH``: the suite's helpers need ``pytest``, which a side's
     production pins do not hold.
 
@@ -49,7 +52,7 @@ def side_environment(state, url, secret):
         secret: The run's secret key.
     """
     return {
-        **rows.side_environment(state, url, secret),
+        **sides.side_environment(state, url, secret),
         "PATH": os.pathsep.join((str(pathlib.Path(sys.executable).parent),
                                  "/usr/bin", "/bin")),
     }

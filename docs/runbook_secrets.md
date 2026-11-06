@@ -59,7 +59,7 @@ maintenance window: the final step recreates both the `app` and `db` containers.
 
    ```bash
    docker compose ps
-   # Expect: shekel-prod-app, shekel-prod-db, shekel-prod-redis
+   # Expect: shekel-prod-app, shekel-prod-db, shekel-prod-valkey
    ```
 
    If the bundled `shekel-prod-nginx` is also present, you are in bundled mode -- docker secrets are

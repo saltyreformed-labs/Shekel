@@ -224,7 +224,7 @@ def _prefill_attributes(html, deduction_id):
     found = {}
     for key in (
         "unit-id", "interval", "placement-id", "max-per-month",
-        "starts-on", "nominal-day", "end-mode", "end-date", "max-occurrences",
+        "starts-on", "repeats-on", "end-mode", "end-date", "max-occurrences",
     ):
         value = re.search(r'data-line-%s="([^"]*)"' % key, button)
         assert value, f"the edit button carries no data-line-{key}"
@@ -236,11 +236,13 @@ def _authored_columns(rule):
     """Every column the write door authors, for a column-for-column comparison."""
     return {
         "unit_id": rule.unit_id,
+        "unit_has_day_of_month": rule.unit_has_day_of_month,
         "placement_id": rule.placement_id,
         "shift_id": rule.shift_id,
         "interval_n": rule.interval_n,
         "starts_on": rule.starts_on,
         "nominal_day": rule.nominal_day,
+        "weekday_reading": rule.weekday_reading,
         "max_per_month": rule.max_per_month,
         "end_date": rule.end_date,
         "max_occurrences": rule.max_occurrences,
@@ -291,7 +293,7 @@ def _line_form(name, amount="100.00", **cadence):
         "inflation_rate": "",
         "inflation_effective_month": "",
         "starts_on": "",
-        "nominal_day": "",
+        "repeats_on": "",
         "recurrence_end_mode": "never",
         "end_date": "",
         "max_occurrences": "",

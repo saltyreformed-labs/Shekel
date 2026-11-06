@@ -199,6 +199,41 @@ def _pytest_stub(tmp_path: Path, pytest_status: int) -> str:
     )
 
 
+def _wrapper_tree(binaries: Path) -> Path:
+    """The tree a case's wrapper runs in, beside the case's stubs.
+
+    Args:
+        binaries: Directory holding the stubs.
+
+    Returns:
+        The tree's root, which :func:`_wrapper_copy` makes.
+    """
+    return binaries.parent / "tree"
+
+
+def _wrapper_copy(binaries: Path) -> Path:
+    """The wrapper, with the cluster's module beside it, in a tree of the case's own.
+
+    The wrapper finds its tree from its own path, and where that tree holds ``uv.lock`` it
+    replaces a ``.venv`` link and syncs the venv.  So a case runs a copy, which only touches
+    the tree the case made: run from this checkout, every case here would sync the checkout's
+    own venv, on CI too, as each case scrubs ``CI``.  What a case puts in the tree before the
+    wrapper runs is the wrapper's to find; a tree holding nothing more has no lock, and leaves
+    the venv alone.
+
+    Args:
+        binaries: Directory holding the stubs.
+
+    Returns:
+        The copy of ``scripts/test.sh``.
+    """
+    scripts = _wrapper_tree(binaries) / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    for script in (_TEST_RUNNER, _TEST_RUNNER.with_name("private_cluster.py")):
+        shutil.copy2(script, scripts)
+    return scripts / _TEST_RUNNER.name
+
+
 def _wrapper_env(
     binaries: Path, runtime: str, env_extra: dict[str, str]
 ) -> dict[str, str]:
@@ -276,7 +311,7 @@ def _run_wrapper(
         runtime = scratch
     try:
         return subprocess.run(
-            [str(_TEST_RUNNER), "tests/does_not_matter"],
+            [str(_wrapper_copy(binaries)), "tests/does_not_matter"],
             capture_output=True,
             text=True,
             cwd=str(REPO_ROOT),
@@ -314,7 +349,7 @@ def _launch_wrapper(
     Returns:
         The running process: the wrapper, or the shell calling it.
     """
-    command = [str(_TEST_RUNNER), "tests/does_not_matter"]
+    command = [str(_wrapper_copy(binaries)), "tests/does_not_matter"]
     if then is not None:
         command = ["bash", "-c", f'"$0" "$1"; {then}', *command]
     return subprocess.Popen(

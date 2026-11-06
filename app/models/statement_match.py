@@ -42,7 +42,10 @@ measured on the developer's own statement, 6 of 16 payroll deposits sit
 seen from the outside.  *The direction was written the wrong way round until
 plan step balance:X-aw re-measured it -- the BANK pays more, which is why the
 owner has been hand-typing the net since 2026-07-02 -- and the finding was
-**N-239** until that step split the horizon half off from this one.*
+**N-239** until that step split the horizon half off from this one.  That
+direction held until the first raise: plan#2866 measured the app ABOVE the
+bank past it (:class:`~app.services.statement_match._landing
+.DifferenceLanding`).*
 
 **Agreement is DERIVED, never stored, and a stale match is not a corrupt one.**
 Nothing here records the day the match asserted: that is ``max(posted_on)`` over

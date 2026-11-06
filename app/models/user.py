@@ -20,17 +20,19 @@ class User(UserMixin, TimestampMixin, db.Model):
 
     Account-lockout columns (see audit finding F-033 / commit C-11):
 
-      * ``failed_login_count`` -- count of consecutive bad-password
-        attempts.  Incremented inside ``auth_service.authenticate`` on
-        every failed verify, reset to ``0`` on a successful login or
-        when the threshold trips and ``locked_until`` is stamped.
+      * ``failed_login_count`` -- count of consecutive wrong passwords and
+        codes, at sign-in and at the signed-in password and code checks.
+        Incremented only by ``auth_service.record_failed_attempt``; reset to
+        ``0`` when the threshold trips and ``locked_until`` is stamped, and by
+        ``auth_service.clear_failed_attempts`` once every check has passed: a
+        finished sign-in or re-confirm, not a correct password alone.
       * ``locked_until`` -- exclusive upper bound on the lockout window;
-        ``NULL`` outside lockout.  ``authenticate`` short-circuits and
-        raises ``AuthError`` without running ``verify_password`` while
-        ``locked_until > now`` so a brute-force attacker observes
-        constant-time rejections during the lockout window (no timing
-        oracle on whether the password was correct on the locked
-        account).
+        ``NULL`` when never locked or cleared, and a past value once a window
+        has run out, which every check reads the same as ``NULL``.  Each check
+        refuses without running ``verify_password`` while ``locked_until >
+        now`` so a brute-force attacker observes constant-time rejections
+        during the lockout window (no timing oracle on whether the password
+        was correct on the locked account).
 
     Together these columns implement per-account brute-force throttling
     that does not depend on Flask-Limiter's IP-keyed storage.  IP
@@ -108,22 +110,20 @@ class User(UserMixin, TimestampMixin, db.Model):
     # and a trusted device made before it is trusted no longer
     # (app/services/trusted_device_service.py, plan#2173).
     session_invalidated_at = db.Column(db.DateTime(timezone=True), nullable=True)
-    # Number of consecutive failed login attempts since the last
-    # successful authenticate() or lockout-trip.  NOT NULL with a
+    # Number of consecutive wrong passwords and codes since every check last
+    # passed or the lock last tripped.  NOT NULL with a
     # server default of 0 so existing rows backfill cleanly and any
     # raw-SQL INSERT that omits the column still produces a usable
     # row.  See audit finding F-033 / commit C-11.
     failed_login_count = db.Column(
         db.Integer, nullable=False, server_default="0",
     )
-    # Exclusive upper bound on the active lockout window, or NULL when
-    # the account is not locked.  Comparison is strict greater-than:
-    # at the instant the column equals ``now`` the lockout is over.
-    # Nullable because most rows are NOT in lockout at any given moment
-    # -- the column carries the "no active lockout" state as NULL
-    # rather than as a sentinel datetime in the past, which keeps the
-    # service-side check (``locked_until is not None and locked_until
-    # > now``) explicit about both conditions.  See audit finding
+    # Exclusive upper bound on the lockout window, or NULL when the account
+    # was never locked or has since been cleared.  Comparison is strict
+    # greater-than: at the instant the column equals ``now`` the lockout is
+    # over, and a window that has run out stays here until every check next
+    # passes, so "no active lockout" is NULL or a past value
+    # (``auth_service.is_locked_out`` reads both).  See audit finding
     # F-033 / commit C-11.
     locked_until = db.Column(db.DateTime(timezone=True), nullable=True)
     role_id = db.Column(

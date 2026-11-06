@@ -39,7 +39,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app import create_app
+from app import CONFIG_MAP, create_app
 from app.utils.log_events import EVT_RATE_LIMIT_EXCEEDED
 
 
@@ -561,10 +561,12 @@ class TestEachAccountHasItsOwnCounter:
             The app.
         """
         # pylint: disable=unused-argument,import-outside-toplevel
-        from app.config import TestConfig
         from app.extensions import limiter
 
-        monkeypatch.setattr(TestConfig, "RATELIMIT_ENABLED", True)
+        # ``app.CONFIG_MAP``, the class ``create_app`` reads: importing
+        # ``TestConfig`` here would find a newer class once a test that reloads
+        # ``app.config`` has run on this worker, and the limiter would stay off.
+        monkeypatch.setattr(CONFIG_MAP["testing"], "RATELIMIT_ENABLED", True)
         rate_app = create_app("testing")
 
         @rate_app.route("/test-gated-route")

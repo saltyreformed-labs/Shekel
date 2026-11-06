@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 _LOCKOUT_THRESHOLD_DEFAULT = 10
 _LOCKOUT_DURATION_MINUTES_DEFAULT = 15
 
+# What the code page and the signed-in doors say while the account is locked.
+# ``/login`` never says it: there a stranger could learn the account exists.
+LOCKED_OUT_MESSAGE = "Too many wrong attempts. Try again later."
+
 
 def _get_lockout_threshold():
     """Read the consecutive-failure threshold for triggering a lockout.
@@ -403,6 +407,108 @@ def find_sign_in_user(email):
     return db.session.query(User).filter_by(email=email).first()
 
 
+def is_locked_out(user) -> bool:
+    """Return True while *user*'s lock window is open.
+
+    ``locked_until`` is an exclusive upper bound: at the instant it equals
+    ``now`` the lock is over.  A value in the past is therefore the same as
+    ``None`` to every check, and stays on the row until the next
+    :func:`clear_failed_attempts`.
+
+    Args:
+        user: The account being checked.
+
+    Returns:
+        True while the account refuses every password and code.
+    """
+    return (
+        user.locked_until is not None
+        and user.locked_until > datetime.now(timezone.utc)
+    )
+
+
+def record_failed_attempt(user) -> None:
+    """Count one wrong password or code against *user*, tripping the lock at the threshold.
+
+    The ONE home of the count and the trip, whichever check the guess failed:
+    sign-in's password and code, and the signed-in password and code checks.
+    The caller holds the owner's lock (ruling **R-CC121**), so two guesses
+    cannot count once.
+
+    At the threshold (``LOCKOUT_THRESHOLD``, default 10) this stamps
+    ``locked_until = now + LOCKOUT_DURATION_MINUTES``, zeroes the count, and
+    emits the structured ``account_locked`` event.  It zeroes the count so a
+    second lock takes another threshold-many failures rather than one more:
+    otherwise an account whose failures already crossed the threshold would
+    lock again on the very next attempt after the window expires.
+
+    Commits, even short of the threshold, so the count survives the caller's
+    refusal.
+
+    Args:
+        user: The account the guess was against.
+    """
+    # Tolerate a defensive ``None`` (a row predating the column or a manual
+    # reset) by coalescing to 0; any future schema-level NOT NULL guarantee
+    # makes the coalesce a no-op rather than a crash.
+    user.failed_login_count = (user.failed_login_count or 0) + 1
+    if user.failed_login_count >= _get_lockout_threshold():
+        user.locked_until = datetime.now(timezone.utc) + _get_lockout_duration()
+        user.failed_login_count = 0
+        log_event(
+            logger, logging.WARNING, EVT_ACCOUNT_LOCKED, AUTH,
+            "Account locked after consecutive wrong passwords or codes",
+            user_id=user.id, lockout_until=user.locked_until.isoformat(),
+        )
+    db.session.commit()
+
+
+def clear_failed_attempts(user) -> None:
+    """Clear *user*'s count and any lock, once every check they face has passed.
+
+    Called at a finished sign-in and a finished re-confirm, and nowhere else
+    (ruling plan#3007).  A correct password alone does not clear it: someone
+    holding the password but not the second factor could otherwise re-enter it
+    between wrong codes, and the lock would never fire.
+
+    Commits only when there is something to clear: the common path is a user
+    with no failure history, for whom the commit would be a no-op write.
+
+    Args:
+        user: The account whose checks have all passed.
+    """
+    if user.failed_login_count != 0 or user.locked_until is not None:
+        user.failed_login_count = 0
+        user.locked_until = None
+        db.session.commit()
+
+
+def check_signed_in_password(user, password, wrong_password_message) -> None:
+    """Check a signed-in door's password, counting a wrong one toward the lock.
+
+    The one password check of ``/reauth``, ``/change-password`` and
+    ``/mfa/disable``.  The lock is checked first, so bcrypt never runs on a
+    locked account, as at sign-in.  Unlike ``/login`` the refusal names the
+    lock: whoever is here holds a live session on this account, so the lock's
+    existence tells them nothing a stranger could use.
+
+    Args:
+        user: The signed-in account.  Its row was reloaded under the owner's
+            lock at the request's boundary.
+        password: The password typed.
+        wrong_password_message: What this door says to a wrong password.
+
+    Raises:
+        AuthError: With :data:`LOCKED_OUT_MESSAGE` while locked, else with
+            *wrong_password_message* when the password is wrong.
+    """
+    if is_locked_out(user):
+        raise AuthError(LOCKED_OUT_MESSAGE)
+    if not verify_password(password, user.password_hash):
+        record_failed_attempt(user)
+        raise AuthError(wrong_password_message)
+
+
 def authenticate(user, password):
     """Check *password* for *user*, enforcing account lockout.
 
@@ -426,24 +532,15 @@ def authenticate(user, password):
         attacker observing response timing cannot distinguish "locked
         and password is wrong" from "locked and password is right",
         so a lockout window cannot be used as a side-channel oracle.
-      * If the password is wrong -- increment ``failed_login_count``.
-        At the configured threshold (``LOCKOUT_THRESHOLD``, default
-        10) stamp ``locked_until = now + LOCKOUT_DURATION_MINUTES``,
-        zero the counter (so a second lockout requires another
-        threshold-many failures), emit a structured ``account_locked``
-        log event for forensics, and commit.  Always commit the
-        increment even when the threshold has not yet tripped so the
-        counter survives the transactional boundary.
+      * If the password is wrong -- :func:`record_failed_attempt`.
       * If the password is right but ``is_active`` is False -- raise
         ``AuthError`` with a message that explicitly says the account
         is disabled.  We have already proven knowledge of the
         password, so this branch is not an information leak.
-      * If the password is right and the account is active -- reset
-        ``failed_login_count`` to 0 and clear ``locked_until`` (a
-        successful login implicitly closes any prior lockout
-        window).  Commit only when the reset is non-trivial so
-        successful logins on accounts with no failure history do not
-        pay an unnecessary write.
+      * If the password is right and the account is active -- return the
+        user.  The count is NOT cleared here: for an account with a second
+        factor this is only the first check, and the count clears when every
+        check has passed (:func:`clear_failed_attempts`, ruling plan#3007).
 
     All branches share the same generic ``"Invalid email or password."``
     message except for the explicit "Account is disabled." branch
@@ -475,36 +572,13 @@ def authenticate(user, password):
         verify_password(password, _DUMMY_PASSWORD_HASH)
         raise AuthError("Invalid email or password.")
 
-    now = datetime.now(timezone.utc)
-
     # Lockout gate FIRST so we never run bcrypt on a locked account.
     # See module docstring above for the timing-oracle rationale.
-    if user.locked_until is not None and user.locked_until > now:
+    if is_locked_out(user):
         raise AuthError("Invalid email or password.")
 
     if not verify_password(password, user.password_hash):
-        # Increment in-place, then decide whether the threshold tripped.
-        # Tolerate a defensive ``None`` (a row predating the column or
-        # a manual reset) by coalescing to 0; any future schema-level
-        # NOT NULL guarantee makes the coalesce a no-op rather than a
-        # crash.
-        user.failed_login_count = (user.failed_login_count or 0) + 1
-        threshold = _get_lockout_threshold()
-        if user.failed_login_count >= threshold:
-            user.locked_until = now + _get_lockout_duration()
-            # Zero the counter once the lockout fires so a second
-            # lockout cycle requires another threshold-many failures
-            # rather than one extra.  Without the reset, a user whose
-            # failures already crossed the threshold would re-trigger
-            # a fresh lockout on the very next attempt after the
-            # window expires.
-            user.failed_login_count = 0
-            log_event(
-                logger, logging.WARNING, EVT_ACCOUNT_LOCKED, AUTH,
-                "Account locked after consecutive failed logins",
-                user_id=user.id, lockout_until=user.locked_until.isoformat(),
-            )
-        db.session.commit()
+        record_failed_attempt(user)
         raise AuthError("Invalid email or password.")
 
     if not user.is_active:
@@ -512,15 +586,6 @@ def authenticate(user, password):
         # not an information leak: an attacker without the password
         # never reaches this branch.
         raise AuthError("Account is disabled.")
-
-    # Successful auth.  Clear any residual lockout state, but only
-    # commit when there is something to clear -- the common path is a
-    # user with ``failed_login_count == 0`` and ``locked_until is None``
-    # for whom the commit would be a no-op write.
-    if user.failed_login_count != 0 or user.locked_until is not None:
-        user.failed_login_count = 0
-        user.locked_until = None
-        db.session.commit()
 
     return user
 
@@ -537,11 +602,13 @@ def change_password(user, current_password, new_password):
         None on success.
 
     Raises:
-        AuthError: If current_password does not match the stored hash.
+        AuthError: If the account is locked, or current_password does not
+            match the stored hash (:func:`check_signed_in_password`).
         ValidationError: If new_password is shorter than 12 characters.
     """
-    if not verify_password(current_password, user.password_hash):
-        raise AuthError("Current password is incorrect.")
+    check_signed_in_password(
+        user, current_password, "Current password is incorrect.",
+    )
     if len(new_password) < 12:
         raise ValidationError("New password must be at least 12 characters.")
     if len(new_password.encode("utf-8")) > 72:

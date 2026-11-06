@@ -19,8 +19,7 @@ import pytest
 from flask import request
 from flask_login import login_user
 
-from app import create_app
-from app.config import TestConfig
+from app import CONFIG_MAP, create_app
 from app.extensions import db
 from app.utils.client_address import (
     believe_forwarded_address_from,
@@ -280,7 +279,7 @@ class TestTheFactoryInstallsIt:
     def test_a_malformed_list_refuses_to_build_the_app(self, app, monkeypatch):
         """A typo in the trusted list stops the start, not the first request."""
         # pylint: disable=unused-argument
-        monkeypatch.setattr(TestConfig, "FORWARDED_ALLOW_IPS", "*")
+        monkeypatch.setattr(CONFIG_MAP["testing"], "FORWARDED_ALLOW_IPS", "*")
         with pytest.raises(ValueError, match="FORWARDED_ALLOW_IPS"):
             create_app("testing")
 

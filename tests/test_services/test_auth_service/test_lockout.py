@@ -1,6 +1,7 @@
 """Auth service tests: the account lockout's settings and behaviour."""
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -219,17 +220,21 @@ class TestAccountLockoutBehaviour:
             result = auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass")
             assert result.id == user_id
 
-            user = db.session.get(User, user_id)
-            # Successful authentication clears any residual lockout.
-            assert user.locked_until is None
-            assert user.failed_login_count == 0
+            # A correct password alone clears nothing (ruling plan#3007): the
+            # run-out window stays, blocking nothing, until every check has
+            # passed.  The clear itself is pinned at a finished sign-in in
+            # tests/test_routes/test_every_guess_counts.py.
+            assert db.session.get(User, user_id).locked_until is not None
 
-    def test_successful_login_resets_counter(self, app, db, seed_user):
-        """A successful login zeroes the counter built up by typos.
+    def test_a_correct_password_alone_does_not_clear_the_count(
+        self, app, db, seed_user,
+    ):
+        """A correct password leaves the count where it was (ruling plan#3007).
 
-        Without this reset, a user who typoed three times then logged
-        in would still be three failures away from a fresh lockout
-        instead of starting from zero.
+        For an account with a second factor this is only the first check.
+        Clearing here would let someone holding the password but not the
+        second factor re-enter it between wrong codes, and the lock would
+        never fire.  The clear belongs to a finished sign-in or re-confirm.
         """
         user_id = seed_user["user"].id
         with app.app_context():
@@ -243,32 +248,55 @@ class TestAccountLockoutBehaviour:
 
             auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass")
             user = db.session.get(User, user_id)
-            assert user.failed_login_count == 0
+            assert user.failed_login_count == 3
             assert user.locked_until is None
 
-    def test_successful_login_no_op_commit_on_clean_user(
+    def test_the_clear_writes_nothing_on_a_clean_account(
         self, app, db, seed_user,
     ):
-        """A login on an account with no failure history does not write.
+        """An account with no failure history pays no write when every check passes.
 
-        The service skips the commit when both ``failed_login_count``
-        and ``locked_until`` are already at their cleared values.  This
-        is a small efficiency concern: every login on a fresh account
-        would otherwise trigger an unnecessary UPDATE.  Verified by
-        comparing ``updated_at`` before and after; the TimestampMixin
-        updates it on every flush, so an absence of change proves no
-        UPDATE was issued.
+        Moved here from the password check when the clear moved
+        (``test_successful_login_no_op_commit_on_clean_user``).  Assigning the
+        same values would issue no UPDATE either, so ``updated_at`` could not
+        tell this from a clear that always writes: the commit itself is what
+        this pins.
         """
         user_id = seed_user["user"].id
         with app.app_context():
-            user_before = db.session.get(User, user_id)
-            original_updated_at = user_before.updated_at
-            db.session.expunge(user_before)
+            user = db.session.get(User, user_id)
+            with patch.object(auth_service.db.session, "commit") as commit:
+                auth_service.clear_failed_attempts(user)
+            commit.assert_not_called()
 
-            auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass")
+    @pytest.mark.parametrize(
+        "count, locked_for",
+        [
+            pytest.param(3, None, id="a-count-alone"),
+            pytest.param(0, timedelta(seconds=-1), id="a-run-out-lock-alone"),
+        ],
+    )
+    def test_the_clear_clears_and_commits(
+        self, app, db, seed_user, count, locked_for,
+    ):
+        """Whatever is on the row is cleared, and the clear survives a rollback."""
+        user_id = seed_user["user"].id
+        with app.app_context():
+            user = db.session.get(User, user_id)
+            user.failed_login_count = count
+            user.locked_until = (
+                None if locked_for is None
+                else datetime.now(timezone.utc) + locked_for
+            )
+            db.session.commit()
 
-            user_after = db.session.get(User, user_id)
-            assert user_after.updated_at == original_updated_at
+            auth_service.clear_failed_attempts(user)
+            db.session.rollback()
+
+            db.session.expire_all()
+            user = db.session.get(User, user_id)
+            assert user.failed_login_count == 0
+            assert user.locked_until is None
 
     def test_lockout_stores_timezone_aware_datetime(
         self, app, db, seed_user, monkeypatch,

@@ -1,8 +1,8 @@
-"""The trusted-device service: who is trusted, until when, and who may forget.
+"""The known-device service: who is trusted, until when, and who may forget.
 
-Plan#2173, ruling **plan#2406**.  A trusted device skips only the two-factor
-code, and :mod:`app.services.trusted_device_service` holds the record's four
-acts.  Every boundary here is exact, to the second, because the predicate is
+Plan#2173, ruling **plan#2406**; plan#2772, ruling **plan#2994**.  A trusted
+device skips only the two-factor code, and
+:mod:`app.services.known_device_service` holds the record's acts.  Every boundary here is exact, to the second, because the predicate is
 the whole of revocation: a device is live while it was trusted less than
 thirty days ago AND not before its user's ``session_invalidated_at``.
 
@@ -23,8 +23,8 @@ import pytest
 import sqlalchemy
 
 from app.exceptions import NotFoundError
-from app.models.trusted_device import TrustedDevice
-from app.services import trusted_device_service
+from app.models.known_device import KnownDevice
+from app.services import known_device_service
 from tests._test_helpers import freeze_today
 
 #: The moment the first trust in each case is made.  Fixed, so no case
@@ -55,19 +55,24 @@ class _Acts:
         """Freeze the service module's clock at *moment* (UTC)."""
         freeze_today(
             self._monkeypatch, moment.date(),
-            modules=(trusted_device_service.__name__,),
+            modules=(known_device_service.__name__,),
             at_time=moment.time(),
         )
 
     def trust(self, moment, user_id, user_agent=_FIREFOX):
         """Trust a device for *user_id* at *moment*; return its token."""
         self._at(moment)
-        return trusted_device_service.trust_device(user_id, user_agent)
+        return known_device_service.record_sign_in(
+            user_id, None, user_agent, trust=True,
+        )
 
     def find(self, moment, user_id, token):
         """Look *token* up for *user_id* at *moment*."""
         self._at(moment)
-        return trusted_device_service.find_live_device(user_id, token)
+        standing = known_device_service.find_browser(user_id, token)
+        if standing is None or not standing.trusted:
+            return None
+        return standing.device
 
     def listed(self, moment, user_id):
         """List *user_id*'s live devices at *moment*, as their ids in order."""
@@ -76,12 +81,12 @@ class _Acts:
     def devices(self, moment, user_id):
         """List *user_id*'s live devices at *moment*, as the rows."""
         self._at(moment)
-        return trusted_device_service.list_live_devices(user_id)
+        return known_device_service.list_trusted_devices(user_id)
 
     def forget(self, moment, user_id, device_id):
         """Forget *device_id* for *user_id* at *moment*."""
         self._at(moment)
-        trusted_device_service.forget_device(user_id, device_id)
+        known_device_service.forget_device(user_id, device_id)
 
 
 @pytest.fixture(name="acts")
@@ -93,7 +98,7 @@ def _acts(monkeypatch):
 def _device_of(db, token):
     """Return the row *token* names, read past the service (no liveness)."""
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    return db.session.query(TrustedDevice).filter_by(
+    return db.session.query(KnownDevice).filter_by(
         token_hash=token_hash,
     ).one()
 
@@ -102,7 +107,7 @@ def _rows_of(db, user_id):
     """Return the ids of every row *user_id* holds, live or dead."""
     return sorted(
         row.id for row in
-        db.session.query(TrustedDevice).filter_by(user_id=user_id)
+        db.session.query(KnownDevice).filter_by(user_id=user_id)
     )
 
 
@@ -117,7 +122,7 @@ class TestTrustingADevice:
 
         token = acts.trust(_T0, user_id)
 
-        [row] = db.session.query(TrustedDevice).filter_by(user_id=user_id)
+        [row] = db.session.query(KnownDevice).filter_by(user_id=user_id)
         assert row.token_hash == hashlib.sha256(token.encode()).hexdigest()
         assert token not in row.token_hash
         assert row.trusted_at == _T0
@@ -184,29 +189,23 @@ class TestTrustingADevice:
         assert _rows_of(db, user_id) == sorted([almost, new])
         assert _rows_of(db, other_id) == [others]
 
-    def test_the_trust_purges_the_users_forgotten_rows_and_nothing_else(
-        self, app, db, acts, seed_user,
-    ):
-        """At T0 + 3 days, the row trusted before the bump goes; the rest stay.
+    def test_a_bump_purges_nothing(self, app, db, acts, seed_user):
+        """At T0 + 3 days, a row trusted before a bump stays: it is still known.
 
-        The user's rows, judged at the purge (T0 + 3 days), each well inside
-        thirty days:
-
-        * trusted at T0, before the bump at T0 + 1 day: dead by the bump --
-          purged;
-        * trusted at T0 + 2 days, after it: live -- kept;
-        * the purge's own new row -- kept.
+        Ruling plan#2997: no bump ends a browser's known standing, so the bump
+        leaves its row for the age to purge.  The row no longer holds a live
+        trust; that half is :class:`TestTheInvalidation`'s.
         """
         user = seed_user["user"]
-        revoked = _device_of(db, acts.trust(_T0, user.id)).id
+        token = acts.trust(_T0, user.id)
+        before = _device_of(db, token).id
         user.session_invalidated_at = _T0 + _ONE_DAY
         db.session.flush()
-        after = _device_of(db, acts.trust(_T0 + 2 * _ONE_DAY, user.id)).id
 
         new = _device_of(db, acts.trust(_T0 + 3 * _ONE_DAY, user.id)).id
 
-        assert revoked not in _rows_of(db, user.id)
-        assert _rows_of(db, user.id) == sorted([after, new])
+        assert _rows_of(db, user.id) == sorted([before, new])
+        assert acts.find(_T0 + 3 * _ONE_DAY, user.id, token) is None
 
 
 class TestTheThirtyDays:
@@ -259,7 +258,7 @@ class TestTheThirtyDays:
         """The date Settings will show: T0 + 30 days on the row."""
         token = acts.trust(_T0, seed_user["user"].id)
 
-        assert _device_of(db, token).expires_at == _T0 + _THIRTY_DAYS
+        assert _device_of(db, token).trust_expires_at == _T0 + _THIRTY_DAYS
 
 
 class TestTheInvalidation:
@@ -382,8 +381,8 @@ class TestTheBrowsersDevice:
         second = acts.trust(_T0 + _ONE_DAY, user_id)
         devices = acts.devices(_T0 + _ONE_DAY, user_id)
 
-        named_first = trusted_device_service.device_named_by(devices, first)
-        named_second = trusted_device_service.device_named_by(devices, second)
+        named_first = known_device_service.device_named_by(devices, first)
+        named_second = known_device_service.device_named_by(devices, second)
 
         assert named_first is _device_of(db, first)
         assert named_second is _device_of(db, second)
@@ -395,7 +394,7 @@ class TestTheBrowsersDevice:
         devices = acts.devices(_T0, user_id)
 
         assert devices
-        assert trusted_device_service.device_named_by(devices, None) is None
+        assert known_device_service.device_named_by(devices, None) is None
 
     def test_a_token_naming_no_listed_device_names_nothing(
         self, app, db, acts, seed_user, seed_second_user,
@@ -407,10 +406,10 @@ class TestTheBrowsersDevice:
         devices = acts.devices(_T0, user_id)
 
         assert devices
-        assert trusted_device_service.device_named_by(
+        assert known_device_service.device_named_by(
             devices, "not-a-token",
         ) is None
-        assert trusted_device_service.device_named_by(devices, theirs) is None
+        assert known_device_service.device_named_by(devices, theirs) is None
 
 
 class TestForgettingADevice:

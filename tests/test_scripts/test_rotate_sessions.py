@@ -20,9 +20,9 @@ import pytest
 import time_machine
 
 from app.extensions import db
-from app.models.trusted_device import TrustedDevice
+from app.models.known_device import KnownDevice
 from app.models.user import User
-from app.services import trusted_device_service
+from app.services import known_device_service
 from app.services.auth_service import hash_password
 from scripts.rotate_sessions import execute_rotation, main, parse_args
 
@@ -143,22 +143,22 @@ class TestExecuteRotation:
         tokens = {}
         with time_machine.travel(an_hour_ago, tick=False):
             for user in (seed_user["user"], seed_second_user["user"]):
-                tokens[user.id] = trusted_device_service.trust_device(
-                    user.id, "Firefox",
+                tokens[user.id] = known_device_service.record_sign_in(
+                    user.id, None, "Firefox", trust=True,
                 )
         db.session.commit()
         for user_id, token in tokens.items():
-            assert trusted_device_service.find_live_device(
+            assert known_device_service.find_browser(
                 user_id, token,
-            ) is not None
+            ).trusted is True
 
         execute_rotation(db.session)
 
         for user_id, token in tokens.items():
-            assert trusted_device_service.find_live_device(
+            assert known_device_service.find_browser(
                 user_id, token,
-            ) is None
-        assert db.session.query(TrustedDevice).count() == 2
+            ).trusted is False
+        assert db.session.query(KnownDevice).count() == 2
 
     def test_rotate_sessions_on_empty_db_returns_zero(self, app, db):
         """An empty ``auth.users`` table returns 0 with no error.

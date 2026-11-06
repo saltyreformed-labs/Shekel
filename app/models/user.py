@@ -106,7 +106,7 @@ class User(UserMixin, TimestampMixin, db.Model):
     # Timestamp of most recent "log out all sessions" or password change event.
     # The user loader compares this against the session creation time to reject stale sessions,
     # and a trusted device made before it is trusted no longer
-    # (app/services/trusted_device_service.py, plan#2173).
+    # (app/services/known_device_service.py, plan#2173).
     session_invalidated_at = db.Column(db.DateTime(timezone=True), nullable=True)
     # Number of consecutive failed login attempts since the last
     # successful authenticate() or lockout-trip.  NOT NULL with a

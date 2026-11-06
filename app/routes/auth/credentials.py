@@ -31,13 +31,13 @@ from app import ref_cache
 from app.db_transaction import bind_sign_in_owner
 from app.enums import RoleEnum
 from app.extensions import db, limiter
-from app.models.trusted_device import TrustedDevice
+from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig, User
 from app.schemas.validation import LoginSchema, RegisterSchema
 from app.services import (
     auth_service,
+    known_device_service,
     registration_service,
-    trusted_device_service,
 )
 from app.exceptions import AuthError, ConflictError, ValidationError
 from app.routes.auth._bp import auth_bp
@@ -55,7 +55,7 @@ from app.utils.log_events import (
     EVT_USER_REGISTERED,
     log_event,
 )
-from app.utils.trusted_device_cookie import device_token
+from app.utils.device_cookie import device_token
 
 logger = logging.getLogger(__name__)
 
@@ -85,26 +85,27 @@ def _render_register_form():
     return render_template("auth/register.html")
 
 
-def _trusted_device_of(user: User) -> TrustedDevice | None:
-    """Return the live trusted device this browser holds for *user*, or ``None``.
+def _trusted_device_of(user: User) -> KnownDevice | None:
+    """Return the trusted device this browser holds for *user*, or ``None``.
 
     Read only once *user*'s password was correct (plan#2173, ruling
     plan#2406): the browser's cookie for THAT user, judged by
-    :func:`~app.services.trusted_device_service.find_live_device`, so a
-    cookie alone, another user's cookie, and a device past its thirty days
-    or forgotten by a ``session_invalidated_at`` bump all answer ``None``.
+    :func:`~app.services.known_device_service.find_browser`, so a cookie
+    alone, another user's cookie, a browser no one trusted, and a device past
+    its thirty days or forgotten by a ``session_invalidated_at`` bump all
+    answer ``None``.
 
     Args:
         user: The user whose password was just accepted.
 
     Returns:
-        The live :class:`~app.models.trusted_device.TrustedDevice`, or
+        The trusted :class:`~app.models.known_device.KnownDevice`, or
         ``None``.
     """
-    token = device_token(user.id)
-    if token is None:
+    standing = known_device_service.find_browser(user.id, device_token(user.id))
+    if standing is None or not standing.trusted:
         return None
-    return trusted_device_service.find_live_device(user.id, token)
+    return standing.device
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])

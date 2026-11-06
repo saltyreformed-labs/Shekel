@@ -23,7 +23,7 @@ from marshmallow import ValidationError as MarshmallowValidationError
 from app.extensions import db, limiter
 from app.models.user import MfaConfig
 from app.schemas.validation import ChangePasswordSchema, ReauthSchema
-from app.services import auth_service, trusted_device_service
+from app.services import auth_service, known_device_service
 from app.exceptions import AuthError, NotFoundError, ValidationError
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
@@ -154,9 +154,9 @@ def forget_trusted_device(device_id):
     a device is its own user's, whatever their role.
     """
     try:
-        trusted_device_service.forget_device(current_user.id, device_id)
+        known_device_service.forget_device(current_user.id, device_id)
     except NotFoundError:
-        log_refused_lookup("TrustedDevice", device_id)
+        log_refused_lookup("KnownDevice", device_id)
         abort(404)
     db.session.commit()
     log_event(logger, logging.INFO, EVT_TRUSTED_DEVICE_FORGOTTEN, AUTH,

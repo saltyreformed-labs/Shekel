@@ -24,8 +24,8 @@ import pyotp
 import sqlalchemy
 
 from app.extensions import db
-from app.models.trusted_device import TrustedDevice
-from app.services import trusted_device_service
+from app.models.known_device import KnownDevice
+from app.services import known_device_service
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -98,19 +98,19 @@ def _firefox_that_trusted_itself(app, secret):
 
 def _trust(user_id, user_agent):
     """Trust a device for *user_id* through the service, committed; return its id."""
-    trusted_device_service.trust_device(user_id, user_agent)
+    known_device_service.record_sign_in(user_id, None, user_agent, trust=True)
     db.session.commit()
     return db.session.execute(
-        sqlalchemy.select(sqlalchemy.func.max(TrustedDevice.id))
-        .where(TrustedDevice.user_id == user_id)
+        sqlalchemy.select(sqlalchemy.func.max(KnownDevice.id))
+        .where(KnownDevice.user_id == user_id)
     ).scalar_one()
 
 
 def _move_trust_to(device_id, instant):
     """Set *device_id*'s ``trusted_at`` to *instant*, committed."""
     db.session.execute(
-        sqlalchemy.update(TrustedDevice)
-        .where(TrustedDevice.id == device_id)
+        sqlalchemy.update(KnownDevice)
+        .where(KnownDevice.id == device_id)
         .values(trusted_at=instant)
     )
     db.session.commit()
@@ -119,8 +119,8 @@ def _move_trust_to(device_id, instant):
 def _device_ids_of(user_id):
     """Return the ids of every device row *user_id* holds, live or dead."""
     return sorted(db.session.execute(
-        sqlalchemy.select(TrustedDevice.id)
-        .where(TrustedDevice.user_id == user_id)
+        sqlalchemy.select(KnownDevice.id)
+        .where(KnownDevice.user_id == user_id)
     ).scalars())
 
 
@@ -337,7 +337,7 @@ class TestForgetting:
         refused = [
             r for r in caplog.records
             if getattr(r, "event", None) == "resource_not_found"
-            and getattr(r, "model", None) == "TrustedDevice"
+            and getattr(r, "model", None) == "KnownDevice"
         ]
         assert [r.device_id for r in forgotten] == [mine]
         assert [r.pk for r in refused] == [theirs]

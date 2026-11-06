@@ -32,14 +32,14 @@ from marshmallow import ValidationError as MarshmallowValidationError
 
 from app.db_transaction import bind_sign_in_owner, write_transaction
 from app.extensions import db, limiter
-from app.models.trusted_device import TRUST_LIFETIME
+from app.models.known_device import TRUST_LIFETIME
 from app.models.user import MfaConfig, User
 from app.schemas.validation import (
     MfaConfirmSchema,
     MfaDisableSchema,
     MfaVerifySchema,
 )
-from app.services import auth_service, mfa_service, trusted_device_service
+from app.services import auth_service, known_device_service, mfa_service
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     MFA_SETUP_PENDING_TTL,
@@ -64,7 +64,7 @@ from app.utils.security_events import (
     record_security_event,
 )
 from app.utils.session_helpers import invalidate_other_sessions
-from app.utils.trusted_device_cookie import set_device_cookie
+from app.utils.device_cookie import device_token, set_device_cookie
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ def _render_verify_form():
     """Render the code form, from its three render sites.
 
     Passes the trust's length in days, so the "Trust this device" box states
-    :data:`~app.models.trusted_device.TRUST_LIFETIME` rather than a second
+    :data:`~app.models.known_device.TRUST_LIFETIME` rather than a second
     spelling of it.
 
     Returns:
@@ -120,8 +120,9 @@ def _trust_this_browser(response: Response, user: User) -> None:
         response: The redirect completing the sign-in; it takes the cookie.
         user: The user who typed the code.
     """
-    token = trusted_device_service.trust_device(
-        user.id, request.headers.get("User-Agent", ""),
+    token = known_device_service.record_sign_in(
+        user.id, device_token(user.id),
+        request.headers.get("User-Agent", ""), trust=True,
     )
     db.session.commit()
     set_device_cookie(response, user.id, token)

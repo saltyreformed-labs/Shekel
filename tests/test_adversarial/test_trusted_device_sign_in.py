@@ -29,9 +29,9 @@ import sqlalchemy
 
 from app.config import ProdConfig
 from app.extensions import db
-from app.models.trusted_device import TrustedDevice
+from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig
-from app.services import mfa_service, trusted_device_service
+from app.services import known_device_service, mfa_service
 from scripts.reset_mfa import reset_mfa
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
@@ -101,7 +101,7 @@ def _signed_in(response):
 
 def _devices_of(user_id):
     """Return how many device rows *user_id* holds."""
-    return db.session.query(TrustedDevice).filter_by(user_id=user_id).count()
+    return db.session.query(KnownDevice).filter_by(user_id=user_id).count()
 
 
 def _device_cookie_header(response, user_id):
@@ -116,7 +116,7 @@ def _device_cookie_header(response, user_id):
 def _move_the_trust_back(seed_user, interval):
     """Move the seed owner's device trust back by the SQL *interval*, committed."""
     db.session.execute(sqlalchemy.text(
-        "UPDATE auth.trusted_devices "
+        "UPDATE auth.known_devices "
         "SET trusted_at = trusted_at - CAST(:interval AS interval) "
         "WHERE user_id = :id"
     ), {"interval": interval, "id": seed_user["user"].id})
@@ -141,7 +141,7 @@ def _browser_trusted_through_the_service(app, user_id):
     test whose one code another act needs (replay prevention refuses a second
     inside its thirty-second step).
     """
-    token = trusted_device_service.trust_device(user_id, "")
+    token = known_device_service.record_sign_in(user_id, None, "", trust=True)
     db.session.commit()
     browser = app.test_client()
     browser.set_cookie(f"shekel_device_{user_id}", token)

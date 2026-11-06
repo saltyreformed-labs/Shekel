@@ -52,7 +52,8 @@ from app.models.transaction import Transaction
 from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.services.balance_at._fold import fold_loan_balances
 from app.services.rate_period_engine import period_for_date
-from tests._ledger_reads import posted_loan_balance_at
+from tests import _ledger_reads
+from tests._ledger_reads import posted_loan_balance_at, posted_loan_balances_on
 from tests._test_helpers import (
     create_loan_account,
     create_loan_with_trueup,
@@ -109,8 +110,8 @@ def _assert_fold_matches_postings_every_day(
     """Assert fold == posted sum on EVERY day of ``[start, end]`` inclusive.
 
     Folds ONCE over the whole domain (the fold takes a date list for exactly
-    this) and sums the posted legs per day through the test suite's dated
-    window, then asserts zero mismatches.  Guards the loop so an empty or
+    this), reads the ledger ONCE through the test suite's dated window and sums
+    it per day, then asserts zero mismatches.  Guards the loop so an empty or
     too-short domain -- which would pass vacuously -- fails instead:
     ``min_days`` is the floor the caller knows its domain must clear.
 
@@ -140,11 +141,11 @@ def _assert_fold_matches_postings_every_day(
         days.append(day)
         day += timedelta(days=1)
     folded = fold_loan_balances(loan_id, scenario_id, days)
+    read = posted_loan_balances_on(loan_id, scenario_id, days)
     mismatches = [
-        (day.isoformat(), str(folded[day]), str(read))
+        (day.isoformat(), str(folded[day]), str(read[day]))
         for day in days
-        if (read := posted_loan_balance_at(loan_id, scenario_id, day))
-        != folded[day]
+        if read[day] != folded[day]
     ]
     assert not mismatches, (
         f"fold vs posted sum disagree on {len(mismatches)}/{len(days)} "
@@ -441,15 +442,17 @@ class TestTheOracleHasTeeth:
             end = seed_periods[3].start_date
             freeze_today(monkeypatch, end + timedelta(days=1))
 
-            real_window = posted_loan_balance_at
+            real_window = posted_loan_balances_on
 
-            def off_by_a_dollar(loan_id, scenario_id, as_of):
-                value = real_window(loan_id, scenario_id, as_of)
-                return None if value is None else value + Decimal("1.00")
+            def off_by_a_dollar(loan_id, scenario_id, days):
+                return {
+                    day: value + Decimal("1.00")
+                    for day, value in real_window(loan_id, scenario_id, days).items()
+                }
 
             monkeypatch.setattr(
                 "tests.test_services.test_loan_fold_oracle."
-                "posted_loan_balance_at",
+                "posted_loan_balances_on",
                 off_by_a_dollar,
             )
             with pytest.raises(AssertionError, match="disagree"):
@@ -457,6 +460,37 @@ class TestTheOracleHasTeeth:
                     loan.id, seed_user["scenario"].id, _BEFORE_ALL, end,
                     min_days=1,
                 )
+
+    def test_the_walk_reads_the_ledger_once_however_many_days_it_grades(
+        self, app, db, seed_user, seed_periods, monkeypatch,
+    ):
+        """A 400-day walk works out the ledger once, not once per day.
+
+        Each working-out is the owner's whole ledger.  Asking per day took these
+        tests from about 3 s to 22-31 s on CI, and one past the test database's
+        30-second limit refused a pull request whatever it changed (plan#3017).
+        Counted rather than timed, so this cannot itself fail on a slow runner.
+        """
+        with app.app_context():
+            loan = _make_loan(seed_user, db)
+            _settle(seed_user, db, loan, seed_periods[1])
+            db.session.commit()
+            end = seed_periods[3].start_date
+            freeze_today(monkeypatch, end + timedelta(days=1))
+
+            workings_out = []
+            real_lines = _ledger_reads.scenario_lines
+
+            def counted(db_session, scenario_id):
+                workings_out.append(scenario_id)
+                return real_lines(db_session, scenario_id)
+
+            monkeypatch.setattr("tests._ledger_reads.scenario_lines", counted)
+            _assert_fold_matches_postings_every_day(
+                loan.id, seed_user["scenario"].id, _BEFORE_ALL, end,
+                min_days=400,
+            )
+            assert workings_out == [seed_user["scenario"].id]
 
 
 class TestRawLoanTransactionIsTheOnlyDivergence:

@@ -31,7 +31,7 @@ from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.services.balance_at._fold import fold_loan_balances
 from app.services.rate_period_engine import period_for_date
 from tests._ledger_parity import assert_ledger_parity
-from tests._ledger_reads import posted_loan_balance_at
+from tests._ledger_reads import posted_loan_balance_at, posted_loan_balances_on
 from tests._test_helpers import (
     create_loan_account,
     create_loan_with_trueup,
@@ -606,13 +606,14 @@ class TestFoldAgreesWithThePostedSum:
                 days.append(day)
                 day += timedelta(days=1)
             folded = _fold(loan, seed_user, days)
+            read = posted_loan_balances_on(
+                loan.id, seed_user["scenario"].id, days,
+            )
 
             mismatches = [
-                (day, folded[day], read)
+                (day, folded[day], read[day])
                 for day in days
-                if (read := posted_loan_balance_at(
-                    loan.id, seed_user["scenario"].id, day,
-                )) != folded[day]
+                if read[day] != folded[day]
             ]
             assert not mismatches, (
                 f"fold and posted ledger disagree on "

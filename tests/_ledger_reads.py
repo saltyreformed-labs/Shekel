@@ -308,6 +308,8 @@ def posted_loan_balance_at(loan_account_id, scenario_id, as_of):
     graded against; it shares its walk with the fold, so agreeing with the fold
     grades how the lines are dated and signed.  A future date carries the sum flat.
 
+    A walk of many days reads :func:`posted_loan_balances_on`, not this per day.
+
     Args:
         loan_account_id: The loan.
         scenario_id: The scenario.
@@ -317,8 +319,28 @@ def posted_loan_balance_at(loan_account_id, scenario_id, as_of):
         The balance owed as a cent-quantized ``Decimal``, or ``None`` for a
         loan with no opening line.
     """
+    return posted_loan_balances_on(loan_account_id, scenario_id, [as_of])[as_of]
+
+
+def posted_loan_balances_on(loan_account_id, scenario_id, days):
+    """Return what the ledger says a loan owed on each of *days*, reading it once.
+
+    The read works out the owner's whole ledger, so a walk asking per day works
+    it out per day.  Over the 400-odd days of a fold test that took the test from
+    about 3 s to 22-31 s on CI, past the test database's 30-second limit
+    (plan#3017).
+
+    Args:
+        loan_account_id: The loan.
+        scenario_id: The scenario.
+        days: The evaluation dates.
+
+    Returns:
+        ``{day: owed}``, each as :func:`posted_loan_balance_at` answers that day,
+        so ``None`` on every day for a loan with no opening line.
+    """
     lines = _opened_loan_lines(loan_account_id, scenario_id)
-    return None if lines is None else _owed_at(lines, as_of)
+    return {day: None if lines is None else _owed_at(lines, day) for day in days}
 
 
 def posted_loan_balance_map(loan_account_id, scenario_id, periods):

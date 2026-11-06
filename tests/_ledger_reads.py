@@ -22,6 +22,7 @@ here.
 Underscore-prefixed module name keeps pytest from collecting it.
 """
 
+from datetime import date, timedelta
 from decimal import Decimal
 from functools import partial
 
@@ -34,6 +35,7 @@ from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.models.user import User
+from app.services.balance_at._fold import fold_loan_balances
 from app.services.ledger_lines import chart_record_type, linked_key, worked_out_lines
 from app.services.pay_calendar import calendar_for
 from app.utils.money import round_money
@@ -308,6 +310,8 @@ def posted_loan_balance_at(loan_account_id, scenario_id, as_of):
     graded against; it shares its walk with the fold, so agreeing with the fold
     grades how the lines are dated and signed.  A future date carries the sum flat.
 
+    A walk of many days reads :func:`posted_loan_balances_on`, not this per day.
+
     Args:
         loan_account_id: The loan.
         scenario_id: The scenario.
@@ -317,8 +321,79 @@ def posted_loan_balance_at(loan_account_id, scenario_id, as_of):
         The balance owed as a cent-quantized ``Decimal``, or ``None`` for a
         loan with no opening line.
     """
+    return posted_loan_balances_on(loan_account_id, scenario_id, [as_of])[as_of]
+
+
+def posted_loan_balances_on(loan_account_id, scenario_id, days):
+    """Return what the ledger says a loan owed on each of *days*, reading it once.
+
+    The read works out the owner's whole ledger, so a walk asking per day works
+    it out per day.  Over the 400-odd days of a fold test, measured 2026-11-06,
+    that took the test from 2-4 s to 14-31 s on CI (plan#3017).
+
+    Args:
+        loan_account_id: The loan.
+        scenario_id: The scenario.
+        days: The evaluation dates.
+
+    Returns:
+        ``{day: owed}``, each as :func:`posted_loan_balance_at` answers that day,
+        so ``None`` on every day for a loan with no opening line.
+    """
     lines = _opened_loan_lines(loan_account_id, scenario_id)
-    return None if lines is None else _owed_at(lines, as_of)
+    return {day: None if lines is None else _owed_at(lines, day) for day in days}
+
+
+def assert_fold_matches_postings_every_day(
+    loan_id, scenario_id, start, end, *, min_days,
+):
+    """Assert fold == posted sum on EVERY day of ``[start, end]`` inclusive.
+
+    Folds ONCE over the whole domain (the fold takes a date list for exactly
+    this), reads the ledger ONCE through :func:`posted_loan_balances_on` and sums
+    it per day, then asserts zero mismatches.  Guards the loop so an empty or
+    too-short domain -- which would pass vacuously -- fails instead:
+    ``min_days`` is the floor the caller knows its domain must clear.
+
+    Args:
+        loan_id: The loan account to fold and read.
+        scenario_id: The budget scenario.
+        start: First day of the domain (inclusive).
+        end: Last day of the domain (inclusive), and ASSERTED ``<= today``.
+            Not because the equality would break past today -- it holds at any
+            date, since both sides key on the same recorded events (the step-E1a
+            assert pins that per visible date) -- but because days past today
+            add no recorded event, so they are trivially equal and would inflate
+            ``min_days`` with padding.  The deleted production reader RAISED for
+            a future ``as_of``, which enforced this incidentally; the assertion
+            keeps that guard on the oracle's own side, where the anti-sampling
+            floor lives.
+        min_days: The floor on the domain length -- proves the walk is not a
+            handful of days agreeing.
+    """
+    assert end <= date.today(), (
+        f"domain end {end} is past today -- days beyond today carry no recorded "
+        f"event, so they pad min_days with trivially equal days"
+    )
+    days: list[date] = []
+    day = start
+    while day <= end:
+        days.append(day)
+        day += timedelta(days=1)
+    folded = fold_loan_balances(loan_id, scenario_id, days)
+    read = posted_loan_balances_on(loan_id, scenario_id, days)
+    mismatches = [
+        (day.isoformat(), str(folded[day]), str(read[day]))
+        for day in days
+        if read[day] != folded[day]
+    ]
+    assert not mismatches, (
+        f"fold vs posted sum disagree on {len(mismatches)}/{len(days)} "
+        f"days (first 5): {mismatches[:5]}"
+    )
+    # Guard the loop: a vacuous or tiny domain proves nothing (anti-sampling).
+    assert days[0] == start and days[-1] == end
+    assert len(days) >= min_days
 
 
 def posted_loan_balance_map(loan_account_id, scenario_id, periods):

@@ -25,7 +25,6 @@ from flask import (
     url_for,
 )
 from flask_login import current_user
-from werkzeug.wrappers import Response
 
 from cryptography.fernet import InvalidToken
 from marshmallow import ValidationError as MarshmallowValidationError
@@ -39,7 +38,7 @@ from app.schemas.validation import (
     MfaDisableSchema,
     MfaVerifySchema,
 )
-from app.services import auth_service, known_device_service, mfa_service
+from app.services import auth_service, mfa_service
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     MFA_SETUP_PENDING_TTL,
@@ -64,7 +63,6 @@ from app.utils.security_events import (
     record_security_event,
 )
 from app.utils.session_helpers import invalidate_other_sessions
-from app.utils.device_cookie import device_token, set_device_cookie
 
 logger = logging.getLogger(__name__)
 
@@ -106,28 +104,6 @@ def _render_verify_form():
     return render_template(
         "auth/mfa_verify.html", trust_days=TRUST_LIFETIME.days,
     )
-
-
-def _trust_this_browser(response: Response, user: User) -> None:
-    """Trust the signing-in browser for *user*: the record, then its cookie.
-
-    Called only on an authenticator-code success with the box ticked
-    (plan#2173, ruling plan#2406).  The record is committed before the
-    cookie rides the response, so a browser never holds a token whose record
-    a failed commit lost.
-
-    Args:
-        response: The redirect completing the sign-in; it takes the cookie.
-        user: The user who typed the code.
-    """
-    token = known_device_service.record_sign_in(
-        user.id, device_token(user.id),
-        request.headers.get("User-Agent", ""), trust=True,
-    )
-    db.session.commit()
-    set_device_cookie(response, user.id, token)
-    log_event(logger, logging.INFO, EVT_DEVICE_TRUSTED, AUTH,
-              "Device trusted", user_id=user.id)
 
 
 @auth_bp.route("/mfa/verify", methods=["GET", "POST"])
@@ -256,7 +232,10 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     # ``session_invalidated_at``.  The two are equal, and the load_user check
     # is strict less-than, so this session survives while every earlier one
     # is refused.
-    response = _complete_sign_in(user, flask_session.get("_mfa_pending_next"))
+    trust = verify_data["trust_device"] and not used_backup_code
+    response = _complete_sign_in(
+        user, flask_session.get("_mfa_pending_next"), trust=trust,
+    )
 
     if used_backup_code:
         # Backup-code consumption is the canonical "I lost my
@@ -270,11 +249,13 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         # refreshes the cookie (with its single ``now``) AFTER
         # Flask-Login has populated the session, ensuring the
         # current request survives the bump.
-        # It also forgets every trusted device of the user (the bump
-        # outdates them), so it never trusts this one.
+        # It also forgets every trust of the user (the bump outdates them),
+        # so it never trusts this browser, which stays known all the same
+        # (ruling plan#2997): it has just finished a sign-in.
         invalidate_other_sessions(user, "backup_code_consumed")
-    elif verify_data["trust_device"]:
-        _trust_this_browser(response, user)
+    elif trust:
+        log_event(logger, logging.INFO, EVT_DEVICE_TRUSTED, AUTH,
+                  "Device trusted", user_id=user.id)
 
     log_event(logger, logging.INFO, EVT_MFA_LOGIN_SUCCESS, AUTH,
               "MFA login succeeded", user_id=user.id)

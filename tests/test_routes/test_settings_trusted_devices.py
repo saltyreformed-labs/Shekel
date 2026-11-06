@@ -124,6 +124,14 @@ def _device_ids_of(user_id):
     ).scalars())
 
 
+def _is_trusted(device_id):
+    """Return whether *device_id*'s row holds a trust, read fresh."""
+    return db.session.execute(
+        sqlalchemy.select(KnownDevice.trusted_at)
+        .where(KnownDevice.id == device_id)
+    ).scalar_one() is not None
+
+
 def _text(html):
     """Return *html*'s text: tags dropped, whitespace collapsed."""
     return " ".join(re.sub(r"<[^>]+>", " ", html).split())
@@ -290,7 +298,9 @@ class TestForgetting:
 
         assert response.status_code == 302
         assert response.headers["Location"].endswith(_SECURITY_PAGE)
-        assert _device_ids_of(user_id) == []
+        # The trust goes and the row stays: the browser is still known (ruling
+        # plan#2997).
+        assert len(_device_ids_of(user_id)) == 1
         after = browser.get(_SECURITY_PAGE).get_data(as_text=True)
         assert "Device forgotten." in after
         assert _rows(after) == []
@@ -300,7 +310,7 @@ class TestForgetting:
     def test_another_users_device_and_a_missing_one_are_one_404(
         self, auth_client, seed_user, seed_second_user,
     ):
-        """Both refused alike and nothing deleted; the user's own id still routes."""
+        """Both refused alike and no trust forgotten; the user's own id still routes."""
         user_id = seed_user["user"].id
         mine = _trust(user_id, _FIREFOX_LINUX)
         theirs = _trust(seed_second_user["user"].id, _CHROME_WINDOWS)
@@ -312,12 +322,12 @@ class TestForgetting:
         assert theirs_response.status_code == 404
         assert missing_response.status_code == 404
         assert theirs_response.get_data() == missing_response.get_data()
-        assert _device_ids_of(seed_second_user["user"].id) == [theirs]
-        assert _device_ids_of(user_id) == [mine]
+        assert _is_trusted(theirs)
+        assert _is_trusted(mine)
         # The pair: the same URL, with the user's own device, routes and forgets.
         mine_response = auth_client.post(f"/trusted-devices/{mine}/forget")
         assert mine_response.status_code == 302
-        assert _device_ids_of(user_id) == []
+        assert not _is_trusted(mine)
 
     def test_the_forget_and_the_refusal_are_logged(
         self, auth_client, seed_user, seed_second_user, caplog,

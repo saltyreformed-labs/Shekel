@@ -86,7 +86,7 @@ class _Acts:
     def forget(self, moment, user_id, device_id):
         """Forget *device_id* for *user_id* at *moment*."""
         self._at(moment)
-        known_device_service.forget_device(user_id, device_id)
+        known_device_service.forget_trust(user_id, device_id)
 
 
 @pytest.fixture(name="acts")
@@ -413,18 +413,27 @@ class TestTheBrowsersDevice:
 
 
 class TestForgettingADevice:
-    """A user forgets their own device; nobody forgets another's."""
+    """A user forgets their own device's trust; nobody forgets another's."""
 
-    def test_a_user_forgets_their_own_device(self, app, db, acts, seed_user):
-        """The row is deleted, so the token finds nothing."""
+    def test_a_user_forgets_their_own_devices_trust(
+        self, app, db, acts, seed_user,
+    ):
+        """The trust goes and the row stays, so the browser is still known.
+
+        Ruling plan#2997: forgetting takes no password, so it must not be a
+        way to make the owner's browser a stranger.
+        """
         user_id = seed_user["user"].id
         token = acts.trust(_T0, user_id)
         device_id = _device_of(db, token).id
 
         acts.forget(_T0, user_id, device_id)
 
-        assert _rows_of(db, user_id) == []
+        assert _rows_of(db, user_id) == [device_id]
         assert acts.find(_T0, user_id, token) is None
+        standing = known_device_service.find_browser(user_id, token)
+        assert standing.device.id == device_id
+        assert standing.trusted is False
 
     def test_another_users_device_is_refused_and_kept(
         self, app, db, acts, seed_user, seed_second_user,
@@ -452,10 +461,11 @@ class TestForgettingADevice:
         assert _rows_of(db, user_id) == [device_id]
 
     def test_a_dead_device_is_still_forgettable(self, app, db, acts, seed_user):
-        """Expired since the user saw it listed: deleted, not refused."""
+        """Expired since the user saw it listed: cleared, not refused."""
         user_id = seed_user["user"].id
-        device_id = _device_of(db, acts.trust(_T0, user_id)).id
+        token = acts.trust(_T0, user_id)
+        device_id = _device_of(db, token).id
 
         acts.forget(_T0 + _THIRTY_DAYS, user_id, device_id)
 
-        assert _rows_of(db, user_id) == []
+        assert _device_of(db, token).trusted_at is None

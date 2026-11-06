@@ -13,7 +13,8 @@ would silently break the flow, which is why the key names are
 centralised at all.  :func:`_complete_sign_in` is the ONE completion of a
 sign-in, whichever proof finished it: a password with no second factor, a
 password and a code, or a password on a trusted device (plan#2173), so the
-three cannot drift on what a signed-in session carries or where it lands.
+three cannot drift on what a signed-in session carries, what the browser
+holds afterwards (plan#2772) or where it lands.
 :func:`_verify_totp_with_replay_logging` (and its
 backup-code sibling :func:`_consume_backup_code`) is shared by
 ``/mfa/verify``, ``/mfa/disable``, and the step-up ``/reauth`` so all
@@ -36,7 +37,8 @@ from marshmallow import ValidationError as MarshmallowValidationError
 from app import ref_cache
 from app.enums import RoleEnum
 from app.extensions import db
-from app.services import mfa_service
+from app.services import known_device_service, mfa_service
+from app.utils.device_cookie import device_token, set_device_cookie
 from app.utils.log_events import (
     AUTH,
     EVT_TOTP_REPLAY_REJECTED,
@@ -97,37 +99,66 @@ def _clear_mfa_pending_state():
         flask_session.pop(key, None)
 
 
-def _complete_sign_in(user, next_page: str | None) -> Response:
+def _complete_sign_in(
+    user, next_page: str | None, *, trust: bool = False,
+) -> Response:
     """Sign *user* in and return the redirect to where they land.
 
     The one completion of a sign-in, called once the proof is in: the
     ``/login`` password with no second factor, ``/mfa/verify``'s code, or
     the ``/login`` password on a trusted device (plan#2173).  It clears any
-    pending code state (a completed sign-in leaves none behind), calls
-    ``login_user``, stamps the user and every lifecycle key from one instant
-    so the idle and fresh-login checks start where the session did (commit
-    C-10) and no other user's id can be loaded on it (plan#2173), and
-    chooses the landing page.  What differs per proof stays with its caller:
-    the log event, a backup code's sign-out of every other session, and a
-    device's trust, each written to the response this returns.
+    pending code state (a completed sign-in leaves none behind), records the
+    browser (plan#2772, ruling plan#2994) so a password alone never makes one
+    known on an account with a code, calls ``login_user``, stamps the user and
+    every lifecycle key from one instant so the idle and fresh-login checks
+    start where the session did (commit C-10) and no other user's id can be
+    loaded on it (plan#2173), and chooses the landing page.  What differs per
+    proof stays with its caller: the log event, and a backup code's sign-out of
+    every other session.
+
+    The record is committed before its cookie rides the response, so a browser
+    never holds a token whose record a failed commit lost.
 
     Args:
         user: The :class:`~app.models.user.User` whose proof was accepted.
         next_page: Where the sign-in was asked for from, or ``None``.
             Validated here, at redirect time, whatever validated it before.
+        trust: Whether the user typed a code and asked to trust this browser.
 
     Returns:
-        A redirect: a companion to ``companion.index`` always, anyone else to
-        a safe *next_page* or the dashboard.
+        A redirect carrying the device cookie: a companion to
+        ``companion.index`` always, anyone else to a safe *next_page* or the
+        dashboard.
     """
     _clear_mfa_pending_state()
+    token = known_device_service.record_sign_in(
+        user.id, device_token(user.id),
+        request.headers.get("User-Agent", ""), trust=trust,
+    )
+    db.session.commit()
     login_user(user)
     stamp_login_session(datetime.now(timezone.utc), user.id)
+    response = redirect(_landing_page(user, next_page))
+    set_device_cookie(response, user.id, token)
+    return response
+
+
+def _landing_page(user, next_page: str | None) -> str:
+    """Return where a signed-in *user* lands.
+
+    Args:
+        user: The :class:`~app.models.user.User` just signed in.
+        next_page: Where the sign-in was asked for from, or ``None``.
+
+    Returns:
+        ``companion.index`` for a companion always, else a safe *next_page* or
+        the dashboard.
+    """
     if user.role_id == ref_cache.role_id(RoleEnum.COMPANION):
-        return redirect(url_for("companion.index"))
+        return url_for("companion.index")
     if not _is_safe_redirect(next_page):
         next_page = None
-    return redirect(next_page or url_for("dashboard.page"))
+    return next_page or url_for("dashboard.page")
 
 
 def _verify_totp_with_replay_logging(mfa_config, code, user_id):

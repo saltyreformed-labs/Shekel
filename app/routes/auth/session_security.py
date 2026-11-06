@@ -154,7 +154,7 @@ def forget_trusted_device(device_id):
     a device is its own user's, whatever their role.
     """
     try:
-        known_device_service.forget_device(current_user.id, device_id)
+        known_device_service.forget_trust(current_user.id, device_id)
     except NotFoundError:
         log_refused_lookup("KnownDevice", device_id)
         abort(404)

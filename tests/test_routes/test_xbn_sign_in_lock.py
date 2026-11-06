@@ -23,8 +23,9 @@ proves it fires:
   through.
 * **R-CC123**: a request's transaction -- and the lock riding it -- ends where
   the request ends, as production's app-context teardown ends it.  Graded on a
-  correct-password sign-in, which commits nothing, so its transaction would
-  otherwise outlive the request under the test client's shared app context.
+  correct password on an account that still owes its code, which commits
+  nothing, so its transaction would otherwise outlive the request under the test
+  client's shared app context.
 * **The rule-5 approval of 2026-09-25** (the lock sits BEFORE the sign-in
   gate): a companion deactivated while their save waits for the owner's lock
   is turned away, because taking the lock expires the signed-in user's row and
@@ -296,20 +297,25 @@ class TestTheLockEndsWithItsRequest:
     """R-CC123: the request's transaction ends where the request ends."""
 
     def test_a_sign_in_that_saves_nothing_leaves_the_key_free(self, client, seed_user):
-        """After a correct-password sign-in, another connection can take the key.
+        """After a correct password that saves nothing, another connection can take the key.
 
-        A correct password with no failed attempts to clear commits nothing,
-        so the sign-in's transaction is still open when its route returns --
-        holding the owner's key.  Production's app-context teardown ends it; under
-        the test client the app context outlives the request, and the request
-        teardown is what ends it.  The capture proves the sign-in took the key
-        at all, so a free key afterwards is the teardown's doing.
+        A correct password with no failed attempts to clear commits nothing
+        while the account still owes its code, so the sign-in's transaction is
+        still open when its route returns -- holding the owner's key.  (A
+        FINISHED sign-in commits its browser's record since plan#2772, and a
+        commit would free the key whatever the teardown did, so it can no longer
+        grade this.)  Production's app-context teardown ends it; under the test
+        client the app context outlives the request, and the request teardown is
+        what ends it.  The capture proves the sign-in took the key at all, so a
+        free key afterwards is the teardown's doing.
         """
         user_id = seed_user["user"].id
+        _enable_mfa(user_id)
         response, statements = capture_sql_statements(
             lambda: _post_login(client),
         )
         assert response.status_code == 302
+        assert response.headers["Location"].endswith("/mfa/verify")
         assert owner_lock_key(user_id) in advisory_lock_keys(statements)
 
         probe = db.engine.connect()

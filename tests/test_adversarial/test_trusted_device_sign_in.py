@@ -104,6 +104,14 @@ def _devices_of(user_id):
     return db.session.query(KnownDevice).filter_by(user_id=user_id).count()
 
 
+def _trusts_of(user_id):
+    """Return the ``trusted_at`` of each of *user_id*'s device rows."""
+    return [
+        device.trusted_at for device in
+        db.session.query(KnownDevice).filter_by(user_id=user_id)
+    ]
+
+
 def _device_cookie_header(response, user_id):
     """Return the ``Set-Cookie`` header naming *user_id*'s device cookie, or None."""
     for header in response.headers.getlist("Set-Cookie"):
@@ -197,7 +205,11 @@ class TestTheTrust:
         assert "Secure" not in header
 
     def test_an_unticked_code_trusts_nothing(self, app, seed_user):
-        """No row, no cookie, and the next sign-in asks for the code."""
+        """The browser is known and holds no trust: the next sign-in asks the code.
+
+        Ruling plan#2994: every finished sign-in writes the record and the
+        cookie, so what an unticked box leaves out is the trust alone.
+        """
         user_id = seed_user["user"].id
         secret = enable_mfa(db.session, user_id)
         browser = app.test_client()
@@ -207,14 +219,18 @@ class TestTheTrust:
         )
         browser.post("/logout")
 
-        assert _device_cookie_header(response, user_id) is None
-        assert _devices_of(user_id) == 0
+        assert _device_cookie_header(response, user_id) is not None
+        assert _trusts_of(user_id) == [None]
         assert _asked_the_code(
             _password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD),
         )
 
     def test_a_backup_code_never_trusts_even_ticked(self, app, seed_user):
-        """A crafted post ticking the box beside a backup code trusts nothing."""
+        """A crafted post ticking the box beside a backup code trusts nothing.
+
+        The browser is known all the same: it finished a sign-in (ruling
+        plan#2994).
+        """
         user_id = seed_user["user"].id
         enable_mfa(db.session, user_id, backup_codes=[_BACKUP_CODE])
         browser = app.test_client()
@@ -227,8 +243,8 @@ class TestTheTrust:
         })
 
         assert _signed_in(response)
-        assert _device_cookie_header(response, user_id) is None
-        assert _devices_of(user_id) == 0
+        assert _device_cookie_header(response, user_id) is not None
+        assert _trusts_of(user_id) == [None]
 
     def test_the_trust_and_the_skip_are_logged(self, app, seed_user, caplog):
         """``device_trusted`` at the trust, ``trusted_device_sign_in`` at the skip."""

@@ -287,12 +287,17 @@ def device_named_by(
     )
 
 
-def forget_device(user_id: int, device_id: int) -> None:
-    """Forget one of *user_id*'s devices: its row is deleted.
+def forget_trust(user_id: int, device_id: int) -> None:
+    """Forget *user_id*'s trust of a device; the browser stays known.
 
-    A device that is already dead is still the user's to forget, so liveness
-    is not asked: a device the user saw in settings a moment ago and which
-    expired since is deleted, not refused.
+    Only the trust goes, by ruling plan#2997, because forgetting takes no
+    password: if it made the browser a stranger, a thief with a live session
+    could press it, lock the account with wrong passwords, and keep the owner
+    out with no way to throw them out.  The next sign-in there asks for the
+    code again, which is all the button says it does.  A device whose trust has
+    already died is still the user's to forget, so liveness is not asked: one
+    the user saw in settings a moment ago and which expired since is cleared,
+    not refused.
 
     Args:
         user_id: The ``auth.users.id`` forgetting the device.
@@ -313,5 +318,5 @@ def forget_device(user_id: int, device_id: int) -> None:
         raise NotFoundError(
             f"Trusted device {device_id} not found for user {user_id}."
         )
-    db.session.delete(device)
+    device.trusted_at = None
     db.session.flush()

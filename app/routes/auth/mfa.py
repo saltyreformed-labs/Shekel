@@ -40,6 +40,7 @@ from app.schemas.validation import (
     MfaVerifySchema,
 )
 from app.services import auth_service, mfa_service, trusted_device_service
+from app.exceptions import AuthError
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     MFA_SETUP_PENDING_TTL,
@@ -67,6 +68,31 @@ from app.utils.session_helpers import invalidate_other_sessions
 from app.utils.trusted_device_cookie import set_device_cookie
 
 logger = logging.getLogger(__name__)
+
+
+def _pending_user_key() -> str:
+    """Return what the code form's per-account limit counts against.
+
+    The session is signed, so a client cannot choose this id, and it survives
+    a change of address, which is the point: moving between addresses buys the
+    holder of a password no more code guesses.
+
+    Returns:
+        ``pending-user:<id>``.
+    """
+    return f"pending-user:{flask_session.get('_mfa_pending_user_id')}"
+
+
+def _no_pending_user() -> bool:
+    """Return True when the request has no pending sign-in to count against.
+
+    Such a request is only redirected to /login, and without this they would
+    all share one count under the ``None`` id.
+
+    Returns:
+        True when no pending user is in the session.
+    """
+    return not flask_session.get("_mfa_pending_user_id")
 
 
 def _check_mfa_code(mfa_config, user_id, totp_code, backup_code):
@@ -131,6 +157,10 @@ def _trust_this_browser(response: Response, user: User) -> None:
 
 @auth_bp.route("/mfa/verify", methods=["GET", "POST"])
 @limiter.limit("5 per 15 minutes", methods=["POST"])
+@limiter.limit(
+    "5 per 15 minutes", methods=["POST"],
+    key_func=_pending_user_key, exempt_when=_no_pending_user,
+)
 def mfa_verify():  # pylint: disable=too-many-return-statements
     """Display the MFA verification form and handle code submission.
 
@@ -146,9 +176,16 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     is bounced back to /login with a flash message -- the F-002
     cookie-replay window closes at exactly this gate.
 
-    Pylint: ``too-many-return-statements`` (8/6) -- each early return is a
+    A wrong, replayed or empty code and a wrong backup code count toward the
+    account's lock, and a locked account is refused here even with the right
+    code.  Not counted: a form the schema rejects, which cannot be a right
+    answer, and a failed encryption key, which is the operator's fault.  Two
+    limits apply, one by address and one by the pending account, so that
+    moving between addresses buys no more guesses.
+
+    Pylint: ``too-many-return-statements`` (9/6) -- each early return is a
     distinct semantic exit (no pending state, stale state, GET render,
-    malformed form, missing user-or-config, key failure, invalid code,
+    malformed form, missing user-or-config, locked, key failure, invalid code,
     success), each with its own clear/flash/redirect side effects, so
     they cannot be collapsed without merging distinct security messaging.
     The explicit returns are the readable form.  (``too-many-branches`` is
@@ -219,6 +256,14 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         _clear_mfa_pending_state()
         return redirect(url_for("auth.login"))
 
+    if auth_service.is_locked_out(user):
+        # Read under the owner's lock taken above.  This person has the
+        # password, so naming the lock tells them nothing a stranger could
+        # use.  Back to /login, where the lock refuses them until it ends.
+        _clear_mfa_pending_state()
+        flash(auth_service.LOCKED_OUT_MESSAGE, "danger")
+        return redirect(url_for("auth.login"))
+
     # Single try/except wraps both the up-front decrypt (preserving
     # the pre-C-09 fail-fast behaviour: a missing encryption key
     # disables BOTH the TOTP and backup-code paths) and the verifier
@@ -242,6 +287,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         return redirect(url_for("auth.login"))
 
     if not valid:
+        auth_service.record_failed_attempt(user)
         flash("Invalid verification code.", "danger")
         return _render_verify_form()
 
@@ -575,6 +621,11 @@ def mfa_disable_confirm():
     enforced -- an attacker who has captured the user's password and a
     recently-used TOTP code cannot use that code to disable MFA, the
     same defence that ``/mfa/verify`` provides at login.
+
+    A wrong password or code counts toward the account's lock, and a locked
+    account is refused here even with the right ones (ruling plan#3008).
+    Success does not clear the count: that is a finished sign-in's or
+    re-confirm's (ruling plan#3007).
     """
     # Schema validates shape before bcrypt is invoked.  current_password
     # accepts any historical length (legacy short passwords still work
@@ -590,8 +641,12 @@ def mfa_disable_confirm():
     totp_code = disable_data["totp_code"]
 
     # Verify the user's current password first.
-    if not auth_service.verify_password(current_password, current_user.password_hash):
-        flash("Invalid password.", "danger")
+    try:
+        auth_service.check_signed_in_password(
+            current_user, current_password, "Invalid password.",
+        )
+    except AuthError as exc:
+        flash(str(exc), "danger")
         return redirect(url_for("auth.mfa_disable"))
 
     # Load MFA config and verify TOTP code.
@@ -617,6 +672,7 @@ def mfa_disable_confirm():
         return redirect(url_for("settings.show", section="security"))
 
     if not accepted:
+        auth_service.record_failed_attempt(current_user)
         flash("Invalid authentication code.", "danger")
         return redirect(url_for("auth.mfa_disable"))
 

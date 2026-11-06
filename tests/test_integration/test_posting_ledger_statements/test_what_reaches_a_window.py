@@ -15,11 +15,11 @@ from app.services import ledger_report_service, posting_service, status_seam
 from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 
-from tests._test_helpers import (
+from tests._stored_ledger import (
     family_journal_filter,
-    create_settled_cash_transaction,
     linked_ledger_account,
 )
+from tests._test_helpers import create_settled_cash_transaction
 
 from ._helpers import (
     _checking_at_its_opening,
@@ -80,7 +80,7 @@ class TestRevertAndResidueDropped:
             assert not after.expense.lines
             assert after.net_income == Decimal("0.00")
             sheet = _checking_at_its_opening(user_id)
-            _assert_reader_matches_independent(user_id, scenario_id, sheet)
+            _assert_reader_matches_independent(scenario_id, sheet)
             _assert_ledger_self_consistent()
 
     def test_cross_year_residue_dropped_from_every_window(
@@ -129,7 +129,7 @@ class TestRevertAndResidueDropped:
                 assert statement.net_income == Decimal("0.00"), year
 
             sheet = _checking_at_its_opening(user_id)
-            _assert_reader_matches_independent(user_id, scenario_id, sheet)
+            _assert_reader_matches_independent(scenario_id, sheet)
             # The residue is real postings that net to zero: the raw trial
             # balance is still exactly zero (whole-entry, self-cancelling).
             _assert_ledger_self_consistent()

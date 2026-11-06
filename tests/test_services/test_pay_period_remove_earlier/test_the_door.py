@@ -24,7 +24,7 @@ from app.services import (
     pay_schedule_service,
 )
 from app.services.pay_rhythm import Monthly, Rhythm
-from tests._ledger_parity import worked_out_totals
+from tests._ledger_reads import linked_key_of, worked_out_totals
 from tests._test_helpers import (
     all_periods,
     assert_pay_period_invariants,
@@ -277,6 +277,10 @@ class TestTheEarliestRhythmKeepsAPaycheck:
             paydays, eras = _paydays(user_id), _stored_eras(user_id)
             rows, entries = _rows_by_period(user_id), set(_entries_in(head))
             stored, worked_out = _stored_totals(user_id), worked_out_totals(_db.session, user_id)
+            # What the comparison below holds: Checking's seeded $1,000.00 opening.
+            assert worked_out[(
+                seed_user["scenario"].id, linked_key_of(_db.session, seed_user["account"].id),
+            )] == Decimal("1000.00")
             assert entries, "the re-sync must file the opening in the head"
             assert _db.session.query(Transaction).filter(
                 Transaction.pay_period_id.in_(head),
@@ -431,6 +435,10 @@ class TestAnAddUndoneLeavesNothingBehind:
             paydays, eras = _paydays(user_id), _stored_eras(user_id)
             rows = _rows_by_period(user_id)
             stored, worked_out = _stored_totals(user_id), worked_out_totals(_db.session, user_id)
+            # What the comparison below holds: Savings' $500.00 opening, among others.
+            assert worked_out[(
+                seed_user["scenario"].id, linked_key_of(_db.session, savings.id),
+            )] == Decimal("500.00")
 
             head = _added_head(user_id, 3)
             added = {period.id for period in head}

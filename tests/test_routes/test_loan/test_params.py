@@ -14,7 +14,8 @@ from app.models.loan_features import RateHistory
 from app.models.ref import AccountType
 from app.services import account_service
 
-from tests._test_helpers import create_settled_transfer, posted_loan_balance_at
+from tests._ledger_reads import posted_loan_balance_at
+from tests._test_helpers import create_settled_transfer
 
 from ._helpers import _TRACKED_FROM, _create_auto_loan, _create_mortgage, _create_other_loan
 
@@ -315,6 +316,9 @@ class TestRecordTrackingStartRoute:
         balance_before = posted_loan_balance_at(
             acct.id, seed_user["scenario"].id, date.today(),
         )
+        # $25,000.00 stated, then $500.00 paid: a month's interest at 5% is
+        # 25000.00 * 0.05 / 12 = 104.17, so 395.83 of principal.
+        assert balance_before == Decimal("24604.17")
 
         resp = auth_client.post(
             f"/accounts/{acct.id}/loan/tracking-start",

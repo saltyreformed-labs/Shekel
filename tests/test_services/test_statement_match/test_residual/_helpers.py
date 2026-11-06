@@ -6,13 +6,12 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app import ref_cache
 from app.extensions import db
-from app.models.journal_entry import Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.transaction import Transaction
 from app.services import statement_match
+from app.services.ledger_lines import category_key
 from app.services.statement_match import RowKind
+from tests._ledger_reads import ledger_net
 
 from tests.test_services.test_statement_match._builders import (
     a_bank_line,
@@ -111,24 +110,11 @@ def _uncategorized_net(seed_user, ledger_class):
             (:class:`~app.enums.LedgerAccountClassEnum`).
 
     Returns:
-        The account's net, or ``None`` when no such account exists yet.
+        The bucket's net, ``$0.00`` while it holds no line.
     """
-    account = (
-        db.session.query(LedgerAccount)
-        .filter(
-            LedgerAccount.user_id == seed_user["user"].id,
-            LedgerAccount.is_owner_bucket.is_(True),
-            LedgerAccount.class_id == ref_cache.ledger_account_class_id(
-                ledger_class,
-            ),
-        )
-        .one_or_none()
+    return ledger_net(
+        db.session, category_key(None, ledger_class), seed_user["scenario"].id,
     )
-    if account is None:
-        return None
-    return db.session.query(
-        db.func.coalesce(db.func.sum(Posting.amount), Decimal("0.00")),
-    ).filter(Posting.ledger_account_id == account.id).scalar()
 
 
 @dataclass(frozen=True)

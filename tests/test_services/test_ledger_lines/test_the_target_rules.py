@@ -76,15 +76,17 @@ from app.services.ledger_lines._account_anchors import (
     _account_anchor_correction_targets,
     _counter_keys,
 )
+from tests._stored_ledger import (
+    ledger_account_of_kind,
+    stored_chart_key,
+    stored_ledger_net,
+)
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_with_trueup,
     create_settled_cash_transaction,
     create_settled_transfer,
     freeze_today,
-    ledger_account_of_kind,
-    ledger_net,
-    stored_chart_key,
 )
 
 
@@ -629,7 +631,7 @@ class TestTheWriterMintsWhatItMinted:
                 _db.session, account.id, LedgerAccountKindEnum.INTEREST_INCOME,
             )
             assert counter is not None
-            assert ledger_net(
+            assert stored_ledger_net(
                 _db.session, counter.id, seed_user["scenario"].id,
             ) == Decimal("0")
             assert _db.session.query(JournalEntry).filter_by(

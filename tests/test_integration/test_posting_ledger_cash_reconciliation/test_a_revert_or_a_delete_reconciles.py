@@ -12,30 +12,32 @@ import pytest
 from app import ref_cache
 from app.enums import LedgerAccountClassEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
+from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
 from app.models.account import AccountAnchorHistory
 from app.models.transaction_entry import TransactionEntry
 from app.services import posting_service, status_seam, transaction_service
+from app.services.ledger_lines import category_key, linked_key
 from app.utils.balance_predicates import balance_excluded_status_ids
+from tests._ledger_reads import (
+    account_net,
+    family_movement_ids,
+    ledger_net,
+    period_nets_of_movements,
+)
 from tests._test_helpers import (
-    family_journal_filter,
-    figure_source_columns,
     add_txn,
     create_envelope_txn,
     create_settled_cash_transaction,
-    linked_ledger_account,
+    figure_source_columns,
     settle_day_columns,
     settlement_if_settling,
 )
 
 from ._helpers import (
-    _independent_ledger_sum,
-    _ledger_account_sum,
     _independent_movement_effect,
     _signed_cash_effect,
     _assert_full_reconciliation,
-    _counter_ledger_id,
 )
 
 
@@ -73,11 +75,10 @@ class TestRevertAndRecategorizeReconciles:
         The route-level 2.8 CRITICAL: a Paid Groceries expense (posted to the
         Groceries-Expense counter) is reverted to Projected AND recategorized to
         Rent in ONE PATCH (the lock lifts on the revert), then re-settled.  The
-        reconcile reverses the OLD counter read from the ledger, so Groceries nets
-        to zero and Rent carries the expense.  Beyond the per-account check the
-        Commit-6 lifecycle test makes, this asserts the COUNTER-ACCOUNT LINKAGE
-        SWEEP reconciles after the move -- proving the linkage formula excludes
-        the net-zero Groceries reversal pair and attributes the effect to Rent.
+        read holds nothing on Groceries, and Rent carries the expense.  Beyond the
+        per-account check the Commit-6 lifecycle test makes, this asserts the
+        COUNTER-ACCOUNT SWEEP reconciles after the move, attributing the effect to
+        Rent.  The sweep's parity arm grades the store's reversal of Groceries.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -114,18 +115,17 @@ class TestRevertAndRecategorizeReconciles:
 
             # Rent now carries the expense; Groceries netted to zero; the whole
             # ledger -- linked, counter (by linkage), per-entry, trial -- ties.
-            rent_counter = _counter_ledger_id(
-                seed_user["user"].id, LedgerAccountClassEnum.EXPENSE, rent_id,
+            rent_counter = category_key(
+                rent_id, LedgerAccountClassEnum.EXPENSE,
             )
-            groceries_counter = _counter_ledger_id(
-                seed_user["user"].id, LedgerAccountClassEnum.EXPENSE,
-                seed_user["categories"]["Groceries"].id,
+            groceries_counter = category_key(
+                seed_user["categories"]["Groceries"].id, LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_account_sum(
-                rent_counter, scenario_id,
+            assert ledger_net(
+                _db.session, rent_counter, scenario_id,
             ) == Decimal("50.00")
-            assert _ledger_account_sum(
-                groceries_counter, scenario_id,
+            assert ledger_net(
+                _db.session, groceries_counter, scenario_id,
             ) == Decimal("0.00")
             _assert_full_reconciliation(scenario_id)
 
@@ -182,10 +182,11 @@ class TestRevertAndMoveReconciles:
                 },
             ).status_code == 200
             _assert_full_reconciliation(scenario_id)
-            # The reversal landed in the ORIGINAL period: P nets to zero per
-            # ledger account, and F holds no entries at all yet.
+            # A reverted row books nothing: P and F each hold no line.  That the
+            # STORED reversal landed in the original period is the sweep's parity
+            # arm.
             assert _period_ledger_nets(txn_id, original.id) == {}
-            assert not _entry_ids_in_period(txn_id, moved_to.id)
+            assert _period_ledger_nets(txn_id, moved_to.id) == {}
 
             assert auth_client.patch(
                 f"/transactions/{txn_id}",
@@ -194,54 +195,22 @@ class TestRevertAndMoveReconciles:
             _assert_full_reconciliation(scenario_id)
 
             # F carries exactly the re-settled split; P still nets to zero.
-            # (LINKED-kind lookup: a bare-account_id .scalar() would raise
-            # MultipleResultsFound beside the Step-5 anchor-equity twin.)
-            cash_ledger = linked_ledger_account(
-                _db.session, seed_user["account"].id,
-            ).id
             moved_nets = _period_ledger_nets(txn_id, moved_to.id)
-            assert moved_nets[cash_ledger] == Decimal("-50.00")
+            assert moved_nets[linked_key(seed_user["account"])] == Decimal("-50.00")
             assert sum(moved_nets.values()) == Decimal("0.00")
             assert _period_ledger_nets(txn_id, original.id) == {}
 
 
 def _period_ledger_nets(transaction_id, pay_period_id):
-    """Return ``{ledger_account_id: net}`` for one transaction in one period.
+    """Return ``{chart key: net}`` for one transaction in one period, off the read.
 
-    Zero nets are dropped, so a period whose entries fully cancel (an
-    original + its reversal) returns ``{}`` -- the R2 attribution tests'
-    "nets to zero per ledger account" shape.  Independent of the service's
-    own per-period reader (a direct grouped query).
+    A period the row books nothing in returns ``{}``.  Scoped by the row's own
+    scenario.
     """
-    rows = (
-        _db.session.query(
-            Posting.ledger_account_id, _db.func.sum(Posting.amount),
-        )
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            family_journal_filter(transaction_id),
-            JournalEntry.pay_period_id == pay_period_id,
-        )
-        .group_by(Posting.ledger_account_id)
-        .all()
-    )
-    return {
-        ledger_id: net for ledger_id, net in rows if net != 0
-    }
-
-
-def _entry_ids_in_period(transaction_id, pay_period_id):
-    """Return the journal-entry ids a transaction holds in one period."""
-    return [
-        entry_id for (entry_id,) in (
-            _db.session.query(JournalEntry.id)
-            .filter(
-                family_journal_filter(transaction_id),
-                JournalEntry.pay_period_id == pay_period_id,
-            )
-            .all()
-        )
-    ]
+    scenario_id = _db.session.get(Transaction, transaction_id).scenario_id
+    return period_nets_of_movements(
+        family_movement_ids(transaction_id), scenario_id,
+    ).get(pay_period_id, {})
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +243,6 @@ class TestRevertedTransactionReconcilesAtZero:
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
-            user_id = seed_user["user"].id
             checking = seed_user["account"]
             period = seed_user["bootstrap_period"]
 
@@ -283,12 +251,11 @@ class TestRevertedTransactionReconcilesAtZero:
                 category=seed_user["categories"]["Groceries"],
             )
             db.session.commit()
-            groceries_counter = _counter_ledger_id(
-                user_id, LedgerAccountClassEnum.EXPENSE,
-                seed_user["categories"]["Groceries"].id,
+            groceries_counter = category_key(
+                seed_user["categories"]["Groceries"].id, LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_account_sum(
-                groceries_counter, scenario_id,
+            assert ledger_net(
+                _db.session, groceries_counter, scenario_id,
             ) == Decimal("50.00")
 
             # Revert to Projected via the real primitives (seam, then reconcile).
@@ -299,11 +266,11 @@ class TestRevertedTransactionReconcilesAtZero:
             posting_service.sync_transaction_postings(txn)
             db.session.commit()
 
-            assert _independent_ledger_sum(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
-            assert _ledger_account_sum(
-                groceries_counter, scenario_id,
+            assert ledger_net(
+                _db.session, groceries_counter, scenario_id,
             ) == Decimal("0.00")
             # Two entries survive (settle + reversal); neither was edited.
             # They are the covering movement's (plan step X-bi-3a), and the
@@ -398,15 +365,14 @@ class TestAPostedPurchaseReconcilesUnderAnUnsettledParent:
             posting_service.sync_transaction_postings(txn)
             db.session.commit()
 
-            groceries_counter = _counter_ledger_id(
-                user_id, LedgerAccountClassEnum.EXPENSE,
-                seed_user["categories"]["Groceries"].id,
+            groceries_counter = category_key(
+                seed_user["categories"]["Groceries"].id, LedgerAccountClassEnum.EXPENSE,
             )
-            assert _independent_ledger_sum(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("960.00")
-            assert _ledger_account_sum(
-                groceries_counter, scenario_id,
+            assert ledger_net(
+                _db.session, groceries_counter, scenario_id,
             ) == Decimal("40.00")
             assert (
                 _db.session.query(JournalEntry)
@@ -468,8 +434,8 @@ class TestACancelledEnvelopesDatedPurchaseReconcilesAtZero:
             _db.session.flush()
             posting_service.sync_transaction_postings(txn)
             db.session.commit()
-            assert _independent_ledger_sum(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("960.00")
             assert _signed_cash_effect(txn) == Decimal("-40.00")
 
@@ -491,14 +457,14 @@ class TestACancelledEnvelopesDatedPurchaseReconcilesAtZero:
             assert _independent_movement_effect(
                 checking.id, scenario_id,
             ) == Decimal("0.00")
-            assert _independent_ledger_sum(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
-            groceries_counter = _counter_ledger_id(
-                user_id, LedgerAccountClassEnum.EXPENSE, txn.category_id,
+            groceries_counter = category_key(
+                txn.category_id, LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_account_sum(
-                groceries_counter, scenario_id,
+            assert ledger_net(
+                _db.session, groceries_counter, scenario_id,
             ) == Decimal("0.00")
             _assert_full_reconciliation(scenario_id)
 
@@ -566,24 +532,22 @@ class TestASettledEnvelopesUndatedPurchasePostsNothing:
             assert _independent_movement_effect(
                 checking.id, scenario_id,
             ) == Decimal("0.00")
-            assert _independent_ledger_sum(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
-            groceries_counter = _counter_ledger_id(
-                user_id, LedgerAccountClassEnum.EXPENSE, txn.category_id,
+            groceries_counter = category_key(
+                txn.category_id, LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_account_sum(
-                groceries_counter, scenario_id,
+            assert ledger_net(
+                _db.session, groceries_counter, scenario_id,
             ) == Decimal("0.00")
-            assert (
-                _db.session.query(JournalEntry)
-                .filter(family_journal_filter(txn_id))
-                .count()
-            ) == 0
+            assert period_nets_of_movements(
+                family_movement_ids(txn_id), scenario_id,
+            ) == {}
 
 
 # ---------------------------------------------------------------------------
-# Hard delete: SET-NULL'd legs reconcile via the no-parent-row branch
+# Hard delete: the row and its movement are gone, so nothing of them is booked
 # ---------------------------------------------------------------------------
 
 
@@ -595,14 +559,14 @@ class TestHardDeletedTransactionReconcilesAtZero:
     ):
         """Hard-deleting a Paid ad-hoc expense severs the link but stays balanced.
 
-        Arithmetic: a $50 Groceries expense posts -50 / +50.  Deleting the ad-hoc
-        (template-less) row hard-deletes it: the route reverses the postings FIRST
-        (a -50 / +50 reversal), then the row is removed with its movement and
+        Arithmetic: a $50 Groceries expense books -50 / +50.  Deleting the ad-hoc
+        (template-less) row hard-deletes it: the route reverses the stored postings
+        FIRST (a -50 / +50 reversal), then the row is removed with its movement and
         ``journal_entries.transaction_entry_id`` SET-NULLs on BOTH the original
-        and the reversal (the immutable legs survive, append-only).  The
-        Groceries-Expense counter therefore nets to zero across a no-parent-row group --
-        the exact branch of the counter sweep that asserts a hard-deleted
-        transaction's legs were reversed, not stranded.  This is the route-driven
+        and the reversal (the immutable legs survive, append-only).  The worked-out
+        read holds no line for a movement that is gone, so Groceries-Expense reads
+        0.00 and Checking its opening; that the STORED legs were reversed rather
+        than stranded is the sweep's parity arm.  This is the route-driven
         production path (``delete_transaction`` -> the one removal act's
         ``reverse_leaving_movements`` -> FK SET NULL; the row's own
         ``reverse_postings_before_delete`` until plan task plan#2557) the
@@ -620,12 +584,11 @@ class TestHardDeletedTransactionReconcilesAtZero:
             assert auth_client.post(
                 f"/transactions/{txn_id}/mark-done",
             ).status_code == 200
-            groceries_counter = _counter_ledger_id(
-                seed_user["user"].id, LedgerAccountClassEnum.EXPENSE,
-                seed_user["categories"]["Groceries"].id,
+            groceries_counter = category_key(
+                seed_user["categories"]["Groceries"].id, LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_account_sum(
-                groceries_counter, scenario_id,
+            assert ledger_net(
+                _db.session, groceries_counter, scenario_id,
             ) == Decimal("50.00")
 
             # Hard delete (ad-hoc row): reverse-before-delete, then SET NULL.
@@ -633,14 +596,12 @@ class TestHardDeletedTransactionReconcilesAtZero:
                 f"/transactions/{txn_id}",
             ).status_code == 200
 
-            # The row is gone with its movement, whose entries' link is
-            # SET-NULLed; the counter nets to zero across the NULL-linkage group.
+            # The row is gone with its movement, so nothing of it is booked.
             assert db.session.get(Transaction, txn_id) is None
-            assert _ledger_account_sum(
-                groceries_counter, scenario_id,
+            assert ledger_net(
+                _db.session, groceries_counter, scenario_id,
             ) == Decimal("0.00")
-            assert _independent_ledger_sum(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
-            # Drives the no-parent-row branch of the counter sweep.
             _assert_full_reconciliation(scenario_id)

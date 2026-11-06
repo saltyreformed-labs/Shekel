@@ -72,9 +72,9 @@ import pytest
 
 from app.extensions import db as _db
 from app.models.journal_entry import JournalEntry, Posting
+from tests._stored_ledger import ledger_accounts_for_account
 from tests._test_helpers import (
     create_account_of_type,
-    ledger_accounts_for_account,
     load_migration_module,
 )
 

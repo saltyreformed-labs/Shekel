@@ -58,18 +58,20 @@ from app.services import (
     loan_posting_service,
     posting_service,
 )
+from tests._stored_ledger import (
+    find_loan_ledger_account,
+    ledger_accounts_for_account,
+    loan_correction_entries,
+    stored_ledger_net,
+    transfer_family_journal_filter,
+)
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_with_trueup,
     create_settled_transfer,
-    find_loan_ledger_account,
     freeze_today,
-    ledger_accounts_for_account,
-    ledger_net,
     load_init_database_module,
     load_migration_module,
-    loan_correction_entries,
-    transfer_family_journal_filter,
     transfer_side_record,
 )
 
@@ -185,7 +187,7 @@ def _interest_ledger_net(loan, scenario_id):
     )
     if ledger is None:
         return Decimal("0")
-    return ledger_net(_db.session, ledger.id, scenario_id)
+    return stored_ledger_net(_db.session, ledger.id, scenario_id)
 
 
 def _per_loan_ledger_count(loan):
@@ -328,7 +330,7 @@ class TestBackfillPostsHistoricalCorrection:
                 db.session, loan.id, LedgerAccountKindEnum.LOAN_ESCROW,
             )
             assert escrow_ledger is not None
-            assert ledger_net(
+            assert stored_ledger_net(
                 db.session, escrow_ledger.id, scenario_id,
             ) == Decimal("100.00")
             # Interest, escrow, AND opening-equity per-loan ledgers.
@@ -470,7 +472,7 @@ class TestBackfillCoverage:
             assert len(loan_correction_entries(
                 db.session, x_whatif.id, loan.id,
             )) == 1
-            assert ledger_net(
+            assert stored_ledger_net(
                 db.session,
                 find_loan_ledger_account(
                     db.session, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,

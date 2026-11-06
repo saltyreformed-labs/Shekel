@@ -15,10 +15,10 @@ from app.models.loan_features import RateHistory
 from app.models.ref import AccountType
 from app.services import account_service
 
+from tests._ledger_reads import posted_loan_balance_at
 from tests._test_helpers import (
     create_settled_transfer,
     make_transfer_template,
-    posted_loan_balance_at,
 )
 
 from ._helpers import _create_auto_loan

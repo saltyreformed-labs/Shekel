@@ -26,10 +26,10 @@ from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
 )
+from app.services.card_today import today_on_a_card
 from app.services.one_off import OneOffToPlace, due_date_for, place_one_off
 from app.utils.auth_helpers import require_owner
 from app.routes._render_helpers import render_transaction_cell
-from app.routes._row_day import today_on_a_card
 from app.routes.transactions._bp import transactions_bp
 from app.routes.transactions._helpers import (
     _create_schema,
@@ -135,7 +135,7 @@ def _place_submitted_one_off(data, period, account):
         due_date=due_date_for(
             data.get("due_date"),
             period,
-            card_today=None if data["is_envelope"] else today_on_a_card(account),
+            card_today=today_on_a_card(account, is_envelope=data["is_envelope"]),
         ),
     )
     # A note is the ROW's -- the popover edits it there -- and the one field

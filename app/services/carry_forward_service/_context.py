@@ -7,11 +7,13 @@ rows, discrete rows and TRANSFERS -- produced once here so the two paths can
 never diverge.  The envelope target-row
 lookup and the "finalised target" reasoning also live here so the
 preview (which predicts) and the execution (which acts) reason about the
-target canonical row from a single source of truth.
+target canonical row from a single source of truth, and so does the date a
+carried row is left with (:func:`_discrete_dates`, :func:`_transfer_dates`).
 """
 
 import enum
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 
@@ -21,6 +23,8 @@ from app.exceptions import NotFoundError
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
+from app.services import transfer_service
+from app.services.card_today import today_on_a_card
 from app.services.cash_ledger import (
     AmountBasis,
     amount_basis,
@@ -29,7 +33,13 @@ from app.services.cash_ledger import (
 )
 from app.services.generation_schedule import GenerationSchedule
 from app.services.loan_ledger import LoanCalendars
-from app.services.one_off import another_row_answers, due_date_for
+from app.services.one_off import (
+    RowToMove,
+    another_row_answers,
+    due_date_after_move,
+    due_date_for,
+    holds_a_row_in,
+)
 from app.services.pay_calendar import DerivedPeriod
 from app.utils.amount_relationships import transfer_pricing_load_options
 from app.utils.balance_predicates import is_projected_clause
@@ -296,6 +306,147 @@ def _build_carry_forward_context(source_period_id, target_period_id,
     )
 
 
+@dataclass(frozen=True)
+class _CarriedDate:
+    """The date a carried placed row is left with, and what refuses the batch.
+
+    Attributes:
+        due: Its due date after the batch.
+        refusal: The clause naming why the batch cannot carry it, for the modal
+            and for the Confirm's refusal alike; ``None`` when it can.
+    """
+
+    due: date
+    refusal: Optional[str] = None
+
+
+def _discrete_dates(ctx: _CarryForwardContext) -> "dict[int, _CarriedDate]":
+    """Return each placed row the batch moves whole: its date, and what refuses it.
+
+    **The one decision the batch and its preview read**, as
+    :func:`_classify_leftover_target` is for an envelope.  The date is
+    ``one_off.due_date_after_move``'s: off a card rulings **R-BAL22** and **R-BAL33**,
+    and on one ruling **plan#2976**, so one batch can hold first-day rows, rows keeping
+    their dates and rows taking today.  No row here is an envelope: the context sends
+    a definition's envelope to the rollover, so a card counts every one of them from
+    its date.
+
+    **Two refusals**, each a whole batch's.  The target already holds a row of the
+    definition (``one_off.holds_a_row_in``, R-BAL24), found by 7b-3's adversarial
+    review.  Or another row answers the day (``one_off.another_row_answers``), which
+    the occurrence index refuses as an ``IntegrityError`` this door has no answer for.
+    A row keeping its date answers what it answered, so only a row the batch re-dates
+    is asked, and only a re-dated row's new day counts against the rows after it: a
+    cleared cadence's survivors can share a paycheck, and on a card two dated ahead
+    would follow it onto one day.
+
+    Args:
+        ctx: The batch's context (:func:`_build_carry_forward_context`).
+
+    Returns:
+        ``{row id: its carried date}``, for the placed rows of
+        ``ctx.discrete_txns``.  No other row's date is the move's to write: a
+        recurring definition's is its rule's, and a payback's its own.
+    """
+    taken: "set[tuple[int, date]]" = set()
+    carried = {}
+    for row in ctx.discrete_txns:
+        if not row.is_placed:
+            continue
+        due = due_date_after_move(
+            RowToMove(
+                stated=row.due_date,
+                held=row.due_date,
+                source_start=ctx.source_period.start_date,
+                card_today=today_on_a_card(row.account),
+            ),
+            ctx.target_period,
+        )
+        refusal = None
+        if holds_a_row_in(
+            row.template_id, row.scenario_id, ctx.target_period.period_id,
+            except_row_id=row.id,
+        ):
+            refusal = (
+                "the next paycheck already holds a row of that item, and an item "
+                "holds one row per paycheck."
+            )
+        elif due != row.due_date:
+            if (row.template_id, due) in taken or another_row_answers(
+                row.template_id, row.scenario_id, due, except_row_id=row.id,
+            ):
+                refusal = _day_is_answered(due, _DATE_ONE_OF_THE_TWO)
+            taken.add((row.template_id, due))
+        carried[row.id] = _CarriedDate(due, refusal)
+    return carried
+
+
+def _transfer_dates(ctx: _CarryForwardContext) -> "dict[int, _CarriedDate]":
+    """Return each placed transfer the batch moves: its date, and what refuses it.
+
+    What ``transfer_service.update_transfer`` will do to each, for the preview to say
+    before the press: the door re-places the date itself (ruling **R-BAL96**), so the
+    batch's own loop asks nothing here.  It asks the same two producers
+    (``transfer_service.date_after_move``, ``transfer_service.another_transfer_answers``)
+    and counts a re-dated transfer's new day against the ones after it, as the door's
+    flush makes it do.  This says nothing of what else a transfer's move can meet at
+    the Confirm, which :attr:`~._preview.CarryForwardPlan.blocked` names.
+
+    Args:
+        ctx: The batch's context (:func:`_build_carry_forward_context`).
+
+    Returns:
+        ``{transfer id: its carried date}``, for the placed transfers of
+        ``ctx.transfers``.
+    """
+    taken: "set[tuple[int, date]]" = set()
+    carried = {}
+    for transfer in ctx.transfers:
+        if not transfer.is_placed:
+            continue
+        due = transfer_service.date_after_move(
+            transfer, transfer.due_date, ctx.target_period, transfer.to_account,
+        )
+        refusal = None
+        if due != transfer.due_date:
+            if (
+                (transfer.transfer_template_id, due) in taken
+                or transfer_service.another_transfer_answers(transfer, due)
+            ):
+                refusal = _day_is_answered(due, _MOVE_ONE_OF_THE_TWO)
+            taken.add((transfer.transfer_template_id, due))
+        carried[transfer.id] = _CarriedDate(due, refusal)
+    return carried
+
+
+#: What clears a refused day for a row.  A date that has passed stays through the
+#: batch, and leaves the day free if it was the other row's.
+_DATE_ONE_OF_THE_TWO = "Date one of the two on a day that has passed, then try again."
+#: What clears it for a transfer, whose date into a card always follows (ruling
+#: plan#2976), so no date typed ahead of the batch would stand.  A date typed beside
+#: its own move does.
+_MOVE_ONE_OF_THE_TWO = (
+    "Move one of the two by its own edit, typing a date beside the move, then "
+    "try again."
+)
+
+
+def _day_is_answered(day: date, remedy: str) -> str:
+    """Return the clause refusing a move onto *day*, which another row answers.
+
+    Args:
+        day: The day the move would date the row.
+        remedy: What clears it for this kind of row.
+
+    Returns:
+        The clause, naming the day and what the owner can do about it.
+    """
+    return (
+        f"another row of that item is already due on {day.isoformat()}, the day "
+        f"the move would date it.  {remedy}"
+    )
+
+
 def _target_canonical_rows(source_txn, target_period_id, scenario_id, *,
                            include_deleted):
     """Return the target period's rows for *source_txn*'s template+scenario.
@@ -485,7 +636,10 @@ def _classify_leftover_target(source_txn, target_period, basis, schedule):
         row there would answer an occurrence a row already does; the
         leftover has nowhere to go and the caller refuses rather than guess.
         A recurring definition in the same state takes ``CREATE`` because
-        its fresh row is an override answering no occurrence.
+        its fresh row is an override answering no occurrence.  **An envelope's
+        leftover takes the first day on a card too**: no card counts from an
+        envelope's date (``one_off.due_date_for``), so ruling **plan#2976**
+        changes neither this day nor the refusals that name it.
 
     Uses ``recurrence_engine.rows_to_generate_in_period`` (a read-only
     predictor) rather than ``generate_for_template`` (which would create

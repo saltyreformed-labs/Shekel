@@ -23,12 +23,7 @@ from app.services import posting_service, transfer_service
 from app.services.amount_ownership import state_own_amount
 from app.services.match_press import NOTHING_SHOWN, Press, Shown
 from app.services.cash_ledger import resolve_transaction_amount
-from app.services.one_off import (
-    due_date_after_move,
-    due_date_for,
-    holds_a_row_in,
-    place_row_of,
-)
+from app.services.one_off import due_date_for, place_row_of
 from app.services.recurrence import compute_due_date
 from app.services.row_valuation import purchases_total
 from app.utils.balance_predicates import is_projected_clause
@@ -36,7 +31,9 @@ from app.utils.log_events import BUSINESS, EVT_CARRY_FORWARD, log_event
 
 from ._context import (
     _build_carry_forward_context,
+    _CarryForwardContext,
     _classify_leftover_target,
+    _discrete_dates,
     _TargetKind,
 )
 
@@ -93,7 +90,7 @@ def carry_forward_unpaid(source_period_id, target_period_id, scenario_id,
     Raises:
         NotFoundError: If either period is not in *balance_ctx*'s calendar --
             it does not exist, or it is not this owner's.
-        ValidationError: On four conditions, any of which fails the WHOLE
+        ValidationError: On five conditions, any of which fails the WHOLE
             batch -- the caller must rollback the session before issuing any
             follow-up writes.  (a) The envelope branch's ``AMBIGUOUS`` guard: a
             destination period with more than one mutable row for the same
@@ -104,7 +101,10 @@ def carry_forward_unpaid(source_period_id, target_period_id, scenario_id,
             branch's twin of it (ruling **R-BAL44**, leaf 7b-3): a rule-less
             definition's row carried into a paycheck that already holds a
             row of it, or whose leftover would answer a day a row of it
-            answers.
+            answers.  (e) A placed row or transfer whose move would date it on
+            a day another row of its definition answers
+            (:func:`._context._discrete_dates`, and for a transfer
+            ``update_transfer``'s own refusal).
             (b) Since plan step C9b, a carried TRANSFER that is a loan payment
             whose destination period would place its installment at or before
             the loan's origination (``transfer_service.update_transfer``
@@ -225,7 +225,7 @@ def _carry_forward(source_period_id, target_period_id, scenario_id,
         # ``no_autoflush`` invariant that the in-memory state never
         # diverges from the database while the loop runs.
         if ctx.discrete_txns:
-            moved = _partition_discrete(ctx, target_period_id)
+            moved = _partition_discrete(ctx)
 
             if moved.recurring_ids:
                 count += (
@@ -245,19 +245,21 @@ def _carry_forward(source_period_id, target_period_id, scenario_id,
                     )
                 )
 
-            if moved.re_placed_ids:
+            # One UPDATE per day: a batch's rows off a card take the target's
+            # start, and its rows on a card may take today (ruling plan#2976).
+            for due, re_placed_ids in moved.re_placed.items():
                 count += (
                     db.session.query(Transaction)
                     .filter(
-                        Transaction.id.in_(moved.re_placed_ids),
+                        Transaction.id.in_(re_placed_ids),
                         is_projected_clause(Transaction),
                         Transaction.is_deleted.is_(False),
                     )
                     .update(
                         {
                             Transaction.pay_period_id: target_period_id,
-                            Transaction.due_date: moved.re_placed_due,
-                            Transaction.occurs_on: moved.re_placed_due,
+                            Transaction.due_date: due,
+                            Transaction.occurs_on: due,
                             Transaction.version_id: Transaction.version_id + 1,
                         },
                         synchronize_session="fetch",
@@ -310,7 +312,7 @@ def _carry_forward(source_period_id, target_period_id, scenario_id,
     # ``transfer_recurrence.propagate_to_unruled_template`` for good; its
     # move RE-PLACES its due date and carries ``occurs_on`` with it INSIDE
     # ``update_transfer`` (**R-BAL96**), so this door states the period and
-    # nothing else, as the ``re_placed_ids`` pass states the same rule in
+    # nothing else, as the ``re_placed`` pass states the same rule in
     # SQL for a transaction.  An ad-hoc transfer takes no flag either: no
     # pass will ever write over it.
     for transfer in ctx.transfers:
@@ -370,44 +372,37 @@ def _carry_forward(source_period_id, target_period_id, scenario_id,
 
 @dataclass(frozen=True)
 class _DiscretePartition:
-    """The discrete branch's three passes, and the date the re-placed take.
+    """The discrete branch's three passes, and the days the re-placed take.
 
     Attributes:
         recurring_ids: Rows of a RECURRING definition -- moved with
             ``is_override`` flipped.
-        re_placed_ids: PLACED rows whose due date the move changes -- moved
-            with ``due_date`` and ``occurs_on`` re-placed on
-            :attr:`re_placed_due`.
-        re_placed_due: The target paycheck's start (ruling **R-BAL22**).
+        re_placed: PLACED rows whose due date the move changes, by the day they
+            take -- moved with ``due_date`` and ``occurs_on`` re-placed on it.
         unruled_ids: Every other row -- moved, and nothing else written.
     """
 
     recurring_ids: "list[int]"
-    re_placed_ids: "list[int]"
-    re_placed_due: date
+    re_placed: "dict[date, list[int]]"
     unruled_ids: "list[int]"
 
 
-def _partition_discrete(ctx, target_period_id: int) -> _DiscretePartition:
+def _partition_discrete(ctx: _CarryForwardContext) -> _DiscretePartition:
     """Sort the discrete rows into the three UPDATEs the move writes.
 
     **A PLACED row -- a rule-less definition's -- is RE-PLACED by the
-    move** (ruling **R-BAL33**, plan step balance:X-bi-7b): due on
-    its placed paycheck's start unless the owner stated a day
-    (R-BAL22), so the default follows the placement and an
-    owner-stated day, read by position, stays.  ``one_off.
-    due_date_after_move`` is the one statement of that rule for both
-    doors that move a row; here the rows whose answer moved are
-    collected under it and written in one UPDATE, ``occurs_on``
-    beside ``due_date`` because a placed row answers its own due date
-    (R-BAL25).  The function's only other answer is the row's own
-    date, so every re-placed row takes the target's start.  Found by
-    7b-1's adversarial review: a one-off is dated at birth since that
-    leaf, and this arm moved the period alone, so a one-off rolled to
-    the next paycheck read OVERDUE on the dashboard pulse and late in
-    ``payment_timeliness`` where the undated row it replaced sat on
-    the "anytime this period" shelf.  The balance is identical under
-    either date (a one-off's series is flat, R-BAL21).
+    move** (rulings **R-BAL33**, **plan#2976**; plan step
+    balance:X-bi-7b): :func:`._context._discrete_dates` is what it is
+    left with, and here the rows whose date moved are collected by the
+    day and written in one UPDATE each, ``occurs_on`` beside
+    ``due_date`` because a placed row answers its own due date
+    (R-BAL25).  Found by 7b-1's adversarial review: a one-off is dated
+    at birth since that leaf, and this arm moved the period alone, so a
+    one-off rolled to the next paycheck read OVERDUE on the dashboard
+    pulse and late in ``payment_timeliness`` where the undated row it
+    replaced sat on the "anytime this period" shelf.  Off a card the
+    balance is identical under either date (a one-off's series is flat,
+    R-BAL21).
 
     A NON-ENVELOPE placed row reaches this branch since ruling
     **R-BAL44** (an envelope of a definition takes the rollover), and
@@ -415,12 +410,8 @@ def _partition_discrete(ctx, target_period_id: int) -> _DiscretePartition:
     one-off, ``mint_uncategorized``'s row -- but not every: an owner
     who unticks *Track individual purchases* on a bank-born envelope
     (the definition's flag, R-BAL36) leaves its rows plain, one per
-    paycheck, and one carried INTO a paycheck holding its sibling met
-    the occurrence index (found by 7b-3's adversarial review; finding
-    **BAL-496**'s last case).  So the re-placing REFUSES, as the
-    envelope branch's CLOSED does, where the target already holds a row
-    of the definition (``one_off.holds_a_row_in``).  A linked row
-    always carries a due date
+    paycheck (finding **BAL-496**'s last case), so a re-placing can be
+    REFUSED.  A linked row always carries a due date
     (``ck_transactions_template_row_needs_due_date``), so the rule
     above always has one to read; the 6 pre-R17 rows the ``occurs_on``
     backfill left NULL (production 2026-09-13) are undated in THAT
@@ -429,42 +420,34 @@ def _partition_discrete(ctx, target_period_id: int) -> _DiscretePartition:
 
     Args:
         ctx: The batch's context (:func:`_build_carry_forward_context`).
-        target_period_id: The pay_period.id the batch carries INTO.
 
     Returns:
-        The three id lists and the re-placed date.
+        The three passes.
 
     Raises:
-        ValidationError: A placed row carried into a paycheck that already
-            holds a row of its definition.
+        ValidationError: A placed row the batch cannot carry
+            (:func:`._context._discrete_dates`).
     """
-    re_placed_due = due_date_for(None, ctx.target_period)
-    re_placed_ids = [
-        t.id for t in ctx.discrete_txns
-        if t.is_placed and due_date_after_move(
-            t.due_date,
-            source_start=ctx.source_period.start_date,
-            target=ctx.target_period,
-        ) != t.due_date
-    ]
+    carried = _discrete_dates(ctx)
+    re_placed: "dict[date, list[int]]" = {}
     for t in ctx.discrete_txns:
-        if t.is_placed and holds_a_row_in(
-            t.template_id, t.scenario_id, target_period_id,
-            except_row_id=t.id,
-        ):
+        move = carried.get(t.id)
+        if move is None:
+            continue
+        if move.refusal is not None:
             raise ValidationError(
                 f"Carry forward refused for source transaction "
-                f"{t.id} ('{t.name}'): the next paycheck already "
-                f"holds a row of that item, and an item holds one "
-                f"row per paycheck."
+                f"{t.id} ('{t.name}'): {move.refusal}"
             )
+        if move.due != t.due_date:
+            re_placed.setdefault(move.due, []).append(t.id)
+    re_dated = {row_id for ids in re_placed.values() for row_id in ids}
     return _DiscretePartition(
         recurring_ids=[t.id for t in ctx.discrete_txns if t.recurs],
-        re_placed_ids=re_placed_ids,
-        re_placed_due=re_placed_due,
+        re_placed=re_placed,
         unruled_ids=[
             t.id for t in ctx.discrete_txns
-            if not t.recurs and t.id not in re_placed_ids
+            if not t.recurs and t.id not in re_dated
         ],
     )
 

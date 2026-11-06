@@ -28,7 +28,11 @@ from ._helpers import (
 
 
 class TestPreviewCarryForwardDiscreteAndTransfer:
-    """Discrete and transfer plans are always actionable."""
+    """A discrete plan and a transfer plan, actionable where nothing refuses them.
+
+    What refuses a placed row or transfer is
+    ``tests/test_routes/test_card_row_moved.py``'s.
+    """
 
     def test_discrete_plan_is_actionable(
         self, app, db, seed_user, seed_periods,

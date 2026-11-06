@@ -270,7 +270,8 @@ def carry_forward(period_id):
         db.session.expire_all()
         return _redrawn(period_id, exc.facts)
     except ValidationError as exc:
-        # Refused by the envelope branch (a corrupt multi-row target state), or
+        # Refused by the envelope branch (a corrupt multi-row target state), by a
+        # placed row with nowhere to land (``_context._discrete_dates``), or
         # -- since plan step C9b -- by ruling R-C, when a carried loan payment's
         # destination period would place its installment at or before the loan's
         # origination, where the fold would erase it.  Rollback so no source row

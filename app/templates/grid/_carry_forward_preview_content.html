@@ -180,6 +180,15 @@
                     ({{ money(plan.budget) }})
                     to {{ current_period.label }}.
                   {% endif %}
+                  {# One batch can hold rows keeping their dates and rows taking
+                     new ones (rulings R-BAL33, plan#2976). #}
+                  {% if plan.due_after is not none %}
+                    {% if plan.keeps_its_date %}
+                      It keeps its date, {{ plan.due_after.strftime('%b %d, %Y') }}.
+                    {% else %}
+                      It will be dated {{ plan.due_after.strftime('%b %d, %Y') }}.
+                    {% endif %}
+                  {% endif %}
                 </div>
 
                 {% if plan.blocked %}

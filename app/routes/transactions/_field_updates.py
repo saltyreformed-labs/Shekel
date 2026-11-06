@@ -15,8 +15,9 @@ and land there through the one act the template edit form calls
 (:mod:`app.services.definition_edit`, ruling **R-BAL36**); a typed figure
 corrects the definition's price IN PLACE and never detaches the row
 (**R-BAL29**, **R-BAL37**); a period move RE-PLACES the row on the target
-paycheck's start unless the owner had stated a day (**R-BAL33**); and a
-moved due date carries ``occurs_on`` with it (**R-BAL25**).  A RECURRING
+paycheck's start unless the owner had stated a day (**R-BAL33**), and on a card
+by whether the bill was bought (ruling **plan#2976**); and a moved due date
+carries ``occurs_on`` with it (**R-BAL25**).  A RECURRING
 definition's row keeps every act it had: a typed figure or a period move
 detaches it (OWN, ``is_override``), because that is a statement about one
 occurrence among many.  A link-less row -- a CC payback, the one shape this
@@ -29,15 +30,19 @@ lazy loads the row's accessors make and the definition edit's own, and it
 does not commit.
 """
 
+from app.models.transaction import Transaction
 from app.services import definition_delete, definition_edit, transaction_service
 from app.services.amount_ownership import state_own_amount
+from app.services.card_today import today_on_a_card
 from app.services.one_off import (
+    RowToMove,
     another_row_answers,
     due_date_after_move,
     holds_a_row_in,
     restate_price,
     state_due_date,
 )
+from app.services.pay_calendar import DerivedPeriod
 
 from app.routes.transactions._helpers import _error_transaction_response
 
@@ -123,13 +128,17 @@ def _re_files_the_row(txn, data) -> bool:
 
 
 def _place_the_date(
-    txn, data, *, period_changed, target_period, source_start,
+    txn: Transaction,
+    data: dict,
+    *,
+    moving: RowToMove | None,
+    target_period: DerivedPeriod | None,
 ):
     """Act 2 of :func:`_apply_field_updates`: a placed row's date, guarded.
 
     The date is the owner's typed one, else the row's; a period move then
-    RE-PLACES it through ``one_off.due_date_after_move`` (ruling
-    **R-BAL33**), and a changed date is written through
+    RE-PLACES it through ``one_off.due_date_after_move`` (rulings
+    **R-BAL33**, **plan#2976**), and a changed date is written through
     ``one_off.state_due_date`` (**R-BAL25**), the one writer that carries
     ``occurs_on`` with it.  The two refusals are the ones act 2 of
     :func:`_apply_field_updates` names, asked in the order the row would
@@ -139,16 +148,15 @@ def _place_the_date(
     Args:
         txn: The placed row being edited.
         data: The PATCH payload after act 0, read for ``due_date``.
-        period_changed: Whether this payload moves the row.
+        moving: The row as this payload moves it, read at act 0; ``None``
+            when it does not.
         target_period: The paycheck the row moves to; ``None`` unless
-            *period_changed*.
-        source_start: The paycheck the row is leaving, its start; ``None``
-            unless *period_changed*.
+            *moving*.
 
     Returns:
         A designed 400 response tuple, or ``None`` when the date was placed.
     """
-    if period_changed and holds_a_row_in(
+    if moving is not None and holds_a_row_in(
         txn.template_id, txn.scenario_id, target_period.period_id,
         except_row_id=txn.id,
     ):
@@ -157,11 +165,10 @@ def _place_the_date(
             "That paycheck already holds this item's row, and an item "
             "holds one row per paycheck. Record into that row instead.",
         )
-    due = data.get("due_date", txn.due_date)
-    if period_changed:
-        due = due_date_after_move(
-            due, source_start=source_start, target=target_period,
-        )
+    due = (
+        data.get("due_date", txn.due_date) if moving is None
+        else due_date_after_move(moving, target_period)
+    )
     if due == txn.due_date:
         return None
     if another_row_answers(
@@ -196,7 +203,9 @@ def _apply_field_updates(
        the source paycheck's start is read off ``txn.pay_period`` while the
        foreign key still names it (the same column
        ``render_transaction_cell`` reads for the due caption, so the
-       response's own load serves it from the identity map).  NEW: for a
+       response's own load serves it from the identity map), and whether a
+       card counts this row from its date, by the flag the save leaves it
+       with (ruling **plan#2976**).  NEW: for a
        placed row the ITEM fields (:data:`_ITEM_FIELDS`) are taken out of
        ``data`` here, so the row loop never writes a definition's field
        onto the row and the handler's posting pre-filter never sees a
@@ -216,7 +225,8 @@ def _apply_field_updates(
        owner's typed one, else the row's; a period move then RE-PLACES it
        (``one_off.due_date_after_move``, **R-BAL33**): the target
        paycheck's start unless the date was not the source paycheck's start,
-       an owner-stated day read by position.  **Two refusals guard it**
+       an owner-stated day read by position, and on a card by ruling
+       **plan#2976**.  **Two refusals guard it**
        (leaf 7b-3, found by adversarial review at this door): a period move
        into a paycheck that already holds a row of the definition
        (``one_off.holds_a_row_in``, R-BAL24's one row per paycheck), and a
@@ -355,12 +365,21 @@ def _apply_field_updates(
     recurs = txn.recurs
     placed = txn.is_placed
     only_row = placed and definition_delete.is_last_row_of_its_definition(txn)
-    source_start = (
-        txn.pay_period.start_date if placed and period_changed else None
-    )
     item = (
         {field: data.pop(field) for field in _ITEM_FIELDS if field in data}
         if placed else {}
+    )
+    moving = (
+        RowToMove(
+            stated=data.get("due_date", txn.due_date),
+            held=txn.due_date,
+            source_start=txn.pay_period.start_date,
+            card_today=today_on_a_card(
+                txn.account,
+                is_envelope=item.get("is_envelope", txn.tracks_purchases),
+            ),
+        )
+        if placed and period_changed else None
     )
 
     # Act 1.
@@ -372,8 +391,7 @@ def _apply_field_updates(
     # Act 2.
     if placed:
         refused = _place_the_date(
-            txn, data, period_changed=period_changed,
-            target_period=target_period, source_start=source_start,
+            txn, data, moving=moving, target_period=target_period,
         )
         if refused is not None:
             return refused

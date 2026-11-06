@@ -18,6 +18,9 @@ reused as they are:
   unless its date was not its old paycheck's start -- an owner-stated day,
   read by position -- which is :func:`one_off.due_date_after_move`, taking
   plain dates and the target :class:`~app.services.pay_calendar.DerivedPeriod`.
+  **Into a card it follows its paycheck** (ruling **plan#2976**): an extra
+  payment is not sent until marked, so its date always moves, unless a new
+  date is typed in the same save (:func:`date_after_move`).
   For a one-time payment INTO A LOAN the due date is the installment it
   satisfies, so the re-placed date is graded by the loan-installment guard
   exactly as a hand-typed one is (it reads ``updates["due_date"]``, which
@@ -53,7 +56,8 @@ reused as they are:
   worked case: the settle is the door's, so the restate had to be too.
 
 * **Two placed transfers of one definition never answer one day**
-  (:func:`reject_a_day_another_row_answers`): the occurrence index
+  (:func:`reject_a_day_another_row_answers`, over
+  :func:`another_transfer_answers`): the occurrence index
   ``idx_transfers_template_scenario_occurrence`` is unique on ``(template,
   scenario, occurs_on)`` over live rows, and a date write that would collide
   is refused as a designed :class:`~app.exceptions.ValidationError` -- a
@@ -69,13 +73,16 @@ reused as they are:
   per-paycheck refusal is twinned**: ``one_off.holds_a_row_in`` states
   **R-BAL24**'s one-row-per-paycheck rule for a bank-born envelope's
   definition, which no transfer definition is; the paycheck-keyed indexes on
-  this table cover UNDATED rows (``..._undated``) and template-less rows
-  (``uq_transfers_adhoc_dedupe``), neither of which a placed transfer is.
+  this table cover rows answering no occurrence (``..._undated``), which a
+  placed transfer is only until ``X-ci-3`` backfills it (finding plan#2992), and
+  template-less rows (``uq_transfers_adhoc_dedupe``), which it never is.
 
 Flask-isolated like the rest of the package: ORM rows and plain data in,
 ``updates`` mutated in place, no flush or commit of its own.  Reading the
 source paycheck is a lazy load, which may autoflush pending writes; every
-caller runs this before the first write.
+caller runs this before the first write.  **The owner's day is read here**
+(:func:`~app.services.card_today.today_on_a_card`), as ``._status`` reads it,
+so that no door, present or future, can move a transfer into a card without it.
 """
 
 from datetime import date
@@ -83,16 +90,50 @@ from datetime import date
 from app.enums import AmountSourceEnum
 from app.exceptions import ValidationError
 from app.extensions import db
+from app.models.account import Account
 from app.models.transfer import Transfer
 from app.services import template_amount_service
 from app.services.amount_ownership import derived_ownership
-from app.services.one_off import due_date_after_move
+from app.services.card_today import today_on_a_card
+from app.services.one_off import RowToMove, due_date_after_move
 from app.services.pay_calendar import DerivedPeriod
+
+
+def date_after_move(
+    xfer: Transfer, stated: date, target: DerivedPeriod, to_account: Account,
+) -> date:
+    """Return the day placed *xfer* is due once moved to *target*.
+
+    The one assembly of what ``one_off.due_date_after_move`` reads for a transfer,
+    for this door and for the preview that says what the door will do.  Into a card
+    the row is an extra payment (ruling **plan#2976**), asked of the account the
+    update leaves it pointing at, as a one-time transfer's first date is
+    (``routes/transfers/_instances``).
+
+    Args:
+        xfer: The placed transfer, before any write.
+        stated: The date the update leaves on it.
+        target: The paycheck it moves to.
+        to_account: The account the update leaves it paying into.
+
+    Returns:
+        The date it is due after the move.
+    """
+    return due_date_after_move(
+        RowToMove(
+            stated=stated,
+            held=xfer.due_date,
+            source_start=xfer.pay_period.start_date,
+            card_today=today_on_a_card(to_account),
+            is_extra_payment=True,
+        ),
+        target,
+    )
 
 
 def re_place_and_grade_the_day(
     xfer: Transfer, updates: dict[str, object], target: DerivedPeriod | None,
-    *, placed: bool,
+    *, placed: bool, to_account: Account,
 ) -> bool:
     """Re-place a placed transfer's date on a move and grade the day it is left with.
 
@@ -102,13 +143,14 @@ def re_place_and_grade_the_day(
     one-time payment into a loan is graded on the installment the move
     leaves it with.  Two acts and one answer:
 
-    * a period move RE-PLACES the due date (**R-BAL93**): a no-op unless
-      *updates* moves *xfer* to ANOTHER paycheck -- the popover posts its
-      period select on every save -- and the date re-placed is the owner's
-      typed one when the same edit carries a ``due_date`` (a day typed beside
-      the move is the owner's, the twin's rule), else the transfer's own; the
-      source paycheck's start is read off the row's ``pay_period`` while the
-      foreign key still names it;
+    * a period move RE-PLACES the due date (**R-BAL93**, and into a card ruling
+      **plan#2976**): a no-op unless *updates* moves *xfer* to ANOTHER paycheck
+      -- the popover posts its period select on every save -- and the date
+      re-placed is the owner's typed one when the same edit carries a
+      ``due_date`` (a day typed beside the move is the owner's, the twin's
+      rule), else the transfer's own; the source paycheck's start is read off
+      the row's ``pay_period`` while the foreign key still names it
+      (:func:`date_after_move`);
     * whether the DATE MOVES -- the update leaves the transfer on a different
       day than it has -- is decided ONCE here and returned, because it is
       the one predicate under which the day is graded against the
@@ -130,6 +172,8 @@ def re_place_and_grade_the_day(
             caller before any write.  A transfer that is not answers
             ``False`` with nothing done: a generated transfer's date is its
             definition's and its occurrence its cadence's.
+        to_account: The account the update leaves it paying into, resolved by
+            the caller: an endpoint move in the same update changes it.
 
     Returns:
         Whether this update moves the placed transfer's date.
@@ -140,10 +184,8 @@ def re_place_and_grade_the_day(
     if not placed:
         return False
     if target is not None and target.period_id != xfer.pay_period_id:
-        updates["due_date"] = due_date_after_move(
-            updates.get("due_date", xfer.due_date),
-            source_start=xfer.pay_period.start_date,
-            target=target,
+        updates["due_date"] = date_after_move(
+            xfer, updates.get("due_date", xfer.due_date), target, to_account,
         )
     date_moves = "due_date" in updates and updates["due_date"] != xfer.due_date
     if date_moves:
@@ -151,18 +193,41 @@ def re_place_and_grade_the_day(
     return date_moves
 
 
-def reject_a_day_another_row_answers(xfer: Transfer, day: date | None) -> None:
-    """Refuse *day* for placed *xfer* when a sibling of its definition already answers it.
+def another_transfer_answers(xfer: Transfer, day: date) -> bool:
+    """Whether a live transfer of *xfer*'s definition other than *xfer* answers *day*.
 
     The transfer occurrence index's own predicate, the twin of
     :func:`one_off.another_row_answers` over the transaction index (the
     module docstring says why they are two): unique on ``(template, scenario,
-    occurs_on)`` over live rows, no status term, ``is_override`` not
-    excluded.  Asked by :func:`re_place_and_grade_the_day` for a placed
-    transfer whose due date this update CHANGES -- the one predicate under
-    which the occurrence also follows the date, decided there so a moved date
-    leaves the two equal; a save that leaves the date alone collides with
-    nothing and is not asked.
+    occurs_on)`` over live rows, no status term, ``is_override`` not excluded.
+
+    Args:
+        xfer: The placed transfer, before any write.
+        day: The occurrence it would answer (**R-BAL94**).
+
+    Returns:
+        ``True`` when the write would collide.
+    """
+    return (
+        db.session.query(Transfer.id)
+        .filter(
+            Transfer.transfer_template_id == xfer.transfer_template_id,
+            Transfer.scenario_id == xfer.scenario_id,
+            Transfer.occurs_on == day,
+            Transfer.is_deleted.is_(False),
+            Transfer.id != xfer.id,
+        )
+        .first()
+    ) is not None
+
+
+def reject_a_day_another_row_answers(xfer: Transfer, day: date | None) -> None:
+    """Refuse *day* for placed *xfer* when a sibling of its definition already answers it.
+
+    Asked by :func:`re_place_and_grade_the_day` for a placed transfer whose due
+    date this update CHANGES -- the one predicate under which the occurrence
+    also follows the date, decided there so a moved date leaves the two equal;
+    a save that leaves the date alone collides with nothing and is not asked.
 
     Args:
         xfer: The placed transfer, before any write.
@@ -177,18 +242,7 @@ def reject_a_day_another_row_answers(xfer: Transfer, day: date | None) -> None:
     """
     if day is None:
         return
-    sibling = (
-        db.session.query(Transfer.id)
-        .filter(
-            Transfer.transfer_template_id == xfer.transfer_template_id,
-            Transfer.scenario_id == xfer.scenario_id,
-            Transfer.occurs_on == day,
-            Transfer.is_deleted.is_(False),
-            Transfer.id != xfer.id,
-        )
-        .first()
-    )
-    if sibling is not None:
+    if another_transfer_answers(xfer, day):
         raise ValidationError(
             "Another transfer of this item is already due that day, so this "
             "one cannot be. Pick a different day."

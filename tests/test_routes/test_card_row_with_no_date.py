@@ -450,10 +450,9 @@ class TestAnExtraPayment:
 
 
 class TestARowMovedBetweenPaychecks:
-    """A date not on its paycheck's first day stays once it moves (ruling R-BAL33).
+    """The date this door gave a bill stays once it moves (ruling plan#2976).
 
-    What a move should do to a row on a card is finding plan#2969's, so this pins only
-    the read a bill and that finding's recommendation agree on.
+    The rule's every clause is ``tests/test_routes/test_card_row_moved.py``.
     """
 
     @pytest.mark.usefixtures("on_jan_22")
@@ -462,8 +461,7 @@ class TestARowMovedBetweenPaychecks:
     ):
         """Dated Jan 22 in Jan 16's paycheck, moved to Jan 30's: still Jan 22.
 
-        ``due_date_after_move`` reads a date that is not its paycheck's first day as
-        one the owner stated.
+        Today reads as passed, and a bill whose date has passed keeps it.
         """
         card = _card(seed_user)
         row = _add_bill(auth_client, seed_user, card, seed_periods[1])

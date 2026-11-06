@@ -47,11 +47,11 @@ from app.extensions import db
 from app.models.transfer import Transfer
 from app.services.amount_ownership import derived_ownership
 from app.services import transfer_recurrence, transfer_service
+from app.services.card_today import today_on_a_card
 from app.services.one_off import due_date_for
 from app.services.scenario_resolver import require_baseline_scenario
 from app.utils.balance_predicates import is_projected_clause
 from app.routes._recurrence_conflict_chooser import flash_retained_notice
-from app.routes._row_day import today_on_a_card
 from app.routes._transfer_creation_helpers import (
     generate_transfers_for_all_periods,
 )

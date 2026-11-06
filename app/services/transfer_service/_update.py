@@ -492,7 +492,8 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # predicate the due-date arm below keys the occurrence on.  See
     # :mod:`._placed`.
     date_moves = re_place_and_grade_the_day(
-        transfer, updates, period_after, placed=placed,
+        transfer, updates, period_after,
+        placed=placed, to_account=endpoints.to_account,
     )
 
     # R-C: refuse an edit that would move a loan payment before its loan, before
@@ -751,7 +752,10 @@ def update_transfer(transfer_id, user_id, *, press=None, **kwargs):
                           paycheck's start unless the date was not the source
                           paycheck's start -- an owner-stated day, read by
                           position -- or a ``due_date`` arrives beside the
-                          move, which is the owner's.  See :mod:`._placed`.
+                          move, which is the owner's.  Into a card it follows
+                          its paycheck by ruling **plan#2976** unless a date
+                          other than its own arrives beside the move.  See
+                          :mod:`._placed`.
         from_account_id -- New SOURCE account for the transfer: its expense
                           side's account, and half of both legs' labels.
                           May not be an amortizing loan (a disbursement is not

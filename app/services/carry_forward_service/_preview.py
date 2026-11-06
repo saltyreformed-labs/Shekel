@@ -10,11 +10,14 @@ posts back for the batch's one check.
 """
 
 from dataclasses import dataclass, replace
+from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 
 from app.models.transaction import Transaction
+from app.models.transfer import Transfer
 from app.services.cash_ledger import (
+    AmountBasis,
     resolve_transaction_amount,
     resolve_transfer_amount,
 )
@@ -28,8 +31,11 @@ from app.services.transfer_legs import PlanItem, leg_of
 
 from ._context import (
     _build_carry_forward_context,
+    _CarriedDate,
     _classify_leftover_target,
+    _discrete_dates,
     _TargetKind,
+    _transfer_dates,
 )
 
 
@@ -53,6 +59,10 @@ BLOCK_AMBIGUOUS_TARGETS = "ambiguous_targets"
 # and none may be placed (ruling **R-BAL44**; ``_context._TargetKind.CLOSED``
 # carries the argument).
 BLOCK_CLOSED_TARGET = "closed_target"
+# A placed row or transfer that moves whole has nowhere to land: the target holds
+# a row of its definition, or another row answers the day the move would date it
+# (``_context._CarriedDate``).
+BLOCK_NOWHERE_TO_LAND = "nowhere_to_land"
 
 
 # ── Plan dataclasses ─────────────────────────────────────────────────
@@ -110,10 +120,11 @@ class CarryForwardPlan:  # pylint: disable=too-many-instance-attributes
         kind: One of ``PLAN_KIND_ENVELOPE`` / ``PLAN_KIND_DISCRETE`` /
             ``PLAN_KIND_TRANSFER``.  Drives the action-label rendering
             and is the partition the mutating service uses too.
-        blocked: True iff ``carry_forward_unpaid`` would refuse this
-            row (raising ``ValidationError`` and aborting the batch).
-            Only envelope plans can be blocked; discrete and transfer
-            plans are always actionable.
+        blocked: True if ``carry_forward_unpaid`` would refuse this
+            row (raising ``ValidationError`` and aborting the batch).  Two
+            things a transfer's move can meet are said only at the Confirm:
+            ruling R-C's refusal on a loan payment, and the undated index on a
+            transfer answering no occurrence, which finding plan#2992 owns.
         block_reason_code: Stable identifier for the block category
             when ``blocked`` is True; ``None`` otherwise.  See the
             ``BLOCK_*`` module constants.
@@ -150,8 +161,12 @@ class CarryForwardPlan:  # pylint: disable=too-many-instance-attributes
             others' in the batch withdraw together, named here because this
             is the first of their envelopes the modal lists (ruling
             **R-CC135**, :class:`SharedClose`); empty everywhere else.
+        due_after: The date a PLACED row or transfer is left with (rulings
+            **R-BAL33**, **R-BAL93**, **plan#2976**), so the modal says which
+            rows keep their dates and which take new ones.  ``None`` for every
+            other row, whose date the move does not write.
 
-    Pylint: ``too-many-instance-attributes`` (13/7) -- this is a cohesive
+    Pylint: ``too-many-instance-attributes`` (14/7) -- this is a cohesive
     value record -- one source row's planned carry-forward action -- read
     flat by its sole consumer, the carry-forward preview modal, which
     iterates ``preview.plans`` and renders one list item per plan.  The
@@ -176,6 +191,12 @@ class CarryForwardPlan:  # pylint: disable=too-many-instance-attributes
     target_will_be_generated: bool = False
     withdraws: Optional[MatchWithdrawal] = None
     shared: "tuple[SharedClose, ...]" = ()
+    due_after: Optional[date] = None
+
+    @property
+    def keeps_its_date(self) -> bool:
+        """True if the move leaves a placed row on the date it has."""
+        return self.due_after == self.item.due_date
 
 
 @dataclass(frozen=True)
@@ -185,8 +206,7 @@ class CarryForwardPreview:
     Read-only output of ``preview_carry_forward``.  ``plans`` ordering
     is stable and matches the partition order the mutating service
     uses internally (envelope -> discrete -> transfer) so the UI
-    presents the most consequential rows first (envelope rollovers
-    are the only ones that can block the batch).
+    presents the most consequential rows first.
     """
 
     source_period: object  # DerivedPeriod -- forward-declared, no import cycle.
@@ -198,7 +218,7 @@ class CarryForwardPreview:
         """True if any plan would refuse the batch.
 
         The mutating service is atomic on a per-batch basis: a single
-        blocked envelope plan rolls back every other plan's
+        blocked plan rolls back every other plan's
         mutations.  The modal disables Confirm whenever this is True
         so the user fixes the offending row first.
         """
@@ -230,7 +250,7 @@ class CarryForwardPreview:
 
     @property
     def blocked_count(self) -> int:
-        """Total number of blocked plans (always envelope rows)."""
+        """Total number of blocked plans."""
         return sum(1 for p in self.plans if p.blocked)
 
     @property
@@ -269,8 +289,7 @@ def preview_carry_forward(
 
     Returns one ``CarryForwardPlan`` per source row or transfer, partitioned
     and ordered the same way ``carry_forward_unpaid`` would process them
-    (envelope rollovers first because they are the only ones that
-    can block the batch; then discrete defers; then transfer moves, one per
+    (envelope rollovers first; then discrete defers; then transfer moves, one per
     transfer in id order).  Each plan carries enough
     structured data (entries_sum, leftover, target_estimated_after,
     block_reason_code) for the modal template to render the action
@@ -315,10 +334,9 @@ def preview_carry_forward(
 
     plans: List[CarryForwardPlan] = []
 
-    # Envelope rollovers first: they are the only kind that can block
-    # the batch, so showing them at the top of the modal puts the
-    # actionable failure cases in front of the user.  Each says what its
-    # close frees, from ONE read for the batch (leaf 5c-2c-2).
+    # Envelope rollovers first: they settle money, so showing them at the
+    # top of the modal puts what matters most in front of the user.  Each
+    # says what its close frees, from ONE read for the batch (leaf 5c-2c-2).
     frees = _what_each_close_frees(ctx.envelope_txns)
     for txn in ctx.envelope_txns:
         withdraws, shared = frees.get(txn.id, (None, ()))
@@ -329,11 +347,17 @@ def preview_carry_forward(
             withdraws=withdraws, shared=shared,
         ))
 
+    discrete_dates = _discrete_dates(ctx)
     for txn in ctx.discrete_txns:
-        plans.append(_build_discrete_plan(txn, ctx.basis))
+        plans.append(
+            _build_discrete_plan(txn, ctx.basis, discrete_dates.get(txn.id)),
+        )
 
+    transfer_dates = _transfer_dates(ctx)
     for transfer in ctx.transfers:
-        plans.append(_build_transfer_plan(transfer, ctx.basis))
+        plans.append(_build_transfer_plan(
+            transfer, ctx.basis, transfer_dates.get(transfer.id),
+        ))
 
     return CarryForwardPreview(
         source_period=ctx.source_period,
@@ -532,34 +556,62 @@ def _resolve_envelope_target_fields(source_txn, target_period,
     }
 
 
-def _build_discrete_plan(source_txn, basis):
+def _date_fields(carried: _CarriedDate | None) -> "dict[str, object]":
+    """Return the plan fields a carried date states.
+
+    Args:
+        carried: The row's carried date, or ``None`` for a row whose date the move
+            does not write.
+
+    Returns:
+        ``CarryForwardPlan`` fields: its date, and its refusal if it has one.
+    """
+    if carried is None:
+        return {}
+    if carried.refusal is None:
+        return {"due_after": carried.due}
+    return {
+        "due_after": carried.due,
+        "blocked": True,
+        "block_reason_code": BLOCK_NOWHERE_TO_LAND,
+        "block_reason": f"Carrying it is refused: {carried.refusal}",
+    }
+
+
+def _build_discrete_plan(
+    source_txn: Transaction, basis: AmountBasis, carried: _CarriedDate | None,
+) -> CarryForwardPlan:
     """Plan for a discrete (non-envelope) row: defer whole.
 
-    Discrete carry-forward never blocks: the relaxed partial unique
-    index allows the moved row to coexist with any rule-generated
-    sibling in the target period, and ad-hoc rows have no template
-    constraint at all.
+    A row of a recurring definition never blocks: the relaxed partial unique
+    index allows the moved row to coexist with any rule-generated sibling in
+    the target period, and a payback has no template constraint at all.  A
+    placed row is re-placed, and can have nowhere to land
+    (:func:`._context._discrete_dates`).
 
     Args:
         source_txn: The row that would move whole.
         basis: The request's amount basis, for the figure the modal names.
+        carried: Its carried date, or ``None`` for a row that is not placed.
     """
     return CarryForwardPlan(
         item=source_txn,
         kind=PLAN_KIND_DISCRETE,
         budget=resolve_transaction_amount(source_txn, basis),
-        blocked=False,
+        **_date_fields(carried),
     )
 
 
-def _build_transfer_plan(transfer, basis):
+def _build_transfer_plan(
+    transfer: Transfer, basis: AmountBasis, carried: _CarriedDate | None,
+) -> CarryForwardPlan:
     """Plan for a transfer: move whole.
 
     The mutating path delegates to ``transfer_service.update_transfer``
-    which moves the parent and both legs together.  No block
-    conditions exist in the carry-forward usage of that service
-    (target period ownership and is_override are both already
-    validated upstream).
+    which moves the parent and both legs together.  A placed transfer is
+    re-placed there and can have nowhere to land
+    (:func:`._context._transfer_dates`); the target period's ownership and
+    ``is_override`` are both already validated upstream.
 
     **The subject is the TRANSFER since plan step balance:X-bi-6-4c-2**, and
     two things follow.  Its figure is ``resolve_transfer_amount`` over the
@@ -580,10 +632,11 @@ def _build_transfer_plan(transfer, basis):
     Args:
         transfer: The transfer that would move.
         basis: The request's amount basis, for the figure the modal names.
+        carried: Its carried date, or ``None`` for a transfer that is not placed.
     """
     return CarryForwardPlan(
         item=leg_of(transfer, transfer.from_account_id),
         kind=PLAN_KIND_TRANSFER,
         budget=resolve_transfer_amount(transfer, basis),
-        blocked=False,
+        **_date_fields(carried),
     )

@@ -32,10 +32,8 @@ each:
     goes through (CLAUDE.md, Architecture): the move writes the transfer's
     period, and each side's leg reads it there.
 
-The whole batch is atomic.  The envelope branch raises a
-``ValidationError`` only on the AMBIGUOUS guard -- a destination period
-with more than one mutable row for the same (template, scenario), a
-corrupt pre-existing state.  The route catches it and rolls back the
+The whole batch is atomic.  A refusal is a ``ValidationError``, and
+``carry_forward_unpaid`` names each one.  The route catches it and rolls back the
 session, so no source is settled and no target is bumped on failure.
 
 The module also exposes ``preview_carry_forward`` -- a read-only
@@ -59,6 +57,7 @@ from ._execute import carry_forward_unpaid
 from ._preview import (
     BLOCK_AMBIGUOUS_TARGETS,
     BLOCK_CLOSED_TARGET,
+    BLOCK_NOWHERE_TO_LAND,
     PLAN_KIND_DISCRETE,
     PLAN_KIND_ENVELOPE,
     PLAN_KIND_TRANSFER,
@@ -79,4 +78,5 @@ __all__ = [
     "PLAN_KIND_TRANSFER",
     "BLOCK_AMBIGUOUS_TARGETS",
     "BLOCK_CLOSED_TARGET",
+    "BLOCK_NOWHERE_TO_LAND",
 ]

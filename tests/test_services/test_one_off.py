@@ -27,7 +27,7 @@ readers (``resolved_amount`` is the one resolver), never through a hand-built
 row -- a control routed round the door would grade a shape the app never
 writes.
 """
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from app import ref_cache
@@ -37,6 +37,7 @@ from app.models.template_amount_version import TemplateAmountVersion
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from app.services.one_off import (
+    RowToMove,
     due_date_after_move,
     due_date_for,
     OneOffToPlace,
@@ -74,6 +75,15 @@ def _period(seed_user, seed_periods_today, index):
     )
     assert period is not None
     return period
+
+
+def _moved(held, *, source, stated=None):
+    """A row off a card holding *held*, leaving *source*, *stated* typed beside the move."""
+    return RowToMove(
+        stated=held if stated is None else stated,
+        held=held,
+        source_start=source.start_date,
+    )
 
 
 class TestWhatTheProducerMints:
@@ -334,18 +344,106 @@ class TestAMovedRowIsRePlaced:
             source = _period(seed_user, seed_periods_today, 2)
             target = _period(seed_user, seed_periods_today, 3)
             assert due_date_after_move(
-                source.start_date, source_start=source.start_date, target=target,
+                _moved(source.start_date, source=source), target,
             ) == target.start_date
             stated = source.start_date + timedelta(days=6)
             assert due_date_after_move(
-                stated, source_start=source.start_date, target=target,
+                _moved(stated, source=source), target,
             ) == stated
             # A stated day that happens to BE the source's start reads as
             # the default and moves -- read by position, since R-BAL25
             # rejected a stored marker.
             assert due_date_after_move(
-                source.start_date, source_start=source.start_date, target=target,
+                _moved(source.start_date, source=source), target,
             ) != source.start_date
+
+    def test_a_typed_day_off_a_card_is_read_by_position_too(
+        self, app, seed_user, seed_periods_today,
+    ):
+        """Off a card a day typed beside the move is read as any other date is."""
+        with app.app_context():
+            source = _period(seed_user, seed_periods_today, 2)
+            target = _period(seed_user, seed_periods_today, 3)
+            held = source.start_date + timedelta(days=6)
+            typed = source.start_date + timedelta(days=3)
+            assert due_date_after_move(
+                _moved(held, source=source, stated=typed), target,
+            ) == typed
+            assert due_date_after_move(
+                _moved(held, source=source, stated=source.start_date), target,
+            ) == target.start_date
+
+
+class TestAMovedRowOnACard:
+    """``due_date_after_move`` on a card: ruling plan#2976, its clauses one by one.
+
+    The paychecks start Jan 16 and Jan 30, and today is Jan 22.  The doors and the money
+    are ``tests/test_routes/test_card_row_moved.py``.
+    """
+
+    _SOURCE_START = date(2026, 1, 16)
+    _TODAY = date(2026, 1, 22)
+
+    def _after(self, seed_user, seed_periods, held, target_index, **row):
+        """The date a row holding *held* is left with, moved to the paycheck at *target_index*."""
+        row.setdefault("stated", held)
+        row.setdefault("card_today", self._TODAY)
+        return due_date_after_move(
+            RowToMove(held=held, source_start=self._SOURCE_START, **row),
+            _period(seed_user, seed_periods, target_index),
+        )
+
+    def test_a_bill_whose_date_has_passed_keeps_it(self, seed_user, seed_periods):
+        """Jan 20 has passed, so it stays, moved to either paycheck."""
+        assert self._after(seed_user, seed_periods, date(2026, 1, 20), 2) == date(2026, 1, 20)
+        assert self._after(seed_user, seed_periods, date(2026, 1, 20), 0) == date(2026, 1, 20)
+
+    def test_a_bill_dated_today_keeps_it(self, seed_user, seed_periods):
+        """Today reads as passed: a row added today moves as it would tomorrow."""
+        assert self._after(seed_user, seed_periods, self._TODAY, 2) == self._TODAY
+
+    def test_a_bill_dated_ahead_follows_to_a_paycheck_not_started(
+        self, seed_user, seed_periods,
+    ):
+        """Dated Jan 23, a day ahead: Jan 30's paycheck has not started, so Jan 30."""
+        assert self._after(seed_user, seed_periods, date(2026, 1, 23), 2) == date(2026, 1, 30)
+
+    def test_a_bill_dated_ahead_follows_to_a_paycheck_started_or_ended(
+        self, seed_user, seed_periods,
+    ):
+        """Dated Jan 30, moved to Jan 16's (started) or Jan 2's (ended): today, Jan 22."""
+        assert self._after(seed_user, seed_periods, date(2026, 1, 30), 1) == self._TODAY
+        assert self._after(seed_user, seed_periods, date(2026, 1, 30), 0) == self._TODAY
+
+    def test_an_extra_payment_follows_whatever_its_date(self, seed_user, seed_periods):
+        """Dated before, on and after today alike: Jan 30's first day, then today."""
+        for held in (date(2026, 1, 20), self._TODAY, date(2026, 1, 25)):
+            assert self._after(
+                seed_user, seed_periods, held, 2, is_extra_payment=True,
+            ) == date(2026, 1, 30)
+            assert self._after(
+                seed_user, seed_periods, held, 1, is_extra_payment=True,
+            ) == self._TODAY
+
+    def test_a_date_typed_in_the_same_save_stands(self, seed_user, seed_periods):
+        """Typed, it stands on a bill or a payment, the source's first day included.
+
+        Off a card that first day reads as the default and moves; on a card it differs
+        from the held date, so it was typed.
+        """
+        for extra in (False, True):
+            for typed in (date(2026, 2, 3), self._SOURCE_START):
+                assert self._after(
+                    seed_user, seed_periods, date(2026, 1, 25), 2,
+                    stated=typed, is_extra_payment=extra,
+                ) == typed
+
+    def test_an_extra_payment_means_nothing_off_a_card(self, seed_user, seed_periods):
+        """With no ``card_today`` the row takes ruling R-BAL93: its Jan 20 stays."""
+        assert self._after(
+            seed_user, seed_periods, date(2026, 1, 20), 2,
+            card_today=None, is_extra_payment=True,
+        ) == date(2026, 1, 20)
 
 
 class TestTheOneWriterOfAPlacedRowsDate:

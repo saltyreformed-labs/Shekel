@@ -426,7 +426,7 @@ class Transaction(
     # seven of them already Paid.  ``pay_period_id`` is the FUNDING and the
     # owner may move it; this column is the cadence, and only re-placing a
     # one-off's date rewrites it (``one_off.state_due_date``, and
-    # carry-forward's ``re_placed_ids`` pass, which states the same rule in
+    # carry-forward's ``re_placed`` pass, which states the same rule in
     # SQL).
     #
     # **NULL means the row answers no occurrence**, and that is a real state

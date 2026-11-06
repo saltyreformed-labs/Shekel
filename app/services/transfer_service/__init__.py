@@ -90,6 +90,10 @@ from app.services.transfer_service._create import (
     create_transfer,
 )
 from app.services.transfer_service._delete import delete_transfer
+from app.services.transfer_service._placed import (
+    another_transfer_answers,
+    date_after_move,
+)
 from app.services.transfer_service._restore import restore_transfer
 from app.services.transfer_service._side_days import SideDay
 from app.services.transfer_service._settle import (
@@ -103,7 +107,9 @@ from app.services.transfer_service._update import (
 __all__ = [
     "SideDay",
     "TransferSpec",
+    "another_transfer_answers",
     "create_transfer",
+    "date_after_move",
     "delete_transfer",
     "restore_transfer",
     "record_leg_clearing",

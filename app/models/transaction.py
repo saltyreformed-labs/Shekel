@@ -400,9 +400,11 @@ class Transaction(
     # definition's series as of THIS day and an undated one cannot be priced
     # at all; a one-off's row is due on its paycheck's start unless the owner
     # states a day (ruling **R-BAL22**; the cutover at ``X-bi-7d-2`` dated
-    # every bare row so).  No other rule reads a transaction's own date: a
-    # credit payback is priced through its parent (as a transfer shadow was
-    # until plan step ``balance:X-bi-6-4d-2`` deleted the shadows), so on one
+    # every bare row so), or on a card today once that paycheck has started
+    # (ruling **plan#2965**, ``one_off.due_date_for``).  Off a card no other rule
+    # reads a transaction's own date: a credit payback is priced through its
+    # parent (as a transfer shadow was until plan step ``balance:X-bi-6-4d-2``
+    # deleted the shadows), so on one
     # the field is the owner's optional note of when the bill falls and NULL
     # means they gave none.
     due_date = db.Column(db.Date, nullable=True)

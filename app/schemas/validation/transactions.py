@@ -244,7 +244,7 @@ class InlineTransactionCreateSchema(BaseSchema):
 
     The same definition-plus-row split :class:`TransactionCreateSchema`
     describes, minus the due date the cell's forms do not offer (the row
-    takes its paycheck's start, ruling **R-BAL22**).
+    takes the day ``one_off.due_date_for`` gives one with none stated).
     Unlike TransactionCreateSchema, the name field is OPTIONAL: the
     quick-create form offers it so an ad-hoc row can be named at the
     Tier-1 entry point (grid audit A5), and the route falls back to the

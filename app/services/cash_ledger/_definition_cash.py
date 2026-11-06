@@ -132,10 +132,10 @@ def _stated_amount(template, on_date: date, subject: str) -> Decimal:
     schema's: ``ck_transactions_template_row_needs_due_date`` and
     ``ck_transfers_template_row_needs_due_date`` refuse the row at flush,
     every writer of a linked row dates it (``compute_due_date``'s answer,
-    which always exists, or the chosen paycheck's start where the definition
+    which always exists, or ``one_off.due_date_for``'s where the definition
     names no cadence -- the one-time transfer, the cleared-rule carry-forward
-    arm -- which is that function's own answer for a rule dated on its
-    funding payday),
+    arm -- whose paycheck's start is that function's own answer for a rule
+    dated on its funding payday),
     and an occurrence no row answers yet is dated by the same function -- so
     ``on_date`` is a ``date`` here by construction, and a refusal over a
     state that cannot be stored is a fence.

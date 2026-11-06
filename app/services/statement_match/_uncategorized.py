@@ -47,9 +47,12 @@ exists at all:
   requires;
 * it is **due on its paycheck's start** (**R-BAL22**): the bank stated the
   day the money POSTED, which is the row's settle day below, and no day it
-  was DUE -- so the row takes the one rule a one-off with no stated day
-  takes, and ``occurs_on`` records that day as the occurrence it answers
-  (**R-BAL25**);
+  was DUE -- so the row takes the rule a one-off with no stated day takes.  **On
+  a card it is due the day it posted**: a card's row counts from its date (ruling
+  **plan#2926**), so reverted to Projected and dated its paycheck's start it
+  would fall inside a true-up that never saw it.  Ruling **plan#2965**'s today is
+  for a row the owner adds; a line can be weeks old.  ``occurs_on`` records the
+  day as the occurrence it answers (**R-BAL25**);
 * it is the **BASELINE scenario**, unconditionally: a what-if scenario is a
   hypothesis about money that has not moved, and this row records money the
   bank has already moved.
@@ -72,7 +75,9 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import SettledDayBasisEnum, TxnTypeEnum
 from app.extensions import db
+from app.models.account import Account
 from app.services import transaction_service
+from app.services.account_projection import is_revolving
 from app.services.one_off import OneOffToPlace, place_one_off
 from app.services.pay_calendar import DerivedPeriod
 from app.services.scenario_resolver import require_baseline_scenario
@@ -214,6 +219,11 @@ def mint_uncategorized(
         ),
         movement.period,
         scenario_id=require_baseline_scenario(scope.owner_id).id,
+        due_date=(
+            movement.posts_on
+            if is_revolving(db.session.get(Account, scope.account_id))
+            else None
+        ),
     )
     transaction_service.apply_requested_status(
         row,

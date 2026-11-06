@@ -47,9 +47,11 @@ from app.extensions import db
 from app.models.transfer import Transfer
 from app.services.amount_ownership import derived_ownership
 from app.services import transfer_recurrence, transfer_service
+from app.services.one_off import due_date_for
 from app.services.scenario_resolver import require_baseline_scenario
 from app.utils.balance_predicates import is_projected_clause
 from app.routes._recurrence_conflict_chooser import flash_retained_notice
+from app.routes._row_day import today_on_a_card
 from app.routes._transfer_creation_helpers import (
     generate_transfers_for_all_periods,
 )
@@ -105,8 +107,14 @@ def _materialize_one_time_transfer(template, start_period):
     "this transfer has nowhere to land" answers sit together.  Both refusals
     roll back: this runs after the template is flushed.
 
-    **The due date is the CHOSEN period's start** -- the period *start_period*
-    names, which is not necessarily the one the transfer sits in
+    **An extra payment to a card is due today once the CHOSEN period has started**
+    (ruling **plan#2965**, :func:`~app.services.one_off.due_date_for`), because a
+    true-up includes a transfer dated on or before it (ruling **plan#2963**): this
+    form offers no date, and dated the period's start a true-up since then would
+    hold money the owner has only now added.
+
+    **Any other transfer's due date is the CHOSEN period's start** -- the period
+    *start_period* names, which is not necessarily the one the transfer sits in
     later.  Before plan step R2e-3 this ran ``compute_due_date`` against the
     template's ``Once`` RULE, which returned exactly that: a form-authored
     ``Once`` rule carries no ``day_of_month`` (verified: all four live ``Once``
@@ -165,6 +173,11 @@ def _materialize_one_time_transfer(template, start_period):
     # repeat moves money exactly once, so absence has no defined answer here
     # and the app already has one place that says so.
     scenario = require_baseline_scenario(current_user.id)
+    # Only the destination is asked: a card is refused as a source
+    # (``transfer_service._validation._reject_unmodeled_source``).
+    due = due_date_for(
+        None, start_period, card_today=today_on_a_card(template.to_account),
+    )
 
     try:
         transfer_service.create_transfer(
@@ -184,8 +197,8 @@ def _materialize_one_time_transfer(template, start_period):
                 category_id=template.category_id,
                 name=template.name,
                 transfer_template_id=template.id,
-                due_date=start_period.start_date,
-                occurs_on=start_period.start_date,
+                due_date=due,
+                occurs_on=due,
             ),
         )
     except (NotFoundError, ShekelValidationError) as exc:

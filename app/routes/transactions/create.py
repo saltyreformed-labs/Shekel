@@ -26,9 +26,10 @@ from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
 )
-from app.services.one_off import OneOffToPlace, place_one_off
+from app.services.one_off import OneOffToPlace, due_date_for, place_one_off
 from app.utils.auth_helpers import require_owner
 from app.routes._render_helpers import render_transaction_cell
+from app.routes._row_day import today_on_a_card
 from app.routes.transactions._bp import transactions_bp
 from app.routes.transactions._helpers import (
     _create_schema,
@@ -79,7 +80,7 @@ def _reject_transaction_on_loan(account: Account) -> tuple[str, int] | None:
     return None
 
 
-def _place_submitted_one_off(data, period):
+def _place_submitted_one_off(data, period, account):
     """Mint the one-off the validated form *data* describes, in *period*.
 
     The one body both create doors share once their IDOR probes have run:
@@ -102,12 +103,18 @@ def _place_submitted_one_off(data, period):
     ``AmountOwnership.own(...)`` onto the row.  The flags the form posts are
     the definition's, not the row's (**R-BAL20**).
 
+    **Neither form offers a due date**, so a row these doors add carries the day
+    :func:`~app.services.one_off.due_date_for` gives one with none stated, which
+    on a card is today once its paycheck has started (ruling **plan#2965**), but
+    for an envelope, whose date no card counts from.
+
     Args:
         data: The schema-loaded POST payload.  ``name`` is present -- the
             inline door has already defaulted it -- and ``estimated_amount``
             is required on both schemas.
         period: The submitted paycheck, as ``_resolve_owned_period`` derived
             it from the owner's calendar.
+        account: The submitted account, ownership-checked by the caller.
 
     Returns:
         The placed, flushed :class:`~app.models.transaction.Transaction`.
@@ -125,7 +132,11 @@ def _place_submitted_one_off(data, period):
         ),
         period,
         scenario_id=data["scenario_id"],
-        due_date=data.get("due_date"),
+        due_date=due_date_for(
+            data.get("due_date"),
+            period,
+            card_today=None if data["is_envelope"] else today_on_a_card(account),
+        ),
     )
     # A note is the ROW's -- the popover edits it there -- and the one field
     # the producer does not state.
@@ -206,7 +217,7 @@ def create_inline():
     # surfaces at the definition's or the row's flush, not at the commit, and
     # both must render the same designed 400.
     try:
-        txn = _place_submitted_one_off(data, period)
+        txn = _place_submitted_one_off(data, period, objs[Account])
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
@@ -271,7 +282,7 @@ def create_transaction():
 
     # Inside the net for the reason create_inline gives: the producer flushes.
     try:
-        txn = _place_submitted_one_off(data, period)
+        txn = _place_submitted_one_off(data, period, objs[Account])
         db.session.commit()
     except IntegrityError:
         db.session.rollback()

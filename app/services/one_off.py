@@ -33,11 +33,13 @@ placing the row a rule-less envelope's leftover rolls into (**R-BAL44**).
   version the series is flat on every date, so the row's date can move
   freely and prices nothing differently.
 * **A one-off is due on its placed paycheck's START unless the owner states
-  a date** (**R-BAL22**) -- the rule the transfer twin states for its own row
-  (``routes/transfers/_instances._materialize_one_time_transfer``; ``X-ci``
-  is where the two spellings meet), balance-neutral by construction because
+  a date** (**R-BAL22**), balance-neutral by construction because
   ``DerivedPeriod.attribution_day`` already budgets an undated item to its
-  paycheck's start.  (The spec also named
+  paycheck's start.  **On a card it is due today once that paycheck has
+  started** (ruling **plan#2965**), because a card's row counts from its date.
+  :func:`due_date_for` states both, and the one-time transfer
+  (``routes/transfers/_instances._materialize_one_time_transfer``) dates its
+  row through it too.  (The spec also named
   ``carry_forward_service._leftover_due_date``; its rule-less arm was
   deleted at 7a and it reads the cadence now.)
 * **The row records its own due date as the occurrence it answers**
@@ -163,23 +165,57 @@ class OneOffToPlace:  # pylint: disable=too-many-instance-attributes
     companion_visible: bool = False
 
 
-def due_date_for(stated: "date | None", period: DerivedPeriod) -> date:
-    """Return the day a one-off placed in *period* is due (**R-BAL22**).
+def due_date_for(
+    stated: "date | None",
+    period: DerivedPeriod,
+    *,
+    card_today: "date | None" = None,
+) -> date:
+    """Return the day a row placed in *period* is due (**R-BAL22**, **plan#2965**).
 
-    The one statement of the rule for a row this module places: the owner's
-    stated day, else the paycheck's START.  Balance-neutral by construction
-    -- ``DerivedPeriod.attribution_day`` already budgets an undated item to
-    its paycheck's start -- but on a card, where a row counts from this date
-    (ruling plan#2926), and the day amount rule 3 prices the row on.
+    The one statement of the rule: the day the owner stated; else, for a row the
+    owner adds to a card or an extra payment into one, today once the paycheck has
+    started and otherwise its first day (ruling **plan#2965**); else the paycheck's
+    first day.  This is also the day amount rule 3 prices the row on.
+
+    **Why a card differs.**  Off a card the default is balance-neutral:
+    ``DerivedPeriod.attribution_day`` budgets a row to its paycheck either way, and
+    an overdue one lands tomorrow (ruling R-G).  On a card a row counts from this
+    date (ruling plan#2926) and a true-up includes what is dated on or before it
+    (ruling plan#2963).  Trued up to $0 on Jan 20, with $100 added on Jan 22 to Jan
+    16's paycheck: dated Jan 16 the true-up holds it and the card reads $0.00, and
+    dated Jan 22 the card owes $100.00.  A paycheck that has ended still takes today:
+    the ruling says "once its paycheck has started".
+
+    **The day of a true-up is inside it.**  A true-up closes its own day, so a row
+    added on Jan 22 after a true-up dated Jan 22 is dated into it and the card does
+    not read it, as a row dated any earlier day is not read.  The ruling's words are
+    "on or before it", and the same cost is stated for a transfer at
+    ``balance_at._cash_plan._day_it_counts_from``.
+
+    **Who passes** *card_today*.  Only a door the owner adds a row at, and not for an
+    envelope: no card counts from an envelope's date
+    (``balance_at._cash_plan._day_it_counts_from``), and today's date on a row in an
+    older paycheck would refuse its own carry-forward.  Nothing else does.  A bank
+    line's row states the day the line posted on a card
+    (``statement_match._uncategorized``), because a line can be weeks old; a bank-born
+    or carried-forward envelope's row takes the first day; and a row moved between
+    paychecks has its own rule (:func:`due_date_after_move`).
 
     Args:
         stated: The day the owner (or the bank) said it falls, or ``None``.
         period: The paycheck the row is placed in.
+        card_today: The owner's day, resolved by the route because this module
+            reads no clock, for a row on a card; ``None`` for any other row.
 
     Returns:
         The due date.
     """
-    return stated if stated is not None else period.start_date
+    if stated is not None:
+        return stated
+    if card_today is None:
+        return period.start_date
+    return max(card_today, period.start_date)
 
 
 def due_date_after_move(
@@ -198,13 +234,20 @@ def due_date_after_move(
     date a rolled-forward one-off reads on the dashboard pulse and in
     payment timeliness is the same whichever door moved it.
 
+    **On a card this read is not yet right, and finding plan#2969 owns that.**  Ruling
+    plan#2965 is about a row with no date typed and a move passes no ``card_today``,
+    but the position read decides a card's money, because there a row counts from its
+    date.  A row on its paycheck's first day takes the target's first day, wherever
+    that falls against a true-up, and any other row keeps its date, an extra payment
+    not yet sent included.
+
     Worked: Kayla's Kindle, born in the paycheck starting 2026-09-04 (due
     09-04 by default), carried forward to the 09-18 paycheck and paid 09-20
     -- due 09-18 and two days late, where the date the move left behind
     read fourteen days overdue.  A typed 09-10 stays 09-10 and reads overdue
-    honestly.  The balance is identical under either date: a one-off's
-    series is flat (**R-BAL21**) and ``attribution_day`` budgets the row to
-    its paycheck.
+    honestly.  Off a card the balance is identical under either date: a
+    one-off's series is flat (**R-BAL21**) and ``attribution_day`` budgets the
+    row to its paycheck.
 
     Args:
         due_date: The row's date before the move.
@@ -386,8 +429,9 @@ def place_row_of(
         period: The paycheck to place the row in, as the owner's calendar
             derived it.
         scenario_id: The scenario the row is placed in.
-        due_date: The owner's stated day, or ``None`` for the paycheck's
-            start (:func:`due_date_for`).
+        due_date: The day it falls, or ``None`` for the paycheck's start
+            (:func:`due_date_for`).  A door adding a row to a card has already
+            resolved today into this.
 
     Returns:
         The placed, flushed :class:`~app.models.transaction.Transaction`.
@@ -440,8 +484,9 @@ def place_one_off(
         scenario_id: The scenario the ROW is placed in -- the submitted one
             at the grid, the baseline for a bank-born row.  The definition
             carries none (**R-BAL26**).
-        due_date: The day the owner said it falls, or ``None`` for the
-            paycheck's start (**R-BAL22**).
+        due_date: The day it falls, or ``None`` for the paycheck's start
+            (:func:`due_date_for`).  A door adding a row to a card has already
+            resolved today into this.
 
     Returns:
         The placed, flushed :class:`~app.models.transaction.Transaction`;

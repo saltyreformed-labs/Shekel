@@ -132,7 +132,8 @@ def _reject_generated_due_date_edit(txn, data):
     owns its figure or is priced through its parent, so amount rule 1 or 5
     answers it and nothing reads its date; the form still offers it,
     clearable.  A RULE-LESS DEFINITION's row: the date is the OWNER's to
-    state (ruling **R-BAL22** -- due on its placed paycheck's start unless
+    state (ruling **R-BAL22** -- due on its placed paycheck's start, or on a
+    card today once that paycheck has started, ruling **plan#2965**, unless
     the owner says otherwise), no cadence derives it and no regeneration puts
     it back, so MOVING it is allowed.  **The price follows the date**: the
     row is priced by its definition's series AS OF that day (amount rule 3),

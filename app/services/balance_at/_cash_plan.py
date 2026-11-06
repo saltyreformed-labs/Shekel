@@ -314,13 +314,13 @@ def _day_it_counts_from(item: _PlanItem, stated_through: date) -> "date | None":
     * **An undated row keeps R-G**: it has no date to count from, and its
       ``due_date`` of ``None`` says so.
     * **A transfer keeps R-G until a true-up is dated on or after its own date**,
-      then counts from that date, so that true-up holds it.  Until then both its
-      legs land together, so money is never off checking before it reaches the card
-      or on the card before it leaves checking.  Once a balance read off the card's
-      website is stated, that balance holds money sent by then, marked or not
-      (ruling plan#2887), so landing the leg again would take it off twice: $800
-      owed, $200 sent Jan 5, $600 stated Jan 10, and the next payment is $600
-      rather than $400.  Checking's leg still lands tomorrow.  The cost: if the $200
+      then counts from that date, so that true-up holds it (ruling plan#2963).
+      Until then both its legs land together, so money is never off checking before
+      it reaches the card or on the card before it leaves checking.  Once a balance
+      read off the card's website is stated, that balance holds money sent by then,
+      marked or not (ruling plan#2887), so landing the leg again would take it off
+      twice: $800 owed, $200 sent Jan 5, $600 stated Jan 10, and the next payment is
+      $600 rather than $400.  Checking's leg still lands tomorrow.  The cost: if the $200
       had not really gone, the owner states $800, the row reads $800 and checking
       reads $200 low until he marks the transfer with a later day than the true-up;
       a true-up closes its own day, so money moved later that same day is inside it.

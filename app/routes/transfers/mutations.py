@@ -125,7 +125,8 @@ def _reject_generated_due_date_edit(xfer, data):
     point in its definition's series, silently, and the next regeneration
     puts it back.  A ONE-TIME transfer -- a rule-less definition's placed
     transfer, or a cleared cadence's survivor: the date is the OWNER's to
-    state (ruling **R-BAL93**: due on its placed paycheck's start unless the
+    state (ruling **R-BAL93**: due on its placed paycheck's start, or into a
+    card today once that paycheck has started, ruling **plan#2965**, unless the
     owner says otherwise, re-placed by a period move), no cadence derives it
     and no pass rewrites it, so MOVING it is allowed and the price follows
     the date (amount rule 3 reads the definition's series as of the new

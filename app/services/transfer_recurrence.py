@@ -285,7 +285,7 @@ def propagate_to_unruled_template(template, transfers) -> "list[int]":
     was created UNDATED**: it answered no occurrence (``occurs_on`` was
     ``None``), and an undated row is retained rather than retired.  Plan step
     ``balance:X-ci-1`` (ruling **R-BAL94**) creates it answering the occurrence
-    its ``due_date`` names (the chosen paycheck's start), and a date MOVE since
+    its ``due_date`` names (``one_off.due_date_for``'s), and a date MOVE since
     then gives an older one its occurrence too
     (``transfer_service.update_transfer``), so that second route now covers
     only rows still undated (one-time transfers born before X-ci-1 and a

@@ -80,6 +80,11 @@ limit_request_field_size = 8190
 # X-Forwarded-For / CF-Connecting-IP and bypass per-IP rate limits.
 # See audit finding F-015 (proxy header spoofing) and Commit C-33.
 #
+# Gunicorn itself uses this list only for the forwarded SCHEME: it sets
+# REMOTE_ADDR from the socket whatever the list says.  The client's address
+# comes from the application, which reads this same variable
+# (app/utils/client_address.py), so the variable is one trusted list for both.
+#
 # Set FORWARDED_ALLOW_IPS to:
 #   - the trusted reverse-proxy container's IP, or
 #   - the Docker bridge CIDR that contains ONLY the trusted

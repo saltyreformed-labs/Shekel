@@ -287,6 +287,14 @@ class BaseConfig:
     # individual Limit objects.
     RATELIMIT_DEFAULT = "200 per hour;30 per minute"
 
+    # The callers whose X-Forwarded-For the app believes, so that it sees each
+    # client's address rather than nginx's.  The same setting gunicorn reads
+    # for the forwarded scheme (gunicorn.conf.py), and it is required there, so
+    # a gunicorn process cannot reach this empty; empty here means a process
+    # with no proxy in front of it, which trusts no caller.  Parsed and refused
+    # if malformed in ``create_app``.
+    FORWARDED_ALLOW_IPS = os.getenv("FORWARDED_ALLOW_IPS", "")
+
     # Fail-closed posture: if Valkey becomes unreachable, do NOT silently
     # drop rate-limit checks (which would let an attacker brute-force
     # auth during a Valkey outage), and do NOT fall back to per-worker
@@ -553,6 +561,10 @@ class TestConfig(BaseConfig):
     WTF_CSRF_ENABLED = False
     LOGIN_DISABLED = False
     RATELIMIT_ENABLED = False
+
+    # Production's bridge, pinned so the suite is hermetic: a test that sends
+    # a request from this range with nginx's headers is what production sees.
+    FORWARDED_ALLOW_IPS = "172.32.0.0/24"
 
     # Pin the idle window regardless of any IDLE_TIMEOUT_MINUTES in the
     # developer's shell or .env, so the suite is hermetic.  The dev

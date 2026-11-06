@@ -15,12 +15,14 @@ from app.models.journal_entry import JournalEntry
 from app.models.loan_params import LoanParams
 from app.models.loan_features import RateHistory
 
-from tests._test_helpers import (
-    create_settled_transfer,
+from app.services.ledger_lines import linked_key
+from tests._ledger_reads import linked_net_by_date
+from tests._stored_ledger import (
     linked_ledger_account,
-    linked_net_by_date,
+    stored_net_by_date,
     transfer_side_journal_filter,
 )
+from tests._test_helpers import create_settled_transfer
 
 from ._helpers import (
     _create_loan_account,
@@ -78,7 +80,7 @@ class TestEscrowPostingSync:
         )
         db.session.commit()
         linked_id = linked_ledger_account(db.session, loan.id).id
-        assert linked_net_by_date(db.session, linked_id, scenario_id)[
+        assert stored_net_by_date(db.session, linked_id, scenario_id)[
             date(2026, 1, 20)
         ] == Decimal("500.00")
 
@@ -104,7 +106,7 @@ class TestEscrowPostingSync:
             {"day": date(2026, 1, 5), "entry_id": cash_entry_id},
         )
         db.session.commit()
-        assert linked_net_by_date(db.session, linked_id, scenario_id)[
+        assert stored_net_by_date(db.session, linked_id, scenario_id)[
             date(2026, 1, 5)
         ] == Decimal("1000.00")
 
@@ -112,7 +114,7 @@ class TestEscrowPostingSync:
         assert resp.status_code == 200
 
         # The escrow write ran the loan sync: the forged entry is re-dated back.
-        by_date = linked_net_by_date(db.session, linked_id, scenario_id)
+        by_date = stored_net_by_date(db.session, linked_id, scenario_id)
         assert by_date.get(date(2026, 1, 5), Decimal("0.00")) == Decimal("0.00")
         assert by_date[date(2026, 1, 20)] == Decimal("500.00")
 
@@ -139,8 +141,8 @@ class TestEscrowPostingSync:
             amount=Decimal("1000.00"), settled_on=date(2026, 1, 20),
         )
         db.session.commit()
-        linked_id = linked_ledger_account(db.session, loan.id).id
-        nets_before = linked_net_by_date(db.session, linked_id, scenario_id)
+        linked = linked_key(loan)
+        nets_before = linked_net_by_date(db.session, linked, scenario_id)
         assert nets_before[date(2026, 1, 20)] == Decimal("500.00")
 
         resp = auth_client.post(
@@ -155,7 +157,7 @@ class TestEscrowPostingSync:
             .filter_by(account_id=loan.id, name="Property Tax").count() == 1
         )
         # No money moved: the linked ledger is byte-identical per date.
-        assert linked_net_by_date(db.session, linked_id, scenario_id) == nets_before
+        assert linked_net_by_date(db.session, linked, scenario_id) == nets_before
 
 
 # ── Rate History Tests ───────────────────────────────────────────────

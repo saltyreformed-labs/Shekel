@@ -13,9 +13,13 @@ import app.services
 from app import ref_cache
 from app.enums import PostingKindEnum
 from app.extensions import db as _db
-from tests._test_helpers import linked_ledger_account, loan_correction_entries
+from tests._stored_ledger import (
+    linked_ledger_account,
+    loan_correction_entries,
+    stored_account_net,
+)
 
-from ._helpers import _P1, _AS_OF, _make_loan, _settle, _resolver_balance, _ledger_balance
+from ._helpers import _P1, _AS_OF, _make_loan, _settle, _resolver_balance
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +36,7 @@ from ._helpers import _P1, _AS_OF, _make_loan, _settle, _resolver_balance, _ledg
 # **INDEPENDENCE IS GRADED AS A VALUE, AND ONLY BACKED BY IMPORT SHAPE**, and
 # plan step balance:X-au-g-2c-1 is where that inverted.  The primary control is
 # ``test_perturbing_the_posted_ledger_does_not_move_the_reference`` below: move
-# the posted ledger, then assert ``_ledger_balance`` moved and
+# the stored ledger, then assert its net moved and
 # ``_resolver_balance`` did not.  That grades the property the oracle actually
 # needs -- no ledger VALUE reaches the reference -- and it is sound against
 # every route a static check cannot see: raw SQL, an ORM backref traversed off
@@ -345,7 +349,7 @@ class TestResolverIsLedgerFree:
     def test_perturbing_the_posted_ledger_does_not_move_the_reference(
         self, app, db, seed_user, seed_periods,
     ):
-        """Moving the posted ledger moves ``_ledger_balance`` and NOT the reference.
+        """Moving the stored ledger moves its balance and NOT the reference.
 
         **The oracle's independence, graded as a value.**  The parallel run
         compares two derivations of one loan's balance and is only evidence
@@ -356,16 +360,18 @@ class TestResolverIsLedgerFree:
         already in the closure, or a dynamic import all move a ledger figure
         with no import edge to see.
 
-        This injects a leg on the loan's LINKED ledger -- the exact rows
-        :func:`_ledger_balance` negates and sums, and the exact rows a
+        This injects a leg on the loan's LINKED stored row -- the exact rows a
         tautological reference would be reading -- and asserts the two sides
         respond differently.  A reference that had quietly started reading the
-        ledger moves with it and fails HERE, whatever import shape it used.
+        stored ledger moves with it and fails HERE, whatever import shape it
+        used.  An injected leg is a state only the store can hold, so the moved
+        side is the stored net rather than :func:`_ledger_balance`, whose read
+        follows the records.  This goes with the store.
 
         Raw SQL, flushed and never committed, then rolled back: the per-entry
         balanced trigger is DEFERRED and validates only at COMMIT, which is the
         same technique (and the same safety argument) as
-        :meth:`TestOracleIsNotVacuous.test_trial_balance_catches_an_injected_leg`
+        :meth:`TestOracleIsNotVacuous.test_stored_trial_balance_catches_an_injected_leg`
         two classes up.
         """
         with app.app_context():
@@ -376,7 +382,7 @@ class TestResolverIsLedgerFree:
             db.session.commit()
             scenario_id = seed_user["scenario"].id
 
-            before_ledger = _ledger_balance(loan.id, scenario_id)
+            before_stored_net = stored_account_net(loan.id, scenario_id)
             before_reference = _resolver_balance(loan.id, scenario_id, _AS_OF)
 
             linked = linked_ledger_account(db.session, loan.id)
@@ -393,10 +399,10 @@ class TestResolverIsLedgerFree:
             })
             db.session.flush()
 
-            # The perturbation landed: the LEDGER side moved by exactly it.
-            assert _ledger_balance(loan.id, scenario_id) == (
-                before_ledger + Decimal("250.00")
-            ), "the injected leg did not reach the ledger derivation"
+            # The perturbation landed: the STORED side moved by exactly it.
+            assert stored_account_net(loan.id, scenario_id) == (
+                before_stored_net - Decimal("250.00")
+            ), "the injected leg did not reach the stored net"
 
             # ...and the reference did not see it.  This is the assertion the
             # whole parallel run rests on.

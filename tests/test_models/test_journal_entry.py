@@ -48,9 +48,9 @@ from app.models.journal_entry import (
     PostingImmutableError,
 )
 from app.models.pay_period import PayPeriod
+from tests._stored_ledger import ledger_accounts_for_account
 from tests._test_helpers import (
     create_account_of_type,
-    ledger_accounts_for_account,
     make_balanced_entry,
 )
 

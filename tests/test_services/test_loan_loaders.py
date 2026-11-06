@@ -31,11 +31,11 @@ from app.services import (
     loan_resolver,
 )
 from app.utils.dates import anchor_chronology_key
+from tests._ledger_reads import posted_loan_balance_at
 from tests._test_helpers import (
     create_loan_account,
     insert_tracking_start_event,
     insert_trueup_event,
-    posted_loan_balance_at,
 )
 
 _PRINCIPAL = Decimal("250000.00")

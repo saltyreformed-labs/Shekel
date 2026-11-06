@@ -12,7 +12,9 @@ from app.enums import LedgerAccountClassEnum, PostingKindEnum, PostingSourceEnum
 from app.extensions import db as _db
 from app.models.journal_entry import Posting
 from app.services import posting_service, status_seam
+from app.services.ledger_lines import category_key, linked_key
 from app.utils.dates import display_today
+from tests._ledger_reads import account_net, ledger_net
 from tests._test_helpers import (
     add_txn,
     an_entered_day,
@@ -26,8 +28,7 @@ from ._helpers import (
     _legs_by_ledger,
     _scenario_id,
     _entries_for_transaction,
-    _period_nets,
-    _ledger_total,
+    _period_nets_for_transaction,
     _add_txn_entry,
     _resolve_category_ledger,
 )
@@ -118,18 +119,19 @@ class TestTransactionSettlePostsBalancedEntry:
                 category_key="Salary",
             )
             _db.session.commit()
-            cash_ledger = _ledger_id(seed_user["account"])
-            salary_ledger = _resolve_category_ledger(
-                seed_user, "Salary", LedgerAccountClassEnum.INCOME,
-            ).id
 
             [entry] = posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
-            legs = _legs_by_ledger(entry.id)
-            assert legs[cash_ledger] == Decimal("2000.00")
-            assert legs[salary_ledger] == Decimal("-2000.00")
-            assert sum(legs.values()) == Decimal("0.00")
+            assert _period_nets_for_transaction(txn.id, _scenario_id(seed_user)) == {
+                period.id: {
+                    linked_key(seed_user["account"]): Decimal("2000.00"),
+                    category_key(
+                        seed_user["categories"]["Salary"].id,
+                        LedgerAccountClassEnum.INCOME,
+                    ): Decimal("-2000.00"),
+                },
+            }
             kinds = {
                 leg.posting_kind_id
                 for leg in _db.session.query(Posting)
@@ -159,17 +161,19 @@ class TestTransactionSettlePostsBalancedEntry:
                 settled_amount="45.00",
             )
             _db.session.commit()
-            cash_ledger = _ledger_id(seed_user["account"])
-            groceries_ledger = _resolve_category_ledger(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            ).id
 
-            [entry] = posting_service.sync_transaction_postings(txn)
+            posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
-            legs = _legs_by_ledger(entry.id)
-            assert legs[cash_ledger] == Decimal("-45.00")
-            assert legs[groceries_ledger] == Decimal("45.00")
+            assert _period_nets_for_transaction(txn.id, _scenario_id(seed_user)) == {
+                period.id: {
+                    linked_key(seed_user["account"]): Decimal("-45.00"),
+                    category_key(
+                        seed_user["categories"]["Groceries"].id,
+                        LedgerAccountClassEnum.EXPENSE,
+                    ): Decimal("45.00"),
+                },
+            }
 
     def test_envelope_posts_debit_only_effect(self, app, db, seed_user):
         """A settled envelope's DEBIT purchases post, each on its own day; the close nothing.
@@ -199,10 +203,6 @@ class TestTransactionSettlePostsBalancedEntry:
                 settlement=settlement_if_settling(txn, ref_cache.status_id(StatusEnum.DONE)),
             )
             _db.session.commit()
-            cash_ledger = _ledger_id(seed_user["account"])
-            groceries_ledger = _resolve_category_ledger(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            ).id
 
             # The close: nothing to post, the purchases are in flight.
             assert posting_service.sync_transaction_postings(txn) == []
@@ -212,10 +212,15 @@ class TestTransactionSettlePostsBalancedEntry:
             entries = posting_service.sync_transaction_postings(txn)
             _db.session.commit()
             assert len(entries) == 2
-            [(_, nets)] = _period_nets(entries).items()
-            assert nets[cash_ledger] == Decimal("-110.00")
-            assert nets[groceries_ledger] == Decimal("110.00")
-            assert sum(nets.values()) == Decimal("0.00")
+            assert _period_nets_for_transaction(txn.id, _scenario_id(seed_user)) == {
+                period.id: {
+                    linked_key(seed_user["account"]): Decimal("-110.00"),
+                    category_key(
+                        seed_user["categories"]["Groceries"].id,
+                        LedgerAccountClassEnum.EXPENSE,
+                    ): Decimal("110.00"),
+                },
+            }
 
 
 class TestTransactionAllCreditNoop:
@@ -303,23 +308,23 @@ class TestEnvelopeCreditDominatesKeepsExpenseSign:
                 settlement=settlement_if_settling(txn, ref_cache.status_id(StatusEnum.DONE)),
             )
             _db.session.commit()
-            cash_ledger = _ledger_id(seed_user["account"])
-            groceries_ledger = _resolve_category_ledger(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            ).id
 
             assert posting_service.sync_transaction_postings(txn) == []
             record_settle_day(one, an_entered_day(display_today()))
-            [entry] = posting_service.sync_transaction_postings(txn)
+            [_entry] = posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
-            legs = _legs_by_ledger(entry.id)
             # The $1 debit books as a proper outflow -- NOT a positive (inflow)
-            # leg, which a credits-exceed-effective sign flip would produce.
-            assert legs[cash_ledger] == Decimal("-1.00")
-            assert legs[cash_ledger] < Decimal("0.00")
-            assert legs[groceries_ledger] == Decimal("1.00")
-            assert sum(legs.values()) == Decimal("0.00")
+            # line, which a credits-exceed-effective sign flip would produce.
+            assert _period_nets_for_transaction(txn.id, _scenario_id(seed_user)) == {
+                period.id: {
+                    linked_key(seed_user["account"]): Decimal("-1.00"),
+                    category_key(
+                        seed_user["categories"]["Groceries"].id,
+                        LedgerAccountClassEnum.EXPENSE,
+                    ): Decimal("1.00"),
+                },
+            }
 
 
 class TestEnvelopeRefundDominatesBooksAnInflow:
@@ -378,11 +383,6 @@ class TestEnvelopeRefundDominatesBooksAnInflow:
             # The figure is DERIVED, never recorded -- see the class docstring.
             assert txn.covering_movements == []
 
-            cash_ledger = _ledger_id(seed_user["account"])
-            groceries_ledger = _resolve_category_ledger(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            ).id
-
             assert posting_service.sync_transaction_postings(txn) == []
             record_settle_day(one, an_entered_day(display_today()))
             record_settle_day(refund, an_entered_day(display_today()))
@@ -390,11 +390,15 @@ class TestEnvelopeRefundDominatesBooksAnInflow:
             _db.session.commit()
 
             assert len(entries) == 2
-            [(_, legs)] = _period_nets(entries).items()
-            assert legs[cash_ledger] == Decimal("49.00")
-            assert legs[cash_ledger] > Decimal("0.00")
-            assert legs[groceries_ledger] == Decimal("-49.00")
-            assert sum(legs.values()) == Decimal("0.00")
+            assert _period_nets_for_transaction(txn.id, _scenario_id(seed_user)) == {
+                period.id: {
+                    linked_key(seed_user["account"]): Decimal("49.00"),
+                    category_key(
+                        seed_user["categories"]["Groceries"].id,
+                        LedgerAccountClassEnum.EXPENSE,
+                    ): Decimal("-49.00"),
+                },
+            }
 
 
 class TestTransactionIdempotency:
@@ -448,10 +452,6 @@ class TestTransactionReversal:
                 status_enum=StatusEnum.DONE, category_key="Groceries",
             )
             _db.session.commit()
-            groceries_ledger = _resolve_category_ledger(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            ).id
-
             posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
@@ -461,9 +461,16 @@ class TestTransactionReversal:
             [_reversal] = posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
-            assert _ledger_total(groceries_ledger) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                seed_user["account"].id, _scenario_id(seed_user),
+            assert ledger_net(
+                _db.session,
+                category_key(
+                    seed_user["categories"]["Groceries"].id,
+                    LedgerAccountClassEnum.EXPENSE,
+                ),
+                _scenario_id(seed_user),
+            ) == Decimal("0.00")
+            assert account_net(
+                _db.session, seed_user["account"].id, _scenario_id(seed_user),
             ) == Decimal("1000.00")
             assert len(_entries_for_transaction(txn.id)) == 2
 
@@ -496,9 +503,6 @@ class TestTransactionReversal:
                 status_enum=StatusEnum.DONE, category_key="Groceries",
             )
             _db.session.commit()
-            a_ledger = _resolve_category_ledger(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            ).id
 
             # 1. Settle in category A.
             posting_service.sync_transaction_postings(txn)
@@ -525,13 +529,22 @@ class TestTransactionReversal:
             posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
-            b_ledger = _resolve_category_ledger(
-                seed_user, "Rent", LedgerAccountClassEnum.EXPENSE,
-            ).id
-            assert _ledger_total(a_ledger) == Decimal("0.00")
-            assert _ledger_total(b_ledger) == Decimal("100.00")
-            assert posting_service.account_posting_total(
-                seed_user["account"].id, _scenario_id(seed_user),
+            assert ledger_net(
+                _db.session,
+                category_key(
+                    seed_user["categories"]["Groceries"].id, LedgerAccountClassEnum.EXPENSE,
+                ),
+                _scenario_id(seed_user),
+            ) == Decimal("0.00")
+            assert ledger_net(
+                _db.session,
+                category_key(
+                    seed_user["categories"]["Rent"].id, LedgerAccountClassEnum.EXPENSE,
+                ),
+                _scenario_id(seed_user),
+            ) == Decimal("100.00")
+            assert account_net(
+                _db.session, seed_user["account"].id, _scenario_id(seed_user),
             ) == Decimal("1000.00")
             # settle + revert + re-settle = three append-only entries.
             assert len(_entries_for_transaction(txn.id)) == 3
@@ -583,10 +596,22 @@ class TestTransactionReversal:
             assert cash_ledger not in legs
             assert sum(legs.values()) == Decimal("0.00")
             # Net books: A zero, B carries the expense, cash on its anchor.
-            assert _ledger_total(a_ledger) == Decimal("0.00")
-            assert _ledger_total(b_ledger) == Decimal("100.00")
-            assert posting_service.account_posting_total(
-                seed_user["account"].id, _scenario_id(seed_user),
+            assert ledger_net(
+                _db.session,
+                category_key(
+                    seed_user["categories"]["Groceries"].id, LedgerAccountClassEnum.EXPENSE,
+                ),
+                _scenario_id(seed_user),
+            ) == Decimal("0.00")
+            assert ledger_net(
+                _db.session,
+                category_key(
+                    seed_user["categories"]["Rent"].id, LedgerAccountClassEnum.EXPENSE,
+                ),
+                _scenario_id(seed_user),
+            ) == Decimal("100.00")
+            assert account_net(
+                _db.session, seed_user["account"].id, _scenario_id(seed_user),
             ) == Decimal("1000.00")
 
 

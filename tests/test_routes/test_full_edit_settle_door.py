@@ -38,22 +38,25 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import MovementFigureSourceEnum, StatusEnum
 from app.extensions import db
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.transaction import Transaction
 from app.services import transaction_service
 from app.services.settle_day import record_settle_day, recorded_settle_day
 from app.services.state_machine import allowed_transitions
 from app.utils.dates import display_today
+from tests._ledger_reads import (
+    family_movement_ids,
+    linked_key_of,
+    movement_nets_by_key,
+    net_posted_by_day,
+)
 from tests._test_helpers import (
-    typed,
-    family_journal_filter,
     add_entry,
     amount_basis_for,
     an_asserted_day,
     an_entered_day,
     create_envelope_txn,
     generate_row_of,
-    net_posted_by_day,
+    typed,
 )
 from app.services import entry_service, status_seam, transaction_service
 from app.services.cash_ledger import contribution_of, resolve_transaction_amount
@@ -156,27 +159,11 @@ def _full_edit_save(auth_client, txn, status_id, **overrides):
 
 
 def _cash_leg(txn_id, account_id):
-    """Return the net posted amount on the account's ledger for *txn_id*.
-
-    Debit-positive, so a settled expense reads negative: this is what the
-    double-entry ledger says the row cost, read back independently of the row.
-    """
-    # pylint: disable=import-outside-toplevel  -- collection-time safety, the
-    # convention the shared helpers use.
-    from tests._test_helpers import linked_ledger_account
-
-    ledger_id = linked_ledger_account(db.session, account_id).id
-    return (
-        db.session.query(
-            db.func.coalesce(db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .join(JournalEntry, JournalEntry.id == Posting.journal_entry_id)
-        .filter(
-            family_journal_filter(txn_id),
-            Posting.ledger_account_id == ledger_id,
-        )
-        .scalar()
-    )
+    """Return the net the row's movements book on the account's own line."""
+    txn = db.session.get(Transaction, txn_id)
+    return movement_nets_by_key(
+        db.session, family_movement_ids(txn), txn.scenario_id,
+    ).get(linked_key_of(db.session, account_id), Decimal("0.00"))
 
 
 class TestTheDropdownBooksWhatTheRowCost:
@@ -242,8 +229,8 @@ class TestTheDropdownBooksWhatTheRowCost:
         Two identically-shaped rows: one settled through the popover's Status
         dropdown, one through the grid's Mark Paid button.  Both must land on
         $48.98 with the same ledger effect.  Asserted as an EQUALITY between
-        the two doors rather than against a constant, so a future change that
-        moves both together still passes and a change that moves one fails.
+        the two doors, so a change that moves one fails, and the ledger half
+        states its figure too, because two doors booking nothing would agree.
         """
         with app.app_context():
             via_dropdown = _gas_envelope(seed_user, seed_periods_today[3])
@@ -264,9 +251,19 @@ class TestTheDropdownBooksWhatTheRowCost:
             assert settled_contribution(dropdown_row) == settled_contribution(button_row)
             assert settled_figure(dropdown_row) == settled_figure(button_row)
             assert dropdown_row.status_id == button_row.status_id
-            assert _cash_leg(
-                dropdown_id, seed_user["account"].id,
-            ) == _cash_leg(button_id, seed_user["account"].id)
+            # The close books nothing of its own (ruling R-BAL77), so two $0.00
+            # legs would agree whatever either door did: the ledger half compares
+            # what each row books once its purchase is dated.
+            for row in (dropdown_row, button_row):
+                [purchase] = row.purchases
+                entry_service.update_entry(
+                    purchase.id, seed_user["user"].id,
+                    settle_day=an_entered_day(display_today()),
+                )
+            db.session.commit()
+            booked = _cash_leg(dropdown_id, seed_user["account"].id)
+            assert booked == _cash_leg(button_id, seed_user["account"].id)
+            assert booked == Decimal("-48.98")
 
     def test_an_entry_less_envelope_still_books_its_budget(
         self, app, db, auth_client, seed_user, seed_periods_today,
@@ -507,7 +504,7 @@ class TestARevertTakesBackWhatTheSettleDerived:
             assert status_seam.recorded_settlement(reverted) is None
             assert reverted.settled_on is None
             assert _plan_worth(reverted) == Decimal("80.00")
-            # The settle's postings reverse with it: nothing is left booked.
+            # The settle's money leaves with it: nothing is left booked.
             assert _cash_leg(txn_id, seed_user["account"].id) == Decimal("0.00")
 
     def test_a_BILLs_hand_typed_figure_SURVIVES_the_revert_round_trip(
@@ -1082,7 +1079,7 @@ class TestAFigureArrivingALONEAtTheTransactionPATCH:
                 "a figure correction moved the day the money moved"
             )
             assert net_posted_by_day(
-                family_journal_filter(txn_id),
+                family_movement_ids(txn_id),
             ) == {day: Decimal("245.32")}
 
     def test_a_SECOND_correction_replaces_the_first(
@@ -1128,7 +1125,7 @@ class TestAFigureArrivingALONEAtTheTransactionPATCH:
                 Decimal("251.08"), MovementFigureSourceEnum.TYPED,
             )
             assert net_posted_by_day(
-                family_journal_filter(txn_id),
+                family_movement_ids(txn_id),
             ) == {day: Decimal("251.08")}
 
     def test_re_posting_a_CORRECTED_figure_unchanged_writes_nothing(

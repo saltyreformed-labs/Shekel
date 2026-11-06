@@ -51,6 +51,7 @@ from app.routes.auth._helpers import (
     _totp_accepted_or_key_failure,
     _verify_totp_with_replay_logging,
 )
+from app.utils.auth_helpers import fresh_login_required
 from app.utils.log_events import (
     AUTH,
     EVT_BACKUP_CODES_REGENERATED,
@@ -560,8 +561,13 @@ def mfa_confirm():
 
 
 @auth_bp.route("/mfa/regenerate-backup-codes", methods=["POST"])
+@fresh_login_required()
 def regenerate_backup_codes():
-    """Generate and display new backup codes, replacing the old ones."""
+    """Generate and display new backup codes, replacing the old ones.
+
+    Takes a step-up (ruling plan#3010): new codes void the old ones, so a
+    stolen session must not be able to mint them.
+    """
     mfa_config = (
         db.session.query(MfaConfig)
         .filter_by(user_id=current_user.id)

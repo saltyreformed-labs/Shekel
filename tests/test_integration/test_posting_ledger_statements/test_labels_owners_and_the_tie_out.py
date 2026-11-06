@@ -21,11 +21,11 @@ from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 import sqlalchemy as sa
 
+from tests._stored_ledger import linked_ledger_account
 from tests._test_helpers import (
     capture_sql_statements,
     create_account_of_type,
     create_settled_cash_transaction,
-    linked_ledger_account,
 )
 
 from ._helpers import (
@@ -195,10 +195,10 @@ class TestScenarioAndOwnerIsolation:
             assert income1.expense.total == Decimal("60.00")
             assert income2.expense.total == Decimal("80.00")
             _assert_reader_matches_independent(
-                user1, seed_user["scenario"].id, sheet1,
+                seed_user["scenario"].id, sheet1,
             )
             _assert_reader_matches_independent(
-                user2, seed_second_user["scenario"].id, sheet2,
+                seed_second_user["scenario"].id, sheet2,
             )
             _assert_ledger_self_consistent()
 

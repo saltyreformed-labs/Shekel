@@ -44,11 +44,11 @@ from app.models.pay_period import PayPeriod
 from app.models.ref import AccountType
 from app.posting_infrastructure import apply_ledger_append_only_privileges
 from app.services import account_service
+from tests._stored_ledger import ledger_accounts_for_account
 from tests._test_helpers import (
     add_entry,
     create_account_of_type,
     create_envelope_txn,
-    ledger_accounts_for_account,
     make_balanced_entry,
     one_off_row_of,
 )

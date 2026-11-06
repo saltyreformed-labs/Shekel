@@ -47,20 +47,22 @@ from app.services import (
     loan_posting_service,
     posting_service,
 )
+from tests._stored_ledger import (
+    find_loan_ledger_account,
+    ledger_account_of_kind,
+    ledger_accounts_for_account,
+    linked_ledger_account,
+    stored_ledger_net,
+    transfer_family_journal_filter,
+)
 from tests._test_helpers import (
     add_anchor_history,
     create_account_of_type,
     create_loan_with_trueup,
     create_settled_transfer,
-    find_loan_ledger_account,
     freeze_today,
-    ledger_account_of_kind,
-    ledger_accounts_for_account,
-    ledger_net,
-    linked_ledger_account,
     load_init_database_module,
     load_migration_module,
-    transfer_family_journal_filter,
 )
 
 
@@ -232,7 +234,7 @@ class TestBackfillPostsHistoricalCorrection:
             ) == _ANCHOR
             equity = _anchor_equity_account(db.session, savings.id)
             assert equity is not None
-            assert ledger_net(
+            assert stored_ledger_net(
                 db.session, equity.id, scenario_id,
             ) == -_ANCHOR
 

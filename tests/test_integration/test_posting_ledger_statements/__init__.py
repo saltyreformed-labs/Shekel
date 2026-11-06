@@ -3,9 +3,11 @@
 The correctness gate for the READ side of Step 5: the two confirmed-ledger
 statements (:mod:`app.services.ledger_report_service`) -- an income statement
 (pay-period AND calendar windows) and a balance sheet (as-of a date, with a
-trial-balance tie-out) -- read against an independent second opinion re-derived
-from the posting ledger and the source tables, never against the readers that
-produced the numbers.  This is the FOURTH reconciliation oracle, the read-side
+trial-balance tie-out) -- read against a second opinion re-derived from the
+worked-out lines and the source tables.  It shares those lines with the readers,
+so it is independent of their attribution and signing, not of the lines, which
+the source tables and hand-computed figures grade.  This is the FOURTH
+reconciliation oracle, the read-side
 sibling of the account-anchor write oracle
 (the ``test_posting_ledger_account_anchor_reconciliation`` package); together they pin the
 Step-5 promise that the trial balance closes app-wide and ``A = L + E`` is
@@ -20,8 +22,9 @@ other posting-ledger oracles are:
     (e.g. a $1000 opening + $3000 salary - $400 groceries - $50 uncategorized -
     $150 transfer out => Checking asset 3400.00);
   * **an independent balance-sheet re-derivation** (:func:`_independent_bs`) --
-    a genuine second opinion that groups ``account_postings`` by ledger-account
-    CLASS directly (a different path than the reader's source-bucket
+    a genuine second opinion that groups the worked-out lines
+    (``tests/_ledger_reads.py``, plan step plan#2913) by chart CLASS directly (a
+    different path than the reader's source-bucket
     attribution), signs each class from a test-local debit-normal set (NOT the
     ref-cache flag the reader signs by), and derives retained earnings from the
     Income + Expense debit nets, so a classification / signing / retained-earnings
@@ -48,8 +51,8 @@ requires.
 
 An adversarial case proves the oracle is not vacuous: injecting one unbalanced
 leg pushes ``tie_out.ledger_net`` off zero and flips ``in_balance`` to False.
-Every other (balanced) fixture asserts the whole-DB trial balance is zero and no
-entry is malformed (:func:`_assert_ledger_self_consistent`), so a lone-leg bug
+Every other (balanced) fixture asserts the read's trial balance is zero and no
+stored entry is malformed (:func:`_assert_ledger_self_consistent`), so a lone-leg bug
 cannot slip past.  All money is ``Decimal`` from strings, with the arithmetic
 shown per the testing standard.
 """

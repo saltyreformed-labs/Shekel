@@ -2,29 +2,27 @@
 
 Plan step B2 (``docs/audits/balance_architecture/README.md``).  Parallel-runs
 the loan fold (:func:`app.services.balance_at._fold.fold_loan_balances`) against
-the sum of the POSTED legs
-(:func:`tests._test_helpers.posted_loan_balance_at`) on
+the sum of the worked-out ledger's lines
+(:func:`tests._ledger_reads.posted_loan_balance_at`) on
 **EVERY DAY** of each generated loan shape's domain -- the shape matrix step C3
 must not move money across (plan Section 7.4).
 
 **The counterparty is the test suite's own window, since plan step E1e.**  The
 production sum-of-postings readers were deleted there: the seam had folded away
 every one of their ``app/`` callers, and grading the postings is the job this
-file exists for, so the window belongs on this side of the line.  It reads the
-same legs by the same rule (``-(sum where entry_date <= as_of)``, ``None`` with
-no opening) -- what changed is that nothing can now render it on a screen.
+file exists for, so the window belongs on this side of the line.  It sums the
+lines by the rule ``-(sum where entry_date <= as_of)``, ``None`` for a loan with
+no terms, and nothing can render it on a screen.
 
 **What this proves, and what it does not.**  The fold reads the loan's SOURCE
-events; the window sums the POSTED legs the sync wrote.  The two SHARE the walk
-by design (the postings are a projection of the fold -- plan Section 3), so an
-equality on every day is the EQUIVALENCE proof C3's cutover rests on -- the
-posted cache faithfully projects the fold -- and NOT an independent proof of the
-split's VALUE.  The split's value is pinned elsewhere and stays there: the
+events; the window sums the lines the read derives from the same walk.  So an
+equality on every day grades how the read dates and signs those lines.  It says
+nothing of the stored ledger, which it read until plan#2913 and does not now, and
+it is NOT an independent proof of the split's VALUE.  That is pinned elsewhere: the
 Step-4 reconciliation oracle's parallel run against the un-seeded resolver
 (the ``test_posting_ledger_loan_reconciliation`` package), A2's hand-computed Taxes
 oracle, and B1's hand-computed fold figures (``test_loan_ledger.py``).  Do not
-read this file's equalities as the correctness proof; they are the equivalence
-proof.
+read this file's equalities as the correctness proof.
 
 **Sampling is forbidden.**  A 14-day sample once scored perfect while wrong by
 $178,103.41 on 22% of days (plan Section 7.2), so every test walks EVERY day of
@@ -54,6 +52,7 @@ from app.models.transaction import Transaction
 from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.services.balance_at._fold import fold_loan_balances
 from app.services.rate_period_engine import period_for_date
+from tests._ledger_reads import posted_loan_balance_at
 from tests._test_helpers import (
     create_loan_account,
     create_loan_with_trueup,
@@ -62,7 +61,6 @@ from tests._test_helpers import (
     freeze_today,
     insert_tracking_start_event,
     last_covered_day,
-    posted_loan_balance_at,
 )
 
 # The controlled loan terms, shared with B1's hand-computed suite
@@ -158,12 +156,11 @@ def _assert_fold_matches_postings_every_day(
 
 
 class TestFoldMatchesPostingsAcrossTheShapeMatrix:
-    """Every required shape (plan Section 7.4), every day: fold == posted reader.
+    """Every required shape (plan Section 7.4), every day: fold == the read's window.
 
-    The fold walks the loan's anchors and settled-payment rows; the reader sums
-    the posted journal legs the sync wrote.  Two disjoint reads of one loan
-    agreeing on EVERY day of the domain is what proves the posted cache
-    faithfully projects the fold, which is what C3's cutover rests on.
+    The fold walks the loan's anchors and settled-payment rows; the window sums
+    the worked-out lines of that walk.  Agreement on EVERY day of the domain
+    grades how the read dates and signs them.
     """
 
     def test_trued_up_loan_with_payments(

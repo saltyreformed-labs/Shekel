@@ -47,6 +47,7 @@ import sqlalchemy as sa
 from app import ref_cache
 from app.enums import (
     AccountOpeningSourceEnum,
+    LedgerAccountKindEnum,
     PostingSourceEnum,
     SettledDayBasisEnum,
 )
@@ -69,7 +70,9 @@ from app.services.opening_service import (
 )
 from app.services.settle_day import SettleDay, record_settle_day
 from app.utils.dates import display_today
-from app.services.ledger_account_service import find_linked_ledger_account
+from app.services.ledger_lines import account_counter_key, linked_key
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import scenario_lines, source_lines
 from tests._test_helpers import (
     account_never_asserted,
     create_account_of_type,
@@ -126,41 +129,32 @@ def _opening_count(account):
     return len(_openings(account))
 
 
-def _linked_ledger_total(account, source_name, entry_date=None):
-    """Return the account's OWN leg total for one posting source.
+def _linked_ledger_total(scenario_id, account, source, entry_date=None):
+    """Return the net of the account's OWN line for one posting source.
 
-    **Only the LINKED row, never the counter**, and that distinction is what a
+    **Only the linked key, never the counter**, and that distinction is what a
     first version of these cases got wrong: an anchor correction books a
-    balanced PAIR, and both legs carry the same ``account_id`` -- the linked
-    chart row and the per-account counter row (``ledger_account_service._counters``).
-    Summing over ``account_id`` therefore returns ``0.00`` for every state, so
-    the assertion passed on the broken tree and on the fixed one alike.
-    ``find_linked_ledger_account`` is THE definition of "which ledger row is
-    this account's own", asked rather than re-derived here.
+    balanced PAIR, and both legs name the same account, so summing over the
+    account returns ``0.00`` for every state and the assertion passes on the
+    broken tree and on the fixed one alike.
 
     Args:
-        account: The account whose linked ledger to total.
-        source_name: The ``ref.posting_sources`` name to restrict to.
+        scenario_id: The scenario.
+        account: The account whose own line to total.
+        source: The :class:`~app.enums.PostingSourceEnum` member to restrict to.
         entry_date: One civil day, or ``None`` for every day.
 
     Returns:
-        The signed ``Decimal`` total of the linked legs.
+        The signed ``Decimal`` net of those lines.
     """
-    linked = find_linked_ledger_account(account.id)
-    assert linked is not None, "the account carries no linked chart row"
-    sql = """
-        SELECT COALESCE(SUM(ap.amount), 0)
-          FROM budget.journal_entries je
-          JOIN budget.account_postings ap ON ap.journal_entry_id = je.id
-          JOIN ref.posting_sources ps ON ps.id = je.source_kind_id
-         WHERE ps.name = :source
-           AND ap.ledger_account_id = :linked
-    """
-    params = {"source": source_name, "linked": linked.id}
-    if entry_date is not None:
-        sql += " AND je.entry_date = :day"
-        params["day"] = entry_date
-    return Decimal(str(_db.session.execute(sa.text(sql), params).scalar()))
+    return sum(
+        (
+            line.amount
+            for line in source_lines(_db.session, linked_key(account), scenario_id, source)
+            if entry_date is None or line.entry_date == entry_date
+        ),
+        Decimal("0.00"),
+    )
 
 
 class TestTheWriter:
@@ -940,23 +934,13 @@ class TestThePostedLedgerFollows:
     general ledger describing an opening the app no longer holds.
     """
 
-    @staticmethod
-    def _trial_balance():
-        """Return the app-wide sum of every posting amount."""
-        return Decimal(str(_db.session.execute(sa.text(
-            "SELECT COALESCE(SUM(amount), 0) FROM budget.account_postings"
-        )).scalar()))
-
     def test_the_opening_entry_moves_to_the_new_day_and_the_old_one_nets_to_zero(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """One balanced delta per key, over the UNION of target and posted.
+        """The opening books on its new day and holds nothing on its old one.
 
-        A key present only in the posted set reverses to zero; a key present
-        only in the target posts fresh.  So the account's LINKED leg sums to
-        the new equity at the new day and to nothing at the old one -- rather
-        than to both, which is what a reconcile keyed on the target alone would
-        leave.
+        The account's OWN line sums to the new equity at the new day and to
+        nothing at the old one, rather than to both.
         """
         with app.app_context():
             account = _cash_account(
@@ -974,17 +958,20 @@ class TestThePostedLedgerFollows:
             # The account's OWN leg, day by day.  Summing over ``account_id``
             # instead would fold the balanced counter leg in beside it and
             # read 0.00 on every state -- broken tree and fixed one alike.
+            scenario_id = seed_user["scenario"].id
+            opening = PostingSourceEnum.ACCOUNT_OPENING
             assert _linked_ledger_total(
-                account, "account_opening", new_day,
+                scenario_id, account, opening, new_day,
             ) == Decimal("650.00")
             assert _linked_ledger_total(
-                account, "account_opening", old_day,
+                scenario_id, account, opening, old_day,
             ) == Decimal("0.00")
-            # And ACROSS every day, so the old entry was REVERSED rather than
-            # merely joined by a new one: the opening books exactly once.
+            # And ACROSS every day: the opening books exactly once.
             assert _linked_ledger_total(
-                account, "account_opening",
+                scenario_id, account, opening,
             ) == Decimal("650.00")
+            # The door's re-sync: the store followed the records, cell by cell.
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_the_opening_books_its_counter_to_ANCHOR_EQUITY(
         self, app, db, seed_user, seed_periods,
@@ -1018,30 +1005,23 @@ class TestThePostedLedgerFollows:
                 opening=BooksOpening(new_day, Decimal("650.00")),
             )
 
-            counters = db.session.execute(sa.text("""
-                SELECT lk.name, SUM(ap.amount)
-                  FROM budget.journal_entries je
-                  JOIN budget.account_postings ap
-                    ON ap.journal_entry_id = je.id
-                  JOIN budget.ledger_accounts la
-                    ON la.id = ap.ledger_account_id
-                  JOIN ref.ledger_account_kinds lk ON lk.id = la.kind_id
-                 WHERE je.source_kind_id = :opening_source
-                   AND la.account_id = :a
-                   AND la.id <> :linked
-                 GROUP BY lk.name
-            """), {
-                "opening_source": ref_cache.posting_source_id(
-                    PostingSourceEnum.ACCOUNT_OPENING,
-                ),
-                "a": account.id,
-                "linked": find_linked_ledger_account(account.id).id,
-            }).fetchall()
+            opening_source = ref_cache.posting_source_id(
+                PostingSourceEnum.ACCOUNT_OPENING,
+            )
+            counters = {
+                line.key: line.amount
+                for line in scenario_lines(db.session, seed_user["scenario"].id)
+                if line.source_kind_id == opening_source
+                and line.key.record_id == account.id
+                and line.key != linked_key(account)
+            }
 
-            # The linked leg is +650.00 (asserted above), so its counter is
-            # -650.00 and it lands on the equity row and nowhere else.
-            assert {row[0]: Decimal(str(row[1])) for row in counters} == {
-                "anchor_equity": Decimal("-650.00"),
+            # The linked line is +650.00 (asserted above), so its counter is
+            # -650.00 and it lands on the equity key and nowhere else.
+            assert counters == {
+                account_counter_key(
+                    LedgerAccountKindEnum.ANCHOR_EQUITY, account.id,
+                ): Decimal("-650.00"),
             }
 
     def test_a_restatement_re_bases_the_LATER_assertions_correction(
@@ -1063,7 +1043,9 @@ class TestThePostedLedgerFollows:
             standing = account_opening_fact(account.id)
 
             def _trueup_total():
-                return _linked_ledger_total(account, "account_trueup")
+                return _linked_ledger_total(
+                    seed_user["scenario"].id, account, PostingSourceEnum.ACCOUNT_TRUEUP,
+                )
 
             # The ABSOLUTES, hand-computed, because a delta whose two sides
             # come from one producer read twice passes on a build carrying a

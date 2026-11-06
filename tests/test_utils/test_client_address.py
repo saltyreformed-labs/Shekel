@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 from flask import request
+from flask_login import login_user
 
 from app import create_app
 from app.config import TestConfig
@@ -24,6 +25,7 @@ from app.extensions import db
 from app.utils.client_address import (
     believe_forwarded_address_from,
     parse_trusted_networks,
+    rate_limit_key,
 )
 
 NGINX = "172.32.0.4"
@@ -174,6 +176,66 @@ class TestWhoseHeaderIsBelieved:
             "172.32.0.0/24",
         )
         assert seen["wsgi.url_scheme"] == "http"
+
+
+class TestWhatALimitCountsASignedOutVisitorAs:
+    """The key a signed-out request counts against, per kind of address."""
+
+    @pytest.mark.parametrize(
+        "address, expected",
+        [
+            pytest.param("8.8.8.8", "ip:8.8.8.8", id="public-ipv4-alone"),
+            pytest.param("100.64.0.5", "ip:100.64.0.5", id="tailnet-ipv4-alone"),
+            pytest.param("10.10.100.2", "ip:10.10.100.2", id="lan-ipv4-alone"),
+            pytest.param(
+                "2606:4700:1234:5678:aaaa:bbbb:cccc:dddd",
+                "ip:2606:4700:1234:5678::/64",
+                id="public-ipv6-by-its-64",
+            ),
+            pytest.param(
+                "2606:4700:1234:5678::1",
+                "ip:2606:4700:1234:5678::/64",
+                id="same-64-same-key",
+            ),
+            pytest.param(
+                "2606:4700:1234:5679::1",
+                "ip:2606:4700:1234:5679::/64",
+                id="next-64-next-key",
+            ),
+            pytest.param(
+                "fd7a:115c:a1e0:ab12:4843:cd96:6258:ac6c",
+                "ip:fd7a:115c:a1e0:ab12:4843:cd96:6258:ac6c",
+                id="tailnet-ipv6-alone",
+            ),
+            pytest.param("::ffff:8.8.8.8", "ip:8.8.8.8", id="mapped-is-its-ipv4"),
+            pytest.param("not-an-address", "ip:not-an-address", id="unparseable"),
+        ],
+    )
+    def test_the_key(self, app, address, expected):
+        """Each kind of address counts as the test's name says.
+
+        The mapped case is the trap: this Python calls ``::ffff:8.8.8.8``
+        global, so a /64 rule reading it unconverted would put every such
+        visitor in one count, ``::/64``.
+        """
+        with app.test_request_context(environ_base={"REMOTE_ADDR": address}):
+            assert rate_limit_key() == expected
+
+
+class TestWhatALimitCountsASignedInPersonAs:
+    """A signed-in request counts against its account, wherever it arrives from."""
+
+    def test_the_key_is_the_account_whatever_the_address(self, app, seed_user):
+        """Two addresses, one signed-in account, one key: its id.
+
+        Read straight from the key function because a real session cannot move:
+        strong session protection signs out a session whose address changes.
+        """
+        user = seed_user["user"]
+        for address in ("8.8.8.8", "9.9.9.9"):
+            with app.test_request_context(environ_base={"REMOTE_ADDR": address}):
+                login_user(user)
+                assert rate_limit_key() == f"user:{user.id}"
 
 
 class TestTheFactoryInstallsIt:

@@ -9,8 +9,8 @@ Asserts that the rate-limit posture introduced by audit Commit C-06
   4 of ~93 mutating routes were rate-limited pre-remediation.
 - The ``/health`` endpoint is exempt so the Docker / Nginx healthcheck
   loops do not burn through the per-IP budget every 30 seconds.
-- The configured key_func is ``get_remote_address`` so per-IP
-  separation actually works.
+- The configured key_func is ``rate_limit_key``, so each client and each
+  signed-in account has its own counter (plan#2170).
 - A storage backend outage (Valkey unreachable in production)
   fail-closed surfaces as a server error, NOT a silent degradation
   to per-worker memory or to allowing the request through (which
@@ -34,11 +34,13 @@ ConnectionError (see flask_limiter._extension.py:1142-1169).
 
 # pylint: disable=redefined-outer-name
 
+import logging
 from unittest.mock import patch
 
 import pytest
 
 from app import create_app
+from app.utils.log_events import EVT_RATE_LIMIT_EXCEEDED
 
 
 # Window math for the default ceiling.  RATELIMIT_DEFAULT in BaseConfig
@@ -47,6 +49,12 @@ from app import create_app
 # rejection (1-indexed: hits 1..30 succeed, hit 31 returns 429).
 _DEFAULT_PER_MINUTE = 30
 _HITS_TO_TRIP_DEFAULT = _DEFAULT_PER_MINUTE + 1
+
+# ``/login``'s own limit, 5 per 15 minutes, in ``app/routes/auth/credentials.py``.
+_LOGIN_LIMIT = 5
+
+# An address on ``TestConfig.FORWARDED_ALLOW_IPS``, as nginx is in production.
+_NGINX = "172.32.0.4"
 
 
 def _enable_limiter_on_fresh_app():
@@ -365,32 +373,290 @@ class TestFailClosedOnStorageOutage:
             _disable_limiter(limiter, rate_app)
 
 
-class TestKeyFunctionWiresRemoteAddress:
-    """Limiter must key on the request's remote_addr so per-IP
-    separation actually works.  Without this, every request would key
-    on the same constant and rate limits would be shared across all
-    users (effectively turning the limit into an application-wide cap).
+class TestKeyFunctionIsTheOneKey:
+    """The limiter counts by the one key: an account, or else a client.
+
+    Without it every request would key on the same constant and rate limits
+    would be shared across all users, the defect plan#2170 fixed.
     """
 
-    def test_key_func_is_get_remote_address(self):
-        """The module-level limiter is constructed with key_func=get_remote_address.
+    def test_key_func_is_rate_limit_key(self):
+        """The module-level limiter is constructed with key_func=rate_limit_key.
 
         The limiter is instantiated at module load time in
         ``app/extensions.py``.  ``key_func`` is the only constructor
         argument we pass (everything else flows through app.config in
         init_app), so a regression that drops the argument would
-        silently key every request on a fixed string.  This test
+        silently fall back to ``get_remote_address``, whose count a signed-out
+        visitor shares with a signed-in account on that address.  This test
         guards that exact construction.
         """
         # pylint: disable=import-outside-toplevel
-        from flask_limiter.util import get_remote_address
-
         from app.extensions import limiter
+        from app.utils.client_address import rate_limit_key
 
         # Flask-Limiter stores the key_func as ``_key_func`` on the
         # Limiter instance.  Comparing function identity (is) is
         # stronger than name comparison and catches re-imports.
-        assert limiter._key_func is get_remote_address  # pylint: disable=protected-access
+        assert limiter._key_func is rate_limit_key  # pylint: disable=protected-access
+
+
+def _through_nginx(client_address, arrived_with=None):
+    """Return the request arguments for *client_address* arriving through nginx.
+
+    The direct caller is an address on ``TestConfig.FORWARDED_ALLOW_IPS``, and
+    ``X-Forwarded-For`` is what ``$proxy_add_x_forwarded_for`` writes: whatever
+    the request arrived with, then the address nginx saw.
+
+    Args:
+        client_address: The address nginx saw.
+        arrived_with: What the client put in the header itself, or ``None``.
+
+    Returns:
+        Keyword arguments for a test client's request method.
+    """
+    forwarded = (
+        client_address if arrived_with is None
+        else f"{arrived_with}, {client_address}"
+    )
+    return {
+        "environ_base": {"REMOTE_ADDR": _NGINX},
+        "headers": {"X-Forwarded-For": forwarded},
+    }
+
+
+def _spend_the_login_limit(rate_client, **request_arguments):
+    """POST an empty login form up to its limit, each answered short of a 429.
+
+    An empty form is refused by the schema, so no password is checked and no
+    account is touched: all this spends is the limit.
+
+    Args:
+        rate_client: A client of an app with the limiter on.
+        **request_arguments: Passed to each POST.
+    """
+    for hit in range(_LOGIN_LIMIT):
+        response = rate_client.post("/login", data={}, **request_arguments)
+        assert response.status_code == 200, (
+            f"hit {hit + 1} of {_LOGIN_LIMIT} unexpectedly returned "
+            f"{response.status_code}"
+        )
+
+
+class TestEachClientHasItsOwnCounter:
+    """Requests through nginx count per client, and no header buys another count."""
+
+    @pytest.fixture
+    def rate_client(self, app):
+        """A client of a fresh app with the limiter on.
+
+        Yields:
+            The test client.
+        """
+        # pylint: disable=unused-argument
+        rate_app, client, limiter = _enable_limiter_on_fresh_app()
+        yield client
+        _disable_limiter(limiter, rate_app)
+
+    def test_two_clients_through_nginx_do_not_share_a_counter(self, rate_client):
+        """One client spending the login limit leaves another's untouched.
+
+        This is the defect itself: both arrive from nginx's address, and
+        until plan#2170 they drained one counter.
+        """
+        _spend_the_login_limit(rate_client, **_through_nginx("8.8.8.8"))
+
+        assert rate_client.post(
+            "/login", data={}, **_through_nginx("8.8.8.8"),
+        ).status_code == 429
+        response = rate_client.post(
+            "/login", data={}, **_through_nginx("9.9.9.9"),
+        )
+        assert response.status_code == 200
+        assert b"Invalid email or password" in response.data
+
+    def test_a_client_supplied_entry_buys_no_new_counter(self, rate_client):
+        """A different leftmost entry each time is still one client."""
+        for hit in range(_LOGIN_LIMIT):
+            response = rate_client.post(
+                "/login", data={},
+                **_through_nginx("8.8.8.8", arrived_with=f"6.6.6.{hit}"),
+            )
+            assert response.status_code == 200
+
+        assert rate_client.post(
+            "/login", data={},
+            **_through_nginx("8.8.8.8", arrived_with="6.6.6.99"),
+        ).status_code == 429
+
+    def test_an_untrusted_callers_header_buys_no_new_counter(self, rate_client):
+        """A caller off the list counts as itself, whatever it claims to be."""
+        for hit in range(_LOGIN_LIMIT):
+            response = rate_client.post(
+                "/login", data={},
+                headers={"X-Forwarded-For": f"6.6.6.{hit}"},
+            )
+            assert response.status_code == 200
+
+        assert rate_client.post(
+            "/login", data={}, headers={"X-Forwarded-For": "6.6.6.99"},
+        ).status_code == 429
+
+    def test_one_ipv6_host_cannot_answer_from_a_new_counter(self, rate_client):
+        """Addresses under one /64 share a count; the next /64 does not."""
+        for hit in range(_LOGIN_LIMIT):
+            response = rate_client.post(
+                "/login", data={},
+                **_through_nginx(f"2606:4700:1234:5678::{hit + 1:x}"),
+            )
+            assert response.status_code == 200
+
+        assert rate_client.post(
+            "/login", data={},
+            **_through_nginx("2606:4700:1234:5678::ffff"),
+        ).status_code == 429
+        assert rate_client.post(
+            "/login", data={},
+            **_through_nginx("2606:4700:1234:5679::1"),
+        ).status_code == 200
+
+    def test_the_429_log_line_names_the_client(self, rate_client):
+        """The forensic line says who hit the limit, not nginx."""
+        _spend_the_login_limit(rate_client, **_through_nginx("8.8.8.8"))
+
+        records = []
+        handler = logging.Handler()
+        handler.emit = records.append
+        target = logging.getLogger("app.error_handlers")
+        target.addHandler(handler)
+        try:
+            rate_client.post("/login", data={}, **_through_nginx("8.8.8.8"))
+        finally:
+            target.removeHandler(handler)
+
+        limited = [
+            r for r in records
+            if getattr(r, "event", None) == EVT_RATE_LIMIT_EXCEEDED
+        ]
+        assert [r.remote_addr for r in limited] == ["8.8.8.8"]
+
+
+class TestEachAccountHasItsOwnCounter:
+    """A signed-in request counts against its account, wherever it comes from."""
+
+    @pytest.fixture
+    def counted_app(self, app, monkeypatch):
+        """A fresh app with the limiter on and an undecorated gated route.
+
+        The limiter is on from the start of ``create_app``, as in production,
+        so its hook runs in production's place, before the login gate.  Turning
+        it on afterwards, as :func:`_enable_limiter_on_fresh_app` does,
+        registers it after the gate, and an anonymous request would be bounced
+        before it was ever counted.
+
+        The route costs nothing to answer and carries only the default
+        ceiling, so its 30-a-minute clause is what a test spends.
+
+        Yields:
+            The app.
+        """
+        # pylint: disable=unused-argument,import-outside-toplevel
+        from app.config import TestConfig
+        from app.extensions import limiter
+
+        monkeypatch.setattr(TestConfig, "RATELIMIT_ENABLED", True)
+        rate_app = create_app("testing")
+
+        @rate_app.route("/test-gated-route")
+        def gated():
+            """Answer a signed-in request; the login gate bounces any other."""
+            return "ok", 200
+
+        yield rate_app
+        _disable_limiter(limiter, rate_app)
+
+    @staticmethod
+    def _signed_in(counted_app, email, password, client_address):
+        """Return a client signed in as *email*, arriving through nginx.
+
+        Args:
+            counted_app: The app under test.
+            email: The account's address.
+            password: The account's password.
+            client_address: The address nginx sees.
+
+        Returns:
+            The signed-in test client.
+        """
+        client = counted_app.test_client()
+        response = client.post(
+            "/login", data={"email": email, "password": password},
+            **_through_nginx(client_address),
+        )
+        assert response.status_code == 302
+        return client
+
+    @staticmethod
+    def _spend_the_default_ceiling(client, expected_status, **request_arguments):
+        """GET the gated route up to the per-minute ceiling.
+
+        Args:
+            client: The client to spend it with.
+            expected_status: What each hit short of the ceiling answers.
+            **request_arguments: Passed to each GET.
+        """
+        for hit in range(_DEFAULT_PER_MINUTE):
+            response = client.get("/test-gated-route", **request_arguments)
+            assert response.status_code == expected_status, (
+                f"hit {hit + 1} unexpectedly returned {response.status_code}"
+            )
+
+    def test_anonymous_traffic_does_not_spend_a_signed_in_counter(
+        self, counted_app, seed_user,
+    ):
+        """A flood from the owner's own address leaves the owner's budget alone.
+
+        The spec's case: anonymous traffic cannot spend the owner's budget, even
+        from one address.  The flood is counted (its 31st hit is refused) and
+        the signed-in request from that same address still gets through.
+        """
+        # pylint: disable=unused-argument
+        owner = self._signed_in(
+            counted_app, "test@shekel.local", "testpass", "8.8.8.8",
+        )
+        anonymous = counted_app.test_client()
+        self._spend_the_default_ceiling(
+            anonymous, 302, **_through_nginx("8.8.8.8"),
+        )
+        assert anonymous.get(
+            "/test-gated-route", **_through_nginx("8.8.8.8"),
+        ).status_code == 429
+
+        response = owner.get("/test-gated-route", **_through_nginx("8.8.8.8"))
+        assert response.status_code == 200
+        assert response.get_data(as_text=True) == "ok"
+
+    def test_two_accounts_on_one_address_do_not_share(
+        self, counted_app, seed_user, seed_second_user,
+    ):
+        """One account's spending never reaches another's on the same address."""
+        # pylint: disable=unused-argument
+        owner = self._signed_in(
+            counted_app, "test@shekel.local", "testpass", "8.8.8.8",
+        )
+        other = self._signed_in(
+            counted_app, "second@shekel.local", "secondpass12", "8.8.8.8",
+        )
+        self._spend_the_default_ceiling(
+            owner, 200, **_through_nginx("8.8.8.8"),
+        )
+        assert owner.get(
+            "/test-gated-route", **_through_nginx("8.8.8.8"),
+        ).status_code == 429
+
+        response = other.get("/test-gated-route", **_through_nginx("8.8.8.8"))
+        assert response.status_code == 200
+        assert response.get_data(as_text=True) == "ok"
 
 
 class TestRateLimitHeaders:

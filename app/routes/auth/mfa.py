@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timezone
 
 from flask import (
+    current_app,
     flash,
     redirect,
     render_template,
@@ -145,6 +146,29 @@ def _render_verify_form():
     )
 
 
+def _flash_backup_codes_left(mfa_config: MfaConfig) -> None:
+    """Tell a backup-code sign-in how many codes are left and how long it has.
+
+    Re-confirm takes no backup code, so someone without their phone can
+    replace their codes only inside the fresh-login window this sign-in just
+    opened, the one Regenerate's ``@fresh_login_required()`` reads (ruling
+    plan#3035).  The minutes are that config value, never a second spelling.
+
+    Args:
+        mfa_config: The signing-in user's config, the spent code already
+            removed from its ``backup_codes``.
+    """
+    minutes = current_app.config["FRESH_LOGIN_MAX_AGE_MINUTES"]
+    unit = "minute" if minutes == 1 else "minutes"
+    flash(
+        f"You signed in with a backup code and have "
+        f"{len(mfa_config.backup_codes)} left. For the next {minutes} {unit} "
+        f"you can replace them on the Security page without your "
+        f"authenticator app.",
+        "warning",
+    )
+
+
 def _trust_this_browser(response: Response, user: User) -> None:
     """Trust the signing-in browser for *user*: the record, then its cookie.
 
@@ -179,7 +203,8 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     route after successful password verification). Completes the login
     on valid TOTP or backup code.  An authenticator code with "Trust this
     device" ticked also trusts this browser for the user (plan#2173); a
-    backup code never does, whatever the form posts.
+    backup code never does, whatever the form posts, and instead says how
+    many codes are left and how long there is to replace them.
 
     Pending state freshness is enforced on every entry to this view
     (both GET and POST) via :func:`_mfa_pending_is_fresh`.  A pending
@@ -340,6 +365,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         # It also forgets every trusted device of the user (the bump
         # outdates them), so it never trusts this one.
         invalidate_other_sessions(user, "backup_code_consumed")
+        _flash_backup_codes_left(mfa_config)
     elif verify_data["trust_device"]:
         _trust_this_browser(response, user)
 

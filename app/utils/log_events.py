@@ -176,7 +176,8 @@ EVT_OTHER_SESSIONS_INVALIDATED = _register(
 )
 EVT_REAUTH_FAILED = _register(
     "reauth_failed", AUTH,
-    "Step-up re-authentication failed (bad password or bad TOTP).",
+    "A signed-in password or code check refused the person (/reauth, "
+    "/change-password or /mfa/disable).",
 )
 EVT_REAUTH_SUCCESS = _register(
     "reauth_success", AUTH,

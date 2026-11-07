@@ -58,7 +58,9 @@ from app.utils.log_events import (
     EVT_DEVICE_TRUSTED,
     EVT_MFA_DISABLED,
     EVT_MFA_ENABLED,
+    EVT_LOGIN_FAILED,
     EVT_MFA_LOGIN_SUCCESS,
+    EVT_REAUTH_FAILED,
     log_event,
 )
 from app.utils.security_events import (
@@ -270,6 +272,11 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         # Read under the owner's lock taken above.  This person has the
         # password, so naming the lock tells them nothing a stranger could
         # use.  Back to /login, where the lock refuses them until it ends.
+        log_event(
+            logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
+            "Login failed: account locked at the code form",
+            user_id=pending_user_id, ip=request.remote_addr,
+        )
         _clear_mfa_pending_state()
         flash(auth_service.LOCKED_OUT_MESSAGE, "danger")
         return redirect(url_for("auth.login"))
@@ -298,6 +305,11 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
 
     if not valid:
         auth_service.record_failed_attempt(user)
+        log_event(
+            logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
+            "Login failed: bad code", user_id=pending_user_id,
+            ip=request.remote_addr,
+        )
         flash("Invalid verification code.", "danger")
         return _render_verify_form()
 
@@ -661,6 +673,11 @@ def mfa_disable_confirm():
             current_user, current_password, "Invalid password.",
         )
     except AuthError as exc:
+        log_event(
+            logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
+            f"Disable two-factor failed: {exc}",
+            user_id=current_user.id, ip=request.remote_addr,
+        )
         flash(str(exc), "danger")
         return redirect(url_for("auth.mfa_disable"))
 
@@ -688,6 +705,11 @@ def mfa_disable_confirm():
 
     if not accepted:
         auth_service.record_failed_attempt(current_user)
+        log_event(
+            logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
+            "Disable two-factor failed: bad code",
+            user_id=current_user.id, ip=request.remote_addr,
+        )
         flash("Invalid authentication code.", "danger")
         return redirect(url_for("auth.mfa_disable"))
 

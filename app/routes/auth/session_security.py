@@ -103,6 +103,11 @@ def change_password():
                   "Password changed", user_id=current_user.id)
         flash("Password changed successfully.", "success")
     except AuthError as e:
+        log_event(
+            logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
+            f"Change password failed: {e}",
+            user_id=current_user.id, ip=request.remote_addr,
+        )
         flash(str(e), "danger")
     except ValidationError as e:
         flash(str(e), "danger")

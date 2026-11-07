@@ -41,8 +41,9 @@ materialised yet.
 from datetime import date
 
 from app.models.recurrence_rule import RecurrenceRule
-from app.services.pay_calendar import DerivedPeriod
+from app.services.pay_calendar import DerivedPeriod, PayCalendar
 from app.services.recurrence._frequency import placement_member, unit_member
+from app.services.recurrence._placement import place
 from app.services.recurrence._row_day import date_row
 
 
@@ -100,4 +101,25 @@ def compute_due_date(
     )
 
 
-__all__ = ["compute_due_date"]
+def period_of_occurrence(
+    rule: RecurrenceRule, occurrence: date, calendar: PayCalendar,
+) -> DerivedPeriod | None:
+    """Return the pay period *rule* places *occurrence* in, read from a rule row.
+
+    :func:`~app.services.recurrence._placement.place` with the rule's own placement,
+    for a caller holding a row rather than a walk: which paycheck is a row's own, where
+    the owner may have moved it (ruling **plan#2991**,
+    ``card_today.date_left_by_a_move``).
+
+    Args:
+        rule: The RecurrenceRule.
+        occurrence: The date its cadence named, a row's ``occurs_on``.
+        calendar: The owner's pay calendar.
+
+    Returns:
+        The pay period, or ``None`` when the saved schedule does not reach *occurrence*.
+    """
+    return place(occurrence, calendar, placement_member(rule.placement_id))
+
+
+__all__ = ["compute_due_date", "period_of_occurrence"]

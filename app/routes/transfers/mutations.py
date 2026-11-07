@@ -34,6 +34,7 @@ from app.services import (
     transfer_legs,
     transfer_service,
 )
+from app.services.card_today import a_save_may_date
 from app.services.match_press import MARK_PAID, NOTHING_SHOWN, Press
 from app.services.state_machine import finalised_edit_rejection
 from app.exceptions import NotFoundError, ValidationError as ShekelValidationError
@@ -100,8 +101,9 @@ def _reject_generated_due_date_edit(xfer, data):
     made it load-bearing** (finding **BAL-476**, plan step X-au-f).  A
     generated transfer's due date is its DEFINITION's: it is a member of
     ``transfer_recurrence.DerivedTransferFields``, computed from the rule and
-    the period and rewritten by the maintain splat on every regeneration -- so
-    an edit here never survived a later template save even before that step.
+    the period and rewritten by the maintain splat on every regeneration that
+    reaches the row (a held one is routed away, and keeps its date) -- so an
+    edit here never survived a later template save on a row carrying no hold.
     What X-au-f added is that the same date now resolves the transfer's PRICE
     through amount rule 3, so the field has gone from an edit that did not last
     to one that can leave a row no rule is able to price.
@@ -122,8 +124,10 @@ def _reject_generated_due_date_edit(xfer, data):
     (finding **BAL-493**'s family).  A transfer a RULE generated: the FIELD
     is refused, keyed on PRESENCE rather than emptiness exactly as its twin
     is, because moving the date re-prices the transfer against a different
-    point in its definition's series, silently, and the next regeneration
-    puts it back.  A ONE-TIME transfer -- a rule-less definition's placed
+    point in its definition's series, silently, and on a row carrying no hold
+    the next regeneration puts it back.  **Except a standing transfer into a
+    card a move re-dated** (ruling **plan#2991**), as its twin says.  A ONE-TIME
+    transfer -- a rule-less definition's placed
     transfer, or a cleared cadence's survivor: the date is the OWNER's to
     state (ruling **R-BAL93**: due on its placed paycheck's start, or into a
     card today once that paycheck has started, ruling **plan#2965**, unless the
@@ -158,7 +162,10 @@ def _reject_generated_due_date_edit(xfer, data):
     """
     if "due_date" not in data:
         return None
-    if xfer.recurs:
+    date_box_open = xfer.recurs and a_save_may_date(
+        xfer, data.get("pay_period_id", xfer.pay_period_id),
+    )
+    if xfer.recurs and not date_box_open:
         return _error_transfer_response(
             xfer.id,
             "This instance's due date comes from its recurring transfer, which "
@@ -166,7 +173,7 @@ def _reject_generated_due_date_edit(xfer, data):
             "transfer to move every instance, or type an amount here to make "
             "this one's figure its own.",
         )
-    if xfer.is_placed and data["due_date"] is None:
+    if (xfer.is_placed or date_box_open) and data["due_date"] is None:
         return _error_transfer_response(
             xfer.id,
             "This transfer's due date can be moved but not cleared: its price "

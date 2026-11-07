@@ -547,6 +547,35 @@ class TestATypedOverPaymentIsAskedAboutFirst:
                 _row_on(template, date(2026, 2, 20)).id, seed_user,
             ) == Decimal("200.00")
 
+    def test_move_retires_a_row_a_move_took_to_another_paycheck(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """A moved row's hold survives "use" only while its rule still names it.
+
+        Moved to the next paycheck and typed over, Feb 27 is no due date after this
+        change, so "Move" clears the hold and the second pass retires it: Feb 20 is the
+        one February payment.  Holding it would leave two payments for one statement.
+        """
+        with app.app_context():
+            card, template = _card_with_payment(seed_user)
+            typed = _typed_over(seed_user, template, date(2026, 2, 27))
+            transfer_service.update_transfer(
+                typed, seed_user["user"].id,
+                pay_period_id=seed_periods[5].id, is_override=True,
+            )
+            db.session.commit()
+            page = _read_chooser(auth_client.post(
+                f"/accounts/{card.id}/card/terms", data=_DUE_ON_20_FORM,
+            ))
+
+            response = _apply(
+                auth_client, page, {f"conflict_decision_{typed}": "use"},
+            )
+
+            assert response.status_code == 302
+            assert _live_dates(template) == _DUE_ON_20
+            assert db.session.get(Transfer, typed) is None
+
     def test_keep_leaves_the_row_and_the_new_date_gets_its_own(
         self, app, auth_client, seed_user, seed_periods,
     ):

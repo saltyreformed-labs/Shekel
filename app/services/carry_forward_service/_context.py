@@ -41,6 +41,7 @@ from app.services.one_off import (
     holds_a_row_in,
 )
 from app.services.pay_calendar import DerivedPeriod
+from app.services.repeating_row_move import repeating_date_after_move
 from app.utils.amount_relationships import transfer_pricing_load_options
 from app.utils.balance_predicates import is_projected_clause
 
@@ -308,7 +309,7 @@ def _build_carry_forward_context(source_period_id, target_period_id,
 
 @dataclass(frozen=True)
 class _CarriedDate:
-    """The date a carried placed row is left with, and what refuses the batch.
+    """The date a carried row is left with, and what refuses the batch.
 
     Attributes:
         due: Its due date after the batch.
@@ -345,12 +346,19 @@ def _discrete_dates(ctx: _CarryForwardContext) -> "dict[int, _CarriedDate]":
 
     Returns:
         ``{row id: its carried date}``, for the placed rows of
-        ``ctx.discrete_txns``.  No other row's date is the move's to write: a
-        recurring definition's is its rule's, and a payback's its own.
+        ``ctx.discrete_txns`` and its repeating rows on a card (ruling **plan#2991**:
+        ``repeating_row_move``, refused by nothing, since it answers the occurrence
+        it answered).  No other row's date is the move's to write: a recurring
+        definition's off a card is its rule's, and a payback's its own.
     """
     taken: "set[tuple[int, date]]" = set()
     carried = {}
     for row in ctx.discrete_txns:
+        if row.recurs:
+            re_dated = repeating_date_after_move(row, row.due_date, ctx.target_period)
+            if re_dated is not None:
+                carried[row.id] = _CarriedDate(re_dated)
+            continue
         if not row.is_placed:
             continue
         due = due_date_after_move(
@@ -397,11 +405,19 @@ def _transfer_dates(ctx: _CarryForwardContext) -> "dict[int, _CarriedDate]":
 
     Returns:
         ``{transfer id: its carried date}``, for the placed transfers of
-        ``ctx.transfers``.
+        ``ctx.transfers`` and its standing transfers into a card (ruling
+        **plan#2991**), refused by nothing here.
     """
     taken: "set[tuple[int, date]]" = set()
     carried = {}
     for transfer in ctx.transfers:
+        if transfer.recurs:
+            re_dated = repeating_date_after_move(
+                transfer, transfer.due_date, ctx.target_period,
+            )
+            if re_dated is not None:
+                carried[transfer.id] = _CarriedDate(re_dated)
+            continue
         if not transfer.is_placed:
             continue
         due = transfer_service.date_after_move(

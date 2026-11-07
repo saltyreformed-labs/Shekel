@@ -17,6 +17,7 @@ from app.services import (
     pay_period_service,
     transfer_legs,
 )
+from app.services.card_today import date_left_by_a_move
 from app.services.pay_calendar import calendar_for
 from app.services.state_machine import allowed_transitions
 from app.utils.auth_helpers import require_owner
@@ -147,9 +148,8 @@ def render_full_edit(xfer, leg_account_id, *, page_refusal):
     # always including the transfer's own period so a transfer sitting in
     # a past period stays selected.  The service re-validates ownership of
     # the submitted id and moves the transfer; both legs read its period.
-    periods = period_move_options(
-        calendar_for(current_user.id), xfer.pay_period_id,
-    )
+    calendar = calendar_for(current_user.id)
+    periods = period_move_options(calendar, xfer.pay_period_id)
     # The sides' records, loaded ONCE for both of their readers below -- the
     # two day boxes and the withdrawal caption (ledger row **BAL-530**: the
     # figures and the caption each loaded them) -- into the transfer's own
@@ -165,6 +165,8 @@ def render_full_edit(xfer, leg_account_id, *, page_refusal):
     return render_template(
         "transfers/_transfer_full_edit.html",
         card_id=full_edit_dom_id(xfer.id),
+        # A date a move left on a card opens its box (ruling plan#2991).
+        date_left_by_a_move=date_left_by_a_move(xfer, calendar),
         page_refusal=page_refusal,
         xfer=xfer, statuses=statuses, categories=categories, periods=periods,
         leg_account_id=leg_account_id,

@@ -745,7 +745,9 @@ def update_transfer(transfer_id, user_id, *, press=None, **kwargs):
     silently ignored like any other unlisted key):
         status_id      -- New status for the transfer; each side's record
                           follows it (dated, un-dated or taken off).
-        pay_period_id  -- New period for the transfer.  On a
+        pay_period_id  -- New period for the transfer.  A standing
+                          transfer into a card is re-dated by ruling
+                          **plan#2991**, its occurrence staying.  On a
                           PLACED transfer (a rule-less definition's one-time
                           transfer) the move RE-PLACES its due date as well
                           (ruling **R-BAL93**, plan step X-ci-1): the target

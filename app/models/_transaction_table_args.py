@@ -249,7 +249,8 @@ transaction_table_args = (
     # ``template_id`` on an existing row, so nothing can reach the state.
     # The transaction PATCH is refused a step earlier by
     # ``routes/transactions/_gates._reject_generated_due_date_edit``, which
-    # also refuses MOVING the date -- something no CHECK can say -- and
+    # also refuses MOVING the date, but on a row a move left it on a card
+    # (ruling plan#2991) -- something no CHECK can say -- and
     # renders a designed 400; this is that door's backstop for a writer that
     # is not the application, and the storage-tier statement of the
     # ``due_date IS NULL`` arm ``c8f3a5d2e714``'s strand guard had to ask.

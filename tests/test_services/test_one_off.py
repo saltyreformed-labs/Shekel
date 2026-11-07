@@ -46,7 +46,7 @@ from app.services.one_off import (
     restate_price,
     state_due_date,
 )
-from app.services.pay_calendar import calendar_for
+from app.services.pay_calendar import DerivedPeriod, calendar_for
 from app.services.amount_ownership import state_own_amount
 from app.services.recurrence_engine import unruled_row_fields
 from app.services.template_amount_service import amount_as_of, amount_versions
@@ -557,3 +557,34 @@ class TestTheSeriesRowIsTheDefinitions:
             ).all()
             assert len(stored) == 1
             assert stored[0].effective_date == row.due_date
+
+
+class TestTheDayARepeatingRowFollowsTo:
+    """``due_date_after_move`` with a rule's day (ruling plan#2991, plan#3026)."""
+
+    _PAYCHECK = DerivedPeriod(
+        period_id=1, period_index=0, start_date=date(2026, 1, 30),
+        end_date=date(2026, 2, 12), end_is_projected=False,
+    )
+
+    def _moved(self, rule_day, today):
+        """A bill dated ahead on Feb 13, moved into :attr:`_PAYCHECK` on *today*."""
+        return due_date_after_move(
+            RowToMove(
+                stated=date(2026, 2, 13), held=date(2026, 2, 13),
+                source_start=date(2026, 2, 13), card_today=today, rule_day=rule_day,
+            ),
+            self._PAYCHECK,
+        )
+
+    def test_its_rules_day_inside_the_paycheck_is_its_default(self):
+        """Its rule dates it Feb 5, inside the paycheck: Feb 5, not the first day."""
+        assert self._moved(date(2026, 2, 5), date(2026, 1, 22)) == date(2026, 2, 5)
+
+    def test_today_wins_once_that_day_has_passed(self):
+        """Today is Feb 8, past the rule's Feb 5: Feb 8, or a true-up would hold it."""
+        assert self._moved(date(2026, 2, 5), date(2026, 2, 8)) == date(2026, 2, 8)
+
+    def test_its_rules_day_outside_the_paycheck_is_no_default(self):
+        """Its rule dates it Mar 5, another paycheck's: the first day, Jan 30."""
+        assert self._moved(date(2026, 3, 5), date(2026, 1, 22)) == date(2026, 1, 30)

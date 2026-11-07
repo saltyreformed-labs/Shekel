@@ -408,7 +408,8 @@ class Transfer(
     notes = db.Column(db.Text)
     # Calendar date the transfer is due.  Nullable, matching
     # ``Transaction.due_date`` (ad-hoc transfers may omit it; a generated
-    # transfer's is ``recurrence.compute_due_date``'s answer).  Each side's leg reads
+    # transfer's is ``recurrence.compute_due_date``'s answer, until a move into a
+    # card re-dates it, ruling plan#2991).  Each side's leg reads
     # it here (``TransferLeg.due_date``, :mod:`app.services.transfer_legs`).
     # Until plan step ``balance:X-bi-6-4d-2`` deleted the shadows, the
     # transfer service mirrored it to both shadow transactions, and the

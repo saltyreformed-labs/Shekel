@@ -308,8 +308,9 @@
        **A generated transfer's due date is its DEFINITION's** (plan step
        balance:X-au-f, finding BAL-476).  ``due_date`` is a member of
        ``transfer_recurrence.DerivedTransferFields``, so generation computes it
-       from the rule and the period and every regeneration rewrites it -- an
-       edit here never survived a later template save.  Since X-au-f it is also
+       from the rule and the period and every regeneration that reaches the row
+       rewrites it -- an edit here never survived a later template save on a row
+       carrying no hold.  Since X-au-f it is also
        the date the transfer's PRICE is resolved on (amount rule 3), so
        CLEARING it leaves a row no rule can price: the parent-transfer render
        sites (every caller of ``_render_helpers.transfer_budgets``) carry no
@@ -334,14 +335,18 @@
        clearable input it always had: an empty submit there loads as an
        explicit None (TransferUpdateSchema strip_empty_strings maps "" to None
        for nullable fields) and clears the transfer's due date, which both
-       legs read. #}
+       legs read.
+
+       **Into a card a move leaves a standing transfer's date the owner's**
+       (ruling plan#2991; ``card_today.date_left_by_a_move``): its box opens, and
+       it may move but not clear. #}
     <div class="mb-2">
       <label class="form-label mb-0 small">Due Date</label>
-      {% if not xfer.recurs %}
+      {% if not xfer.recurs or date_left_by_a_move %}
       <input type="date" name="due_date"
              value="{{ xfer.due_date.isoformat() if xfer.due_date is not none else '' }}"
              class="form-control form-control-sm"
-             {{ 'required' if xfer.is_placed else '' }}
+             {{ 'required' if xfer.is_placed or date_left_by_a_move else '' }}
              {{ 'disabled' if locked else '' }}>
       {% else %}
       <div class="form-control form-control-sm bg-body-secondary">

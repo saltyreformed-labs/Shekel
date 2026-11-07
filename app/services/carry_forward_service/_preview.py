@@ -161,8 +161,9 @@ class CarryForwardPlan:  # pylint: disable=too-many-instance-attributes
             others' in the batch withdraw together, named here because this
             is the first of their envelopes the modal lists (ruling
             **R-CC135**, :class:`SharedClose`); empty everywhere else.
-        due_after: The date a PLACED row or transfer is left with (rulings
-            **R-BAL33**, **R-BAL93**, **plan#2976**), so the modal says which
+        due_after: The date a PLACED row or transfer, or a repeating one on a card, is
+            left with (rulings **R-BAL33**, **R-BAL93**, **plan#2976**,
+            **plan#2991**), so the modal says which
             rows keep their dates and which take new ones.  ``None`` for every
             other row, whose date the move does not write.
 
@@ -195,7 +196,7 @@ class CarryForwardPlan:  # pylint: disable=too-many-instance-attributes
 
     @property
     def keeps_its_date(self) -> bool:
-        """True if the move leaves a placed row on the date it has."""
+        """True if the move leaves the row on the date it has."""
         return self.due_after == self.item.due_date
 
 
@@ -592,7 +593,7 @@ def _build_discrete_plan(
     Args:
         source_txn: The row that would move whole.
         basis: The request's amount basis, for the figure the modal names.
-        carried: Its carried date, or ``None`` for a row that is not placed.
+        carried: Its carried date, or ``None`` for a row whose date the move leaves.
     """
     return CarryForwardPlan(
         item=source_txn,
@@ -632,7 +633,7 @@ def _build_transfer_plan(
     Args:
         transfer: The transfer that would move.
         basis: The request's amount basis, for the figure the modal names.
-        carried: Its carried date, or ``None`` for a transfer that is not placed.
+        carried: Its carried date, or ``None`` for a transfer whose date the move leaves.
     """
     return CarryForwardPlan(
         item=leg_of(transfer, transfer.from_account_id),

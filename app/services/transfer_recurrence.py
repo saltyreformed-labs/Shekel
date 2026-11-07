@@ -941,9 +941,10 @@ def resolve_conflicts(
             # and both legs read the transfer.  ``is_override=False`` rides
             # with it still, because the flag means *this row is the OWNER's,
             # not the rule's* (plan step X-au-h) and this act clears exactly
-            # that -- it no longer says anything about the amount.
+            # that -- it no longer says anything about the amount.  A transfer a move
+            # left into a card keeps it (ruling plan#2991, ``use.keep_their_hold``).
             transfer_service.update_transfer(
-                xfer.id, ctx.user_id, is_override=False,
+                xfer.id, ctx.user_id, is_override=xfer.id in use.keep_their_hold,
                 amount_ownership=derived_ownership(AmountSourceEnum.TEMPLATE),
             )
 

@@ -551,8 +551,9 @@
          **A generated row's due date is its DEFINITION's** (plan step
          balance:X-au-e, developer 2026-09-03).  ``due_date`` is a member of
          ``recurrence_engine._amounts.DerivedRowFields``, so generation
-         computes it from the rule and the period and every regeneration
-         rewrites it -- an edit here never survived a later template save, and
+         computes it from the rule and the period and every regeneration that
+         reaches the row rewrites it -- an edit here never survived a later
+         template save on a row carrying no hold, and
          since X-au-e it is also the date the row's PRICE is resolved on
          (amount rule 3).  Offering a clearable box over it made the owner a
          second writer of a derived value, and an empty submit left a row no
@@ -576,14 +577,19 @@
          browser refuses the clear first; the gate
          (``_gates._reject_generated_due_date_edit``) is the backstop.  A
          CC payback's date is its own optional note, priced through its
-         parent, and stays clearable. #}
+         parent, and stays clearable.
+
+         **On a card a move leaves a repeating row's date the owner's** (ruling
+         plan#2991; ``card_today.date_left_by_a_move``): its box opens, so a
+         real charge date can be typed, and its hold keeps every pass off it.  It may move
+         but not clear, as a placed row's may not. #}
       <div class="mb-2">
         <label class="form-label mb-0 small">Due Date</label>
-        {% if not txn.recurs %}
+        {% if not txn.recurs or date_left_by_a_move %}
         <input type="date" name="due_date"
                value="{{ txn.due_date.isoformat() if txn.due_date is not none else '' }}"
                class="form-control form-control-sm"
-               {{ 'required' if txn.is_placed else '' }}
+               {{ 'required' if txn.is_placed or date_left_by_a_move else '' }}
                {{ 'disabled' if locked else '' }}>
         {% else %}
         <div class="form-control form-control-sm bg-body-secondary">

@@ -172,6 +172,7 @@ def due_date_for(
     period: DerivedPeriod,
     *,
     card_today: "date | None" = None,
+    rule_day: "date | None" = None,
 ) -> date:
     """Return the day a row placed in *period* is due (**R-BAL22**, **plan#2965**).
 
@@ -209,20 +210,29 @@ def due_date_for(
         period: The paycheck the row is placed in.
         card_today: The owner's day, resolved by the door because this module
             reads no clock, for a row on a card; ``None`` for any other row.
+        rule_day: For a repeating row moved on a card, the day its rule dates its
+            occurrence in *period*.  It stands for the first day where it falls inside
+            *period*, which only the row's own paycheck can do for a rule dating a row on
+            its occurrence, and every other rule's answer is the first day already.
 
     Returns:
         The due date.
     """
     if stated is not None:
         return stated
+    first_day = (
+        rule_day
+        if rule_day is not None and period.start_date <= rule_day <= period.end_date
+        else period.start_date
+    )
     if card_today is None:
-        return period.start_date
-    return max(card_today, period.start_date)
+        return first_day
+    return max(card_today, first_day)
 
 
 @dataclass(frozen=True)
 class RowToMove:
-    """A placed row leaving its paycheck, as :func:`due_date_after_move` reads it.
+    """A row leaving its paycheck, as :func:`due_date_after_move` reads it.
 
     **A parameter object because the producer is PUBLIC and reached from three
     modules**, as :class:`OneOffToPlace` is: a signature that cannot be read at a call
@@ -240,8 +250,11 @@ class RowToMove:
             takes ruling R-BAL33.  An envelope on a card is one of those: no card
             counts from an envelope's date
             (``balance_at._cash_plan._day_it_counts_from``).
-        is_extra_payment: Whether the row is a one-time transfer rather than a bill.
-            Read only beside *card_today*.
+        is_extra_payment: Whether the row is a transfer rather than a bill, one-time or
+            standing (ruling plan#2991).  Read only beside *card_today*.
+        rule_day: For a repeating row, the day its rule dates its occurrence in the
+            paycheck it is moving to; ``None`` for a one-time row.  Read only beside
+            *card_today*.
     """
 
     stated: date
@@ -249,6 +262,7 @@ class RowToMove:
     source_start: date
     card_today: "date | None" = None
     is_extra_payment: bool = False
+    rule_day: "date | None" = None
 
 
 def due_date_after_move(row: RowToMove, target: DerivedPeriod) -> date:
@@ -291,6 +305,16 @@ def due_date_after_move(row: RowToMove, target: DerivedPeriod) -> date:
       a true-up is inside it**, as :func:`due_date_for` says: a row taking today on the
       day of a true-up is held by it.
 
+    **A repeating row on a card takes the same clauses** (ruling **plan#2991**), and the
+    doors reach them through ``repeating_row_move``.  **Its own paycheck's day is the one
+    its rule gives it**, where that day falls inside the paycheck it is moving to (ruling
+    **plan#3038**): a one-time row's first day is its only default, and a repeating row
+    has another.  So a move there and back leaves it as it was, while that day is still
+    ahead; once it has passed the row takes today, as any row does.  A $100 bill due on the
+    5th, its price going to $120 from Feb 1, sits in Jan 30's paycheck dated Feb 5.  Moved
+    on Jan 22 to Feb 13's paycheck and back on Jan 25, it reads Feb 5 and $120, where the
+    first day would read Jan 30 and $100.
+
     Args:
         row: The row, its dates and what it is.
         target: The paycheck it is moving to.
@@ -306,7 +330,9 @@ def due_date_after_move(row: RowToMove, target: DerivedPeriod) -> date:
         return row.stated
     if not row.is_extra_payment and row.held <= row.card_today:
         return row.held
-    return due_date_for(None, target, card_today=row.card_today)
+    return due_date_for(
+        None, target, card_today=row.card_today, rule_day=row.rule_day,
+    )
 
 
 def another_row_answers(

@@ -20,7 +20,9 @@ reused as they are:
   plain dates and the target :class:`~app.services.pay_calendar.DerivedPeriod`.
   **Into a card it follows its paycheck** (ruling **plan#2976**): an extra
   payment is not sent until marked, so its date always moves, unless a new
-  date is typed in the same save (:func:`date_after_move`).
+  date is typed in the same save (:func:`date_after_move`).  **A standing
+  transfer into a card moves the same way** (ruling **plan#2991**), its
+  occurrence staying (``repeating_row_move``), but a worked-out payment.
   For a one-time payment INTO A LOAN the due date is the installment it
   satisfies, so the re-placed date is graded by the loan-installment guard
   exactly as a hand-typed one is (it reads ``updates["due_date"]``, which
@@ -97,6 +99,7 @@ from app.services.amount_ownership import derived_ownership
 from app.services.card_today import today_on_a_card
 from app.services.one_off import RowToMove, due_date_after_move
 from app.services.pay_calendar import DerivedPeriod
+from app.services.repeating_row_move import repeating_date_after_move
 
 
 def date_after_move(
@@ -104,8 +107,9 @@ def date_after_move(
 ) -> date:
     """Return the day placed *xfer* is due once moved to *target*.
 
-    The one assembly of what ``one_off.due_date_after_move`` reads for a transfer,
-    for this door and for the preview that says what the door will do.  Into a card
+    The one assembly of what ``one_off.due_date_after_move`` reads for a placed
+    transfer (a standing one's is ``repeating_row_move``), for this door and for
+    the preview that says what the door will do.  Into a card
     the row is an extra payment (ruling **plan#2976**), asked of the account the
     update leaves it pointing at, as a one-time transfer's first date is
     (``routes/transfers/_instances``).
@@ -170,8 +174,9 @@ def re_place_and_grade_the_day(
             names none of the period-bearing fields.
         placed: Whether *xfer* is a rule-less definition's, read by the
             caller before any write.  A transfer that is not answers
-            ``False`` with nothing done: a generated transfer's date is its
-            definition's and its occurrence its cadence's.
+            ``False``: its occurrence is its cadence's, so a date this writes
+            leaves the occurrence where it is, and only a standing transfer into a
+            card moved to another paycheck gets one (ruling **plan#2991**).
         to_account: The account the update leaves it paying into, resolved by
             the caller: an endpoint move in the same update changes it.
 
@@ -181,9 +186,15 @@ def re_place_and_grade_the_day(
     Raises:
         ValidationError: From :func:`reject_a_day_another_row_answers`.
     """
+    moves = target is not None and target.period_id != xfer.pay_period_id
     if not placed:
+        re_dated = None if not moves else repeating_date_after_move(
+            xfer, updates.get("due_date", xfer.due_date), target, account=to_account,
+        )
+        if re_dated is not None:
+            updates["due_date"] = re_dated
         return False
-    if target is not None and target.period_id != xfer.pay_period_id:
+    if moves:
         updates["due_date"] = date_after_move(
             xfer, updates.get("due_date", xfer.due_date), target, to_account,
         )

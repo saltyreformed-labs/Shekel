@@ -227,11 +227,14 @@ def _carry_forward(source_period_id, target_period_id, scenario_id,
         if ctx.discrete_txns:
             moved = _partition_discrete(ctx)
 
-            if moved.recurring_ids:
+            # One UPDATE per day: a repeating row on a card may take a new date,
+            # and never a new occurrence (ruling plan#2991); the key ``None``
+            # holds every row whose date stays.
+            for due, row_ids in moved.recurring.items():
                 count += (
                     db.session.query(Transaction)
                     .filter(
-                        Transaction.id.in_(moved.recurring_ids),
+                        Transaction.id.in_(row_ids),
                         is_projected_clause(Transaction),
                         Transaction.is_deleted.is_(False),
                     )
@@ -240,6 +243,7 @@ def _carry_forward(source_period_id, target_period_id, scenario_id,
                             Transaction.pay_period_id: target_period_id,
                             Transaction.is_override: True,
                             Transaction.version_id: Transaction.version_id + 1,
+                            **({} if due is None else {Transaction.due_date: due}),
                         },
                         synchronize_session="fetch",
                     )
@@ -247,11 +251,11 @@ def _carry_forward(source_period_id, target_period_id, scenario_id,
 
             # One UPDATE per day: a batch's rows off a card take the target's
             # start, and its rows on a card may take today (ruling plan#2976).
-            for due, re_placed_ids in moved.re_placed.items():
+            for due, row_ids in moved.re_placed.items():
                 count += (
                     db.session.query(Transaction)
                     .filter(
-                        Transaction.id.in_(re_placed_ids),
+                        Transaction.id.in_(row_ids),
                         is_projected_clause(Transaction),
                         Transaction.is_deleted.is_(False),
                     )
@@ -375,14 +379,15 @@ class _DiscretePartition:
     """The discrete branch's three passes, and the days the re-placed take.
 
     Attributes:
-        recurring_ids: Rows of a RECURRING definition -- moved with
-            ``is_override`` flipped.
+        recurring: Rows of a RECURRING definition -- moved with ``is_override``
+            flipped -- by the date a move gives them on a card (ruling
+            **plan#2991**), and under ``None`` where their date stays.
         re_placed: PLACED rows whose due date the move changes, by the day they
             take -- moved with ``due_date`` and ``occurs_on`` re-placed on it.
         unruled_ids: Every other row -- moved, and nothing else written.
     """
 
-    recurring_ids: "list[int]"
+    recurring: "dict[date | None, list[int]]"
     re_placed: "dict[date, list[int]]"
     unruled_ids: "list[int]"
 
@@ -429,9 +434,14 @@ def _partition_discrete(ctx: _CarryForwardContext) -> _DiscretePartition:
             (:func:`._context._discrete_dates`).
     """
     carried = _discrete_dates(ctx)
+    recurring: "dict[date | None, list[int]]" = {}
     re_placed: "dict[date, list[int]]" = {}
     for t in ctx.discrete_txns:
         move = carried.get(t.id)
+        if t.recurs:
+            due = None if move is None or move.due == t.due_date else move.due
+            recurring.setdefault(due, []).append(t.id)
+            continue
         if move is None:
             continue
         if move.refusal is not None:
@@ -443,7 +453,7 @@ def _partition_discrete(ctx: _CarryForwardContext) -> _DiscretePartition:
             re_placed.setdefault(move.due, []).append(t.id)
     re_dated = {row_id for ids in re_placed.values() for row_id in ids}
     return _DiscretePartition(
-        recurring_ids=[t.id for t in ctx.discrete_txns if t.recurs],
+        recurring=recurring,
         re_placed=re_placed,
         unruled_ids=[
             t.id for t in ctx.discrete_txns

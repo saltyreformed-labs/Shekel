@@ -12,8 +12,8 @@ that walk already wrote.  Both terms doors, the save and the remove, call
 
 **Every row moves through the maintain pass**
 (:func:`~app.services.transfer_recurrence.regenerate_for_template`), the one
-writer of a definition's rows: a row whose date is still a due date is left
-alone, one whose date no longer is retires, and each new date gets a row.  So a
+writer of a definition's rows: a row answering what is still a due date is left
+alone, one answering what no longer is retires, and each new date gets a row.  So a
 moved payment is a new row on the new date rather than an old row re-dated
 (ruling **recurrence:R-R49**: a row is never re-pointed at another occurrence),
 and a row holding the owner's notes or a kept payment record is retained where
@@ -112,7 +112,7 @@ class _MovedDates:
     after: DueDateSchedule
 
     def moved(self, row: Transfer) -> bool:
-        """Return whether this change took *row*'s date off the due dates.
+        """Return whether this change took the date *row* answers off the due dates.
 
         Args:
             row: A row a pass held back.  One answering no occurrence is on

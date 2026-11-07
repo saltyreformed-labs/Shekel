@@ -36,6 +36,7 @@ import logging
 from app import ref_cache
 from app.enums import StatusEnum
 from app.exceptions import ValidationError
+from app.services.card_today import a_save_may_date
 from app.services.state_machine import verify_transition
 from app.services.transaction_service import repays_card_spend
 
@@ -101,8 +102,10 @@ def _reject_generated_due_date_edit(txn, data):
     balance:X-au-e, developer 2026-09-03).  ``due_date`` is a member of
     ``recurrence_engine._amounts.DerivedRowFields``: generation computes it
     from the rule and the period, and the maintain splat rewrites it on every
-    regeneration -- so an edit here never survived a later template save even
-    before this step.  What X-au-e added is that the same date now resolves the
+    regeneration that reaches the row -- so an edit here never survived a later
+    template save even before this step, on a row carrying no hold.  (A held row
+    is routed away from that write, ``classify_maintain_work``, and keeps its date
+    until "use" hands it back.)  What X-au-e added is that the same date now resolves the
     row's PRICE through amount rule 3, so the field has gone from an edit that
     did not last to one that can leave a row no rule is able to price.
 
@@ -123,7 +126,15 @@ def _reject_generated_due_date_edit(txn, data):
     gate states one function down: what a generated row may not accept is the
     FIELD.  Moving the date is refused as well as clearing it -- a moved date
     re-prices the row against a different point in its definition's series,
-    silently, and the next regeneration puts it back.
+    silently, and on a row carrying no hold the next regeneration puts it back.
+
+    **The exception is a repeating row a move re-dated on a card** (ruling
+    **plan#2991**): its date box opens, so a real charge date can be typed
+    (:func:`~app.services.card_today.date_left_by_a_move`), and a date beside a
+    move is the owner's too.  A row typed over and never moved stays refused until
+    an edit of its rule's funding moves its paycheck out from under it, and the date
+    may move but not clear, as a placed row's may not.  The price follows
+    it, which the ruling names as a cost.
 
     **Which rows it refuses is keyed on ``Transaction.recurs`` since plan
     step ``balance:X-bi-7a``, not on the link**, and the three shapes get
@@ -163,7 +174,10 @@ def _reject_generated_due_date_edit(txn, data):
     """
     if "due_date" not in data:
         return None
-    if txn.recurs:
+    date_box_open = txn.recurs and a_save_may_date(
+        txn, data.get("pay_period_id", txn.pay_period_id),
+    )
+    if txn.recurs and not date_box_open:
         return _error_transaction_response(
             txn.id,
             "This instance's due date comes from its recurring transaction, "
@@ -171,7 +185,7 @@ def _reject_generated_due_date_edit(txn, data):
             "transaction to move every instance, or type an amount here to make "
             "this month's figure its own.",
         )
-    if txn.is_placed and data["due_date"] is None:
+    if (txn.is_placed or date_box_open) and data["due_date"] is None:
         return _error_transaction_response(
             txn.id,
             "This item's due date can be moved but not cleared: its price is "

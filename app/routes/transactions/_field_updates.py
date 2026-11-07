@@ -20,7 +20,9 @@ by whether the bill was bought (ruling **plan#2976**); and a moved due date
 carries ``occurs_on`` with it (**R-BAL25**).  A RECURRING
 definition's row keeps every act it had: a typed figure or a period move
 detaches it (OWN, ``is_override``), because that is a statement about one
-occurrence among many.  A link-less row -- a CC payback, the one shape this
+occurrence among many; and on a card a move re-dates it by the one-time rule
+(ruling **plan#2991**, ``repeating_row_move``), its occurrence staying.  A
+link-less row -- a CC payback, the one shape this
 door still reaches with no definition since the family's cutover -- keeps
 its own branch, frozen.
 
@@ -43,6 +45,7 @@ from app.services.one_off import (
     state_due_date,
 )
 from app.services.pay_calendar import DerivedPeriod
+from app.services.repeating_row_move import repeating_date_after_move
 
 from app.routes.transactions._helpers import _error_transaction_response
 
@@ -181,6 +184,26 @@ def _place_the_date(
         )
     state_due_date(txn, due)
     return None
+
+
+def _re_date_a_repeating_row(
+    txn: Transaction, data: dict, target_period: DerivedPeriod,
+) -> None:
+    """Put the date a move leaves on a repeating row on a card into *data*.
+
+    Ruling **plan#2991**.  Into the payload for act 1 to write, because only a placed
+    row's date carries ``occurs_on``.  Read at act 0, for the source paycheck.
+
+    Args:
+        txn: The repeating row being moved.
+        data: The PATCH payload, its ``due_date`` set where the move writes one.
+        target_period: The paycheck it moves to.
+    """
+    re_dated = repeating_date_after_move(
+        txn, data.get("due_date", txn.due_date), target_period,
+    )
+    if re_dated is not None:
+        data["due_date"] = re_dated
 
 
 def _apply_field_updates(
@@ -381,6 +404,8 @@ def _apply_field_updates(
         )
         if placed and period_changed else None
     )
+    if recurs and period_changed:
+        _re_date_a_repeating_row(txn, data, target_period)
 
     # Act 1.
     for field, value in data.items():

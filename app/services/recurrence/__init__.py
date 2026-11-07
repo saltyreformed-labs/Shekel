@@ -272,7 +272,7 @@ from app.services.recurrence._resolution import (
     ResolvedRecurrence,
     resolve,
 )
-from app.services.recurrence._row_date import compute_due_date
+from app.services.recurrence._row_date import compute_due_date, period_of_occurrence
 from app.services.recurrence._picker import (
     CadenceOption,
     EndBoundOption,
@@ -337,6 +337,7 @@ __all__ = [
     "cadences_without_a_card",
     "canonical_cadence",
     "compute_due_date",
+    "period_of_occurrence",
     "describe",
     "emits_period_starts",
     "end_bound_from_columns",

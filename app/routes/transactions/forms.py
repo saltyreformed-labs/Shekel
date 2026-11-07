@@ -31,6 +31,7 @@ from app.services.account_resolver import (
     resolve_cash_flow_set,
     resolve_owner_cash_flow_set,
 )
+from app.services.card_today import date_left_by_a_move
 from app.services.cash_flow_set import CashFlowSet, purchase_accounts
 from app.services.pay_calendar import FiledRow, calendar_for
 from app.services.scenario_resolver import get_baseline_scenario
@@ -208,6 +209,8 @@ def render_full_edit(txn, *, page_refusal):
     return render_template(
         "grid/_transaction_full_edit.html",
         card_id=full_edit_dom_id(txn.id),
+        # A date a move left on a card opens its box (ruling plan#2991).
+        date_left_by_a_move=date_left_by_a_move(txn, calendar),
         page_refusal=page_refusal,
         # **What taking the row's payment out of its matches would WITHDRAW**
         # -- read once, for the card's four captions: a different "Paid

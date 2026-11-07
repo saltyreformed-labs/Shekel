@@ -125,7 +125,8 @@ from app.services.balance_at import (
 from app.services.cash_ledger import governing_account_opening
 from app.services.pay_calendar import FiledRow, PayCalendar
 from app.services.recurrence import ResolvedRecurrence, occurrence_walk
-from app.services.recurring_definition import resolved_rule_of
+from app.services.card_today import date_left_by_a_move
+from app.services.recurring_definition import read_definition, resolved_rule_of
 from app.utils.balance_predicates import is_projected_clause
 from app.utils.books_boundary import books_hold, row_books_day
 
@@ -741,12 +742,23 @@ class UseRestore(NamedTuple):
             definition to hand them back to.
         notice: :func:`stays_deleted_notice`'s sentence naming the rows left
             deleted, or ``None`` when there are none.
+        keep_their_hold: The ids of the handed-back rows that take back their figure
+            and keep their hold: rows a move left on a card
+            (:func:`~app.services.card_today.date_left_by_a_move`, ruling **plan#2991**)
+            whose occurrence the rule still names.  The page asks about an amount and
+            says the definition prices a row "on its own due date", so "use" leaves it
+            where the owner put it.  Without the hold the next pass re-dates it, a rename
+            moving money, and a pass from today retires it once its own paycheck has
+            ended.  A row its rule no longer names loses the hold, so the terms door's
+            second pass retires it (``routes/card/_payments_follow``).  Decided under
+            R-BAL207.
     """
 
     handed_back: tuple
     left_deleted: tuple
     orphaned: tuple
     notice: str | None
+    keep_their_hold: frozenset = frozenset()
 
 
 def restored_by_use(
@@ -819,15 +831,24 @@ def restored_by_use(
         notice = stays_deleted_notice(scope)
         if notice is not None:
             notices.append(notice)
+    handed_back = tuple(
+        row for row in owned if not row.is_deleted or row.id in restores
+    )
     return UseRestore(
-        handed_back=tuple(
-            row for row in owned if not row.is_deleted or row.id in restores
-        ),
+        handed_back=handed_back,
         left_deleted=tuple(
             row.id for row in owned if row.is_deleted and row.id not in restores
         ),
         orphaned=tuple(row.id for row in rows if row.template is None),
         notice=" ".join(notices) or None,
+        keep_their_hold=frozenset(
+            row.id for row in handed_back
+            if date_left_by_a_move(row, ctx.calendar())
+            and row.occurs_on in {
+                placement.occurrence
+                for placement in read_definition(row.template, ctx).placements
+            }
+        ),
     )
 
 

@@ -13,6 +13,9 @@ deleted and untouched, and named
 (:func:`~app.services.definition_unarchive.restored_by_use`, the one rule the
 transfer twin asks too).
 
+**A row a move left on a card takes its figure back and keeps its hold** (ruling
+**plan#2991**; :attr:`~app.services.definition_unarchive.UseRestore.keep_their_hold`).
+
 **"Use" WRITES NO FIGURE, and that is plan step X-au-e** (ruling **R-JD**).
 Every generated transaction row is derived now, so "move this instance to the
 template's amount" has no amount to move it to: the act is to stop overriding,
@@ -231,7 +234,7 @@ def resolve_conflicts(
         # resolver spelled for itself until it moved into the rule).
         use = restored_by_use(picked, ctx)
         for txn in use.handed_back:
-            txn.is_override = False
+            txn.is_override = txn.id in use.keep_their_hold
             txn.is_deleted = False
             # **The whole of "use the template's amount"** since plan step
             # X-au-e: the row stops owning a figure and DECLARES the definition

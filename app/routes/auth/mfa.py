@@ -84,16 +84,24 @@ def _pending_user_key() -> str:
     return f"pending-user:{flask_session.get('_mfa_pending_user_id')}"
 
 
-def _no_pending_user() -> bool:
-    """Return True when the request has no pending sign-in to count against.
+def _no_live_pending_sign_in() -> bool:
+    """Return True when the request has no live pending sign-in to count against.
 
-    Such a request is only redirected to /login, and without this they would
-    all share one count under the ``None`` id.
+    Such a request checks no code: the view only redirects it to /login.  With
+    no id they would all share one count under ``None``.  With an id past its
+    time, a kept cookie would spend the account's tries long after the password
+    step, because this limit runs before the view's own freshness check, and
+    the owner's right code would be refused.  Either way the request still
+    spends its own address's limit.
 
     Returns:
-        True when no pending user is in the session.
+        True when the session holds no pending user, or one
+        :func:`~app.routes.auth._helpers._mfa_pending_is_fresh` refuses.
     """
-    return not flask_session.get("_mfa_pending_user_id")
+    return (
+        not flask_session.get("_mfa_pending_user_id")
+        or not _mfa_pending_is_fresh()
+    )
 
 
 def _check_mfa_code(mfa_config, user_id, totp_code, backup_code):
@@ -160,7 +168,7 @@ def _trust_this_browser(response: Response, user: User) -> None:
 @limiter.limit("5 per 15 minutes", methods=["POST"])
 @limiter.limit(
     "5 per 15 minutes", methods=["POST"],
-    key_func=_pending_user_key, exempt_when=_no_pending_user,
+    key_func=_pending_user_key, exempt_when=_no_live_pending_sign_in,
 )
 def mfa_verify():  # pylint: disable=too-many-return-statements
     """Display the MFA verification form and handle code submission.
@@ -182,7 +190,8 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     code.  Not counted: a form the schema rejects, which cannot be a right
     answer, and a failed encryption key, which is the operator's fault.  Two
     limits apply, one by address and one by the pending account, so that
-    moving between addresses buys no more guesses.
+    moving between addresses buys no more guesses.  A pending sign-in past its
+    time spends only the address's.
 
     Pylint: ``too-many-return-statements`` (9/6) -- each early return is a
     distinct semantic exit (no pending state, stale state, GET render,

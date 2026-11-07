@@ -23,6 +23,7 @@ import pytest
 from app import CONFIG_MAP, create_app
 from app.extensions import db, limiter
 from app.models.user import MfaConfig, User
+from app.routes.auth._helpers import _MFA_PENDING_MAX_AGE
 from app.services import auth_service, mfa_service
 from app.utils.log_events import EVT_ACCOUNT_LOCKED
 
@@ -776,3 +777,76 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
             )
             assert response.status_code == 302
             assert "/login" in response.headers["Location"]
+
+    def _kept_cookie(self, rate_app, secret_holder_address):
+        """Return a browser and its cookie from a password step past its five minutes.
+
+        Args:
+            rate_app: The app under test.
+            secret_holder_address: The address the password step came from.
+
+        Returns:
+            ``(browser, cookie value)``, the cookie holding a pending sign-in
+            whose time has run out.
+        """
+        browser = rate_app.test_client()
+        assert browser.post(
+            "/login", data={"email": _EMAIL, "password": _PASSWORD},
+            **self._through_nginx(secret_holder_address),
+        ).status_code == 302
+        with browser.session_transaction() as pending:
+            pending["_mfa_pending_at"] = (
+                datetime.now(timezone.utc) - _MFA_PENDING_MAX_AGE
+                - timedelta(seconds=1)
+            ).isoformat()
+        name = rate_app.config["SESSION_COOKIE_NAME"]
+        return browser, browser.get_cookie(name).value
+
+    def test_a_kept_cookie_spends_none_of_the_accounts_budget(
+        self, rate_app, seed_user,
+    ):
+        """Replaying a timed-out pending sign-in leaves the owner's right code working."""
+        with rate_app.app_context():
+            secret = _enable_mfa(seed_user["user"].id)
+            kept, cookie = self._kept_cookie(rate_app, "6.6.6.6")
+            name = rate_app.config["SESSION_COOKIE_NAME"]
+            for hit in range(_CODE_LIMIT):
+                # The view clears the pending state in its reply, so a replay
+                # sends the kept cookie again each time.
+                kept.set_cookie(name, cookie)
+                response = kept.post(
+                    "/mfa/verify", data={"totp_code": _NEVER_A_CODE},
+                    **self._through_nginx(f"6.6.6.{hit}"),
+                )
+                assert response.status_code == 302
+                assert "/login" in response.headers["Location"]
+
+            owner = rate_app.test_client()
+            assert owner.post(
+                "/login", data={"email": _EMAIL, "password": _PASSWORD},
+                **self._through_nginx("8.8.8.8"),
+            ).status_code == 302
+            response = owner.post(
+                "/mfa/verify", data={"totp_code": _right_code(secret)},
+                **self._through_nginx("8.8.8.8"),
+            )
+
+            assert response.status_code == 302
+            assert "/login" not in response.headers["Location"]
+            assert "/mfa/verify" not in response.headers["Location"]
+
+    def test_a_kept_cookie_still_spends_its_own_address(self, rate_app, seed_user):
+        """The exemption is from the account's budget, never from the address's."""
+        with rate_app.app_context():
+            _enable_mfa(seed_user["user"].id)
+            kept, cookie = self._kept_cookie(rate_app, "6.6.6.6")
+            name = rate_app.config["SESSION_COOKIE_NAME"]
+            statuses = []
+            for _ in range(_CODE_LIMIT + 1):
+                kept.set_cookie(name, cookie)
+                statuses.append(kept.post(
+                    "/mfa/verify", data={"totp_code": _NEVER_A_CODE},
+                    **self._through_nginx("7.7.7.7"),
+                ).status_code)
+
+            assert statuses == [302] * _CODE_LIMIT + [429]

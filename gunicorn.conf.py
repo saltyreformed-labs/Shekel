@@ -80,9 +80,10 @@ limit_request_field_size = 8190
 # X-Forwarded-For / CF-Connecting-IP and bypass per-IP rate limits.
 # See audit finding F-015 (proxy header spoofing) and Commit C-33.
 #
-# Gunicorn itself uses this list only for the forwarded SCHEME: it sets
-# REMOTE_ADDR from the socket whatever the list says.  The client's address
-# comes from the application, which reads this same variable
+# Gunicorn itself uses this list for the forwarded scheme and its
+# ``forwarder_headers`` (SCRIPT_NAME, PATH_INFO, which nginx drops), never for
+# the address: it sets REMOTE_ADDR from the socket whatever the list says.  The
+# client's address comes from the application, which reads this same variable
 # (app/utils/client_address.py), so the variable is one trusted list for both.
 #
 # Set FORWARDED_ALLOW_IPS to:
@@ -98,7 +99,8 @@ limit_request_field_size = 8190
 # Shared mode (deploy/docker-compose.prod.yml):  the externally-
 #   managed shared nginx and the app meet on the pinned
 #   ``shekel-frontend`` bridge (172.32.0.0/24); the override env
-#   block sets FORWARDED_ALLOW_IPS to that CIDR.
+#   block sets FORWARDED_ALLOW_IPS to that CIDR.  cloudflared is on
+#   that bridge too, so the list covers it as well.
 #
 # Local-only invocations of ``gunicorn --config gunicorn.conf.py``
 # (rare; ``flask run`` is the dev path) must export

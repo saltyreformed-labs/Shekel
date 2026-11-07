@@ -233,8 +233,9 @@ services:
       # ``memory://`` default: counters
       # now persist across the reloader's restarts, so the global
       # default limit (``200 per hour; 30 per minute``, app/config.py)
-      # is enforced for real per client IP.  All host-originated
-      # traffic NATs to the bridge gateway and shares one bucket; an
+      # is enforced for real, per signed-in account or else per address.
+      # All signed-out host-originated traffic NATs to the bridge gateway
+      # and shares one bucket; an
       # aggressive automated crawl can now meet 429s that memory://
       # never surfaced.  That is prod behavior -- fix the crawl rate,
       # not the limit.

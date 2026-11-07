@@ -11,6 +11,7 @@ bridge.  ``nginx_forwarded`` spells the header the way nginx writes it:
 """
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -76,14 +77,25 @@ class TestParseTrustedNetworks:
 
     @pytest.mark.parametrize("allow_list", ["", "   ", ",", " , "])
     def test_empty_trusts_nobody(self, allow_list):
-        """No entries is a process with no proxy in front of it, not an error."""
+        """No entries trusts no caller, which is not an error."""
         assert parse_trusted_networks(allow_list) == ()
 
-    def test_reads_what_each_compose_file_sets(self):
-        """A pinned bridge's CIDR, as both compose files set it."""
-        assert [str(n) for n in parse_trusted_networks("172.32.0.0/24")] == [
-            "172.32.0.0/24",
-        ]
+    @pytest.mark.parametrize(("compose_file", "bridge"), [
+        ("docker-compose.yml", "172.31.0.0/24"),
+        ("deploy/docker-compose.prod.yml", "172.32.0.0/24"),
+    ])
+    def test_reads_what_each_compose_file_sets(self, compose_file, bridge):
+        """Each compose file's value parses, since a bad one refuses the app's start."""
+        text = (_REPO_ROOT / compose_file).read_text(encoding="utf-8")
+        setting = re.search(
+            r"^\s*FORWARDED_ALLOW_IPS:\s*(\S+)\s*$", text, re.MULTILINE,
+        )
+        assert setting is not None, f"{compose_file} sets no FORWARDED_ALLOW_IPS"
+        # ``docker-compose.yml`` spells its value as a default an env can override.
+        value = re.sub(
+            r"^\$\{FORWARDED_ALLOW_IPS:-(.*)\}$", r"\1", setting.group(1),
+        )
+        assert [str(n) for n in parse_trusted_networks(value)] == [bridge]
 
     def test_reads_addresses_and_spaces(self):
         """A bare address is a network of one, and spaces after commas are fine."""

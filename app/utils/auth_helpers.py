@@ -701,15 +701,16 @@ def fresh_login_required(max_age_minutes: int | None = None):
             if _fresh_login_is_within(threshold):
                 return f(*args, **kwargs)
             # The user must re-authenticate.  Build a /reauth URL
-            # carrying the current request URL as ``next`` so the
-            # redirect after a successful re-auth lands them back on
-            # the original action target.  ``request.url`` is the
-            # full URL (including query string); the /reauth handler
-            # validates it through the same ``_is_safe_redirect``
-            # helper used by /login, so an attacker who somehow seeds
-            # a malicious ``next`` (e.g. via an open redirect on a
-            # third-party site that links into a decorated route)
-            # cannot redirect the user off-origin after re-auth.
+            # carrying the current request URL as ``next``.
+            # ``request.url`` is the full URL (including query
+            # string), and the /reauth handler validates it through
+            # the same ``_is_safe_redirect`` helper used by /login,
+            # which refuses any absolute URL: so the user lands on
+            # /dashboard and re-issues the action, and an attacker
+            # who somehow seeds a malicious ``next`` (e.g. via an
+            # open redirect on a third-party site that links into a
+            # decorated route) cannot redirect the user off-origin
+            # after re-auth.
             reauth_url = url_for("auth.reauth", next=request.url)
             if request.headers.get("HX-Request"):
                 # HTMX swaps response bodies; a 302 would render

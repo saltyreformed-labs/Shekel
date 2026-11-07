@@ -41,8 +41,9 @@ _IPV6_ONE_CLIENT_PREFIX = 64
 def parse_trusted_networks(allow_list: str) -> tuple[IpNetwork, ...]:
     """Parse ``FORWARDED_ALLOW_IPS`` into networks, refusing a malformed entry.
 
-    Empty means nobody is trusted, which is every process with no proxy in
-    front of it.  Gunicorn's ``*`` is refused like any other entry that names
+    Empty means nobody is trusted, so each client counts as the socket's peer:
+    a process run directly, and the dev container, which sets no list.
+    Gunicorn's ``*`` is refused like any other entry that names
     no network: trusting every caller is the mistake this list exists to
     prevent, and failing at start is louder than believing every client's
     header.
@@ -154,12 +155,14 @@ def rate_limit_key() -> str:
 
     A signed-in request counts against its account, so nobody else's traffic
     can spend that account's budget.  Anyone else counts against their address,
-    which includes a signed-out visitor to a gated page: the limiter runs
+    which includes a signed-out visitor to a gated page: the default limits run
     before the login gate, so they spend their own count for that page and are
-    then sent to sign in (ruling plan#3009).
+    then sent to sign in (ruling plan#3009).  A route's own ``@limiter.limit``
+    runs inside its view, after the gate, so the one gated route that has one,
+    ``/reauth``, sends a signed-out visitor to sign in uncounted.
 
     ``current_user`` costs no statement here: the request-id hook has already
-    resolved it by the time the limiter's hook runs.
+    resolved it by the time any limit runs.
 
     Returns:
         ``user:<id>`` or ``ip:<client>``.

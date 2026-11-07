@@ -407,7 +407,7 @@ def find_sign_in_user(email):
     return db.session.query(User).filter_by(email=email).first()
 
 
-def is_locked_out(user) -> bool:
+def is_locked_out(user: User) -> bool:
     """Return True while *user*'s lock window is open.
 
     ``locked_until`` is an exclusive upper bound: at the instant it equals
@@ -427,7 +427,7 @@ def is_locked_out(user) -> bool:
     )
 
 
-def record_failed_attempt(user) -> None:
+def record_failed_attempt(user: User) -> None:
     """Count one wrong password or code against *user*, tripping the lock at the threshold.
 
     The ONE home of the count and the trip, whichever check the guess failed:
@@ -463,7 +463,7 @@ def record_failed_attempt(user) -> None:
     db.session.commit()
 
 
-def clear_failed_attempts(user) -> None:
+def clear_failed_attempts(user: User) -> None:
     """Clear *user*'s count and any lock, once every check they face has passed.
 
     Called at a finished sign-in and a finished re-confirm, and nowhere else
@@ -483,7 +483,9 @@ def clear_failed_attempts(user) -> None:
         db.session.commit()
 
 
-def check_signed_in_password(user, password, wrong_password_message) -> None:
+def check_signed_in_password(
+    user: User, password: str, wrong_password_message: str,
+) -> None:
     """Check a signed-in door's password, counting a wrong one toward the lock.
 
     The one password check of ``/reauth``, ``/change-password`` and

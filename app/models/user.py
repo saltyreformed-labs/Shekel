@@ -35,10 +35,10 @@ class User(UserMixin, TimestampMixin, db.Model):
         was correct on the locked account).
 
     Together these columns implement per-account brute-force throttling
-    that does not depend on Flask-Limiter's IP-keyed storage.  IP
-    rotation (residential proxy, RFC 1918 spoofing) cannot bypass the
-    per-account counter -- only knowing the password before the
-    lockout trips can.  Threshold and duration are env-configurable
+    that does not depend on Flask-Limiter's storage.  IP rotation
+    (residential proxy, RFC 1918 spoofing) cannot bypass the per-account
+    counter: it clears only once every check the account faces has
+    passed.  Threshold and duration are env-configurable
     via ``LOCKOUT_THRESHOLD`` and ``LOCKOUT_DURATION_MINUTES``; see
     ``BaseConfig``.
     """

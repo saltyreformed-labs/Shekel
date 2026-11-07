@@ -251,7 +251,7 @@ EVT_RESOURCE_NOT_FOUND = _register(
 )
 EVT_RATE_LIMIT_EXCEEDED = _register(
     "rate_limit_exceeded", ACCESS,
-    "Flask-Limiter rejected a request that exceeded its per-IP quota.",
+    "Flask-Limiter rejected a request that exceeded its quota.",
 )
 EVT_BASELINE_MISSING = _register(
     "baseline_missing", ERROR,

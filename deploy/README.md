@@ -95,8 +95,9 @@ In shared mode:
 - `deploy/nginx-shared/nginx.conf` is the main config for the shared Nginx. The repo file is the
   source of truth; the host copy at `/opt/docker/nginx/nginx.conf` must match.
 
-The `shekel-frontend` network must exist before `docker compose up`, with the subnet pinned so
-Gunicorn's `FORWARDED_ALLOW_IPS` literal matches and Nginx's `set_real_ip_from` directive applies:
+The `shekel-frontend` network must exist before `docker compose up`, with the subnet pinned so the
+`FORWARDED_ALLOW_IPS` literal Gunicorn and the app read matches and Nginx's `set_real_ip_from`
+directive applies:
 
 ```bash
 docker network ls --filter name=shekel-frontend

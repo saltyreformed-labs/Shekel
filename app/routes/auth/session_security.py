@@ -103,6 +103,11 @@ def change_password():
                   "Password changed", user_id=current_user.id)
         flash("Password changed successfully.", "success")
     except AuthError as e:
+        log_event(
+            logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
+            f"Change password failed: {e}",
+            user_id=current_user.id, ip=request.remote_addr,
+        )
         flash(str(e), "danger")
     except ValidationError as e:
         flash(str(e), "danger")
@@ -184,9 +189,12 @@ def reauth():
 
     Verification mirrors the /login flow:
 
-      * Password is verified through ``auth_service.verify_password``
-        -- the same bcrypt path used at primary login.
-      * If the user has MFA enabled, a TOTP code is required.  The
+      * Password is verified through
+        ``auth_service.check_signed_in_password`` -- the same bcrypt path
+        used at primary login, refused while the account is locked, and a
+        wrong one counts toward the lock.
+      * If the user has MFA enabled, a TOTP code is required.  A wrong or
+        replayed one counts toward the lock.  The
         same ``_verify_totp_with_replay_logging`` helper used by
         /mfa/verify and /mfa/disable enforces replay prevention --
         a code captured at primary login cannot be reused here, and
@@ -203,14 +211,16 @@ def reauth():
         operator-actionable message and re-render the form, mirroring
         /mfa/verify and /mfa/disable.
 
+    Success clears the wrong-guess count (ruling plan#3007): every check
+    this account faces has passed.
+
     The ``next`` parameter is validated through ``_is_safe_redirect``
     on every read (storage time and post-success redirect) so an
     attacker cannot stage an open-redirect via the step-up flow.
-    For most decorated routes the original action URL is a POST or
-    PATCH endpoint, so the redirect-back GET will return 405 -- the
-    user is expected to re-issue their action manually.  The
-    fall-through to /dashboard handles the no-next case (direct
-    navigation to /reauth).
+    ``fresh_login_required`` sends ``request.url``, which is absolute, so
+    ``_is_safe_redirect`` refuses it and the user lands on /dashboard to
+    re-issue their action, as does direct navigation to /reauth.  A relative
+    ``next`` is honoured.
     """
     next_url = request.args.get("next")
     safe_next = next_url if _is_safe_redirect(next_url) else None
@@ -233,14 +243,17 @@ def reauth():
         flash("Invalid password.", "danger")
         return render_template("auth/reauth.html", next=safe_next)
 
-    password = reauth_data["password"]
-    if not auth_service.verify_password(password, current_user.password_hash):
+    try:
+        auth_service.check_signed_in_password(
+            current_user, reauth_data["password"], "Invalid password.",
+        )
+    except AuthError as exc:
         log_event(
             logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
-            "Step-up re-auth failed: bad password",
+            f"Step-up re-auth failed: {exc}",
             user_id=current_user.id, ip=request.remote_addr,
         )
-        flash("Invalid password.", "danger")
+        flash(str(exc), "danger")
         return render_template("auth/reauth.html", next=safe_next)
 
     mfa_config = (
@@ -256,6 +269,7 @@ def reauth():
         if key_failure:
             return render_template("auth/reauth.html", next=safe_next)
         if not accepted:
+            auth_service.record_failed_attempt(current_user)
             log_event(
                 logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
                 "Step-up re-auth failed: bad TOTP",
@@ -264,6 +278,7 @@ def reauth():
             flash("Invalid authentication code.", "danger")
             return render_template("auth/reauth.html", next=safe_next)
 
+    auth_service.clear_failed_attempts(current_user)
     stamp_reauth_session(datetime.now(timezone.utc))
     log_event(
         logger, logging.INFO, EVT_REAUTH_SUCCESS, AUTH,

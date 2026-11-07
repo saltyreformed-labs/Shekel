@@ -4,7 +4,7 @@ Shekel Budget App -- The reconcile panel's refusal of a ticked $0.00 box
 Ruling **R-CC125**'s refusal, and the two sentences it says (ruling
 **R-CC136**), asked by :func:`~._rows.record_settled` of each settle arm's ticked
 items before that arm settles any.  It moved here from :mod:`._rows`, verbatim
-but for its name, when that module reached pylint's 1,000-line ceiling (plan
+but for its name, when that module neared pylint's 1,000-line ceiling (plan
 step ``credit_card:CC-6``, its task plan#2958): it is the one part of that
 module plan step ``balance:X-db`` deletes whole, once the status seam refuses a
 ``$0.00`` payment at every button.

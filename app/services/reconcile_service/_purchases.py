@@ -10,7 +10,7 @@ is the security property, not a convenience.
 
 **Its settle is the odd one of the three, and that is why it is first.**
 Settling a purchase writes THREE columns on ONE row (``settled_on``, the basis
-that says the day is an upper BOUND, and the statement it names) and moves no
+that says what kind of day it is, and the statement it names) and moves no
 status, so this arm's writer is a single bulk ``UPDATE`` narrowed by the same
 clauses the reader selected on.  The transaction
 and transfer arms settle through a status seam, so their writers dispatch to a
@@ -32,9 +32,11 @@ Architecture (``CLAUDE.md``):
 """
 
 import logging
+from dataclasses import dataclass
+from datetime import date
 
-from app import ref_cache
-from app.enums import SettledDayBasisEnum
+from sqlalchemy import ColumnElement, case
+
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
@@ -352,6 +354,66 @@ def _post_stamped_purchases(
         posting_service.sync_transaction_postings(txn)
 
 
+@dataclass(frozen=True)
+class _Stamp:
+    """What the writer's ``UPDATE`` writes, and over which ids.
+
+    Attributes:
+        entry_ids: The ids it narrows to, beside the scope.
+        settled_on: The day: one, or a ``CASE`` over the ids on a card.
+        basis_id: How that day is known, likewise.
+    """
+
+    entry_ids: set[int]
+    settled_on: date | ColumnElement[date]
+    basis_id: int | ColumnElement[int]
+
+
+def _stamp(statement: "_rows.Statement", entry_ids: "set[int]") -> "_Stamp | None":
+    """Return what the writer stamps on *entry_ids*, or ``None`` for nothing.
+
+    Off a card every tick takes the statement's own day
+    (:attr:`~._rows.Statement.settle_day`).  **On a card each purchase takes
+    the day the card counts it from** (:meth:`~._rows.Statement.settle_day_of`,
+    plan#2958): the day it was made, ``entered``, where the card's books hold
+    it.  Stamped with the statement's day, $800 bought Jan 3 and ticked on the
+    Jan 20 statement left the Jan 5 one, so Jan 27 paid $0.00 and Feb 27
+    $800.00.  So the ticked purchases in scope are loaded to date each, and the
+    pair is a ``CASE`` over their ids.  **Loaded locked, in id order**: the day
+    is read here and written by the ``UPDATE``, so a purchase day edited, or the
+    purchase stamped by another save, in between would otherwise be written
+    stale (the review of plan#2958).
+
+    Args:
+        statement: The statement being reconciled.
+        entry_ids: The ids the user ticked, not empty.
+
+    Returns:
+        The :class:`_Stamp`, or ``None`` on a card where no ticked id is in
+        scope.
+    """
+    if statement.card_books_open_on is None:
+        day = statement.settle_day
+        return _Stamp(entry_ids, day.day, day.basis_id)
+    days = {
+        entry.id: statement.settle_day_of(entry)
+        for entry in db.session.query(TransactionEntry)
+        .filter(TransactionEntry.id.in_(entry_ids), *_outstanding_scope(statement))
+        .order_by(TransactionEntry.id)
+        .with_for_update(of=TransactionEntry)
+    }
+    if not days:
+        return None
+    return _Stamp(
+        set(days),
+        case({key: day.day for key, day in days.items()}, value=TransactionEntry.id),
+        case(
+            {key: day.basis_id for key, day in days.items()},
+            value=TransactionEntry.id,
+        ),
+    )
+
+
 def record_settled_days(
     statement: "_rows.Statement",
     entry_ids: "set[int]",
@@ -360,10 +422,13 @@ def record_settled_days(
 
     This arm's writer: the user ticked these purchases off a statement, so each
     one records WHICH statement showed it (``reconciled_by_id``, ruling
-    **R-FL**) and takes that statement's day as its ``settled_on``.
+    **R-FL**) and takes that statement's day as its ``settled_on`` -- but on a
+    card, where each takes the day the card already counts it from
+    (:func:`_stamp`, plan#2958).
 
     **Three columns, three facts, and the second is why this step exists.**
-    ``settled_on`` is an UPPER BOUND on the true posting day -- the purchase may
+    ``settled_on`` is an UPPER BOUND on the true posting day off a card (on a
+    card it is the purchase's own day, :func:`_stamp`) -- the purchase may
     have cleared a day or two earlier, and a user who wants the exact day edits
     the entry.  ``reconciled_by_id`` is not a bound at all: it is the
     observation, and it is what the clearing rule reads first.  The day alone
@@ -372,7 +437,8 @@ def record_settled_days(
     a tick was made against.
 
     **``settled_day_basis_id`` is the third, and it is plan step X-az** (finding
-    **N-332**).  It records that this day is a BOUND, in the row itself, where
+    **N-332**).  It records what kind of day this is (a BOUND off a card), in
+    the row itself, where
     the sentence above used to be the only statement of it and every reader had
     to re-derive the fact from ``reconciled_by_id`` being populated.  That
     inference was exact over the three writers of ``settled_on`` and blind to
@@ -397,7 +463,7 @@ def record_settled_days(
         entry_ids: The entry ids the user ticked.  An empty set is a no-op.
             Its anchor id is what each ticked purchase records, and its
             ``observed_on`` is
-            the day each is recorded as having settled by.
+            the day each is recorded as having settled by, off a card.
 
     Returns:
         The number of entries actually stamped.
@@ -408,7 +474,9 @@ def record_settled_days(
             :func:`app.services.cash_ledger.reject_movement_before_books_open`,
             plan step X-f3c-2b).  Refused whole rather than per entry: the day
             being stamped is the STATEMENT's, so either every tick lands inside
-            the opening equity or none does.
+            the opening equity or none does.  On a card a purchase dated by its
+            own day is inside the books by construction (:func:`_stamp`), and
+            the rest take this day.
     """
     if not entry_ids:
         return 0
@@ -425,7 +493,9 @@ def record_settled_days(
     # statement recorded for that day would stamp every ticked purchase inside
     # the opening equity.  Asked BEFORE the UPDATE so a refused act writes
     # nothing, and asked ONCE rather than per entry because the day is the
-    # statement's, not the purchase's.
+    # statement's, not the purchase's.  On a card a purchase dated by its own
+    # day is inside the books by construction (``_stamp``), so this still
+    # grades every day the UPDATE can write.
     reject_movement_before_books_open(account_id, observed_on)
 
     # ``synchronize_session=False``, which CLOSES finding **N-223**, and the
@@ -446,10 +516,13 @@ def record_settled_days(
     # and a probe of the identity map at this statement counted **ZERO**
     # ``TransactionEntry`` objects, because nothing in the POST loads one before
     # here.  ``'fetch'`` pre-SELECTs primary keys in order to synchronise an
-    # empty set.
+    # empty set.  On a card ``_stamp`` loads the ticked purchases to date each
+    # (plan#2958), and ``_post_stamped_purchases`` refreshes exactly the rows
+    # this stamps (``populate_existing``), which are the rows it loaded.
     # **THREE columns, and the third says what KIND of day the first is** (plan
     # step **X-az**, finding **N-332**).  ``asserted`` is not a nicety: this
-    # writer's own docstring calls the day an UPPER BOUND, and until this step
+    # writer's own docstring calls the statement's day an UPPER BOUND (on a
+    # card a purchase's own day is ``entered``: ``_stamp``), and until this step
     # the only way a reader could tell was to test whether ``reconciled_by_id``
     # was populated -- which is exactly the "infer a fact from a column being
     # populated" shape finding **N-241** deleted one column over (the row's
@@ -465,19 +538,17 @@ def record_settled_days(
     # to hand that function.  ``ck_transaction_entries_settle_day_basis_pairing``
     # is what makes a statement that wrote one column and not the other fail
     # loudly rather than leave a day nobody can classify.
-    asserted_basis_id = ref_cache.settled_day_basis_id(
-        SettledDayBasisEnum.ASSERTED,
-    )
-    updated = (
+    stamp = _stamp(statement, entry_ids)
+    updated = 0 if stamp is None else (
         db.session.query(TransactionEntry)
         .filter(
-            TransactionEntry.id.in_(entry_ids),
+            TransactionEntry.id.in_(stamp.entry_ids),
             *_outstanding_scope(statement),
         )
         .update(
             {
-                TransactionEntry.settled_on: observed_on,
-                TransactionEntry.settled_day_basis_id: asserted_basis_id,
+                TransactionEntry.settled_on: stamp.settled_on,
+                TransactionEntry.settled_day_basis_id: stamp.basis_id,
                 TransactionEntry.reconciled_by_id: statement.anchor.anchor_id,
             },
             synchronize_session=False,

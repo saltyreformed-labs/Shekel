@@ -243,9 +243,12 @@ class StatementCoverage:
         partition exists to make unspellable.
 
         So the record is honoured where it only chooses between assertions
-        SHARING a day -- which is what the reconcile panel writes, because it
-        names the GOVERNING assertion while the date rule takes the first of
-        that day, and production carries three such days on Checking.  That
+        SHARING a day -- which is what the reconcile panel writes off a card,
+        because it names the GOVERNING assertion while the date rule takes the
+        first of that day, and production carries three such days on Checking.
+        On a card the panel dates a tick by the item's own day (plan#2958), so a
+        true-up between that day and the linked one answers by the date rule,
+        as it did for the item unticked.  That
         choice is real: it decides which correction the posted ledger books the
         line under.  It is invisible to every BALANCE, because the fold reads a
         day's boundary after every step on it.

@@ -206,7 +206,9 @@ def _settle_one(
             records the money as having moved on, rather than the seam's
             default of the user's today -- and on the ``asserted`` basis, because
             what the owner asserted is a BALANCE for that day and the money was
-            inside it (plan step **X-az**).  **Its ACCOUNT is where the tick
+            inside it (plan step **X-az**).  On a card a row it counts from its
+            own date records that date, ``entered``
+            (:meth:`~._rows.Statement.settle_day_of`, plan#2958).  **Its ACCOUNT is where the tick
             books, by the scopes' construction** (ruling **R-CC15**: a
             statement-driven settle books on the statement's own account).
             The tick names NO tender since plan step
@@ -263,7 +265,8 @@ def _settle_one(
         (finding **N-231**), which is the shape they can no longer be.
     """
     corrected = transaction_service.settle_transaction(
-        txn, submitted=submitted, settle_day=statement.settle_day, press=press,
+        txn, submitted=submitted, settle_day=statement.settle_day_of(txn),
+        press=press,
     )
     # WHICH statement showed this row (ruling **R-FL**), recorded HERE rather
     # than inside ``settle_transaction`` -- and that placement is the rule.  The

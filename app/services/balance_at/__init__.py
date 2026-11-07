@@ -275,6 +275,7 @@ from ._cash_flow import (
     records_balance_at,
     rows_counted_from_their_date,
 )
+from ._cash_plan import OwnDay, own_day_on_a_card
 from ._confirmed_view import confirmed_view
 from ._context import BalanceContext
 from ._definition_books import (
@@ -391,6 +392,7 @@ __all__ = [
     "GridRowFlags",
     "LoanFigures",
     "LoanTerms",
+    "OwnDay",
     "first_installment_at_most",
     "installments_payoff",
     "SecuredLoanSeries",
@@ -431,6 +433,7 @@ __all__ = [
     "loan_principal_paid_in_year",
     "money_account_columns",
     "next_card_payment_price",
+    "own_day_on_a_card",
     "positions",
     "records_balance_at",
     "rows_counted_from_their_date",

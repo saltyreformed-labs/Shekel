@@ -343,7 +343,9 @@ class CandidateRow:  # pylint: disable=too-many-instance-attributes
           a belief, so the projection is not consulted;
         * a PURCHASE settled by the RECONCILE PANEL spans ``purchased_on`` to
           ``settled_on``, because that day is a BOUND and not an observation --
-          see the measurement below.  A BILL ticked the same way keeps its
+          see the measurement below.  On a card the panel records the purchase
+          day itself, ``entered`` (plan#2958), so it is a point there, as an
+          unticked purchase is.  A BILL ticked the same way keeps its
           point for now, which the same passage explains;
         * a PURCHASE is a point at ``purchased_on``.  Every purchase has one
           -- ``transaction_entries.purchased_on`` is NOT NULL -- so "undated"

@@ -146,7 +146,9 @@ class SettledDayBasisEnum(enum.Enum):
         entered   -- the owner's own word with no bank document behind it:
                      the owner typed the day, or a settle door stamped the day
                      the act happened on a plain row.  A POINT, on the owner's
-                     word.
+                     word.  A tick on a card's reconcile panel records the
+                     item's own date so (plan#2958): the day is the owner's,
+                     and the link names the statement that showed it.
         borrowed  -- NO evidence of its own: one side of a TRANSFER whose day
                      is its other side's, or the day Paid was pressed when
                      neither side has one (plan step ``balance:X-bi-6-4c-3``,

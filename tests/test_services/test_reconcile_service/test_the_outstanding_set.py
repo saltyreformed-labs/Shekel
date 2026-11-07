@@ -347,6 +347,12 @@ class TestTheOutstandingSet:
         card's statement is what shows it, so the card's reconcile offers it
         and stamps it; checking's does neither, though the envelope row is
         checking's.  Graded from both doors, as every clause here is.
+
+        **Stamped on the day it was made, not the statement's** (plan#2958):
+        rulings plan#2888 and plan#2910 say a purchase's date decides its
+        statement, and the card counts a swipe from that day (decided under
+        R-BAL207 at plan#2928), so a tick moves nothing.  This asserted the
+        statement's day, Jan 10, until then.
         """
         with app.app_context():
             card = create_account_of_type(
@@ -382,7 +388,7 @@ class TestTheOutstandingSet:
             db.session.expire_all()
             assert db.session.get(
                 TransactionEntry, swipe.id,
-            ).settled_on == _OBSERVED_ON
+            ).settled_on == _BEFORE_THE_STATEMENT
 
     def test_another_users_purchase_matches_nothing(
         self, app, db, seed_user, seed_second_user, seed_periods,

@@ -32,6 +32,7 @@ from functools import cached_property
 
 from app.models.account import Account
 from app.models.transaction import Transaction
+from app.models.transaction_entry import TransactionEntry
 from app.services.account_projection import is_revolving
 from app.services.cash_ledger import (
     AmountRule,
@@ -258,14 +259,13 @@ def _cash_plan(
         if _is_worked_out(item):
             worked_out.append(_WorkedOutRow(item, dated_on, lands_on))
             continue
-        counts_from = (
-            None if stated_through is None
-            else _day_it_counts_from(item, stated_through)
+        own = None if stated_through is None else own_day_on_a_card(
+            item, stated_through=stated_through, opened_on=walk.opening.opened_on,
         )
-        if counts_from is None:
+        if own is None:
             by_day[lands_on].append(item)
-        elif books_hold(walk.opening.opened_on, counts_from):
-            on_their_dates[counts_from].append(item)
+        elif own.moves:
+            on_their_dates[own.day].append(item)
     return _CashPlan(
         rows=rows, by_day=dict(by_day), basis=basis, worked_out=worked_out,
         on_their_dates=dict(on_their_dates),
@@ -290,7 +290,9 @@ def _stated_through(walk: CashLedgerWalk) -> date:
     return walk.opening.opened_on
 
 
-def _day_it_counts_from(item: _PlanItem, stated_through: date) -> "date | None":
+def _day_it_counts_from(
+    item: "_PlanItem | TransactionEntry", stated_through: date,
+) -> "date | None":
     """Return the day a plan item on a card counts from, or ``None`` for R-G's.
 
     Ruling plan#2926, item by item:
@@ -305,7 +307,8 @@ def _day_it_counts_from(item: _PlanItem, stated_through: date) -> "date | None":
       under R-BAL207: it has happened, and only the bank's posting is still to
       come.  The cost is a posting dated after a true-up that already held it: the
       posting comes on top, by the same date rule a recorded movement takes (ruling
-      R-FL), until the true-up is restated.
+      R-FL), until the true-up is restated.  The reconcile tick hands the stored
+      purchase it is about to date (:func:`own_day_on_a_card`).
     * **An envelope's unspent budget keeps R-G**, decided under R-BAL207: money not
       yet spent has no day it was spent on, so a true-up cannot hold it.  Its swipes
       are the in-flight items above.  The cost: left open past its paycheck, the
@@ -326,19 +329,61 @@ def _day_it_counts_from(item: _PlanItem, stated_through: date) -> "date | None":
       a true-up closes its own day, so money moved later that same day is inside it.
 
     Args:
-        item: A plan item on a card, not a worked-out payment.
+        item: A plan item on a card, not a worked-out payment, or a purchase
+            in flight as it is stored.
         stated_through: The last day the card's balance was stated for.
 
     Returns:
         The day it counts from, or ``None`` where it lands by ruling R-G.
     """
-    if isinstance(item, InFlightMovement):
+    if isinstance(item, (InFlightMovement, TransactionEntry)):
         return item.purchased_on
     if item.due_date is None:
         return None
     if isinstance(item, TransferLeg):
         return item.due_date if item.due_date <= stated_through else None
     return None if item.tracks_purchases else item.due_date
+
+
+@dataclass(frozen=True)
+class OwnDay:
+    """The day a card counts a plan item from by itself (ruling plan#2926).
+
+    Attributes:
+        day: That day (:func:`_day_it_counts_from`).
+        moves: Whether the card's books hold it (``books_hold``).  ``False`` for
+            a day by the books' opening, which already holds the money, so the
+            item moves nothing.
+    """
+
+    day: date
+    moves: bool
+
+
+def own_day_on_a_card(
+    item: "_PlanItem | TransactionEntry", *, stated_through: date, opened_on: date,
+) -> "OwnDay | None":
+    """Return the day a card counts *item* from by itself, or ``None`` for R-G's.
+
+    The ONE answer, read by the fold (:func:`_cash_plan`) and by the reconcile
+    tick (plan#2958): a tick on the card records the day the card already counts
+    the money from, so ticking it moves nothing (ruling plan#2926, "marked or
+    not").  It recorded the statement's day before, which moved $800 dated Jan 3
+    off the Jan 5 statement once it was ticked on the Jan 20 one.
+
+    Args:
+        item: A plan item on a card, not a worked-out payment, or a purchase
+            in flight as it is stored (the purchase arm's tick).
+        stated_through: The last day the card's balance was stated for.
+        opened_on: The day the card's books opened.
+
+    Returns:
+        The :class:`OwnDay`, or ``None`` where the card lands it by ruling R-G.
+    """
+    counts_from = _day_it_counts_from(item, stated_through)
+    if counts_from is None:
+        return None
+    return OwnDay(counts_from, books_hold(opened_on, counts_from))
 
 
 def _planned_day(item: _PlanItem, calendar: PayCalendar) -> date:

@@ -61,14 +61,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from functools import cached_property
 
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.enums import MovementFigureSourceEnum, SettledDayBasisEnum
 from app.extensions import db
+from app.models.account import Account
 from app.models.transaction import Transaction
+from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-from app.services.cash_ledger import AnchorPoint
+from app.services.account_projection import is_revolving
+from app.services.balance_at import own_day_on_a_card
+from app.services.cash_ledger import AnchorPoint, account_opening_fact
 from app.services.match_press import Press
 from app.services.stated_figure import StatedFigure
 from app.services.pay_calendar import DerivedPeriod, FiledRow, PayCalendar
@@ -83,6 +88,8 @@ from app.utils.balance_predicates import (
 from app.utils.log_events import BUSINESS, log_event
 
 logger = logging.getLogger(__name__)
+
+_Ticked = Transaction | TransactionEntry | Transfer  # what a tick can date
 
 
 @dataclass(frozen=True)
@@ -124,8 +131,9 @@ class Statement:
         anchor: The governing :class:`~app.services.cash_ledger.AnchorPoint` --
             the assertion being reconciled against.  Its ``anchor_id`` is what a
             tick writes into ``reconciled_by_id``, and its ``observed_on`` is the
-            day every tick records -- as a BOUND, which :attr:`settle_day` is
-            what says (plan step **X-az**).
+            day a tick records -- as a BOUND, which :attr:`settle_day` is what
+            says (plan step **X-az**) -- but on a card, where a tick records the
+            item's own day (:meth:`settle_day_of`, plan#2958).
     """
 
     calendar: PayCalendar
@@ -225,7 +233,9 @@ class Statement:
 
         **The two sets are not interchangeable and the difference is an arm.**
         The source-row arms bound the ROW's own landing day, so a period that
-        starts after the statement can hold nothing they may offer.  The
+        starts after the statement can hold nothing they may offer -- but a
+        card's row dated before its paycheck (:meth:`own_day`), which this set
+        leaves out until that paycheck starts (plan#3042).  The
         purchase arm bounds the ENTRY's ``purchased_on`` instead and its
         parent's period is unbounded -- a purchase made today against next
         period's envelope is a state the app can express, and it is the
@@ -246,8 +256,9 @@ class Statement:
     def observed_on(self) -> date:
         """Return the civil day this statement's balance was true for.
 
-        The bound every offer is measured against, and the day every tick
-        records its money as having moved.  Read THROUGH the assertion rather
+        The bound every offer is measured against, and the day a tick records
+        its money as having moved but on a card (:meth:`settle_day_of`).  Read
+        THROUGH the assertion rather
         than stored beside it, so the day and the statement a tick names can
         never describe different rows.
 
@@ -275,9 +286,9 @@ class Statement:
         builds**, for the reason :attr:`observed_on` is: three arms tick against
         one assertion, and three constructions of "what kind of day is this" is
         three chances for one of them to say something the other two do not.
-        The purchase arm cannot use it -- its writer is a bulk ``UPDATE`` with
-        no ORM row to hand -- and it resolves the same member there by name; the
-        two are one sentence apart in this module's own package.
+        The purchase arm's bulk ``UPDATE`` reads it too since plan#2958, where
+        it resolved the same member by name.  On a card a tick records the
+        item's own day instead (:meth:`settle_day_of`).
 
         Returns:
             A :class:`~app.services.settle_day.SettleDay` over
@@ -287,6 +298,65 @@ class Statement:
             day=self.observed_on,
             basis=SettledDayBasisEnum.ASSERTED,
         )
+
+    @cached_property
+    def card_books_open_on(self) -> "date | None":
+        """Return the day this card's books opened, or ``None`` off a card.
+
+        Read once per statement: every row the panel dates asks it
+        (:meth:`own_day`), and the purchase arm's writer.
+        """
+        if not is_revolving(db.session.get(Account, self.account_id)):
+            return None
+        return account_opening_fact(self.account_id).opened_on
+
+    def own_day(self, item: "_Ticked") -> "date | None":
+        """Return the day this card counts *item* from by itself, or ``None``.
+
+        A row or a purchase on this card that its fold counts from its own date
+        (ruling plan#2926; ``balance_at.own_day_on_a_card``) is bounded,
+        captioned and ticked by that day (plan#2958): ticked on the statement's
+        day it moved off the statement its date put it on.  A row dated before a
+        paycheck that has not started is not offered yet
+        (:attr:`offerable_period_ids`, plan#3042).  ``None`` off a card,
+        for a row planned on another account (the "Paid from this account"
+        list), for a transfer, and for a row the card holds forward by ruling R-G.
+
+        Args:
+            item: A row, a purchase, or the transfer a leg is filed by.
+
+        Returns:
+            That day, or ``None``.
+        """
+        opened_on = self.card_books_open_on
+        if (
+            opened_on is None or isinstance(item, Transfer)
+            or item.account_id != self.account_id
+        ):
+            return None
+        # The governing assertion is the card's latest, so its day is the
+        # fold's ``stated_through``; only a transfer's leg reads it.
+        own = own_day_on_a_card(
+            item, stated_through=self.observed_on, opened_on=opened_on,
+        )
+        return own.day if own is not None and own.moves else None
+
+    def settle_day_of(self, item: "_Ticked") -> SettleDay:
+        """Return the day a tick records for *item*: its own on a card, else :attr:`settle_day`.
+
+        Its own day is the owner's date, so it is ``entered``; the link the
+        tick writes says which statement showed it.
+
+        Args:
+            item: A row, a purchase, or the transfer a leg is filed by.
+
+        Returns:
+            The :class:`~app.services.settle_day.SettleDay`.
+        """
+        day = self.own_day(item)
+        if day is None:
+            return self.settle_day
+        return SettleDay(day=day, basis=SettledDayBasisEnum.ENTERED)
 
 
 @dataclass(frozen=True)
@@ -505,6 +575,11 @@ def attributed_on(statement: Statement, txn: Transaction | Transfer) -> date:
     unconstructible there.  The shadow it handed before carried the same period
     and due date by Transfer Invariant 3.
 
+    **A row a card counts from its own date lands on that date**
+    (:meth:`Statement.own_day`, plan#2958), never its paycheck's clamp: the day
+    the panel offers it by is the day a tick records, so no tick records a day
+    after its statement's.
+
     Args:
         statement: The statement being reconciled, carrying the owner's
             calendar.
@@ -521,6 +596,9 @@ def attributed_on(statement: Statement, txn: Transaction | Transfer) -> date:
             rather than silent if a future caller reaches this with a row from
             somewhere else (:func:`filed_period`).
     """
+    own = statement.own_day(txn)
+    if own is not None:
+        return own
     return filed_period(statement, txn).attribution_day(txn.due_date)
 
 
@@ -539,6 +617,8 @@ def lands_on_or_before(statement: Statement, txn: Transaction | Transfer) -> boo
     whose attribution day has already passed is precisely one the projection is
     still holding forward.  Measured on production 2026-08-11, Checking at its
     latest assertion: the SQL superset admits 5 rows and this narrows them to 3.
+    A card's row counted from its own date is not held forward (ruling
+    plan#2926): it is offered once that date is on or before the statement's.
 
     Args:
         statement: The statement being reconciled -- its ``observed_on`` is the

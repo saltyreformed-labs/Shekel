@@ -291,7 +291,9 @@ class OutstandingTransaction:  # pylint: disable=too-many-instance-attributes
             What a tick POSTS is derived from it (:attr:`tick_form`,
             :attr:`tick_id`), and the arm's writer re-scopes that rather than
             trusting it, so publishing it grants nothing.
-        attributed_on: The day the PROJECTION lands this row on -- its
+        attributed_on: The day the PROJECTION lands this row on -- on a card
+            the row's own date where the card counts from it (plan#2958,
+            ``_rows.attributed_on``), else its
             ``due_date``, falling back to its pay period's start and clamped
             into that period
             (:meth:`~app.services.pay_calendar.DerivedPeriod.attribution_day`,

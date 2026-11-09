@@ -34,13 +34,16 @@ import logging
 from datetime import date
 
 from app.enums import SettledDayBasisEnum
-from app.exceptions import NotFoundError, ValidationError
+from app.exceptions import ValidationError
+from app.extensions import db
 from app.models.account import Account
 from app.models.transaction import Transaction
 from app.services.account_projection import is_revolving
 from app.services.account_resolver import resolve_owner_cash_flow_set
 from app.services.cash_flow_set import purchase_accounts
+from app.services.credit_workflow import get_active_payback
 from app.services.match_press import Press
+from app.services.movement_account import admitted_movement_account_id
 from app.services.pay_calendar import FiledRow, calendar_for
 from app.services.settle_day import SettleDay
 from app.services.status_seam import covering_movement_of, settled_on_a_card
@@ -67,10 +70,12 @@ def mark_as_credit(
     with a paycheck), a row whose purchases are tracked (its purchases each
     name their own account, so Credit is per purchase), and a row that is
     not Projected (a stale press on a row another tab settled or cancelled).
-    A row already on a card, or an old Credit row, is a press already made,
-    so a double click changes nothing.  The settle verb adds its own
-    refusals: a deleted row, a day before the card's books open (S11 of the
-    trace), a figure it cannot price.
+    A row already on a card, or an old Credit row holding its live payback,
+    is a press already made, so a double click changes nothing; a row in
+    status Credit holding no payback (the Status dropdown's, finding
+    plan#2133) is refused as not Projected, as the old press refused it.
+    The settle verb adds its own refusals: a deleted row, a day on or before
+    the card's books open (S11 of the trace), a figure it cannot price.
 
     Args:
         txn: The row pressed, already proven the caller's by the door.  A
@@ -85,8 +90,8 @@ def mark_as_credit(
     Raises:
         ValidationError: On the refusals above, or when no card or more than
             one could be the one meant (:func:`_the_card`).
-        NotFoundError: When *card_account_id* is not one of the owner's
-            active cards (one answer for "not found" and "not yours").
+        NotFoundError: When *card_account_id* is not an account of the
+            row's owner (one answer for "not found" and "not yours").
     """
     if txn.is_income:
         raise ValidationError("Cannot mark income as credit.")
@@ -95,7 +100,9 @@ def mark_as_credit(
             "This transaction uses individual purchase tracking. "
             "Mark individual entries as credit instead of the whole transaction."
         )
-    if is_credit(txn) or settled_on_a_card(txn):
+    if settled_on_a_card(txn) or (
+        is_credit(txn) and get_active_payback(txn.id) is not None
+    ):
         return
     if not is_projected(txn):
         raise ValidationError(
@@ -152,10 +159,17 @@ def credit_day(txn: Transaction) -> date:
 def _the_card(txn: Transaction, card_account_id: int | None) -> Account:
     """Return the card a Credit press on *txn* puts it on.
 
-    The choices are the cards among the accounts the row's payment may move
-    through (``cash_flow_set.purchase_accounts``, the settle verb's own gate:
-    the row's own account, then the owner's active cards), so the choice and
-    the gate cannot part.  A row that lives on a card goes on that card.
+    A NAMED card is gated as "Paid from" gates one -- the one gate on where a
+    movement under a row may go (``movement_account.admitted_movement_account_id``:
+    another owner's account is not found, an archived one is refused in
+    words, one outside the owner's cash-flow set is refused) -- and must then
+    be a card.  With none named, the choices are the cards among the
+    accounts the row's payment may move through
+    (``cash_flow_set.purchase_accounts``, the same set that gate admits: the
+    row's own account, then the owner's active cards).  A row that lives on a
+    card goes on that card, however many the owner has (decided under
+    R-BAL207: a bill on the card says "this went on this card", ruling
+    plan#2926, and asking which would ask what the row already says).
     Otherwise the owner's one card; with none there is nothing to put it on,
     and with two or more the press must say which.
 
@@ -167,22 +181,26 @@ def _the_card(txn: Transaction, card_account_id: int | None) -> Account:
         The card's :class:`~app.models.account.Account`.
 
     Raises:
-        NotFoundError: *card_account_id* names no card among the choices: not
-            the owner's, archived, or not a card.  One answer, because a
-            press offers only the choices, so anything else was crafted.
-        ValidationError: No card was named and none, or more than one, could
-            be the one meant.
+        NotFoundError: *card_account_id* is not an account of the row's owner.
+        ValidationError: The named account is archived, outside the owner's
+            cash-flow set, or not a card; or none was named and none, or more
+            than one, could be the one meant.
     """
+    if card_account_id is not None:
+        account = db.session.get(
+            Account, admitted_movement_account_id(txn, card_account_id, movement="purchase"),
+        )
+        if not is_revolving(account):
+            raise ValidationError(
+                f"'{account.name}' is not a credit card, so Credit cannot put "
+                f"{txn.name} on it: pick one of your cards."
+            )
+        return account
     cards = [
         account
         for account in purchase_accounts(resolve_owner_cash_flow_set(txn.user_id), txn)
         if is_revolving(account)
     ]
-    if card_account_id is not None:
-        named = next((card for card in cards if card.id == card_account_id), None)
-        if named is None:
-            raise NotFoundError("Card not found.")
-        return named
     if is_revolving(txn.account) or len(cards) == 1:
         return cards[0]
     if not cards:

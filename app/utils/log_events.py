@@ -338,7 +338,7 @@ EVT_TRANSFER_RESTORE_REFUSED_ARCHIVED_ACCOUNT = _register(
 
 EVT_CREDIT_MARKED = _register(
     "credit_marked", BUSINESS,
-    "Transaction marked Credit; payback expense generated in next period.",
+    "Transaction put on a credit card (Paid, its movement on the card).",
 )
 EVT_CREDIT_UNMARKED = _register(
     "credit_unmarked", BUSINESS,

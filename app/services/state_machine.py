@@ -24,8 +24,9 @@ transition map rather than sharing the transaction one:
   done -> projected (revert mistakes)
   cancelled -> projected (reactivate)
 
-Credit is excluded because the credit/auto-payback workflow is
-expense-only (``mark_as_credit`` refuses transfers outright); a
+Credit is excluded because the Credit press is expense-only
+(``transaction_service.mark_as_credit`` takes a transaction row, and
+the old auto-payback workflow refused transfers outright); a
 transfer pushed into Credit would be balance-excluded on both
 accounts with no compensating payback -- it would silently vanish
 from both projections.  Received is excluded because it is a display

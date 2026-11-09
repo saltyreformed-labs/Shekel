@@ -366,8 +366,9 @@ def apply_status_change(
          records what moved and when.
       4. ``db.session.expire(row, ["status"])`` so a pre-commit reader (a cell
          render, a test assertion) sees the new ``Status`` row, not the stale
-         ``lazy="joined"`` one -- the exact trap ``mark_as_credit`` documented
-         and handled inline before this seam absorbed it.  Both models declare
+         ``lazy="joined"`` one -- the exact trap the old row-level Credit press
+         (``credit_workflow.mark_as_credit`` until plan task plan#2929)
+         documented and handled inline before this seam absorbed it.  Both models declare
          ``status`` as ``lazy="joined"``, so both need it; the transfer path did
          not do this before X-aj1 and held only because every route commits
          before it renders.

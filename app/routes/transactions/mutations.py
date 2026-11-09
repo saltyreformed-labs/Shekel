@@ -38,7 +38,7 @@ from app.services import (
     status_seam,
     transaction_service,
 )
-from app.services.match_press import MARK_PAID, NOTHING_SHOWN, Press
+from app.services.match_press import NOTHING_SHOWN, Press
 from app.services.settle_day import recorded_settle_day
 from app.exceptions import NotFoundError, ValidationError
 from app.utils.auth_helpers import require_owner
@@ -876,10 +876,10 @@ def mark_credit(txn_id):
     The HTTP shape of ``transaction_service.mark_as_credit`` (plan task
     plan#2929, rulings plan#2887 / plan#2888), which writes no CC Payback row,
     so the payback's unique-index backstop (commit C-19) has nothing left to
-    catch here.  The press declares what Mark Paid's does: the lines its page
-    named, and silence from the owner's one-click (ruling **R-CC56**), because
-    putting a reverted row's kept payment on the card takes it out of a match
-    naming it.  The door is the owner's, so a companion's press is a 404.
+    catch here.  Putting a reverted row's kept payment on the card takes it
+    out of a match naming it, and a press naming no line frees none (ruling
+    **R-CC127**; only Mark Paid's one-click is silent, **R-CC56**).  The door
+    is the owner's, so a companion's press is a 404.
     Optimistic locking (commit C-18 / F-010): ``StaleDataError`` -> 409.
     """
     txn = _get_owned_transaction(txn_id)
@@ -890,7 +890,7 @@ def mark_credit(txn_id):
         return _error_transaction_response(
             txn_id, flatten_schema_errors(errors), status=422,
         )
-    posted = read_posted(_credit_press_schema.load(request.form), absent=MARK_PAID)
+    posted = read_posted(_credit_press_schema.load(request.form), absent=NOTHING_SHOWN)
     try:
         with Press(posted.shown) as one_save:
             transaction_service.mark_as_credit(txn, press=one_save)

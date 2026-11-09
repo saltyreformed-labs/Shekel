@@ -107,10 +107,11 @@ _mark_done_schema = MarkDoneSchema()
 # **R-CC127** / **R-CC131**).
 _delete_dialog_schema = TransactionDeleteSchema()
 
-# The two Credit presses': the bank lines the card's caption named -- for the
-# payback Undo CC deletes, a DELETE's query string (plan step
-# ``credit_card:CC-5-4a-5``, ruling **R-CC80**), and for the kept payment a
-# Credit press puts on the card, a POST's form (plan task plan#2929).
+# The two Credit presses': the bank lines the page named -- for the payback
+# Undo CC deletes, its caption's, a DELETE's query string (plan step
+# ``credit_card:CC-5-4a-5``, ruling **R-CC80**); and for the kept payment a
+# Credit press puts on the card, a POST's form (plan task plan#2929), which no
+# page names yet, so such a press is refused (plan#3056 draws its caption).
 _credit_press_schema = ShownLinesSchema()
 
 

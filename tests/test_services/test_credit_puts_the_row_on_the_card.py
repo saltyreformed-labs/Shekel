@@ -166,6 +166,14 @@ class TestTheDay:
 
         assert row.settled_on == min(_JAN_16, display_today())
 
+    def test_an_undated_row_in_a_paycheck_not_started_is_today(self, seed_user, seed_periods):
+        """No date, in the last paycheck, which has not started: put on the card today."""
+        _card(seed_user)
+        assert seed_periods[-1].start_date > display_today(), "precondition: not started"
+        row = _press(_groceries(seed_user, seed_periods[-1], due_date=None))
+
+        assert row.settled_on == display_today()
+
     def test_a_day_inside_the_cards_opening_is_refused(self, seed_user, seed_periods):
         """Dated the day the card's books open: the opening already holds it, so refused."""
         card = _card(seed_user)
@@ -211,22 +219,56 @@ class TestWhichCard:
 
         assert [m.account_id for m in row.entries] == [amex.id]
 
-    @pytest.mark.parametrize("named", ["checking", "another owner's card"])
-    def test_a_named_account_that_is_not_one_of_the_cards_is_not_found(
-        self, seed_user, seed_second_user, seed_periods, named,
+    def test_a_named_account_of_another_owner_is_not_found(
+        self, seed_user, seed_second_user, seed_periods,
     ):
-        """Checking, or another owner's card: one answer, not found, nothing written."""
+        """Another owner's card: not found, as "Paid from" answers it, nothing written."""
         _card(seed_user)
-        account_id = (
-            seed_user["account"].id if named == "checking"
-            else add_card(seed_second_user, name="Theirs").id
-        )
+        theirs = add_card(seed_second_user, name="Theirs")
         db.session.commit()
         row = _groceries(seed_user, seed_periods[0])
 
         with pytest.raises(NotFoundError):
+            transaction_service.mark_as_credit(row, card_account_id=theirs.id)
+        _assert_untouched(row.id)
+
+    @pytest.mark.parametrize("named, sentence", [
+        ("checking", "is not a credit card"),
+        ("an archived card", "is archived"),
+    ])
+    def test_a_named_account_that_is_not_an_active_card_is_refused_in_words(
+        self, seed_user, seed_periods, named, sentence,
+    ):
+        """Checking, or the owner's archived card: refused with a sentence, nothing written."""
+        _card(seed_user)
+        if named == "checking":
+            account_id = seed_user["account"].id
+        else:
+            old = add_card(seed_user, name="Old")
+            old.is_active = False
+            account_id = old.id
+        db.session.commit()
+        row = _groceries(seed_user, seed_periods[0])
+
+        with pytest.raises(ValidationError, match=sentence):
             transaction_service.mark_as_credit(row, card_account_id=account_id)
         _assert_untouched(row.id)
+
+
+class TestWhatIsAlreadyCredit:
+    """An old Credit row holding its payback is a press made; a bare Credit status is not."""
+
+    def test_a_credit_status_with_no_payback_is_refused(self, seed_user, seed_periods):
+        """Status Credit, no payback (finding plan#2133's shape): refused, as the old press did."""
+        _card(seed_user)
+        row = _groceries(seed_user, seed_periods[0])
+        status_seam.apply_status_change(row, ref_cache.status_id(StatusEnum.CREDIT))
+        db.session.commit()
+
+        with pytest.raises(ValidationError, match="Only projected transactions"):
+            transaction_service.mark_as_credit(row)
+        db.session.rollback()
+        assert not db.session.get(Transaction, row.id).entries
 
 
 class TestTheDoor:

@@ -62,7 +62,9 @@ SIX leaves, cut by what each DECIDES rather than by size:
 * :mod:`._door` -- what a DOOR's requested status means, which is a settle for
   one direction and the mechanics alone for every other;
 * :mod:`._credit` -- what pressing CREDIT means: a settle with the card as its
-  tender, on the row's own day (plan task plan#2929); and Undo CC, the revert
+  tender, on the row's own day or the one its page typed, on the card it
+  names or the one card it could mean (plan tasks plan#2929, plan#3056); and
+  Undo CC, the revert
   that takes it off the card (plan task plan#3055);
 * :mod:`._delete` -- what REMOVING a row means: the four-step sequence and its
   order, which existed twice until plan step ``bank_import:X-gb`` gave the
@@ -72,7 +74,9 @@ SIX leaves, cut by what each DECIDES rather than by size:
 """
 
 from app.services.transaction_service._credit import (
+    credit_cards,
     credit_day,
+    credit_moves_payment,
     mark_as_credit,
     undo_credit,
 )
@@ -115,7 +119,9 @@ __all__ = [
     "RowDeletion",
     "StatedRecord",
     "apply_requested_status",
+    "credit_cards",
     "credit_day",
+    "credit_moves_payment",
     "delete_transaction",
     "deletion_refusal",
     "preview_deletion",

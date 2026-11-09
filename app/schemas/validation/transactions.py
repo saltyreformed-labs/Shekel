@@ -375,6 +375,33 @@ class MarkDoneSchema(BaseSchema):
     shown_lines = ShownIds(allow_none=True)
 
 
+class CreditPressSchema(BaseSchema):
+    """What the popover's Credit press posts: the day, the card, the lines it named.
+
+    Plan task plan#3056.  The day it puts the row on the card, typed or left
+    as the popover showed it (``transaction_service.credit_day``); the card,
+    when the owner has two or more to pick from; and the bank lines its
+    caption named (ruling **R-CC127**).  Each is absent from a press that
+    shows none -- the C key and the palette's Credit, which post nothing --
+    and the door then reads the row's own day and its one card.  An empty
+    box is absent too, never a cleared day.
+    """
+
+    @pre_load
+    def strip_empty_strings(self, data, **kwargs):
+        """Drop an empty box: a press that named no day or no card."""
+        return _normalize_empty_inputs(self, data)
+
+    # The day the money went on the card, posted under the name the popover's
+    # "Money moved on" box posts, because it is that fact (ruling R-ED).  Not
+    # ``allow_none``: an empty box loads as absent, as the box does there.
+    settled_on = fields.Date()
+    # The card named; gated by the verb as "Paid from" gates one.
+    card_account_id = RowId()
+    # ``allow_none`` is presence: :class:`ShownIds` says why.
+    shown_lines = ShownIds(allow_none=True)
+
+
 class TransactionDeleteSchema(BaseSchema):
     """What a row's delete dialog NAMED, sent back as the DELETE's query string.
 

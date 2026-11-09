@@ -30,6 +30,7 @@ from app.routes.transactions._helpers import (
     _error_transaction_response,
     _get_owned_transaction,
     _stale_transaction_response,
+    _undo_credit_schema,
 )
 from app.routes.transactions._press import _refused
 from app.services import transaction_service
@@ -53,6 +54,11 @@ def mark_credit(txn_id):
     **R-CC127**; only Mark Paid's one-click is silent, **R-CC56**).  The door
     is the owner's, so a companion's press is a 404.
     Optimistic locking (commit C-18 / F-010): ``StaleDataError`` -> 409.
+
+    **The popover's press posts its day and its card** (plan task plan#3056):
+    the day under its "Money moved on" box, as shown or as typed, and the
+    card picked when the owner has two or more; the C key and the palette
+    post neither, and the verb then reads the row's own day and its one card.
     """
     txn = _get_owned_transaction(txn_id)
     if txn is None:
@@ -62,10 +68,16 @@ def mark_credit(txn_id):
         return _error_transaction_response(
             txn_id, flatten_schema_errors(errors), status=422,
         )
-    posted = read_posted(_credit_press_schema.load(request.form), absent=NOTHING_SHOWN)
+    press_data = _credit_press_schema.load(request.form)
+    posted = read_posted(press_data, absent=NOTHING_SHOWN)
     try:
         with Press(posted.shown) as one_save:
-            transaction_service.mark_as_credit(txn, press=one_save)
+            transaction_service.mark_as_credit(
+                txn,
+                card_account_id=press_data.get("card_account_id"),
+                day=press_data.get("settled_on"),
+                press=one_save,
+            )
         db.session.commit()
     except StaleDataError:
         logger.info("Stale-data conflict on mark_credit id=%d", txn_id)
@@ -91,13 +103,13 @@ def unmark_credit(txn_id):
     txn = _get_owned_transaction(txn_id)
     if txn is None:
         return "Not found", 404
-    errors = _credit_press_schema.validate(request.args)
+    errors = _undo_credit_schema.validate(request.args)
     if errors:
         return _error_transaction_response(
             txn_id, flatten_schema_errors(errors), status=422,
         )
     posted = read_posted(
-        _credit_press_schema.load(request.args), absent=NOTHING_SHOWN,
+        _undo_credit_schema.load(request.args), absent=NOTHING_SHOWN,
     )
 
     try:

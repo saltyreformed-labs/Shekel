@@ -28,6 +28,13 @@ through the one status door Status -> Projected takes, and the status seam
 moves its kept payment onto the row's own account as it reverts, so a later
 Paid leaves checking and a later Credit puts it back on the card.
 
+**The press says its day and asks which card** (plan task plan#3056).  The
+popover shows the day :func:`credit_day` gives and lets the owner type the real
+one, and asks which card when the owner has two or more; it reads
+:func:`credit_cards` for the choice and :func:`credit_moves_payment` for the
+caption naming the bank lines the press frees, the one producer the C key and
+the palette ask too (plan task plan#3114).
+
 **Old Credit rows keep the old path** until plan#1034's re-plan: a row in
 status Credit holds its live CC Payback, and Undo CC on it still deletes that
 payback (``credit_workflow.unmark_credit``).  A press on one changes nothing.
@@ -48,7 +55,7 @@ from app.models.account import Account
 from app.models.transaction import Transaction
 from app.services.account_projection import is_revolving
 from app.services.account_resolver import resolve_owner_cash_flow_set
-from app.services.cash_flow_set import purchase_accounts
+from app.services.cash_flow_set import CashFlowSet, purchase_accounts
 from app.services.credit_workflow import get_active_payback, unmark_credit
 from app.services.match_press import Press
 from app.services.movement_account import admitted_movement_account_id
@@ -66,14 +73,15 @@ logger = logging.getLogger(__name__)
 
 def mark_as_credit(
     txn: Transaction, *, card_account_id: int | None = None,
-    press: Press | None = None,
+    day: date | None = None, press: Press | None = None,
 ) -> None:
     """Put *txn* on a credit card: settle it with its money moved on the card.
 
     The row settles through the ONE settle verb with the card as its tender,
-    on the day :func:`credit_day` gives it, so it records what a Paid press
-    with "Paid from: the card" records and nothing else: one covering
-    movement on the card carrying the row's figure, and no CC Payback row.
+    on the day the owner typed, else the day :func:`credit_day` gives it, so
+    it records what a Paid press with "Paid from: the card" records and
+    nothing else: one covering movement on the card carrying the row's
+    figure, and no CC Payback row.
 
     Refused, before anything is written: an income row (nothing is bought
     with a paycheck), a row whose purchases are tracked (its purchases each
@@ -83,8 +91,12 @@ def mark_as_credit(
     is a press already made, so a double click changes nothing; a row in
     status Credit holding no payback (the Status dropdown's, finding
     plan#2133) is refused as not Projected, as the old press refused it.
-    The settle verb adds its own refusals: a deleted row, a day on or before
-    the card's books open (S11 of the trace), a figure it cannot price.
+    The settle verb adds its own refusals: a deleted row, a day that has not
+    come (ruling **R-EJ**) or is before the owner's schedule (ruling
+    **R-EL**), a day on or before the card's books open (S11 of the trace), a
+    figure it cannot price.  A row whose settle records $0.00 is refused
+    after it, because nothing moved on the card, so the row would be Paid
+    and drawn so rather than Credit; the door's rollback undoes the settle.
 
     Args:
         txn: The row pressed, already proven the caller's by the door.  A
@@ -92,13 +104,19 @@ def mark_as_credit(
             (review J).
         card_account_id: The card the owner named, or ``None`` when the press
             named none (:func:`_the_card`).
+        day: The day the owner typed under "Money moved on" (plan task
+            plan#3056), or ``None`` when the press named none: then
+            :func:`credit_day`.  Entered either way, as the press is the
+            owner's statement that the money went on the card.
         press: The save's :class:`~app.services.match_press.Press`, for the
             settle's removal act: putting a reverted row's kept payment on
             the card takes it out of any match naming it on its old account.
 
     Raises:
         ValidationError: On the refusals above, or when no card or more than
-            one could be the one meant (:func:`_the_card`).
+            one could be the one meant (:func:`_the_card`).  The settle
+            verb's own refusals leave nothing written; the $0.00 one leaves
+            the settle for the caller's rollback.
         NotFoundError: When *card_account_id* is not an account of the
             row's owner (one answer for "not found" and "not yours").
     """
@@ -121,10 +139,19 @@ def mark_as_credit(
     card = _the_card(txn, card_account_id)
     settle_transaction(
         txn,
-        settle_day=SettleDay(day=credit_day(txn), basis=SettledDayBasisEnum.ENTERED),
+        settle_day=SettleDay(
+            day=credit_day(txn) if day is None else day,
+            basis=SettledDayBasisEnum.ENTERED,
+        ),
         tender_account_id=card.id,
         press=press,
     )
+    movement = covering_movement_of(txn)
+    if movement is None:
+        raise ValidationError(
+            f"{txn.name} is $0.00, so there is nothing to put on the card: "
+            "set what it cost, then press Credit again."
+        )
     log_event(
         logger, logging.INFO, EVT_CREDIT_MARKED, BUSINESS,
         "Transaction put on a credit card",
@@ -132,7 +159,7 @@ def mark_as_credit(
         transaction_id=txn.id,
         card_account_id=card.id,
         settled_on=txn.settled_on.isoformat(),
-        amount=str(covering_movement_of(txn).amount),
+        amount=str(movement.amount),
     )
 
 
@@ -208,15 +235,9 @@ def _the_card(txn: Transaction, card_account_id: int | None) -> Account:
     movement under a row may go (``movement_account.admitted_movement_account_id``:
     another owner's account is not found, an archived one is refused in
     words, one outside the owner's cash-flow set is refused) -- and must then
-    be a card.  With none named, the choices are the cards among the
-    accounts the row's payment may move through
-    (``cash_flow_set.purchase_accounts``, the same set that gate admits: the
-    row's own account, then the owner's active cards).  A row that lives on a
-    card goes on that card, however many the owner has (decided under
-    R-BAL207: a bill on the card says "this went on this card", ruling
-    plan#2926, and asking which would ask what the row already says).
-    Otherwise the owner's one card; with none there is nothing to put it on,
-    and with two or more the press must say which.
+    be a card.  With none named, the choices are :func:`credit_cards`: the
+    one card when there is one; with none there is nothing to put it on, and
+    with two or more the press must say which.
 
     Args:
         txn: The row pressed.
@@ -241,12 +262,8 @@ def _the_card(txn: Transaction, card_account_id: int | None) -> Account:
                 f"{txn.name} on it: pick one of your cards."
             )
         return account
-    cards = [
-        account
-        for account in purchase_accounts(resolve_owner_cash_flow_set(txn.user_id), txn)
-        if is_revolving(account)
-    ]
-    if is_revolving(txn.account) or len(cards) == 1:
+    cards = credit_cards(txn, resolve_owner_cash_flow_set(txn.user_id))
+    if len(cards) == 1:
         return cards[0]
     if not cards:
         raise ValidationError(
@@ -257,3 +274,68 @@ def _the_card(txn: Transaction, card_account_id: int | None) -> Account:
     raise ValidationError(
         f"You have {len(cards)} credit cards: pick the one {txn.name} went on."
     )
+
+
+def credit_cards(txn: Transaction, cash_flow: CashFlowSet | None) -> tuple[Account, ...]:
+    """Return the cards a Credit press naming none could put *txn* on.
+
+    **The one answer to "which card does Credit mean"** (plan task
+    plan#3056): the press asks it when nothing is named (:func:`_the_card`),
+    the popover draws from it (one card named, two or more to pick from, none
+    and an ask to add one), and the C key and the palette press at once only
+    when it holds one (plan task plan#3114).  The cards among the accounts
+    the row's payment may move through
+    (``cash_flow_set.purchase_accounts``, the set the "Paid from" gate admits:
+    the row's own account first, then the owner's other members).  A row
+    that lives on a card means that card, however many the owner has
+    (decided under R-BAL207 at plan task plan#2929: a bill on the card says
+    "this went on this card", ruling plan#2926, and asking which would ask
+    what the row already says).
+
+    Args:
+        txn: The row, its ``account`` loaded (a joined load).
+        cash_flow: The row OWNER's cash-flow set with no override
+            (``account_resolver.resolve_owner_cash_flow_set``), or ``None``
+            for an owner with no grid-eligible account.
+
+    Returns:
+        The row's own card alone when it lives on one; else the owner's cards
+        in member order, which may be none.
+    """
+    cards = tuple(
+        account for account in purchase_accounts(cash_flow, txn)
+        if is_revolving(account)
+    )
+    if is_revolving(txn.account):
+        return cards[:1]
+    return cards
+
+
+def credit_moves_payment(txn: Transaction, cards: tuple[Account, ...]) -> bool:
+    """Return whether a Credit press onto one of *cards* moves *txn*'s kept payment.
+
+    A row Paid, then set back to Projected, keeps its payment un-dated
+    (ruling **R-BAL61**), and an accepted match may still name it.  Credit
+    settles with the card as the tender, and the seam moves a kept payment
+    that is on another account onto it, which takes it out of every match
+    naming it (``status_seam._covering._re_point``, ruling **R-CC46**).  So
+    this is the question a caption naming those lines asks (plan task
+    plan#3056) and the one that sends the C key and the palette to the
+    popover instead (ruling plan#3112, plan task plan#3114); what the move
+    would free is ``match_withdrawal.pending_for_movements``' answer.
+
+    Args:
+        txn: The row, with ``entries`` loaded or loadable.
+        cards: What :func:`credit_cards` answered for it.
+
+    Returns:
+        ``True`` when the row keeps a payment on an account none of *cards* is.
+
+    Raises:
+        ValueError: From ``status_seam.covering_movement_of``, on a row
+            holding two covering movements.
+    """
+    movement = covering_movement_of(txn)
+    return movement is not None and movement.account_id not in {
+        card.id for card in cards
+    }

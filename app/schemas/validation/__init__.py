@@ -173,6 +173,7 @@ from app.schemas.validation.templates import (
     TemplateUpdateSchema,
 )
 from app.schemas.validation.transactions import (
+    CreditPressSchema,
     InlineTransactionCreateSchema,
     MarkDoneSchema,
     TransactionCreateSchema,
@@ -212,6 +213,7 @@ __all__ = [
     "CompanionCreateSchema",
     "CompanionEditSchema",
     "CreditCardTermsSchema",
+    "CreditPressSchema",
     "DebtStrategyCalculateSchema",
     "PaycheckLineCreateSchema",
     "PaycheckLineUpdateSchema",

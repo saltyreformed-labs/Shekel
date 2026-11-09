@@ -5,7 +5,10 @@ Rulings **plan#2887** and **plan#2888**: Credit stays as the way the owner says 
 purchase went on the card, and the press now records it ON the card -- the row
 settles with its money moved on the card from its own date
 (``transaction_service.mark_as_credit``, the settle verb with the card as its
-tender) and no CC Payback row is written.
+tender) and no CC Payback row is written.  Since plan task plan#3056 the press
+takes the day its popover shows or the owner typed, and the card picked, and
+the popover and the C key read which cards it could mean from the same
+producer (``credit_cards``).
 
 **The one example**: $800 of groceries dated Jan 3, its row in the Jan 2
 paycheck, on a card whose books open before Jan 2, closing on the 5th and
@@ -20,11 +23,12 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import StatusEnum
+from app.enums import SettledDayBasisEnum, StatusEnum
 from app.exceptions import NotFoundError, ValidationError
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import credit_workflow, status_seam, transaction_service
+from app.services.account_resolver import resolve_owner_cash_flow_set
 from app.services.cash_ledger import account_opening_fact
 from app.utils.dates import display_today
 from tests._cards import add_card
@@ -185,6 +189,65 @@ class TestTheDay:
         _assert_untouched(row.id)
 
 
+class TestTheDayTyped:
+    """The day the popover's "Money moved on" box posts (plan task plan#3056)."""
+
+    def test_a_typed_day_is_the_day_it_goes_on_the_card(self, seed_user, seed_periods):
+        """Dated Jan 3, Jan 5 typed: the row and its movement on the card are dated Jan 5."""
+        card = _card(seed_user)
+        jan_5 = date(2026, 1, 5)
+        row = _press(_groceries(seed_user, seed_periods[0]), day=jan_5)
+
+        assert row.settled_on == jan_5
+        assert [(m.account_id, m.settled_on, m.amount) for m in row.entries] == [
+            (card.id, jan_5, _EIGHT_HUNDRED),
+        ]
+        assert row.settled_day_basis_id == ref_cache.settled_day_basis_id(
+            SettledDayBasisEnum.ENTERED,
+        )
+
+    def test_a_typed_day_that_has_not_come_is_refused(self, seed_user, seed_periods):
+        """Tomorrow typed: money cannot have moved in the future (R-EJ), nothing written."""
+        _card(seed_user)
+        row = _groceries(seed_user, seed_periods[0])
+
+        with pytest.raises(ValidationError):
+            transaction_service.mark_as_credit(
+                row, day=display_today() + timedelta(days=1),
+            )
+        _assert_untouched(row.id)
+
+    def test_a_typed_day_inside_the_cards_opening_is_refused(self, seed_user, seed_periods):
+        """The card's opening day typed over Jan 3: the opening already holds it, refused."""
+        card = _card(seed_user)
+        opened_on = account_opening_fact(card.id).opened_on
+        row = _groceries(seed_user, seed_periods[0])
+
+        with pytest.raises(ValidationError, match=f"Money cannot have moved on {opened_on}"):
+            transaction_service.mark_as_credit(row, day=opened_on)
+        _assert_untouched(row.id)
+
+
+class TestNothingToPutOnTheCard:
+    """A row whose settle records $0.00 moves nothing onto the card."""
+
+    def test_a_zero_row_is_refused_in_words(self, seed_user, seed_periods):
+        """$0.00 Groceries: refused with a sentence, nothing written.
+
+        Measured before the fix: an ``AttributeError`` (the press's log line
+        read the movement a $0.00 settle never writes), a 500 at the door.
+        """
+        _card(seed_user)
+        row = add_txn(
+            db.session, seed_user, seed_periods[0], "Groceries", _ZERO, due_date=_JAN_3,
+        )
+        db.session.commit()
+
+        with pytest.raises(ValidationError, match="Groceries is \\$0.00, so there is nothing"):
+            transaction_service.mark_as_credit(row)
+        _assert_untouched(row.id)
+
+
 class TestWhichCard:
     """The owner's one card; none or two refused unnamed; a named one gated."""
 
@@ -253,6 +316,66 @@ class TestWhichCard:
         with pytest.raises(ValidationError, match=sentence):
             transaction_service.mark_as_credit(row, card_account_id=account_id)
         _assert_untouched(row.id)
+
+
+class TestTheCardsAPressCouldMean:
+    """``credit_cards`` and ``credit_moves_payment``: what the popover and the C key ask."""
+
+    def _cards(self, row):
+        """The cards a press naming none could put *row* on."""
+        return transaction_service.credit_cards(row, resolve_owner_cash_flow_set(row.user_id))
+
+    def test_none_one_and_two_cards(self, seed_user, seed_periods):
+        """No card: none; the Visa: it; the Visa and the Amex: both, in member order."""
+        row = _groceries(seed_user, seed_periods[0])
+        assert not self._cards(row)
+
+        visa = _card(seed_user)
+        db.session.commit()
+        assert [c.id for c in self._cards(row)] == [visa.id]
+
+        amex = add_card(seed_user, name="Amex")
+        db.session.commit()
+        assert [c.id for c in self._cards(row)] == [visa.id, amex.id]
+
+    def test_a_row_on_a_card_means_its_own_card(self, seed_user, seed_periods):
+        """A row living on the Amex, beside the Visa: the Amex alone."""
+        _card(seed_user)
+        amex = add_card(seed_user, name="Amex")
+        db.session.commit()
+        row = _groceries(seed_user, seed_periods[0], account=amex)
+
+        assert [c.id for c in self._cards(row)] == [amex.id]
+
+    def test_only_a_kept_payment_off_the_card_is_moved(self, seed_user, seed_periods):
+        """No payment kept: no move; Paid on checking and reverted: its payment moves."""
+        _card(seed_user)
+        row = _groceries(seed_user, seed_periods[0])
+        assert not transaction_service.credit_moves_payment(row, self._cards(row))
+
+        transaction_service.settle_transaction(row)
+        db.session.commit()
+        transaction_service.apply_requested_status(
+            row, ref_cache.status_id(StatusEnum.PROJECTED),
+        )
+        db.session.commit()
+
+        assert transaction_service.credit_moves_payment(row, self._cards(row))
+
+    def test_a_bill_on_the_card_keeps_its_payment_there(self, seed_user, seed_periods):
+        """A bill living on the Visa, Paid and reverted: its payment is on the Visa, no move."""
+        visa = _card(seed_user)
+        db.session.commit()
+        row = _groceries(seed_user, seed_periods[0], account=visa)
+        transaction_service.settle_transaction(row)
+        db.session.commit()
+        transaction_service.apply_requested_status(
+            row, ref_cache.status_id(StatusEnum.PROJECTED),
+        )
+        db.session.commit()
+        assert [m.account_id for m in row.entries] == [visa.id], "precondition: kept on the Visa"
+
+        assert not transaction_service.credit_moves_payment(row, self._cards(row))
 
 
 class TestWhatIsAlreadyCredit:

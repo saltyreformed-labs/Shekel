@@ -26,6 +26,7 @@ from app.routes._mobile_card import RenderTarget, render_mobile_card
 from app.routes._render_helpers import render_transaction_cell
 from app.routes.transactions._bp import transactions_bp
 from app.schemas.validation import (
+    CreditPressSchema,
     MarkDoneSchema,
     ShownLinesSchema,
     TransactionDeleteSchema,
@@ -107,12 +108,16 @@ _mark_done_schema = MarkDoneSchema()
 # **R-CC127** / **R-CC131**).
 _delete_dialog_schema = TransactionDeleteSchema()
 
-# The two Credit presses': the bank lines the page named -- for the payback
-# Undo CC deletes, its caption's, a DELETE's query string (plan step
-# ``credit_card:CC-5-4a-5``, ruling **R-CC80**); and for the kept payment a
-# Credit press puts on the card, a POST's form (plan task plan#2929), which no
-# page names yet, so such a press is refused (plan#3056 draws its caption).
-_credit_press_schema = ShownLinesSchema()
+# The Credit press's form (plan task plan#3056): the day and the card the
+# popover shows, and the bank lines its caption named for a kept payment the
+# press puts on the card (ruling **R-CC127**).
+_credit_press_schema = CreditPressSchema()
+
+# Undo CC's: the bank lines the page named for what it frees -- the payback an
+# old Credit row's Undo CC deletes, or the payment one put on the card takes off
+# it -- a DELETE's query string (plan step ``credit_card:CC-5-4a-5``, ruling
+# **R-CC80**; plan task plan#3055).
+_undo_credit_schema = ShownLinesSchema()
 
 
 def _mark_done_success_response(txn, target):

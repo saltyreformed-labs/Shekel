@@ -27,7 +27,7 @@ from app.enums import SettledDayBasisEnum, StatusEnum
 from app.exceptions import NotFoundError, ValidationError
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.services import credit_workflow, status_seam, transaction_service
+from app.services import credit_workflow, movement_account, status_seam, transaction_service
 from app.services.account_resolver import resolve_owner_cash_flow_set
 from app.services.cash_ledger import account_opening_fact
 from app.utils.dates import display_today
@@ -378,11 +378,15 @@ class TestWhichCard:
 
 
 class TestTheCardsAPressCouldMean:
-    """``credit_cards`` and ``credit_moves_payment``: what the popover and the C key ask."""
+    """``credit_cards`` and ``credit_moves_payment``: what the popover and the C key ask.
+
+    ``credit_cards`` is ``movement_account``'s since plan task plan#2930, which
+    moved it where the purchase doors' CC tick asks it too.
+    """
 
     def _cards(self, row):
         """The cards a press naming none could put *row* on."""
-        return transaction_service.credit_cards(row, resolve_owner_cash_flow_set(row.user_id))
+        return movement_account.credit_cards(row, resolve_owner_cash_flow_set(row.user_id))
 
     def test_none_one_and_two_cards(self, seed_user, seed_periods):
         """No card: none; the Visa: it; the Visa and the Amex: both, in member order."""

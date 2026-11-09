@@ -17,7 +17,7 @@ from app.models.ref import Status
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.user import User, UserSettings
-from app.services import entry_service, pay_period_write
+from app.services import entry_service
 from app.services.auth_service import hash_password
 from app.schemas.validation import EntryCreateSchema, EntryUpdateSchema
 from app.exceptions import NotFoundError, ValidationError
@@ -30,6 +30,7 @@ from app.services import (
 )
 from app.services.row_valuation import purchases_total, settled_figure
 from app.utils.dates import display_today
+from tests._cards import add_card
 from tests._test_helpers import (
     typed,
     account_never_asserted,
@@ -103,11 +104,18 @@ class TestCreateEntry:
             assert entry.purchased_on == date(2026, 1, 5)
             assert entry.is_credit is False
 
-    def test_create_entry_credit(self, app, db, seed_user, seed_entry_template):
-        """Create a credit entry. is_credit flag is persisted."""
+    def test_create_entry_on_the_card(self, app, db, seed_user, seed_entry_template):
+        """A ticked purchase is filed ON the owner's card; the CC flag stays unwritten.
+
+        Plan task plan#2930, ruling plan#2888: the tick says the money went on
+        the card, so the purchase's account is the card's, and the add door
+        writes no ``is_credit`` (the old lines keep theirs until plan#1034).
+        """
         with app.app_context():
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
+            card = add_card(seed_user)
+            db.session.commit()
 
             entry = entry_service.create_entry(
                 transaction_id=txn.id,
@@ -116,11 +124,12 @@ class TestCreateEntry:
                     figure=typed(Decimal("75.00")),
                     description="Amazon order",
                     purchased_on=date(2026, 1, 6),
-                    is_credit=True,
+                    on_card=True,
                 ),
             )
 
-            assert entry.is_credit is True
+            assert entry.account_id == card.id
+            assert entry.is_credit is False
             assert entry.amount == Decimal("75.00")
 
     def test_create_entry_returns_flushed_id(
@@ -1346,7 +1355,7 @@ class TestEntryCreateSchema:
             assert data["amount"] == Decimal("50.00")
             assert data["description"] == "Kroger"
             assert data["purchased_on"] == date(2026, 1, 5)
-            assert data["is_credit"] is False
+            assert data["on_card"] is False
 
     def test_schema_rejects_zero_amount(self, app):
         """Amount of 0 is rejected (min is 0.01)."""
@@ -1435,8 +1444,8 @@ class TestEntryCreateSchema:
             })
             assert data["description"] == desc
 
-    def test_schema_is_credit_default_false(self, app):
-        """is_credit defaults to False when omitted."""
+    def test_schema_on_card_default_false(self, app):
+        """on_card (the CC tick) defaults to False when omitted."""
         with app.app_context():
             schema = EntryCreateSchema()
             data = schema.load({
@@ -1444,10 +1453,10 @@ class TestEntryCreateSchema:
                 "description": "Test",
                 "purchased_on": "2026-01-05",
             })
-            assert data["is_credit"] is False
+            assert data["on_card"] is False
 
-    def test_schema_is_credit_true(self, app):
-        """is_credit can be set to True."""
+    def test_schema_on_card_true(self, app):
+        """on_card (the CC tick) can be set to True."""
         with app.app_context():
             schema = EntryCreateSchema()
             data = schema.load({
@@ -1456,7 +1465,7 @@ class TestEntryCreateSchema:
                 "purchased_on": "2026-01-05",
                 "is_credit": True,
             })
-            assert data["is_credit"] is True
+            assert data["on_card"] is True
 
     def test_schema_strips_empty_strings(self, app):
         """Empty string fields are stripped (HTML form pattern)."""
@@ -1468,8 +1477,8 @@ class TestEntryCreateSchema:
                 "purchased_on": "2026-01-05",
                 "is_credit": "",  # Empty string from unchecked checkbox
             })
-            # is_credit reverts to default (False) after strip
-            assert data["is_credit"] is False
+            # on_card reverts to default (False) after strip
+            assert data["on_card"] is False
 
     def test_schema_amount_quantized(self, app):
         """Amount with extra decimal places is quantized to 2 places.

@@ -39,7 +39,7 @@ from tests._test_helpers import add_txn, typed
 
 from ._helpers import _LogCapture
 from tests._cards import add_card
-from tests._legacy_credit import plant_old_credit
+from tests._legacy_credit import plant_old_credit, plant_old_flagged_purchase
 
 
 class TestCreditWorkflowLogging:
@@ -148,7 +148,6 @@ class TestEntryServiceLogging:
                     figure=typed(Decimal("12.50")),
                     description="Coffee",
                     purchased_on=date(2026, 1, 15),
-                    is_credit=False,
                 ),
             )
 
@@ -159,7 +158,10 @@ class TestEntryServiceLogging:
         assert record.transaction_id == _envelope_transaction.id
         assert record.entry_id == entry.id
         assert record.amount == "12.50"
-        assert record.is_credit is False
+        # Which account the money moved through, the CC tick's card when ticked
+        # (plan task plan#2930, which took the CC flag out of the receipt: the
+        # add door writes none).
+        assert record.account_id == _envelope_transaction.account_id
 
     def test_update_entry_emits_event(self, app, db, seed_user, _envelope_transaction):
         """update_entry emits ``entry_updated`` with sorted fields_changed."""
@@ -330,14 +332,13 @@ class TestEntryCreditWorkflowLogging:
             with _LogCapture(
                 "app.services.entry_credit_workflow",
             ) as cap:
-                entry1 = entry_service.create_entry(
+                entry1 = plant_old_flagged_purchase(
                     transaction_id=_envelope_transaction.id,
                     user_id=seed_user["user"].id,
                     details=entry_service.EntryDetails(
                         figure=typed(Decimal("25.00")),
                         description="Card 1",
                         purchased_on=date(2026, 1, 10),
-                        is_credit=True,
                     ),
                 )
             assert cap.find(EVT_ENTRY_PAYBACK_CREATED) is not None
@@ -346,14 +347,13 @@ class TestEntryCreditWorkflowLogging:
             with _LogCapture(
                 "app.services.entry_credit_workflow",
             ) as cap:
-                entry_service.create_entry(
+                plant_old_flagged_purchase(
                     transaction_id=_envelope_transaction.id,
                     user_id=seed_user["user"].id,
                     details=entry_service.EntryDetails(
                         figure=typed(Decimal("10.00")),
                         description="Card 2",
                         purchased_on=date(2026, 1, 11),
-                        is_credit=True,
                     ),
                 )
             update_record = cap.find(EVT_ENTRY_PAYBACK_UPDATED)

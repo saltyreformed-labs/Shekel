@@ -73,6 +73,7 @@ from app.services.statement_match._release import (  # pylint: disable=protected
     planned_removals,
 )
 
+from tests._legacy_credit import plant_old_flagged_purchase
 from tests._test_helpers import an_entered_day, typed
 
 from ._builders import (
@@ -1048,11 +1049,11 @@ class TestTheSettledParentRuleIsTheArithmetic:
             settled_on=start + timedelta(days=1),
         )
         a_later_period(seed_user)
-        doomed = entry_service.create_entry(
+        doomed = plant_old_flagged_purchase(
             transaction_id=envelope.id, user_id=seed_user["user"].id,
             details=entry_service.EntryDetails(
                 figure=typed(Decimal("57.96")), description="Amazon",
-                purchased_on=start + timedelta(days=3), is_credit=True,
+                purchased_on=start + timedelta(days=3),
             ),
         )
         payback = sync_entry_payback(envelope.id, seed_user["user"].id)

@@ -32,7 +32,7 @@ from app.schemas.validation import (
     ShownLinesSchema,
 )
 from app.services import entry_credit_workflow, entry_service
-from app.services.cash_flow_set import purchase_accounts
+from app.services.movement_account import purchase_choices
 from app.services.match_press import NOTHING_SHOWN, OwnerOnly, Press, Shown, Silent
 from app.services.pay_calendar import FiledRow, calendar_for
 from app.services.settle_day import (
@@ -65,9 +65,9 @@ _update_schema = EntryUpdateSchema()
 _shown_lines_schema = ShownLinesSchema()
 
 # Name of the partial unique index that backstops the duplicate CC
-# Payback bug closed in commit C-19.  ``entry_service.create_entry``,
-# ``update_entry``, and ``delete_entry`` all funnel through
-# ``entry_credit_workflow.sync_entry_payback``, and the request's owner
+# Payback bug closed in commit C-19.  ``entry_service.update_entry`` and
+# ``delete_entry`` funnel through ``entry_credit_workflow.sync_entry_payback``
+# (``create_entry`` did until plan task plan#2930), and the request's owner
 # write lock (:mod:`app.db_transaction`, plan step ``balance:X-bn``, which
 # deleted C-19's ``FOR NO KEY UPDATE`` on the parent row) serialises two
 # of them; for a writer that holds no request, and so no owner lock, the
@@ -230,8 +230,9 @@ def _render_entry_list(
     period = calendar_for(txn.user_id).require_period(
         FiledRow.for_row(txn),
     )
-    # The accounts a new purchase may name (plan step credit_card:CC-5-2):
-    # the row's own plus the OWNER's cash-flow set, by the row's owner for
+    # The accounts a new purchase may name (plan step credit_card:CC-5-2) and
+    # the cards its CC tick offers (plan task plan#2930): the row's own plus
+    # the OWNER's cash-flow set, by the row's owner for
     # the calendar's reason -- the purchase door gates against ``txn.user_id``
     # (ruling R-CC11), so a companion's refresh carries the owner's picker.
     # Through the fragment producer the mobile card and the cell share, so
@@ -243,7 +244,7 @@ def _render_entry_list(
     # (``get_entries_for_transaction`` returns ``txn.purchases``).
     view = entry_service.entry_list_view(
         entries, budgets[txn.id], period,
-        purchase_accounts(fragment_cash_flow(txn.user_id).purchases, txn),
+        purchase_choices(txn, fragment_cash_flow(txn.user_id).purchases),
         entry_service.purchase_controls([txn], current_user.id)[txn.id],
     )
     return render_template(
@@ -337,13 +338,13 @@ def _refused_entry_response(
 def _entry_shown(
     txn: Transaction, data: dict[str, Any], *, refusal: str,
 ) -> Shown | Silent:
-    """Return what an X, an edit or an add declares about the bank lines it frees.
+    """Return what an X or an edit declares about the bank lines it frees.
 
     Plan step ``credit_card:CC-5-4a-5``.  The OWNER's list names what each
     press would free before it -- the X's confirmation, the edit form's CC
     caption (ruling **R-CC80**) -- and posts those lines back for the removal
     act to compare (ruling **R-CC127**); a request without the field named
-    none, as the add form never has one.  A COMPANION's list names no bank
+    none.  A COMPANION's list names no bank
     line and never could (rulings **R-CC130** / **R-CC132**, developer
     2026-10-04, "Refuse, shown first"), so its press may free none, refused
     with *refusal* where it would.  Who pressed is the request's, so it is
@@ -355,9 +356,8 @@ def _entry_shown(
         txn: The purchase's row, on a request the door has already admitted.
         data: The schema-loaded payload; its ``shown_lines`` is taken out.
         refusal: The companion's sentence -- the X's names the PURCHASE
-            (ruling **R-CC132**'s words); an edit's and an add's can free
-            only the payback's line, so theirs is
-            ``entry_credit_workflow.payback_refusal``.
+            (ruling **R-CC132**'s words); an edit's can free only the
+            payback's line, so its is ``entry_credit_workflow.payback_refusal``.
 
     Returns:
         A :class:`~app.services.match_press.Shown` or
@@ -451,8 +451,10 @@ def _credit_payback_idempotent_response(
     """Translate a credit-payback unique-index violation into a 200.
 
     Shared between :func:`create_entry`, :func:`update_entry`, and
-    :func:`delete_entry`.  All three routes funnel through
-    ``entry_credit_workflow.sync_entry_payback`` (commit C-19), and the
+    :func:`delete_entry`.  The update and delete routes funnel through
+    ``entry_credit_workflow.sync_entry_payback`` (commit C-19); the create
+    route has not since plan task plan#2930, so an ``IntegrityError`` there
+    takes the other arm below, the invalid reference.  The
     request's owner write lock (plan step ``balance:X-bn``, which replaced
     C-19's lock on the parent row) prevents the duplicate-payback race in
     normal flow.  This helper is the backstop for a writer that holds no
@@ -589,8 +591,9 @@ def create_entry(txn_id):
     """Create a new entry and return the updated entry list.
 
     Validates input via EntryCreateSchema, delegates to
-    entry_service.create_entry (which syncs CC payback; a
-    settled parent's purchases are closed, so no figure is re-derived), then commits atomically.
+    entry_service.create_entry (a ticked purchase goes on the owner's card,
+    with no CC payback; a settled parent's purchases are closed, so no
+    figure is re-derived), then commits atomically.
     Returns the refreshed entry list with a balanceChanged trigger
     (plus, on the desktop popover surface, the OOB grid-cell
     re-render -- see :func:`_entry_mutation_response`).
@@ -652,25 +655,21 @@ def create_entry(txn_id):
             records_a_refund=data.pop("direction") == entry_service.REFUND,
         ),
     )
-    # An add frees a line only by deleting a payback (a card refund bringing
-    # the card total to zero), which the form cannot foresee: an owner's add
-    # names nothing (finding CC-381), a companion's is refused with the
-    # payback's sentence (ruling R-CC132; plan step credit_card:CC-5-4a-5).
-    shown = _entry_shown(
-        txn, data, refusal=entry_credit_workflow.payback_refusal(txn),
-    )
+    # **No press**: an add frees no bank line since plan task plan#2930.  It
+    # freed one only by deleting a CC payback (a card refund bringing the card
+    # total to zero), and a purchase the door writes carries no CC flag, so
+    # its tick files it on the card and touches no payback.
     try:
-        with Press(shown) as one_save:
-            entry_service.create_entry(
-                transaction_id=txn.id,
-                user_id=current_user.id,
-                details=entry_service.EntryDetails(**data),
-                press=one_save,
-            )
+        entry_service.create_entry(
+            transaction_id=txn.id,
+            user_id=current_user.id,
+            details=entry_service.EntryDetails(**data),
+        )
         db.session.commit()
     except IntegrityError as exc:
-        # Defensive backstop for commit C-19: see
-        # ``_credit_payback_idempotent_response`` docstring.
+        # A refused reference is the shared helper's 400 arm; its payback
+        # arm (commit C-19) cannot fire here since plan task plan#2930, the add
+        # door syncing no payback.
         return _credit_payback_idempotent_response(
             exc, txn.id, f"create_entry txn_id={txn.id}", host,
         )

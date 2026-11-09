@@ -31,7 +31,7 @@ from tests._test_helpers import (
 )
 
 from ._helpers import _TODAY, _read, _lines_of, _source, _kind
-from tests._legacy_credit import plant_old_credit
+from tests._legacy_credit import plant_old_credit, plant_old_flagged_purchase
 
 
 def _true_ups_of(lines, account):
@@ -62,15 +62,19 @@ def _envelope(seed_user, period, amount):
 
 
 def _purchase(seed_user, txn, amount, *, is_credit=False, posted_on=_TODAY):
-    """Record a purchase of *amount* on *txn*, made and posted on *posted_on*."""
-    return entry_service.create_entry(
+    """Record a purchase of *amount* on *txn*, made and posted on *posted_on*.
+
+    *is_credit* plants an old flagged line as the add door wrote it until plan
+    task plan#2930, which files a ticked purchase on the card instead.
+    """
+    record = plant_old_flagged_purchase if is_credit else entry_service.create_entry
+    return record(
         transaction_id=txn.id,
         user_id=seed_user["user"].id,
         details=entry_service.EntryDetails(
             figure=typed(Decimal(amount)),
             description="Market",
             purchased_on=posted_on,
-            is_credit=is_credit,
             settle_day=an_entered_day(posted_on),
         ),
     )

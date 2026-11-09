@@ -47,6 +47,18 @@ the sentence that names its remedy: an ARCHIVED card is not an active member
 neither the row's nor a member -- a loan, a 401(k), savings -- is not one
 money can be recorded as moving through.
 
+**Which card "on the card" means is answered here too** (plan task plan#2930,
+ruling plan#2888): the row's Credit press and the purchase list's CC tick say
+the same thing, that this money went on a card, and neither names an account
+unless the owner has two or more cards to pick from.  :func:`credit_cards` is
+the cards either could mean and :func:`the_card` the one it does, each moved
+here from ``transaction_service._credit`` when the purchase doors became the
+second caller: the entry doors cannot reach that package's private module,
+and two spellings of "the owner's one card" would part the first time one of
+them learned an exception (rule 14: move the leaf).  :func:`tick_cards` is
+what the purchase list draws its tick from, beside the "Paid from" accounts
+(:func:`purchase_choices`).
+
 The books boundary on the card's OPENING is not asked here, and by
 construction: the day a movement takes is written by
 ``settle_day.record_settle_day``, which reads the MOVEMENT's ``account_id``
@@ -57,12 +69,15 @@ Services-boundary discipline (``CLAUDE.md`` Architecture): no Flask imports;
 one read of the named account, one resolve of the owner's set; no mutation.
 """
 
+from dataclasses import dataclass
+
 from app.exceptions import NotFoundError, ValidationError
 from app.extensions import db
 from app.models.account import Account
 from app.models.transaction import Transaction
+from app.services.account_projection import is_revolving
 from app.services.account_resolver import resolve_owner_cash_flow_set
-from app.services.cash_flow_set import purchase_accounts
+from app.services.cash_flow_set import CashFlowSet, purchase_accounts
 
 
 def admitted_movement_account_id(
@@ -103,3 +118,164 @@ def admitted_movement_account_id(
             "one of your credit cards."
         )
     return account.id
+
+
+def credit_cards(txn: Transaction, cash_flow: CashFlowSet | None) -> tuple[Account, ...]:
+    """Return the cards a Credit press or a CC tick naming none could put *txn*'s money on.
+
+    **The one answer to "which card does 'on the card' mean"** (plan tasks
+    plan#3056 and plan#2930): the Credit press asks it when nothing is named
+    (:func:`the_card`), and so does a purchase ticked CC under *txn*; the
+    popover draws from it (one card named, two or more to pick from, none and
+    an ask to add one), the C key and the palette press at once only when it
+    holds one (plan task plan#3114), and the purchase list's tick is drawn
+    from it (:func:`tick_cards`).  The cards among the accounts the row's
+    money may move through (``cash_flow_set.purchase_accounts``, the set
+    :func:`admitted_movement_account_id` admits: the row's own account first,
+    then the owner's other members).  A row that lives on a card means that
+    card, however many the owner has (decided under R-BAL207 at plan task
+    plan#2929: a bill on the card says "this went on this card", ruling
+    plan#2926, and asking which would ask what the row already says).
+
+    Args:
+        txn: The row, its ``account`` loaded (a joined load).
+        cash_flow: The row OWNER's cash-flow set with no override
+            (``account_resolver.resolve_owner_cash_flow_set``), or ``None``
+            for an owner with no grid-eligible account.
+
+    Returns:
+        The row's own card alone when it lives on one; else the owner's cards
+        in member order, which may be none.
+    """
+    return _cards_among(txn, purchase_accounts(cash_flow, txn))
+
+
+def _cards_among(txn: Transaction, accounts: tuple[Account, ...]) -> tuple[Account, ...]:
+    """Return :func:`credit_cards`' answer over *txn*'s ``purchase_accounts`` tuple, already read.
+
+    The one body for :func:`credit_cards`, which reads the tuple, and
+    :func:`purchase_choices`, which has read it for "Paid from" already, so
+    one render reads it once per row (the review of plan#2930, L8).
+    """
+    cards = tuple(account for account in accounts if is_revolving(account))
+    if is_revolving(txn.account):
+        return cards[:1]
+    return cards
+
+
+def tick_cards(txn: Transaction, accounts: tuple[Account, ...]) -> tuple[Account, ...]:
+    """Return the cards the CC tick on a purchase under *txn* offers; none where it moves nothing.
+
+    The purchase list draws its tick from this (plan task plan#2930, ruling
+    plan#2888: "the tick stays the one control, with a pick only for two or
+    more cards"): no tick where it is empty, the tick alone for one card, and
+    the tick with a pick for two or more.  :func:`credit_cards` less one
+    case: a row that lives on a card files every purchase on that card
+    already, so a tick there could only name the account the purchase is on,
+    and a control that can change nothing is not drawn (ruling **R-CC34**'s
+    reason for the "Paid from" picker).  With no card the tick is not drawn
+    either: the door would refuse it in words (:func:`the_card`), after the
+    owner had typed the purchase.
+
+    Args:
+        txn: The purchase's row, its ``account`` loaded.
+        accounts: The row's ``cash_flow_set.purchase_accounts`` over the
+            OWNER's cash-flow set, as :func:`purchase_choices` reads it.
+
+    Returns:
+        The cards, in member order, or ``()``.
+    """
+    if is_revolving(txn.account):
+        return ()
+    return _cards_among(txn, accounts)
+
+
+def the_card(
+    txn: Transaction, card_account_id: int | None, *, what: str, again: str,
+) -> Account:
+    """Return the card a Credit press on *txn*, or a CC tick on a purchase under it, puts money on.
+
+    A NAMED card is gated as "Paid from" gates one, by
+    :func:`admitted_movement_account_id` (another owner's account is not
+    found, an archived one is refused in words, one outside the owner's
+    cash-flow set is refused), and must then be a card.  With none named,
+    the choices are :func:`credit_cards`: the one card when there is one;
+    with none there is nothing to put it on, and with two or more the owner
+    must say which.  Moved here from ``transaction_service._credit`` at plan
+    task plan#2930, when the purchase doors became its second caller.
+
+    Args:
+        txn: The row pressed, or the purchase's row.
+        card_account_id: The card the owner named, or ``None``.
+        what: What goes on the card, for the refusals' sentences: the row's
+            name for a press, the purchase's description for a tick.
+        again: The act the owner repeats once a card is added, ending the
+            no-card sentence: ``"press Credit"`` or ``"tick CC"``.
+
+    Returns:
+        The card's :class:`~app.models.account.Account`.
+
+    Raises:
+        NotFoundError: *card_account_id* is not an account of the row's owner.
+        ValidationError: The named account is archived, outside the owner's
+            cash-flow set, or not a card; or none was named and none, or more
+            than one, could be the one meant.
+    """
+    if card_account_id is not None:
+        account = db.session.get(
+            Account,
+            admitted_movement_account_id(txn, card_account_id, movement="purchase"),
+        )
+        if not is_revolving(account):
+            raise ValidationError(
+                f"'{account.name}' is not a credit card, so {what} cannot go "
+                "on it: pick one of your cards."
+            )
+        return account
+    cards = credit_cards(txn, resolve_owner_cash_flow_set(txn.user_id))
+    if len(cards) == 1:
+        return cards[0]
+    if not cards:
+        raise ValidationError(
+            f"{what} cannot go on a credit card: there is no credit card in "
+            f"the app yet. Add your card under Accounts, then {again} again."
+        )
+    raise ValidationError(
+        f"You have {len(cards)} credit cards: pick the one {what} went on."
+    )
+
+
+@dataclass(frozen=True)
+class PurchaseChoices:
+    """What a purchase list's forms offer for a purchase under one row.
+
+    One value for its two readers (the grid's every envelope and the purchase
+    list's fragment, through ``entry_service.entry_list_view``), so neither
+    can draw the tick from one set and "Paid from" from another.
+
+    Attributes:
+        accounts: The accounts "Paid from" offers, the row's own first
+            (``cash_flow_set.purchase_accounts``, the set
+            :func:`admitted_movement_account_id` admits); the picker is drawn
+            only when there are two or more (ruling **R-CC34**).
+        cards: The cards the CC tick offers (:func:`tick_cards`): no tick
+            when empty, a pick beside it when two or more.
+    """
+
+    accounts: tuple[Account, ...]
+    cards: tuple[Account, ...]
+
+
+def purchase_choices(txn: Transaction, cash_flow: CashFlowSet | None) -> PurchaseChoices:
+    """Return what the purchase forms under *txn* offer, from the OWNER's cash-flow set.
+
+    Args:
+        txn: The purchase's row, its ``account`` loaded.
+        cash_flow: The row OWNER's cash-flow set with no override, or
+            ``None`` (:func:`credit_cards`' argument).
+
+    Returns:
+        The :class:`PurchaseChoices`.
+    """
+    accounts = purchase_accounts(cash_flow, txn)
+    return PurchaseChoices(accounts=accounts, cards=tick_cards(txn, accounts))

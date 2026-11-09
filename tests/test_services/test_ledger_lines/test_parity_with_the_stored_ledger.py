@@ -201,7 +201,6 @@ def _purchases(seed_user, seed_periods):
             figure=typed(Decimal("25.00")),
             description="Market",
             purchased_on=_TODAY,
-            is_credit=False,
             settle_day=an_entered_day(_TODAY),
         ),
     )

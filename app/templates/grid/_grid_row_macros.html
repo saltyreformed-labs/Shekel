@@ -614,6 +614,10 @@
              is 0 SILENTLY, which would hide the picker on every initial render
              while the HTMX refresh drew it. #}
           {% set accounts = _entry_data.accounts %}
+          {# The cards the CC tick offers (plan task plan#2930).  The same trap:
+             an Undefined is falsy SILENTLY, which would hide the tick on every
+             initial render while the HTMX refresh drew it. #}
+          {% set tick_cards = _entry_data.tick_cards %}
           {# What each purchase's X and CC un-tick would free, and whether the
              session's user may be shown it (plan step credit_card:CC-5-4a-5).
              The same trap again: `removals[entry.id]` over an Undefined

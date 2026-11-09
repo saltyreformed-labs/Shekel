@@ -642,7 +642,7 @@ class TestEnvelopePostingLifecycle:
                 txn_id, user_id,
                 EntryDetails(
                     figure=typed(Decimal("30.00")), description="late",
-                    purchased_on=seed_periods[0].start_date, is_credit=False,
+                    purchased_on=seed_periods[0].start_date,
                 ),
             )
             entry_service.update_entry(

@@ -26,7 +26,7 @@ from app.services import credit_workflow, entry_service, status_seam, transactio
 from app.services.row_valuation import settled_figure
 from app.services.entry_credit_workflow import sync_entry_payback
 from tests._cards import add_card
-from tests._legacy_credit import plant_old_credit
+from tests._legacy_credit import plant_old_credit, plant_old_flagged_purchase
 from tests._test_helpers import (
     typed,
     an_entered_day,
@@ -394,14 +394,13 @@ class TestACardRefundNeverDestroysThePayback:
         created by the same door the refund will later re-enter.
         """
         txn = seed_entry_template["transaction"]
-        entry_service.create_entry(
+        plant_old_flagged_purchase(
             transaction_id=txn.id,
             user_id=seed_user["user"].id,
             details=entry_service.EntryDetails(
                 figure=typed(Decimal("100.00")),
                 description="Card purchase",
                 purchased_on=date(2026, 1, 5),
-                is_credit=True,
             ),
         )
         db.session.commit()
@@ -430,14 +429,13 @@ class TestACardRefundNeverDestroysThePayback:
             assert payback.estimated_amount == Decimal("100.00")
 
             with pytest.raises(ValidationError, match="owes YOU"):
-                entry_service.create_entry(
+                plant_old_flagged_purchase(
                     transaction_id=txn.id,
                     user_id=seed_user["user"].id,
                     details=entry_service.EntryDetails(
                         figure=typed(Decimal("-150.00")),
                         description="Card refund",
                         purchased_on=date(2026, 1, 6),
-                        is_credit=True,
                     ),
                 )
 
@@ -484,14 +482,13 @@ class TestACardRefundNeverDestroysThePayback:
             )
             assert credit_workflow.get_active_payback(txn.id) is not None
 
-            entry_service.create_entry(
+            plant_old_flagged_purchase(
                 transaction_id=txn.id,
                 user_id=seed_user["user"].id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("-100.00")),
                     description="Card refund",
                     purchased_on=date(2026, 1, 6),
-                    is_credit=True,
                 ),
             )
             db.session.commit()
@@ -1119,37 +1116,48 @@ class TestLegacyCreditGuard:
 class TestEntryServiceHooks:
     """Integration tests through entry_service hooks.
 
-    These tests verify that entry_service.create_entry, update_entry,
-    and delete_entry automatically trigger sync_entry_payback, producing
-    the correct payback state without explicit sync calls.
+    These tests verify that entry_service.update_entry and delete_entry
+    automatically trigger sync_entry_payback, producing the correct payback
+    state without explicit sync calls, and that create_entry no longer does:
+    since plan task plan#2930 a ticked add goes ON the owner's card and makes
+    no payback (ruling plan#2888), and the payback arms serve the old flagged
+    lines, planted here as the door wrote them (``plant_old_flagged_purchase``).
     """
 
-    def test_create_credit_entry_creates_payback(
+    def test_a_ticked_add_goes_on_the_card_and_makes_no_payback(
         self, app, db, seed_user, seed_periods, seed_entry_template,
     ):
-        """create_entry with is_credit=True automatically creates a payback."""
+        """create_entry with the CC tick files the purchase ON the card, with no payback.
+
+        Plan task plan#2930, ruling plan#2888: the card owes the $100.00 from
+        the day it was bought, and checking pays it through the card's payoff
+        row, so a CC Payback would pay it twice.  The flag stays unwritten.
+        """
         with app.app_context():
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
+            card = add_card(seed_user)
+            db.session.commit()
 
-            entry_service.create_entry(
+            entry = entry_service.create_entry(
                 transaction_id=txn.id,
                 user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")),
                     description="Credit purchase",
                     purchased_on=date(2026, 1, 5),
-                    is_credit=True,
+                    on_card=True,
                 ),
             )
 
-            payback = (
+            assert entry.account_id == card.id
+            assert entry.is_credit is False
+            assert entry.credit_payback_id is None
+            assert (
                 db.session.query(Transaction)
                 .filter_by(credit_payback_for_id=txn.id)
                 .first()
-            )
-            assert payback is not None
-            assert payback.estimated_amount == Decimal("100.00")
+            ) is None
 
     def test_create_debit_entry_no_payback(
         self, app, db, seed_user, seed_periods, seed_entry_template,
@@ -1166,7 +1174,6 @@ class TestEntryServiceHooks:
                     figure=typed(Decimal("100.00")),
                     description="Debit purchase",
                     purchased_on=date(2026, 1, 5),
-                    is_credit=False,
                 ),
             )
 
@@ -1192,7 +1199,6 @@ class TestEntryServiceHooks:
                     figure=typed(Decimal("100.00")),
                     description="Toggle test",
                     purchased_on=date(2026, 1, 5),
-                    is_credit=False,
                 ),
             )
 
@@ -1214,14 +1220,13 @@ class TestEntryServiceHooks:
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
 
-            entry = entry_service.create_entry(
+            entry = plant_old_flagged_purchase(
                 transaction_id=txn.id,
                 user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")),
                     description="Toggle test",
                     purchased_on=date(2026, 1, 5),
-                    is_credit=True,
                 ),
             )
 
@@ -1253,24 +1258,22 @@ class TestEntryServiceHooks:
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
 
-            e1 = entry_service.create_entry(
+            e1 = plant_old_flagged_purchase(
                 transaction_id=txn.id,
                 user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")),
                     description="First",
                     purchased_on=date(2026, 1, 5),
-                    is_credit=True,
                 ),
             )
-            entry_service.create_entry(
+            plant_old_flagged_purchase(
                 transaction_id=txn.id,
                 user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("50.00")),
                     description="Second",
                     purchased_on=date(2026, 1, 6),
-                    is_credit=True,
                 ),
             )
 
@@ -1295,14 +1298,13 @@ class TestEntryServiceHooks:
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
 
-            entry = entry_service.create_entry(
+            entry = plant_old_flagged_purchase(
                 transaction_id=txn.id,
                 user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")),
                     description="Only",
                     purchased_on=date(2026, 1, 5),
-                    is_credit=True,
                 ),
             )
 
@@ -1327,14 +1329,13 @@ class TestEntryServiceHooks:
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
 
-            entry = entry_service.create_entry(
+            entry = plant_old_flagged_purchase(
                 transaction_id=txn.id,
                 user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")),
                     description="Amount change",
                     purchased_on=date(2026, 1, 5),
-                    is_credit=True,
                 ),
             )
 
@@ -1350,27 +1351,66 @@ class TestEntryServiceHooks:
             db.session.expire(payback)
             assert payback.estimated_amount == Decimal("75.00")
 
-    def test_companion_credit_entry_creates_owner_payback(
+    def test_a_companions_tick_files_on_the_owners_card(
         self, app, db, seed_user, seed_companion,
         seed_periods, seed_entry_template,
     ):
-        """Credit entry by companion creates payback under owner's data.
+        """A companion's CC tick files the purchase on the OWNER's card, with no payback.
 
-        The companion's user_id is resolved to the owner's user_id, so
-        the CC Payback category is created for the owner, not the companion.
+        Plan task plan#2930 (6 of the 26 old ticks were a companion's, the
+        trace's review count): the card is the row OWNER's one card
+        (``movement_account.the_card`` reads ``txn.user_id``, ruling
+        **R-CC11**), and the companion, who owns no account, is the
+        purchase's author.
         """
         with app.app_context():
             txn = seed_entry_template["transaction"]
             companion = seed_companion["user"]
+            card = add_card(seed_user)
+            db.session.commit()
 
-            entry_service.create_entry(
+            entry = entry_service.create_entry(
                 transaction_id=txn.id,
                 user_id=companion.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")),
                     description="Companion purchase",
                     purchased_on=date(2026, 1, 5),
-                    is_credit=True,
+                    on_card=True,
+                ),
+            )
+
+            assert entry.account_id == card.id
+            assert entry.owner_id == seed_user["user"].id
+            assert entry.user_id == companion.id
+            assert (
+                db.session.query(Transaction)
+                .filter_by(credit_payback_for_id=txn.id)
+                .first()
+            ) is None
+
+    def test_a_companions_old_flagged_line_has_its_payback_under_the_owner(
+        self, app, db, seed_user, seed_companion,
+        seed_periods, seed_entry_template,
+    ):
+        """An old flagged line a companion recorded has its payback under owner's data.
+
+        The companion's user_id is resolved to the owner's user_id, so
+        the CC Payback category is created for the owner, not the companion.
+        The line is planted as the add door wrote it until plan task
+        plan#2930 (6 of the 26 old flagged lines are a companion's).
+        """
+        with app.app_context():
+            txn = seed_entry_template["transaction"]
+            companion = seed_companion["user"]
+
+            plant_old_flagged_purchase(
+                transaction_id=txn.id,
+                user_id=companion.id,
+                details=entry_service.EntryDetails(
+                    figure=typed(Decimal("100.00")),
+                    description="Companion purchase",
+                    purchased_on=date(2026, 1, 5),
                 ),
             )
 
@@ -1397,20 +1437,20 @@ class TestSessionState:
 
         Verifies that the SQLAlchemy session state is correct between
         the entry flush in create_entry and the entries read in
-        sync_entry_payback.
+        sync_entry_payback, on an old flagged line planted as the door wrote
+        it until plan task plan#2930 (the add door syncs no payback since).
         """
         with app.app_context():
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
 
-            entry = entry_service.create_entry(
+            entry = plant_old_flagged_purchase(
                 transaction_id=txn.id,
                 user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")),
                     description="Session test",
                     purchased_on=date(2026, 1, 5),
-                    is_credit=True,
                 ),
             )
 
@@ -1438,24 +1478,22 @@ class TestSessionState:
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
 
-            e1 = entry_service.create_entry(
+            e1 = plant_old_flagged_purchase(
                 transaction_id=txn.id,
                 user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")),
                     description="First",
                     purchased_on=date(2026, 1, 5),
-                    is_credit=True,
                 ),
             )
-            entry_service.create_entry(
+            plant_old_flagged_purchase(
                 transaction_id=txn.id,
                 user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("50.00")),
                     description="Second",
                     purchased_on=date(2026, 1, 6),
-                    is_credit=True,
                 ),
             )
 
@@ -1498,11 +1536,11 @@ class TestASettledPaybackCannotBeReDerived:
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
 
-            entry_service.create_entry(
+            plant_old_flagged_purchase(
                 transaction_id=txn.id, user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")), description="Card buy",
-                    purchased_on=date(2026, 1, 5), is_credit=True,
+                    purchased_on=date(2026, 1, 5),
                 ),
             )
             payback = sync_entry_payback(txn.id, user.id)
@@ -1518,11 +1556,11 @@ class TestASettledPaybackCannotBeReDerived:
 
             # The second card purchase would take the payback to $150.00.
             with pytest.raises(ValidationError, match="has settled at"):
-                entry_service.create_entry(
+                plant_old_flagged_purchase(
                     transaction_id=txn.id, user_id=user.id,
                     details=entry_service.EntryDetails(
                         figure=typed(Decimal("50.00")), description="Later card buy",
-                        purchased_on=date(2026, 1, 9), is_credit=True,
+                        purchased_on=date(2026, 1, 9),
                     ),
                 )
 
@@ -1541,16 +1579,22 @@ class TestASettledPaybackCannotBeReDerived:
         settled payback", which would fail every re-sync the source triggers for
         an unrelated reason -- a description edit, a debit entry added beside the
         credit one -- none of which changes what the payback owes.
+
+        **Its act is a description edit of the card purchase since plan task
+        plan#2930**: it was a debit purchase ADDED, and the add door syncs no
+        payback since, so the guard was no longer reached (the task's review,
+        L3, measured the case passing with the guard mutated).  The edit door
+        still syncs, over a write that leaves the credit total as it was.
         """
         with app.app_context():
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
 
-            entry_service.create_entry(
+            card_buy = plant_old_flagged_purchase(
                 transaction_id=txn.id, user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")), description="Card buy",
-                    purchased_on=date(2026, 1, 5), is_credit=True,
+                    purchased_on=date(2026, 1, 5),
                 ),
             )
             payback = sync_entry_payback(txn.id, user.id)
@@ -1558,13 +1602,9 @@ class TestASettledPaybackCannotBeReDerived:
             transaction_service.settle_transaction(payback)
             db.session.flush()
 
-            # A DEBIT entry does not change the credit total.
-            entry_service.create_entry(
-                transaction_id=txn.id, user_id=user.id,
-                details=entry_service.EntryDetails(
-                    figure=typed(Decimal("25.00")), description="Cash buy",
-                    purchased_on=date(2026, 1, 9), is_credit=False,
-                ),
+            # A description edit does not change the credit total.
+            entry_service.update_entry(
+                card_buy.id, user.id, description="Card buy, groceries",
             )
             assert settled_figure(payback) == Decimal("100.00")
 
@@ -1592,11 +1632,11 @@ class TestASettledPaybackCannotBeReDerived:
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
 
-            entry = entry_service.create_entry(
+            entry = plant_old_flagged_purchase(
                 transaction_id=txn.id, user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("100.00")), description="Card buy",
-                    purchased_on=date(2026, 1, 5), is_credit=True,
+                    purchased_on=date(2026, 1, 5),
                 ),
             )
             payback = sync_entry_payback(txn.id, user.id)
@@ -1652,11 +1692,11 @@ class TestASettledPaybackWithDRIFTStillAdmitsUnrelatedEdits:
         Returns:
             ``(payback, entry)`` -- the drifted payback and its credit purchase.
         """
-        entry = entry_service.create_entry(
+        entry = plant_old_flagged_purchase(
             transaction_id=txn.id, user_id=user.id,
             details=entry_service.EntryDetails(
                 figure=typed(Decimal("150.00")), description="Card buy",
-                purchased_on=date(2026, 1, 5), is_credit=True,
+                purchased_on=date(2026, 1, 5),
             ),
         )
         payback = sync_entry_payback(txn.id, user.id)
@@ -1698,7 +1738,7 @@ class TestASettledPaybackWithDRIFTStillAdmitsUnrelatedEdits:
                 transaction_id=txn.id, user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("25.00")), description="Cash buy",
-                    purchased_on=date(2026, 1, 9), is_credit=False,
+                    purchased_on=date(2026, 1, 9),
                 ),
             )
             # Drift, created after the settle exactly as production's was.
@@ -1734,11 +1774,11 @@ class TestASettledPaybackWithDRIFTStillAdmitsUnrelatedEdits:
             payback, _ = self._drifted(txn, user)
 
             with pytest.raises(ValidationError) as exc:
-                entry_service.create_entry(
+                plant_old_flagged_purchase(
                     transaction_id=txn.id, user_id=user.id,
                     details=entry_service.EntryDetails(
                         figure=typed(Decimal("50.00")), description="Second card buy",
-                        purchased_on=date(2026, 1, 9), is_credit=True,
+                        purchased_on=date(2026, 1, 9),
                     ),
                 )
 
@@ -1766,7 +1806,7 @@ class TestASettledPaybackWithDRIFTStillAdmitsUnrelatedEdits:
                 transaction_id=txn.id, user_id=user.id,
                 details=entry_service.EntryDetails(
                     figure=typed(Decimal("25.00")), description="Cash buy",
-                    purchased_on=date(2026, 1, 9), is_credit=False,
+                    purchased_on=date(2026, 1, 9),
                 ),
             )
             entry_service.update_entry(

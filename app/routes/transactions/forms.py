@@ -22,6 +22,7 @@ from app.services import (
     category_service,
     credit_workflow,
     definition_delete,
+    movement_account,
     pay_period_service,
     status_seam,
     transaction_service,
@@ -209,7 +210,7 @@ def render_full_edit(txn, *, page_refusal):
     # the cards a Credit press could mean (plan task plan#3056).
     owner_set = resolve_owner_cash_flow_set(txn.user_id)
     tender_accounts, tender_account_id = _tender_picker(txn, owner_set)
-    credit_cards = transaction_service.credit_cards(txn, owner_set)
+    credit_cards = movement_account.credit_cards(txn, owner_set)
     payment_withdraws = status_seam.pending_payment_withdrawal(txn)
     return render_template(
         "grid/_transaction_full_edit.html",

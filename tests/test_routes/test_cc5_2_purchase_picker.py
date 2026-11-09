@@ -26,6 +26,7 @@ card, one checking envelope in today's paycheck.
 
 from __future__ import annotations
 
+import ast
 import re
 from decimal import Decimal
 from pathlib import Path
@@ -198,18 +199,36 @@ class TestPurchaseAccountsIsTheDoorsOwnTuple:
         still lands.  The developer confirmed this re-expression on
         2026-09-21 (rule 5): "The census follows the leaf: one shared gate,
         both doors graded, no door spells the rule itself."
+
+        **It followed the leaf again at plan task plan#2930**: the purchase
+        door's call moved to ``entry_service/_details.py`` with the purchase's
+        content, and the gate's module now also holds which card a CC tick or
+        a Credit press means, which reads the same tuple
+        (``movement_account.credit_cards``).  So the count is of the GATE
+        FUNCTION's own body, the one place the predicate is spelled.
         """
         services = Path(app.root_path) / "services"
-        gate = (services / "movement_account.py").read_text(encoding="utf-8")
+        module = (services / "movement_account.py").read_text(encoding="utf-8")
+        tree = ast.parse(module)
+        gate = next(
+            ast.get_source_segment(module, node) for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "admitted_movement_account_id"
+        )
         assert gate.count("purchase_accounts(cash_flow, txn)") == 1
         writers = (
-            "entry_service/_doors.py",
+            "entry_service/_details.py",
             "transaction_service/_settle.py",
             "transaction_service/_door.py",
         )
         for door in writers:
             source = (services / door).read_text(encoding="utf-8")
             assert "admitted_movement_account_id(" in source, door
+        # The purchase door's own module still writes the movement's account
+        # (the review of plan#2930, L4), so it is held to spelling none of
+        # the rule beside the three that call the gate.
+        for door in (*writers, "entry_service/_doors.py"):
+            source = (services / door).read_text(encoding="utf-8")
             assert "purchase_accounts(" not in source, door
             assert "cash_flow.member_ids" not in source, door
 

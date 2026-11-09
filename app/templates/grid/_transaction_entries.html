@@ -14,6 +14,12 @@
                           Account picker only when there is more than one
                           (ruling R-CC34); with one, no control and the door
                           files the purchase on the row's account.
+     tick_cards        -- the cards the add form's CC tick offers (plan task
+                          plan#2930, ruling plan#2888;
+                          ``movement_account.tick_cards``): no tick when
+                          empty, the tick alone for one card, and a "Which
+                          card" pick beside it for two or more.  Ticked, the
+                          purchase goes ON the card and no CC payback is made.
      remaining         -- Decimal remaining budget (negative = overspent)
      today             -- the USER's today (display timezone): the add form's
                           default purchased_on AND both pickers' ``max``.
@@ -428,9 +434,9 @@
           own tuple (ruling R-CC37), the row's account first and selected.
           Rendered ONLY when there is a choice (ruling R-CC34): with one
           account the form carries no control and the door files the purchase
-          on the row's account, so an owner with no card sees the form they
-          always did, byte for byte.  The CC checkbox beside it stays until
-          CC-7 deletes the flag (ruling R-CC35); ticking it beside another
+          on the row's account, so an owner with no card is offered no picker
+          (and, since plan task plan#2930, no CC tick).  The CC tick beside it says the same
+          fact for a card (plan task plan#2930), so ticking it beside another
           account is refused by the door with a banner naming which to use.
           Whitespace-controlled so the one-account form emits no bytes here. -#}
       {%- if accounts|length > 1 %}
@@ -442,11 +448,33 @@
         {% endfor %}
       </select>
       {%- endif %}
+      {#- **The CC tick puts the purchase ON the card** (plan task plan#2930,
+          ruling plan#2888: "the tick stays the one control, with a pick only
+          for two or more cards").  The door files it on the owner's card,
+          dated the day it was bought, and makes no CC payback: checking pays
+          the card through the card's payoff row.  Drawn only where there is
+          a card it could mean and the row does not already live on one
+          (`tick_cards`); a companion's tick files on the owner's card.  It
+          posts as `is_credit`, which the schema loads as `on_card`, so a form
+          drawn before the deploy means the same. -#}
+      {%- if tick_cards %}
       <div class="form-check form-check-inline mb-0">
-        <input type="checkbox" name="is_credit" class="form-check-input"
+        <input type="checkbox" name="is_credit" value="true" class="form-check-input"
                id="cc-{{ entry_list_host_id }}">
-        <label class="form-check-label small" for="cc-{{ entry_list_host_id }}">CC</label>
+        <label class="form-check-label small" for="cc-{{ entry_list_host_id }}"
+               title="Bought on {{ tick_cards[0].name if tick_cards|length == 1 else 'a credit card' }}">CC</label>
       </div>
+      {%- if tick_cards|length > 1 %}
+      <select name="card_account_id" aria-label="Which card"
+              class="form-select form-select-sm mw-px-130"
+              title="The card this purchase went on, when CC is ticked">
+        <option value="" selected>Which card</option>
+        {% for card in tick_cards %}
+        <option value="{{ card.id }}">{{ card.name }}</option>
+        {% endfor %}
+      </select>
+      {%- endif %}
+      {%- endif %}
       <button type="submit" class="btn btn-sm btn-primary">
         <i class="bi bi-plus"></i>
       </button>

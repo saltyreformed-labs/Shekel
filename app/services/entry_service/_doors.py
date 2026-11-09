@@ -16,7 +16,6 @@ Architecture:
 """
 
 import logging
-from dataclasses import dataclass
 from datetime import date
 
 from app.extensions import db
@@ -31,14 +30,9 @@ from app.services.entry_credit_workflow import (
     sync_entry_payback,
     x_press_for_payback,
 )
-from app.services.movement_account import admitted_movement_account_id
 from app.services.owned_transaction import load_owned_transaction
-from app.services.settle_day import (
-    SettleDay,
-    record_settle_day,
-    recorded_settle_day,
-)
-from app.services.stated_figure import StatedFigure
+from app.services.settle_day import record_settle_day, recorded_settle_day
+from app.services.entry_service._details import EntryDetails, purchase_account_id
 from app.services.entry_service._sums import credit_total_moves
 from app.services.entry_service._refusals import (
     _reject_flag_beside_another_account,
@@ -189,138 +183,10 @@ def resolve_owner_id(user_id: int) -> int:
 _resolve_owner_id = resolve_owner_id
 
 
-@dataclass(frozen=True)
-class EntryDetails:
-    """The content of a purchase entry -- the add-purchase form's inputs.
-
-    The user-supplied fields of a :class:`TransactionEntry` (what was
-    bought, how much, when, and whether paid by credit card), bundled so
-    ``create_entry`` takes them as one cohesive argument distinct from the
-    routing/ownership context (the parent transaction and the acting user).
-
-    Fields:
-        figure:      What the purchase cost and WHO WROTE the figure, as one
-            :class:`~app.services.stated_figure.StatedFigure` (plan step
-            **X-bi-3e-1**, ruling **R-BAL69**): ``typed`` from the add-purchase
-            form, ``observed`` from ``statement_match._create._born_purchase``,
-            where the bank line IS the figure.  Its amount is SIGNED --
-            POSITIVE for a charge and NEGATIVE for a REFUND (ruling
-            **bank_import:R-II**).  **It said *Positive* until plan step
-            ``bank_import:X-gj-2b-3``, and its own caller contradicted it**:
-            the born-purchase builder passes ``-Decimal(str(line.amount))``,
-            which for a merchant credit is negative.  What refuses a negative
-            is the hand-entry FORM (``EntryCreateSchema``'s ``Range(min=0.01)``),
-            where a typed negative is a typo -- not this value, and not the
-            table, whose only rule is ``<> 0``
-            (:func:`~._refusals._reject_zero_amount`).
-        description: Store name or brief note (1--200 chars).
-        purchased_on: Date the purchase HAPPENED.  Backdating is ordinary; a
-            date after the user's today is refused (ruling R-M, see
-            :func:`_reject_future_purchase_date`).
-        is_credit:   Whether this was paid with a credit card -- the CHEAT's
-            flag, kept until ``CC-7`` for the legacy lines that carry it.  A
-            purchase that names an ``account_id`` other than its row's says
-            the same thing properly and may not carry the flag too
-            (:func:`~._refusals._reject_flag_beside_another_account`).
-
-        settle_day: The day the BANK took the money and HOW that day is
-            known (:class:`app.services.settle_day.SettleDay`), when the caller
-            already knows it, else ``None`` -- which is the state every
-            hand-typed purchase is born in.  The one caller that supplies one
-            is ``statement_match._create.create_purchase_from_line``, and its
-            basis is always ``observed``: the bank line IS why the purchase
-            exists.
-
-        account_id: The account the purchase's money MOVED THROUGH (plan step
-            ``credit_card:CC-5-2``, ruling **R-CC15**; the movement folds on
-            its own account, **R-BAL75**), or ``None`` for its row's -- where
-            the row is EXPECTED to be paid from, which is every purchase's
-            account until a card exists and the one every caller but the
-            add-purchase form states.  A card swipe in a checking envelope
-            names the card here: the envelope's spend grows by the purchase
-            whatever account it moved through, checking's fold sees nothing
-            on that day, and the card's fold sees the swipe.  The door gates
-            it against the ROW's owner, never the caller (a companion records
-            the purchase on the owner's card, ruling **R-CC11**), and admits
-            exactly what the picker offers -- the row's own account or a
-            member of the owner's cash-flow set (ruling **R-CC37**; see
-            :func:`_purchase_account_id`).
-
-    **The posting day was deliberately NOT here until plan step
-    ``bank_import:X-f6a-3b``, and the premise that kept it out was true only of
-    the doors that existed then.**  It read: *the day the bank took the money is
-    an observation, and at the moment a purchase is recorded there is nothing to
-    have observed.*  That is exactly right for the add-purchase form, and false
-    for a purchase created FROM a bank statement line -- there the observation is
-    what caused the record to exist, and it is the more reliable of the two days
-    (**R-FW**).
-
-    Recording it here rather than through a follow-up :func:`update_entry` is
-    the difference between one act and two: the second call would re-run
-    ``sync_entry_payback`` and the posting reconcile against an intermediate
-    state in which a purchase the bank has already taken looks outstanding, and
-    it would leave that state committed if anything after it refused.
-    """
-
-    figure: StatedFigure
-    description: str
-    purchased_on: date
-    is_credit: bool = False
-    settle_day: SettleDay | None = None
-    account_id: int | None = None
-
-
-def _purchase_account_id(txn: Transaction, details: EntryDetails) -> int:
-    """Return the account the new purchase's money moved through, gated.
-
-    Plan step ``credit_card:CC-5-2``, the FIRST door that writes a movement
-    onto another account than its row's (ruling **R-BAL76** dropped the key
-    that forbade it at ``CC-5-1``).  ``None`` is the row's own account --
-    today's behaviour for every caller, and the add-purchase form's when the
-    owner has no card (ruling **R-CC34**: the picker renders only when there
-    is a choice).
-
-    **The gate itself is**
-    :func:`app.services.movement_account.admitted_movement_account_id`
-    **since plan step ``CC-5-3``**: the ONE spelling of which accounts a
-    movement under a row may name (rulings **R-CC37** / **R-CC39** -- the
-    row's own, or a member of the ROW OWNER's cash-flow set, the tuple every
-    picker renders from), shared with the settle verb's tender so the two
-    doors cannot part.  Its argument -- the owner gate over ``txn.user_id``
-    (ruling **R-CC11**), the 404, the two refusals and why the books boundary
-    is not asked there -- is that module's docstring; this door's own half is
-    the ``None`` arm.  The review of this leaf's first cut found the door
-    admitting every non-loan account under a docstring that claimed parity
-    with the picker; the grid half (the second commit of CC-5-2) made the
-    predicate one function rather than two spellings that agreed, and
-    ``CC-5-3`` moved it out of this module rather than copy it for the
-    second door.
-
-    Args:
-        txn: The parent row, already proven the caller's.
-        details: The submission; ``details.account_id`` is what is gated.
-
-    Returns:
-        The ``budget.accounts.id`` to write onto the purchase.
-
-    Raises:
-        NotFoundError: The account does not exist or is not the ROW's owner's.
-        ValidationError: The account is archived, or is neither the row's own
-            nor a member of the owner's cash-flow set.
-    """
-    if details.account_id is None:
-        return txn.account_id
-    return admitted_movement_account_id(
-        txn, details.account_id, movement="purchase",
-    )
-
-
 def create_entry(
     transaction_id: int,
     user_id: int,
     details: EntryDetails,
-    *,
-    press: match_press.Press | None = None,
 ) -> TransactionEntry:
     """Create a new purchase entry against a transaction.
 
@@ -332,28 +198,31 @@ def create_entry(
         transaction_id: Parent transaction ID.
         user_id: The creating user's ID (owner or companion).
         details: :class:`EntryDetails` -- the purchase content (the figure
-            with who wrote it, description, purchased_on, is_credit, and the
-            posting day -- with the basis that says how it is known -- where
-            the caller already has one).
-        press: The save's press, for the payback sync, the one place an add
-            frees a line: an owner's over nothing named (finding **CC-381**),
-            a companion's ``OwnerOnly`` (ruling **R-CC132**, plan step
-            CC-5-4a-5).
+            with who wrote it, description, purchased_on, the account or the
+            CC tick, and the posting day -- with the basis that says how it is
+            known -- where the caller already has one).
+
+    **It takes no press since plan task plan#2930**: an add freed a line only
+    by deleting a CC Payback (a card refund bringing the card total to zero,
+    finding **CC-381**'s add half), and a purchase this door writes carries no
+    CC flag, so it cannot move the card total and the payback sync has
+    nothing to do for it.
 
     Returns:
         The newly created TransactionEntry (flushed, id available).
 
     Raises:
         NotFoundError: Transaction not found or not accessible by this
-            user; or ``details.account_id`` names no account of the ROW's
-            owner (:func:`_purchase_account_id`).
+            user; or ``details.account_id`` or the picked card names no
+            account of the ROW's owner (:func:`~._details.purchase_account_id`).
         ValidationError: Transaction deleted, not entry-capable, is a
             transfer, is income, or has a blocked status (Cancelled, Credit, the archive, or
             a settled row whose figure is not its purchases -- see
             :func:`_reject_settled_addition`); the account is archived or a
-            loan, or the ``CC`` flag is set beside an account other than the
-            row's; or a purchase day in the future, a posting day in the
-            future, or a posting day before the purchase day.
+            loan, the tick names no card or sits beside an account other than
+            the row's (:func:`~._details.purchase_account_id`); or a purchase day in the
+            future, a posting day in the future, or a posting day before the
+            purchase day.
     """
     owner_id = resolve_owner_id(user_id)
 
@@ -449,17 +318,12 @@ def create_entry(
     _reject_settled_addition(txn)
 
     # WHICH ACCOUNT the money moved through, gated against the ROW's owner
-    # (plan step ``credit_card:CC-5-2``; the rule and its refusals are
-    # :func:`_purchase_account_id`'s).  After the row guards, so the row's
-    # own refusals keep their order, and before the content guards, because a
-    # foreign account is a bad REFERENCE and answers 404 where the content
-    # rules answer with a message.  The flag beside it is refused by the same
-    # test both purchase doors apply: a purchase on another account already
-    # says how it was paid.
-    account_id = _purchase_account_id(txn, details)
-    _reject_flag_beside_another_account(
-        details.is_credit, account_id, txn.account_id,
-    )
+    # (plan step ``credit_card:CC-5-2``; the CC tick's card since plan task
+    # plan#2930; the rule and its refusals are :func:`~._details.purchase_account_id`'s).
+    # After the row guards, so the row's own refusals keep their order, and
+    # before the content guards, because a foreign account is a bad REFERENCE
+    # and answers 404 where the content rules answer with a message.
+    account_id = purchase_account_id(txn, details)
 
     # Content guard, after the ownership and transaction guards so a
     # non-owner still gets the 404 rather than a validation message that
@@ -497,7 +361,8 @@ def create_entry(
         amount=details.figure.amount,
         description=details.description,
         purchased_on=details.purchased_on,
-        is_credit=details.is_credit,
+        # No ``is_credit``: the column's default, ``False``, because this door
+        # writes no CC flag since plan task plan#2930 (``EntryDetails``).
         # WHO WROTE the figure, stated by the caller with the figure itself
         # (plan step **X-bi-3e-1**, ruling **R-BAL61**): the form says a
         # person did, the born-purchase builder says the bank did.  It was
@@ -525,10 +390,10 @@ def create_entry(
         transaction_id=transaction_id,
         entry_id=entry.id,
         amount=str(details.figure.amount),
-        is_credit=details.is_credit,
         # WHICH account the money moved through (plan step CC-5-2): a receipt
         # naming the row alone cannot tell a checking debit from a card
-        # swipe, and the two move different balances.
+        # swipe, and the two move different balances.  A CC tick is logged
+        # as the card it filed the purchase on.
         account_id=account_id,
         # The posting day is logged because a purchase BORN with one has
         # already moved money: it books its own dated cash leg at the reconcile
@@ -547,13 +412,23 @@ def create_entry(
         ),
     )
 
-    # Only a CREDIT purchase carrying money moves the envelope's credit sum
-    # (finding **N-323**); a debit purchase, or a zero-amount one, cannot.
-    sync_entry_payback(
-        transaction_id, owner_id,
-        moves_credit_total=bool(details.is_credit and details.figure.amount),
-        press=press,
-    )
+    # **No payback sync** (plan task plan#2930, ruling plan#2888): a
+    # purchase on the card is owed ON the card, which checking pays through
+    # the card's payoff row, and this door writes no CC flag, so the
+    # envelope's card total (the flagged lines alone) cannot move.
+    #
+    # **The row's ``entries`` are expired here, which the sync did for this
+    # door until then.**  The purchase was written by its foreign key, not
+    # appended to the collection, so a collection this request already loaded
+    # (the ownership read, a caller's earlier walk) does not hold it: the
+    # posting reconcile below would book the family without it, and every
+    # later reader of ``txn.purchases`` in the request would miss it.
+    # Measured at plan task plan#2930 with the sync call gone and no expiry:
+    # 11 tests across ``test_covering_movement``, ``test_statement_match`` and
+    # ``test_mark_paid_entries`` read the row without its new purchase (an
+    # envelope closed empty, then given one, still summed $0.00), the count
+    # the task's review re-measured.
+    db.session.expire(txn, ["entries"])
     _resync_after_entry_change(txn)
 
     return entry
@@ -561,7 +436,7 @@ def create_entry(
 
 def _posting_day_after(
     entry: TransactionEntry, valid_updates: dict,
-) -> "date | None":
+) -> date | None:
     """Return the posting day *entry* would carry once *valid_updates* is applied.
 
     The RESULT the update door's two day rules are checked on: the submitted

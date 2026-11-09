@@ -31,7 +31,7 @@ Paid leaves checking and a later Credit puts it back on the card.
 **The press says its day and asks which card** (plan task plan#3056).  The
 popover shows the day :func:`credit_day` gives and lets the owner type the real
 one, and asks which card when the owner has two or more; it reads
-:func:`credit_cards` for the choice and :func:`credit_frees_a_line` for the
+``movement_account.credit_cards`` for the choice and :func:`credit_frees_a_line` for the
 caption naming the bank lines the press frees.
 
 **The C key and the palette open the popover where the press needs what only it asks**
@@ -61,15 +61,12 @@ from typing import TYPE_CHECKING
 from app import ref_cache
 from app.enums import SettledDayBasisEnum, StatusEnum
 from app.exceptions import ValidationError
-from app.extensions import db
 from app.models.account import Account
 from app.models.transaction import Transaction
-from app.services.account_projection import is_revolving
-from app.services.account_resolver import resolve_owner_cash_flow_set
-from app.services.cash_flow_set import CashFlowSet, purchase_accounts
+from app.services.cash_flow_set import CashFlowSet
 from app.services.credit_workflow import get_active_payback, unmark_credit
 from app.services.match_press import Press
-from app.services.movement_account import admitted_movement_account_id
+from app.services.movement_account import credit_cards, the_card
 from app.services.pay_calendar import FiledRow, PayCalendar, calendar_for
 from app.services.settle_day import SettleDay, recorded_settle_day
 from app.services.status_seam import (
@@ -131,7 +128,7 @@ def mark_as_credit(
             companion's press never reaches here: the door is the owner's
             (review J).
         card_account_id: The card the owner named, or ``None`` when the press
-            named none (:func:`_the_card`).
+            named none (``movement_account.the_card``).
         day: The day under the popover's "Money moved on" box (plan task
             plan#3056), or ``None`` when the press named none: then
             :func:`credit_day`.  Entered either way, as the press is the
@@ -142,7 +139,7 @@ def mark_as_credit(
 
     Raises:
         ValidationError: On the refusals above, or when no card or more than
-            one could be the one meant (:func:`_the_card`).  The settle
+            one could be the one meant (``movement_account.the_card``).  The settle
             verb's own refusals leave nothing written; the $0.00 one leaves
             the settle for the caller's rollback.
         NotFoundError: When *card_account_id* is not an account of the
@@ -164,7 +161,7 @@ def mark_as_credit(
             f"Cannot mark a '{txn.status.name}' transaction as credit. "
             "Only projected transactions can be marked as credit."
         )
-    card = _the_card(txn, card_account_id)
+    card = the_card(txn, card_account_id, what=txn.name, again="press Credit")
     own_day = credit_day(txn)
     settle_day = SettleDay(day=own_day, basis=SettledDayBasisEnum.ENTERED)
     if day is not None and day != own_day:
@@ -263,89 +260,6 @@ def credit_day(txn: Transaction, calendar: PayCalendar | None = None) -> date:
     return min(own, display_today())
 
 
-def _the_card(txn: Transaction, card_account_id: int | None) -> Account:
-    """Return the card a Credit press on *txn* puts it on.
-
-    A NAMED card is gated as "Paid from" gates one -- the one gate on where a
-    movement under a row may go (``movement_account.admitted_movement_account_id``:
-    another owner's account is not found, an archived one is refused in
-    words, one outside the owner's cash-flow set is refused) -- and must then
-    be a card.  With none named, the choices are :func:`credit_cards`: the
-    one card when there is one; with none there is nothing to put it on, and
-    with two or more the press must say which.
-
-    Args:
-        txn: The row pressed.
-        card_account_id: The card the owner named, or ``None``.
-
-    Returns:
-        The card's :class:`~app.models.account.Account`.
-
-    Raises:
-        NotFoundError: *card_account_id* is not an account of the row's owner.
-        ValidationError: The named account is archived, outside the owner's
-            cash-flow set, or not a card; or none was named and none, or more
-            than one, could be the one meant.
-    """
-    if card_account_id is not None:
-        account = db.session.get(
-            Account, admitted_movement_account_id(txn, card_account_id, movement="purchase"),
-        )
-        if not is_revolving(account):
-            raise ValidationError(
-                f"'{account.name}' is not a credit card, so Credit cannot put "
-                f"{txn.name} on it: pick one of your cards."
-            )
-        return account
-    cards = credit_cards(txn, resolve_owner_cash_flow_set(txn.user_id))
-    if len(cards) == 1:
-        return cards[0]
-    if not cards:
-        raise ValidationError(
-            f"{txn.name} cannot go on a credit card: there is no credit card "
-            "in the app yet. Add your card under Accounts, then press Credit "
-            "again."
-        )
-    raise ValidationError(
-        f"You have {len(cards)} credit cards: pick the one {txn.name} went on."
-    )
-
-
-def credit_cards(txn: Transaction, cash_flow: CashFlowSet | None) -> tuple[Account, ...]:
-    """Return the cards a Credit press naming none could put *txn* on.
-
-    **The one answer to "which card does Credit mean"** (plan task
-    plan#3056): the press asks it when nothing is named (:func:`_the_card`),
-    the popover draws from it (one card named, two or more to pick from, none
-    and an ask to add one), and the C key and the palette press at once only
-    when it holds one (plan task plan#3114).  The cards among the accounts
-    the row's payment may move through
-    (``cash_flow_set.purchase_accounts``, the set the "Paid from" gate admits:
-    the row's own account first, then the owner's other members).  A row
-    that lives on a card means that card, however many the owner has
-    (decided under R-BAL207 at plan task plan#2929: a bill on the card says
-    "this went on this card", ruling plan#2926, and asking which would ask
-    what the row already says).
-
-    Args:
-        txn: The row, its ``account`` loaded (a joined load).
-        cash_flow: The row OWNER's cash-flow set with no override
-            (``account_resolver.resolve_owner_cash_flow_set``), or ``None``
-            for an owner with no grid-eligible account.
-
-    Returns:
-        The row's own card alone when it lives on one; else the owner's cards
-        in member order, which may be none.
-    """
-    cards = tuple(
-        account for account in purchase_accounts(cash_flow, txn)
-        if is_revolving(account)
-    )
-    if is_revolving(txn.account):
-        return cards[:1]
-    return cards
-
-
 def credit_moves_payment(txn: Transaction, cards: tuple[Account, ...]) -> bool:
     """Return whether a Credit press onto one of *cards* could move *txn*'s kept payment.
 
@@ -365,7 +279,7 @@ def credit_moves_payment(txn: Transaction, cards: tuple[Account, ...]) -> bool:
 
     Args:
         txn: The row, with ``entries`` loaded or loadable.
-        cards: What :func:`credit_cards` answered for it.
+        cards: What ``movement_account.credit_cards`` answered for it.
 
     Returns:
         ``True`` when the row keeps a payment and one of *cards* is another
@@ -397,7 +311,7 @@ def credit_frees_a_line(
 
     Args:
         txn: The row, with ``entries`` loaded or loadable.
-        cards: What :func:`credit_cards` answered for it.
+        cards: What ``movement_account.credit_cards`` answered for it.
         payment_withdraws: What taking the row's kept payment out of its
             matches would withdraw (``status_seam.pending_payment_withdrawal``),
             or ``None`` when it keeps none.  Read by the caller, which may
@@ -448,10 +362,10 @@ def credit_opens_the_popover_by_key(
     plan#3114, ruling plan#3112, Josh 2026-11-09: "Open the popover").  A
     press from the C key or the palette posts no card, no day and no bank
     line, so the door reads the row's own day and its one card
-    (:func:`_the_card`), and a press naming no line may free none (ruling
+    (``movement_account.the_card``), and a press naming no line may free none (ruling
     **R-CC127**).  They open the popover where the press needs what only the
     popover asks: with no card it asks for one to be added, with two or more
-    it asks which (:func:`credit_cards`), and where Credit would unmatch a
+    it asks which (``movement_account.credit_cards``), and where Credit would unmatch a
     bank line it names the line beside Credit first
     (:func:`credit_frees_a_line`).  On every other row they press at once,
     as the ruling says, a $0.00 row among them: the door refuses that press
@@ -475,7 +389,7 @@ def credit_opens_the_popover_by_key(
         items: The items being drawn, rows and transfer sides, a row's
             ``entries`` loaded or loadable.
         cash_flow: The row OWNER's cash-flow set with no override, as
-            :func:`credit_cards` takes it.
+            ``movement_account.credit_cards`` takes it.
 
     Returns:
         One entry per item, keyed by ``transfer_legs.cell_key``: ``None``

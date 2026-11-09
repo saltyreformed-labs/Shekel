@@ -64,7 +64,7 @@ from tests.test_services.test_statement_match._builders import (
     a_transaction,
     an_import,
 )
-from tests._legacy_credit import plant_old_credit
+from tests._legacy_credit import plant_old_credit, plant_old_flagged_purchase
 
 
 def _day(seed_user):
@@ -525,10 +525,10 @@ class TestEveryDoorWithdrawsTheActItself:
             db.session.commit()
             a_later_period(seed_user)
             db.session.commit()
-            purchase = entry_service.create_entry(
+            purchase = plant_old_flagged_purchase(
                 envelope.id, seed_user["user"].id, entry_service.EntryDetails(
                     figure=typed(Decimal("60.00")), description="Kroger",
-                    purchased_on=_day(seed_user), is_credit=True,
+                    purchased_on=_day(seed_user),
                 ),
             )
             db.session.commit()

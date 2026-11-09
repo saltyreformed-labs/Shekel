@@ -29,6 +29,7 @@ from app.services import cash_ledger, entry_service
 from app.services.row_valuation import purchases_total
 from app.services.cash_ledger import account_opening_fact
 from app.services.settle_day import SettleDay
+from tests._legacy_credit import plant_old_flagged_purchase
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_account,
@@ -254,15 +255,17 @@ class TestWhatTheDoorRefuses:
             assert defaulted.account_id == savings.id
             assert stated.account_id == savings.id
 
-    def test_the_flag_beside_the_card_is_refused_and_beside_the_rows_account_admitted(
+    def test_the_tick_beside_another_account_is_refused_and_alone_files_on_the_card(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """Two representations of one purchase are unwritable; the legacy one stands.
+        """The tick and "Paid from" may not both say where the money went; the tick alone names the card.
 
-        The ``CC`` flag says *not on this row's account* the cheat's way; a
-        card named as the account says it properly.  Both at once is one fact
-        in two homes (rule 14), refused.  The flag beside the row's OWN
-        account is the legacy line ``CC-7`` converts, still writable.
+        Plan task plan#2930 (ruling plan#2888): the CC tick says *this went on
+        the card*, and so does a card named as the account.  Both at once is
+        one fact in two homes (rule 14), refused before anything is written,
+        by the test that refused the CC flag beside another account until
+        then.  The tick alone files the purchase on the owner's one card, and
+        the add door writes no CC flag (the old lines keep theirs, plan#1034).
         """
         with app.app_context():
             card = _card(seed_user)
@@ -270,14 +273,14 @@ class TestWhatTheDoorRefuses:
             with pytest.raises(ValidationError, match=r"not both"):
                 _swipe(
                     row, seed_user["user"].id,
-                    account_id=card.id, is_credit=True,
+                    account_id=card.id, on_card=True,
                 )
             assert _purchases_of(row.id) == []
 
-            legacy = _swipe(row, seed_user["user"].id, is_credit=True)
+            ticked = _swipe(row, seed_user["user"].id, on_card=True)
             db.session.flush()
-            assert legacy.is_credit is True
-            assert legacy.account_id == row.account_id
+            assert ticked.is_credit is False
+            assert ticked.account_id == card.id
 
 
 class TestTheBooksBoundaryIsTheMovementsAccounts:
@@ -377,7 +380,12 @@ class TestTheUpdateDoorRefusesTheSameCombination:
             )
             row = _envelope(seed_user, seed_periods[0])
             owner_id = seed_user["user"].id
-            legacy = _swipe(row, owner_id, is_credit=True)
+            legacy = plant_old_flagged_purchase(
+                row.id, owner_id, entry_service.EntryDetails(
+                    figure=typed(Decimal("60.00")), description="Kroger",
+                    purchased_on=_PURCHASED_ON,
+                ),
+            )
             db.session.flush()
             row.account_id = other.id
             db.session.flush()

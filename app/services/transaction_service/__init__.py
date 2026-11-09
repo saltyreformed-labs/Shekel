@@ -75,7 +75,6 @@ SIX leaves, cut by what each DECIDES rather than by size:
 """
 
 from app.services.transaction_service._credit import (
-    credit_cards,
     credit_day,
     credit_frees_a_line,
     credit_moves_payment,
@@ -124,7 +123,6 @@ __all__ = [
     "RowDeletion",
     "StatedRecord",
     "apply_requested_status",
-    "credit_cards",
     "credit_day",
     "credit_frees_a_line",
     "credit_moves_payment",

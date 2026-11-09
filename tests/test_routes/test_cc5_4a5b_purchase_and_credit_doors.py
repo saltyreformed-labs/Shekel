@@ -66,7 +66,8 @@ from tests.test_services.test_statement_match._builders import (
     an_import,
 )
 from app.services.statement_match import accept_match, release_match
-from tests._legacy_credit import plant_old_credit
+from tests._cards import add_card
+from tests._legacy_credit import plant_old_credit, plant_old_flagged_purchase
 
 #: The bank's own words for the Kroger line -- distinct from the purchase's
 #: description, so a page that leaked the line would be caught naming it.
@@ -113,10 +114,16 @@ def _groceries(seed_user, *, companion_visible=False):
 
 
 def _purchase(seed_user, txn, amount, description, *, is_credit=False):
-    entry = entry_service.create_entry(
+    """Record a purchase on *txn*; *is_credit* plants an old flagged line.
+
+    As the add door wrote one until plan task plan#2930, which files a ticked
+    purchase on the card instead (``tests._legacy_credit``).
+    """
+    record = plant_old_flagged_purchase if is_credit else entry_service.create_entry
+    entry = record(
         txn.id, seed_user["user"].id, entry_service.EntryDetails(
             figure=typed(Decimal(amount)), description=description,
-            purchased_on=_day(seed_user), is_credit=is_credit,
+            purchased_on=_day(seed_user),
         ),
     )
     db.session.commit()
@@ -624,42 +631,46 @@ class TestACompanionIsNeverShownTheOwnersLines:
             assert db.session.get(Transaction, payback.id) is not None
             assert _claimed(seed_user, line)
 
-    def test_a_companions_equal_card_refund_is_refused(
+    def test_a_companions_card_refund_goes_on_the_card_and_leaves_the_payback(
         self, app, companion_client, seed_user,
     ):
-        """The add form's card refund that would delete the payback: R-CC132's refusal, not "out of date".
+        """A companion's card refund, posted from the rendered form, goes on the owner's card.
 
-        The add form names nothing, and a companion's page could not name the
-        line anyway, so the refusal is the payback's own sentence and says
-        nothing of a statement screen the companion does not have.
+        It was refused (R-CC132): the add form's card refund equal to the old
+        line's $60.00 would delete the payback whose payment a match names.
+        Since plan task plan#2930 the form's CC tick files the refund ON the
+        owner's card (ruling plan#2888), so it cannot reach the old line's
+        payback: the payback and its claimed line stand, and the refund is a
+        credit on the card.
         """
         with app.app_context():
             txn, card, payback, line = _card_payback_matched(
                 seed_user, companion_visible=True,
             )
+            visa = add_card(seed_user, "Visa")
+            db.session.commit()
             page = companion_client.get(
                 f"/companion/period/{txn.pay_period_id}",
             ).get_data(as_text=True)
             fields, offerable, url = _add_form(page, txn.id)
-            # The CC box carries no ``value``, so a browser sends "on" when it
-            # is ticked (the reader records the attribute as rendered: "").
-            assert ("is_credit", "") in offerable
+            assert ("is_credit", "true") in offerable
             posted = dict(fields)
             posted.update(
                 amount="60.00", direction="refund", description="Return",
-                is_credit="on",
+                is_credit="true",
             )
 
-            refused = companion_client.post(url, data=posted)
+            admitted = companion_client.post(url, data=posted)
 
-            assert refused.status_code == 400
-            body = html_lib.unescape(refused.get_data(as_text=True))
-            assert _PAYBACK_REFUSAL in body
-            assert "unexplained" not in body and "out of date" not in body
+            assert admitted.status_code == 200
             _committed()
-            assert [e.id for e in db.session.get(Transaction, txn.id).purchases] == [
-                card.id,
-            ]
+            refund = next(
+                e for e in db.session.get(Transaction, txn.id).purchases
+                if e.id != card.id
+            )
+            assert (refund.account_id, refund.amount, refund.is_credit) == (
+                visa.id, Decimal("-60.00"), False,
+            )
             assert db.session.get(Transaction, payback.id) is not None
             assert _claimed(seed_user, line)
 
@@ -679,10 +690,10 @@ class TestACompanionIsNeverShownTheOwnersLines:
             a_later_period(seed_user)
             db.session.commit()
             _purchase(seed_user, txn, "60.00", "Kroger", is_credit=True)
-            back = entry_service.create_entry(
+            back = plant_old_flagged_purchase(
                 txn.id, seed_user["user"].id, entry_service.EntryDetails(
                     figure=typed(Decimal("-20.00")), description="Return",
-                    purchased_on=_day(seed_user), is_credit=True,
+                    purchased_on=_day(seed_user),
                 ),
             )
             db.session.commit()

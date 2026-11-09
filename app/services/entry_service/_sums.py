@@ -35,13 +35,13 @@ Architecture:
 
 from decimal import Decimal
 
-from app.models.account import Account
 from app.models.transaction_entry import TransactionEntry
-from app.services.cash_flow_set import CashFlowSet, purchase_accounts
+from app.services.cash_flow_set import CashFlowSet
 from app.services.entry_service._removals import (
     PurchaseControls,
     purchase_controls,
 )
+from app.services.movement_account import PurchaseChoices, purchase_choices
 from app.services.pay_calendar import DerivedPeriod
 from app.services.transfer_legs import PlanItem
 from app.utils.entry_partition import partition_entries
@@ -289,9 +289,10 @@ def build_entry_lists_dict(
     same shape one step earlier.
 
     **The OWNER's cash-flow set arrives as an argument too** (plan step
-    ``credit_card:CC-5-2``), for the add-purchase form's account picker: each
-    row's choice is :func:`~app.services.cash_flow_set.purchase_accounts` over
-    it, the one spelling the purchase door tests against (ruling **R-CC37**).
+    ``credit_card:CC-5-2``), for the add-purchase form's account picker and,
+    since plan task plan#2930, its CC tick: each row's choices are
+    :func:`~app.services.movement_account.purchase_choices` over it, the one
+    spelling the purchase door tests against (ruling **R-CC37**).
     An argument and NOT a default, so that a caller which forgets it fails
     loudly rather than rendering a form with no picker on the initial grid
     while the HTMX refresh renders one -- the exact two-callers shape
@@ -348,7 +349,7 @@ def build_entry_lists_dict(
             txn.purchases,
             budgets[txn.id],
             periods[txn.pay_period_id],
-            purchase_accounts(cash_flow, txn),
+            purchase_choices(txn, cash_flow),
             controls[txn.id],
         )
         for txn in envelopes
@@ -359,7 +360,7 @@ def entry_list_view(
     entries: list[TransactionEntry],
     budget: Decimal,
     period: "DerivedPeriod",
-    accounts: tuple[Account, ...],
+    choices: PurchaseChoices,
     controls: PurchaseControls,
 ) -> dict:
     """Return the WHOLE derived context one envelope's entry list renders from.
@@ -431,15 +432,17 @@ def entry_list_view(
             rather than an ORM ``PayPeriod`` because a period's span is the
             derivation over the owner's paydays, not the column the table
             stores beside them.
-        accounts: The accounts a NEW purchase under this row may name, in
-            picker order with the row's own first --
-            :func:`~app.services.cash_flow_set.purchase_accounts` over the
-            OWNER's cash-flow set (plan step ``credit_card:CC-5-2``, ruling
-            **R-CC37**).  The purchase door admits exactly these, so the form
-            offers what the door takes.  A fourth argument the callers pair
-            the way they pair *period*: :func:`build_entry_lists_dict`
-            derives it per row from the one set it is handed, and
-            ``routes.entries._render_entry_list`` from the row's owner.
+        choices: What the forms offer a purchase under this row
+            (:func:`~app.services.movement_account.purchase_choices` over the
+            OWNER's cash-flow set): the accounts a NEW purchase may name, in
+            picker order with the row's own first (plan step
+            ``credit_card:CC-5-2``, ruling **R-CC37**; the purchase door admits
+            exactly these, so the form offers what the door takes), and the
+            cards the CC tick offers (plan task plan#2930).  A fourth argument
+            the callers pair the way they pair *period*:
+            :func:`build_entry_lists_dict` derives it per row from the one set
+            it is handed, and ``routes.entries._render_entry_list`` from the
+            row's owner.
         controls: The list's
             :class:`~app.services.entry_service._removals.PurchaseControls`
             (:func:`~app.services.entry_service._removals.purchase_controls`):
@@ -452,15 +455,21 @@ def entry_list_view(
             silent withdrawal ruling **R-CC80** forbids.
 
     Returns:
-        The seven keys the template consumes:
+        The eight keys the template consumes:
 
           - ``entries``: the list as given.
-          - ``accounts``: the tuple as given.  The template renders its
+          - ``accounts``: *choices*' accounts.  The template renders its
             ``<select name="account_id">`` only when it holds more than one
             (ruling **R-CC34**: with one choice there is no control, and the
             door's ``None`` arm files the purchase on the row's account) --
-            so every form of an owner with no card is byte-identical to
-            before the picker existed.
+            so an owner with no card is offered no "Paid from" picker (nor,
+            since plan task plan#2930, a CC tick: there is no card for it to
+            mean).
+          - ``tick_cards``: *choices*' cards.  The template draws the CC tick
+            only when there is one, and a "Which card" pick beside it only
+            when there are two or more (ruling plan#2888); the tick posts
+            ``is_credit`` (loaded as ``on_card``) and the pick
+            ``card_account_id``.
           - ``remaining`` (Decimal): the row's resolved budget minus the sum
             of all entries (debit + credit), via :func:`compute_remaining`.
           - ``out_of_period_ids`` (set[int]): entry IDs whose ``purchased_on``
@@ -492,7 +501,8 @@ def entry_list_view(
         },
         "owner_viewing": controls.owner_viewing,
         "entries": entries,
-        "accounts": accounts,
+        "accounts": choices.accounts,
+        "tick_cards": choices.cards,
         "remaining": compute_remaining(budget, entries),
         "out_of_period_ids": {
             e.id for e in entries if not period.covers(e.purchased_on)

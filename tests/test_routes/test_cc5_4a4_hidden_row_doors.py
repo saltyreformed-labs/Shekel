@@ -116,6 +116,7 @@ from app.services.transaction_service import (
 from app.utils.dates import display_today
 from app.utils.error_fragments import ROW_NO_LONGER_EXISTS_MSG
 from app.utils.hidden_row import HiddenRow
+from tests._legacy_credit import plant_old_flagged_purchase
 from tests._test_helpers import (
     a_deleted_occurrence,
     amount_basis_for,
@@ -1456,10 +1457,10 @@ class TestARefusedRemovalIsTheListsBanner:
                 amount="120.00", is_envelope=True,
             )
             envelope_id = envelope.id
-            purchase = entry_service.create_entry(
+            purchase = plant_old_flagged_purchase(
                 envelope_id, seed_user["user"].id, entry_service.EntryDetails(
                     figure=typed(Decimal("50.00")), description="Made-up store",
-                    purchased_on=display_today(), is_credit=True,
+                    purchased_on=display_today(),
                 ),
             )
             db.session.commit()
@@ -1520,10 +1521,10 @@ class TestARefusedRemovalIsTheListsBanner:
 
 def _card_purchase(envelope_id, user_id, amount, description):
     """Record a made-up card purchase (a negative *amount* is a refund) on *envelope_id*."""
-    return entry_service.create_entry(
+    return plant_old_flagged_purchase(
         envelope_id, user_id, entry_service.EntryDetails(
             figure=typed(Decimal(amount)), description=description,
-            purchased_on=display_today(), is_credit=True,
+            purchased_on=display_today(),
         ),
     )
 

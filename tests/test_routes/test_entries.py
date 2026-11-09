@@ -21,6 +21,7 @@ from app.services.auth_service import hash_password
 from app.services import account_service
 from app.utils.dates import display_today
 
+from tests._cards import add_card
 from tests._test_helpers import (
     an_asserted_day,
     an_entered_day,
@@ -405,8 +406,15 @@ class TestCreateEntry:
         self, app, auth_client, seed_user, seed_periods,
         seed_entry_template,
     ):
-        """POST with is_credit=on creates a credit entry."""
+        """POST with the CC tick files the purchase ON the owner's card.
+
+        Plan task plan#2930, ruling plan#2888: the form's tick (posted as
+        ``is_credit``, loaded as ``on_card``) files the purchase on the one
+        card, the add door writes no CC flag, and the list chips the card.
+        """
         with app.app_context():
+            card = add_card(seed_user, "Visa")
+            db.session.commit()
             txn = seed_entry_template["transaction"]
             resp = auth_client.post(
                 f"/transactions/{txn.id}/entries",
@@ -414,7 +422,7 @@ class TestCreateEntry:
                     "amount": "80.00",
                     "description": "Amazon",
                     "purchased_on": "2026-01-06",
-                    "is_credit": "on",
+                    "is_credit": "true",
                 },
             )
             assert resp.status_code == 200
@@ -422,8 +430,9 @@ class TestCreateEntry:
             entry = db.session.query(TransactionEntry).filter_by(
                 transaction_id=txn.id,
             ).one()
-            assert entry.is_credit is True
-            assert b"CC" in resp.data
+            assert entry.account_id == card.id
+            assert entry.is_credit is False
+            assert b'title="On Visa"' in resp.data
 
     def test_create_minimum_fields(
         self, app, auth_client, seed_user, seed_periods,
@@ -2308,7 +2317,12 @@ class TestTheAddFormNamesAnAccount:
     def test_the_cc_box_beside_the_card_is_refused(
         self, app, auth_client, seed_user, seed_periods, seed_entry_template,
     ):
-        """Ruling **R-CC35**: the box stays, and the door refuses it beside the card."""
+        """The CC tick beside "Paid from" naming the card is refused: two controls, one fact.
+
+        Ruling **R-CC35** kept the box; plan task plan#2930 made it the tick
+        that files the purchase on the card, so it beside an account other than
+        the row's is still refused, by the same sentence.
+        """
         with app.app_context():
             card = self._card(seed_user)
             db.session.commit()
@@ -2320,7 +2334,7 @@ class TestTheAddFormNamesAnAccount:
                     "description": "Kroger",
                     "purchased_on": "2026-01-05",
                     "account_id": str(card.id),
-                    "is_credit": "on",
+                    "is_credit": "true",
                 },
             )
             assert resp.status_code == 400

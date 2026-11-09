@@ -1,4 +1,6 @@
-"""The OLD Credit row, planted: status Credit and a live CC Payback next paycheck.
+"""The OLD Credit shapes, planted: a Credit row, and a purchase carrying the CC flag.
+
+**The row**: status Credit and a live CC Payback next paycheck.
 
 What ``credit_workflow.mark_as_credit`` wrote until plan task plan#2929, which
 makes a Credit press put the row on the card instead (rulings plan#2887,
@@ -15,14 +17,25 @@ took the state machine's edge into Credit away (finding plan#2133), so the
 seam refuses the move the deleted writer made.  The column and the ``status``
 expiry are what the seam did on that move: Projected to Credit settles
 nothing, so it wrote no day and no record.
+
+**The purchase**: a purchase on its row's account carrying ``is_credit``, the
+envelope's CC Payback next paycheck summing every such purchase.  What the add
+door wrote for a CC tick until plan task plan#2930, which files a ticked
+purchase ON the card instead (ruling plan#2888) and writes no flag.  Production
+holds 26 such lines on 17 envelopes (the 2026-11-04 dump), and they keep the
+flag and its payback arms until plan#1034's re-plan, so the tests of those arms
+plant the line here (:func:`plant_old_flagged_purchase`).
 """
 
 from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.services import posting_service
+from app.models.transaction_entry import TransactionEntry
+from app.services import entry_service, posting_service
+from app.services.settle_day import record_settle_day
 from app.services.cash_ledger import derived_amount_basis, resolve_transaction_amount
+from app.services.entry_credit_workflow import sync_entry_payback
 from app.services.credit_workflow import (
     create_cc_payback_transaction,
     get_active_payback,
@@ -75,3 +88,52 @@ def plant_old_credit(txn: Transaction) -> Transaction:
     payback = create_cc_payback_transaction(txn, next_period, category, amount)
     posting_service.sync_transaction_postings(txn)
     return payback
+
+
+def plant_old_flagged_purchase(
+    transaction_id: int, user_id: int, details: "entry_service.EntryDetails",
+) -> TransactionEntry:
+    """Record the purchase *details* says under the row, carrying the old CC flag.
+
+    The deleted writer's acts, in its order: the purchase written on its row's
+    account carrying the flag (the row's owner its owner, *user_id* its
+    author, the figure and its source, the posting day pair through its one
+    writer), flushed; the envelope's CC Payback synced (the sync the 26 lines
+    still have, which creates, re-prices or refuses it as it did); and the
+    family's postings reconciled ONCE, with the flag already set, so a posted
+    line books no checking leg (the review of plan#2930, L2: written through
+    today's door and flagged after, it booked one and then reversed it).  The
+    door's refusals are not asked: what is planted is a shape the old door
+    admitted.  A tick on the card is not this shape, so *details* names no
+    card and no other account.
+
+    Args:
+        transaction_id: The envelope's id.
+        user_id: The recording user (the owner, or a companion).
+        details: The purchase, its ``on_card`` unset.
+
+    Returns:
+        The purchase, flushed.
+    """
+    assert not details.on_card and details.account_id is None, (
+        "an old flagged line sat on its row's account, named by no tick"
+    )
+    txn = db.session.get(Transaction, transaction_id)
+    entry = TransactionEntry(
+        transaction_id=txn.id,
+        account_id=txn.account_id,
+        owner_id=txn.user_id,
+        user_id=user_id,
+        amount=details.figure.amount,
+        description=details.description,
+        purchased_on=details.purchased_on,
+        is_credit=True,
+        figure_source_id=ref_cache.movement_figure_source_id(details.figure.source),
+    )
+    record_settle_day(entry, details.settle_day)
+    db.session.add(entry)
+    db.session.flush()
+    db.session.expire(txn, ["entries"])
+    sync_entry_payback(txn.id, txn.user_id)
+    posting_service.sync_transaction_postings(txn)
+    return entry

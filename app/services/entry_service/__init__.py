@@ -26,7 +26,10 @@ shape was already there --
   screen renders from those sums.  It does not;
 * :mod:`._removals` -- what removing each purchase would withdraw from the
   statement matches, the purchase list's captions (plan step
-  ``credit_card:CC-5-4a-5``).  It reads and never writes.
+  ``credit_card:CC-5-4a-5``).  It reads and never writes;
+* :mod:`._details` -- what one new purchase says, and which account that
+  names (the CC tick's card since plan task plan#2930).  It reads and never
+  writes.
 
 -- and the arrow runs ONE way, ``_doors`` reading the reductions in
 :mod:`._sums` and ``_sums`` reading nothing back.  (It named
@@ -48,8 +51,8 @@ Architecture:
     database transaction boundary.
 """
 
+from ._details import EntryDetails
 from ._doors import (
-    EntryDetails,
     _resolve_owner_id,
     create_entry,
     delete_entry,

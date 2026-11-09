@@ -206,7 +206,7 @@ def purchase_accounts(
     narrower parenthetical; plan step CC-5-2): the row's own account, then
     every member of the ROW OWNER's cash-flow set that is not it, in the
     set's own order.  The purchase door
-    (``entry_service._doors._purchase_account_id``) admits exactly this
+    (``entry_service._details.purchase_account_id``) admits exactly this
     tuple's accounts and the add-purchase form renders its picker from it, so
     the door and the form cannot part: a swipe on a 401(k), an IRA, a house, a
     loan or a savings account is unwritable rather than merely unoffered,

@@ -583,26 +583,30 @@ class TestSyncEntryPaybackTOCTOUPrevention:
             )
             assert paybacks == 0
 
-    def test_concurrent_sync_yields_one_payback(self, app, db):
-        """Two concurrent credit-flagged entry POSTs leave exactly one payback.
+    def test_concurrent_ticked_adds_both_go_on_the_card(self, app, db):
+        """Two concurrent CC-ticked purchase POSTs both land on the card, and no payback is made.
 
-        Each thread inserts a credit entry on the same parent
-        envelope transaction.  Unserialised, the two
-        ``sync_entry_payback`` calls would both find no existing
-        payback and both insert one.  **This grades the OUTCOME, not a
-        lock**: two locks each serialise the pair -- the request's owner
-        lock (plan step ``balance:X-bn``; C-19's row lock until then) and
-        the parent row's ``FOR NO KEY UPDATE`` that the arrival trigger
-        takes on every purchase INSERT (:mod:`app.deleted_row_infrastructure`,
-        ruling **R-CC96**) -- so it passes with the owner lock removed
-        (measured 2026-09-29, 3 of 3 runs, while the Mark Credit race above
-        failed 3 of 3).  The owner lock's order on the purchase route is
-        graded by ``tests/test_services/test_cc5_4a4_row_lock_races/test_the_database_locks.py``'s
-        ``TestTheOwnersLockComesFirst::test_the_purchase_door``.  The
-        database ends up with one payback whose amount equals the sum of
-        both entries.
+        **The race this graded left the add route at plan task plan#2930.**
+        It was two credit-flagged purchase POSTs whose ``sync_entry_payback``
+        calls, unserialised, would each find no payback and insert one.  A
+        ticked purchase goes ON the owner's card now (ruling plan#2888) and the
+        add door syncs no payback, so the same two POSTs are graded for what
+        they do now: both 200, both purchases on the card at their figures,
+        and no payback.  The payback sync's race is reached only by an edit of
+        an old flagged line (plan#3142 and plan#1034's re-plan), and the
+        unique index above is still its backstop.  Two locks serialise the
+        pair -- the request's owner lock (plan step ``balance:X-bn``) and the
+        parent row's ``FOR NO KEY UPDATE`` the arrival trigger takes on every
+        purchase INSERT (:mod:`app.deleted_row_infrastructure`, ruling
+        **R-CC96**).
         """
         data = _create_concurrent_user(db.session)
+        card = add_card({
+            "scenario": data["scenario"],
+            "account": data["account"],
+            "categories": data["categories"],
+            "user": data["user"],
+        })
         # The threaded owner's envelope definition and its engine-generated
         # parent row; the owner dict has the shape the shared builder reads.
         template = make_expense_template(
@@ -612,6 +616,7 @@ class TestSyncEntryPaybackTOCTOUPrevention:
         txn = generate_row_of(template, data["periods"][0])
         db.session.commit()
         txn_id = txn.id
+        card_id = card.id
 
         # Single shared client (see ``_make_auth_client`` docstring).
         client = _make_auth_client(
@@ -644,12 +649,6 @@ class TestSyncEntryPaybackTOCTOUPrevention:
 
         assert err_a is None, f"Thread A errored: {err_a!r}"
         assert err_b is None, f"Thread B errored: {err_b!r}"
-        assert resp_a.status_code != 500, (
-            f"Thread A 500'd: {resp_a.data[:200]!r}"
-        )
-        assert resp_b.status_code != 500, (
-            f"Thread B 500'd: {resp_b.data[:200]!r}"
-        )
         assert resp_a.status_code == 200, (
             f"Thread A status {resp_a.status_code}: {resp_a.data[:200]!r}"
         )
@@ -658,34 +657,84 @@ class TestSyncEntryPaybackTOCTOUPrevention:
         )
 
         db.session.expire_all()
-        # Exactly one active payback should exist after both threads
-        # complete.
+        assert db.session.query(Transaction).filter_by(
+            credit_payback_for_id=txn_id,
+        ).count() == 0
+        entries = (
+            db.session.query(TransactionEntry)
+            .filter_by(transaction_id=txn_id)
+            .all()
+        )
+        assert sorted(
+            (entry.account_id, entry.amount, entry.is_credit) for entry in entries
+        ) == [
+            (card_id, Decimal("50.00"), False),
+            (card_id, Decimal("75.00"), False),
+        ]
+
+
+    def test_concurrent_edit_ticks_yield_one_payback(self, app, db):
+        """Two tabs ticking CC on two purchases of one envelope leave exactly one payback.
+
+        The payback sync's race since plan task plan#2930 (the task's review,
+        M2): the add door syncs no payback, and the edit door's tick still
+        flips the old CC flag until plan#3142, so two PATCHes each run the
+        sync's create arm.  The arrival trigger's parent-row lock fires on an
+        INSERT or a re-parent, not on this UPDATE, so the request's owner lock
+        (plan step ``balance:X-bn``) alone serialises the pair, and the unique
+        index is the backstop.  Graded as the OUTCOME: one payback summing
+        both, 50 + 75 = 125, and both purchases linked to it.
+        """
+        data = _create_concurrent_user(db.session)
+        template = make_expense_template(
+            db.session, data, amount="400.00", name="Concurrent Tracked",
+            category_key="Groceries", is_envelope=True,
+        )
+        txn = generate_row_of(template, data["periods"][0])
+        db.session.commit()
+        txn_id = txn.id
+        client = _make_auth_client(
+            app, "c19-concurrent@shekel.local", "c19concurrent",
+        )
+        today_iso = display_today().isoformat()
+        for amount in ("50.00", "75.00"):
+            assert client.post(
+                f"/transactions/{txn_id}/entries",
+                data={
+                    "amount": amount, "description": "Concurrent purchase",
+                    "purchased_on": today_iso,
+                },
+            ).status_code == 200
+        first, second = sorted(
+            entry.id for entry in db.session.query(TransactionEntry).filter_by(
+                transaction_id=txn_id,
+            )
+        )
+
+        def _tick(entry_id):
+            return client.patch(
+                f"/transactions/{txn_id}/entries/{entry_id}",
+                data={"is_credit": "true"},
+            )
+
+        resp_a, resp_b, err_a, err_b = _run_concurrent(
+            app, lambda: _tick(first), lambda: _tick(second),
+        )
+
+        assert err_a is None, f"Thread A errored: {err_a!r}"
+        assert err_b is None, f"Thread B errored: {err_b!r}"
+        assert (resp_a.status_code, resp_b.status_code) == (200, 200)
+        db.session.expire_all()
         active_paybacks = (
             db.session.query(Transaction)
             .filter_by(credit_payback_for_id=txn_id, is_deleted=False)
             .all()
         )
-        assert len(active_paybacks) == 1, (
-            f"Expected 1 active payback, got {len(active_paybacks)}: "
-            f"{[(p.id, p.estimated_amount) for p in active_paybacks]!r}"
-        )
-        # Both entries are flagged credit; the payback's amount must
-        # equal their sum (50 + 75 = 125).
-        assert active_paybacks[0].estimated_amount == Decimal("125.00"), (
-            f"Payback amount {active_paybacks[0].estimated_amount} does "
-            "not match sum of both credit entries (125.00)"
-        )
-        # And both entries must point at the single payback.
-        entries = (
-            db.session.query(TransactionEntry)
+        assert [p.estimated_amount for p in active_paybacks] == [Decimal("125.00")]
+        assert sorted(
+            entry.credit_payback_id for entry in db.session.query(TransactionEntry)
             .filter_by(transaction_id=txn_id, is_credit=True)
-            .all()
-        )
-        assert len(entries) == 2
-        assert all(
-            entry.credit_payback_id == active_paybacks[0].id
-            for entry in entries
-        ), "Both credit entries must link to the surviving payback."
+        ) == [active_paybacks[0].id, active_paybacks[0].id]
 
 
 # ---------------------------------------------------------------------------

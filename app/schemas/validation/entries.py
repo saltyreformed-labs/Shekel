@@ -23,7 +23,7 @@ class EntryCreateSchema(BaseSchema):
     """Validates POST data for creating a transaction entry.
 
     Requires amount (>= 0.01), description (1--200 chars), and
-    ``purchased_on``.  is_credit defaults to False.
+    ``purchased_on``.  ``on_card`` (the CC tick) defaults to False.
 
     **The ``>= 0.01`` bound is THIS FORM's rule and not the table's** (ruling
     **bank_import:R-II**).  ``transaction_entries`` requires only ``amount
@@ -59,6 +59,17 @@ class EntryCreateSchema(BaseSchema):
     and whether it may hold a purchase, is ``entry_service.create_entry``'s
     gate against the ROW's owner.  It is absent from :class:`EntryUpdateSchema`
     because the update door does not move a purchase between accounts.
+
+    **``on_card`` is the CC tick and ``card_account_id`` its pick** (plan task
+    plan#2930, ruling plan#2888): ticked, the purchase goes on the owner's
+    card, and the form draws the pick only for two or more cards.  The add
+    door wrote the CC flag from the tick until then; it writes none now
+    (``entry_service.EntryDetails``).  Which card, and whose, is the door's.
+    **The tick still posts as ``is_credit``** (``data_key``), so an add form
+    drawn before the deploy, whose box posts ``is_credit=on``, puts its
+    purchase on the card as the ruling says, rather than having the field
+    dropped as unknown and the purchase filed on checking unasked (the
+    review of plan#2930, M3: grid pages stay open across a deploy).
     """
 
     @pre_load
@@ -77,7 +88,8 @@ class EntryCreateSchema(BaseSchema):
         required=True, validate=validate.Length(min=1, max=200),
     )
     purchased_on = fields.Date(required=True)
-    is_credit = fields.Boolean(load_default=False)
+    on_card = fields.Boolean(load_default=False, data_key="is_credit")
+    card_account_id = RowId()
     account_id = RowId()
 
 

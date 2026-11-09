@@ -728,7 +728,7 @@ def _reject_settled_before_purchase(
 def _reject_flag_beside_another_account(
     is_credit: bool, account_id: int, row_account_id: int,
 ) -> None:
-    """Refuse the ``CC`` flag on a purchase whose account is not its row's.
+    """Refuse the CC tick, or the old ``CC`` flag, beside an account other than the row's.
 
     Plan step ``credit_card:CC-5-2``, ruling **R-CC15**: a card swipe in a
     checking envelope is a movement ON the card, named by the purchase's own

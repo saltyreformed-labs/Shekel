@@ -422,8 +422,13 @@ class TestRegenerateHelperNarrowCatch:
     log entry but the route handler still records them.  **It lives in
     ``app.services.salary_regeneration`` since plan step salary:S3-f-3**
     (ruling **R-SAL24**); the route package's ``_regenerate_salary_transactions``
-    is the adapter that opens the pass and flashes, and the patch below
-    targets the engine call where the catch now is.
+    is the adapter that hands it the door's pass and flashes what it kept
+    (it opened the pass itself until task plan#3106), and the patch below
+    targets the engine call inside the service's ``try``.  A lost version
+    race leaves the service by its own arm since task plan#3126, logged at
+    INFO and never as an error, for the route's conflict handling:
+    ``tests/test_services/test_salary_regeneration.py`` grades that arm, and
+    ``test_the_rails_lost_race`` the rail's race.
     """
 
     def test_helper_logs_sqlalchemy_error_with_profile_id(
@@ -431,9 +436,12 @@ class TestRegenerateHelperNarrowCatch:
     ):
         """Helper logs the profile-id when regenerate raises SQLAlchemyError.
 
-        Patches ``recurrence_engine.regenerate_for_template`` (the
-        only SQLAlchemy-emitting call inside the service's try block)
-        to raise a ``DataError``, then drives the service through
+        Patches ``recurrence_engine.regenerate_for_template`` (one of
+        the two calls inside the service's try block that reach the
+        database: ``GenerationSchedule.for_pass`` derives the pass's
+        calendar there when the door has not read it already, as this
+        POST, which carries no pay-period pair, has not) to raise a
+        ``DataError``, then drives the service through
         ``update_profile``.  The service's ``logger.exception`` must
         emit a record whose message includes the profile id, and the
         outer route's ``except SQLAlchemyError`` block then converts

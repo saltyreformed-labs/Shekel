@@ -71,6 +71,7 @@ with the write that caused it.
 import logging
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.exceptions import RecurrenceConflict
 from app.models.salary_profile import SalaryProfile
@@ -107,9 +108,15 @@ def regenerate_salary_transactions(
         a retained row is a silent no-op unless it is said out loud.
 
     Raises:
-        sqlalchemy.exc.SQLAlchemyError: Re-raised from the regeneration's
-            flush after the profile id is logged (C-46 / F-145), so the
-            route's own handler still reports it.
+        sqlalchemy.orm.exc.StaleDataError: Re-raised from the regeneration's
+            flush, logged at INFO with its message and no traceback: a row
+            this unit of work writes -- the write this walk follows, or a
+            paycheck row the walk updates in place -- lost a version race,
+            which the calling route reports in its own voice; it is not a
+            failure of the regeneration (task plan#3126).
+        sqlalchemy.exc.SQLAlchemyError: Any other, re-raised from the
+            regeneration's flush after the profile id is logged (C-46 /
+            F-145), so the route's own handler still reports it.
     """
     if not profile.template:
         return []
@@ -117,16 +124,19 @@ def regenerate_salary_transactions(
         return []
 
     # The id the failure log names is read BEFORE the walk.  A flush that
-    # fails inside it -- the write this walk follows losing a version race --
-    # rolls the session back and expires the profile, and reading
-    # ``profile.id`` in the handler below then raised ``PendingRollbackError``
-    # in place of the error it was logging, so the route reported its generic
-    # failure rather than the stale conflict.  A door whose pass is built
-    # after its write flushes in that pass's scenario query, before this walk,
-    # and never met it.  The ``/retirement`` rail's Save builds its pass
-    # first, and a lost race there answered its designed 500 instead of its
-    # 409 (measured 2026-11-09, task plan#3106); since that task the salary
-    # update and Fix doors hand over a pass built before their writes too.
+    # fails inside it rolls the session back and expires the profile, and
+    # reading ``profile.id`` in the handler below raised
+    # ``PendingRollbackError`` in place of the error it was logging.  A door
+    # whose pass is built after its write flushes in that pass's scenario
+    # query, before this walk, so its write's own failures never reach here;
+    # the ``/retirement`` rail's Save builds its pass first, and since task
+    # plan#3106 the salary update and Fix doors hand over a pass built before
+    # their writes too.  A lost version race was how it showed: the route
+    # reported its generic failure rather than its conflict (measured
+    # 2026-11-09, task plan#3106).  A race leaves by the ``StaleDataError``
+    # arm since task plan#3126, which logs this id too; any other flush
+    # failure reaches the handler below, which would meet the expired profile
+    # if it read the id itself.
     profile_id = profile.id
 
     # The regeneration runs from the PASS's pinned day, read once (ledger row
@@ -145,6 +155,23 @@ def regenerate_salary_transactions(
         # own records, which the CALLER must say out loud (plan step R10-a,
         # adversarial review): it is returned, never dropped.
         return list(e.retained)
+    except StaleDataError as lost:
+        # A lost version race is not a failure of the regeneration: another
+        # save moved a row this unit of work writes -- the write this walk
+        # follows, or a paycheck row the walk updates in place -- and the
+        # calling route reports it in its own voice, a caller with a stale
+        # arm as its designed conflict and one without as its generic
+        # failure.  Caught by the arm below, as the SQLAlchemyError it also
+        # is, every race lost inside the walk was an ERROR with a traceback
+        # beside the route's report (task plan#3126).  It is logged here at
+        # INFO, the level a conflict is logged at, because only its message
+        # says WHICH row lost: a route's conflict line names the door's row,
+        # so a paycheck row's race would leave no record of the table.
+        logger.info(
+            "Lost a version race regenerating salary transactions for profile %d: %s",
+            profile_id, lost,
+        )
+        raise
     except SQLAlchemyError:
         # Narrow catch (C-46 / F-145): logging hook that re-raises.
         # SQLAlchemy errors from the regenerate flush get the

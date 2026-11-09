@@ -11,27 +11,12 @@ and nothing moves.  The popover's caption that names the line is plan#3056's.
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 from app import ref_cache
-from app.enums import SettledDayBasisEnum, StatusEnum
+from app.enums import StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.services import transaction_service
-from app.services.settle_day import SettleDay
-from app.services.statement_match import accept_match, matched_subjects
-from tests._cards import add_card
-
-# Pylint: ``shekel-private-module-import`` -- the one way a test stages a bank
-# line, a scope and an accepted act as the app does (``test_statement_reconcile``'s).
-# pylint: disable=shekel-private-module-import
-from tests.test_services.test_statement_match._builders import (
-    a_bank_line,
-    a_scope,
-    a_submission,
-    a_transaction,
-    an_import,
-)
+from app.services.statement_match import matched_subjects
+from tests._matched_payment import matched_and_reverted
 
 
 def test_a_credit_press_on_a_matched_reverted_row_is_refused(app, auth_client, seed_user):
@@ -41,28 +26,8 @@ def test_a_credit_press_on_a_matched_reverted_row_is_refused(app, auth_client, s
     to the card, and the line was unexplained again with no word on the page.
     """
     with app.app_context():
-        add_card(seed_user)
-        bank_day = seed_user["bootstrap_period"].start_date + timedelta(days=1)
-        txn = a_transaction(seed_user, name="Hotel", amount="120.00")
-        db.session.commit()
-        transaction_service.settle_transaction(
-            txn, settle_day=SettleDay(day=bank_day, basis=SettledDayBasisEnum.ENTERED),
-        )
-        db.session.commit()
-        line = a_bank_line(
-            seed_user, an_import(seed_user), amount="-120.00",
-            posted_on=bank_day, description="HOTEL",
-        )
-        db.session.commit()
-        scope = a_scope(seed_user)
-        accept_match(a_submission(scope, lines=[line], transactions=[txn]), scope)
-        db.session.commit()
-        transaction_service.apply_requested_status(
-            txn, ref_cache.status_id(StatusEnum.PROJECTED),
-        )
-        db.session.commit()
+        txn, line, _visa = matched_and_reverted(seed_user)
         checking_id = seed_user["account"].id
-        assert matched_subjects(checking_id).lines == {line.id}, "precondition: matched"
 
         response = auth_client.post(f"/transactions/{txn.id}/mark-credit")
 

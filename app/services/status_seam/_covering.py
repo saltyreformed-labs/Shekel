@@ -169,11 +169,18 @@ state since plan step ``balance:X-bi-6-3``); ``scripts/integrity_check.py``'s
 DC-10 grades the state a caller of the bare seam would leave.  Money is
 ``Decimal`` throughout, read off the
 :class:`~app.services.status_seam._record.Settlement` the seam was handed.
+
+**One READ lives here too** (plan task plan#3114):
+:func:`pending_payment_withdrawals`, what the re-point and the withdrawal
+below would take out of the matches, for the screens that say so before the
+press.  It sits beside the two writes it twins rather than in
+:mod:`._covering_reads`, whose readers ask no session.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Hashable
 from functools import partial
 from typing import Optional
 
@@ -623,6 +630,69 @@ def _withdraw(row: Transaction, press: Press | None) -> None:
         press=press,
     )
     _record_moved(row)
+
+
+def pending_payment_withdrawals(
+    rows: dict[Hashable, Transaction],
+) -> dict[Hashable, match_withdrawal.MatchWithdrawal | None]:
+    """Return what taking each row's payment out of its matches would withdraw, in ONE read.
+
+    **The read twin of the two writes above**: the re-point
+    (:func:`_re_point` calls ``match_withdrawal.withdraw_for_moved_movement``)
+    and the removal a ``$0.00`` or ``purchases`` record makes
+    (:func:`_withdraw` calls ``movement_removal.remove_movements``), so a
+    caption that names the lines and the act under it come from one
+    derivation, the shape the delete dialog has over ``preview_deletion``.
+    One read serves both, because an act names the MOVEMENT and neither
+    write keeps it named.  Each row is answered ALONE, as its own press
+    would withdraw (``match_withdrawal.pending_for_each``), and the matches
+    of every row are read together, so a page of cells asks once
+    (plan task plan#3114: the grid's C key and palette stamps,
+    ``transaction_service.credit_opens_the_popover_by_key``).  It was the
+    full-edit popover's private ``_payment_withdrawal`` until that task: a
+    route-private function could not be its one home.
+
+    Args:
+        rows: ``{key: row}``, each row with ``entries`` loaded or loadable,
+            under whatever key the caller reads its answer back by.
+
+    Returns:
+        ``{key: MatchWithdrawal}``, one per key given; ``None`` for a row
+        holding no payment, which asks nothing of the session.
+
+    Raises:
+        ValueError: From :func:`~._record.covering_movement_of`, on a row
+            holding two covering movements.
+    """
+    held = {}
+    for key, row in rows.items():
+        movement = covering_movement_of(row)
+        if movement is not None:
+            held[key] = [movement]
+    withdrawals = match_withdrawal.pending_for_each(held) if held else {}
+    return {key: withdrawals.get(key) for key in rows}
+
+
+def pending_payment_withdrawal(
+    row: Transaction,
+) -> match_withdrawal.MatchWithdrawal | None:
+    """Return what taking *row*'s payment out of its matches would withdraw, or ``None``.
+
+    :func:`pending_payment_withdrawals` for one row: the full-edit popover's
+    read, for its captions and the presses under them.
+
+    Args:
+        row: The row, with ``entries`` loaded or loadable.
+
+    Returns:
+        A :class:`~app.services.match_withdrawal.MatchWithdrawal`, or
+        ``None`` when the row holds no payment.
+
+    Raises:
+        ValueError: From :func:`~._record.covering_movement_of`, on a row
+            holding two covering movements.
+    """
+    return pending_payment_withdrawals({row.id: row})[row.id]
 
 
 def _follow_assertion(row: Transaction) -> None:

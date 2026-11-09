@@ -22,7 +22,6 @@ from app.services import (
     category_service,
     credit_workflow,
     definition_delete,
-    match_withdrawal,
     pay_period_service,
     status_seam,
     transaction_service,
@@ -211,7 +210,7 @@ def render_full_edit(txn, *, page_refusal):
     owner_set = resolve_owner_cash_flow_set(txn.user_id)
     tender_accounts, tender_account_id = _tender_picker(txn, owner_set)
     credit_cards = transaction_service.credit_cards(txn, owner_set)
-    payment_withdraws = _payment_withdrawal(txn)
+    payment_withdraws = status_seam.pending_payment_withdrawal(txn)
     return render_template(
         "grid/_transaction_full_edit.html",
         card_id=full_edit_dom_id(txn.id),
@@ -228,10 +227,10 @@ def render_full_edit(txn, *, page_refusal):
         # **R-CC56**).  Every accepted match names the row's payment, and
         # none of the four keeps it named, so all four free the same lines
         # -- said BEFORE the press, the disclosure a delete makes through its
-        # dialog, read through the same twin
-        # (``match_withdrawal.pending_for_movements``) the doors' own write
-        # uses.  ``None`` for a row holding no payment; a withdrawal freeing
-        # nothing renders nothing.
+        # dialog, read through the seam's own twin of those writes
+        # (``status_seam.pending_payment_withdrawal``, which the grid's cell
+        # asks too, plan task plan#3114).  ``None`` for a row holding no
+        # payment; a withdrawal freeing nothing renders nothing.
         payment_withdraws=payment_withdraws,
         # **What leaving Credit would WITHDRAW** -- Undo CC, or Status set
         # back to Projected, deletes the row's CC payback (plan step
@@ -269,16 +268,19 @@ def render_full_edit(txn, *, page_refusal):
         # inside one card.  ``PayPeriod.label`` is deleted with this step, so
         # the wrong source is unreachable rather than merely unused.
         period=calendar.require_period(FiledRow.for_row(txn)),
-        # **What the Credit press shows** (plan task plan#3056): the day it
-        # puts the row on the card, in its "Money moved on" box for the owner
-        # to correct (``credit_day``, reading this render's calendar); the
-        # cards it could mean, for the card it names, the picker it offers
-        # with two or more, or the ask to add one with none
+        # **What the Credit press shows** (plan task plan#3056): whether
+        # Credit is offered at all (``credit_offered``, the one predicate the
+        # cell's C key and palette stamps ask too, plan task plan#3114); the
+        # day it puts the row on the card, in its "Money moved on" box for
+        # the owner to correct (``credit_day``, reading this render's
+        # calendar); the cards it could mean, for the card it names, the
+        # picker it offers with two or more, or the ask to add one with none
         # (``credit_cards``, the producer the press itself asks); and whether
         # it frees a bank line a match names (``credit_frees_a_line``, the
         # producer the C key asks too, over the ``payment_withdraws`` read
         # above), so its caption names those lines and the press posts them
         # (ruling **R-CC127**).
+        credit_offered=transaction_service.credit_offered(txn),
         credit_on=transaction_service.credit_day(txn, calendar),
         credit_cards=credit_cards,
         credit_frees_a_line=transaction_service.credit_frees_a_line(
@@ -417,31 +419,6 @@ def redraw_full_edit(txn_id, facts):
     return RedrawnCard(
         full_edit_dom_id(txn_id), render_full_edit(txn, page_refusal=facts),
     )
-
-
-def _payment_withdrawal(txn):
-    """Return what taking *txn*'s payment out of its matches would withdraw, or ``None``.
-
-    The read twin of the seam's two writes on the payment -- the re-point
-    (``status_seam._covering._re_point`` calls
-    ``match_withdrawal.withdraw_for_moved_movement``) and the removal a
-    ``$0.00`` or ``purchases`` record makes (``_covering._withdraw`` calls
-    ``movement_removal.remove_movements``) -- so each caption on the card and
-    the act under it come from one derivation, the shape the delete dialog
-    has over ``preview_deletion``.  One read serves all three, because an act
-    names the MOVEMENT and none of the three keeps it named.
-
-    Args:
-        txn: The row the popover is drawn for, with ``entries`` loaded.
-
-    Returns:
-        A :class:`~app.services.match_withdrawal.MatchWithdrawal`, or
-        ``None`` when the row holds no payment.
-    """
-    movement = status_seam.covering_movement_of(txn)
-    if movement is None:
-        return None
-    return match_withdrawal.pending_for_movements([movement])
 
 
 def _tender_picker(txn, owner_set):

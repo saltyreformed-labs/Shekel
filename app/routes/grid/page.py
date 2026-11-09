@@ -37,6 +37,8 @@ from app.services.cash_flow_set import CashFlowSet
 from app.services.entry_service import build_entry_lists_dict, build_entry_sums_dict
 from app.services.grid_view_service import RowKey
 from app.services.statement_match import awaiting_review_count
+from app.services.transaction_service import credit_opens_the_popover_by_key
+from app.services.transfer_legs import PlanItem
 from app.services.pay_calendar import DerivedPeriod, PayCadence, PeriodWindow
 from app.utils.auth_helpers import require_owner
 from app.utils.dates import display_today
@@ -413,7 +415,7 @@ def _build_grid_row_data(transactions, periods, show_all, all_categories):
     # lookup total: every key it needs is a period being drawn, and a row it
     # cannot cover would raise rather than caption silently.
     due_captions = grid_view_service.due_captions_by_key(
-        [txn for cell in matched_by_row_period.values() for txn in cell],
+        _drawn_items(matched_by_row_period),
         {period.period_id: period.start_date for period in periods},
     )
 
@@ -423,6 +425,26 @@ def _build_grid_row_data(transactions, periods, show_all, all_categories):
         matched_by_row_period=matched_by_row_period,
         due_captions=due_captions,
     )
+
+
+def _drawn_items(
+    matched_by_row_period: dict[tuple[int, int | None, str, int], list[PlanItem]],
+) -> list[PlanItem]:
+    """Return every item the page draws a cell for: the match index's values.
+
+    The row set the cell's own maps are built over -- the due captions and
+    what the C key does (plan task plan#3114) -- rather than every loaded
+    item, which carries rows outside the visible window: a map built over
+    the cells drawn covers each one the template indexes, and asks nothing of
+    a row it never draws.
+
+    Args:
+        matched_by_row_period: ``_GridRowData.matched_by_row_period``.
+
+    Returns:
+        The items, rows and transfer sides, in the index's order.
+    """
+    return [item for cell in matched_by_row_period.values() for item in cell]
 
 
 class _GridEntryMaps(NamedTuple):
@@ -906,6 +928,14 @@ def index():
         entry_lists=entry_maps.entry_lists,
         matched_by_row_period=row_data.matched_by_row_period,
         due_captions=row_data.due_captions,
+        # What the C key and the palette's Credit do on each cell drawn (plan
+        # task plan#3114, ruling plan#3112): press at once, or open the
+        # popover.  The producer the cell fragment asks too
+        # (``_render_helpers.render_transaction_cell``), over the OWNER's set
+        # with no override, the one ``credit_cards`` takes.
+        credit_opens_popover=credit_opens_the_popover_by_key(
+            _drawn_items(row_data.matched_by_row_period), ctx.owner_cash_flow,
+        ),
         **plan_view,
     )
 

@@ -717,6 +717,10 @@ class TestTheChipMarksARowOnAnotherAccount:
                 template.render(
                     txn=txn, budgets={1: Decimal("1200.00")},
                     settled={1: None}, retained={1: None}, due_captions={1: None},
+                    # Read before the chip, at the amount's span (plan task
+                    # plan#3114); ``None`` (no Credit offered) is a value, so
+                    # the render reaches the key under test.
+                    credit_opens_popover={1: None},
                 )
 
 

@@ -281,4 +281,10 @@ class TestTheCaptionMapIsREQUIRED:
                     # ``test_grid.test_accounts_and_cards``'s
                     # ``TestTheChipMarksARowOnAnotherAccount``.
                     account=None,
+                    # What the C key does is read before the caption too, at
+                    # the amount's span (plan task plan#3114); ``None`` (no
+                    # Credit offered) is a legitimate value, so the render
+                    # reaches the map under test.  Its own absence is graded
+                    # by ``test_c_and_the_palette_press_or_open``.
+                    credit_opens_popover={1: None},
                 )

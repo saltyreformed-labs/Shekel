@@ -24,7 +24,8 @@
    Transaction row or, since plan step balance:X-bi-6-1 (ruling R-BAL87), a
    TransferLeg -- one side of a transfer read off its parent rather than a
    shadow row.  Every map the macros index (`budgets`, `settled`, `retained`,
-   `due_captions`, `entry_sums`, `entry_lists`) is keyed by `cell_key(item)`
+   `due_captions`, `credit_opens_popover`, `entry_sums`, `entry_lists`) is
+   keyed by `cell_key(item)`
    -- a row's `id`, a leg's `(transfer id, account id)` -- and every DOM id
    by `cell_dom_id` / `card_dom_id`, so the identity of each shape is
    spelled in `grid_view_service` and nowhere in here.  The `transfer_leg`
@@ -192,7 +193,7 @@
 {%- endif %}
 {%- endmacro %}
 
-{% macro render_row_cells(rk, periods, matched_by_row_period, entry_sums, budgets, settled, retained, due_captions, txn_type_id, account, today, current_period_id=none, band=none) -%}
+{% macro render_row_cells(rk, periods, matched_by_row_period, entry_sums, budgets, settled, retained, due_captions, credit_opens_popover, txn_type_id, account, today, current_period_id=none, band=none) -%}
 {#- Desktop grid row.  Emits one <tr> containing the sticky row
     label (<th scope="row">) followed by one <td class="text-end
     cell"> per visible period.  Group-header rows are emitted by
@@ -215,6 +216,11 @@
     partial INDEXES.  That partial decided it itself, off
     `t.pay_period.start_date`, until pay-calendar plan step C4-a-1 --
     a database query issued from inside the render.
+
+    `credit_opens_popover` is a fourth, threaded the same way (plan task
+    plan#3114): `{cell_key(item): none, true or false}` from
+    `transaction_service.credit_opens_the_popover_by_key`, which the cell
+    partial INDEXES for what the C key and the palette's Credit do.
 
     `today` is accepted for caller-shape parity with the grid
     route's context; it is intentionally unread here.  The

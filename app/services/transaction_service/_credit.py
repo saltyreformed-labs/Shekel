@@ -32,21 +32,29 @@ Paid leaves checking and a later Credit puts it back on the card.
 popover shows the day :func:`credit_day` gives and lets the owner type the real
 one, and asks which card when the owner has two or more; it reads
 :func:`credit_cards` for the choice and :func:`credit_frees_a_line` for the
-caption naming the bank lines the press frees, the producers the C key and the
-palette ask too (plan task plan#3114).
+caption naming the bank lines the press frees.
+
+**The C key and the palette open the popover where the press needs what only it asks**
+(plan task plan#3114, ruling plan#3112).  They post no card, no day and no
+line, so with no card, two or more, or a bank line the press would free, they
+open the popover; on every other row they press at once
+(:func:`credit_opens_the_popover_by_key`, over the two producers above).
+Which rows offer Credit at all is :func:`credit_offered`, read by the popover
+and the cell alike.
 
 **Old Credit rows keep the old path** until plan#1034's re-plan: a row in
 status Credit holds its live CC Payback, and Undo CC on it still deletes that
 payback (``credit_workflow.unmark_credit``).  A press on one changes nothing.
 
-Architecture: no Flask imports; reads the row, the owner's cash-flow set and
-the pay calendar; mutates through the settle verb and the status door only;
-does not commit.
+Architecture: no Flask imports; reads the row, the owner's cash-flow set, the
+pay calendar and what a moved payment's matches would withdraw; mutates
+through the settle verb and the status door only; does not commit.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Hashable, Iterable
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -66,12 +74,14 @@ from app.services.pay_calendar import FiledRow, PayCalendar, calendar_for
 from app.services.settle_day import SettleDay, recorded_settle_day
 from app.services.status_seam import (
     covering_movement_of,
+    pending_payment_withdrawals,
     settle_day_for_status,
     settled_on_a_card,
 )
 from app.services.transaction_service._door import apply_requested_status
 from app.services.transaction_service._settle import settle_transaction
 from app.services.transaction_service._status_rules import settled_status_id
+from app.services.transfer_legs import PlanItem, TransferLeg, cell_key
 from app.utils.balance_predicates import is_credit, is_projected
 from app.utils.dates import display_today
 from app.utils.log_events import BUSINESS, EVT_CREDIT_MARKED, log_event
@@ -387,10 +397,9 @@ def credit_frees_a_line(
         txn: The row, with ``entries`` loaded or loadable.
         cards: What :func:`credit_cards` answered for it.
         payment_withdraws: What taking the row's kept payment out of its
-            matches would withdraw
-            (``match_withdrawal.pending_for_movements`` over its covering
-            movement), or ``None`` when it keeps none.  Read by the caller,
-            which also draws those lines, so one read serves both.
+            matches would withdraw (``status_seam.pending_payment_withdrawal``),
+            or ``None`` when it keeps none.  Read by the caller, which may
+            also draw those lines (the popover), so one read serves both.
 
     Returns:
         ``True`` when the press could move the payment and that frees a line.
@@ -400,3 +409,96 @@ def credit_frees_a_line(
         and payment_withdraws.frees_a_line
         and credit_moves_payment(txn, cards)
     )
+
+
+def credit_offered(txn: Transaction) -> bool:
+    """Return whether Credit is offered on *txn*: the popover's button, the C key, the palette.
+
+    **The one predicate for "can this row be put on the card from the grid"**
+    (plan task plan#3114): a Projected expense whose purchases are not
+    tracked.  An income row buys nothing, a row tracking its purchases names
+    each purchase's account instead (Credit is per purchase there), and a row
+    that is not Projected is settled, cancelled or an old Credit row.  Keyed
+    on the STORED status, so a row already on the card (stored Paid, drawn
+    Credit, plan task plan#3054) offers it no more than an old Credit row
+    does.  :func:`mark_as_credit` refuses an income row, a row tracking its
+    purchases and a row that is not Projected in words at the door, each with
+    its own reason; a press on a row already on the card, or on an old Credit
+    row holding its payback, it lets through as changing nothing.  The
+    popover's template and the cell's each spelled this predicate until this
+    task; both now draw the route's answer.
+
+    Args:
+        txn: The row.
+
+    Returns:
+        ``True`` when Credit is offered.
+    """
+    return txn.is_expense and is_projected(txn) and not txn.tracks_purchases
+
+
+def credit_opens_the_popover_by_key(
+    items: Iterable[PlanItem], cash_flow: CashFlowSet | None,
+) -> dict[Hashable, bool | None]:
+    """Return what the C key and the palette's Credit do on each of *items*, by cell key.
+
+    **The one answer to "press at once, or open the popover"** (plan task
+    plan#3114, ruling plan#3112, Josh 2026-11-09: "Open the popover").  A
+    press from the C key or the palette posts no card, no day and no bank
+    line, so the door reads the row's own day and its one card
+    (:func:`_the_card`), and a press naming no line may free none (ruling
+    **R-CC127**).  They open the popover where the press needs what only the
+    popover asks: with no card it asks for one to be added, with two or more
+    it asks which (:func:`credit_cards`), and where Credit would unmatch a
+    bank line it names the line beside Credit first
+    (:func:`credit_frees_a_line`).  On every other row they press at once,
+    as the ruling says, a $0.00 row among them: the door refuses that press
+    in words (:func:`mark_as_credit`), the sentence the popover prints beside
+    its disabled Credit.
+
+    **Both surfaces that draw the grid's cell publish this map** (the grid
+    page and ``routes/_render_helpers.render_transaction_cell``), so a cell
+    stamps the same answer on the page and in the fragment a click swaps in;
+    the cell INDEXES it, so a surface that forgets to publish it raises rather
+    than stamping no Credit (the rule ``due_captions`` states).
+
+    **The matches are read once for the page**: only a row with one card
+    whose press would move the payment it keeps onto that card
+    (:func:`credit_moves_payment`: Paid, set back to Projected, its payment
+    still on another account) needs them, and those rows are asked together
+    (``status_seam.pending_payment_withdrawals``).  A page with none reads no
+    match.
+
+    Args:
+        items: The items being drawn, rows and transfer sides, a row's
+            ``entries`` loaded or loadable.
+        cash_flow: The row OWNER's cash-flow set with no override, as
+            :func:`credit_cards` takes it.
+
+    Returns:
+        One entry per item, keyed by ``transfer_legs.cell_key``: ``None``
+        where Credit is not offered (a transfer side, whose status machine has
+        no Credit, or :func:`credit_offered` false); ``True`` where the C key
+        and the palette open the popover; ``False`` where they put the row on
+        the card at once.
+    """
+    answers: dict[Hashable, bool | None] = {}
+    moving: dict[Hashable, tuple[Transaction, tuple[Account, ...]]] = {}
+    for item in items:
+        key = cell_key(item)
+        if isinstance(item, TransferLeg) or not credit_offered(item):
+            answers[key] = None
+            continue
+        cards = credit_cards(item, cash_flow)
+        if len(cards) != 1:
+            answers[key] = True
+        elif credit_moves_payment(item, cards):
+            moving[key] = (item, cards)
+        else:
+            answers[key] = False
+    withdrawals = pending_payment_withdrawals(
+        {key: row for key, (row, _cards) in moving.items()},
+    )
+    for key, (row, cards) in moving.items():
+        answers[key] = credit_frees_a_line(row, cards, withdrawals[key])
+    return answers

@@ -144,7 +144,9 @@
 {% set off_card_frees = withdraws_a_line and off_card_caption %}
 {#- **What Credit says before the press** (plan task plan#3056).  Credit is
     offered on a Projected expense whose purchases are not tracked (each
-    purchase names its own account, so Credit is per purchase there).
+    purchase names its own account, so Credit is per purchase there):
+    `credit_offered`, the route's answer (`transaction_service.credit_offered`,
+    which the cell's C key stamp reads too, plan task plan#3114).
     `credit_cards` are the cards it could mean (`transaction_service.
     credit_cards`, the producer the press asks when nothing is named): with
     none the card asks the owner to add one, one is named, and two or more
@@ -155,8 +157,6 @@
     (`transaction_service.credit_frees_a_line`, the producer the C key asks
     too), so the caption names those lines and the press posts them (ruling
     R-CC127). -#}
-{% set credit_offered = txn.is_expense and txn.status_id == STATUS_PROJECTED
-   and not txn.tracks_purchases %}
 {% set credit_presses = credit_offered and credit_cards and not paid_records_nothing %}
 {% set credit_frees = credit_presses and credit_frees_a_line %}
 {#- What the card NAMED, the one value every press on it posts back as
@@ -546,7 +546,8 @@
             the match and its bank line is unexplained again -- said here,
             beside the control, before the pick, as the delete dialog says it
             before the press.  `payment_withdraws` is the route's read of the
-            same derivation the door acts on (`_payment_withdrawal`); it renders
+            same derivation the door acts on
+            (`status_seam.pending_payment_withdrawal`); it renders
             nothing when no match names the payment -- and nothing for a GROUP
             act the pick only shrinks (the register flags it), the silence the
             delete dialog keeps over the same case. -#}

@@ -12,31 +12,20 @@ palette's -- reads the row's own day and its one card.
 closing on the 5th and due on the 27th.  Each figure is the row's own.
 """
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import SettledDayBasisEnum, StatusEnum
+from app.enums import StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import status_seam, transaction_service
-from app.services.settle_day import SettleDay
-from app.services.statement_match import accept_match, matched_subjects
+from app.services.statement_match import matched_subjects
 from app.utils.dates import display_today
 from tests._cards import add_card
+from tests._matched_payment import matched_and_reverted
 from tests._test_helpers import add_txn
 from tests.test_services.test_card_payment_price import _card
-
-# Pylint: ``shekel-private-module-import`` -- the one way a test stages a bank
-# line, a scope and an accepted act as the app does (``test_statement_reconcile``'s).
-# pylint: disable=shekel-private-module-import
-from tests.test_services.test_statement_match._builders import (
-    a_bank_line,
-    a_scope,
-    a_submission,
-    a_transaction,
-    an_import,
-)
 
 _EIGHT_HUNDRED = Decimal("800.00")
 _JAN_3 = date(2026, 1, 3)
@@ -280,38 +269,6 @@ class TestThePopoverSaysItsDayAndCard:
 class TestAMatchedLineIsNamed:
     """A reverted row's kept payment, matched on checking: Credit names the line and frees it."""
 
-    @staticmethod
-    def _matched_and_reverted(seed_user, *, card=True):
-        """$120 Hotel Paid on checking, matched to its bank line, set back to Projected.
-
-        Returns:
-            The row, its bank line, and the Visa (``None`` without *card*).
-        """
-        visa = add_card(seed_user) if card else None
-        bank_day = seed_user["bootstrap_period"].start_date + timedelta(days=1)
-        txn = a_transaction(seed_user, name="Hotel", amount="120.00")
-        db.session.commit()
-        transaction_service.settle_transaction(
-            txn, settle_day=SettleDay(day=bank_day, basis=SettledDayBasisEnum.ENTERED),
-        )
-        db.session.commit()
-        line = a_bank_line(
-            seed_user, an_import(seed_user), amount="-120.00",
-            posted_on=bank_day, description="HOTEL",
-        )
-        db.session.commit()
-        scope = a_scope(seed_user)
-        accept_match(a_submission(scope, lines=[line], transactions=[txn]), scope)
-        db.session.commit()
-        transaction_service.apply_requested_status(
-            txn, ref_cache.status_id(StatusEnum.PROJECTED),
-        )
-        db.session.commit()
-        assert matched_subjects(seed_user["account"].id).lines == {line.id}, (
-            "precondition: matched on checking"
-        )
-        return txn, line, visa
-
     def test_the_caption_names_the_line_and_the_press_frees_it(
         self, auth_client, seed_user,
     ):
@@ -321,7 +278,7 @@ class TestAMatchedLineIsNamed:
         the day in its box.  200, the $120.00 on the Visa from that day, and
         the line no longer matched on checking.
         """
-        txn, line, visa = self._matched_and_reverted(seed_user)
+        txn, line, visa = matched_and_reverted(seed_user)
 
         html = _popover(auth_client, txn.id)
 
@@ -353,7 +310,7 @@ class TestAMatchedLineIsNamed:
         lines the card's other captions name (a $0.00 estimate saved as Paid
         frees this one) are theirs, unchanged.
         """
-        txn, _line, _visa = self._matched_and_reverted(seed_user, card=False)
+        txn, _line, _visa = matched_and_reverted(seed_user, card=False)
 
         html = _popover(auth_client, txn.id)
 

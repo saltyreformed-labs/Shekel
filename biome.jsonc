@@ -79,7 +79,7 @@
       "bootstrap",
       "activePopover",
       "closeFullEdit",
-      "markTxnCredit"
+      "creditFromShortcut"
     ]
   }
 }

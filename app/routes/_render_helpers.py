@@ -41,6 +41,7 @@ from app.services.row_valuation import settled_figure
 from app.services.settle_day import SettleDay, is_evidence, recorded_settle_day
 from app.services.grid_view_service import due_captions_by_key
 from app.services.transaction_service import (
+    credit_opens_the_popover_by_key,
     retained_amount,
     retained_amounts_by_key,
 )
@@ -796,16 +797,23 @@ def render_transaction_cell(item: PlanItem, **extra: Any) -> str:
     ``account_chips`` macro decides off ``t.account_id`` and each of
     ``t.entries``' against the ``account`` published here, the way the grid
     page's row macro publishes its own.  Resolved through
-    :func:`fragment_balance_line`, the same call the transfer cell's arrow
-    reads, and PUBLISHED even when it resolves ``None``: the partial reads it
-    with ``is not none``, so a surface that forgets the key raises where a
-    ``None`` draws no chip.  The chips' labels cost this fragment nothing
-    beyond what it already paid: ``Transaction.account`` is
-    ``lazy="joined"`` on the model, the family is loaded by
-    :func:`fragment_amounts`'s settled-record read (17 statements for a
-    bill's cell and 18 for an envelope's, one of them the family, on the
-    tree before CC-5-2 and after it), and a movement's account is an
+    :func:`fragment_cash_flow`, the walk :func:`fragment_balance_line` (the
+    transfer cell's arrow) reads, and PUBLISHED even when it resolves
+    ``None``: the partial reads it with ``is not none``, so a surface that
+    forgets the key raises where a ``None`` draws no chip.  The chips' labels
+    cost this fragment nothing beyond what it already paid:
+    ``Transaction.account`` is ``lazy="joined"`` on the model, the family is
+    loaded by :func:`fragment_amounts`'s settled-record read (17 statements
+    for a bill's cell and 18 for an envelope's, one of them the family, on
+    the tree before CC-5-2 and after it), and a movement's account is an
     identity-map hit for a member of the owner's set.
+
+    **What the C key and the palette's Credit do is the sixth** (plan task
+    plan#3114, ruling plan#3112): ``credit_opens_popover``, the map the grid
+    page publishes from the same producer
+    (``transaction_service.credit_opens_the_popover_by_key``), read off the
+    OWNER's set from that same walk, so the fragment a click swaps in stamps
+    what the page stamped.
 
     Args:
         item: The row, or the transfer side, to render.
@@ -822,10 +830,18 @@ def render_transaction_cell(item: PlanItem, **extra: Any) -> str:
         BaselineMissingError: The owner has no baseline scenario (ruling R-BW).
     """
     amounts = fragment_amounts(item)
+    cash_flow = fragment_cash_flow(item.user_id)
     return render_template(
         "grid/_transaction_cell.html",
         txn=item,
-        account=fragment_balance_line(item.user_id),
+        account=cash_flow.balance_line,
+        # What the C key and the palette's Credit do on this cell, from the
+        # producer the grid page asks (plan task plan#3114): read off the
+        # OWNER's set, the one ``credit_cards`` takes, from the same walk as
+        # the balance line above.
+        credit_opens_popover=credit_opens_the_popover_by_key(
+            [item], cash_flow.purchases,
+        ),
         budgets=amounts.budgets,
         settled=amounts.settled,
         retained=amounts.retained,

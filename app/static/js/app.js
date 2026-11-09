@@ -58,12 +58,25 @@ document.body.addEventListener("gridRefresh", function() {
   window.location.reload();
 });
 
-// Mark a transaction credit via HTMX, swapping just its cell.  Shared by
-// the grid 'c' keyboard shortcut (below) and the command palette's Credit
-// action (command_palette.js), so the route path is defined in one place
-// (JS-19).  Defined at module scope so command_palette.js -- loaded after
-// app.js -- can call it.
-function markTxnCredit(txnId) {
+// Credit from the grid's 'c' key (below) or the command palette's Credit
+// action (command_palette.js), on a cell's .txn-open carrying
+// data-can-credit, so what the two do is defined in one place (JS-19).
+// Defined at module scope so command_palette.js -- loaded after app.js --
+// can call it.
+//
+// The press posts no card, no day and no bank line.  Where it needs what
+// only the popover asks -- a card added (none yet), which card (two or
+// more), or the bank line it would unmatch named first -- the server stamps
+// data-credit-opens-popover and the popover opens instead; on every other
+// row the press is made at once (plan task plan#3114, ruling plan#3112).
+// The decision is the route's
+// (transaction_service.credit_opens_the_popover_by_key); this only reads it.
+function creditFromShortcut(openEl) {
+  if (openEl.dataset.creditOpensPopover) {
+    openEl.click();
+    return;
+  }
+  var txnId = openEl.dataset.txnId;
   htmx.ajax('POST', '/transactions/' + txnId + '/mark-credit', {
     target: '#txn-cell-' + txnId,
     swap: 'innerHTML',
@@ -962,11 +975,12 @@ document.addEventListener('keydown', function(e) {
       }
       case 'c':
       case 'C': {
-        // C marks the focused cell credit.  The template stamps
-        // data-can-credit with the same predicate as the card's
-        // Credit button (expense, projected, a row rather than a
-        // transfer leg, not an envelope), so this cannot fire where
-        // the button would not render.
+        // C is Credit on the focused cell.  The route stamps
+        // data-can-credit with the popover's own Credit predicate
+        // (expense, projected, a row rather than a transfer leg, not an
+        // envelope), so this cannot fire where the button would not
+        // render; creditFromShortcut presses or opens the popover, as
+        // the route stamped.
         //
         // Ctrl+C / Cmd+C is the OS copy shortcut: bail before any
         // preventDefault so the browser still copies and no
@@ -980,7 +994,7 @@ document.addEventListener('keydown', function(e) {
           e.preventDefault();
           // Same reveal-before-mutate rule as Space above.
           setFocus(focusedRow, focusedCol);
-          markTxnCredit(creditable.dataset.txnId);
+          creditFromShortcut(creditable);
         }
         break;
       }

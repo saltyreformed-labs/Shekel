@@ -11,8 +11,10 @@
  *
  * Actions per visible window:
  *   - Mark paid  -- every projected cell (clicks its .paybtn)
- *   - Mark credit -- every credit-eligible cell (same endpoint as the
- *     card's Credit button)
+ *   - Mark credit -- every credit-eligible cell: the card's Credit press
+ *     where the cell says it may be made at once, else the cell's card
+ *     opened, where Credit asks for a card to be added, asks which card,
+ *     or names the bank line it would unmatch first
  *   - Open       -- every transaction cell (opens the action card)
  *   - Add purchase -- envelope rows (opens the card, focuses the
  *     add-purchase amount input once the entries list loads)
@@ -163,15 +165,14 @@
                 }
 
                 // Credit is a transaction-only affordance (a leg carries no
-                // data-can-credit), so the runner may read the txn id.
+                // data-can-credit).
                 if (open.dataset.canCredit) {
                     actions.push({
                         kind: 'credit',
                         subject: name,
                         label: 'Credit -- ' + name + ' ' + amount,
                         meta: period,
-                        run: makeCreditRunner(
-                            td, open.dataset.cell, open.dataset.txnId),
+                        run: makeCreditRunner(td, open.dataset.cell),
                     });
                 }
 
@@ -291,12 +292,16 @@
         };
     }
 
-    function makeCreditRunner(td, cellId, txnId) {
+    function makeCreditRunner(td, cellId) {
         return function () {
             revealCell(cellId, td);
-            // Shared mark-credit helper (app.js) so the route path lives in
-            // one place (JS-19).
-            markTxnCredit(txnId);
+            // Re-resolved at run time, as Pay and Open are: a swap before
+            // Enter may have re-drawn the cell with other stamps, or with no
+            // Credit at all.  The shared helper (app.js) presses or opens
+            // the popover as the cell's stamps say (plan task plan#3114), so
+            // what Credit does lives in one place (JS-19).
+            var openEl = freshControl(cellId, '.txn-open[data-can-credit]');
+            if (openEl) creditFromShortcut(openEl);
         };
     }
 

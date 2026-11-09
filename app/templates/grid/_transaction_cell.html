@@ -34,6 +34,11 @@
                  credit_card:CC-4-2): a row on another account carries an
                  account chip.  REQUIRED as a key, `none` allowed as a value;
                  read with `is not none` so a forgotten publish raises.
+     credit_opens_popover -- `{cell_key(item): none, true or false}`, from
+                 `transaction_service.credit_opens_the_popover_by_key` (plan
+                 task plan#3114): none where Credit is not offered, true where
+                 the C key and the palette open the popover, false where they
+                 press at once.  REQUIRED, and a MAP, as `due_captions` is.
    Optional:
      wrap_div -- if true, wraps the cell in a <div id="{{ cell_dom_id(t) }}">.
      wrap_oob -- if true (requires wrap_div), the wrapper div also
@@ -121,21 +126,28 @@
      data-leg-account-id and fetches the TRANSFER's full-edit partial,
      whose form then targets this cell by the same id `data-cell`
      carries. #}
-  {# data-can-credit mirrors the card's Credit-button predicate so the
-     keyboard C action (grid_keyboard.js) only fires where the button
-     would render -- expense, projected, a row rather than a transfer
-     leg, not an envelope.  So a row already on the card (stored Paid,
-     drawn Credit) carries none, as an old Credit row carries none. #}
+  {# data-can-credit is the popover's Credit predicate
+     (`transaction_service.credit_offered`, read by the route) so the C key
+     (app.js) and the palette's Credit only act where the popover draws its
+     Credit button -- an expense, Projected, a row rather than a transfer
+     leg, not an envelope.  So a row already on the card (stored Paid, drawn
+     Credit) carries none, as an old Credit row carries none.
+     data-credit-opens-popover marks a row where they open the popover rather
+     than press (plan task plan#3114, ruling plan#3112): no card, so the
+     popover asks for one; two or more, so it asks which; or a press that
+     frees a bank line a match names, so it names the line first. #}
   {# aria-label and title share the same status/progress detail; build it
      ONCE (polyglot audit TPLB/TPL-10).  aria-label additionally prefixes
      the txn name for screen readers, and the two conflict prefixes differ
      only in punctuation, so those stay inline. #}
   {% set detail %}{% if show_progress %}{{ money(es.total) }} / {{ money(es.budget) }} -- {{ money(remaining|abs) }} {% if over_budget %}over{% else %}remaining{% endif %} -- {{ es.count }} entr{{ 'ies' if es.count != 1 else 'y' }}{% if es.credit > 0 %} -- includes {{ money(es.credit) }} on CC{% endif %}{% else %}{{ money(display_amount) }}{% if recorded is not none and recorded != est_display %} (est: {{ money(est_display) }}){% endif %}{% if will_book is not none %} -- marking paid records {{ money(will_book) }}{% endif %}{% if drawn %} -- {{ drawn.name }}{% endif %}{% if t.notes %} -- {{ t.notes }}{% endif %}{% endif %}{% endset %}
+  {#- What the C key and the palette's Credit do here: the route's answer,
+      `none` where Credit is not offered (plan task plan#3114). -#}
+  {% set opens_popover = credit_opens_popover[key] %}
   <span class="txn-open"
         data-cell="{{ dom_id }}"
         {% if is_leg %}data-xfer-id="{{ t.transfer.id }}" data-leg-account-id="{{ t.account_id }}"{% else %}data-txn-id="{{ t.id }}"{% endif %}
-        {% if not is_leg and t.is_expense and t.status_id == STATUS_PROJECTED
-           and not t.tracks_purchases %}data-can-credit="1"{% endif %}
+        {% if opens_popover is not none %}data-can-credit="1"{% if opens_popover %} data-credit-opens-popover="1"{% endif %}{% endif %}
         {% if not is_leg and t.tracks_purchases %}data-envelope="1"{% endif %}
         role="button"
         tabindex="0"

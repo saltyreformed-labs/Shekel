@@ -63,8 +63,9 @@ SIX leaves, cut by what each DECIDES rather than by size:
   one direction and the mechanics alone for every other;
 * :mod:`._credit` -- what pressing CREDIT means: a settle with the card as its
   tender, on the row's own day or the one its page typed, on the card it
-  names or the one card it could mean (plan tasks plan#2929, plan#3056); and
-  Undo CC, the revert
+  names or the one card it could mean (plan tasks plan#2929, plan#3056); which
+  rows offer it, and whether the C key and the palette press it at once or
+  open the popover (plan task plan#3114); and Undo CC, the revert
   that takes it off the card (plan task plan#3055);
 * :mod:`._delete` -- what REMOVING a row means: the four-step sequence and its
   order, which existed twice until plan step ``bank_import:X-gb`` gave the
@@ -78,6 +79,8 @@ from app.services.transaction_service._credit import (
     credit_day,
     credit_frees_a_line,
     credit_moves_payment,
+    credit_offered,
+    credit_opens_the_popover_by_key,
     mark_as_credit,
     undo_credit,
 )
@@ -124,6 +127,8 @@ __all__ = [
     "credit_day",
     "credit_frees_a_line",
     "credit_moves_payment",
+    "credit_offered",
+    "credit_opens_the_popover_by_key",
     "delete_transaction",
     "deletion_refusal",
     "preview_deletion",

@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 from flask import (
     current_app,
     flash,
-    g,
     redirect,
     render_template,
     request,
@@ -33,7 +32,7 @@ from marshmallow import ValidationError as MarshmallowValidationError
 
 from app.db_transaction import bind_sign_in_owner, write_transaction
 from app.extensions import db, limiter
-from app.models.known_device import TRUST_LIFETIME, KnownDevice
+from app.models.known_device import TRUST_LIFETIME
 from app.models.user import MfaConfig, User
 from app.schemas.validation import (
     MfaConfirmSchema,
@@ -50,6 +49,7 @@ from app.routes.auth._helpers import (
     _consume_backup_code,
     _known_device,
     _mfa_pending_is_fresh,
+    _spend_a_try,
     _totp_accepted_or_key_failure,
     _verify_totp_with_replay_logging,
 )
@@ -72,76 +72,6 @@ from app.utils.security_events import (
 from app.utils.session_helpers import invalidate_other_sessions
 
 logger = logging.getLogger(__name__)
-
-
-#: How many codes the code form checks in a window for one counter: a known
-#: browser's own, or else its account's, which every other browser shares
-#: (ruling plan#3023).
-_CODE_TRIES = "5 per 15 minutes"
-
-#: Where :func:`_spend_a_code_try` leaves, on ``g``, the counter this
-#: request's code try is spent from.
-_CODE_TRIES_KEY = "_code_tries_key"
-
-
-def _code_tries_key() -> str:
-    """Return the counter this request's code try is spent from.
-
-    The limit on :func:`_count_a_code_try` reads it, and
-    :func:`_spend_a_code_try` put it there a moment before.  Read without a
-    default: Flask-Limiter skips a limit whose key is empty, so a missing key
-    must raise, never wave a try through.
-
-    Returns:
-        ``known-device:<id>`` or ``pending-user:<id>``.
-    """
-    return getattr(g, _CODE_TRIES_KEY)
-
-
-@limiter.limit(_CODE_TRIES, key_func=_code_tries_key)
-def _count_a_code_try() -> None:
-    """Spend one try from the counter :func:`_code_tries_key` names.
-
-    The body is empty because the decorator does the work: Flask-Limiter
-    spends from the limit at each call and, past it, raises
-    :class:`~flask_limiter.RateLimitExceeded`, which the 429 handler answers.
-    A limit on a function the view calls, rather than on the view, is what
-    lets it run after the view has read the browser's record under the
-    owner's lock.  Its counters are scoped by the endpoint, as a limit on the
-    view would be.
-    """
-
-
-def _spend_a_code_try(user: User, device: KnownDevice | None) -> None:
-    """Spend one of the code form's tries before a code is checked.
-
-    A known browser spends its own, so a guesser who has the password but not
-    the phone and spends the account's cannot refuse the owner's code there
-    (ruling plan#3023).  Every other browser spends the account's, which they
-    all share, so moving between addresses or browsers buys no more guesses.
-
-    The counter comes from *device*, the record
-    :func:`~app.services.known_device_service.find_browser` verified under the
-    owner's lock, never from the cookie the browser sent: a key built from
-    that would give a guesser five new tries for each made-up cookie.  Called
-    only once the view has a live pending sign-in it may check a code for, so
-    a request that checks none spends nothing but its address's limit.
-
-    Args:
-        user: The pending user, whose owner's lock is held.
-        device: This browser's record, as the view read it under that lock,
-            or ``None`` for a stranger.
-
-    Raises:
-        flask_limiter.RateLimitExceeded: The counter has no try left in this
-            window.
-    """
-    counter = (
-        f"pending-user:{user.id}" if device is None
-        else f"known-device:{device.id}"
-    )
-    setattr(g, _CODE_TRIES_KEY, counter)
-    _count_a_code_try()
 
 
 def _check_mfa_code(mfa_config, user_id, totp_code, backup_code):
@@ -231,14 +161,14 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     the schema rejects, which cannot be a right answer, and a failed
     encryption key, which is the operator's fault.
 
-    Two limits apply.  Every POST spends its address's.  Each code checked
-    also spends a try (:func:`_spend_a_code_try`): a known browser's own, or
-    else the account's, which every other browser shares.  So moving between
-    addresses buys a stranger no more guesses, and a guesser who spends the
-    account's tries still leaves the owner's browser its own (ruling
-    plan#3023).  A request that checks no code spends only its address's: one
-    with no live pending sign-in, a form the schema rejects, a pending user
-    gone or without two-factor, and a stranger the lock refuses.
+    Two limits of its own apply, beside the app's defaults.  Every POST spends
+    its address's.  Each code checked also spends a try (:func:`_spend_a_try`):
+    a known browser's own, or else the account's, which every other browser
+    shares.  So moving between addresses buys a stranger no more guesses, and
+    a guesser who spends the account's tries still leaves the owner's browser
+    its own (ruling plan#3023).  A request that checks no code spends no try:
+    one with no live pending sign-in, a form the schema rejects, a pending
+    user gone or without two-factor, and a stranger the lock refuses.
 
     Pylint: ``too-many-return-statements`` (9/6) -- each early return is a
     distinct semantic exit (no pending state, stale state, GET render,
@@ -334,7 +264,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     # A code is about to be checked: spend one of this browser's tries, its
     # own when it is known (ruling plan#3023).  Past the limit this raises,
     # and the 429 handler answers before any code is checked or counted.
-    _spend_a_code_try(user, device)
+    _spend_a_try(user, device)
 
     # Single try/except wraps both the up-front decrypt (preserving
     # the pre-C-09 fail-fast behaviour: a missing encryption key

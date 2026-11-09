@@ -12,7 +12,8 @@ lives here rather than in either route module; a typo on any one key
 would silently break the flow, which is why the key names are
 centralised at all.  :func:`_browser_standing` (and :func:`_known_device`)
 is the one read, per request, of what the browser's cookie is worth
-(plan#2772).
+(plan#2772), and :func:`_spend_a_try` the one spending of a door's tries
+from it, at the code form and at re-confirm.
 :func:`_complete_sign_in` is the ONE completion of a sign-in, whichever proof
 finished it: a password with no second factor, a password and a code, or a
 password on a trusted device (plan#2173), so the three cannot drift on what a
@@ -30,7 +31,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from flask import flash, redirect, request, session as flask_session, url_for
+from flask import flash, g, redirect, request, session as flask_session, url_for
 from flask_login import login_user
 from werkzeug.wrappers import Response
 
@@ -39,8 +40,9 @@ from marshmallow import ValidationError as MarshmallowValidationError
 
 from app import ref_cache
 from app.enums import RoleEnum
-from app.extensions import db
+from app.extensions import db, limiter
 from app.models.known_device import KnownDevice
+from app.models.user import User
 from app.services import auth_service, known_device_service, mfa_service
 from app.services.known_device_service import BrowserStanding
 from app.utils.device_cookie import device_token, set_device_cookie
@@ -149,6 +151,83 @@ def _known_device(user) -> KnownDevice | None:
     """
     standing = _browser_standing(user)
     return None if standing is None else standing.device
+
+
+#: How many passwords or codes one counter lets a door check in its window:
+#: the code form's and re-confirm's alike (rulings plan#3023, plan#3071).
+_TRIES = "5 per 15 minutes"
+
+#: Where :func:`_spend_a_try` leaves, on ``g``, the counter this request's try
+#: is spent from.
+_TRIES_KEY = "_tries_key"
+
+
+def _tries_key() -> str:
+    """Return the counter this request's try is spent from.
+
+    The limit on :func:`_count_a_try` reads it, and :func:`_spend_a_try` put it
+    there a moment before.  Read without a default: Flask-Limiter skips a limit
+    whose key is empty, so a missing key must raise, never wave a try through.
+
+    Returns:
+        ``known-device:<id>`` or ``account:<id>``.
+    """
+    return getattr(g, _TRIES_KEY)
+
+
+@limiter.limit(_TRIES, key_func=_tries_key, override_defaults=False)
+def _count_a_try() -> None:
+    """Spend one try from the counter :func:`_tries_key` names.
+
+    The body is empty because the decorator does the work: Flask-Limiter
+    spends from the limit at each call and, past it, raises
+    :class:`~flask_limiter.RateLimitExceeded`, which the 429 handler answers.
+    A limit on a function the view calls, rather than on the view, is what
+    lets it run after the view has read the browser's record under the
+    owner's lock.  Its counters are scoped by the endpoint, as a limit on the
+    view would be, so each door's tries are its own.
+
+    It adds to the app's default limits rather than replacing them
+    (``override_defaults=False``).  Once a request has spent a try here,
+    Flask-Limiter ties this limit to the door's endpoint, and a limit that
+    replaced the defaults would then leave the door's other requests under
+    none: measured 2026-11-09, re-confirm's form page answered to no limit at
+    all after the first re-confirm, where it had answered to the defaults.
+    """
+
+
+def _spend_a_try(user: User, device: KnownDevice | None) -> None:
+    """Spend one of this door's tries before its password or code is checked.
+
+    The code form and re-confirm each check at most :data:`_TRIES` from one
+    counter.  A known browser spends its own, so someone who spends the
+    account's cannot refuse the owner's browser there: a guesser with the
+    password but not the phone at the code form (ruling plan#3023), or
+    someone holding a stolen session at re-confirm (ruling plan#3071).  Every
+    other browser spends the account's, which they all share, so moving
+    between addresses or browsers buys no more guesses.
+
+    The counter comes from *device*, the record
+    :func:`~app.services.known_device_service.find_browser` verified under the
+    owner's lock, never from the cookie the browser sent: a key built from
+    that would give a guesser five new tries for each made-up cookie.
+
+    Args:
+        user: The :class:`~app.models.user.User` signing in or signed in,
+            whose owner's lock is held.
+        device: This browser's record, as the view read it under that lock,
+            or ``None`` for a stranger.
+
+    Raises:
+        flask_limiter.RateLimitExceeded: The counter has no try left in this
+            window.
+    """
+    counter = (
+        f"account:{user.id}" if device is None
+        else f"known-device:{device.id}"
+    )
+    setattr(g, _TRIES_KEY, counter)
+    _count_a_try()
 
 
 def _complete_sign_in(

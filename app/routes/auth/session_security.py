@@ -20,7 +20,7 @@ from flask_login import current_user
 
 from marshmallow import ValidationError as MarshmallowValidationError
 
-from app.extensions import db, limiter
+from app.extensions import db
 from app.models.user import MfaConfig
 from app.schemas.validation import ChangePasswordSchema, ReauthSchema
 from app.services import auth_service, known_device_service
@@ -30,6 +30,7 @@ from app.routes.auth._helpers import (
     _first_validation_message,
     _is_safe_redirect,
     _known_device,
+    _spend_a_try,
     _totp_accepted_or_key_failure,
 )
 from app.utils.auth_helpers import log_refused_lookup
@@ -183,7 +184,6 @@ def forget_trusted_device(device_id):
 
 
 @auth_bp.route("/reauth", methods=["GET", "POST"])
-@limiter.limit("5 per 15 minutes", methods=["POST"])
 def reauth():
     """Step-up re-authentication for high-value operations.
 
@@ -220,6 +220,15 @@ def reauth():
         unreadable under any current Fernet) flash an
         operator-actionable message and re-render the form, mirroring
         /mfa/verify and /mfa/disable.
+
+    Each POST whose form the schema accepts spends a try
+    (:func:`~app.routes.auth._helpers._spend_a_try`) before its password is
+    checked, five in fifteen minutes per counter: a known browser's own, else
+    the account's, which every other browser signed in to it shares (ruling
+    plan#3071).  So someone holding a stolen session who spends the account's
+    tries cannot keep the owner's browser from re-confirming, and from what
+    sits behind it.  The try is spent before the lock is asked, so a stranger
+    the lock refuses spends one; a form the schema rejects spends none.
 
     Success clears the count the guesses went to (ruling plan#3007): every
     check this account faces has passed.  A stranger's re-confirm clears the
@@ -265,6 +274,10 @@ def reauth():
         return render_template("auth/reauth.html", next=safe_next)
 
     device = _known_device(current_user)
+    # A password is about to be checked: spend one of this browser's tries,
+    # its own when it is known (ruling plan#3071).  Past the limit this
+    # raises, and the 429 handler answers before anything is checked.
+    _spend_a_try(current_user, device)
     try:
         auth_service.check_signed_in_password(
             current_user, reauth_data["password"], "Invalid password.",

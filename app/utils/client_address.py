@@ -157,9 +157,10 @@ def rate_limit_key() -> str:
     can spend that account's budget.  Anyone else counts against their address,
     which includes a signed-out visitor to a gated page: the default limits run
     before the login gate, so they spend their own count for that page and are
-    then sent to sign in (ruling plan#3009).  A route's own ``@limiter.limit``
-    runs inside its view, after the gate, so the one gated route that has one,
-    ``/reauth``, sends a signed-out visitor to sign in uncounted.
+    then sent to sign in (ruling plan#3009).  ``/reauth``, the one gated route
+    with a limit of its own, spends its tries from a key of their own inside
+    its view (:func:`app.routes.auth._helpers._spend_a_try`), after the gate,
+    so a signed-out visitor spends none of them.
 
     ``current_user`` costs no statement here: the request-id hook has already
     resolved it by the time any limit runs.

@@ -25,12 +25,12 @@ recorded payday by, so the two cannot disagree about which paycheck a day is.
 
 **The periods TILE by construction.**  A paycheck's first day is the day after
 its PREVIOUS paycheck's last, and that previous paycheck is the calendar's own
-(:meth:`~._calendar.PayCalendar.span_containing` on the day before the
-payday), so no day is paid twice and none is left unpaid between two paychecks
-the calendar holds.  The opening paycheck has no previous one in the calendar;
-its previous is the payday the plan puts just below the record
-(:func:`~._eras.grid_below_record`), the same day the backward rhythm and "Add
-earlier paychecks" stand on.
+(:func:`previous_payday`: :meth:`~._calendar.PayCalendar.span_containing` on
+the day before the payday), so no day is paid twice and none is left unpaid
+between two paychecks the calendar holds.  The opening paycheck has no previous
+one in the calendar; its previous is the payday the plan puts just below the
+record (:func:`~._eras.grid_below_record`), the same day the backward rhythm
+and "Add earlier paychecks" stand on.
 
 **One kind of pay period it cannot state**, said so a caller does not assume
 it: a period anchored to the MONTH and paid before it ends (monthly pay on the
@@ -85,6 +85,35 @@ def scheduled_payday(calendar: PayCalendar, payday: date) -> date:
     return nominal_payday(era.effective_from, era.rhythm.cadence, steps)
 
 
+def previous_payday(calendar: PayCalendar, payday: date) -> date:
+    """Return the payday of the paycheck just before the one paid on *payday*.
+
+    **The one statement of "the paycheck before"** for the pay period's
+    readers (task plan#3122): :func:`days_paid_for` starts a paycheck's days
+    the day after this one's end, and the engine's banner reads which days
+    this one priced (:meth:`~app.services.payroll_basis.PayrollBasis
+    .pay_event_on`), so the two cannot disagree about which paycheck came
+    first.  It is the calendar's own paycheck covering the day before
+    *payday*; below the record, where the calendar holds none, it is the grid
+    payday the plan puts just below *payday* (:func:`~._eras.grid_below_record`),
+    the day the backward rhythm and "Add earlier paychecks" stand on, which
+    is nominal: no convention moves a payday the calendar does not hold.
+
+    Args:
+        calendar: The owner's calendar.
+        payday: A payday of *calendar*: saved, projected past the record, or
+            stepped back below it.
+
+    Returns:
+        The previous paycheck's payday.
+    """
+    previous = calendar.span_containing(payday - _ONE_DAY)
+    if previous is not None:
+        return previous.start_date
+    era, top = grid_below_record(calendar.eras, payday)
+    return nominal_payday(era.effective_from, era.rhythm.cadence, top)
+
+
 def days_paid_for(
     calendar: PayCalendar, payday: date, ends_days_before: int,
 ) -> PaidDays:
@@ -112,14 +141,8 @@ def days_paid_for(
         The :class:`PaidDays`.
     """
     gap = timedelta(days=ends_days_before)
-    previous = calendar.span_containing(payday - _ONE_DAY)
-    if previous is None:
-        era, top = grid_below_record(calendar.eras, payday)
-        previous_scheduled = nominal_payday(era.effective_from, era.rhythm.cadence, top)
-    else:
-        previous_scheduled = scheduled_payday(calendar, previous.start_date)
     return PaidDays(
-        first=previous_scheduled - gap + _ONE_DAY,
+        first=scheduled_payday(calendar, previous_payday(calendar, payday)) - gap + _ONE_DAY,
         last=scheduled_payday(calendar, payday) - gap,
     )
 
@@ -161,4 +184,6 @@ def first_day_paid_at(
     return days_paid_for(calendar, paycheck.start_date, ends_days_before).first
 
 
-__all__ = ["PaidDays", "days_paid_for", "first_day_paid_at", "scheduled_payday"]
+__all__ = [
+    "PaidDays", "days_paid_for", "first_day_paid_at", "previous_payday", "scheduled_payday",
+]

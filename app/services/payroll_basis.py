@@ -35,6 +35,7 @@ from app.services.pay_calendar import (
     days_paid_for,
     first_day_paid_at,
     first_payday_of,
+    previous_payday,
 )
 from app.services.recurrence import (
     ResolvedRecurrence,
@@ -49,6 +50,7 @@ from app.services.salary_raises import (
     raise_pay,
     terms_of,
 )
+from app.utils.business_days import SATURDAY
 from app.utils.money import ZERO, round_money
 
 #: How far past an ask a cadence is walked before it is asked again: every
@@ -65,11 +67,6 @@ from app.utils.money import ZERO, round_money
 #: reach set exactly at the payday asked stops the walk before the
 #: occurrence that admits it and caches the wrong ``False``.
 _REACH_PAST_ASK = timedelta(days=366)
-
-#: Friday, as :meth:`datetime.date.weekday` numbers it (Monday is 0): the last
-#: day of the week a paycheck pays a weekday's share for (ruling plan#3089).
-_LAST_WEEKDAY = 4
-
 
 @dataclass
 class _WalkedCadence:
@@ -311,25 +308,32 @@ def _at_rhythm(rate: PayRate, rhythm: PayCadence) -> PayRate:
     return PayRate(_carry(rate.per_paycheck, rate.cadence, rhythm), rhythm)
 
 
-def _weekdays(first: date, last: date) -> "list[date]":
-    """Return every Monday-to-Friday day from *first* through *last*, a holiday included.
+def _priced_days(paid: PaidDays) -> "list[date]":
+    """Return the days a paycheck's base is priced over: its pay period's weekdays.
 
-    Ruling **plan#3089**: a paycheck pays its pay period's weekdays, and a
-    holiday or a vacation day is a weekday (the 07-16 stub paid 07-03, a
-    holiday, at the new pay).
+    Ruling **plan#3089**: a paycheck pays its pay period's Monday-to-Friday
+    days, a holiday or a vacation day included (the 07-16 stub paid 07-03, a
+    holiday, at the new pay), each at the pay in force that day.  **A period
+    holding no weekday is priced on its last day**, at the pay in force then:
+    only a rhythm of one or two days can hold such a period, a weekend, and
+    with no weekday to share the pay over it pays its rate, as a paycheck no
+    change reaches does.  The pricing (:meth:`PayrollBasis.base_pay_on`) and
+    the banner (:meth:`PayrollBasis.pay_event_on`) both read these days, so a
+    raise is announced on the paycheck that first PAYS a day of it (task
+    plan#3122).
 
     Args:
-        first: The first day, inclusive.
-        last: The last day, inclusive.
+        paid: The paycheck's pay period.
 
     Returns:
-        The weekdays, ascending; empty when the span holds none.
+        The days, ascending; never empty.
     """
-    span = (last - first).days + 1
-    return [
-        day for day in (first + timedelta(days=offset) for offset in range(span))
-        if day.weekday() <= _LAST_WEEKDAY
+    span = (paid.last - paid.first).days + 1
+    weekdays = [
+        day for day in (paid.first + timedelta(days=offset) for offset in range(span))
+        if day.weekday() < SATURDAY
     ]
+    return weekdays or [paid.last]
 
 
 @dataclass(frozen=True)
@@ -729,7 +733,7 @@ class PayrollBasis:
         **A paycheck pays the weekdays of its pay period, each at the pay in
         force that day** (ruling **plan#3089**, task plan#3100).  Its pay
         period is :func:`~app.services.pay_calendar.days_paid_for`'s; its
-        weekdays (Monday to Friday, a holiday included, :func:`_weekdays`)
+        weekdays (Monday to Friday, a holiday included, :func:`_priced_days`)
         are grouped by the pay in force on each (:meth:`pay_rate_on`) carried
         to the paycheck's own rhythm, each group's share of the weekdays is
         rounded to the cent as a stub prints each line, and the shares are
@@ -779,13 +783,11 @@ class PayrollBasis:
         paid = self._paid_days_of(payday)
         rhythm = cadence_on(self.calendar, payday)
         rate = _at_rhythm(self.pay_rate_on(paid.last), rhythm)
-        weekdays = _weekdays(paid.first, paid.last)
-        if not weekdays:
-            return BasePay(rate.per_paycheck, rate)
+        days = _priced_days(paid)
         shares = Counter(
-            _at_rhythm(self.pay_rate_on(day), rhythm).per_paycheck for day in weekdays
+            _at_rhythm(self.pay_rate_on(day), rhythm).per_paycheck for day in days
         )
-        count = Decimal(len(weekdays))
+        count = Decimal(len(days))
         return BasePay(
             sum((round_money(pay * days / count) for pay, days in shares.items()), ZERO),
             rate,
@@ -808,19 +810,27 @@ class PayrollBasis:
         on 03-05, the day before the entry's paycheck opens, and badges
         nothing.  An entry changing nothing badges nothing.
 
-        **A forecast raise badges the first paycheck it reaches** (ruling
-        **plan#3092**, task plan#3101): the paycheck whose pay period holds
-        the day it lands, and only where that paycheck is priced under it.
-        The banner names the applications the walk to the paycheck's last day
-        applied -- the walk its rate is (:meth:`_walk`, ``raised``) -- that
-        land on or after the first day it pays for: the pricing's own read of
-        the pay period and of the entry in force, so a banner cannot announce
-        a raise the figure beside it was not priced under.  A raise dated on
-        or before the day the paycheck's entry opens is inside the entry
-        (ruling **plan#3091**), never applied, and badges nothing.  Made-up:
-        5% from Wednesday 2027-03-03 badges 03-11, paying 02-20..03-05, and
-        neither 02-25 nor 03-25; until this task it badged every paycheck
-        dated in March, 03-11 and 03-25.
+        **A forecast raise badges the first paycheck that PAYS a day of it**
+        (ruling **plan#3092**, "where the pay first changes"; task plan#3122):
+        the paycheck whose priced days (:func:`_priced_days`) hold the first
+        priced day on or after the raise lands, and only where that paycheck
+        is priced under it.  The banner names the applications the walk to
+        the paycheck's last priced day applied (:meth:`_walk`, ``raised``)
+        that land after the PREVIOUS paycheck's last priced day: the
+        pricing's own days and its own read of the entry in force, so a
+        banner cannot announce a raise the base beside it does not pay, nor
+        miss one it does.  A raise dated on or before the day the paycheck's
+        entry opens is inside the entry (ruling **plan#3091**), never
+        applied, and badges nothing.  Made-up: 5% from Wednesday 2027-03-03
+        badges 03-11, paying 02-20..03-05, and neither 02-25 nor 03-25; until
+        task plan#3101 it badged every paycheck dated in March, 03-11 and
+        03-25.  Until task plan#3122 it named a raise landing anywhere in the
+        pay period, so where periods run Sunday to Saturday a raise from a
+        Saturday badged the paycheck ending that day, which pays no day of
+        it, and not the next, which does.  **The banner follows the pay, not
+        the rate**: that Saturday's paycheck's rate is the new pay (the pay
+        in force on its last day, :meth:`base_pay_on`) while its base is
+        wholly the old.
 
         **The FIRST entry badges no pay change**: every paycheck before it is
         priced FROM it (R-SAL59), so there is no earlier recorded pay to
@@ -865,11 +875,14 @@ class PayrollBasis:
                 return ""
             sign = "+" if change > 0 else "-"
             return f"PAY {sign}${abs(change):,.2f}{unit}"
-        paid = self._paid_days_of(payday)
+        last = _priced_days(self._paid_days_of(payday))[-1]
+        before = _priced_days(
+            self._paid_days_of(previous_payday(self.calendar, payday)),
+        )[-1]
         return raise_banner(
             raise_obj
-            for landed, raise_obj in self._in_force_on(paid.last).raised
-            if landed >= paid.first
+            for landed, raise_obj in self._in_force_on(last).raised
+            if landed > before
         )
 
     def rhythm_changes_without_pay(self) -> "list[RhythmChangeWithoutPay]":

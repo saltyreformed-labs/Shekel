@@ -665,12 +665,14 @@ def grid_below_record(
 
     Args:
         eras: The owner's eras, validated.
-        opening: The record's first payday.
+        opening: The record's first payday, or a grid payday below it, as
+            :func:`~._paid_days.previous_payday` hands it one the engine
+            priced below the record (task plan#3100).
 
     Returns:
-        The earliest era and the highest grid step on it whose payday falls
-        below the record: ``-1`` wherever the opening is the era's own first
-        payday.
+        The earliest era and the step below the one *opening* stands for:
+        for the record's first payday the highest step whose payday falls
+        below the record, ``-1`` wherever it is the era's own first payday.
     """
     era = eras[0]
     return era, matched_step(era.effective_from, era.rhythm, opening) - 1

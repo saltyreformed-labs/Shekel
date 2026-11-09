@@ -417,25 +417,78 @@ class TestARaiseBadgesTheFirstPaycheckItReaches:
         )
         assert _badge(basis, date(2027, 3, 11)) == "MERIT +5.00%, COLA +$2,600.00"
 
-    def test_a_paycheck_badges_exactly_where_its_rate_first_moves(self):
-        """Two years of the July raise: the badged paydays are the paydays whose rate moves.
+    def test_a_paycheck_badges_exactly_where_its_base_first_leaves_the_old_pay(self):
+        """Two years of the July raise: the badged paydays are where the BASE first moves.
 
-        The rate is 2,000.00 through 07-01, 2,000.00 x 1.03 = 2,060.00 from
-        07-15, and 2,060.00 x 1.03 = 2,121.80 from 2028-07-13.  The banner and
-        the figure beside it read one walk, so they move on the same paychecks.
+        Each raise moves two bases: the straddle's and the first paycheck paid
+        wholly at the new pay.  07-15 pays 06-26..07-09, whose weekdays before
+        Thursday 07-01 are three: 3/10 at 2,000.00 and 7/10 at 2,060.00 =
+        600.00 + 1,442.00 = 2,042.00, and 07-29 pays 2,060.00;
+        2028-07-13 pays 06-24..07-07, 5/10 at 2,060.00 and 5/10 at 2,060.00 x
+        1.03 = 2,121.80, = 1,030.00 + 1,060.90 = 2,090.90.  The banner is the
+        first of each pair: the paycheck whose base moves while the one before
+        it was paid wholly at one pay (its base equal to its rate).
         """
         basis = _basis(
             _biweekly(_TWO_YEARS), [(_OPENS, "2000.00")],
             (_recurring(date(2027, 7, 1), "0.03"),),
         )
         paydays = [_OPENS + timedelta(days=14 * step) for step in range(_TWO_YEARS)]
+        bases = {payday: basis.base_pay_on(payday) for payday in paydays}
         moved = [
             later for earlier, later in zip(paydays, paydays[1:])
-            if basis.base_pay_on(later).rate != basis.base_pay_on(earlier).rate
+            if bases[later].per_paycheck != bases[earlier].per_paycheck
+            and bases[earlier].per_paycheck == bases[earlier].rate.per_paycheck
         ]
         badged = [payday for payday in paydays if _badge(basis, payday)]
         assert badged == moved == [date(2027, 7, 15), date(2028, 7, 13)]
-        assert basis.base_pay_on(date(2028, 7, 13)).rate.per_paycheck == Decimal("2121.80")
+        assert [bases[payday].per_paycheck for payday in (
+            date(2027, 7, 15), date(2027, 7, 29), date(2028, 7, 13), date(2028, 7, 27),
+        )] == [Decimal("2042.00"), Decimal("2060.00"), Decimal("2090.90"), Decimal("2121.80")]
+
+
+#: Every 14 days from Friday 2028-01-07: with the gap of six each paycheck pays
+#: Sunday through Saturday, 07-07 paying 06-18..07-01 and 07-21 07-02..07-15.
+_FRIDAYS = date(2028, 1, 7)
+
+
+def _friday_paydays():
+    """Twenty Friday paydays every 14 days from 2028-01-07, reaching 2028-09-15."""
+    return _calendar(
+        [_FRIDAYS + timedelta(days=14 * step) for step in range(20)], (_era(_FRIDAYS, 14),),
+    )
+
+
+class TestARaiseOnAWeekendBadgesThePaycheckThatPaysIt:
+    """A raise landing on a pay period's weekend badges the paycheck that first PAYS a day of it.
+
+    Task plan#3122 (ruling plan#3092, "where the pay first changes").  Until
+    then the banner named any raise landing inside the pay period, while the
+    base pays only its weekdays (ruling plan#3089).
+    """
+
+    def test_one_on_a_periods_last_saturday_badges_the_next_paycheck(self):
+        """3% from Saturday 2028-07-01, the last day 07-07 pays for: 07-21, not 07-07.
+
+        07-07 pays the weekdays 06-19..06-30 wholly at 2,000.00, though its
+        rate, the pay in force on 07-01, is 2,000.00 x 1.03 = 2,060.00; 07-21
+        pays 07-03..07-14 at 2,060.00.  Before task plan#3122, 07-07 was
+        badged and 07-21 was not.
+        """
+        basis = _basis(
+            _friday_paydays(), [(_FRIDAYS, "2000.00")], (_percent(date(2028, 7, 1), "0.03"),),
+        )
+        assert _badges(basis, date(2028, 7, 7), date(2028, 7, 21)) == ["", "MERIT +3.00%"]
+        assert _pay(basis, date(2028, 7, 7)) == Decimal("2000.00")
+        assert basis.base_pay_on(date(2028, 7, 7)).rate.per_paycheck == Decimal("2060.00")
+        assert _pay(basis, date(2028, 7, 21)) == Decimal("2060.00")
+
+    def test_one_on_a_periods_first_sunday_badges_its_own_paycheck(self):
+        """3% from Sunday 2028-07-02, the first day 07-21 pays for: 07-21, as before."""
+        basis = _basis(
+            _friday_paydays(), [(_FRIDAYS, "2000.00")], (_percent(date(2028, 7, 2), "0.03"),),
+        )
+        assert _badges(basis, date(2028, 7, 7), date(2028, 7, 21)) == ["", "MERIT +3.00%"]
 
 
 class TestARhythmSeam:
@@ -513,6 +566,22 @@ class TestAPeriodHoldingNoWeekday:
         assert _pay(basis, date(2027, 3, 5)) == Decimal("2000.00")
         assert _pay(basis, date(2027, 3, 6)) == Decimal("2100.00")
         assert _pay(basis, date(2027, 3, 8)) == Decimal("2100.00")
+
+    def test_the_weekend_paycheck_paying_a_raise_is_the_one_badged(self):
+        """The same daily rhythm: Saturday 03-06 pays the raise first, so it alone is badged.
+
+        Task plan#3122.  Sunday 03-07 and Monday 03-08 pay the raise too, but
+        a paycheck before them already did; a rule reading weekdays alone
+        would badge Monday instead.
+        """
+        monday = date(2027, 3, 1)
+        basis = _basis(
+            _calendar([monday + timedelta(days=step) for step in range(14)], (_era(monday, 1),)),
+            [(monday, "2000.00")], (_percent(date(2027, 3, 6), "0.05"),), gap=0,
+        )
+        assert _badges(
+            basis, date(2027, 3, 5), date(2027, 3, 6), date(2027, 3, 7), date(2027, 3, 8),
+        ) == ["", "MERIT +5.00%", "", ""]
 
 
 class TestThePayListReadsTheRate:

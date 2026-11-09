@@ -122,7 +122,9 @@ from ._loader import (
     calendar_for,
     schedule_for,
 )
-from ._paid_days import PaidDays, days_paid_for, first_day_paid_at, scheduled_payday
+from ._paid_days import (
+    PaidDays, days_paid_for, first_day_paid_at, previous_payday, scheduled_payday,
+)
 from ._rhythm import (
     cadence_on,
     paydays_in_month_through,
@@ -177,6 +179,7 @@ __all__ = [
     "paydays_in_year_before",
     "planned_paydays_after",
     "period_by_id",
+    "previous_payday",
     "projected_payday",
     "saved_paydays_in_month_through",
     "schedule_for",

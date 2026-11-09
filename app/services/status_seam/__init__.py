@@ -41,7 +41,8 @@ subjects**: :mod:`._seam` (the mechanics -- ``apply_status_change`` and the two
 form-submission readings), :mod:`._record` (WHAT a settle records: the
 ``Settlement`` value and the reads over it), and :mod:`._refusals` (the
 invariants stated as guards); :mod:`._covering` writes a row's covering
-movement and, since plan step ``balance:X-bi-6-4d-2``, :mod:`._side` a
+movement (:mod:`._covering_reads`, since plan task plan#3055, holds what
+readers ask of it) and, since plan step ``balance:X-bi-6-4d-2``, :mod:`._side` a
 transfer side's record (the Transfer arm).  The split is the one ``transfer_service`` and
 ``cash_ledger`` already made at the same 1000-line ceiling, and by the same
 rule: BY RESPONSIBILITY, not by line count.  **The public surface is this module
@@ -119,12 +120,12 @@ from app.services.status_seam._refusals import (
     reject_stated_figure_over_purchases,
     reject_tender_without_settled_status,
 )
-from app.services.status_seam._covering import (
+from app.services.status_seam._covering import record_clearing
+from app.services.status_seam._covering_reads import (
     covered_cash_leg,
     covering_clause,
     holds_no_purchase_clause,
     payment_recorded_elsewhere_clause,
-    record_clearing,
 )
 from app.services.status_seam._side import (
     free_moving_side_record,

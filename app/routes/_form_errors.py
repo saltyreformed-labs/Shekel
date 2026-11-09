@@ -2,7 +2,9 @@
 Shekel Budget App -- Which Marshmallow error a form flashes
 
 One rule for "the schema refused this payload; what do we tell the user",
-shared by the transaction-template and transfer-template CRUD routes.
+shared by the transaction-template and transfer-template CRUD routes, the
+card APR and terms doors, and the salary profile's raise and payroll-line
+doors.
 
 It was one rule with two behaviours.  ``templates.py`` picked actionable
 messages out of the errors dict; ``transfers/templates.py`` flashed a fixed
@@ -24,6 +26,7 @@ from typing import Any
 
 from flask import Response, flash, request
 from marshmallow import ValidationError
+from marshmallow.exceptions import SCHEMA
 
 from app.routes._redirect_target import RedirectTarget
 
@@ -107,6 +110,28 @@ from app.routes._redirect_target import RedirectTarget
 #:   refusal (plan step salary:R18-b): a target account on an EARNING kind,
 #:   which funds nothing.  Listed in the same commit as the sentence, so it
 #:   is heard rather than the generic prompt.
+#:
+#: **The raise form's three arrived with its doors' move onto this loader**
+#: (task plan#3125): until then ``salary.add_raise`` and ``update_raise``
+#: flashed the generic prompt for every refusal, so each sentence below was
+#: dead copy, the leap-day one included although its docstring said "in
+#: words".
+#:
+#: * ``raise_end_mode`` / ``terminal_year`` -- the raise's end-year answer
+#:   (``validate_end_year``, through ``salary_raises.end_year_of``, ruling
+#:   R-SAL22): unanswered on a recurring raise, a year missing where the
+#:   answer asks one, an end before the start, or an end year on a one-time
+#:   raise.  No other schema this loader serves declares either name.
+#: * :data:`~marshmallow.exceptions.SCHEMA` -- marshmallow's WHOLE-FORM key
+#:   (``"_schema"``), where a cross-field rule that belongs to no one control
+#:   lands (ruling plan#3135): the raise's percentage-or-flat-amount rule, its
+#:   leap-day rule (a raise that repeats every year cannot start on February
+#:   29, ruling plan#3090: the Recur box and the date together, so ruling
+#:   plan#3137 files it here), and the
+#:   transfer template's same-account rule, which was silent too.  No
+#:   stock validator writes there from a form post (a form is always a
+#:   mapping), so every message under it is authored.  LAST, so a refusal
+#:   that names its control is the one said when both are present.
 ACTIONABLE_FLASH_FIELDS: tuple[str, ...] = (
     "is_envelope",
     "recurrence_unit",
@@ -119,6 +144,9 @@ ACTIONABLE_FLASH_FIELDS: tuple[str, ...] = (
     "end_date",
     "max_occurrences",
     "target_account_id",
+    "raise_end_mode",
+    "terminal_year",
+    SCHEMA,
 )
 
 GENERIC_VALIDATION_FLASH: str = (

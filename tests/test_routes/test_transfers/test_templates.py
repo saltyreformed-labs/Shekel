@@ -306,7 +306,9 @@ class TestTemplateCreate:
             }, follow_redirects=True)
 
             assert response.status_code == 200
-            assert b"Please correct the highlighted errors" in response.data
+            # Its own words since ruling plan#3135, which put the whole-form
+            # key the same-account rule lands under on the shared allowlist.
+            assert b"From and To accounts must be different." in response.data
 
     def test_create_recurring_template_from_loan_flashes_not_500(
         self, app, auth_client, seed_user, seed_periods_today,

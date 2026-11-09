@@ -39,6 +39,7 @@ from app.services import (
 )
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import PayCalendar, calendar_for
+from app.services.salary_raises import RAISE_YEAR_MAX, RAISE_YEAR_MIN
 from app.services.recurrence import (
     NEVER_ENDS,
     EndBound,
@@ -196,6 +197,21 @@ def _regenerate_salary_transactions(
     flash_retained_notice(retained)
 
 
+def _raise_form_bounds() -> dict[str, int]:
+    """The years the raise form's date and end-year controls offer.
+
+    The window's one home is ``salary_raises.RAISE_YEAR_MIN`` / ``_MAX``,
+    which the schema's ``Range`` and the columns' CHECKs are built from; the
+    template typed the same two years a second time until task plan#3125.
+    Both renders of the Raises card (the edit page and the HTMX section) hand
+    these in.
+
+    Returns:
+        ``raise_year_min`` and ``raise_year_max``, for the template.
+    """
+    return {"raise_year_min": RAISE_YEAR_MIN, "raise_year_max": RAISE_YEAR_MAX}
+
+
 def _render_raises_partial(profile):
     """Return the raises table partial for HTMX updates."""
     # Refresh relationships
@@ -205,6 +221,7 @@ def _render_raises_partial(profile):
         "salary/_raises_section.html",
         profile=profile,
         raise_types=raise_types,
+        **_raise_form_bounds(),
     )
 
 

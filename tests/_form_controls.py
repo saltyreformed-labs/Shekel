@@ -17,9 +17,13 @@ class FormControls(HTMLParser):
     Repeated names (the stub form's one-off rows) keep every value in order;
     an ``<input>`` submits its ``value`` and a ``<select>`` its ``selected``
     option, else its first, and a select with no option submits nothing.  A
-    control without a name submits nothing.  It reads only those two shapes:
-    any other control inside the form -- an input of any type but hidden,
-    text, number or date (a checkbox or radio, say), a ``<textarea>``, a named
+    checkbox or radio submits its ``value`` (``on`` when it states none) only
+    while ``checked``, and every one, checked or not, is listed in
+    :attr:`choices`, so a test can tick one the form renders and never one it
+    does not (task plan#3125, the raise form's Recur box and end-year
+    answer).  A control without a name submits nothing.  It reads only those
+    shapes: any other control inside the form -- an input of any type but
+    hidden, text, number, date, checkbox or radio, a ``<textarea>``, a named
     button, a disabled input, a disabled or multiple select, a disabled
     option or an option without a ``value`` in a named select (a browser
     posts such an option's text), or a disabled ``<fieldset>`` or
@@ -32,11 +36,15 @@ class FormControls(HTMLParser):
 
     #: Input types a browser posts by their ``value`` alone.
     _PLAIN_INPUTS = frozenset({"hidden", "text", "number", "date"})
+    #: Input types a browser posts only while ``checked``.
+    _CHECKED_INPUTS = frozenset({"checkbox", "radio"})
 
     def __init__(self, action):
         super().__init__()
         self.action = action
         self.controls: "dict[str, list[str]]" = {}
+        #: Every checkbox's and radio's value by name, checked or not.
+        self.choices: "dict[str, list[str]]" = {}
         self._inside = False
         self._select = None
         self._chosen = None
@@ -51,8 +59,11 @@ class FormControls(HTMLParser):
         elif self._inside and tag in ("fieldset", "optgroup") and "disabled" in attributes:
             raise AssertionError(f"the reader does not post a disabled <{tag}>")
         elif self._inside and tag == "input" and attributes.get("name"):
-            plain = attributes.get("type", "text") in self._PLAIN_INPUTS
-            if not plain or "disabled" in attributes:
+            kind = attributes.get("type", "text")
+            if kind in self._CHECKED_INPUTS and "disabled" not in attributes:
+                self._read_checked_input(attributes)
+                return
+            if kind not in self._PLAIN_INPUTS or "disabled" in attributes:
                 raise AssertionError(f"the reader does not post {attributes}")
             self.controls.setdefault(attributes["name"], []).append(attributes.get("value") or "")
         elif self._inside and tag == "select":
@@ -64,6 +75,13 @@ class FormControls(HTMLParser):
                 raise AssertionError(f"the reader does not post the option {attributes}")
             if self._chosen is None or "selected" in attributes:
                 self._chosen = attributes["value"]
+
+    def _read_checked_input(self, attributes):
+        """List a checkbox or radio among the choices, and post it if checked."""
+        value = attributes.get("value", "on")
+        self.choices.setdefault(attributes["name"], []).append(value)
+        if "checked" in attributes:
+            self.controls.setdefault(attributes["name"], []).append(value)
 
     def handle_endtag(self, tag):
         """Close a select, submitting its choice, or close the form."""
@@ -94,4 +112,24 @@ def rendered_form_controls(html, action):
     return reader.controls
 
 
-__all__ = ["FormControls", "rendered_form_controls"]
+def rendered_form_choices(html, action):
+    """The checkboxes and radios of the form posting to *action*, checked or not.
+
+    The half of a form :func:`rendered_form_controls` cannot show: a browser
+    posts an unticked box as nothing, so a test that ticks one asks this
+    first that the form renders it, with the value it would post.
+
+    Args:
+        html: A rendered page.
+        action: The form's ``action``, as the page renders it.
+
+    Returns:
+        ``{name: [value, ...]}``: each box's value, a radio group's in order.
+    """
+    reader = FormControls(action)
+    reader.feed(html)
+    assert reader.controls, f"no form posts to {action}"
+    return reader.choices
+
+
+__all__ = ["FormControls", "rendered_form_choices", "rendered_form_controls"]

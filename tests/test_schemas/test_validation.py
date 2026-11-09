@@ -1707,13 +1707,18 @@ class TestRaiseRangeValidation:
         assert data["effective_date"] == date(2026, 7, 15)
 
     def test_a_recurring_raise_may_not_start_on_february_29(self):
-        """It repeats on its month and day, which three years in four lack."""
+        """It repeats on its month and day, which three years in four lack.
+
+        A rule of the Recur box and the date together, so it lands under the
+        whole-form key the shared loader flashes (ruling plan#3137, beside
+        ruling plan#3135; task plan#3125).
+        """
         with pytest.raises(ValidationError) as exc:
             RaiseCreateSchema().load(self._base(
                 effective_date="2028-02-29", is_recurring="on",
                 raise_end_mode="none",
             ))
-        assert exc.value.messages["effective_date"] == [
+        assert exc.value.messages["_schema"] == [
             "A raise that repeats every year can't start on February 29, "
             "because most years don't have one. Start it on February 28 "
             "or March 1."

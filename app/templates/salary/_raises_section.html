@@ -116,12 +116,14 @@
           {# The day the raise starts (ruling plan#3090): the employer pays each
              weekday at the pay in force that day, so the day moves money.  No
              default, so the date is stated rather than assumed.  A raise that
-             repeats does so on this month and day every year. #}
+             repeats does so on this month and day every year.  The window is
+             salary_raises' RAISE_YEAR_MIN / _MAX, handed in by the route
+             (task plan#3125), the years the schema and the column take. #}
           <div class="col-md-3">
             <label class="form-label" for="raise-effective-date">Starts on</label>
             <input type="date" name="effective_date" id="raise-effective-date"
                    class="form-control form-control-sm"
-                   min="2000-01-01" max="2100-12-31" required>
+                   min="{{ raise_year_min }}-01-01" max="{{ raise_year_max }}-12-31" required>
           </div>
           <div class="col-md-2">
             <label class="form-label">Percentage</label>
@@ -173,7 +175,7 @@
               </div>
               <input type="number" name="terminal_year" id="raise-terminal-year"
                      class="form-control form-control-sm input-rem-7"
-                     min="2000" max="2100" placeholder="year"
+                     min="{{ raise_year_min }}" max="{{ raise_year_max }}" placeholder="year"
                      aria-label="Last year this raise is believed">
             </div>
           </div>

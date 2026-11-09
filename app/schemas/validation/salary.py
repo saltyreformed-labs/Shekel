@@ -248,7 +248,7 @@ class RaiseCreateSchema(BaseSchema):
         ),
     )
     # F-011 / C-24: Tightened from Range(-1e7, 1e7) to a positive,
-    # column-fitting bound on a flat-dollar raise per period.
+    # column-fitting bound on a flat-dollar raise, dollars a year (R-SAL65).
     # ``salary.salary_raises.flat_amount`` is ``Numeric(12, 2)``; the
     # DB CHECK ``flat_amount > 0`` rejects zero/negative.  $10M is
     # the schema-layer ceiling -- well above any realistic raise but
@@ -304,16 +304,13 @@ class RaiseCreateSchema(BaseSchema):
         generic failure; neither copy is the source of truth for the other,
         and the database's is the one that cannot be bypassed.
 
-        **The messages are not rendered on the control today**, and an
-        adversarial review of plan step salary:S3-c corrected a draft of this
-        paragraph that said they were.  ``salary.add_raise`` and
-        ``update_raise`` flash "Please correct the highlighted errors and try
-        again." and redirect, and ``_raises_section.html`` renders neither
-        ``errors`` nor the submitted values -- so nothing is highlighted and
-        the form comes back empty.  That is the raise form's long-standing
-        shape (``validate_one_method`` has always refused the same way), not
-        something this step introduced, and fixing it is a change to that
-        form rather than to this schema.
+        **Each message is flashed in its own words since task plan#3125**:
+        ``salary.add_raise`` and ``update_raise`` load through the shared
+        loader (:func:`~app.routes._form_errors.load_form_or_redirect`), whose
+        allowlist carries ``raise_end_mode`` and ``terminal_year``.  Until then
+        both doors flashed "Please correct the highlighted errors and try
+        again." for every refusal, on a form that highlights nothing.
+        Nothing is rendered ON the control: the flash is the message.
 
         Raises:
             ValidationError: The end year contradicts the raise's kind, is
@@ -396,7 +393,12 @@ class RaiseCreateSchema(BaseSchema):
         A recurring raise repeats on its start's month and day every year it
         is believed (ruling **plan#3090**), and three years in four have no
         February 29 to repeat on.  The form refuses it here, in words, before
-        ``ck_salary_raises_recurring_not_on_february_29`` could.
+        ``ck_salary_raises_recurring_not_on_february_29`` could.  The rule is
+        the Recur box's and the date's together, so it lands under
+        marshmallow's whole-form key, which the shared loader's allowlist
+        carries (rulings **plan#3135** and **plan#3137**, task plan#3125): the
+        raise doors flash it, while a date merely missing keeps the generic
+        prompt.
 
         Raises:
             ValidationError: On a recurring raise dated February 29.
@@ -408,17 +410,19 @@ class RaiseCreateSchema(BaseSchema):
             raise ValidationError(
                 "A raise that repeats every year can't start on February 29, "
                 "because most years don't have one. Start it on February 28 "
-                "or March 1.",
-                field_name="effective_date",
+                "or March 1."
             )
 
     @validates_schema
     def validate_one_method(self, data, **kwargs):
         """Require exactly one of ``percentage`` or ``flat_amount``.
 
-        A raise is either a percentage bump or a flat per-period dollar
-        amount, never both and never neither; the two columns are
-        mutually exclusive in ``salary.salary_raises``.
+        A raise is either a percentage bump or a flat dollar amount a year,
+        never both and never neither; the two columns are mutually exclusive
+        in ``salary.salary_raises``.  The refusal belongs to neither control,
+        so it lands under marshmallow's whole-form key, which the shared
+        loader's allowlist carries (ruling **plan#3135**), and its words name
+        the two boxes by their labels on the form.
 
         Raises:
             ValidationError: If both fields are set, or neither is.
@@ -427,7 +431,8 @@ class RaiseCreateSchema(BaseSchema):
         has_flat = data.get("flat_amount") is not None
         if has_pct == has_flat:
             raise ValidationError(
-                "Specify exactly one of percentage or flat_amount."
+                "Enter the raise as either a percentage or a flat amount a "
+                "year, but not both."
             )
 
 

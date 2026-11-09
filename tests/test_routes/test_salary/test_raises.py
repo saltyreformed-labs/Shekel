@@ -251,7 +251,12 @@ class TestRaises:
             )
 
             assert response.status_code == 200
-            assert b"Please correct the highlighted errors" in response.data
+            # The one-method rule's own words since ruling plan#3135, which
+            # put the whole-form key on the shared loader's allowlist.
+            assert (
+                b"Enter the raise as either a percentage or a flat amount a "
+                b"year, but not both."
+            ) in response.data
 
     def test_add_raise_without_start_date_rejected(
         self, app, auth_client, seed_user, seed_periods,

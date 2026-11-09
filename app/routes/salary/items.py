@@ -96,17 +96,22 @@ def _edit_page(profile_id: int) -> RedirectTarget:
 @salary_bp.route("/salary/<int:profile_id>/raises", methods=["POST"])
 @require_owner
 def add_raise(profile_id):
-    """Add a raise to a salary profile."""
+    """Add a raise to a salary profile.
+
+    The payload is loaded ONCE through the shared loader
+    (:func:`~app.routes._form_errors.load_form_or_redirect`, task
+    plan#3125), so a refused raise is flashed in the schema's own words --
+    a yearly raise from February 29, an unanswered end year, both or neither
+    of a percentage and a flat amount -- rather than the generic prompt.
+    """
     profile = get_or_404(SalaryProfile, profile_id)
     if profile is None:
         abort(404)
 
-    errors = _raise_schema.validate(request.form)
-    if errors:
-        flash("Please correct the highlighted errors and try again.", "danger")
-        return redirect(url_for("salary.edit_profile", profile_id=profile_id))
-
-    data = _raise_schema.load(request.form)
+    payload = load_form_or_redirect(_raise_schema, _edit_page(profile_id))
+    if isinstance(payload, Response):
+        return payload
+    data = payload
 
     # Convert percentage input (e.g. 3 → 0.03) for storage.
     if data.get("percentage") is not None:
@@ -246,7 +251,8 @@ def update_raise(raise_id):
     :class:`~sqlalchemy.exc.IntegrityError` (F-051/C-23, surfaced as a
     warning), and any other DB error (C-46/F-145, a danger flash).  The
     route keeps only the input-validation and stale-form pre-check guard
-    clauses.
+    clauses; the first loads the payload once through the shared loader, as
+    :func:`add_raise` does, so a refusal is flashed in its own words.
     """
     salary_raise = get_owned_via_parent(
         SalaryRaise, raise_id, "salary_profile",
@@ -256,12 +262,10 @@ def update_raise(raise_id):
 
     profile = salary_raise.salary_profile
 
-    errors = _raise_update_schema.validate(request.form)
-    if errors:
-        flash("Please correct the highlighted errors and try again.", "danger")
-        return redirect(url_for("salary.edit_profile", profile_id=profile.id))
-
-    data = _raise_update_schema.load(request.form)
+    payload = load_form_or_redirect(_raise_update_schema, _edit_page(profile.id))
+    if isinstance(payload, Response):
+        return payload
+    data = payload
 
     # Stale-form check (commit C-18 / F-010).
     submitted_version = data.pop("version_id", None)

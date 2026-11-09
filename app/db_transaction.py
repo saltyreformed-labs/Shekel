@@ -186,10 +186,14 @@ owes one thing of its own: a save's READS that decide its write must sit
 inside its block, because a read in the query's snapshot before the block is
 a read taken before the lock.  Sign-up takes no lock: its user is not
 committed, so no other transaction can touch it.  **Sign-in takes the
-signing-in person's owner lock** right after finding the account and before
-reading its codes or failed-attempt count (ruling **R-CC121**,
-:func:`bind_sign_in_owner`): it writes a committed user's rows before anyone
-is signed in, which no hook above can see.  A CLI script, a deploy reconcile
+signing-in person's owner lock itself** (:func:`bind_sign_in_owner`): it
+writes a committed user's rows before anyone is signed in, which no hook above
+can see.  The code step takes it right after finding the account and before
+reading its codes, and a known browser's password step before its check
+(ruling **R-CC121**); a stranger's password step takes it only once its check
+has committed and found the password right, on the way to signing in (ruling
+plan#3110), so no stranger's try waits on it while bcrypt runs, and the wait
+is no clue to which emails have accounts.  A CLI script, a deploy reconcile
 and Alembic hold no request, so nothing here locks for them: the three deploy
 reconciles lock every owner at their own start
 (:func:`app.services.user_write_lock.lock_every_user_writes`), and a script
@@ -675,17 +679,26 @@ def _take_the_request_owner_s_lock() -> None:
 def bind_sign_in_owner(user_id: int, owner_id: "int | None") -> None:
     """Take the lock of the owner whose data a SIGN-IN is about to write.
 
-    Ruling **R-CC121** ("Lock, then check"): sign-in takes the signing-in
-    person's owner lock right after finding the account, before it reads the
-    codes or the failed-attempt count, and re-checks nothing.  Sign-in is the
-    one writer of a committed user's rows that no signed-in request covers:
-    the password step (the count and lock on the record of the account's
-    email, ``auth.guess_records``) and the code step (``backup_codes``,
-    ``last_totp_timestep``, ``session_invalidated_at``) run before anyone is
-    signed in, so :func:`bind_request_actor` never saw an owner.  Unlocked, a backup-code
+    Sign-in is the one writer of a committed user's rows that no signed-in
+    request covers: the code step (``backup_codes``, ``last_totp_timestep``,
+    ``session_invalidated_at``), a known browser's count on its record, and
+    the completion's records run before anyone is signed in, so
+    :func:`bind_request_actor` never saw an owner.  Unlocked, a backup-code
     sign-in racing "Regenerate backup codes" wrote the old codes back over the
-    new ones, one backup or authenticator code signed in two devices, and two
-    wrong passwords counted once.
+    new ones, one backup or authenticator code signed in two devices, and a
+    known browser's two wrong passwords counted once.  So the code step takes
+    it right after finding the account, before it reads the codes, and a known
+    browser's password step before its check (ruling **R-CC121**, "Lock, then
+    check").  A stranger's password step takes it only once its check has
+    committed and found the password right, and re-reads the account under it
+    (ruling plan#3110): a stranger's count is the record of the email typed
+    (``auth.guess_records``), whose own row lock serialises it, and a wait on
+    this lock through the check took twice as long for two tries at a real
+    email as at one no account has.
+
+    When the transaction that found the account is still open, the lock is
+    taken on it now; when a commit has ended it, the lock is the next
+    transaction's first act (:func:`_lock_the_open_transaction`).
 
     Records no ACTOR: the audit rows a sign-in writes carry none today, and who
     they are attributed to is not this ruling's to change.
@@ -710,7 +723,12 @@ def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") ->
 
     The only rows that transaction has read before the lock are *user_id*'s
     own, loaded to sign the request in or to find the account, and the role
-    row joined to it (``User.role``, ``lazy="joined"``: the same statement).
+    row joined to it (``User.role``, ``lazy="joined"``: the same statement);
+    at ``/login``, also whether the browser's cookie names a known record of
+    that user, read as an id alone
+    (:func:`app.services.known_device_service.is_known`), so no record of it
+    is loaded.  A sign-in whose check committed holds no open transaction
+    here, so the lock is the next one's first act and nothing precedes it.
     The password, MFA and settings doors write the user's row, so it is
     EXPIRED once the lock is held, and its next use reloads it under the lock:
     nothing a write decides on was read before it.  The role row is a

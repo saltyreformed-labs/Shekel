@@ -12,7 +12,8 @@ lives here rather than in either route module; a typo on any one key
 would silently break the flow, which is why the key names are
 centralised at all.  :func:`_browser_standing` (and :func:`_known_device`)
 is the one read, per request, of what the browser's cookie is worth
-(plan#2772), and :func:`_spend_a_try` the one spending of a door's tries
+(plan#2772), :func:`_names_a_known_browser` the one question ``/login`` asks of
+it before any lock, and :func:`_spend_a_try` the one spending of a door's tries
 from it, at the code form and at re-confirm.
 :func:`_complete_sign_in` is the ONE completion of a sign-in, whichever proof
 finished it: a password with no second factor, a password and a code, or a
@@ -110,10 +111,12 @@ def _browser_standing(user) -> BrowserStanding | None:
     """Return what this browser's cookie is worth for *user*, or ``None``.
 
     Read once per request, under the owner's lock, by every door with a
-    password or code to check: ``/login`` and ``/mfa/verify`` right after they
-    take it, and the signed-in doors (``/reauth``, ``/change-password``,
-    ``/mfa/disable``), whose request took it at its boundary.  So everything in
-    the request that turns on the browser judges it at one moment (plan#2772):
+    password or code to check: ``/login`` right after it takes the lock for a
+    browser :func:`_names_a_known_browser` found known, ``/mfa/verify`` right
+    after it takes it, and the signed-in doors (``/reauth``,
+    ``/change-password``, ``/mfa/disable``), whose request took it at its
+    boundary.  So everything in the request that turns on the browser judges
+    it at one moment (plan#2772):
     the lock, the count and what a success clears, at ``/login`` the trusted
     skip of the code, and at ``/mfa/verify`` whose tries a code spends
     (plan#3025).  It is the cookie for THAT user, judged by
@@ -133,6 +136,28 @@ def _browser_standing(user) -> BrowserStanding | None:
         ``None`` for a stranger.
     """
     return known_device_service.find_browser(user.id, device_token(user.id))
+
+
+def _names_a_known_browser(user) -> bool:
+    """Return whether this browser's cookie names a browser known to *user*, before any lock.
+
+    ``/login``'s question, asked before it takes the owner's lock, of whether
+    to take it before the password check: a known browser checks under it, a
+    stranger with none held (ruling plan#3110).  So a made-up cookie never
+    makes a stranger take the lock.  It loads no record
+    (:func:`~app.services.known_device_service.is_known`), and the answer
+    decides nothing else: under the lock :func:`_browser_standing` reads the
+    browser again, and a record its own guesses deleted meanwhile is a
+    stranger's.
+
+    Args:
+        user: The :class:`~app.models.user.User` signing in, whose owner's
+            lock is not held.
+
+    Returns:
+        True when the cookie names a live record of *user*.
+    """
+    return known_device_service.is_known(user.id, device_token(user.id))
 
 
 def _known_device(user) -> KnownDevice | None:

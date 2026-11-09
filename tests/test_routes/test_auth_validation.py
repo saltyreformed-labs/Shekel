@@ -55,7 +55,7 @@ class TestLoginSchemaWiring:
                 assert b"Invalid email or password" in response.data
                 assert mock_check.call_count == 0, (
                     "bcrypt was reached despite oversized password; "
-                    "the schema cap must run before authenticate()."
+                    "the schema cap must run before the password check."
                 )
 
     def test_oversized_email_rejected_generic_error(self, app, client):

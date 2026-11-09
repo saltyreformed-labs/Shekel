@@ -4,9 +4,10 @@ Shekel Budget App -- Known Device Service
 One browser, one record, one cookie (plan#2772, ruling plan#2994).  A finished
 sign-in writes the record; a trust is one fact on it, and skips only the
 two-factor code, never the password (plan#2173, ruling plan#2406).  This module
-owns the record's acts: read what a browser's token is worth, record a finished
-sign-in or re-confirm (each gives the browser a new token and clears its
-count), count a wrong guess, list a user's trusted devices, and forget one.
+owns the record's acts: read what a browser's token is worth (or, before any
+lock, only whether it names a known browser), record a finished sign-in or
+re-confirm (each gives the browser a new token and clears its count), count a
+wrong guess, list a user's trusted devices, and forget one.
 Beside them, :func:`device_named_by` picks a browser's device out of a list
 already read, so the token's hash is spelled in this module alone.
 
@@ -142,6 +143,28 @@ def _trusted(now: datetime) -> ColumnElement[bool]:
     )
 
 
+def _the_known_browser(now: datetime, user_id: int, token: str) -> ColumnElement[bool]:
+    """Return the ONE statement of which record *token* names for *user_id*, as SQL.
+
+    The record holding *token*'s hash, of *user_id*, and known at *now*
+    (:func:`_known`): so a token no record holds, another user's token and a
+    browser past its lifetime all match nothing.
+
+    Args:
+        now: The moment to judge at.
+        user_id: The ``auth.users.id`` signing in.
+        token: The token the browser's cookie carries.
+
+    Returns:
+        A boolean clause over ``auth.known_devices``.
+    """
+    return and_(
+        KnownDevice.token_hash == _token_hash(token),
+        KnownDevice.user_id == user_id,
+        _known(now),
+    )
+
+
 def _standing_at(
     now: datetime, user_id: int, token: str | None,
 ) -> BrowserStanding | None:
@@ -159,14 +182,40 @@ def _standing_at(
         return None
     row = db.session.execute(
         select(KnownDevice, _trusted(now)).where(
-            KnownDevice.token_hash == _token_hash(token),
-            KnownDevice.user_id == user_id,
-            _known(now),
+            _the_known_browser(now, user_id, token),
         )
     ).one_or_none()
     if row is None:
         return None
     return BrowserStanding(device=row[0], trusted=row[1] is True)
+
+
+def is_known(user_id: int, token: str | None) -> bool:
+    """Return whether *token* names a browser known to *user_id*, loading no record.
+
+    ``/login``'s question before it takes any lock: a known browser checks
+    its password under the owner's lock, and a stranger checks with none held
+    (ruling plan#3110), so a made-up cookie never makes a stranger take the
+    lock.  The answer is a bool, never the record: the record the sign-in
+    acts on is read under the lock, by :func:`find_browser`, because one read
+    before it holds the count as it stood before the lock, and a guess
+    counted on that copy would write back over one counted meanwhile.
+
+    Args:
+        user_id: The ``auth.users.id`` signing in.
+        token: The token the browser's cookie carries, or ``None`` when it
+            sent none.
+
+    Returns:
+        True when :func:`find_browser` would, at this moment, answer a
+        standing.
+    """
+    if token is None:
+        return False
+    now = datetime.now(timezone.utc)
+    return db.session.execute(
+        select(KnownDevice.id).where(_the_known_browser(now, user_id, token))
+    ).first() is not None
 
 
 def find_browser(user_id: int, token: str | None) -> BrowserStanding | None:

@@ -6,6 +6,7 @@ import pytest
 
 from app.services import auth_service
 from app.exceptions import AuthError
+from tests._sign_in import stranger_signs_in
 
 
 class TestHashPassword:
@@ -195,20 +196,21 @@ class TestVerifyPasswordC44Hardening:
     def test_authenticate_handles_non_string_password_via_verify_guard(
         self, app, db, seed_user,
     ):
-        """End-to-end: a non-string password through ``authenticate`` raises AuthError.
+        """End-to-end: a non-string password through a stranger's sign-in raises AuthError.
 
-        Before C-44, calling ``authenticate(email, b"bytes")`` would
+        Before C-44, calling ``authenticate(email, b"bytes")`` (the sign-in
+        check then) would
         crash inside ``verify_password`` with ``AttributeError`` and
         bubble up as a Flask 500.  After C-44, the bytes payload is
         rejected by the type guard so ``verify_password`` returns
-        ``False`` and ``authenticate`` raises the standard
+        ``False`` and ``check_strangers_password`` raises the standard
         ``AuthError`` -- the user-visible response is now identical
         to a wrong-password attempt, which is the right side-channel
         posture for the auth path.
         """
         with app.app_context():
             with pytest.raises(AuthError, match="Invalid email or password"):
-                auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), b"testpass", device=None)
+                stranger_signs_in("test@shekel.local", b"testpass")
 
     def test_failure_modes_are_indistinguishable(self):
         """Every failure mode returns the same ``False`` value, not a tagged sentinel.

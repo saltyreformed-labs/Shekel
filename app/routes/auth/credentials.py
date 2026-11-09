@@ -31,9 +31,10 @@ from app import ref_cache
 from app.db_transaction import bind_sign_in_owner
 from app.enums import RoleEnum
 from app.extensions import db, limiter
-from app.models.user import MfaConfig
+from app.models.user import MfaConfig, User
 from app.schemas.validation import LoginSchema, RegisterSchema
 from app.services import auth_service, registration_service
+from app.services.known_device_service import BrowserStanding
 from app.exceptions import AuthError, ConflictError, ValidationError
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
@@ -41,6 +42,7 @@ from app.routes.auth._helpers import (
     _complete_sign_in,
     _first_validation_message,
     _is_safe_redirect,
+    _names_a_known_browser,
 )
 from app.utils.log_events import (
     AUTH,
@@ -80,6 +82,61 @@ def _render_register_form():
     return render_template("auth/register.html")
 
 
+def _check_the_password(
+    email: str, password: str,
+) -> tuple[User, BrowserStanding | None]:
+    """Check the password typed at ``/login``; return the account and this browser's standing.
+
+    Two flows, chosen by what this browser's cookie is worth for the account
+    typed (plan#2772):
+
+    * **A browser known to the account** checks its password under the
+      account's owner lock, taken first (ruling **R-CC121**, "Lock, then
+      check"): its wrong guesses count on its own record, and the lock keeps
+      two of them from counting once.  Whether it is known is asked first
+      with no lock held and no record loaded (:func:`_names_a_known_browser`),
+      then read again under the lock (:func:`_browser_standing`), so a
+      made-up cookie never makes a stranger take the lock.  A browser whose
+      record its own guesses deleted between the two reads goes on as a
+      stranger, with the lock it already took still held through its check:
+      it held a live cookie for this account a moment ago, so its wait is no
+      clue to whether the email has one.
+    * **Every other try is a stranger's** and runs the same steps whatever the
+      email and the answer, with no lock held (ruling plan#3110): the
+      password check, the guess record's one statement and a commit
+      (:func:`~app.services.auth_service.check_strangers_password`).  So a
+      wrong password at a real account costs what one at an email no account
+      has does, and no try waits on another try at the same email through its
+      check.  Only a right password the lock let through takes the owner's
+      lock, on the way to signing in, and under it the account is read again
+      and its hash confirmed
+      (:func:`~app.services.auth_service.confirm_strangers_password`).
+
+    Args:
+        email: The email typed, as the form normalised it.
+        password: The password typed.
+
+    Returns:
+        The account the password signs in to, and this browser's standing
+        for it, or ``None`` for a stranger.
+
+    Raises:
+        AuthError: The password does not sign in, for any of the reasons the
+            two flows refuse it.
+    """
+    user = auth_service.find_sign_in_user(email)
+    if user is not None and _names_a_known_browser(user):
+        bind_sign_in_owner(user.id, user.data_owner_id)
+        standing = _browser_standing(user)
+        if standing is not None:
+            return auth_service.authenticate_known_browser(
+                user, password, device=standing.device,
+            ), standing
+    proof = auth_service.check_strangers_password(email, user, password)
+    bind_sign_in_owner(proof.user_id, proof.owner_id)
+    return auth_service.confirm_strangers_password(user, proof), None
+
+
 @auth_bp.route("/login", methods=["GET", "POST"])
 @limiter.limit("5 per 15 minutes", methods=["POST"])
 def login():
@@ -111,22 +168,12 @@ def login():
         try:
             login_data = LoginSchema().load(request.form)
             email = login_data["email"]
-            password = login_data["password"]
-            # Find the account, take its owner's lock, THEN check it (ruling
-            # R-CC121, "Lock, then check"): the check reads the lockout
-            # columns and writes the failed-attempt count, and a signed-in
-            # door writes the same row under that lock.  Under the lock, read
-            # once what this browser's cookie is worth for the account: the
-            # lock, the count and the code's skip all turn on it (plan#2772).
-            user = auth_service.find_sign_in_user(email)
-            standing = None
-            if user is not None:
-                bind_sign_in_owner(user.id, user.data_owner_id)
-                standing = _browser_standing(user)
-            user = auth_service.authenticate(
-                user, password,
-                device=None if standing is None else standing.device,
-            )
+            # The password, a known browser's under the owner's lock and a
+            # stranger's with none held until it is right (ruling plan#3110).
+            # What this browser's cookie is worth for the account is read
+            # once, and the count and the code's skip below turn on it
+            # (plan#2772).
+            user, standing = _check_the_password(email, login_data["password"])
 
             # Check if MFA is enabled for this user.
             mfa_config = (
@@ -184,11 +231,11 @@ def login():
                 "Login failed: schema validation",
                 ip=request.remote_addr,
             )
-            flash("Invalid email or password.", "danger")
+            flash(auth_service.INVALID_SIGN_IN_MESSAGE, "danger")
         except AuthError:
             log_event(logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
                       "Login failed", email=email, ip=request.remote_addr)
-            flash("Invalid email or password.", "danger")
+            flash(auth_service.INVALID_SIGN_IN_MESSAGE, "danger")
 
     return render_template("auth/login.html")
 

@@ -22,7 +22,8 @@ an email is guessable, so the digest is keyed: without the key, a copy of this
 table cannot be searched for the emails strangers typed.
 
 The table is audited (ruling plan#3113): every stranger's try writes its
-record, so the audit trail holds one row per try, with the digest and never
+record, so the audit trail holds one row per try (two for a sign-in whose
+password changed during its check, judged again as wrong), with the digest and never
 the address.
 
 Related service: app/services/guess_record_service.py

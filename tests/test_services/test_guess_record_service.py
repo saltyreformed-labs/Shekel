@@ -145,6 +145,25 @@ class TestTheJudgment:
         assert not _judge(SEED_USER_EMAIL).refused
         assert count_of(SEED_USER_EMAIL) == 1
 
+    def test_a_second_lock_opens_once_the_first_has_run_out(self, app, db, seed_user, at):
+        """Three wrong, the lock runs out, three more: the last opens a second lock, and says so.
+
+        The outcome names a lock this try opened by the lock's end moving, so
+        a record whose first lock has run out (not NULL) still reports the
+        second: it ends 15 minutes after the try at 15 minutes, 30 after _T0.
+        """
+        at(_T0)
+        for _ in range(_THRESHOLD):
+            _judge(SEED_USER_EMAIL)
+        at(_T0 + _DURATION)
+
+        outcomes = [_judge(SEED_USER_EMAIL) for _ in range(_THRESHOLD)]
+
+        assert [o.opened_lock_until for o in outcomes] == [
+            None, None, _T0 + _DURATION + _DURATION,
+        ]
+        assert locked_until_of(SEED_USER_EMAIL) == _T0 + _DURATION + _DURATION
+
     def test_the_lock_is_open_a_second_before_its_end(self, app, db, seed_user, at):
         """The control: a second before the end, the lock is open."""
         at(_T0)

@@ -327,9 +327,10 @@ class BaseConfig:
     # ---- Account lockout (audit finding F-033 / commit C-11) ----------
     #
     # Per-account brute-force throttling that cannot be bypassed by IP
-    # rotation.  See ``app/models/user.py`` for the column-level
-    # documentation and ``app/services/auth_service.py:authenticate``
-    # for the enforcement path.  These settings are documented here for
+    # rotation.  See ``app/models/guess_record.py`` for the column-level
+    # documentation and ``app/services/auth_service.py`` (its
+    # ``_judge_strangers_try``) for the enforcement path.  These settings
+    # are documented here for
     # operator discovery; the service itself reads ``os.getenv`` at call
     # time (matching the ``mfa_service.TOTP_ENCRYPTION_KEY`` pattern) so
     # tests can adjust thresholds via ``monkeypatch.setenv`` without

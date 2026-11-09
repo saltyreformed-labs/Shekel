@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import bcrypt
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
@@ -14,6 +15,7 @@ from app.services import auth_service, known_device_service
 from app.exceptions import AuthError
 from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
 from tests._guess_records import count_of, locked_until_of, set_record
+from tests._sign_in import stranger_signs_in
 
 
 _EMAIL = "test@shekel.local"
@@ -77,7 +79,7 @@ class TestAccountLockoutHelpers:
 
 
 class TestAccountLockoutBehaviour:
-    """End-to-end tests for the lockout flow inside ``authenticate``.
+    """End-to-end tests for the lockout flow of a stranger's sign-in password.
 
     Every test re-fetches the seed user inside its own ``app_context``
     via ``db.session.get`` because the ``seed_user`` fixture's session
@@ -98,10 +100,7 @@ class TestAccountLockoutBehaviour:
         """
         with app.app_context():
             with pytest.raises(AuthError):
-                auth_service.authenticate(
-                    auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
-                    device=None,
-                )
+                stranger_signs_in("test@shekel.local", "wrong-password")
 
             assert count_of(_EMAIL) == 1
             assert locked_until_of(_EMAIL) is None
@@ -119,10 +118,7 @@ class TestAccountLockoutBehaviour:
         with app.app_context():
             for _ in range(3):
                 with pytest.raises(AuthError):
-                    auth_service.authenticate(
-                        auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
-                        device=None,
-                    )
+                    stranger_signs_in("test@shekel.local", "wrong-password")
             assert count_of(_EMAIL) == 3
             assert locked_until_of(_EMAIL) is None
 
@@ -142,10 +138,7 @@ class TestAccountLockoutBehaviour:
             before = datetime.now(timezone.utc)
             for _ in range(3):
                 with pytest.raises(AuthError):
-                    auth_service.authenticate(
-                        auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
-                        device=None,
-                    )
+                    stranger_signs_in("test@shekel.local", "wrong-password")
             assert count_of(_EMAIL) == 0
             locked_until = locked_until_of(_EMAIL)
             assert locked_until is not None
@@ -160,14 +153,16 @@ class TestAccountLockoutBehaviour:
     ):
         """A locked account refuses even the correct password.
 
-        This is the timing-oracle defence: while ``locked_until > now``
-        the service checks the password only against the dummy hash, so an
-        attacker observing response timing cannot distinguish "locked +
-        right" from "locked + wrong" and cannot use a captured-but-then-
-        locked window to confirm a guessed password
-        (:class:`TestALockedAttemptPaysTheCheck` spies that check).
-        Verified here by feeding a known-correct password and confirming
-        AuthError.
+        This is the timing-oracle defence: while ``locked_until > now`` a
+        right password and a wrong one run the same steps -- one check of
+        the account's hash, then the one statement that judges the lock and
+        refuses the try -- so an attacker observing response timing cannot
+        distinguish "locked + right" from "locked + wrong" and cannot use a
+        captured-but-then-locked window to confirm a guessed password
+        (ruling plan#3110; :class:`TestALockedAttemptPaysTheCheck` spies the
+        check, and ``tests/test_routes/test_strangers_sign_in.py`` the
+        statements).  Verified here by feeding a known-correct password and
+        confirming AuthError.
         """
         with app.app_context():
             now = datetime.now(timezone.utc)
@@ -178,7 +173,7 @@ class TestAccountLockoutBehaviour:
             db.session.commit()
 
             with pytest.raises(AuthError, match="Invalid email or password"):
-                auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass", device=None)
+                stranger_signs_in("test@shekel.local", "testpass")
 
     def test_locked_account_does_not_increment_counter(
         self, app, db, seed_user,
@@ -187,8 +182,8 @@ class TestAccountLockoutBehaviour:
 
         This matters because the service zeroes the counter at lockout-
         trip; we do not want re-locking to happen after a single retry
-        during the window.  The retry-while-locked path returns early
-        without touching the counter.
+        during the window.  The judgment refuses a try while the lock is
+        open without touching the counter.
         """
         with app.app_context():
             now = datetime.now(timezone.utc)
@@ -200,10 +195,7 @@ class TestAccountLockoutBehaviour:
 
             for _ in range(5):
                 with pytest.raises(AuthError):
-                    auth_service.authenticate(
-                        auth_service.find_sign_in_user("test@shekel.local"), "anything",
-                        device=None,
-                    )
+                    stranger_signs_in("test@shekel.local", "anything")
             assert count_of(_EMAIL) == 0
 
     def test_expired_lockout_allows_correct_password(
@@ -225,7 +217,7 @@ class TestAccountLockoutBehaviour:
             )
             db.session.commit()
 
-            result = auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass", device=None)
+            result = stranger_signs_in("test@shekel.local", "testpass")
             assert result.id == user_id
 
             # A correct password alone clears nothing (ruling plan#3007): the
@@ -247,13 +239,10 @@ class TestAccountLockoutBehaviour:
         with app.app_context():
             for _ in range(3):
                 with pytest.raises(AuthError):
-                    auth_service.authenticate(
-                        auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
-                        device=None,
-                    )
+                    stranger_signs_in("test@shekel.local", "wrong-password")
             assert count_of(_EMAIL) == 3
 
-            auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass", device=None)
+            stranger_signs_in("test@shekel.local", "testpass")
             assert count_of(_EMAIL) == 3
             assert locked_until_of(_EMAIL) is None
 
@@ -315,10 +304,7 @@ class TestAccountLockoutBehaviour:
         monkeypatch.setenv("LOCKOUT_THRESHOLD", "1")
         with app.app_context():
             with pytest.raises(AuthError):
-                auth_service.authenticate(
-                    auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
-                    device=None,
-                )
+                stranger_signs_in("test@shekel.local", "wrong-password")
             locked_until = locked_until_of(_EMAIL)
             assert locked_until is not None
             assert locked_until.tzinfo is not None
@@ -333,7 +319,6 @@ class TestAccountLockoutBehaviour:
         asserts the constraint name appears in the IntegrityError so a
         future rename is caught.
         """
-        from sqlalchemy.exc import IntegrityError  # pylint: disable=import-outside-toplevel
         with app.app_context():
             now = datetime.now(timezone.utc)
             with pytest.raises(
@@ -361,22 +346,24 @@ def _known_browser(user_id: int) -> str:
 
 
 def _attempt(token: str | None, password: str) -> User:
-    """Sign in as the route does: find, read the browser, then authenticate.
+    """Sign in as the route does, with no lock: find, read the browser, then check.
 
-    The browser is read afresh on each attempt, as each request reads it.
+    The browser is read afresh on each attempt, as each request reads it: a
+    known one checks as a known browser, any other as a stranger.
 
     Args:
         token: The browser's token, or ``None`` for a browser holding none.
         password: The password typed.
 
     Returns:
-        The user :func:`~app.services.auth_service.authenticate` returns.
+        The user the password signs in to.
     """
     user = auth_service.find_sign_in_user(_EMAIL)
     standing = known_device_service.find_browser(user.id, token)
-    return auth_service.authenticate(
-        user, password,
-        device=None if standing is None else standing.device,
+    if standing is None:
+        return stranger_signs_in(_EMAIL, password)
+    return auth_service.authenticate_known_browser(
+        user, password, device=standing.device,
     )
 
 
@@ -476,7 +463,7 @@ class TestAKnownBrowser:
 
 
 def _hashes_checked(email: str, password: str) -> list[str]:
-    """Return each hash bcrypt checked while ``authenticate`` refused *email*.
+    """Return each hash bcrypt checked while a stranger's sign-in refused *email*.
 
     Spies ``bcrypt.checkpw`` itself, the cost, so a branch that returns early
     shows as no check at all.
@@ -492,19 +479,19 @@ def _hashes_checked(email: str, password: str) -> list[str]:
         auth_service.bcrypt, "checkpw", wraps=bcrypt.checkpw,
     ) as checkpw:
         with pytest.raises(AuthError, match="Invalid email or password"):
-            auth_service.authenticate(
-                auth_service.find_sign_in_user(email), password, device=None,
-            )
+            stranger_signs_in(email, password)
     return [call.args[1].decode("utf-8") for call in checkpw.call_args_list]
 
 
 class TestALockedAttemptPaysTheCheck:
-    """Every refusal at ``/login`` pays one password check (ruling plan#2999).
+    """Every refusal at ``/login`` pays one password check (rulings plan#2999, plan#3110).
 
     A locked account used to skip it while an address with no account paid it,
     so ten wrong passwords and a faster reply told a stranger the address is a
-    real account that has just locked.  An address with no account and a
-    locked one check the dummy hash; a wrong password checks the account's.
+    real account that has just locked.  An address with no account checks the
+    dummy hash.  A real account checks its own, locked or not: the lock is
+    judged after the check, by the one statement every try sends (ruling
+    plan#3110), so the reply cannot depend on whether the password was right.
     """
 
     def test_an_address_with_no_account_checks_the_dummy(self, app, db, seed_user):
@@ -513,24 +500,21 @@ class TestALockedAttemptPaysTheCheck:
             auth_service._DUMMY_PASSWORD_HASH,
         ]
 
-    def test_a_locked_account_checks_the_dummy(self, app, db, seed_user):
-        """The right password and a wrong one: one check each, against the dummy.
+    def test_a_locked_account_checks_its_own_hash(self, app, db, seed_user):
+        """The right password and a wrong one: one check each, against the account's hash.
 
-        Never the account's hash, so the reply cannot depend on whether the
-        password was right.
+        What a wrong password at an unlocked account checks, so a locked
+        account's reply costs what an unlocked one's does; both are refused,
+        right or wrong, by the judgment after the check.
         """
+        password_hash = db.session.get(User, seed_user["user"].id).password_hash
         _lock(0)
 
-        assert _hashes_checked(_EMAIL, _PASSWORD) == [
-            auth_service._DUMMY_PASSWORD_HASH,
-        ]
-        assert _hashes_checked(_EMAIL, "wrong-password") == [
-            auth_service._DUMMY_PASSWORD_HASH,
-        ]
+        assert _hashes_checked(_EMAIL, _PASSWORD) == [password_hash]
+        assert _hashes_checked(_EMAIL, "wrong-password") == [password_hash]
 
     def test_a_wrong_password_checks_the_accounts_hash(self, app, db, seed_user):
         """One check, against the account's own hash: what the other two cost."""
         password_hash = db.session.get(User, seed_user["user"].id).password_hash
 
         assert _hashes_checked(_EMAIL, "wrong-password") == [password_hash]
-

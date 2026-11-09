@@ -15,6 +15,7 @@ import hashlib
 import logging
 import os
 from datetime import timedelta
+from typing import NamedTuple
 
 import bcrypt
 import requests
@@ -331,9 +332,9 @@ def verify_password(plain_password, password_hash):
       ``ValueError`` ("Invalid salt") inside ``bcrypt.checkpw``.
       The catch below converts it to ``False`` so a corrupted row
       cannot crash the login flow.  Operators observe the corruption
-      via the lockout-counter increment in :func:`authenticate` and
-      the structured ``account_locked`` log event once the threshold
-      trips.
+      via the lockout-counter increment at sign-in
+      (:func:`check_strangers_password`) and the structured
+      ``account_locked`` log event once the threshold trips.
 
     All failure modes return the same ``False`` value -- "wrong
     type", "empty string", "corrupted hash", and "wrong password"
@@ -371,35 +372,63 @@ def verify_password(plain_password, password_hash):
         return False
 
 
-# Timing-equalization dummy hash (deep-hunt #27).  ``authenticate`` runs a
-# throwaway bcrypt verification against this hash on the no-user branch and on
-# a stranger's attempt at a locked account (ruling plan#2999), so neither costs
-# less wall-clock time than a known email with a wrong password.  Without it
-# both return before any bcrypt work while the wrong-password branch pays a
-# full ``bcrypt.checkpw``, letting an attacker tell by timing ``/login``,
-# despite the constant response message, that an address is registered or
-# that its account has just locked.  Generated once at import with the
-# same default cost factor as real password hashes (``bcrypt.gensalt()`` in
+# Timing-equalization dummy hash (deep-hunt #27).  A stranger's try at an
+# email no account has is checked against this hash
+# (:func:`check_strangers_password`), so it costs the same bcrypt work as a
+# try at a real account, whose own hash is checked, locked or not (ruling
+# plan#3110).  Without it the no-account try would return before any bcrypt
+# work while a real account's pays a full ``bcrypt.checkpw``, letting an
+# attacker tell by timing ``/login``, despite the constant response message,
+# that an address is registered.  Generated once at import with the same
+# default cost factor as real password hashes (``bcrypt.gensalt()`` in
 # :func:`hash_password`), so if bcrypt's default rounds change the
 # equalization cost tracks it automatically.  The plaintext is irrelevant --
-# only the ``bcrypt.checkpw`` cost matters and the verification result is
-# always discarded.
+# only the ``bcrypt.checkpw`` cost matters, and a try at an email no account
+# has is wrong whatever the check answers.
 _DUMMY_PASSWORD_HASH = bcrypt.hashpw(
     b"shekel-timing-equalization-placeholder", bcrypt.gensalt()
 ).decode("utf-8")
 
+# What the sign-in checks refuse with, a disabled account's refusal aside, and
+# what ``/login`` flashes for every refusal, that one included, so no reply
+# tells a stranger which of them it was.
+INVALID_SIGN_IN_MESSAGE = "Invalid email or password."
+
+
+class PasswordProof(NamedTuple):
+    """A stranger's right password at ``/login``, judged and committed, not yet confirmed.
+
+    What :func:`check_strangers_password` hands the sign-in for the owner's
+    lock and for :func:`confirm_strangers_password` under it (ruling
+    plan#3110).  Read before the check's commit expired the account's row, so
+    taking the lock reads nothing first.
+
+    Attributes:
+        email: The email typed, whose record judged the try.
+        user_id: The account the password is right for.
+        owner_id: Its :attr:`~app.models.user.User.data_owner_id`, whose lock
+            the sign-in takes: ``None`` for a companion with no linked owner,
+            who takes none.
+        password_hash: The hash the password was checked against.
+    """
+
+    email: str
+    user_id: int
+    owner_id: int | None
+    password_hash: str
+
 
 def find_sign_in_user(email):
-    """Return the user who signs in with *email*, or ``None``: sign-in's read before its lock.
+    """Return the user who signs in with *email*, or ``None``: sign-in's read before any lock.
 
-    The first half of sign-in, split from :func:`authenticate` at plan step
-    ``balance:X-bn`` (ruling **R-CC121**, "Lock, then check"): the route finds
-    the account here, takes that account's owner lock
-    (:func:`app.db_transaction.bind_sign_in_owner`), and only then calls
-    :func:`authenticate`, whose reads of the lock and the password hash happen
-    under the lock.  One service call doing both could not put the
-    lock between them, and this layer takes no lock itself (the lock's home is
-    :mod:`app.db_transaction`).
+    The first act of sign-in, split from the password check at plan step
+    ``balance:X-bn`` so the route can choose, between the two, whether and
+    when to take the account's owner lock
+    (:func:`app.db_transaction.bind_sign_in_owner`): a browser known to the
+    account takes it before its check (:func:`authenticate_known_browser`),
+    and a stranger only after its check has committed, on the way to signing
+    in (:func:`check_strangers_password`, ruling plan#3110).  This layer takes
+    no lock itself (the lock's home is :mod:`app.db_transaction`).
 
     Args:
         email: The address typed at the login form.
@@ -444,20 +473,19 @@ def is_locked_out(user: User, *, device: KnownDevice | None) -> bool:
 def record_failed_attempt(user: User, *, device: KnownDevice | None) -> None:
     """Count one wrong password or code on *user*, from a stranger or a known browser.
 
-    The ONE home of the count and the trip, whichever check the guess failed:
-    sign-in's password and code, and the signed-in password and code checks.
-    The caller holds the owner's lock (ruling **R-CC121**), so two guesses
-    cannot count once.  Whose count it is turns on the browser (plan#2772), at
-    one threshold (``LOCKOUT_THRESHOLD``, default 10):
+    The count of a wrong guess at every door but a stranger's ``/login``
+    password, which judges its every try in :func:`check_strangers_password`:
+    the code form, the signed-in password and code checks, and a known
+    browser's sign-in password (:func:`authenticate_known_browser`).  The
+    caller holds the owner's lock (ruling **R-CC121**), so a known browser's
+    two guesses cannot count once; a stranger's are serialised by the
+    record's own row lock.  Whose count it is turns on the browser
+    (plan#2772), at one threshold (``LOCKOUT_THRESHOLD``, default 10):
 
-    * A stranger's guess counts on the record of the account's email (ruling
-      plan#3110, :func:`~app.services.guess_record_service.judge_try`).  At
-      the threshold the lock opens for ``LOCKOUT_DURATION_MINUTES`` and the
-      count is zeroed, so a second lock takes another threshold-many failures
-      rather than one more, and the structured ``account_locked`` event is
-      emitted.  A guess the lock refuses is not counted: every door asks
-      :func:`is_locked_out` first, so that is a guess that met a lock another
-      try opened since.
+    * A stranger's guess counts on the record of the account's email
+      (:func:`_judge_strangers_try`).  A guess the lock refuses is not
+      counted: every door that calls this asks :func:`is_locked_out` first,
+      so that is a guess that met a lock another try opened since.
     * A known browser's guess counts on its own record, *device*, and never on
       the account.  At the threshold the record is deleted, so the browser is
       a stranger again and the user's other browsers are untouched (ruling
@@ -474,28 +502,45 @@ def record_failed_attempt(user: User, *, device: KnownDevice | None) -> None:
             under the owner's lock, or ``None`` for a stranger.
     """
     if device is None:
-        _count_on_the_account(user)
+        _judge_strangers_try(user.email, user.id, wrong=True)
     else:
         _count_on_the_browser(user, device)
     db.session.commit()
 
 
-def _count_on_the_account(user: User) -> None:
-    """Count a stranger's wrong guess on the record of *user*'s email.
+def _judge_strangers_try(email: str, user_id: int | None, *, wrong: bool) -> bool:
+    """Judge one stranger's try at *email* on its record; return whether the lock refused it.
+
+    The ONE home of a stranger's count and trip, whichever door the try came
+    to (:func:`~app.services.guess_record_service.judge_try`, ruling
+    plan#3110): a wrong try counts, and at the threshold the lock opens for
+    ``LOCKOUT_DURATION_MINUTES`` and the count is zeroed, so a second lock
+    takes another threshold-many failures rather than one more.  A lock that
+    opens at an account's email emits the structured ``account_locked``
+    event; one at an email no account has has no account to name.
+
+    Writes the record; the caller commits.
 
     Args:
-        user: The account the guess was against.
+        email: The email the try named.
+        user_id: The account that email names, or ``None`` when none does.
+        wrong: Whether the password or code was wrong.
+
+    Returns:
+        True when the record's lock was open, so the try was refused and not
+        counted.
     """
     outcome = guess_record_service.judge_try(
-        user.email, wrong=True,
+        email, wrong=wrong,
         threshold=_get_lockout_threshold(), duration=_get_lockout_duration(),
     )
-    if outcome.opened_lock_until is not None:
+    if outcome.opened_lock_until is not None and user_id is not None:
         log_event(
             logger, logging.WARNING, EVT_ACCOUNT_LOCKED, AUTH,
             "Account locked after consecutive wrong passwords or codes",
-            user_id=user.id, lockout_until=outcome.opened_lock_until.isoformat(),
+            user_id=user_id, lockout_until=outcome.opened_lock_until.isoformat(),
         )
+    return outcome.refused
 
 
 def _count_on_the_browser(user: User, device: KnownDevice) -> None:
@@ -533,8 +578,10 @@ def clear_failed_attempts(user: User) -> None:
 
     The clear deletes the record of the account's email
     (:func:`~app.services.guess_record_service.clear`).  Commits only when
-    there was a record: the common path is a user with no failure history,
-    for whom the commit would write nothing.
+    there was a record: a stranger's sign-in finds the one its own try's
+    judgment wrote (ruling plan#3110), unless another finished sign-in
+    cleared it since, while a re-confirm on an account with no failure
+    history finds none, and the commit would write nothing.
 
     Args:
         user: The account whose checks have all passed.
@@ -558,8 +605,9 @@ def check_signed_in_password(
     refusal names the lock: whoever is
     here holds a live session on this account, so the lock's existence tells
     them nothing a stranger could use, and neither does how fast it is said.
-    ``/login`` hides the lock, so there a locked attempt pays a throwaway
-    check (:func:`authenticate`, ruling plan#2999).
+    ``/login`` hides the lock, so there a stranger's every try runs the same
+    steps, locked or not (:func:`check_strangers_password`, ruling
+    plan#3110).
 
     Args:
         user: The signed-in account.  Its row was reloaded under the owner's
@@ -582,94 +630,161 @@ def check_signed_in_password(
         raise AuthError(wrong_password_message)
 
 
-def authenticate(
-    user: User | None, password: str, *, device: KnownDevice | None,
-) -> User:
-    """Check *password* for *user* from this browser, enforcing account lockout.
+def check_strangers_password(
+    email: str, user: User | None, password: str,
+) -> PasswordProof:
+    """Check a stranger's password at ``/login``, judge the try, and commit.
 
-    *user* is what :func:`find_sign_in_user` returned, and the caller has
-    taken its owner lock in between (ruling **R-CC121**), so the lock read
-    below and the count this writes cannot interleave with another sign-in's
-    or a signed-in door's write of the same record.  Under the
-    same lock the caller read *device*, what this browser's cookie is worth
-    for *user*: whose attempt this is decides which lock and which count apply
-    (plan#2772).
+    Every stranger's try runs the same steps, whatever the email and the
+    answer (ruling plan#3110): one password check, against the account's hash
+    or, where no account has *email*, the dummy one; the guess record's one
+    statement, which judges the lock and counts the guess
+    (:func:`_judge_strangers_try`); and a commit.  So a wrong password at a
+    real account costs what one at an email no account has does, a locked
+    account's reply costs what an unlocked one's does, and a right password
+    and a wrong one cost the same at a locked account, so a lock cannot be
+    used to confirm a guess.  The lock is judged after the check, by that one
+    statement, so no try waits on another try at the same email while bcrypt
+    runs.  ``verify_password`` short-circuits empty and non-string passwords
+    the same way against either hash, so every input shape costs the same on
+    every path.
 
-    Lockout flow (audit finding F-033 / commit C-11):
+    No owner lock is needed here: the count is the record's and its row lock
+    serialises it.  ``/login`` calls this with none held, but for a browser
+    whose record its own guesses deleted after the route found it known and
+    took the lock (the route's ``_check_the_password``).  Only a right
+    password the lock let
+    through goes on: the caller takes the owner's lock of
+    :attr:`PasswordProof.owner_id`, then calls
+    :func:`confirm_strangers_password`.  The count is NOT cleared here: for
+    an account with a second factor this is only the first check, and the
+    count clears when every check has passed (:func:`clear_failed_attempts`,
+    ruling plan#3007).
 
-      * If *user* is ``None`` (no account has the address), or the lock on
-        the record of its email is open and the attempt is a stranger's
-        (:func:`is_locked_out`) -- run one throwaway
-        bcrypt verification against ``_DUMMY_PASSWORD_HASH``, so this branch
-        costs the same as a wrong-password attempt, then raise ``AuthError``
-        with the same generic message used for wrong-password.  For an
-        address with no account this closes the response-content AND the
-        response-timing email-enumeration oracle (deep-hunt #27).  For a
-        locked account it means a fast reply cannot tell a stranger that the
-        address is real and has just locked (ruling plan#2999); and because
-        the check is against the dummy hash, never the account's, the reply
-        cannot depend on whether the password was right, so a lockout window
-        cannot be used to confirm a guess either.  A known browser is not
-        stopped by that lock.
-      * If the password is wrong -- :func:`record_failed_attempt`: on
-        *device* for a known browser, on the account for a stranger.
-      * If the password is right but ``is_active`` is False -- raise
-        ``AuthError`` with a message that explicitly says the account
-        is disabled.  We have already proven knowledge of the
-        password, so this branch is not an information leak.
-      * If the password is right and the account is active -- return the
-        user.  The count is NOT cleared here: for an account with a second
-        factor this is only the first check, and the count clears when every
-        check has passed (:func:`clear_failed_attempts`, ruling plan#3007).
+    Every refusal says :data:`INVALID_SIGN_IN_MESSAGE`, so a stranger
+    probing whether an email is real or locked learns nothing from the
+    words either.
 
-    All branches share the same generic ``"Invalid email or password."``
-    message except for the explicit "Account is disabled." branch
-    above.  In particular, the lockout-rejection branch deliberately
-    uses the generic message so an attacker probing whether an account
-    is locked sees the same response as wrong-password and learns
-    nothing.
+    An *email* that is not a non-empty string names no record and no account,
+    and is refused before any check, as :func:`verify_password` refuses such a
+    password: the login form's schema never passes one, so only a broken
+    caller reaches it, and a refusal is safer than a crash computing its
+    digest.
 
     Args:
-        user:     The account :func:`find_sign_in_user` found, or ``None``.
-        password: The plaintext password.
-        device:   This browser's record for *user*, as
-            :func:`~app.services.known_device_service.find_browser` read it
-            under the owner's lock, or ``None`` for a stranger.
+        email: The email typed, as the form normalised it.
+        user: The account :func:`find_sign_in_user` found for it, or
+            ``None``.
+        password: The password typed.
 
     Returns:
-        The :class:`~app.models.user.User` object on successful auth.
+        The :class:`PasswordProof` the sign-in confirms under the owner's
+        lock.
 
     Raises:
-        AuthError: If no account was found, the account is in an
-            active lockout window and the attempt is a stranger's, the
-            password is wrong, or the account is disabled.
+        AuthError: No account has *email*, the password is wrong, the lock on
+            the record of *email* refused the try, right password or not, or
+            *email* is not a non-empty string.
     """
-    if user is None or is_locked_out(user, device=device):
-        # Timing equalization (deep-hunt #27, ruling plan#2999): pay the same
-        # bcrypt cost as the wrong-password branch below, so neither an
-        # address with no account nor a stranger's attempt at a locked one is
-        # measurably faster, which would let an attacker enumerate registered
-        # emails, or learn that one has just locked, by timing /login.  The
-        # check is against the dummy hash, never the account's, so a locked
-        # account's reply cannot depend on whether the password was right.
-        # verify_password mirrors the real branch's input-validation
-        # short-circuits exactly (empty / non-string passwords stay fast on
-        # every path), so timing matches for every input shape.  The result is
-        # intentionally discarded.
-        verify_password(password, _DUMMY_PASSWORD_HASH)
-        raise AuthError("Invalid email or password.")
+    if not isinstance(email, str) or not email:
+        raise AuthError(INVALID_SIGN_IN_MESSAGE)
+    password_hash = _DUMMY_PASSWORD_HASH if user is None else user.password_hash
+    right = verify_password(password, password_hash)
+    proof = None if user is None else PasswordProof(
+        email=email, user_id=user.id, owner_id=user.data_owner_id,
+        password_hash=password_hash,
+    )
+    refused = _judge_strangers_try(
+        email, None if proof is None else proof.user_id,
+        wrong=proof is None or not right,
+    )
+    db.session.commit()
+    if proof is None or refused or not right:
+        raise AuthError(INVALID_SIGN_IN_MESSAGE)
+    return proof
 
+
+def confirm_strangers_password(user: User, proof: PasswordProof) -> User:
+    """Confirm, under the owner's lock, that a stranger's right password still signs in.
+
+    The second half of a stranger's sign-in (ruling plan#3110).  The caller
+    took the lock of ``proof.owner_id`` after :func:`check_strangers_password`
+    committed, and that commit expired *user*'s row, so each column read here
+    is read afresh: under the lock, for every account but a companion with no
+    linked owner, who has no owner to lock (``owner_id`` is ``None``).  A
+    password changed while the check ran leaves a hash other than the one
+    checked, and the try counts as a wrong guess on the record of the email
+    typed and is refused: the password typed was checked against a hash the
+    account no longer holds.  That try is judged twice, so it writes two of
+    the record's audit rows, where every other try writes one.
+
+    Args:
+        user: The account :func:`check_strangers_password` checked.
+        proof: What it returned.
+
+    Returns:
+        *user*, signed in by its password.
+
+    Raises:
+        AuthError: The account's hash changed since the check, or the
+            account is disabled (:func:`_refuse_a_disabled_account`).
+    """
+    if user.password_hash != proof.password_hash:
+        _judge_strangers_try(proof.email, proof.user_id, wrong=True)
+        db.session.commit()
+        raise AuthError(INVALID_SIGN_IN_MESSAGE)
+    _refuse_a_disabled_account(user)
+    return user
+
+
+def authenticate_known_browser(
+    user: User, password: str, *, device: KnownDevice,
+) -> User:
+    """Check *password* for *user* from a browser known to it, under the owner's lock.
+
+    The caller took *user*'s owner lock and then read *device*, this
+    browser's record, under it (ruling **R-CC121**, "Lock, then check"), so
+    the browser's own count cannot interleave with another of its guesses.
+    A known browser passes the lock strangers' guesses open on the account,
+    and a wrong password counts on its own record, never on the account
+    (plan#2772, :func:`record_failed_attempt`).  The count is NOT cleared
+    here, for the reason :func:`check_strangers_password` gives.
+
+    Args:
+        user: The account :func:`find_sign_in_user` found.
+        password: The password typed.
+        device: This browser's record for *user*, as
+            :func:`~app.services.known_device_service.find_browser` read it
+            under the owner's lock.
+
+    Returns:
+        *user*, signed in by its password.
+
+    Raises:
+        AuthError: The password is wrong, or the account is disabled
+            (:func:`_refuse_a_disabled_account`).
+    """
     if not verify_password(password, user.password_hash):
         record_failed_attempt(user, device=device)
-        raise AuthError("Invalid email or password.")
-
-    if not user.is_active:
-        # Past the password gate, so naming the disabled state here is
-        # not an information leak: an attacker without the password
-        # never reaches this branch.
-        raise AuthError("Account is disabled.")
-
+        raise AuthError(INVALID_SIGN_IN_MESSAGE)
+    _refuse_a_disabled_account(user)
     return user
+
+
+def _refuse_a_disabled_account(user: User) -> None:
+    """Refuse a sign-in to *user* while the account is disabled.
+
+    Asked only once the password is proven, so naming the disabled state is
+    not an information leak: someone without the password never reaches it.
+
+    Args:
+        user: The account whose password was right.
+
+    Raises:
+        AuthError: ``"Account is disabled."`` when ``is_active`` is False.
+    """
+    if not user.is_active:
+        raise AuthError("Account is disabled.")
 
 
 def change_password(

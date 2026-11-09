@@ -164,12 +164,13 @@ _SOCKET_DIR_BYTES = _SUN_PATH_BYTES - len(f"/{_SOCKET_FILE}".encode())
 # are this cluster's own mechanics, and the lock table's size has its own paragraph below.
 #
 # TWO TIMEOUTS are carried because the suite QUOTES one of them as a mechanism.  Docstrings
-# and comments across ``tests/`` (``git grep lock_timeout tests`` finds them) state that a
-# conflicting DDL dies on, or waits out, the cluster's 10-second ``lock_timeout`` --
-# PostgreSQL's default is 0, wait forever, so without the flag that becomes the per-test
-# pytest-timeout naming a timeout instead of a lock, with each of them telling the author
-# to expect the other signature.  ``statement_timeout`` comes along for the same reason: a
-# runaway statement is bounded by the cluster, loudly, rather than by the test runner.
+# and comments across ``tests/`` (``git grep lock_timeout tests`` finds them, among others)
+# state that a conflicting DDL dies on, or waits out, the cluster's 10-second
+# ``lock_timeout`` -- PostgreSQL's default is 0, wait forever, so without the flag that
+# becomes the per-test pytest-timeout naming a timeout instead of a lock, with each of them
+# telling the author to expect the other signature.  ``statement_timeout`` comes along for
+# the same reason: a runaway statement is bounded by the cluster, loudly, rather than by
+# the test runner.
 #
 # ``idle_in_transaction_session_timeout`` is DELIBERATELY NOT carried (ruling plan#3027,
 # 2026-11-06), though the shared cluster set it at 30 seconds.  It bounded no runaway: it
@@ -177,13 +178,15 @@ _SOCKET_DIR_BYTES = _SUN_PATH_BYTES - len(f"/{_SOCKET_FILE}".encode())
 # transaction open on their session, since their reads leave it open and any later read of
 # a fixture object opens it again, so that connection sits idle in it whenever the test
 # works elsewhere.  A test 30 seconds past that session's last statement passed and then
-# errored at teardown, on a database error that said nothing of time (the merge queue's CI
-# run 42235790947 refused PR #673 so), under ``pytest.ini``'s 50-second per-test timeout,
-# sized on purpose (ruling R-BI41) and now the one limit on a test's idle time.  A wait on
-# a lock an idle connection holds is still bounded, by ``lock_timeout``.  Neither
-# production compose file sets it, so as far as this repository says production runs
-# PostgreSQL's default, 0.  The rehearsal bench starts its cluster here too, so it loses
-# the limit with the suite.
+# errored at teardown, the merge queue's CI run 42235790947 refusing PR #673 so.  The error
+# named the connection's idle timeout, never the test or how long it ran, and it came under
+# ``pytest.ini``'s 50-second per-test timeout, which is sized on purpose (ruling R-BI41)
+# and is now the one limit on how long a suite test may sit idle.  A wait on a lock an idle
+# connection holds is still bounded, by ``lock_timeout``.  Neither production compose file
+# sets it, so as far as this repository says production runs PostgreSQL's default, 0.  The
+# rehearsal bench starts its cluster here too and loses the limit with the suite, having
+# relied on nothing it did: its row comparison holds one connection idle in a transaction
+# while it reads the other (``tools/rehearsal/rows.py``, ``compare``).
 #
 # The three ``tcp_keepalives_*`` flags are DELIBERATELY NOT carried, and this is the one
 # place that says so: they configure TCP sockets, and this cluster has none, so they would

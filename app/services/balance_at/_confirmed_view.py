@@ -28,9 +28,10 @@ anchor replay (finding B-12).
 **Byte-equal to the reader it replaced, proven before the cutover.**  The row
 builder reproduced the posting reader's ``confirmed_loan_history_rows``
 exactly: each row's ``principal`` / ``interest`` equal the posted linked /
-interest nets (the checked-projection invariant plan step E1a asserts at write
-time), and its ``remaining_balance`` is the SAME contract-order running sum over
-the SAME visible event set the reader walked.  Step E1c's oracle parallel-ran
+interest nets (the checked-projection invariant plan step E1a asserted at write
+time until plan task plan#3093), and its ``remaining_balance`` is the SAME
+contract-order running sum over the SAME visible event set the reader
+walked.  Step E1c's oracle parallel-ran
 the two on EVERY DAY of nine shapes and they agreed byte for byte; step E1d-b
 retired that oracle with its counterparty and re-anchored every shape on
 HAND-COMPUTED values instead (``tests/test_services/test_confirmed_view.py``),
@@ -118,7 +119,7 @@ def _history_rows_from_walk(
 
     * ``principal`` / ``interest`` -- the split's real principal and accrued
       interest, which the posting writer books verbatim onto the ledger, so they
-      equal the posted nets (plan step E1a's checked-projection invariant).
+      equal the posted nets.
     * ``remaining_balance`` -- the genesis running balance owed AFTER this payment,
       accumulated in CONTRACT order over the walk's events, every one of which
       is visible by the pass's as-of: an

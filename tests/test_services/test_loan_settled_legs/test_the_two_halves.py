@@ -1,6 +1,9 @@
 """Every payment into the loan in exactly one half, settled or planned (ruling R-BAL140), in the
-loan walk and in the contribution feed, and the posting sync resolving a stale movement's
-transfer through its lineage.
+loan walk and in the contribution feed, and a paid payment's movement posting on its settle day.
+
+The last case graded the posting sync's lineage probe naming a stale movement's transfer
+until plan step balance:X-bi-6-4d-2 made the state unstorable; plan task plan#3093 deleted
+the probe.
 """
 
 from decimal import Decimal

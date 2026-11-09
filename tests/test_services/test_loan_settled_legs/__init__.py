@@ -29,7 +29,7 @@ none of them:
 * The posting sync's lineage probe named the transfer of a movement that hung
   off a DEAD shadow, so that movement's postings reversed; since plan step
   ``balance:X-bi-6-4d-2`` no twin can be stored to hang one off, which the
-  case asserts.
+  case asserts.  The probe itself went at plan task plan#3093.
 
 Every figure is made up (ruling R-BAL132).  The loan is ``$100,000.00`` at 6%
 from 2026-02-01, due on the 1st: one month's charge is

@@ -536,10 +536,11 @@ def holding_the_anchor_re_check(act: str) -> Iterator[None]:
 
     **Deferring the writes moves nothing the act reads.**  Between an act's
     settles nothing reads a non-loan account's anchor corrections but the
-    anchor reconcile itself: the loan sync reads only the loan's own linked
-    ledger (``loan_posting_service._linked_ledger``), which this re-check
-    never writes, and each source sync reads back only its own movement's
-    legs.
+    anchor reconcile itself: the loan sync reads back only the loan's own
+    corrections (``loan_posting_service._corrections``; it read the loan's
+    linked ledger for the checked-projection assert until plan task
+    plan#3093), which this re-check never writes, and each source sync reads
+    back only its own movement's legs.
 
     **A block that raises runs none**: its act is refused and its
     transaction rolls back, and the key leaves the session either way, so a
@@ -617,8 +618,9 @@ def resync_all_cash_postings() -> tuple[int, int]:
     and the third of the three deploy-time reconciles that between them cover
     every journal entry the app writes.  It exists because those two do NOT
     reach an ordinary transaction or a NON-loan transfer: the loan package's
-    staleness detector is scoped to one loan's linked ledger
-    (``loan_posting_service._sync._reconcile_lineage_transfer_entries``) and the anchor
+    staleness detector was scoped to one loan's linked ledger (its lineage
+    pass, deleted with the checked-projection assert at plan task plan#3093)
+    and the anchor
     backfill reconciles only the corrections, so a checking-to-savings transfer
     and every ordinary settled row were maintained per-mutation and by nothing
     else.

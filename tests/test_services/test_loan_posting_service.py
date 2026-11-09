@@ -45,7 +45,6 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-import sqlalchemy as sa
 
 from app import ref_cache
 from app.enums import (
@@ -67,13 +66,11 @@ from app.services import (
     loan_posting_service,
     pay_period_admin,
     posting_service,
-    status_seam,
     transaction_service,
     transfer_service,
 )
 from app.services._posting_write import _emit_balanced_entry, _PostingLeg
 from app.services.ledger_lines import loan_key
-from app.services.transfer_legs import transfer_side_leg
 from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     account_net,
@@ -95,7 +92,6 @@ from tests._stored_ledger import (
     stored_ledger_net,
     stored_loan_balance_at,
     stored_loan_balance_map,
-    stored_net_by_date,
     transfer_family_journal_filter,
 )
 from tests._test_helpers import (
@@ -276,9 +272,8 @@ def _cash_reader_loan_net(xfer, loan, ledger_id):
 
     Mirrors the cash source's own read exactly -- the loan-side movement's
     ``transaction_entry_id`` under the ``transfer_movement`` source kind, the
-    filter ``loan_posting_service._linked_ledger._movement_nets_by_date`` and
-    the writer's reconcile both apply since plan step ``balance:X-bi-6-3``
-    (rulings **R-BAL45**, **R-BAL101**) -- WITHOUT calling either, so a test
+    filter the writer's reconcile applies since plan step ``balance:X-bi-6-3``
+    (rulings **R-BAL45**, **R-BAL101**) -- WITHOUT calling it, so a test
     can prove a Step-4 correction is invisible to that reader.  It mirrored
     ``JournalEntry.transfer_id == transfer_id`` while the cash was one entry
     per transfer.
@@ -1577,9 +1572,9 @@ class TestTheSplitIsADateKeyedCorrection:
         it posts linking no row -- the INSTALLMENT's day since ruling
         **R-BAL139**, where a payment that moved nothing is dated (it was the
         settle day until plan step balance:X-bi-6-4b; rule-5 re-expression,
-        developer approval 2026-09-24) -- and the checked-projection assert holds:
-        the loan-linked ledger nets opening (-250000) + true-up (+150000) +
-        principal (-500) = -100500.00 and the interest ledger 500.00.
+        developer approval 2026-09-24): the loan-linked ledger nets opening
+        (-250000) + true-up (+150000) + principal (-500) = -100500.00 and the
+        interest ledger 500.00.
 
         **Paid is pressed on a day the test states, and the loan side is read
         off the transfer, since plan step ``balance:X-bi-6-4d-2``** (ruling
@@ -2022,95 +2017,6 @@ class TestReverseLoanPaymentPostings:
                 )
                 .count()
             ) == 0
-
-    def test_resync_reverses_an_unsettled_payment(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A payment that leaves the eligible set is reversed by the next sync.
-
-        Settle + sync (one correction; loan-linked -99500 = opening -250000 +
-        true-up +150000 + principal 500), then revert the pair through the
-        status SEAM alone -- the transfer's status and its sides' records, with
-        NO posting sync behind it, standing in for a door that forgot the
-        ledger -- and run the one loan sync bare: the now-stale correction's
-        key has no target and reverses, the lineage probe finds the cash leg
-        posted for a movement the revert un-dated and reverses it through
-        the pair's door, and the loan-linked ledger drops to the opening +
-        true-up = -100000 with the checked-projection assert holding.
-
-        **The figure was -99000 through plan step ``balance:X-bi-6-1b``, and
-        the fixture was an impossible state**: the payment-only door this
-        test drove (deleted at ``X-bi-6-3``, ruling R-BAL102) ran no assert,
-        so the test could un-settle the shadows' STATUS by raw SQL, leave the
-        covering movement DATED (a state no revert leaves, ruling R-BAL61),
-        and pin the cash leg still posted beside a reversed split.  The one
-        sync refuses that state, correctly (its assert fires: walk 0.00 vs
-        posted 1000.00 at the settle day), so the fixture is the honest
-        revert and the figure is what the ledger holds after it.  A rule-5
-        class (b) re-expression Josh confirmed 2026-09-21.
-
-        **The seam's TRANSFER arm since plan step ``balance:X-bi-6-4d-2``**
-        (ruling R-BAL167 class 2): the sides' records hang off the transfer,
-        so the revert un-dates them through ``status_seam.sync_side_records``
-        -- the call the transfer's status writer makes beside
-        ``apply_status_change`` -- where it applied the seam to each shadow
-        row, whose covering movement held the record, until then.  Reverting
-        the twins and the transfer's status alone now leaves both records
-        dated under a Projected transfer, which the database refuses at
-        commit, so the stale ledger is reached through the arm instead.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            xfer = _settle_payment(
-                seed_user, loan, seed_periods[_P1], Decimal("1000.00"),
-            )
-            db.session.commit()
-            loan_posting_service.sync_loan_postings(
-                loan.id, scenario_id,
-            )
-            db.session.commit()
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
-            ) == Decimal("-99500.00")
-            period_id = xfer.pay_period_id
-            day = _loan_side_movement(xfer, loan).settled_on
-
-            # Revert through the seam alone (no posting sync): the status and
-            # both sides' records move, each record is un-dated, the ledger is
-            # left stale on BOTH halves.
-            projected = ref_cache.status_id(StatusEnum.PROJECTED)
-            status_seam.sync_side_records(
-                (
-                    transfer_side_leg(xfer, is_income=False),
-                    transfer_side_leg(xfer, is_income=True),
-                ),
-                projected, days=(None, None), settlement=None, press=None,
-            )
-            status_seam.apply_status_change(xfer, projected)
-            db.session.commit()
-            assert _loan_side_movement(xfer, loan).settled_on is None
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
-            ) == Decimal("-99500.00")
-
-            loan_posting_service.sync_loan_postings(
-                loan.id, scenario_id,
-            )
-            db.session.commit()
-
-            # The correction is reversed at its own key and the cash leg
-            # through the pair's door; the loan holds the opening + true-up.
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
-            ) == Decimal("-100000.00")
-            entries = loan_correction_entries_at(
-                _db.session, loan.id, scenario_id, period_id, day,
-            )
-            assert len(entries) == 2
-            assert posting_service.account_posting_total(
-                seed_user["account"].id, scenario_id,
-            ) == Decimal("1000.00")
 
 
 # ---------------------------------------------------------------------------
@@ -3271,9 +3177,8 @@ class TestPrePeriodAnchor:
 
 
 # ---------------------------------------------------------------------------
-# The checked projection (plan step E1a): sum(postings) == fold(events),
-# asserted per visible date at every write, and the date-aware reconcile
-# (finding N-13) that makes the assert safe on a legitimate settle-day edit.
+# The date-aware reconcile (finding N-13): a settled settle-day edit moves
+# every posting to the new day, in one pass, in both directions.
 # ---------------------------------------------------------------------------
 
 
@@ -3315,79 +3220,16 @@ def _source_entry_count(transfer_id, loan_account_id):
     )
 
 
-class TestCheckedProjection:
-    """The posted linked ledger must equal the fold of the loan's events (E1a).
+class TestASettleDayEditReDatesThePostings:
+    """A settled settle-day edit re-dates a loan payment's postings (finding N-13).
 
-    ``sync_loan_postings`` runs the per-visible-date assert after both
-    reconciles: the walk's dated deltas (negated into posting space) must match
-    the linked ledger's per-``entry_date`` nets exactly.  These tests prove the
-    assert has teeth (a forced $1.00 walk-invisible posting fires it) and that
-    the date-aware reconcile keeps it from firing on the one legitimate edit
-    that moves a date without moving an amount -- a settled settle-day edit
-    (finding N-13) -- converging in ONE pass in both directions.
+    The one legitimate edit that moves a date without moving an amount: the
+    worked-out ledger moves the payment's effect to the new day, and the
+    date-aware reconcile converges in ONE pass in both directions.  The class
+    was ``TestCheckedProjection`` and held the checked-projection assert's
+    negative control and its lineage pass's two heals until plan task
+    plan#3093 deleted the assert and the pass ahead of the store.
     """
-
-    def test_walk_invisible_posting_fires_the_assert(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A $1.00 posting the walk cannot model makes the sync refuse to run green.
-
-        The negative control (verification standard 7.3): a balanced raw entry
-        with a $1.00 leg on the loan's LINKED ledger -- the N-11 legacy shape,
-        forbidden at the source since BG/R6 but forced here directly -- is
-        invisible to the walk, so the per-date comparison must fail AT THAT
-        DATE and name it.  Without this control the assert could be deleted
-        and every test would stay green.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            _settle_payment(
-                seed_user, loan, seed_periods[_P1], Decimal("1000.00"),
-                settled_on=date(2026, 1, 20),
-            )
-            db.session.commit()
-            # The settle chokepoint already ran the sync + assert green.
-
-            equity_ledger = _find_loan_ledger(
-                loan.id, LedgerAccountKindEnum.EQUITY_OPENING,
-            )
-            drift_entry = JournalEntry(
-                user_id=seed_user["user"].id,
-                scenario_id=scenario_id,
-                pay_period_id=seed_periods[_P1].id,
-                entry_date=date(2026, 2, 15),
-                # A purchase linking no movement: a kind the loan walk does
-                # not model (it was the ``transaction`` source, deleted at
-                # card plan#1845).
-                source_kind_id=ref_cache.posting_source_id(
-                    PostingSourceEnum.PURCHASE
-                ),
-                description="forced walk-invisible drift",
-            )
-            db.session.add(drift_entry)
-            db.session.flush()
-            expense_kind = ref_cache.posting_kind_id(PostingKindEnum.EXPENSE)
-            db.session.add(Posting(
-                journal_entry_id=drift_entry.id,
-                ledger_account_id=_linked_ledger_id(loan),
-                amount=Decimal("1.00"),
-                posting_kind_id=expense_kind,
-            ))
-            db.session.add(Posting(
-                journal_entry_id=drift_entry.id,
-                ledger_account_id=equity_ledger.id,
-                amount=Decimal("-1.00"),
-                posting_kind_id=expense_kind,
-            ))
-            db.session.flush()
-
-            with pytest.raises(
-                posting_service.PostingError,
-                match="diverges from the fold .*2026-02-15",
-            ):
-                loan_posting_service.sync_loan_postings(loan.id, scenario_id)
-            db.session.rollback()
 
     def test_settle_day_edit_redates_the_postings(
         self, app, db, seed_user, seed_periods,
@@ -3399,11 +3241,10 @@ class TestCheckedProjection:
         ledger nets +1000.00 (cash) - 500.00 (correction) = +500.00 on 01-20.
         A PURE settle-day edit to 2026-02-05 changes no amount, so the
         pre-E1a reconcile wrote nothing and the entries kept the old date --
-        while the fold moved to 02-05, a divergence the checked-projection
-        assert now refuses.  After the edit: 01-20 holds no line (the store nets
-        0.00 there, reversed at its own date), 02-05 nets +500.00, and a repeat sync
-        writes NOTHING (the
-        reconcile converged in one pass -- no churn).
+        while the fold moved to 02-05.  After the edit: 01-20 holds no line
+        (the store nets 0.00 there, reversed at its own date), 02-05 nets
+        +500.00, and a repeat sync writes NOTHING (the reconcile converged in
+        one pass -- no churn).
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -3419,8 +3260,7 @@ class TestCheckedProjection:
             ] == Decimal("500.00")
 
             # The pure settle-day edit -- no amount, status, or period change.
-            # update_transfer runs the (now date-aware) reconciles + the
-            # checked-projection assert; a raise here IS the N-13 regression.
+            # update_transfer runs the (now date-aware) reconciles.
             transfer_service.update_transfer(
                 xfer.id, seed_user["user"].id,
                 side_days=on_both_sides(
@@ -3484,154 +3324,3 @@ class TestCheckedProjection:
             loan_posting_service.sync_loan_postings(loan.id, scenario_id)
             db.session.flush()
             assert _source_entry_count(xfer.id, loan.id) == before
-
-    def test_legacy_stale_dated_cash_pair_self_heals(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A pre-E1a cross-date transfer residue heals in the loan sync itself.
-
-        The REAL-data shape the dev-clone sweep found (the Mortgage's July
-        payment): the date-blind pre-E1a reconcile reversed a cash entry at a
-        DIFFERENT date than it posted, leaving a net-zero transfer-source pair
-        straddling two dates -- residue no loan-side reconcile can touch, so
-        without the lineage-transfer pass the checked-projection assert would
-        fire on it forever (the C9a self-500 class).  Forged here by re-dating
-        the settled payment's cash entry (exactly what the legacy data
-        contains), the loan sync must re-date it back (reverse at the forged
-        date, re-post at the settle date), pass its own assert, and converge
-        (a second sync writes nothing).  The cash entry is the loan-side
-        MOVEMENT's since plan step ``balance:X-bi-6-3``, and the probe keys
-        on it (re-expressed; the forge targeted the one ``transfer_id``
-        entry).
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            xfer = _settle_payment(
-                seed_user, loan, seed_periods[_P1], Decimal("1000.00"),
-                settled_on=date(2026, 1, 20),
-            )
-            db.session.commit()
-            linked_id = _linked_ledger_id(loan)
-
-            # Forge the legacy shape: the loan-side cash entry carries a WRONG
-            # date, as a pre-E1a revert / re-settle left it.  Raw SQL, because
-            # the forge must bypass the ORM append-only listener exactly as
-            # the legacy writes predate it (the test runs as the table owner;
-            # production's role REVOKE does not bind here).
-            cash_entry_id = (
-                db.session.query(JournalEntry.id)
-                .filter(
-                    JournalEntry.transaction_entry_id
-                    == _loan_side_movement(xfer, loan).id,
-                    JournalEntry.scenario_id == scenario_id,
-                )
-                .scalar()
-            )
-            db.session.execute(
-                sa.text(
-                    "UPDATE budget.journal_entries SET entry_date = :day "
-                    "WHERE id = :entry_id"
-                ),
-                {"day": date(2026, 1, 5), "entry_id": cash_entry_id},
-            )
-            db.session.commit()
-            assert stored_net_by_date(_db.session, linked_id, scenario_id)[
-                date(2026, 1, 5)
-            ] == Decimal("1000.00")
-
-            # The loan sync heals it: lineage-transfer pass re-dates, then
-            # the checked-projection assert passes.
-            loan_posting_service.sync_loan_postings(loan.id, scenario_id)
-            db.session.commit()
-            by_date = stored_net_by_date(_db.session, linked_id, scenario_id)
-            # Forged date: reversed at its own date; settle date: the full
-            # effect (cash +1000.00, correction -500.00).
-            assert by_date[date(2026, 1, 5)] == Decimal("0.00")
-            assert by_date[date(2026, 1, 20)] == Decimal("500.00")
-
-            # Convergence: a repeat sync writes nothing.
-            before = _source_entry_count(xfer.id, loan.id)
-            loan_posting_service.sync_loan_postings(loan.id, scenario_id)
-            db.session.flush()
-            assert _source_entry_count(xfer.id, loan.id) == before
-
-    def test_reverted_transfer_stale_residue_self_heals(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Pre-E1a cross-date residue on a REVERTED payment heals too (review H2).
-
-        A reverted payment is OUTSIDE the walk's settled set, so a heal pass
-        keyed on the walk's payments would never touch its entries -- while
-        the pre-E1a date-blind reconcile could leave its settle/reversal pair
-        straddling two dates (net zero in TOTAL, nonzero per DATE), and the
-        checked-projection assert would then fire on every later sync of the
-        loan with nothing able to converge it.  The lineage pass therefore
-        derives its candidates from the LEDGER: forged here by re-dating the
-        reverted payment's reversal entry (the legacy shape), the loan sync
-        must re-sync that transfer with its CURRENT unsettled sense, zero
-        every date, pass its own assert, and converge.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            xfer = _settle_payment(
-                seed_user, loan, seed_periods[_P1], Decimal("1000.00"),
-                settled_on=date(2026, 1, 20),
-            )
-            db.session.commit()
-            transfer_service.update_transfer(
-                xfer.id, seed_user["user"].id,
-                status_id=ref_cache.status_id(StatusEnum.PROJECTED),
-            )
-            db.session.commit()
-            linked_id = _linked_ledger_id(loan)
-            # Clean revert: the settle date nets zero (the anchor dates --
-            # the opening and true-up -- legitimately keep their nets).
-            assert stored_net_by_date(_db.session, linked_id, scenario_id)[
-                date(2026, 1, 20)
-            ] == Decimal("0.00")
-
-            # Forge the pre-E1a residue: the loan-side REVERSAL entry (the
-            # newest entry linked to the loan-side movement, plan step
-            # ``balance:X-bi-6-3``) re-dated away from the settle date, so
-            # 01-20 holds +1000.00 and 01-08 holds -1000.00.
-            reversal_id = (
-                db.session.query(JournalEntry.id)
-                .filter(
-                    JournalEntry.transaction_entry_id
-                    == _loan_side_movement(xfer, loan).id,
-                    JournalEntry.scenario_id == scenario_id,
-                )
-                .order_by(JournalEntry.id.desc())
-                .limit(1)
-                .scalar()
-            )
-            db.session.execute(
-                sa.text(
-                    "UPDATE budget.journal_entries SET entry_date = :day "
-                    "WHERE id = :entry_id"
-                ),
-                {"day": date(2026, 1, 8), "entry_id": reversal_id},
-            )
-            db.session.commit()
-            by_date = stored_net_by_date(_db.session, linked_id, scenario_id)
-            assert by_date[date(2026, 1, 20)] == Decimal("1000.00")
-            assert by_date[date(2026, 1, 8)] == Decimal("-1000.00")
-
-            # The loan sync heals it from the LEDGER-derived candidate set
-            # (the transfer is NOT in the walk -- it is reverted) and passes
-            # its own checked-projection assert: both payment dates net zero.
-            loan_posting_service.sync_loan_postings(loan.id, scenario_id)
-            db.session.commit()
-            by_date = stored_net_by_date(_db.session, linked_id, scenario_id)
-            assert by_date[date(2026, 1, 20)] == Decimal("0.00")
-            assert by_date[date(2026, 1, 8)] == Decimal("0.00")
-
-            # Convergence: a repeat sync writes nothing.
-            before = _source_entry_count(xfer.id, loan.id)
-            loan_posting_service.sync_loan_postings(loan.id, scenario_id)
-            db.session.flush()
-            assert _source_entry_count(xfer.id, loan.id) == before
-
-

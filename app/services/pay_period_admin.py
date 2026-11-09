@@ -663,10 +663,10 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     SETTLED.**  The account side reads the account's DATED movements
     (``cash_ledger.settled_cash_facts``, through the read fold's assertion
     replay since plan task plan#2525; it read the linked ledger's nonzero
-    per-row nets until then), and every read the loan side makes of
-    ``budget.transactions`` or ``budget.transfers`` is keyed on a set of ids
-    taken from ``budget.journal_entries`` -- the stale lineage transfers and
-    stale payment shadows, and the loan walk's own ``settled_income_legs``.
+    per-row nets until then), and the loan side reads only the loan walk's own
+    ``settled_income_legs`` (its lineage pass's reads of stale transfers, keyed
+    on ids taken from ``budget.journal_entries``, went at plan task
+    plan#3093).
     A freshly generated row is ``Projected``, carries no dated movement and
     posts nothing, so it is in none of those sets.  *A first
     draft of this paragraph said the account half "reads no transaction or

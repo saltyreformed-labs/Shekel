@@ -18,11 +18,11 @@ Before this the seam's past balance was a sum of POSTINGS (the genesis reader
 ``confirmed_loan_balance_at``, since DELETED at plan step E1e).  Here it is the
 fold over the loan's SOURCE events, which step B2 proves equal to the postings
 on every day (``tests/test_services/test_loan_fold_oracle.py``): the postings
-become a checked projection of the fold (asserted at write time since plan step
-E1a), not the answer to "what do I owe".  A loan whose POSTING ledger is missing
-(a cache miss) still folds correctly from its source facts, so the read is no
-longer an outage when the cache is cold -- it is a repairable inconsistency
-(B-8).
+become a checked projection of the fold (asserted at write time from plan step
+E1a until plan task plan#3093), not the answer to "what do I owe".  A loan
+whose POSTING ledger is missing (a cache miss) still folds correctly from its
+source facts, so the read is no longer an outage when the cache is cold -- it
+is a repairable inconsistency (B-8).
 
 **The future is the same fold, over the plan's outcomes behind the facts
 (step C6b, merged at recurrence:R16-c-1).**  The loan's

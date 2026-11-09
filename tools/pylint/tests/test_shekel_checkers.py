@@ -584,7 +584,7 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
         node = self._function_def(
             "def confirmed_loan_balance_somewhere(loan_id, scenario_id):\n"
             "    return None\n",
-            "app.services.loan_posting_service._linked_ledger",
+            "app.services.loan_posting_service._corrections",
         )
         with self.assertAddsMessages(
             MessageTest(
@@ -1928,16 +1928,15 @@ class TestShekelLedgerModelFenceChecker(CheckerTestCase):
         """A submodule of an allowlisted PACKAGE stays inside the fence (prefix match).
 
         The loan / account posting packages and the chart resolver package
-        are allowlisted by prefix, so their real submodules (``_sync`` /
-        ``_linked_ledger`` / ``_linked``) that legitimately query the ledger
-        must remain exempt -- the package-prefix arm of
+        are allowlisted by prefix, so their submodules (``_corrections`` /
+        ``_sync`` / ``_linked``) must remain exempt -- the package-prefix arm of
         :func:`_module_in_allowlist`.  The report package was the third
         example until plan task plan#2771 moved the statements onto the
         worked-out ledger and the fence tightened past it
         (:meth:`test_flags_the_report_package_since_it_reads_lines`).
         """
         for module_name in (
-            "app.services.loan_posting_service._linked_ledger",
+            "app.services.loan_posting_service._corrections",
             "app.services.account_posting_service._sync",
             "app.services.ledger_account_service._linked",
         ):

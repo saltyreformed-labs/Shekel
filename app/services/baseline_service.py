@@ -42,9 +42,10 @@ def create_baseline_scenario(user_id: int) -> Scenario | None:
       SOURCE facts (origination, anchors, settled payments), so a cold posting
       cache is a repairable inconsistency, not a read outage (plan steps
       C3b1/C3b3; before them the seam raised and every loan surface 500'd until
-      this ran).  What this restores is the POSTING ledger itself -- the general
-      ledger the balance sheet and statements read, and the checked projection of
-      the fold (plan E1) -- so it reconciles again.  Its ``LoanParams`` and
+      this ran).  What this restores is the POSTING ledger itself, so it
+      reconciles again; no screen reads it since plan task plan#2771, and the
+      checked-projection assert that graded it against the fold went at plan
+      task plan#3093.  Its ``LoanParams`` and
       ``user_trueup`` rows carry no ``pay_period_id`` and survive, so the openings
       and true-ups re-derive exactly.
     * **Non-loan accounts**

@@ -445,43 +445,6 @@ def entries_violating_balance():
     ]
 
 
-def stored_net_by_date(db_session, ledger_account_id, scenario_id):
-    """Return a ledger account's posted net keyed by journal-entry ``entry_date``.
-
-    Sums ``budget.account_postings.amount`` over *ledger_account_id* for journal
-    entries in *scenario_id*, grouped by each entry's ``entry_date``.  A date whose
-    legs net to zero (a reversed forgery) is still present, at ``Decimal("0.00")``.
-    This is an INDEPENDENT re-implementation of the grouped read the
-    checked-projection assert performs (production groups via ``_visible_nets``), so
-    a suite comparing against it keeps teeth if that production query drifts.  Shared
-    by the posting-service checked-projection suite and the loan-route escrow-sync
-    suite so both read a ledger's per-date net the same way (``stored_ledger_net`` is the
-    scalar-total counterpart).
-
-    Args:
-        db_session: The test ``db.session``.
-        ledger_account_id: The ledger account whose legs to sum.
-        scenario_id: The scenario to scope to.
-
-    Returns:
-        A ``{entry_date: Decimal}`` mapping (empty when none posted).
-    """
-    rows = (
-        db_session.query(
-            JournalEntry.entry_date,
-            db.func.sum(Posting.amount),
-        )
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            Posting.ledger_account_id == ledger_account_id,
-            JournalEntry.scenario_id == scenario_id,
-        )
-        .group_by(JournalEntry.entry_date)
-        .all()
-    )
-    return dict(rows)
-
-
 def _posted_loan_linked_ledger(loan_account_id, scenario_id):
     """Return a loan's linked ledger row, or None when it has no OPENING posting.
 

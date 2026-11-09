@@ -21,42 +21,19 @@ the balance interest accrued on and no chokepoint walks the loan twice:
 Flushes but never commits -- the caller owns the transaction boundary.
 """
 
-from datetime import date
-from decimal import Decimal
-
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import loan_loaders
 from app.services._posting_reconcile import account_owner_id
-from app.services.row_valuation import settled_contribution
-from app.services.posting_service import (
-    PostingError,
-    _ledger_account_for,
-    sync_transfer_postings,
-)
 from app.services.scenario_resolver import get_baseline_scenario
-from app.services.transfer_legs import (
-    movement_parent,
-    movement_parent_loads,
-    parent_of,
-)
 from app.services.user_write_lock import lock_every_user_writes
 from app.utils.db_errors import is_unique_violation
-from app.utils.money import round_money
 
-from app.services.loan_ledger import (
-    LoanLedgerWalk,
-    dated_deltas,
-    walk_loan_ledger,
-)
+from app.services.loan_ledger import walk_loan_ledger
 
 from ._corrections import reconcile_loan_corrections
-from ._linked_ledger import _movement_nets_by_date, _visible_nets
-
-_ZERO_MONEY = Decimal("0.00")
 
 
 def scenarios_with_loan_payments(loan_account_id: int) -> list[int]:
@@ -111,15 +88,19 @@ def sync_loan_postings(loan_account_id: int, scenario_id: int) -> None:
     syncs would each cost).
 
     Idempotent and self-healing: a re-run at the same state writes nothing.
-    The loan-side reconciles touch ONLY the loan's own ledgers (linked,
-    interest, escrow, refund, opening-equity); the lineage-transfer pass
-    (:func:`_reconcile_lineage_transfer_entries`, step E1a) may additionally
-    RE-DATE a settled payment's Step-2 cash entry -- which touches Checking's
-    ledger but moves no net anywhere: it corrects WHICH DAY the cash moved,
-    never how much.  After both reconcile, the CHECKED-PROJECTION assert
-    (:func:`_assert_checked_projection`, plan step E1a) verifies the linked
-    ledger's per-date nets against the same walk and raises rather than
-    letting a divergent ledger commit.
+    It touches ONLY the loan's own ledgers (linked, interest, escrow, refund,
+    opening-equity).
+
+    **It checks nothing against the walk any more** (plan task plan#3093).
+    From plan step E1a until that task a checked-projection assert compared
+    the linked ledger's per-date nets, the payments' cash legs included, with
+    the walk and refused the write when they differed, and a lineage pass
+    re-dated a payment's stale cash entry first so the assert could hold on
+    real data.  The cash legs are the transfer syncs', which plan#2914 deletes
+    with every other door into the store, so the assert went first, with the
+    pass that served it.  The stored ledger it graded is read by no screen;
+    the worked-out ledger the screens read is graded against the fold by the
+    suite (``tests/_ledger_reads.assert_fold_matches_postings_every_day``).
 
     **Takes no as-of, and reads no clock.**  It posts what the loan's facts say,
     every one of them; WHEN each fact becomes visible is the readers' decision,
@@ -145,266 +126,23 @@ def sync_loan_postings(loan_account_id: int, scenario_id: int) -> None:
     contract as the precedent for deleting the cash lock, which is how a
     defect became a rationale.  See :mod:`app.services.user_write_lock`.
 
-    **A loan with no resolvable owner still FAILS LOUD, and an earlier version
-    of this step made it a silent no-op.**  ``account_owner_id`` returns
-    ``None`` only when the ``accounts`` row is absent (``user_id`` is NOT
-    NULL), and at that point ``_ledger_account_for`` below raises
-    ``PostingError`` for the missing chart-of-accounts pairing -- which is the
-    disposition this codebase wants for a broken invariant.  *Until plan step
-    ``balance:X-bn`` this function keyed a lock of its own on that owner and
-    skipped the acquisition when there was none, leaving the raise to fire.*
-    *The claim that this matched "the same
-    disposition the reconciles below already have" was FALSE and was caught by
-    a neutral adversarial review: the cash twin no-ops on a missing account by
-    design, this one raises, and the two are not the same rule.*
+    **A loan with no account row reconciles nothing**: it has no
+    :class:`~app.models.loan_params.LoanParams`, so its walk is empty.  Until
+    plan task plan#3093 it raised ``PostingError`` instead, from the
+    linked-ledger resolution the checked-projection assert shared, which
+    went with the assert.
 
     Args:
         loan_account_id: The loan whose full ledger to reconcile.
         scenario_id: The budget scenario to reconcile within.
 
     Raises:
-        PostingError: When the reconciled ledger does not equal the fold of the
-            loan's events (:func:`_assert_checked_projection`).
+        PostingError: A loan account with no linked ledger account, when a
+            correction books on it
+            (:func:`._corrections.reconcile_loan_corrections`).
     """
     walk = walk_loan_ledger(loan_account_id, scenario_id)
-    # ONE linked-ledger resolution per sync, shared by the lineage probe and
-    # the assert (each used to resolve its own -- a redundant query).
-    linked_ledger_id = _ledger_account_for(loan_account_id).id
-    _reconcile_lineage_transfer_entries(linked_ledger_id, scenario_id, walk)
     reconcile_loan_corrections(loan_account_id, scenario_id, walk)
-    _assert_checked_projection(
-        loan_account_id, scenario_id, walk, linked_ledger_id,
-    )
-
-
-def _reconcile_lineage_transfer_entries(
-    linked_ledger_id: int, scenario_id: int, walk: LoanLedgerWalk,
-) -> None:
-    """Reconcile the loan's stale-dated Step-2 cash entries, wherever they hide.
-
-    The loan sync's third reconcile (plan step E1a), and the reason the
-    checked-projection assert can hold on REAL data: the linked ledger's
-    per-date nets include the TRANSFER-source cash legs, which this package
-    does not write -- and the pre-E1a transfer reconcile was date-blind, so a
-    historical revert / re-settle left net-zero-in-TOTAL pairs straddling two
-    DATES (measured on the real Mortgage: +$2,410.95 at 2026-07-02 against
-    its reversal dated 2026-06-18 -- the old latest-``entry_date`` reversal
-    rule's residue).  The loan-side reconciles cannot touch those entries, so
-    without this pass the assert would fire on residue no loan write can heal
-    -- the C9a lesson (a guard that 500s its own route) in posting form.
-
-    **The candidate set comes from the LEDGER, not the walk** (the step's
-    adversarial review, H2): a REVERTED or SOFT-DELETED payment is outside
-    the walk's settled set, but its pre-E1a cash entries can carry exactly
-    the same cross-date residue -- so the probe reads every loan-side
-    movement's non-zero per-date nets off the linked ledger
-    (:func:`._linked_ledger._movement_nets_by_date`; a payment's cash leg is
-    its loan-side covering movement's own entry since plan step
-    ``balance:X-bi-6-3``, ruling **R-BAL45**) and compares each against what
-    a clean ledger holds: for a settled walk payment, its full cash at its
-    settle date (the SAME leaf clock the fold and the writer share -- the
-    event's ``visible_on``, read once by the stream's builder through
-    :func:`app.services.loan_ledger.payment_visible_on`), keyed by the
-    payment leg's record, its covering movement; for any other movement,
-    nothing (every date nets zero).  Only a movement that fails that comparison is re-synced, so
-    the steady-state cost is the ONE probe query; each stale movement's
-    TRANSFER runs :func:`app.services.posting_service.sync_transfer_postings`
-    -- the one date-aware reconcile for those entries, which reads each
-    movement's own state under its transfer LEG (a soft-deleted payment's
-    legs are non-contributing, the transfer's gate read through the leg since
-    leaf ``balance:X-bi-6-4a``, so they reverse) and brings the legacy
-    one-entry source to zero besides.  A
-    pre-guard legacy transfer OUT of the loan (the R6 KEEP arm) never matches
-    its walk expectation and re-syncs as a no-op each pass -- bounded, and
-    such a loan is already assert-blocked as an N-11-class F1 item.
-
-    Note the honest scope widening: the loan sync may RE-DATE a payment's
-    cash entry, which touches the CHECKING side of that entry -- moving no
-    net anywhere, only correcting WHICH DAY the cash moved (the entry's own
-    account-anchor self-heal runs inside the transfer sync).
-
-    Args:
-        linked_ledger_id: The loan's linked ledger account id (resolved once
-            by :func:`sync_loan_postings`).
-        scenario_id: The budget scenario the reconcile runs in.
-        walk: The loan's walk (supplies each settled payment's expected
-            settle date and cash).
-
-    Raises:
-        PostingError: From the transfer sync, for a broken chart-of-accounts
-            pairing (fail-loud, same as every posting path).
-    """
-    posted = _movement_nets_by_date(linked_ledger_id, scenario_id)
-    # Zero-filtered SYMMETRICALLY with the posted side (its zero-net dates are
-    # dropped): a settled payment with a zero cash contribution -- a ``$0.00``
-    # close, its transfer's settled figure ``0.00`` and no record on either
-    # side -- posts nothing, so expecting ``{date: 0.00}``
-    # would flag it stale and re-sync it (a no-op) on every pass forever.
-    #
-    # A loop rather than a comprehension because the cash is needed BOTH as the
-    # value and by the zero filter, and the comprehension form read it twice per
-    # split -- two valuations of one payment, which is the shape that lets a
-    # filter and the figure it admits come to disagree.  Every source here is
-    # a leg from ``loan_loaders.settled_income_legs`` (the walk's own
-    # loader, plan step balance:X-bi-6-4b), so it has SETTLED and
-    # ``settled_contribution`` of its parent answers the figure its transfer
-    # stores --
-    # and REFUSES a leg outside the settled half rather than pricing its
-    # plan, so this loop's precondition is stated by the call it makes and
-    # not only by the loader above it.  A leg with a non-zero cash holds its
-    # RECORD, its covering movement, whose id is the key the posted side
-    # groups by; a ``$0.00`` close holds none and is skipped by the zero
-    # filter.  A leg is always
-    # a transfer's, so the ``transfer_id is None`` skip the shadow needed is
-    # gone.
-    expected: dict[int, dict[date, Decimal]] = {}
-    transfer_by_movement: dict[int, int] = {}
-    for outcome in walk.settled_splits:
-        leg = outcome.source
-        cash = round_money(settled_contribution(parent_of(leg)))
-        if cash == 0:
-            continue
-        expected[leg.record.id] = {outcome.visible_on: cash}
-        transfer_by_movement[leg.record.id] = leg.transfer.id
-    stale_ids = {
-        movement_id
-        for movement_id in set(posted) | set(expected)
-        if posted.get(movement_id, {}) != expected.get(movement_id, {})
-    }
-    if not stale_ids:
-        return
-    # A posted movement the walk does not expect -- a reverted or soft-deleted
-    # payment's, or one a legacy transfer OUT of the loan wrote -- names its
-    # transfer through the ledger writer's ONE resolution of a movement's
-    # parent (``transfer_legs.movement_parent``, plan step
-    # balance:X-bi-6-4b), over one load of all of them with the loader
-    # options that resolution publishes (``transfer_legs.movement_parent_loads``
-    # since leaf balance:X-bi-6-4d-1, ledger row BAL-579: which relationships
-    # the chain walks -- a movement's row, or its side's transfer -- is that
-    # package's to name).  Every one resolves to a leg: only a transfer's
-    # movement posts under the transfer-movement source, and a hard-deleted
-    # movement's residue was excluded above.  It was NOT
-    # ``transfer_movement_rows`` while a movement could sit under a DEAD
-    # shadow, which that loader dropped and this probe had to name so its
-    # postings reversed; a side record hangs off its transfer since plan
-    # step balance:X-bi-6-4d-2, so no movement sits under a shadow now.
-    unresolved = stale_ids - set(transfer_by_movement)
-    if unresolved:
-        transfer_by_movement.update(
-            (movement.id, movement_parent(movement).transfer.id)
-            for movement in db.session.query(TransactionEntry)
-            .options(*movement_parent_loads())
-            .filter(TransactionEntry.id.in_(unresolved))
-        )
-    transfers = (
-        db.session.query(Transfer)
-        .filter(Transfer.id.in_({transfer_by_movement[m] for m in stale_ids}))
-        .order_by(Transfer.id)
-        .all()
-    )
-    for xfer in transfers:
-        sync_transfer_postings(xfer)
-
-
-def _assert_checked_projection(
-    loan_account_id: int,
-    scenario_id: int,
-    walk: LoanLedgerWalk,
-    linked_ledger_id: int,
-) -> None:
-    """Assert the posted linked ledger equals the fold of the loan's events.
-
-    **The E1a invariant: ``sum(postings) == fold(ACTUAL events)``, checked at
-    WRITE time -- per visible date, not just in total.**  The walk's events,
-    re-keyed by the day each counts from
-    (:func:`app.services.loan_ledger.dated_deltas` -- the ONE statement of the
-    clock, shared with the balance seam's fold), must match the linked
-    ledger's per-``entry_date`` nets exactly: same dates, same amounts, in
-    posting space (a posted net is the negated owed delta).  Anything else
-    means the posted ledger is no longer a faithful projection of the loan's
-    source facts.  No screen reads it any more (the statements and the
-    payment-history table read the worked-out ledger since plan#2515), so what
-    this holds is the store's agreement with that ledger, until X-ew's third
-    leaf deletes both.  Raising HERE, inside the write transaction, turns a
-    difference into a rollback at the write that caused it instead of a silent
-    divergence found months later (finding B-5's invariant, open since the
-    archived audits).
-
-    The comparison is per DATE because a right amount at a wrong date is
-    still a wrong ledger: the fold counts each event from its ``entry_date``
-    (step C2's one clock), so a stale-dated posting moves balances on every
-    day between the two dates.  The reconciles this runs behind are
-    date-aware for exactly that reason (finding N-13), so a legitimate edit
-    -- a settled ``settled_on`` move, a params change, a true-up -- converges
-    BEFORE this check reads the ledger back and can never trip it.
-
-    The two known ways to fail it, named so the error is actionable:
-
-    * a reconcile defect (a target computed or dated wrong) -- fix the
-      reconcile, never this check;
-    * a posting the walk cannot model -- a raw transaction typed onto the
-      loan or a transfer out of it (the N-11 class, forbidden at the source
-      since steps BG / R6).  Such a row is an F1-class DATA item for a human:
-      the E1a ship gate swept production and found none, and the write
-      guards refuse new ones, so one appearing here means a guard was
-      bypassed.
-
-    Skipped for an unconfigured loan (an empty walk: no ``LoanParams``, the
-    N1 guard) -- the reconciles above posted nothing and there is no fact
-    stream to check against.
-
-    Args:
-        loan_account_id: The loan whose projection to verify (names the loan
-            in the failure message).
-        scenario_id: The budget scenario the reconcile ran in.
-        walk: The SAME walk the reconciles just posted from (one walk, both
-            halves, then the check -- never a second walk that could differ).
-        linked_ledger_id: The loan's linked ledger account id (resolved once
-            by :func:`sync_loan_postings`, shared with the lineage probe).
-
-    Raises:
-        PostingError: When any visible date's posted net differs from the
-            fold's delta -- the projection is broken and the write must not
-            commit.
-    """
-    if walk.is_empty:
-        return
-    expected: dict[date, Decimal] = {}
-    for visible_on, delta in dated_deltas(walk):
-        # Posting space: the linked ledger stores the NEGATED owed delta
-        # (debit-positive convention; owed = -(sum of postings)).
-        expected[visible_on] = expected.get(visible_on, _ZERO_MONEY) - delta
-    expected = {
-        visible_on: net for visible_on, net in expected.items() if net != 0
-    }
-    posted = {
-        entry_date: net
-        for entry_date, net in _visible_nets(linked_ledger_id, scenario_id)
-        if net != 0
-    }
-    if expected == posted:
-        return
-    mismatches = sorted(
-        (
-            on_date,
-            expected.get(on_date, _ZERO_MONEY),
-            posted.get(on_date, _ZERO_MONEY),
-        )
-        for on_date in set(expected) | set(posted)
-        if expected.get(on_date, _ZERO_MONEY) != posted.get(on_date, _ZERO_MONEY)
-    )
-    detail = "; ".join(
-        f"{on_date.isoformat()}: walk {want} vs posted {got}"
-        for on_date, want, got in mismatches
-    )
-    raise PostingError(
-        f"Loan account {loan_account_id} scenario {scenario_id}: the posted "
-        f"linked ledger diverges from the fold of the loan's events at "
-        f"{len(mismatches)} date(s) [{detail}].  Either a reconcile defect "
-        f"(fix the reconcile) or a posting the walk cannot model (an N-11 "
-        f"class row -- an F1-class data item for a human).  Refusing to "
-        f"commit a ledger that no longer projects the loan's facts."
-    )
 
 
 def sync_loan_postings_all_scenarios(loan_account_id: int) -> None:

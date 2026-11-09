@@ -16,11 +16,12 @@ interest / escrow / principal legs back out of the ledger by the loan-side
 shadow's ``transaction_id``, so the table would "cross-check the writer".  The
 split is a date-keyed correction with no row link now, and two payments on
 one day in one period share ONE entry, so the ledger cannot say which payment
-paid what -- and never needed to: the E1a write-time assert
-(:func:`._sync._assert_checked_projection`) already grades the posted ledger
-against this same walk per date, and a display-side second grade was a
-checker.  The paid-in-year chips moved OFF the postings onto the fold at step
-C6c (:func:`app.services.balance_at.loan_interest_paid_in_year` /
+paid what -- and never needed to: the ledger is a projection of this same
+walk (graded against it per date by plan step E1a's write-time assert until
+plan task plan#3093 deleted the assert ahead of the store), and a
+display-side second grade was a checker.  The paid-in-year chips moved OFF
+the postings onto the fold at step C6c
+(:func:`app.services.balance_at.loan_interest_paid_in_year` /
 :func:`~app.services.balance_at.loan_principal_paid_in_year`), so this module
 no longer answers them.
 

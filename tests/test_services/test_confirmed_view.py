@@ -997,8 +997,10 @@ class TestSplitInputsKeyOnTheDueDate:
     boundary: the rate case misattributes interest as principal, the escrow case
     misattributes escrow as principal.  Both propagate to the owed balance, the
     posted ledger's interest leg, the payment-history table, the Schedule-A tax
-    figure, and the paid-YTD chips -- and E1a's checked-projection assert cannot
-    catch either, because both sides derive from the same walk.
+    figure, and the paid-YTD chips -- and no check of the posted ledger against
+    the walk could catch either (E1a's checked-projection assert could not,
+    until plan task plan#3093 deleted it), because both sides derive from the
+    same walk.
 
     Each test puts the version change STRICTLY inside the window and asserts the
     installment's own date governs; reverting either call site to

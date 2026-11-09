@@ -14,9 +14,9 @@ does it the way the whole arc turns on (Section 3):
 
 * re-key each event by the date it became VISIBLE
   (:func:`app.services.loan_ledger.dated_deltas` -- on the LEAF since plan step
-  E1a, because the posting writer's checked-projection assert consumes the same
-  re-key and two copies of the one clock is how the fold and the ledger would
-  drift), then
+  E1a, because the posting writer's checked-projection assert consumed the same
+  re-key until plan task plan#3093 and two copies of the one clock is how the
+  fold and the ledger would drift), then
 * prefix-sum the paydowns and read each requested date off the running total
   (:func:`sample_cumulative`) -- ``0.00`` for a date before any event, the honest
   fold of an empty prefix.
@@ -151,7 +151,7 @@ def fold_from_walk(
 
     Re-keys each event by its visible-on date (the leaf's
     :func:`app.services.loan_ledger.dated_deltas` -- the ONE statement of the
-    clock, shared with the posting writer's checked-projection assert),
+    clock),
     prefix-sums the deltas, and reads each requested date off the cumulative --
     ``0.00`` for a date before any event (the empty prefix's honest fold).
     Identical output to :func:`fold_loan_balances` for the same walk, so

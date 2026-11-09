@@ -34,10 +34,11 @@ package depends on: a loan's balance is a fold over its event stream, and these
 postings are a PROJECTION of that fold onto the chart of accounts.  The walk
 lived here until plan step B1, which put the general ledger in the position of
 owning the balance and left every other consumer reaching through this package's
-privates for the split.  The direction now runs one way, which is what lets the
-posted rows become a CHECKED projection of the fold (``sum(postings) ==
-fold(ACTUAL events)``, asserted per visible date at every sync since plan step
-E1a) instead of the source of truth they were mistaken for.
+privates for the split.  The direction now runs one way, which is what made
+the posted rows a projection of the fold instead of the source of truth they
+were mistaken for (asserted per visible date at every sync from plan step E1a
+until plan task plan#3093, which deleted the assert ahead of the store it
+graded).
 
 ## Package layout
 
@@ -56,8 +57,6 @@ keep working unchanged:
 * :mod:`._sync` -- the UNIFIED per-scenario sync (``sync_loan_postings``: one walk,
   one reconcile), the loan-GLOBAL all-scenarios sync, the duplicate translation,
   and the historical backfill.
-* :mod:`._linked_ledger` -- the grouped reads over a loan's linked ledger the
-  sync's E1a checks are built on.
 * :mod:`._display` -- the loan-detail page's two surfaces, both read off the
   walk.  This package answers no balance: the two sum-of-postings balance
   readers it once held (``confirmed_loan_balance_at`` /
@@ -100,9 +99,9 @@ revert / edit / delete / restore / endpoint move), so a loan's opening,
 true-ups, and confirmed payments are all posted as they happen.  A delete or
 an endpoint move needs no reversal BEFORE it (the split links no row a
 delete could sever): the sync the door runs AFTER finds the vacated key with
-no target and reverses it.  Every one of those doors then runs the step-E1a
-assert, so a sync that reconciled the ledger away from the fold rolls back at
-the write that caused it.
+no target and reverses it.  None of them checks the posted ledger against the
+fold any more: the step-E1a assert that did went at plan task plan#3093,
+ahead of the doors plan#2914 stops writing the store from.
 
 **Read status.**  No displayed balance reads these postings.  The read switch
 that once pointed at them is retired: the balance seam folds a loan's past from

@@ -292,7 +292,8 @@ def posted_by_period(source_filter) -> "dict[tuple[int, date], dict[int, Decimal
     ``entry_date`` is the day the recorded event happened (step C2's one
     clock), and the balance fold counts each event from that day -- so a
     correct NET in the right period at the WRONG date is still a wrong ledger
-    (the per-visible-date checked-projection assert catches exactly that).
+    (the per-visible-date checked-projection assert caught exactly that until
+    plan task plan#3093 deleted it ahead of the store).
     Keying the reconcile by ``(period, entry_date)`` makes a stale-dated
     posting a first-class delta: it is reversed AT ITS OWN DATE and re-posted
     at the source's current settle date, instead of surviving because its

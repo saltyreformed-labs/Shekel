@@ -167,7 +167,7 @@ class LoanLedgerWalk:
         The ONE statement of the empty walk, the one a loan with no
         ``LoanParams`` walks to (the N1 guard): the loan writers return on it
         before they read what is posted (``loan_posting_service``'s
-        ``reconcile_loan_corrections`` and ``_assert_checked_projection``),
+        ``reconcile_loan_corrections``),
         the worked-out read asks it of each loan to decide whether the
         owner's pay calendar is loaded (``ledger_lines.worked_out_lines``),
         and the loan page's two measured surfaces hide on it
@@ -540,20 +540,15 @@ def dated_deltas(walk: LoanLedgerWalk) -> list[tuple[date, Decimal]]:
 
     Negated, these are exactly the amounts the posting writer books onto the
     loan's linked ledger (the debit-positive convention), each at this same
-    visible date (the ``entry_date`` its entry carries).  TWO consumers, ONE
-    derivation -- the reason this lives on the leaf (plan step E1a) rather than
-    in either consumer:
-
-    * the balance seam's fold prefix-sums the deltas and samples a date
-      (:func:`app.services.balance_at._fold.fold_from_walk`);
-    * the posting writer's checked-projection assert compares the posted
-      per-date linked nets against them after every reconcile
-      (:func:`app.services.loan_posting_service.sync_loan_postings`).
-
-    A third statement of "which day does this event count from, and for how
-    much" is exactly how the fold and the posted ledger would drift apart --
-    the divergence the assert exists to catch -- so the assert must not carry
-    its own copy of the rule.
+    visible date (the ``entry_date`` its entry carries).  The balance seam's
+    fold prefix-sums the deltas and samples a date
+    (:func:`app.services.balance_at._fold.fold_from_walk`).  It moved onto the
+    leaf at plan step E1a because the posting writer's checked-projection
+    assert read the same deltas, and two statements of "which day does this
+    event count from, and for how much" is how the fold and the posted ledger
+    would drift apart; plan task plan#3093 deleted the assert ahead of the
+    store it graded, so the fold is its one consumer in ``app/``, and it stays
+    here as the walk's statement of its own clock.
 
     **The deltas are computed in EVENT (contract) order and then re-keyed by
     VISIBLE date, and that is deliberate.**  A payment's split depends on the

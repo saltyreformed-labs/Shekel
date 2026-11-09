@@ -84,10 +84,12 @@ class DifferenceLanding:
     ``salary_profiles.template_id`` names the member whose figure is computed
     (:func:`~app.services.income_service.salary_net_for` prices it, and every
     other member states its own price) so *which member rounds* is a stored
-    fact.  What it lacks
-    is a JUSTIFICATION: `salary:N-391` reads *NOT yet attributed*, and none is
-    coming -- ``bank_import:X-gj-3b`` was WITHDRAWN (**R-JJ**) and
-    ``salary:R18`` dissolves the question: one deposit will name ONE row.
+    fact.  What it lacked
+    when the default was ruled is a JUSTIFICATION: `salary:N-391` read *NOT yet
+    attributed*, ``bank_import:X-gj-3b`` was WITHDRAWN (**R-JJ**) and
+    ``salary:R18`` dissolves the question: one deposit will name ONE row.  The
+    attribution that came later (plan#2866, below) reopens nothing here, for
+    that last reason.
 
     **It is a GENERALISATION of ``bank_cash_for`` rather than a second arm
     beside it, and the algebra is why that matters.**  That function answered
@@ -123,11 +125,12 @@ class DifferenceLanding:
     employer paid, ``+$0.35`` across the span.  Before this step the only thing
     this door could do with that gap was mint seven uncategorized rows.
 
-    **WHICH member it belongs to is NOT established, and this class does not
-    claim it is.**  An earlier draft of this paragraph said every cent of it
-    belongs to the salary row; `N-391`'s own last sentence says the opposite
-    -- *NOT yet attributed: a `$0.04` error in any of the 12 hand-entered
-    deductions reproduces the same net, and the gross is n=1*.  What was
+    **WHICH member it belonged to was not established when this was written,
+    and this class still derives no such thing for any match.**  An earlier
+    draft of this paragraph said every cent of it belongs to the salary row;
+    `N-391`'s own last sentence said the opposite -- *NOT yet attributed: a
+    `$0.04` error in any of the 12 hand-entered deductions reproduces the same
+    net, and the gross is n=1*.  What was
     measured on 2026-09-01 is narrower and is about the GROSS: the app derived
     a per-paycheck gross by dividing ``salary_profiles.annual_salary``
     (`$91,675.00` / 26 = `$3,525.96`) where the owner's stub states
@@ -139,8 +142,29 @@ class DifferenceLanding:
     against, and *the allowances match exactly* is ``bank less allowances =
     salary`` restated.  The gross half was ``salary:X-av``'s, which
     `N-391` names; since plan step ``salary:X-av-3a`` the salary is what one
-    paycheck pays, so the owner can hold the stub's figure (its migration
-    wrote the divided one).
+    paycheck pays (its migration wrote the divided figure).
+
+    **plan#2866 attributed it, on a same-day production copy, 2026-11-06.**
+    Every saved stub's own figures add up to its deposit to the cent and its
+    deductions agree with the app's line for line, so a mistyped deduction is
+    not the cause.  On a stub's own payday its taxes are that stub's by
+    construction (:func:`~app.services.paycheck_calculator._stubs
+    .priced_taxes`), so that comparison grades no tax formula; what it does
+    grade is that on the four stubs past the first raise the one line left to
+    differ is BASE PAY: the walked pay list, four cents ABOVE what the employer
+    prints, the sign having flipped at that raise because the employer's raise
+    was not exactly the forecast's percentage.  A cent either way beyond that
+    is read as the employer's -- two stubs with one gross and one set of lines
+    print Medicare a cent apart -- and on the paydays with no stub it is
+    inferred.  The first two paydays of the raise's month differ by dollars,
+    not cents: the employer paid that raise by the hours worked after it, where
+    the app prices every payday of the month at the whole raise (plan#3048);
+    and where a forecast raise moves the state line, its rounding to the cent
+    against the employer's whole dollars is plan#2682's.  The figures stay
+    outside the repository.  While no later entry covers those paydays, a Fix
+    of the first entry to the pre-raise pay WIDENS the gap, because the raise
+    walks from it; the ruled way to state a raise received is a new entry
+    (**R-SAL59**), plan step ``salary:X-av-3b``'s Record door.
 
     Attributes:
         on_row: The member the difference is written to, or ``None`` where it

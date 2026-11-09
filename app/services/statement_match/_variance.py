@@ -59,10 +59,15 @@ move, because the residue rule's whole range was `{$3,525.96, $3,525.97}`.
 What `N-391` says instead is that ``salary_profiles.annual_salary`` divided to
 a per-paycheck gross four cents under the stub the employer issues, and its
 owner was ``salary:X-av``.  Plan step ``salary:X-av-3a`` removed the division:
-the salary is now what one paycheck pays, so the owner can hold the stub's
-figure -- though its migration wrote the divided one, and the gap stays until
-the owner fixes it.  A cause sentence nobody re-checks is exactly the shape
-that decays.
+the salary is now what one paycheck pays, though its migration wrote the
+divided figure.  **This sentence said the gap stays until the owner fixes it,
+and plan#2866 measured the obvious fix false** (2026-11-06, the attribution is
+:class:`~._landing.DifferenceLanding`'s): past the first raise the walked pay
+sits ABOVE the stub, so while no later entry covers those paydays a Fix of the
+first entry to the pre-raise pay widens the gap.  The ruled way to state a
+raise received is a new entry (**R-SAL59**), plan step ``salary:X-av-3b``'s
+Record door.  A cause sentence nobody re-checks is exactly the shape that
+decays.
 
 **Nothing PROPOSES a residual and nothing may.**  R-GD's own measurement is
 why: ``n choose k`` puts 20 leftover lines within 1% of some same-day row set,

@@ -60,6 +60,7 @@ def _fake_period(period_id, start_date, end_date):
 
 #: The rhythm a paycheck here is priced at unless a case says otherwise.
 _BIWEEKLY = PayCadence(FixedDays(14))
+_WEEKLY = PayCadence(FixedDays(7))
 
 
 def _priced(lines, kind):
@@ -190,7 +191,7 @@ class TestCleanRaiseLabel:
 
 
 class TestBaseRegularNet:
-    """base_regular_net: nearest regular paycheck at the same salary."""
+    """base_regular_net: nearest regular paycheck at the same pay rate."""
 
     def test_prefers_previous_regular_same_salary(self):
         """The idx-1 third paycheck resolves to idx-0's regular net (prev)."""
@@ -208,6 +209,65 @@ class TestBaseRegularNet:
         ]
         # No earlier period; next regular same salary is idx 1 => 1400.00.
         assert svc.base_regular_net(pairs, 0) == Decimal("1400.00")
+
+    def test_a_third_paycheck_straddling_a_raise_matches_a_regular_one_at_its_rate(self):
+        """The straddle third paycheck compares with a regular paycheck at its pay rate (plan#3123).
+
+        Made-up: $2,000.00 a paycheck and 5% from a Wednesday, 2/10 of the
+        third paycheck's weekdays at the old pay: its base is 2,000.00 x 2/10
+        + 2,100.00 x 8/10 = 2,080.00, its rate 2,100.00 (2,100.00 x 26 =
+        54,600.00 a year), and with its $300.00 line skipped and no tax it
+        nets 2,080.00.  No paycheck shares that base, so the base key fell
+        back to its own net, a delta of $0.00; the regular paycheck at
+        2,100.00 nets 2,100.00 - 300.00 = 1,800.00: 2,080.00 - 1,800.00 =
+        +280.00.  The earlier regular paycheck, at 2,000.00, is a different
+        rate and is passed over.
+        """
+        pairs = [
+            _pair(1, date(2027, 7, 1), date(2027, 7, 14), "52000", "2000", "1700"),
+            _pair(2, date(2027, 7, 15), date(2027, 7, 28), "52000", "2000", "1700"),
+            _pair(3, date(2027, 7, 29), date(2027, 8, 11), "54600", "2080", "2080",
+                  is_third=True),
+            _pair(4, date(2027, 8, 12), date(2027, 8, 25), "54600", "2100", "1800"),
+        ]
+        assert svc.base_regular_net(pairs, 2) == Decimal("1800.00")
+        assert svc.next_third_after(pairs, date(2027, 7, 20)) == {
+            "period_start": date(2027, 7, 29),
+            "net": Decimal("2080.00"),
+            "delta": Decimal("280.00"),
+        }
+
+    def test_one_yearly_salary_at_two_rhythms_is_two_pay_rates(self):
+        """52,000.00 a year biweekly (2,000.00) and weekly (1,000.00) do not match (R-SAL70)."""
+        pairs = [
+            _pair(1, date(2027, 3, 1), date(2027, 3, 7), "52000", "1000", "900",
+                  cadence=_WEEKLY),
+            _pair(2, date(2027, 3, 8), date(2027, 3, 21), "52000", "2000", "2000",
+                  is_third=True),
+            _pair(3, date(2027, 3, 22), date(2027, 4, 4), "52000", "2000", "1700"),
+        ]
+        # The weekly paycheck shares the yearly figure but not the rate, so the
+        # nearest match is the later biweekly one: 1,700.00.
+        assert svc.base_regular_net(pairs, 1) == Decimal("1700.00")
+
+    def test_a_regular_paycheck_whose_rate_moved_before_its_pay_is_passed_over(self):
+        """A regular paycheck at the new rate but the old base is not a match.
+
+        Made-up, as task plan#3122's weekend case: 3% from the Saturday that
+        ends the second paycheck's period, so its rate is 2,060.00 (53,560.00
+        a year) while it pays 2,000.00 and nets 1,700.00.  The third paycheck
+        after it pays 2,060.00 and skips its $300.00 line: it nets 2,060.00.
+        The match is the later regular paycheck paying 2,060.00, netting
+        1,760.00, not the earlier one at the old pay: 2,060.00 - 1,760.00.
+        """
+        pairs = [
+            _pair(1, date(2028, 6, 23), date(2028, 7, 6), "52000", "2000", "1700"),
+            _pair(2, date(2028, 7, 7), date(2028, 7, 20), "53560", "2000", "1700"),
+            _pair(3, date(2028, 7, 21), date(2028, 8, 3), "53560", "2060", "2060",
+                  is_third=True),
+            _pair(4, date(2028, 8, 4), date(2028, 8, 17), "53560", "2060", "1760"),
+        ]
+        assert svc.base_regular_net(pairs, 2) == Decimal("1760.00")
 
 
 class TestNextEvents:

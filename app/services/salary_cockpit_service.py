@@ -25,7 +25,7 @@ from app.enums import PaycheckLineKindEnum
 from app.services import paycheck_line_kinds
 from app.services.pay_calendar import DerivedPeriod
 from app.services.paycheck_calculator import PaycheckBreakdown
-from app.utils.money import HUNDRED, ZERO
+from app.utils.money import HUNDRED, ZERO, round_money
 
 # The net-pay staircase chart looks back this many pay periods before the
 # period containing ``today`` and forward this many months after it, so
@@ -158,26 +158,64 @@ def is_pay_cut(raw_label: str | None) -> bool:
     return bool(raw_label) and raw_label.startswith("PAY -")
 
 
+def _pay_rate(breakdown: PaycheckBreakdown) -> Decimal:
+    """Return the paycheck's pay RATE per paycheck: the pay in force on its last paid day.
+
+    The rate's yearly figure over the paychecks a year it is paid at
+    (:attr:`~app.services.paycheck_calculator.Earnings.annual_salary` and
+    :attr:`~app.services.paycheck_calculator.PeriodInfo.cadence`, both the
+    engine's :class:`~app.services.payroll_basis.BasePay` rate).  The engine's
+    yearly figure is the per-paycheck rate times the count, exactly, so the
+    cent this rounds to is that rate.
+
+    Args:
+        breakdown: One paycheck's breakdown.
+
+    Returns:
+        The per-paycheck rate, to the cent.
+    """
+    return round_money(
+        breakdown.period.cadence.annual_to_per_paycheck(breakdown.earnings.annual_salary),
+    )
+
+
 def base_regular_net(pairs: list[PeriodPair], idx: int) -> Decimal:
-    """Return the net of the nearest regular paycheck at the same base pay.
+    """Return the net of the nearest regular paycheck at the same pay rate.
 
     A third-paycheck period skips the 24x deductions, so its net spikes
     above the regular per-paycheck net.  For the staircase chart line and
     the third-paycheck delta chip we need the "base" regular net at the
     same pay level: the net of the nearest NON third-paycheck period
-    sharing the period-at-``idx``'s base pay per paycheck.  Prefer the
+    whose base is the period-at-``idx``'s pay rate per paycheck.  Prefer the
     closest earlier period; fall back to the closest later one; and, in
     the degenerate case where no regular period at that pay exists, fall
     back to the period's own net.
 
-    **Keyed on BASE PAY since plan step salary:X-av-2** (ruling
-    **R-SAL70**), where it keyed on the annual salary.  The two were one
-    test while every payday divided the annual by the same count; once each
-    payday divides by its own era's, one annual salary is two paychecks
-    across a change of rhythm, and a third paycheck of a new biweekly era
-    matched against a regular WEEKLY paycheck at the same salary would show
-    the difference of the two rhythms as a third-paycheck bonus.  A raise
-    still separates the levels, because it moves the base.
+    **The third paycheck is keyed on its PAY RATE since task plan#3123**,
+    the pay in force on the last day it pays for at its own rhythm
+    (:func:`_pay_rate`).  It was keyed on its BASE until then, which is the
+    rate for every paycheck paid wholly at one pay, so those match as they
+    did.  A paycheck
+    whose pay period straddles a raise is paid a blend no other paycheck is
+    (ruling **plan#3089**), so as a third paycheck it found no regular one
+    and fell back to its own net: a delta of $0.00 and a spike on the
+    regular line.  Made-up: biweekly Thursdays, a gap of six, $2,000.00 and
+    5% from Wednesday 2027-07-14; 07-29, July's third payday, pays
+    07-10..07-23 for 2,000.00 x 2/10 + 2,100.00 x 8/10 = 2,080.00.  With a
+    $300.00 line it skips and no tax, it now compares with a regular
+    paycheck at 2,100.00, netting 1,800.00: +$280.00, what it nets above a
+    regular paycheck at the pay in force.  **A regular paycheck matches only
+    where its BASE is that rate**, what it pays rather than its own rate, so
+    a straddling one, whose rate can be the new pay while its base is still
+    the old (a raise landing on its period's last weekend, task plan#3122),
+    is passed over.
+
+    **Per paycheck at the paycheck's rhythm, never the yearly figure alone**
+    (ruling **R-SAL70**, plan step salary:X-av-2): across a change of rhythm
+    one yearly salary is two paychecks, and a third paycheck of a new
+    biweekly era matched against a regular WEEKLY paycheck at the same salary
+    would show the difference of the two rhythms as a third-paycheck bonus.
+    A raise still separates the levels, because it moves the rate.
 
     Args:
         pairs: The full ordered ``(period, breakdown)`` list.
@@ -186,16 +224,16 @@ def base_regular_net(pairs: list[PeriodPair], idx: int) -> Decimal:
     Returns:
         The base regular net pay as a :class:`~decimal.Decimal`.
     """
-    target_base = pairs[idx][1].earnings.base_biweekly
+    target_rate = _pay_rate(pairs[idx][1])
     for j in range(idx - 1, -1, -1):
         breakdown = pairs[j][1]
         if (not breakdown.period.is_third_paycheck
-                and breakdown.earnings.base_biweekly == target_base):
+                and breakdown.earnings.base_biweekly == target_rate):
             return breakdown.earnings.net_pay
     for j in range(idx + 1, len(pairs)):
         breakdown = pairs[j][1]
         if (not breakdown.period.is_third_paycheck
-                and breakdown.earnings.base_biweekly == target_base):
+                and breakdown.earnings.base_biweekly == target_rate):
             return breakdown.earnings.net_pay
     return pairs[idx][1].earnings.net_pay
 
@@ -243,7 +281,7 @@ def next_third_after(pairs: list[PeriodPair], today: date) -> dict[str, object] 
     Returns:
         ``{"period_start": date, "net": Decimal, "delta": Decimal}`` where
         ``delta`` is the third-paycheck net minus the base regular net at
-        the same base pay (:func:`base_regular_net`), or ``None`` when no
+        the same pay rate (:func:`base_regular_net`), or ``None`` when no
         future third paycheck exists in the projection.
     """
     for idx, (period, breakdown) in enumerate(pairs):

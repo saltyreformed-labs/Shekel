@@ -78,6 +78,7 @@ def _create_salary_profile(seed_user, db_session, name="Main Job"):
     rule = make_every_period_rule(db_session, template)
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         template_id=template.id,

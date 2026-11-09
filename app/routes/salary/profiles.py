@@ -31,13 +31,14 @@ from app.services import (
     account_service,
     pay_list_service,
     recurrence_engine,
+    salary_pay_period,
     salary_profile_service,
     template_amount_service,
 )
 from app.services import pay_schedule_service, pay_stub_service
 from app.services.balance_at import BalanceContext
 from app.services.obligations_aggregator import todays_price
-from app.services.pay_calendar import PayCadence
+from app.services.pay_calendar import PayCadence, calendar_for
 from app.services.payroll_basis import PayrollBasis
 from app.services.recurrence import RecurrenceSpec, author_rule
 from app.schemas.validation import SalaryPayEntryFixSchema
@@ -155,6 +156,7 @@ def new_profile():
         calc_methods=[],
         paychecks_per_year=paychecks_per_year,
         current_payday=current_payday,
+        pay_period=None,
     )
 
 
@@ -324,6 +326,12 @@ def create_profile():
     calendar = ctx.calendar()
 
     try:
+        # The job's pay periods from one stub's two dates (plan#3048, ruling
+        # plan#3096), off the pass's calendar; a refusal is the owner's to
+        # correct, reported below with the others.
+        period_end_days = salary_pay_period.days_before_payday(
+            calendar, data["stub_pay_date"], data["stub_period_end"],
+        )
         # The profile FIRST, with its pay list (plan step salary:X-av-3a,
         # where it was priced before its template existed so the template
         # was born at the net paycheck; the template states no price since
@@ -342,6 +350,7 @@ def create_profile():
             stub_gross_includes_after_tax=data.get(
                 "stub_gross_includes_after_tax", False,
             ),
+            period_end_days_before_payday=period_end_days,
         )
         db.session.add(profile)
         db.session.flush()
@@ -438,6 +447,9 @@ def edit_profile(profile_id):
         pay_rows=pay_list_service.pay_rows(basis),
         rhythm_changes=basis.rhythm_changes_without_pay(),
         stub_summaries=pay_stub_service.stub_summaries(profile),
+        pay_period=salary_pay_period.pay_period_view(
+            ctx.calendar(), profile.period_end_days_before_payday, ctx.as_of,
+        ),
         **_line_cadence_context(profile, ctx.calendar),
     )
 
@@ -480,6 +492,21 @@ def update_profile(profile_id):
             "warning",
         )
         return redirect(url_for("salary.edit_profile", profile_id=profile_id))
+
+    # The pay-period pair (plan#3048, ruling plan#3096), turned into the gap
+    # BEFORE anything is staged, so a refusal leaves the profile as it was.
+    # Neither posted leaves the stored gap alone; one alone is refused.
+    if "stub_pay_date" in data or "stub_period_end" in data:
+        try:
+            profile.period_end_days_before_payday = (
+                salary_pay_period.days_before_payday(
+                    calendar_for(current_user.id),
+                    data.get("stub_pay_date"), data.get("stub_period_end"),
+                )
+            )
+        except ValidationError as refused:
+            flash(str(refused), "danger")
+            return redirect(url_for("salary.edit_profile", profile_id=profile_id))
 
     for field_name, value in data.items():
         if field_name in _PROFILE_UPDATE_FIELDS:

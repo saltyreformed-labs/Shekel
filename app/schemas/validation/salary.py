@@ -132,6 +132,12 @@ class SalaryProfileCreateSchema(BaseSchema):
     # rulings R-SAL102 and R-SAL105): "no", the column's own default, unless
     # the form says otherwise.
     stub_gross_includes_after_tax = fields.Boolean(load_default=False)
+    # One stub's Pay Date and Period End (plan#3048, ruling plan#3096: "a new
+    # job asks for the two dates when you set it up").  Whether the Pay Date
+    # is a payday, and what gap the two state, are the calendar's questions
+    # (``salary_pay_period.days_before_payday``).
+    stub_pay_date = fields.Date(required=True, validate=_PAYDAY_RANGE)
+    stub_period_end = fields.Date(required=True, validate=_PAYDAY_RANGE)
 
 
 class SalaryProfileUpdateSchema(BaseSchema):
@@ -175,6 +181,13 @@ class SalaryProfileUpdateSchema(BaseSchema):
     # of exactly that: an unticked checkbox submits nothing, so "no" could
     # never be saved over a "yes" (plan step salary:S11-c-2b, R-SAL105).
     stub_gross_includes_after_tax = fields.Boolean()
+    # The pay-period pair (ruling plan#3096), absent together to leave the
+    # stored gap alone like every field above.  One without the other states
+    # no gap, which ``salary_pay_period.days_before_payday`` refuses in words:
+    # this form flashes a schema error as "correct the highlighted errors"
+    # and highlights nothing.
+    stub_pay_date = fields.Date(validate=_PAYDAY_RANGE)
+    stub_period_end = fields.Date(validate=_PAYDAY_RANGE)
 
     # Optimistic-locking pin (commit C-18).
     version_id = RowId(validate=validate.Range(min=1))

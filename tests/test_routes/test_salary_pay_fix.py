@@ -36,6 +36,7 @@ from app.models.ref import FilingStatus
 from app.models.salary_pay_entry import SalaryPayEntry
 from app.models.salary_profile import SalaryProfile
 from app.services import pay_era_write
+from tests._stub_period import stub_period_on
 from tests._test_helpers import era_of, freeze_today, start_test_pay_list
 
 
@@ -109,7 +110,7 @@ def _create_through_the_form(client, seed_user, pay, payday):
     # "Choose your state" and chooses none (plan step salary:X-at-3).
     controls.update({
         "name": "Day Job", "pay_amount": pay, "pay_payday": payday,
-        "state_code": "NC",
+        "state_code": "NC", **stub_period_on(payday),
     })
     response = client.post("/salary", data=controls)
     assert response.status_code == 302, response.get_data(as_text=True)
@@ -177,6 +178,8 @@ class TestCreateByPayPerPaycheck:
             controls.update({
                 "name": "Day Job", "pay_amount": "2000.00",
                 "pay_payday": "2026-01-03", "state_code": "NC",
+                # A payday, so the pay box's refusal is the one graded.
+                **stub_period_on("2026-01-02"),
             })
             response = auth_client.post(
                 "/salary", data=controls, follow_redirects=True,
@@ -209,6 +212,8 @@ class TestUpToTheNextPayday:
             controls.update({
                 "name": "Day Job", "pay_amount": "2000.00",
                 "pay_payday": "2026-04-10", "state_code": "NC",
+                # A paid payday, so the pay box's refusal is the one graded.
+                **stub_period_on("2026-01-02"),
             })
             response = auth_client.post(
                 "/salary", data=controls, follow_redirects=True,
@@ -463,6 +468,7 @@ class TestOwnership:
         """The second owner's entry: 404, unchanged; the first owner's own: 302."""
         with app.app_context():
             victim = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_second_user["user"].id,
                 scenario_id=seed_second_user["scenario"].id,
                 filing_status_id=db.session.query(FilingStatus).first().id,

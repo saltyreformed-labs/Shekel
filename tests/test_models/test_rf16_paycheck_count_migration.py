@@ -183,6 +183,7 @@ def without_the_schedule_key(db, with_the_pay_period_derived_columns):
 def _profile(db, seed_user, name="R-F16"):
     """Add and flush a salary profile for the seeded owner."""
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         filing_status_id=1,

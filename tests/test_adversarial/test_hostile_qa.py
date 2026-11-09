@@ -1201,6 +1201,7 @@ class TestCrossResourceIDOR:
             ).one()
 
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=second_user["user"].id,
                 scenario_id=second_user["scenario"].id,
                 filing_status_id=filing_single.id,

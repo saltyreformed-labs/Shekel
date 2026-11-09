@@ -202,6 +202,7 @@ def _make_salary_profile(user_id, scenario_id):
         db.session.query(FilingStatus).filter_by(name="single").one()
     )
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user_id,
         scenario_id=scenario_id,
         filing_status_id=filing_status.id,

@@ -68,6 +68,7 @@ from app.schemas.validation import (
     SalaryProfileCreateSchema,
     SalaryProfileUpdateSchema,
 )
+from tests._stub_period import stub_period_on
 from tests._test_helpers import constraint_name_from, start_test_pay_list
 
 
@@ -324,6 +325,7 @@ class TestSalaryProfileSchemaBounds:
             "name": "Test Profile",
             "pay_amount": "3846.15",  # $100,000.00 a year / 26
             "pay_payday": "2026-01-02",
+            **stub_period_on("2026-01-02"),
             "filing_status_id": str(single_id),
             "state_code": "NC",
         }
@@ -811,6 +813,7 @@ class TestPaycheckLineCheck:
             .filter_by(name="single").one().id
         )
         profile = SalaryProfile(
+            period_end_days_before_payday=6,
             user_id=seed_user["user"].id,
             scenario_id=seed_user["scenario"].id,
             filing_status_id=single_id,
@@ -918,6 +921,7 @@ class TestSalaryRaiseCheck:
             .filter_by(name="single").one().id
         )
         profile = SalaryProfile(
+            period_end_days_before_payday=6,
             user_id=seed_user["user"].id,
             scenario_id=seed_user["scenario"].id,
             filing_status_id=single_id,

@@ -115,6 +115,7 @@ def _profile(user_id: int, scenario_id: int, name: str, *, is_active: bool):
         "SELECT id FROM ref.filing_statuses WHERE name = 'single'"
     )).scalar()
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user_id,
         scenario_id=scenario_id,
         filing_status_id=filing_status_id,

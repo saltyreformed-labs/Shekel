@@ -159,6 +159,7 @@ class TestThePicturesPublishedSurface:
         with app.app_context():
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=filing.id,
@@ -590,6 +591,7 @@ class TestTheRenderDayOpensTheSalaryPath:
         with app.app_context():
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=filing.id,
@@ -961,6 +963,7 @@ class TestRetirementProjectionEntryAware:
             # Active salary profile so the gap path is reachable.
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=user.id,
                 scenario_id=scenario.id,
                 filing_status_id=filing.id,
@@ -1214,6 +1217,7 @@ def _seed_active_salary_profile(db_session, user, scenario):
     """
     filing = db_session.query(FilingStatus).first()
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user.id,
         scenario_id=scenario.id,
         filing_status_id=filing.id,

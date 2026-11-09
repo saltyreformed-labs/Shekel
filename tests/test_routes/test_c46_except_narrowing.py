@@ -44,6 +44,7 @@ from app.models.ref import (
 from app.models.salary_profile import SalaryProfile
 from app.models.salary_raise import SalaryRaise
 from app.services import account_service
+from tests._stub_period import stub_period_on
 from tests._test_helpers import freeze_today
 from tests.test_routes.test_salary._helpers import _create_profile
 
@@ -107,6 +108,7 @@ class TestSalaryNarrowCatch:
                         "name": "New Profile",
                         "pay_amount": "2884.62",  # $75,000.00 a year / 26
                         "pay_payday": "2026-01-02",  # the first period's payday
+                        **stub_period_on("2026-01-02"),
                         "filing_status_id": filing_status.id,
                         "state_code": "NC",
                     },
@@ -514,6 +516,7 @@ class TestNonSqlAlchemyErrorPropagates:
                             "name": "New Profile",
                             "pay_amount": "2884.62",  # $75,000.00 a year / 26
                             "pay_payday": "2026-01-02",  # the first period's payday
+                            **stub_period_on("2026-01-02"),
                             "filing_status_id": filing_status.id,
                             "state_code": "NC",
                         },

@@ -19,6 +19,7 @@ from app.services.payroll_basis import PayrollBasis
 
 from app.services import account_service
 
+from tests._stub_period import stub_period_on
 from tests._test_helpers import create_account_of_type, create_loan_account, NO_TAX_LAW
 
 from ._helpers import _create_profile, _create_other_user_profile, _respace_paydays
@@ -73,6 +74,7 @@ class TestProfileCreate:
                 "name": "Day Job",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2026-01-02",  # the first period's payday
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)
@@ -128,6 +130,7 @@ class TestProfileCreate:
                 "name": "Weekly Check",
                 "pay_amount": "1000.00",  # $52,000.00 a year / 52
                 "pay_payday": "2026-01-02",  # the first weekly payday
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)
@@ -213,6 +216,7 @@ class TestProfileCreate:
                 "name": "Day Job",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2024-01-05",  # the seed owner's bootstrap payday
+                **stub_period_on("2024-01-05"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)
@@ -235,6 +239,7 @@ class TestProfileCreate:
                 "name": "Day Job",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2024-01-05",  # the seed owner's bootstrap payday
+                **stub_period_on("2024-01-05"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)
@@ -274,6 +279,7 @@ class TestProfileCreate:
                 "name": "Day Job",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2026-01-02",  # the first period's payday
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)
@@ -337,6 +343,7 @@ class TestProfileCreate:
                 "name": "Day Job",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2026-01-02",  # the first period's payday
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)
@@ -382,6 +389,7 @@ class TestProfileCreate:
                 "name": "Day Job",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2026-01-02",  # the first period's payday
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)
@@ -434,6 +442,7 @@ class TestProfileCreate:
                 "name": "Day Job",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2026-01-02",  # the first period's payday
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)
@@ -457,6 +466,7 @@ class TestProfileCreate:
                 "name": "Day Job",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2026-01-02",  # the first period's payday
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }
@@ -483,6 +493,7 @@ class TestProfileCreate:
                 "name": "Link Test",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2024-01-05",  # the seed owner's bootstrap payday
+                **stub_period_on("2024-01-05"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)

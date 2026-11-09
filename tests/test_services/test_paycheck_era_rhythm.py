@@ -77,6 +77,7 @@ from app.services.paycheck_calculator._calendar_questions import (
 )
 from app.services.payroll_basis import PayrollBasis
 from app.utils.dates import display_today
+from tests._stub_period import stub_period_on
 from tests._test_helpers import (
     era_of,
     fica_only_law,
@@ -680,6 +681,7 @@ class TestTheRecurringSalaryRow:
             "pay_payday": min(
                 period.start_date for period in periods
             ).isoformat(),
+            **stub_period_on(min(period.start_date for period in periods)),
             "filing_status_id": filing.id,
             "state_code": "NC",
         }, follow_redirects=True)

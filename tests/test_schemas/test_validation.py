@@ -19,6 +19,7 @@ from app import tax_law as tax_law_module
 from app.enums import PaycheckLineKindEnum, RecurrenceUnitEnum
 from app.schemas.validation._helpers import _normalize_empty_inputs
 from app.schemas.validation.templates import A_CADENCE_IS_REQUIRED
+from tests._stub_period import stub_period_on
 from tests._test_helpers import EMPTY_TAX_LAW, cadence_payload
 from app.services.pay_rhythm import FixedDays
 from app.services.recurrence import MonthReading
@@ -866,6 +867,7 @@ class TestSalaryProfileCreateSchema:
             "name": "My Salary",
             "pay_amount": "2884.62",  # $75,000.00 a year / 26
             "pay_payday": "2026-01-02",
+            **stub_period_on("2026-01-02"),
             "filing_status_id": "1",
             "state_code": "NC",
         })
@@ -899,6 +901,7 @@ class TestSalaryProfileCreateSchema:
             "name": "Stale client",
             "pay_amount": "2884.62",  # $75,000.00 a year / 26
             "pay_payday": "2026-01-02",
+            **stub_period_on("2026-01-02"),
             "filing_status_id": "1",
             "state_code": "NC",
             "pay_periods_per_year": "52",
@@ -912,6 +915,7 @@ class TestSalaryProfileCreateSchema:
                 "name": "Bad",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2026-01-02",
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": "1",
                 "state_code": "NCC",  # 3 chars, max is 2.
             })
@@ -1527,6 +1531,7 @@ class TestSalaryProfileCreateSchemaBoundary:
             "name": "Test Profile",
             "pay_amount": "2884.62",  # $75,000.00 a year / 26
             "pay_payday": "2026-01-02",
+            **stub_period_on("2026-01-02"),
             "filing_status_id": "1",
             "state_code": "NC",
         }
@@ -1643,6 +1648,7 @@ class TestAnnualSalaryRange:
             "name": "Test",
             "pay_amount": "2884.62",  # $75,000.00 a year / 26
             "pay_payday": "2026-01-02",
+            **stub_period_on("2026-01-02"),
             "filing_status_id": "1", "state_code": "NC",
         }
         data.update(overrides)

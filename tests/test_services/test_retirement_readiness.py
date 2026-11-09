@@ -194,6 +194,7 @@ def _build_scenario(db, seed_user, *, tax_rate=None, with_pension=True):
     filing = db.session.query(FilingStatus).first()
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user.id,
         scenario_id=scenario.id,
         filing_status_id=filing.id,

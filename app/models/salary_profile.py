@@ -15,6 +15,19 @@ from app.models.mixins import (
 )
 
 
+#: How many days a pay period may end before the payday payroll scheduled for
+#: it (``period_end_days_before_payday``, ruling plan#3096).  ZERO is a period
+#: paid on the day it ends; below zero would be a period paid before it ends,
+#: which one gap cannot state for every paycheck (a month-anchored period paid
+#: on the 25th), so the job's form refuses a Period End after its Pay Date.  A
+#: YEAR is the top: no payroll pays a period that ended over a year before,
+#: and the bound turns a mistyped year on a stub's date into a refusal rather
+#: than a stored fact.  ``ck_salary_profiles_period_end_days_range`` is built
+#: from these two, and the form's refusal quotes them.
+PERIOD_END_DAYS_BEFORE_PAYDAY_MIN = 0
+PERIOD_END_DAYS_BEFORE_PAYDAY_MAX = 365
+
+
 class SalaryProfile(
     UserScopedMixin, IsActiveMixin, SortOrderMixin, OptimisticLockMixin,
     TimestampMixin, db.Model,
@@ -93,6 +106,11 @@ class SalaryProfile(
             "version_id > 0",
             name="ck_salary_profiles_version_id_positive",
         ),
+        db.CheckConstraint(
+            "period_end_days_before_payday BETWEEN "
+            f"{PERIOD_END_DAYS_BEFORE_PAYDAY_MIN} AND {PERIOD_END_DAYS_BEFORE_PAYDAY_MAX}",
+            name="ck_salary_profiles_period_end_days_range",
+        ),
         {"schema": "salary"},
     )
 
@@ -161,6 +179,15 @@ class SalaryProfile(
         db.Boolean, nullable=False, default=False,
         server_default=db.text("false"),
     )
+    # How many days each of this job's pay periods ends before the payday
+    # payroll SCHEDULED for it, the grid day before any holiday moved it
+    # (plan#3048, ruling plan#3096).  The owner never types it: the form asks
+    # one stub's Pay Date and Period End and turns them into this through the
+    # calendar's match of a paid day to its planned one
+    # (``salary_pay_period.days_before_payday``).  Read by the one producer of
+    # a paycheck's pay period, ``pay_calendar.days_paid_for``.  No default: it
+    # is a fact about the owner's employer, so every job states it.
+    period_end_days_before_payday = db.Column(db.Integer, nullable=False)
 
     # is_active + sort_order: from IsActiveMixin / SortOrderMixin.
     # version_id + its version_id_col mapper config: from OptimisticLockMixin.

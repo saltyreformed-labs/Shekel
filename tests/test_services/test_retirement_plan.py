@@ -196,6 +196,7 @@ def _seed_plan(db, seed_user, *, balance, annual_return, months_out=240):
     retirement_date = add_months(date.today(), months_out)
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user.id,
         scenario_id=seed_user["scenario"].id,
         filing_status_id=filing.id,
@@ -844,6 +845,7 @@ class TestThePointBelievesARaiseSet:
             _seed_believed_plan(db, seed_user, effective_year=year)
             other = seed_second_user["user"]
             foreign_profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=other.id,
                 scenario_id=seed_second_user["scenario"].id,
                 filing_status_id=db.session.query(FilingStatus).first().id,

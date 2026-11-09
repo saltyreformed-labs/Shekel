@@ -144,6 +144,7 @@ from app.models.salary_profile import SalaryProfile
 from app.services import account_resolver, pay_schedule_service
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
+from tests._stub_period import stub_period_on
 from tests._test_helpers import (
     counting_calls,
     counting_read_passes,
@@ -1075,6 +1076,7 @@ class TestOneCalendarDerivationPerRender:
                 "name": "Arch Job",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": first_payday,
+                **stub_period_on(first_payday),
                 "filing_status_id": status_id,
                 "state_code": "NC",
             })

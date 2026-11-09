@@ -53,15 +53,16 @@ part of it:
 
 * :mod:`._grid`, :mod:`._eras`, :mod:`._derive`, :mod:`._projection`,
   :mod:`._searches`, :mod:`._window`, :mod:`._views`, :mod:`._calendar`,
-  :mod:`._walks`, :mod:`._rhythm` and :mod:`._cadence` -- no Flask symbol, no
+  :mod:`._walks`, :mod:`._rhythm`, :mod:`._paid_days` and :mod:`._cadence` --
+  no Flask symbol, no
   database session, no clock.  Every answer is a pure function of values a
   caller supplies, and that is load-bearing rather than tidy: it is what lets
   C1's harness drive the derivation over production's real 63 paydays and
   over a generated sweep with no database, so the two runs exercise the same
   code.  The pure half is a one-way chain -- ``_grid`` -> ``_eras`` ->
   ``_derive`` -> ``_projection`` -> ``_searches`` -> ``_window`` ->
-  ``_views`` -> ``_calendar`` -> (``_walks``, ``_rhythm``) -- split at plan
-  step C2-c and again at C2-f3b, each time when the calendar module reached
+  ``_views`` -> ``_calendar`` -> (``_walks``, ``_rhythm``, ``_paid_days``) --
+  split at plan step C2-c and again at C2-f3b, each time when the calendar module reached
   pylint's 1,000-line ceiling, so a search, a producer of a view, a view over
   a calendar and the calendar itself cannot answer one question differently.
   **``_projection`` is ``C17-b-1``'s** (ruling **R-PC69**, developer
@@ -121,6 +122,7 @@ from ._loader import (
     calendar_for,
     schedule_for,
 )
+from ._paid_days import PaidDays, days_paid_for, scheduled_payday
 from ._rhythm import (
     cadence_on,
     paydays_in_month_through,
@@ -145,6 +147,7 @@ __all__ = [
     "MIN_CADENCE_DAYS",
     "DerivedPeriod",
     "FiledRow",
+    "PaidDays",
     "PayCadence",
     "PayCalendar",
     "PayCalendarError",
@@ -155,6 +158,7 @@ __all__ = [
     "calendar_at_schedule",
     "calendar_for",
     "containing_period",
+    "days_paid_for",
     "derive_periods",
     "earlier_paydays",
     "earliest_started_period",
@@ -175,5 +179,6 @@ __all__ = [
     "projected_payday",
     "saved_paydays_in_month_through",
     "schedule_for",
+    "scheduled_payday",
     "validate_eras",
 ]

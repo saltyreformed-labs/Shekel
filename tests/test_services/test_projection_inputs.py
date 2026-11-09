@@ -271,18 +271,21 @@ def _seed_deductions_fixture(app, db, seed_user, seed_second_user):
     db.session.flush()
 
     active_profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user_id, scenario_id=scenario_id,
         name="Active",
         state_code="NC",
         filing_status_id=filing_status_id, is_active=True,
     )
     inactive_profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user_id, scenario_id=scenario_id,
         name="Inactive",
         state_code="NC",
         filing_status_id=filing_status_id, is_active=False,
     )
     other_profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=other_user_id, scenario_id=other_scenario_id,
         name="Other",
         state_code="NC",
@@ -1649,6 +1652,7 @@ class TestTheFeedIsBuiltOverTheWiring:
                 app, db, seed_user, seed_second_user,
             )
             second = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=ids["user_id"], scenario_id=seed_user["scenario"].id,
                 name="Second",
                 state_code="NC", is_active=True,

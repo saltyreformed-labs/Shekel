@@ -26,6 +26,7 @@ import pytest
 from app.extensions import db
 from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
+from tests._stub_period import stub_period_on
 from tests._test_helpers import freeze_today, rendered_form_controls
 
 _FIELD = "stub_gross_includes_after_tax"
@@ -61,6 +62,7 @@ def _create(client, name, **extra):
         "name": name,
         "pay_amount": "2884.62",
         "pay_payday": "2026-01-02",
+        **stub_period_on("2026-01-02"),
         "filing_status_id": filing_status.id,
         "state_code": "NC",
         **extra,

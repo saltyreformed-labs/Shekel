@@ -2,8 +2,9 @@
 Shekel Budget App -- the known-device cookie.
 
 The browser's half of a known device (plan#2772, ruling plan#2994): the cookie
-carrying the token
-:func:`app.services.known_device_service.record_sign_in` returns.  The record
+carrying the token a finished sign-in or re-confirm returns
+(:func:`app.services.known_device_service.record_sign_in`,
+:func:`~app.services.known_device_service.record_re_confirm`).  The record
 in ``auth.known_devices`` holds only that token's hash and decides what the
 browser's standing is; this cookie only names which record the browser means.
 
@@ -69,10 +70,12 @@ def set_device_cookie(response: Response, user_id: int, token: str) -> None:
     """Put *user_id*'s device token on *response* as its cookie.
 
     Args:
-        response: The response that completes the sign-in.
-        user_id: The ``auth.users.id`` who finished signing in here.
+        response: The response that completes the sign-in or re-confirm.
+        user_id: The ``auth.users.id`` who finished it here.
         token: The token
-            :func:`~app.services.known_device_service.record_sign_in` returned.
+            :func:`~app.services.known_device_service.record_sign_in` or
+            :func:`~app.services.known_device_service.record_re_confirm`
+            returned.
     """
     response.set_cookie(
         _cookie_name(user_id),

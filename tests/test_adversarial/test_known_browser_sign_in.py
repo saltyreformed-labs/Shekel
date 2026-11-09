@@ -22,6 +22,11 @@ Plan#2772.  A browser that finishes a sign-in holds one record and one cookie
   password and Disable two-factor let a known browser past the strangers' lock
   and count its wrong answers on its own record (ruling **plan#3034**).  Their
   stranger's side is ``tests/test_routes/test_every_guess_counts.py``.
+* :class:`TestAReConfirmReplacesTheCookie` -- a finished re-confirm gives a
+  known browser a new token on the same row, as a sign-in does (ruling
+  **plan#3070**), and moves neither its thirty days nor its trust; a stranger
+  gets none; and a record a copy of the cookie deletes after the code's commit
+  leaves the re-confirm finishing, with nothing renewed or cleared.
 
 The code form's tries, which a known browser has of its own (ruling
 **plan#3023**), are ``test_known_browser_code_tries.py``.
@@ -37,8 +42,10 @@ import sqlalchemy
 from app.extensions import db
 from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig, User
+from app.routes.auth import _helpers as auth_route_helpers
 from app.services import auth_service, known_device_service
 from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
+from app.utils.session_helpers import SESSION_SIGNED_IN_AT_KEY
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -709,7 +716,7 @@ class TestEveryDoorHasTheOneRule:
             "/reauth", data={"password": SEED_USER_PASSWORD},
         ).status_code == 302
 
-        assert _device_count(user_id, token) == 0
+        assert _device_count(user_id, _token(browser, user_id)) == 0
         assert _lock_state(user_id) == (4, None)
 
     def test_a_known_browser_changes_its_password_while_locked(self, app, seed_user):
@@ -749,3 +756,149 @@ class TestEveryDoorHasTheOneRule:
         assert db.session.query(MfaConfig).filter_by(
             user_id=user_id,
         ).one().is_enabled is False
+
+
+def _re_confirmed(response):
+    """Return whether *response* is a finished re-confirm's redirect."""
+    return (
+        response.status_code == 302
+        and response.headers["Location"].endswith("/dashboard")
+    )
+
+
+def _signed_in_with_a_code(app, secret):
+    """Return a browser that finished a sign-in with its code, still signed in."""
+    browser = app.test_client()
+    assert _asked_the_code(_password(browser))
+    assert _signed_in(browser.post("/mfa/verify", data={"totp_code": _code(secret)}))
+    return browser
+
+
+class TestAReConfirmReplacesTheCookie:
+    """A finished re-confirm renews a known browser's cookie and nothing else (ruling plan#3070)."""
+
+    def test_the_old_cookie_is_a_strangers_and_the_new_one_known(
+        self, app, seed_user,
+    ):
+        """No two-factor: a new token on the same row, its thirty days unmoved.
+
+        The re-confirm's response carries the cookie, so the browser holds the
+        new token; a stolen copy of the old one now names nothing.  Neither the
+        record's last sign-in nor the session's sign-in stamp moves: a
+        re-confirm is not a sign-in (ruling plan#3069).
+        """
+        user_id = seed_user["user"].id
+        browser = app.test_client()
+        assert _signed_in(_password(browser))
+        old_token = _token(browser, user_id)
+        (device,) = _rows_of(user_id)
+        device_id, signed_in_at = device.id, device.last_signed_in_at
+
+        response = browser.post("/reauth", data={"password": SEED_USER_PASSWORD})
+
+        assert _re_confirmed(response)
+        assert _cookie_header(response, user_id) is not None
+        new_token = _token(browser, user_id)
+        assert new_token != old_token
+        assert known_device_service.find_browser(user_id, old_token) is None
+        assert known_device_service.find_browser(
+            user_id, new_token,
+        ).device.id == device_id
+        (device,) = _rows_of(user_id)
+        assert device.last_signed_in_at == signed_in_at
+        with browser.session_transaction() as sess:
+            assert datetime.fromisoformat(sess[SESSION_SIGNED_IN_AT_KEY]) == signed_in_at
+
+    def test_a_code_re_confirm_keeps_the_row_its_days_and_its_trust(
+        self, app, seed_user,
+    ):
+        """Two-factor, a trusted browser: the password and code renew the token alone.
+
+        The renewal reads the record after the code's commit.  The row, its
+        last sign-in and its trust are as they were, and the new token is
+        still trusted.
+        """
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _known_with_a_code(app, secret, trust=True)
+        assert _signed_in(_password(browser))
+        old_token = _token(browser, user_id)
+        (device,) = _rows_of(user_id)
+        before = (device.id, device.last_signed_in_at, device.trusted_at)
+
+        response = browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
+        })
+
+        assert _re_confirmed(response)
+        new_token = _token(browser, user_id)
+        assert new_token != old_token
+        assert known_device_service.find_browser(user_id, old_token) is None
+        assert known_device_service.find_browser(user_id, new_token).trusted is True
+        (device,) = _rows_of(user_id)
+        assert (device.id, device.last_signed_in_at, device.trusted_at) == before
+
+    def test_a_strangers_re_confirm_gets_no_cookie(self, app, seed_user):
+        """A signed-in browser whose record has gone: no cookie, no row, the account cleared.
+
+        Four strangers' guesses are on the account; the stranger's finished
+        re-confirm clears them, as every finished check of a stranger's does
+        (ruling plan#3007).
+        """
+        user_id = seed_user["user"].id
+        browser = app.test_client()
+        assert _signed_in(_password(browser))
+        db.session.query(KnownDevice).filter_by(user_id=user_id).delete()
+        db.session.commit()
+        _strangers_guess(app, 4)
+
+        response = browser.post("/reauth", data={"password": SEED_USER_PASSWORD})
+
+        assert _re_confirmed(response)
+        assert _cookie_header(response, user_id) is None
+        assert _rows_of(user_id) == []
+        assert _lock_state(user_id) == (0, None)
+
+    def test_a_record_deleted_after_the_codes_commit_leaves_it_finishing(
+        self, app, seed_user, monkeypatch,
+    ):
+        """The gap forced: the right password and code still finish, with no 500.
+
+        The accepted code's commit ends the transaction that read the record
+        and releases the owner's lock; here a copy of the cookie's tenth wrong
+        guess deletes the record in that gap, on a connection of its own as
+        another request's would.  The re-confirm finishes, gives the browser
+        no cookie (there is no record to renew), and leaves the strangers' four
+        on the account: their count is not cleared in the record's place.
+        """
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _signed_in_with_a_code(app, secret)
+        _strangers_guess(app, 4)
+        real_check = auth_route_helpers._verify_totp_with_replay_logging
+        accepted = []
+
+        def _accept_then_lose_the_record(mfa_config, code, checked_user_id):
+            """Check the code as the route does, then delete the record after its commit."""
+            accepted.append(real_check(mfa_config, code, checked_user_id))
+            with db.engine.begin() as connection:
+                connection.execute(
+                    sqlalchemy.delete(KnownDevice)
+                    .where(KnownDevice.user_id == checked_user_id),
+                )
+            return accepted[-1]
+
+        monkeypatch.setattr(
+            auth_route_helpers, "_verify_totp_with_replay_logging",
+            _accept_then_lose_the_record,
+        )
+
+        response = browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _second_code(secret),
+        })
+
+        assert accepted == [True]
+        assert _re_confirmed(response)
+        assert _cookie_header(response, user_id) is None
+        assert _rows_of(user_id) == []
+        assert _lock_state(user_id) == (4, None)

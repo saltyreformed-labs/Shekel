@@ -33,6 +33,7 @@ from app.routes.auth._helpers import (
     _totp_accepted_or_key_failure,
 )
 from app.utils.auth_helpers import log_refused_lookup
+from app.utils.device_cookie import device_token, set_device_cookie
 from app.utils.log_events import (
     AUTH,
     EVT_PASSWORD_CHANGED,
@@ -221,8 +222,18 @@ def reauth():
         /mfa/verify and /mfa/disable.
 
     Success clears the count the guesses went to (ruling plan#3007): every
-    check this account faces has passed.  A known browser's re-confirm clears
-    its own record's count and leaves the strangers' count and lock alone.
+    check this account faces has passed.  A stranger's re-confirm clears the
+    account's count and lock, and gets no cookie: it has no record.  A known
+    browser's renews its record
+    (:func:`~app.services.known_device_service.record_re_confirm`): a new
+    cookie and its own count cleared, so a stolen copy of the old cookie
+    stops working here, as at a sign-in (ruling plan#3070).  The record's
+    thirty days do not move, and nor does the session's: a re-confirm is not
+    a sign-in (ruling plan#3069).  The strangers' count and lock are left
+    alone.  The record is read again for the renewal, after the code's commit
+    and under the owner's lock that the next transaction takes again: a record
+    a copy of the cookie deleted in between gets nothing, and the account's
+    count is not cleared in its place.
 
     The ``next`` parameter is validated through ``_is_safe_redirect``
     on every read (storage time and post-success redirect) so an
@@ -290,13 +301,26 @@ def reauth():
             flash("Invalid authentication code.", "danger")
             return render_template("auth/reauth.html", next=safe_next)
 
-    auth_service.clear_failed_attempts(current_user, device=device)
+    # Every check has passed.  ``device`` is asked only whether it was None:
+    # with two-factor, the code's commit has expired it, and a copy of this
+    # cookie may have deleted its row since, so it is never read again here.
+    token = None
+    if device is None:
+        auth_service.clear_failed_attempts(current_user)
+    else:
+        token = known_device_service.record_re_confirm(
+            current_user.id, device_token(current_user.id),
+        )
+        db.session.commit()
     stamp_reauth_session(datetime.now(timezone.utc))
     log_event(
         logger, logging.INFO, EVT_REAUTH_SUCCESS, AUTH,
         "Step-up re-auth succeeded", user_id=current_user.id,
     )
-    return redirect(safe_next or url_for("dashboard.page"))
+    response = redirect(safe_next or url_for("dashboard.page"))
+    if token is not None:
+        set_device_cookie(response, current_user.id, token)
+    return response
 
 
 @auth_bp.route("/security-event/dismiss", methods=["POST"])

@@ -193,7 +193,7 @@ def _complete_sign_in(
     """
     _clear_mfa_pending_state()
     if not known:
-        auth_service.clear_failed_attempts(user, device=None)
+        auth_service.clear_failed_attempts(user)
     # One instant for the record and the session's stamps: a session ends
     # KNOWN_LIFETIME after its sign-in stamp (ruling plan#3069), and one read
     # a moment after the record's would outlive the browser's standing.

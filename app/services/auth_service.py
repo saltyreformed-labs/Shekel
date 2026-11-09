@@ -517,37 +517,29 @@ def _count_on_the_browser(user: User, device: KnownDevice) -> None:
         )
 
 
-def clear_failed_attempts(user: User, *, device: KnownDevice | None) -> None:
-    """Clear the count the guesses went to, once every check has passed.
+def clear_failed_attempts(user: User) -> None:
+    """Clear the account's count and any lock, once a stranger's checks have all passed.
 
-    Called at a finished sign-in and a finished re-confirm, and nowhere else
-    (ruling plan#3007).  A correct password alone does not clear it: someone
-    holding the password but not the second factor could otherwise re-enter it
-    between wrong codes, and the lock would never fire.  Whose count it is
-    turns on the browser, as in :func:`record_failed_attempt` (plan#2772):
+    Called at a stranger's finished sign-in and finished re-confirm, and
+    nowhere else (ruling plan#3007).  A correct password alone does not clear
+    it: someone holding the password but not the second factor could otherwise
+    re-enter it between wrong codes, and the lock would never fire.
 
-    * A stranger's clears the account's count and any lock.
-    * A known browser's clears its own record's count, which breaks its row
-      of wrong guesses (ruling plan#2996), and leaves the account's count and
-      lock alone: those are the strangers', and clearing them would refill a
-      stranger's guesses.  A known browser's finished sign-in clears its count
-      in :func:`~app.services.known_device_service.record_sign_in` instead,
-      which renews the whole record.
+    Never at a known browser's: the account's count and lock are the
+    strangers', and clearing them there would refill a stranger's guesses
+    (plan#2772).  A known browser's own count clears where its record is
+    renewed with a new token, at a finished sign-in
+    (:func:`~app.services.known_device_service.record_sign_in`) or re-confirm
+    (:func:`~app.services.known_device_service.record_re_confirm`).  So this
+    takes no browser: the two completions that call it are the stranger's
+    side of a choice they each make once.
 
     Commits only when there is something to clear: the common path is a user
     with no failure history, for whom the commit would be a no-op write.
 
     Args:
         user: The account whose checks have all passed.
-        device: This browser's record for *user*, as
-            :func:`~app.services.known_device_service.find_browser` read it
-            under the owner's lock, or ``None`` for a stranger.
     """
-    if device is not None:
-        if device.failed_login_count != 0:
-            known_device_service.clear_failed_attempts(device)
-            db.session.commit()
-        return
     if user.failed_login_count != 0 or user.locked_until is not None:
         user.failed_login_count = 0
         user.locked_until = None

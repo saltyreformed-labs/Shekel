@@ -277,7 +277,7 @@ class TestAccountLockoutBehaviour:
         with app.app_context():
             user = db.session.get(User, user_id)
             with patch.object(auth_service.db.session, "commit") as commit:
-                auth_service.clear_failed_attempts(user, device=None)
+                auth_service.clear_failed_attempts(user)
             commit.assert_not_called()
 
     @pytest.mark.parametrize(
@@ -301,7 +301,7 @@ class TestAccountLockoutBehaviour:
             )
             db.session.commit()
 
-            auth_service.clear_failed_attempts(user, device=None)
+            auth_service.clear_failed_attempts(user)
             db.session.rollback()
 
             db.session.expire_all()

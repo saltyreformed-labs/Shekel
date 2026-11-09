@@ -13,6 +13,11 @@ from app.models.user import User
 from app.services import auth_service, known_device_service
 from app.exceptions import AuthError
 from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
+from tests._guess_records import count_of, locked_until_of, set_record
+
+
+_EMAIL = "test@shekel.local"
+_PASSWORD = "testpass"
 
 
 # ---------------------------------------------------------------------------
@@ -84,14 +89,13 @@ class TestAccountLockoutBehaviour:
     """
 
     def test_failed_login_increments_counter(self, app, db, seed_user):
-        """Each wrong password bumps ``failed_login_count`` and commits.
+        """Each wrong password bumps the email's count and commits.
 
         Verifies the counter survives the transactional boundary and
         the next call observes the persisted value.  Without the
         commit inside ``authenticate`` the counter would only live in
         the session and reset to 0 on the next request.
         """
-        user_id = seed_user["user"].id
         with app.app_context():
             with pytest.raises(AuthError):
                 auth_service.authenticate(
@@ -99,9 +103,8 @@ class TestAccountLockoutBehaviour:
                     device=None,
                 )
 
-            user = db.session.get(User, user_id)
-            assert user.failed_login_count == 1
-            assert user.locked_until is None
+            assert count_of(_EMAIL) == 1
+            assert locked_until_of(_EMAIL) is None
 
     def test_three_consecutive_failures_increment_to_three(
         self, app, db, seed_user, monkeypatch,
@@ -113,7 +116,6 @@ class TestAccountLockoutBehaviour:
         below: at exactly 5 failures the lockout fires.
         """
         monkeypatch.setenv("LOCKOUT_THRESHOLD", "5")
-        user_id = seed_user["user"].id
         with app.app_context():
             for _ in range(3):
                 with pytest.raises(AuthError):
@@ -121,9 +123,8 @@ class TestAccountLockoutBehaviour:
                         auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
                         device=None,
                     )
-            user = db.session.get(User, user_id)
-            assert user.failed_login_count == 3
-            assert user.locked_until is None
+            assert count_of(_EMAIL) == 3
+            assert locked_until_of(_EMAIL) is None
 
     def test_threshold_failures_set_locked_until(
         self, app, db, seed_user, monkeypatch,
@@ -137,7 +138,6 @@ class TestAccountLockoutBehaviour:
         """
         monkeypatch.setenv("LOCKOUT_THRESHOLD", "3")
         monkeypatch.setenv("LOCKOUT_DURATION_MINUTES", "15")
-        user_id = seed_user["user"].id
         with app.app_context():
             before = datetime.now(timezone.utc)
             for _ in range(3):
@@ -146,13 +146,13 @@ class TestAccountLockoutBehaviour:
                         auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
                         device=None,
                     )
-            user = db.session.get(User, user_id)
-            assert user.failed_login_count == 0
-            assert user.locked_until is not None
+            assert count_of(_EMAIL) == 0
+            locked_until = locked_until_of(_EMAIL)
+            assert locked_until is not None
             # locked_until must be approximately now + 15 min.  Use a
             # tolerant range to absorb the test runtime; 14..16 minutes
             # is plenty of slack for any plausible CI box.
-            delta = user.locked_until - before
+            delta = locked_until - before
             assert timedelta(minutes=14) < delta < timedelta(minutes=16)
 
     def test_locked_account_rejects_correct_password(
@@ -169,11 +169,11 @@ class TestAccountLockoutBehaviour:
         Verified here by feeding a known-correct password and confirming
         AuthError.
         """
-        user_id = seed_user["user"].id
         with app.app_context():
-            user = db.session.get(User, user_id)
-            user.locked_until = (
-                datetime.now(timezone.utc) + timedelta(minutes=10)
+            now = datetime.now(timezone.utc)
+            set_record(
+                _EMAIL, count=0, locked_until=now + timedelta(minutes=10),
+                last_attempt_at=now,
             )
             db.session.commit()
 
@@ -190,13 +190,12 @@ class TestAccountLockoutBehaviour:
         during the window.  The retry-while-locked path returns early
         without touching the counter.
         """
-        user_id = seed_user["user"].id
         with app.app_context():
-            user = db.session.get(User, user_id)
-            user.locked_until = (
-                datetime.now(timezone.utc) + timedelta(minutes=10)
+            now = datetime.now(timezone.utc)
+            set_record(
+                _EMAIL, count=0, locked_until=now + timedelta(minutes=10),
+                last_attempt_at=now,
             )
-            user.failed_login_count = 0
             db.session.commit()
 
             for _ in range(5):
@@ -205,8 +204,7 @@ class TestAccountLockoutBehaviour:
                         auth_service.find_sign_in_user("test@shekel.local"), "anything",
                         device=None,
                     )
-            user = db.session.get(User, user_id)
-            assert user.failed_login_count == 0
+            assert count_of(_EMAIL) == 0
 
     def test_expired_lockout_allows_correct_password(
         self, app, db, seed_user,
@@ -214,17 +212,17 @@ class TestAccountLockoutBehaviour:
         """A lockout in the past does not block authentication.
 
         ``locked_until`` is an exclusive upper bound: at the instant
-        the column equals ``now`` the lockout is over.  Set the column
-        a second into the past and verify a correct password succeeds,
-        confirming the strict-greater-than gate.
+        it equals ``now`` the lockout is over.  Set it a second into the
+        past and verify a correct password succeeds, confirming the
+        strict-greater-than gate.
         """
         user_id = seed_user["user"].id
         with app.app_context():
-            user = db.session.get(User, user_id)
-            user.locked_until = (
-                datetime.now(timezone.utc) - timedelta(seconds=1)
+            now = datetime.now(timezone.utc)
+            set_record(
+                _EMAIL, count=0, locked_until=now - timedelta(seconds=1),
+                last_attempt_at=now,
             )
-            user.failed_login_count = 0
             db.session.commit()
 
             result = auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass", device=None)
@@ -234,7 +232,7 @@ class TestAccountLockoutBehaviour:
             # run-out window stays, blocking nothing, until every check has
             # passed.  The clear itself is pinned at a finished sign-in in
             # tests/test_routes/test_every_guess_counts.py.
-            assert db.session.get(User, user_id).locked_until is not None
+            assert locked_until_of(_EMAIL) is not None
 
     def test_a_correct_password_alone_does_not_clear_the_count(
         self, app, db, seed_user,
@@ -246,7 +244,6 @@ class TestAccountLockoutBehaviour:
         second factor re-enter it between wrong codes, and the lock would
         never fire.  The clear belongs to a finished sign-in or re-confirm.
         """
-        user_id = seed_user["user"].id
         with app.app_context():
             for _ in range(3):
                 with pytest.raises(AuthError):
@@ -254,13 +251,11 @@ class TestAccountLockoutBehaviour:
                         auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
                         device=None,
                     )
-            user = db.session.get(User, user_id)
-            assert user.failed_login_count == 3
+            assert count_of(_EMAIL) == 3
 
             auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass", device=None)
-            user = db.session.get(User, user_id)
-            assert user.failed_login_count == 3
-            assert user.locked_until is None
+            assert count_of(_EMAIL) == 3
+            assert locked_until_of(_EMAIL) is None
 
     def test_the_clear_writes_nothing_on_a_clean_account(
         self, app, db, seed_user,
@@ -290,24 +285,22 @@ class TestAccountLockoutBehaviour:
     def test_the_clear_clears_and_commits(
         self, app, db, seed_user, count, locked_for,
     ):
-        """Whatever is on the row is cleared, and the clear survives a rollback."""
+        """Whatever is on the record is cleared, and the clear survives a rollback."""
         user_id = seed_user["user"].id
         with app.app_context():
-            user = db.session.get(User, user_id)
-            user.failed_login_count = count
-            user.locked_until = (
-                None if locked_for is None
-                else datetime.now(timezone.utc) + locked_for
+            now = datetime.now(timezone.utc)
+            set_record(
+                _EMAIL, count=count,
+                locked_until=None if locked_for is None else now + locked_for,
+                last_attempt_at=now,
             )
             db.session.commit()
 
-            auth_service.clear_failed_attempts(user)
+            auth_service.clear_failed_attempts(db.session.get(User, user_id))
             db.session.rollback()
 
-            db.session.expire_all()
-            user = db.session.get(User, user_id)
-            assert user.failed_login_count == 0
-            assert user.locked_until is None
+            assert count_of(_EMAIL) == 0
+            assert locked_until_of(_EMAIL) is None
 
     def test_lockout_stores_timezone_aware_datetime(
         self, app, db, seed_user, monkeypatch,
@@ -320,42 +313,35 @@ class TestAccountLockoutBehaviour:
         edit that drops the ``timezone.utc`` argument.
         """
         monkeypatch.setenv("LOCKOUT_THRESHOLD", "1")
-        user_id = seed_user["user"].id
         with app.app_context():
             with pytest.raises(AuthError):
                 auth_service.authenticate(
                     auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
                     device=None,
                 )
-            user = db.session.get(User, user_id)
-            assert user.locked_until is not None
-            assert user.locked_until.tzinfo is not None
+            locked_until = locked_until_of(_EMAIL)
+            assert locked_until is not None
+            assert locked_until.tzinfo is not None
 
     def test_check_constraint_rejects_negative_count(self, app, db, seed_user):
         """The CHECK constraint blocks writes of a negative count.
 
         Verifies the schema-level guard documented on
-        ``ck_users_failed_login_count_non_negative``.  A future
+        ``ck_guess_records_failed_login_count_non_negative``.  A future
         backfill or buggy migration that wrote a negative value would
         otherwise silently invert the lockout logic.  The test
         asserts the constraint name appears in the IntegrityError so a
         future rename is caught.
         """
         from sqlalchemy.exc import IntegrityError  # pylint: disable=import-outside-toplevel
-        user_id = seed_user["user"].id
         with app.app_context():
-            user = db.session.get(User, user_id)
-            user.failed_login_count = -1
+            now = datetime.now(timezone.utc)
             with pytest.raises(
                 IntegrityError,
-                match="ck_users_failed_login_count_non_negative",
+                match="ck_guess_records_failed_login_count_non_negative",
             ):
-                db.session.commit()
+                set_record(_EMAIL, count=-1, locked_until=None, last_attempt_at=now)
             db.session.rollback()
-
-
-_EMAIL = "test@shekel.local"
-_PASSWORD = "testpass"
 
 
 def _known_browser(user_id: int) -> str:
@@ -394,21 +380,20 @@ def _attempt(token: str | None, password: str) -> User:
     )
 
 
-def _lock(user_id: int, count: int) -> datetime:
-    """Lock *user_id* for ten minutes with *count* on the account; return the end.
+def _lock(count: int) -> datetime:
+    """Lock the seed user's email for ten minutes with *count* on it; return the end.
 
     Args:
-        user_id: The account.
         count: The strangers' count to store.
 
     Returns:
         The stored ``locked_until``.
     """
-    user = db.session.get(User, user_id)
-    user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=10)
-    user.failed_login_count = count
+    now = datetime.now(timezone.utc)
+    locked_until = now + timedelta(minutes=10)
+    set_record(_EMAIL, count=count, locked_until=locked_until, last_attempt_at=now)
     db.session.commit()
-    return user.locked_until
+    return locked_until
 
 
 class TestAKnownBrowser:
@@ -424,14 +409,12 @@ class TestAKnownBrowser:
         """Locked by strangers with 4 on the count: the user comes back, both untouched."""
         user_id = seed_user["user"].id
         token = _known_browser(user_id)
-        locked_until = _lock(user_id, 4)
+        locked_until = _lock(4)
 
         assert _attempt(token, _PASSWORD).id == user_id
 
-        db.session.expire_all()
-        user = db.session.get(User, user_id)
-        assert user.locked_until == locked_until
-        assert user.failed_login_count == 4
+        assert locked_until_of(_EMAIL) == locked_until
+        assert count_of(_EMAIL) == 4
 
     def test_a_stranger_is_still_refused_the_right_password(
         self, app, db, seed_user,
@@ -439,7 +422,7 @@ class TestAKnownBrowser:
         """The control: the same lock refuses a browser holding no token."""
         user_id = seed_user["user"].id
         _known_browser(user_id)
-        _lock(user_id, 4)
+        _lock(4)
 
         with pytest.raises(AuthError, match="Invalid email or password"):
             _attempt(None, _PASSWORD)
@@ -454,10 +437,8 @@ class TestAKnownBrowser:
         with pytest.raises(AuthError, match="Invalid email or password"):
             _attempt(token, "wrong-password")
 
-        db.session.expire_all()
-        user = db.session.get(User, user_id)
-        assert user.failed_login_count == 0
-        assert user.locked_until is None
+        assert count_of(_EMAIL) == 0
+        assert locked_until_of(_EMAIL) is None
         assert known_device_service.find_browser(
             user_id, token,
         ).device.failed_login_count == 1
@@ -485,16 +466,13 @@ class TestAKnownBrowser:
             (r.user_id, r.device_id) for r in caplog.records
             if getattr(r, "event", None) == EVT_KNOWN_DEVICE_DELETED
         ] == [(user_id, device_id)]
-        db.session.expire_all()
-        assert db.session.get(User, user_id).failed_login_count == 0
+        assert count_of(_EMAIL) == 0
 
         with pytest.raises(AuthError):
             _attempt(token, "wrong-password")
 
-        db.session.expire_all()
-        user = db.session.get(User, user_id)
-        assert user.failed_login_count == 1
-        assert user.locked_until is None
+        assert count_of(_EMAIL) == 1
+        assert locked_until_of(_EMAIL) is None
 
 
 def _hashes_checked(email: str, password: str) -> list[str]:
@@ -541,7 +519,7 @@ class TestALockedAttemptPaysTheCheck:
         Never the account's hash, so the reply cannot depend on whether the
         password was right.
         """
-        _lock(seed_user["user"].id, 0)
+        _lock(0)
 
         assert _hashes_checked(_EMAIL, _PASSWORD) == [
             auth_service._DUMMY_PASSWORD_HASH,

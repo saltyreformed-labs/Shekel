@@ -31,6 +31,7 @@ from app.utils.session_helpers import (
     SESSION_LAST_ACTIVITY_KEY,
     SESSION_SIGNED_IN_AT_KEY,
 )
+from tests._guess_records import locked_until_of
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -273,8 +274,7 @@ class TestTheSessionAndItsRecord:
         })
         for _ in range(_THRESHOLD):
             assert not _signed_in(_password(app.test_client(), "not-the-password"))
-        db.session.expire_all()
-        assert db.session.get(User, user_id).locked_until > datetime.now(timezone.utc)
+        assert locked_until_of(SEED_USER_EMAIL) > datetime.now(timezone.utc)
 
         browser.post("/change-password", data={
             "current_password": SEED_USER_PASSWORD,

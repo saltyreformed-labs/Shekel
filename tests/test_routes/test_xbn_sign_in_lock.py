@@ -8,8 +8,9 @@ proves it fires:
 * **R-CC121** ("Lock, then check"): sign-in finds the account, takes the
   signing-in person's owner lock, and only then reads the codes or the
   failed-attempt count.  Graded by statement ORDER on the password step (a
-  wrong password writes ``failed_login_count``) and the backup-code step (the
-  code check reads ``auth.mfa_configs``), by the count being read AGAIN under
+  wrong password writes the record of the account's email,
+  ``auth.guess_records``) and the backup-code step (the
+  code check reads ``auth.mfa_configs``), by the count being read under
   the lock and a race proving it (another transaction raises the count while
   the sign-in waits, and the sign-in counts on top of it), and by a held key
   making each step WAIT, with the free-key control beside it.  A companion's
@@ -45,9 +46,11 @@ from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.models.user import MfaConfig, User
+from app.models.user import MfaConfig
 from app.services import mfa_service
 from app.services.user_write_lock import _USER_WRITE_LOCK_NAMESPACE
+from app.services.guess_record_service import email_digest
+from tests._guess_records import count_of
 from tests._test_helpers import (
     HeldOwnerKey,
     advisory_lock_keys,
@@ -130,8 +133,8 @@ class TestSignInLocksBeforeItChecks:
     def test_a_wrong_password_locks_before_it_counts(self, client, seed_user):
         """The failed-attempt write happens under the lock; the lookup before it.
 
-        A wrong password is the password step's one WRITE
-        (``failed_login_count``), and "Lock, then check" puts the lock between
+        A wrong password is the password step's one WRITE (the record of the
+        account's email, ``auth.guess_records``), and "Lock, then check" puts the lock between
         the email lookup (which must run first: it is how the owner is found)
         and that write.  Both neighbours are asserted to exist, so the order
         cannot pass over a run that never looked the account up or never
@@ -150,19 +153,19 @@ class TestSignInLocksBeforeItChecks:
         lock_at = _lock_index(statements)
         count_at = _first_index(
             statements,
-            lambda sql: sql.lstrip().startswith("UPDATE auth.users"),
+            lambda sql: sql.lstrip().startswith("INSERT INTO auth.guess_records"),
         )
         assert None not in (lookup_at, lock_at, count_at), (lookup_at, lock_at, count_at)
         assert lookup_at < lock_at < count_at
         assert advisory_lock_keys(statements)[0] == owner_lock_key(user_id)
-        # The check itself runs on a row read AGAIN under the lock: the lookup's
-        # copy was taken before it, and counting on that copy is the race the
-        # ruling closed (two wrong passwords counted once).
-        reread_at = _first_index(
-            statements, lambda sql: "FROM auth.users" in sql, start=lock_at + 1,
+        # The check itself reads the count under the lock: nothing read before
+        # it decides the count, and counting on a copy read before it is the
+        # race the ruling closed (two wrong passwords counted once).
+        read_at = _first_index(
+            statements, lambda sql: "FROM auth.guess_records" in sql,
         )
-        assert reread_at is not None and reread_at < count_at, (
-            "the failed-attempt count was not read again under the lock"
+        assert read_at is not None and lock_at < read_at < count_at, (
+            "the failed-attempt count was not read under the lock"
         )
 
     def test_a_backup_code_locks_before_it_reads_the_codes(self, client, seed_user):
@@ -420,25 +423,28 @@ class TestTheCheckReadsWhatTheLockProtects:
     def test_a_count_raised_during_the_wait_is_counted_on(self, app, client, seed_user):
         """Another transaction raises the failed count while the sign-in waits.
 
-        The holder takes the owner's key and sets ``failed_login_count`` to 3
-        without committing; a wrong password then finds the account (count 0
-        as committed), waits, and after the holder commits counts ON TOP of
-        what it wrote.  Counting on the pre-lock copy writes 1 -- the "two
+        The holder takes the owner's key and writes 3 on the record of the
+        account's email without committing; a wrong password then finds the
+        account (no count committed), waits, and after the holder commits
+        counts ON TOP of what it wrote.  Counting on the pre-lock copy writes 1 -- the "two
         wrong passwords counted once" race the ruling closed.
         """
         user_id = seed_user["user"].id
         with HeldOwnerKey(user_id) as held:
             held.connection.execute(
-                text("UPDATE auth.users SET failed_login_count = 3 WHERE id = :id"),
-                {"id": user_id},
+                text(
+                    "INSERT INTO auth.guess_records "
+                    "(email_digest, failed_login_count, last_attempt_at) "
+                    "VALUES (:digest, 3, now())"
+                ),
+                {"digest": email_digest(SEED_USER_EMAIL)},
             )
             response = _run_behind(
                 held, app, lambda: _post_login(client, password="not-the-password"),
             )
 
         assert response.status_code == 200, "the refusal re-renders the form"
-        db.session.expire_all()
-        assert db.session.get(User, user_id).failed_login_count == 4
+        assert count_of(SEED_USER_EMAIL) == 4
 
 
 class TestADeactivatedCompanionIsTurnedAwayAfterTheWait:

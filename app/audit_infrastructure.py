@@ -64,6 +64,7 @@ from typing import Callable, Iterable
 #     avoid recursive trigger fires.
 AUDITED_TABLES: tuple[tuple[str, str], ...] = (
     # ── auth schema ──────────────────────────────────────────────────
+    ("auth", "guess_records"),
     ("auth", "known_devices"),
     ("auth", "mfa_configs"),
     ("auth", "user_settings"),

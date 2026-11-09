@@ -40,8 +40,8 @@ import pytest
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
-from app.models.user import User
 from app.services import known_device_service
+from tests._guess_records import count_of, locked_until_of
 from tests._limited_app import limited_app, through_nginx
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
@@ -246,8 +246,7 @@ class TestAKnownBrowserHasItsOwnTries:
 
             assert _refused_for_tries(_try_code(new_browser, "9.9.9.1", _code(secret)))
             assert _refused_for_tries(_try_code(made_up, "9.9.9.2", _NEVER_A_CODE))
-            db.session.expire_all()
-            assert db.session.get(User, user_id).failed_login_count == _CODE_TRIES
+            assert count_of(SEED_USER_EMAIL) == _CODE_TRIES
 
     def test_another_users_cookie_and_a_cookie_thirty_days_old_share_them(
         self, rate_app, seed_user, seed_second_user,
@@ -375,15 +374,13 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         password.
         """
         with rate_app.app_context():
-            user_id = seed_user["user"].id
             owner = _signed_in_owner(rate_app, _OWNERS_ADDRESS)
             thief = _stolen_session(rate_app, owner)
             _wrong_passwords_checked(thief, _CODE_TRIES)
             assert _re_confirm_refused_for_tries(
                 _re_confirm(thief, _OWNERS_ADDRESS, _WRONG_PASSWORD),
             )
-            db.session.expire_all()
-            assert db.session.get(User, user_id).failed_login_count == _CODE_TRIES
+            assert count_of(SEED_USER_EMAIL) == _CODE_TRIES
 
             assert _re_confirmed(_re_confirm(owner, _OWNERS_ADDRESS))
 
@@ -434,8 +431,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
             assert _re_confirm_refused_for_tries(
                 _re_confirm(made_up, _OWNERS_ADDRESS, _WRONG_PASSWORD),
             )
-            db.session.expire_all()
-            assert db.session.get(User, user_id).failed_login_count == _CODE_TRIES
+            assert count_of(SEED_USER_EMAIL) == _CODE_TRIES
 
     def test_the_form_page_keeps_the_default_limits_after_a_re_confirm(
         self, rate_app, seed_user,
@@ -512,7 +508,6 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         put the lock on, as a stranger who knows the email would.
         """
         with rate_app.app_context():
-            user_id = seed_user["user"].id
             owner = _signed_in_owner(rate_app, _OWNERS_ADDRESS)
             for octet in range(_LOCK_THRESHOLD):
                 rate_app.test_client().post(
@@ -520,8 +515,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
                     data={"email": SEED_USER_EMAIL, "password": _WRONG_PASSWORD},
                     **through_nginx(f"8.8.8.{octet}"),
                 )
-            db.session.expire_all()
-            assert db.session.get(User, user_id).locked_until is not None
+            assert locked_until_of(SEED_USER_EMAIL) is not None
             thief = _stolen_session(rate_app, owner)
             for _ in range(_CODE_TRIES):
                 refused = _re_confirm(thief, _OWNERS_ADDRESS)

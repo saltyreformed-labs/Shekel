@@ -14,7 +14,7 @@ Flask config object.  Defaults documented alongside the matching
 import hashlib
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import bcrypt
 import requests
@@ -23,7 +23,7 @@ from app.extensions import db
 from app.models.known_device import KnownDevice
 from app.models.user import User
 from app.exceptions import AuthError, ValidationError
-from app.services import known_device_service
+from app.services import guess_record_service, known_device_service
 from app.utils.log_events import (
     AUTH,
     EVT_ACCOUNT_LOCKED,
@@ -396,8 +396,8 @@ def find_sign_in_user(email):
     ``balance:X-bn`` (ruling **R-CC121**, "Lock, then check"): the route finds
     the account here, takes that account's owner lock
     (:func:`app.db_transaction.bind_sign_in_owner`), and only then calls
-    :func:`authenticate`, whose reads of the lockout columns and the password
-    hash happen under the lock.  One service call doing both could not put the
+    :func:`authenticate`, whose reads of the lock and the password hash happen
+    under the lock.  One service call doing both could not put the
     lock between them, and this layer takes no lock itself (the lock's home is
     :mod:`app.db_transaction`).
 
@@ -414,15 +414,16 @@ def find_sign_in_user(email):
 def is_locked_out(user: User, *, device: KnownDevice | None) -> bool:
     """Return True while the lock refuses this attempt on *user*.
 
-    The lock is the account's, and it refuses only strangers (plan#2772): a
-    known browser, *device*, passes it, so no one who knows the email can keep
-    the owner out of a browser they have signed in on.  A known browser's own
-    wrong guesses count on its record instead (:func:`record_failed_attempt`).
+    The lock is the one on the record of the account's email (ruling
+    plan#3110, :func:`~app.services.guess_record_service.is_locked`), and it
+    refuses only strangers (plan#2772): a known browser, *device*, passes it,
+    so no one who knows the email can keep the owner out of a browser they
+    have signed in on.  A known browser's own wrong guesses count on its
+    record instead (:func:`record_failed_attempt`).
 
-    ``locked_until`` is an exclusive upper bound: at the instant it equals
-    ``now`` the lock is over.  A value in the past is therefore the same as
-    ``None`` to every check, and stays on the row until the next
-    :func:`clear_failed_attempts`.
+    The record's ``locked_until`` is an exclusive upper bound: at the instant
+    it equals ``now`` the lock is over, and a value in the past is the same as
+    no lock to every check.
 
     Args:
         user: The account being checked.
@@ -437,11 +438,7 @@ def is_locked_out(user: User, *, device: KnownDevice | None) -> bool:
         True while the account's lock window is open and the attempt is a
         stranger's.
     """
-    return (
-        device is None
-        and user.locked_until is not None
-        and user.locked_until > datetime.now(timezone.utc)
-    )
+    return device is None and guess_record_service.is_locked(user.email)
 
 
 def record_failed_attempt(user: User, *, device: KnownDevice | None) -> None:
@@ -453,12 +450,14 @@ def record_failed_attempt(user: User, *, device: KnownDevice | None) -> None:
     cannot count once.  Whose count it is turns on the browser (plan#2772), at
     one threshold (``LOCKOUT_THRESHOLD``, default 10):
 
-    * A stranger's guess counts on the account.  At the threshold this stamps
-      ``locked_until = now + LOCKOUT_DURATION_MINUTES``, zeroes the count, and
-      emits the structured ``account_locked`` event.  It zeroes the count so a
-      second lock takes another threshold-many failures rather than one more:
-      otherwise an account whose failures already crossed the threshold would
-      lock again on the very next attempt after the window expires.
+    * A stranger's guess counts on the record of the account's email (ruling
+      plan#3110, :func:`~app.services.guess_record_service.judge_try`).  At
+      the threshold the lock opens for ``LOCKOUT_DURATION_MINUTES`` and the
+      count is zeroed, so a second lock takes another threshold-many failures
+      rather than one more, and the structured ``account_locked`` event is
+      emitted.  A guess the lock refuses is not counted: every door asks
+      :func:`is_locked_out` first, so that is a guess that met a lock another
+      try opened since.
     * A known browser's guess counts on its own record, *device*, and never on
       the account.  At the threshold the record is deleted, so the browser is
       a stranger again and the user's other browsers are untouched (ruling
@@ -482,22 +481,20 @@ def record_failed_attempt(user: User, *, device: KnownDevice | None) -> None:
 
 
 def _count_on_the_account(user: User) -> None:
-    """Count a stranger's wrong guess on *user*, locking the account at the threshold.
+    """Count a stranger's wrong guess on the record of *user*'s email.
 
     Args:
         user: The account the guess was against.
     """
-    # Tolerate a defensive ``None`` (a row predating the column or a manual
-    # reset) by coalescing to 0; any future schema-level NOT NULL guarantee
-    # makes the coalesce a no-op rather than a crash.
-    user.failed_login_count = (user.failed_login_count or 0) + 1
-    if user.failed_login_count >= _get_lockout_threshold():
-        user.locked_until = datetime.now(timezone.utc) + _get_lockout_duration()
-        user.failed_login_count = 0
+    outcome = guess_record_service.judge_try(
+        user.email, wrong=True,
+        threshold=_get_lockout_threshold(), duration=_get_lockout_duration(),
+    )
+    if outcome.opened_lock_until is not None:
         log_event(
             logger, logging.WARNING, EVT_ACCOUNT_LOCKED, AUTH,
             "Account locked after consecutive wrong passwords or codes",
-            user_id=user.id, lockout_until=user.locked_until.isoformat(),
+            user_id=user.id, lockout_until=outcome.opened_lock_until.isoformat(),
         )
 
 
@@ -534,15 +531,15 @@ def clear_failed_attempts(user: User) -> None:
     takes no browser: the two completions that call it are the stranger's
     side of a choice they each make once.
 
-    Commits only when there is something to clear: the common path is a user
-    with no failure history, for whom the commit would be a no-op write.
+    The clear deletes the record of the account's email
+    (:func:`~app.services.guess_record_service.clear`).  Commits only when
+    there was a record: the common path is a user with no failure history,
+    for whom the commit would write nothing.
 
     Args:
         user: The account whose checks have all passed.
     """
-    if user.failed_login_count != 0 or user.locked_until is not None:
-        user.failed_login_count = 0
-        user.locked_until = None
+    if guess_record_service.clear(user.email):
         db.session.commit()
 
 
@@ -591,18 +588,18 @@ def authenticate(
     """Check *password* for *user* from this browser, enforcing account lockout.
 
     *user* is what :func:`find_sign_in_user` returned, and the caller has
-    taken its owner lock in between (ruling **R-CC121**), so the lockout
-    columns read below and the counter this writes cannot interleave with
-    another sign-in's or a signed-in door's write of the same row.  Under the
+    taken its owner lock in between (ruling **R-CC121**), so the lock read
+    below and the count this writes cannot interleave with another sign-in's
+    or a signed-in door's write of the same record.  Under the
     same lock the caller read *device*, what this browser's cookie is worth
     for *user*: whose attempt this is decides which lock and which count apply
     (plan#2772).
 
     Lockout flow (audit finding F-033 / commit C-11):
 
-      * If *user* is ``None`` (no account has the address), or the user
-        row's ``locked_until`` is set and still in the future and the
-        attempt is a stranger's (:func:`is_locked_out`) -- run one throwaway
+      * If *user* is ``None`` (no account has the address), or the lock on
+        the record of its email is open and the attempt is a stranger's
+        (:func:`is_locked_out`) -- run one throwaway
         bcrypt verification against ``_DUMMY_PASSWORD_HASH``, so this branch
         costs the same as a wrong-password attempt, then raise ``AuthError``
         with the same generic message used for wrong-password.  For an

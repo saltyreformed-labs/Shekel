@@ -679,10 +679,10 @@ def bind_sign_in_owner(user_id: int, owner_id: "int | None") -> None:
     person's owner lock right after finding the account, before it reads the
     codes or the failed-attempt count, and re-checks nothing.  Sign-in is the
     one writer of a committed user's rows that no signed-in request covers:
-    the password step (``failed_login_count``, ``locked_until``) and the code
-    step (``backup_codes``, ``last_totp_timestep``,
-    ``session_invalidated_at``) run before anyone is signed in, so
-    :func:`bind_request_actor` never saw an owner.  Unlocked, a backup-code
+    the password step (the count and lock on the record of the account's
+    email, ``auth.guess_records``) and the code step (``backup_codes``,
+    ``last_totp_timestep``, ``session_invalidated_at``) run before anyone is
+    signed in, so :func:`bind_request_actor` never saw an owner.  Unlocked, a backup-code
     sign-in racing "Regenerate backup codes" wrote the old codes back over the
     new ones, one backup or authenticator code signed in two devices, and two
     wrong passwords counted once.

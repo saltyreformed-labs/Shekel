@@ -22,8 +22,8 @@ from app.config import BaseConfig
 from app.models.pay_era import CADENCE_DAYS_MAX, CADENCE_DAYS_MIN
 from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN
 from app.schemas.validation.pay_periods import PERIOD_BATCH_MAX
-from app.services.auth_service import hash_password
 from app.utils.dates import display_today
+from tests._guess_records import count_of, locked_until_of, set_record
 from tests._test_helpers import register_form_data
 
 
@@ -2718,8 +2718,8 @@ class TestLoginLockoutIntegration:
     ``tests/test_services/test_auth_service/test_lockout.py`` cover the lockout
     semantics in isolation; this class verifies the integration with
     the Flask route -- in particular that the route's flash message,
-    redirect target, and ``failed_login_count`` persistence remain
-    consistent under the new behaviour.
+    redirect target, and the persistence of the count on the record of the
+    account's email remain consistent under the new behaviour.
     """
 
     def test_failed_login_increments_db_counter(
@@ -2732,14 +2732,12 @@ class TestLoginLockoutIntegration:
         the counter would only live in the request's session and
         reset on the next request.
         """
-        user_id = seed_user["user"].id
         with app.app_context():
             client.post("/login", data={
                 "email": "test@shekel.local",
                 "password": "wrong-password",
             }, follow_redirects=True)
-            user = db.session.get(User, user_id)
-            assert user.failed_login_count == 1
+            assert count_of("test@shekel.local") == 1
 
     def test_threshold_failures_lock_account_via_route(
         self, app, client, seed_user, monkeypatch,
@@ -2754,7 +2752,6 @@ class TestLoginLockoutIntegration:
         """
         monkeypatch.setenv("LOCKOUT_THRESHOLD", "3")
         monkeypatch.setenv("LOCKOUT_DURATION_MINUTES", "15")
-        user_id = seed_user["user"].id
         with app.app_context():
             for _ in range(3):
                 client.post("/login", data={
@@ -2762,9 +2759,9 @@ class TestLoginLockoutIntegration:
                     "password": "wrong",
                 }, follow_redirects=True)
 
-            user = db.session.get(User, user_id)
-            assert user.locked_until is not None
-            assert user.locked_until > datetime.now(timezone.utc)
+            locked_until = locked_until_of("test@shekel.local")
+            assert locked_until is not None
+            assert locked_until > datetime.now(timezone.utc)
 
     def test_locked_account_login_returns_generic_error(
         self, app, client, seed_user,
@@ -2776,11 +2773,11 @@ class TestLoginLockoutIntegration:
         whether an account is locked would otherwise get a free signal
         about the lockout window.
         """
-        user_id = seed_user["user"].id
         with app.app_context():
-            user = db.session.get(User, user_id)
-            user.locked_until = (
-                datetime.now(timezone.utc) + timedelta(minutes=10)
+            now = datetime.now(timezone.utc)
+            set_record(
+                "test@shekel.local", count=0,
+                locked_until=now + timedelta(minutes=10), last_attempt_at=now,
             )
             db.session.commit()
 
@@ -2802,15 +2799,13 @@ class TestLoginLockoutIntegration:
         boundary so the route's commit-after-authenticate path is
         exercised.
         """
-        user_id = seed_user["user"].id
         with app.app_context():
             for _ in range(3):
                 client.post("/login", data={
                     "email": "test@shekel.local",
                     "password": "wrong",
                 }, follow_redirects=True)
-            user = db.session.get(User, user_id)
-            assert user.failed_login_count == 3
+            assert count_of("test@shekel.local") == 3
 
             response = client.post("/login", data={
                 "email": "test@shekel.local",
@@ -2818,9 +2813,8 @@ class TestLoginLockoutIntegration:
             }, follow_redirects=False)
             assert response.status_code == 302
 
-            user = db.session.get(User, user_id)
-            assert user.failed_login_count == 0
-            assert user.locked_until is None
+            assert count_of("test@shekel.local") == 0
+            assert locked_until_of("test@shekel.local") is None
 
 
 # ---------------------------------------------------------------------------

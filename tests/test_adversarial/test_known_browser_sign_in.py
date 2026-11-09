@@ -46,6 +46,7 @@ from app.routes.auth import _helpers as auth_route_helpers
 from app.services import auth_service, known_device_service
 from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
 from app.utils.session_helpers import SESSION_SIGNED_IN_AT_KEY
+from tests._guess_records import count_of, locked_until_of
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -114,10 +115,10 @@ def _rows_of(user_id):
 
 
 def _lock_state(user_id):
-    """Return *user_id*'s ``(failed_login_count, locked_until)``, read fresh."""
+    """Return the ``(count, locked_until)`` on the record of *user_id*'s email, read fresh."""
     db.session.expire_all()
-    user = db.session.get(User, user_id)
-    return user.failed_login_count, user.locked_until
+    email = db.session.get(User, user_id).email
+    return count_of(email), locked_until_of(email)
 
 
 def _strangers_guess(app, times, email=SEED_USER_EMAIL):

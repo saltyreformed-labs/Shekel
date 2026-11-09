@@ -148,13 +148,17 @@
     `credit_cards` are the cards it could mean (`transaction_service.
     credit_cards`, the producer the press asks when nothing is named): with
     none the card asks the owner to add one, one is named, and two or more
-    are picked from.  `credit_frees`: the press moves a payment the row keeps
-    onto the card (`credit_moves_payment`), which withdraws every match
-    naming it, so the caption names those lines and the press posts them
-    (ruling R-CC127). -#}
+    are picked from.  `credit_presses`: there is a card, and a figure to put
+    on it (`paid_records_nothing`: the settle Credit makes would record
+    $0.00, which the door refuses, so the card says so first).
+    `credit_frees`: the press frees a bank line a match names
+    (`transaction_service.credit_frees_a_line`, the producer the C key asks
+    too), so the caption names those lines and the press posts them (ruling
+    R-CC127). -#}
 {% set credit_offered = txn.is_expense and txn.status_id == STATUS_PROJECTED
    and not txn.tracks_purchases %}
-{% set credit_frees = withdraws_a_line and credit_offered and credit_moves_payment %}
+{% set credit_presses = credit_offered and credit_cards and not paid_records_nothing %}
+{% set credit_frees = credit_presses and credit_frees_a_line %}
 {#- What the card NAMED, the one value every press on it posts back as
     `shown_lines`: the Save's hidden field, Paid / Received's, Credit's and
     Undo CC's `hx-vals` (the delete dialog names its own lines, below).  The two reads
@@ -210,16 +214,18 @@
     {% endif %}
 
     {#- Credit posts its day and card (`#credit-press-<id>`, below) and the
-        lines the card named; with no card in the app it is drawn disabled,
-        beside the sentence asking for one (plan task plan#3056). -#}
+        lines the card named; with no card in the app, or nothing to put on
+        one, it is drawn disabled beside the sentence saying why (plan task
+        plan#3056). -#}
     {% if credit_offered %}
     <button type="button" class="btn btn-xs btn-warning flex-grow-1"
             hx-post="{{ url_for('transactions.mark_credit', txn_id=txn.id) }}"
             hx-target="#txn-cell-{{ txn.id }}" hx-swap="innerHTML"
             hx-disabled-elt="this"
-            {%- if credit_cards %}
+            {%- if credit_presses %}
             hx-include="#credit-press-{{ txn.id }}"
             hx-vals='{"shown_lines": "{{ named_lines }}"}'
+            aria-describedby="credit-says-{{ txn.id }}"
             {%- else %}
             disabled aria-describedby="credit-press-{{ txn.id }}"
             {%- endif %}
@@ -271,10 +277,11 @@
       `transaction_service.credit_day`) for him to correct; with two or more
       cards he picks one, and none is preselected, so a press that picks none
       is told to (the door's sentence).  With no card the press asks him to
-      add one.  Outside the form, so a Save does not post them. -#}
+      add one, and on a $0.00 row it says there is nothing to put on the
+      card.  Outside the form, so a Save does not post them. -#}
   {%- if credit_offered %}
   <div class="mb-2" id="credit-press-{{ txn.id }}">
-    {%- if credit_cards %}
+    {%- if credit_presses %}
     <div class="row g-1">
       {%- if credit_cards | length > 1 %}
       <div class="col">
@@ -301,9 +308,13 @@
     <div class="form-text" id="credit-says-{{ txn.id }}">
       Credit puts this on {{ credit_cards[0].name if credit_cards | length == 1 else 'the card you pick' }} on the day shown{% if credit_frees %} and {{ frees_lines(payment_withdraws) }}{% endif %}.
     </div>
+    {%- elif credit_cards %}
+    <div class="form-text">
+      {{ txn.name }} is $0.00, so there is nothing to put on the card: set what it cost, then press Credit.
+    </div>
     {%- else %}
     <div class="form-text">
-      Credit puts this on a credit card, and there is no card in the app yet: <a href="{{ url_for('accounts.new_account') }}">add your card</a>, then press Credit.
+      Credit puts this on a credit card, and there is no card in the app to put it on: <a href="{{ url_for('accounts.new_account') }}">add your card</a>, then press Credit.
     </div>
     {%- endif %}
   </div>

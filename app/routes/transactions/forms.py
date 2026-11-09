@@ -211,6 +211,7 @@ def render_full_edit(txn, *, page_refusal):
     owner_set = resolve_owner_cash_flow_set(txn.user_id)
     tender_accounts, tender_account_id = _tender_picker(txn, owner_set)
     credit_cards = transaction_service.credit_cards(txn, owner_set)
+    payment_withdraws = _payment_withdrawal(txn)
     return render_template(
         "grid/_transaction_full_edit.html",
         card_id=full_edit_dom_id(txn.id),
@@ -231,7 +232,7 @@ def render_full_edit(txn, *, page_refusal):
         # (``match_withdrawal.pending_for_movements``) the doors' own write
         # uses.  ``None`` for a row holding no payment; a withdrawal freeing
         # nothing renders nothing.
-        payment_withdraws=_payment_withdrawal(txn),
+        payment_withdraws=payment_withdraws,
         # **What leaving Credit would WITHDRAW** -- Undo CC, or Status set
         # back to Projected, deletes the row's CC payback (plan step
         # ``credit_card:CC-5-4a-5``, ruling **R-CC80**: *"all three
@@ -274,13 +275,14 @@ def render_full_edit(txn, *, page_refusal):
         # cards it could mean, for the card it names, the picker it offers
         # with two or more, or the ask to add one with none
         # (``credit_cards``, the producer the press itself asks); and whether
-        # it moves a payment the row keeps onto the card
-        # (``credit_moves_payment``), so its caption names the bank lines
-        # ``payment_withdraws`` says that frees (ruling **R-CC127**).
+        # it frees a bank line a match names (``credit_frees_a_line``, the
+        # producer the C key asks too, over the ``payment_withdraws`` read
+        # above), so its caption names those lines and the press posts them
+        # (ruling **R-CC127**).
         credit_on=transaction_service.credit_day(txn, calendar),
         credit_cards=credit_cards,
-        credit_moves_payment=transaction_service.credit_moves_payment(
-            txn, credit_cards,
+        credit_frees_a_line=transaction_service.credit_frees_a_line(
+            txn, credit_cards, payment_withdraws,
         ),
         # See ``get_quick_edit`` for why the Estimated field is primed with the
         # RESOLVED amount rather than the column, and why it is a MAP.

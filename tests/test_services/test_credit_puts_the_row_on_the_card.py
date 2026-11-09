@@ -32,7 +32,13 @@ from app.services.account_resolver import resolve_owner_cash_flow_set
 from app.services.cash_ledger import account_opening_fact
 from app.utils.dates import display_today
 from tests._cards import add_card
-from tests._test_helpers import add_txn, make_expense_template, generate_row_of
+from tests._test_helpers import (
+    add_txn,
+    create_account_via_service,
+    generate_row_of,
+    make_expense_template,
+    open_books_before_the_first_assertion,
+)
 from tests.test_services.test_card_payment_follows_what_is_owed import _balances, _payoff
 from tests.test_services.test_card_payment_price import _card
 
@@ -53,6 +59,23 @@ def _groceries(seed_user, period, *, due_date=_JAN_3, account=None):
     )
     db.session.commit()
     return row
+
+
+def _card_opened_on(seed_user, day):
+    """A Visa owing nothing, its books opening on *day* as the factory writes them, committed."""
+    card = create_account_via_service(
+        seed_user, db.session, "Credit Card", "Visa", _ZERO, day,
+    )
+    db.session.commit()
+    return card
+
+
+def _card_with_books_before(seed_user, day):
+    """A Visa owing nothing, its books opening before *day* (and the schedule), committed."""
+    card = create_account_via_service(seed_user, db.session, "Credit Card", "Visa", _ZERO)
+    open_books_before_the_first_assertion(db.session, card, also_before=day)
+    db.session.commit()
+    return card
 
 
 def _press(row, **kwargs):
@@ -218,14 +241,50 @@ class TestTheDayTyped:
         _assert_untouched(row.id)
 
     def test_a_typed_day_inside_the_cards_opening_is_refused(self, seed_user, seed_periods):
-        """The card's opening day typed over Jan 3: the opening already holds it, refused."""
-        card = _card(seed_user)
+        """The card's opening day, Jan 9, typed over Jan 3: the opening holds it, refused.
+
+        After the schedule's Jan 2 start, so only the card's books can refuse it.
+        """
+        card = _card_opened_on(seed_user, date(2026, 1, 10))
         opened_on = account_opening_fact(card.id).opened_on
+        assert opened_on > seed_periods[0].start_date, "precondition: inside the schedule"
         row = _groceries(seed_user, seed_periods[0])
 
         with pytest.raises(ValidationError, match=f"Money cannot have moved on {opened_on}"):
             transaction_service.mark_as_credit(row, day=opened_on)
         _assert_untouched(row.id)
+
+
+    def test_a_typed_day_before_the_schedule_is_refused(self, seed_user, seed_periods):
+        """Dec 1, 2025 typed, the schedule starting Jan 2, 2026: refused (R-EL), nothing written.
+
+        The card's books open before Dec 1, so only the schedule's floor can
+        refuse it.  Measured by plan#3056's review before the fix: the press
+        put the $800.00 on the card from Dec 1.
+        """
+        card = _card_with_books_before(seed_user, date(2025, 12, 1))
+        assert account_opening_fact(card.id).opened_on < date(2025, 12, 1), (
+            "precondition: the card's books reach Dec 1"
+        )
+        row = _groceries(seed_user, seed_periods[0])
+
+        with pytest.raises(ValidationError, match="before this budget's schedule starts"):
+            transaction_service.mark_as_credit(row, day=date(2025, 12, 1))
+        _assert_untouched(row.id)
+
+    def test_the_day_shown_is_not_bounded_by_the_schedule(self, seed_user, seed_periods):
+        """Dated Dec 30, 2025 and posted back untouched: on the card from Dec 30.
+
+        The day the popover showed is the press's own (``credit_day``), as an
+        unnamed press uses it, so the floor that bounds a typed day does not
+        refuse it.
+        """
+        card = _card_with_books_before(seed_user, date(2025, 12, 30))
+        dec_30 = date(2025, 12, 30)
+        row = _press(_groceries(seed_user, seed_periods[0], due_date=dec_30), day=dec_30)
+
+        assert row.settled_on == dec_30
+        assert [m.account_id for m in row.entries] == [card.id]
 
 
 class TestNothingToPutOnTheCard:

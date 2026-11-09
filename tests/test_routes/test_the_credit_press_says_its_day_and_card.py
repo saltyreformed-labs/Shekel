@@ -214,7 +214,7 @@ class TestThePopoverSaysItsDayAndCard:
 
         block = _block(html, row.id)
         assert 'name="settled_on"' not in block
-        assert "there is no card in the app yet" in block
+        assert "there is no card in the app to put it on" in block
         assert 'href="/accounts/new"' in block
         button = _credit_button(html)
         assert f'disabled aria-describedby="credit-press-{row.id}"' in button
@@ -235,6 +235,36 @@ class TestThePopoverSaysItsDayAndCard:
         shown = min(date(2026, 1, 16), display_today())
         assert f'value="{shown.isoformat()}"' in _block(html, row.id)
 
+    def test_a_zero_row_says_there_is_nothing_to_put_on(
+        self, auth_client, seed_user, seed_periods,
+    ):
+        """$0.00 Groceries: Credit disabled beside the sentence; a press anyway is refused.
+
+        The 400 names why, and the row read back is still Projected with no
+        payment: the door rolled the settle back.
+        """
+        _card(seed_user)
+        row = add_txn(
+            db.session, seed_user, seed_periods[0], "Groceries", Decimal("0.00"),
+            due_date=_JAN_3,
+        )
+        db.session.commit()
+
+        html = _popover(auth_client, row.id)
+
+        block = _block(html, row.id)
+        assert "Groceries is $0.00, so there is nothing to put on the card" in block
+        assert 'name="settled_on"' not in block
+        assert f'disabled aria-describedby="credit-press-{row.id}"' in _credit_button(html)
+
+        response = auth_client.post(f"/transactions/{row.id}/mark-credit")
+
+        assert response.status_code == 400
+        assert "nothing to put on the card" in response.get_data(as_text=True)
+        row, movement = _read(row.id)
+        assert movement is None
+        assert row.status_id == ref_cache.status_id(StatusEnum.PROJECTED)
+
     def test_a_settled_row_draws_no_credit_press(self, auth_client, seed_user, seed_periods):
         """Paid on checking: no Credit, so no day and no card beside it."""
         _card(seed_user)
@@ -251,9 +281,13 @@ class TestAMatchedLineIsNamed:
     """A reverted row's kept payment, matched on checking: Credit names the line and frees it."""
 
     @staticmethod
-    def _matched_and_reverted(seed_user):
-        """$120 Hotel Paid on checking, matched to its bank line, set back to Projected."""
-        add_card(seed_user)
+    def _matched_and_reverted(seed_user, *, card=True):
+        """$120 Hotel Paid on checking, matched to its bank line, set back to Projected.
+
+        Returns:
+            The row, its bank line, and the Visa (``None`` without *card*).
+        """
+        visa = add_card(seed_user) if card else None
         bank_day = seed_user["bootstrap_period"].start_date + timedelta(days=1)
         txn = a_transaction(seed_user, name="Hotel", amount="120.00")
         db.session.commit()
@@ -276,7 +310,7 @@ class TestAMatchedLineIsNamed:
         assert matched_subjects(seed_user["account"].id).lines == {line.id}, (
             "precondition: matched on checking"
         )
-        return txn, line
+        return txn, line, visa
 
     def test_the_caption_names_the_line_and_the_press_frees_it(
         self, auth_client, seed_user,
@@ -287,7 +321,7 @@ class TestAMatchedLineIsNamed:
         the day in its box.  200, the $120.00 on the Visa from that day, and
         the line no longer matched on checking.
         """
-        txn, line = self._matched_and_reverted(seed_user)
+        txn, line, visa = self._matched_and_reverted(seed_user)
 
         html = _popover(auth_client, txn.id)
 
@@ -308,7 +342,20 @@ class TestAMatchedLineIsNamed:
 
         assert response.status_code == 200
         row, movement = _read(txn.id)
-        assert movement.account_id != seed_user["account"].id
-        assert movement.amount == Decimal("120.00")
+        assert (movement.account_id, movement.amount) == (visa.id, Decimal("120.00"))
         assert row.settled_on.isoformat() == day
         assert not matched_subjects(seed_user["account"].id).lines
+
+    def test_with_no_card_nothing_is_named_for_credit(self, auth_client, seed_user):
+        """The same matched row and no card: Credit cannot press, so it names no line.
+
+        Its block says no line, and its disabled button posts nothing.  The
+        lines the card's other captions name (a $0.00 estimate saved as Paid
+        frees this one) are theirs, unchanged.
+        """
+        txn, _line, _visa = self._matched_and_reverted(seed_user, card=False)
+
+        html = _popover(auth_client, txn.id)
+
+        assert "accepted match" not in _block(html, txn.id)
+        assert "hx-vals" not in _credit_button(html)

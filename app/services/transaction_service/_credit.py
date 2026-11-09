@@ -31,9 +31,9 @@ Paid leaves checking and a later Credit puts it back on the card.
 **The press says its day and asks which card** (plan task plan#3056).  The
 popover shows the day :func:`credit_day` gives and lets the owner type the real
 one, and asks which card when the owner has two or more; it reads
-:func:`credit_cards` for the choice and :func:`credit_moves_payment` for the
-caption naming the bank lines the press frees, the one producer the C key and
-the palette ask too (plan task plan#3114).
+:func:`credit_cards` for the choice and :func:`credit_frees_a_line` for the
+caption naming the bank lines the press frees, the producers the C key and the
+palette ask too (plan task plan#3114).
 
 **Old Credit rows keep the old path** until plan#1034's re-plan: a row in
 status Credit holds its live CC Payback, and Undo CC on it still deletes that
@@ -44,8 +44,11 @@ the pay calendar; mutates through the settle verb and the status door only;
 does not commit.
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import date
+from typing import TYPE_CHECKING
 
 from app import ref_cache
 from app.enums import SettledDayBasisEnum, StatusEnum
@@ -60,13 +63,21 @@ from app.services.credit_workflow import get_active_payback, unmark_credit
 from app.services.match_press import Press
 from app.services.movement_account import admitted_movement_account_id
 from app.services.pay_calendar import FiledRow, PayCalendar, calendar_for
-from app.services.settle_day import SettleDay
-from app.services.status_seam import covering_movement_of, settled_on_a_card
+from app.services.settle_day import SettleDay, recorded_settle_day
+from app.services.status_seam import (
+    covering_movement_of,
+    settle_day_for_status,
+    settled_on_a_card,
+)
 from app.services.transaction_service._door import apply_requested_status
 from app.services.transaction_service._settle import settle_transaction
+from app.services.transaction_service._status_rules import settled_status_id
 from app.utils.balance_predicates import is_credit, is_projected
 from app.utils.dates import display_today
 from app.utils.log_events import BUSINESS, EVT_CREDIT_MARKED, log_event
+
+if TYPE_CHECKING:  # pragma: no cover -- annotations only
+    from app.services.match_withdrawal import MatchWithdrawal
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +102,14 @@ def mark_as_credit(
     is a press already made, so a double click changes nothing; a row in
     status Credit holding no payback (the Status dropdown's, finding
     plan#2133) is refused as not Projected, as the old press refused it.
-    The settle verb adds its own refusals: a deleted row, a day that has not
-    come (ruling **R-EJ**) or is before the owner's schedule (ruling
-    **R-EL**), a day on or before the card's books open (S11 of the trace), a
+    A day the owner typed over the one the popover showed is bounded as every
+    typed settle day is, by ``status_seam.settle_day_for_status``: not before
+    the owner's schedule starts (ruling **R-EL**, a door rule the settle verb
+    does not hold).  The day the popover showed, posted back untouched, is the
+    press's own and is not bounded there, so a row dated before the schedule
+    goes on the card on its date as an unnamed press puts it.  The settle verb
+    adds its own refusals: a deleted row, a day that has not come (ruling
+    **R-EJ**), a day on or before the card's books open (S11 of the trace), a
     figure it cannot price.  A row whose settle records $0.00 is refused
     after it, because nothing moved on the card, so the row would be Paid
     and drawn so rather than Credit; the door's rollback undoes the settle.
@@ -104,7 +120,7 @@ def mark_as_credit(
             (review J).
         card_account_id: The card the owner named, or ``None`` when the press
             named none (:func:`_the_card`).
-        day: The day the owner typed under "Money moved on" (plan task
+        day: The day under the popover's "Money moved on" box (plan task
             plan#3056), or ``None`` when the press named none: then
             :func:`credit_day`.  Entered either way, as the press is the
             owner's statement that the money went on the card.
@@ -137,14 +153,14 @@ def mark_as_credit(
             "Only projected transactions can be marked as credit."
         )
     card = _the_card(txn, card_account_id)
+    own_day = credit_day(txn)
+    settle_day = SettleDay(day=own_day, basis=SettledDayBasisEnum.ENTERED)
+    if day is not None and day != own_day:
+        settle_day = settle_day_for_status(
+            txn.user_id, settled_status_id(txn), day, recorded_settle_day(txn),
+        )
     settle_transaction(
-        txn,
-        settle_day=SettleDay(
-            day=credit_day(txn) if day is None else day,
-            basis=SettledDayBasisEnum.ENTERED,
-        ),
-        tender_account_id=card.id,
-        press=press,
+        txn, settle_day=settle_day, tender_account_id=card.id, press=press,
     )
     movement = covering_movement_of(txn)
     if movement is None:
@@ -319,30 +335,68 @@ def credit_cards(txn: Transaction, cash_flow: CashFlowSet | None) -> tuple[Accou
 
 
 def credit_moves_payment(txn: Transaction, cards: tuple[Account, ...]) -> bool:
-    """Return whether a Credit press onto one of *cards* moves *txn*'s kept payment.
+    """Return whether a Credit press onto one of *cards* could move *txn*'s kept payment.
 
     A row Paid, then set back to Projected, keeps its payment un-dated
     (ruling **R-BAL61**), and an accepted match may still name it.  Credit
     settles with the card as the tender, and the seam moves a kept payment
     that is on another account onto it, which takes it out of every match
-    naming it (``status_seam._covering._re_point``, ruling **R-CC46**).  So
-    this is the question a caption naming those lines asks (plan task
-    plan#3056) and the one that sends the C key and the palette to the
-    popover instead (ruling plan#3112, plan task plan#3114); what the move
-    would free is ``match_withdrawal.pending_for_movements``' answer.
+    naming it (``status_seam._covering._re_point``, ruling **R-CC46**).
+    :func:`credit_frees_a_line` asks it.
+
+    **"Could", across the cards the owner may pick**: True when some card the
+    press could put it on is another account than the payment's, because
+    the page names the lines before he picks.  A page naming a line the press
+    then does not free is not refused (a save that reaches no match step is
+    not graded, ``match_press.Press``); a press freeing one the page did not
+    name is, on every try.  No card: no press, nothing moves.
 
     Args:
         txn: The row, with ``entries`` loaded or loadable.
         cards: What :func:`credit_cards` answered for it.
 
     Returns:
-        ``True`` when the row keeps a payment on an account none of *cards* is.
+        ``True`` when the row keeps a payment and one of *cards* is another
+        account than the one it is on.
 
     Raises:
         ValueError: From ``status_seam.covering_movement_of``, on a row
             holding two covering movements.
     """
     movement = covering_movement_of(txn)
-    return movement is not None and movement.account_id not in {
-        card.id for card in cards
-    }
+    return movement is not None and any(
+        card.id != movement.account_id for card in cards
+    )
+
+
+def credit_frees_a_line(
+    txn: Transaction, cards: tuple[Account, ...],
+    payment_withdraws: MatchWithdrawal | None,
+) -> bool:
+    """Return whether a Credit press on *txn* frees a bank line a match names.
+
+    **The one answer to "does Credit unmatch a bank line"** (plan task
+    plan#3056): the popover names the lines beside Credit and posts them
+    when it is true (ruling **R-CC127**), and the C key and the palette open
+    the popover instead of pressing when it is (ruling plan#3112, plan task
+    plan#3114).  True when the press could move the payment the row keeps
+    (:func:`credit_moves_payment`) and a match naming that payment frees a
+    line.
+
+    Args:
+        txn: The row, with ``entries`` loaded or loadable.
+        cards: What :func:`credit_cards` answered for it.
+        payment_withdraws: What taking the row's kept payment out of its
+            matches would withdraw
+            (``match_withdrawal.pending_for_movements`` over its covering
+            movement), or ``None`` when it keeps none.  Read by the caller,
+            which also draws those lines, so one read serves both.
+
+    Returns:
+        ``True`` when the press could move the payment and that frees a line.
+    """
+    return (
+        payment_withdraws is not None
+        and payment_withdraws.frees_a_line
+        and credit_moves_payment(txn, cards)
+    )

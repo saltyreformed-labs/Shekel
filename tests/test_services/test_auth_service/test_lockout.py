@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import bcrypt
 import pytest
 
 from app.extensions import db
@@ -157,11 +158,13 @@ class TestAccountLockoutBehaviour:
         """A locked account refuses even the correct password.
 
         This is the timing-oracle defence: while ``locked_until > now``
-        the service does NOT call ``verify_password``, so an attacker
-        observing response timing cannot distinguish "locked + right"
-        from "locked + wrong" and cannot use a captured-but-then-
-        locked window to confirm a guessed password.  Verified by
-        feeding a known-correct password and confirming AuthError.
+        the service checks the password only against the dummy hash, so an
+        attacker observing response timing cannot distinguish "locked +
+        right" from "locked + wrong" and cannot use a captured-but-then-
+        locked window to confirm a guessed password
+        (:class:`TestALockedAttemptPaysTheCheck` spies that check).
+        Verified here by feeding a known-correct password and confirming
+        AuthError.
         """
         user_id = seed_user["user"].id
         with app.app_context():
@@ -483,3 +486,64 @@ class TestAKnownBrowser:
         user = db.session.get(User, user_id)
         assert user.failed_login_count == 1
         assert user.locked_until is None
+
+
+def _hashes_checked(email: str, password: str) -> list[str]:
+    """Return each hash bcrypt checked while ``authenticate`` refused *email*.
+
+    Spies ``bcrypt.checkpw`` itself, the cost, so a branch that returns early
+    shows as no check at all.
+
+    Args:
+        email: The address typed.
+        password: The password typed.
+
+    Returns:
+        The hashes, in the order checked.
+    """
+    with patch.object(
+        auth_service.bcrypt, "checkpw", wraps=bcrypt.checkpw,
+    ) as checkpw:
+        with pytest.raises(AuthError, match="Invalid email or password"):
+            auth_service.authenticate(
+                auth_service.find_sign_in_user(email), password,
+            )
+    return [call.args[1].decode("utf-8") for call in checkpw.call_args_list]
+
+
+class TestALockedAttemptPaysTheCheck:
+    """Every refusal at ``/login`` pays one password check (ruling plan#2999).
+
+    A locked account used to skip it while an address with no account paid it,
+    so ten wrong passwords and a faster reply told a stranger the address is a
+    real account that has just locked.  An address with no account and a
+    locked one check the dummy hash; a wrong password checks the account's.
+    """
+
+    def test_an_address_with_no_account_checks_the_dummy(self, app, db, seed_user):
+        """One check, against the dummy hash."""
+        assert _hashes_checked("nobody@shekel.local", _PASSWORD) == [
+            auth_service._DUMMY_PASSWORD_HASH,
+        ]
+
+    def test_a_locked_account_checks_the_dummy(self, app, db, seed_user):
+        """The right password and a wrong one: one check each, against the dummy.
+
+        Never the account's hash, so the reply cannot depend on whether the
+        password was right.
+        """
+        _lock(seed_user["user"].id, 0)
+
+        assert _hashes_checked(_EMAIL, _PASSWORD) == [
+            auth_service._DUMMY_PASSWORD_HASH,
+        ]
+        assert _hashes_checked(_EMAIL, "wrong-password") == [
+            auth_service._DUMMY_PASSWORD_HASH,
+        ]
+
+    def test_a_wrong_password_checks_the_accounts_hash(self, app, db, seed_user):
+        """One check, against the account's own hash: what the other two cost."""
+        password_hash = db.session.get(User, seed_user["user"].id).password_hash
+
+        assert _hashes_checked(_EMAIL, "wrong-password") == [password_hash]
+

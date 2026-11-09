@@ -21,18 +21,25 @@ class User(UserMixin, TimestampMixin, db.Model):
     Account-lockout columns (see audit finding F-033 / commit C-11):
 
       * ``failed_login_count`` -- count of consecutive wrong passwords and
-        codes, at sign-in and at the signed-in password and code checks.
-        Incremented only by ``auth_service.record_failed_attempt``; reset to
-        ``0`` when the threshold trips and ``locked_until`` is stamped, and by
+        codes counted on the account, at sign-in and at the signed-in password
+        and code checks.  A known browser's wrong password at sign-in counts
+        on its own record instead (``KnownDevice.failed_login_count``,
+        plan#2772).  Incremented only by
+        ``auth_service.record_failed_attempt``; reset to ``0`` when the
+        threshold trips and ``locked_until`` is stamped, and by
         ``auth_service.clear_failed_attempts`` once every check has passed: a
-        finished sign-in or re-confirm, not a correct password alone.
+        stranger's finished sign-in or a re-confirm, not a correct password
+        alone.
       * ``locked_until`` -- exclusive upper bound on the lockout window;
         ``NULL`` when never locked or cleared, and a past value once a window
         has run out, which every check reads the same as ``NULL``.  Each check
-        refuses without running ``verify_password`` while ``locked_until >
-        now`` so a brute-force attacker observes constant-time rejections
-        during the lockout window (no timing oracle on whether the password
-        was correct on the locked account).
+        refuses while ``locked_until > now``, except that sign-in's password
+        step lets a known browser past (plan#2772).  The signed-in checks
+        refuse without running ``verify_password``, and say why.  Sign-in
+        hides the lock, so it runs a throwaway check against a dummy hash
+        instead (ruling plan#2999): a brute-force attacker observes rejections
+        that cost what a wrong password does, and that cannot depend on
+        whether the password was correct on the locked account.
 
     Together these columns implement per-account brute-force throttling
     that does not depend on Flask-Limiter's storage.  IP rotation

@@ -372,12 +372,13 @@ def verify_password(plain_password, password_hash):
 
 
 # Timing-equalization dummy hash (deep-hunt #27).  ``authenticate`` runs a
-# throwaway bcrypt verification against this hash on the no-user branch so
-# an unknown email costs the same wall-clock time as a known email with a
-# wrong password.  Without it the no-user branch returns before any bcrypt
-# work while the wrong-password branch pays a full ``bcrypt.checkpw``,
-# letting an attacker enumerate registered addresses by timing ``/login``
-# despite the constant response message.  Generated once at import with the
+# throwaway bcrypt verification against this hash on the no-user branch and on
+# a stranger's attempt at a locked account (ruling plan#2999), so neither costs
+# less wall-clock time than a known email with a wrong password.  Without it
+# both return before any bcrypt work while the wrong-password branch pays a
+# full ``bcrypt.checkpw``, letting an attacker tell by timing ``/login``,
+# despite the constant response message, that an address is registered or
+# that its account has just locked.  Generated once at import with the
 # same default cost factor as real password hashes (``bcrypt.gensalt()`` in
 # :func:`hash_password`), so if bcrypt's default rounds change the
 # equalization cost tracks it automatically.  The plaintext is irrelevant --
@@ -544,9 +545,11 @@ def check_signed_in_password(
 
     The one password check of ``/reauth``, ``/change-password`` and
     ``/mfa/disable``.  The lock is checked first, so bcrypt never runs on a
-    locked account, as at sign-in.  Unlike ``/login`` the refusal names the
-    lock: whoever is here holds a live session on this account, so the lock's
-    existence tells them nothing a stranger could use.
+    locked account.  Unlike ``/login`` the refusal names the lock: whoever is
+    here holds a live session on this account, so the lock's existence tells
+    them nothing a stranger could use, and neither does how fast it is said.
+    ``/login`` hides the lock, so there a locked attempt pays a throwaway
+    check (:func:`authenticate`, ruling plan#2999).
 
     Args:
         user: The signed-in account.  Its row was reloaded under the owner's
@@ -580,20 +583,20 @@ def authenticate(
 
     Lockout flow (audit finding F-033 / commit C-11):
 
-      * If *user* is ``None`` (no account has the address) -- run one throwaway bcrypt
-        verification against ``_DUMMY_PASSWORD_HASH`` (timing
-        equalization, deep-hunt #27) so this branch costs the same as a
-        wrong-password attempt, then raise ``AuthError`` with the same
-        generic message used for wrong-password.  This closes the
-        response-content AND the response-timing email-enumeration
-        oracle.
-      * If the user row's ``locked_until`` is set and still in the
-        future, and the attempt is a stranger's -- raise ``AuthError``
-        WITHOUT calling :func:`verify_password`.  Skipping the bcrypt step
-        means an attacker observing response timing cannot distinguish
-        "locked and password is wrong" from "locked and password is right",
-        so a lockout window cannot be used as a side-channel oracle.  A
-        known browser is not stopped by that lock (:func:`is_locked_out`).
+      * If *user* is ``None`` (no account has the address), or the user
+        row's ``locked_until`` is set and still in the future and the
+        attempt is a stranger's (:func:`is_locked_out`) -- run one throwaway
+        bcrypt verification against ``_DUMMY_PASSWORD_HASH``, so this branch
+        costs the same as a wrong-password attempt, then raise ``AuthError``
+        with the same generic message used for wrong-password.  For an
+        address with no account this closes the response-content AND the
+        response-timing email-enumeration oracle (deep-hunt #27).  For a
+        locked account it means a fast reply cannot tell a stranger that the
+        address is real and has just locked (ruling plan#2999); and because
+        the check is against the dummy hash, never the account's, the reply
+        cannot depend on whether the password was right, so a lockout window
+        cannot be used to confirm a guess either.  A known browser is not
+        stopped by that lock.
       * If the password is wrong -- :func:`record_failed_attempt`: on
         *device* for a known browser, on the account for a stranger.
       * If the password is right but ``is_active`` is False -- raise
@@ -627,20 +630,19 @@ def authenticate(
             active lockout window and the attempt is a stranger's, the
             password is wrong, or the account is disabled.
     """
-    if user is None:
-        # Timing equalization (deep-hunt #27): pay the same bcrypt cost as
-        # the wrong-password branch below so the no-user response is not
-        # measurably faster, which would let an attacker enumerate
-        # registered emails by timing /login.  verify_password mirrors the
-        # real branch's input-validation short-circuits exactly (empty /
-        # non-string passwords stay fast on both paths), so timing matches
-        # for every input shape.  The result is intentionally discarded.
+    if user is None or is_locked_out(user, device):
+        # Timing equalization (deep-hunt #27, ruling plan#2999): pay the same
+        # bcrypt cost as the wrong-password branch below, so neither an
+        # address with no account nor a stranger's attempt at a locked one is
+        # measurably faster, which would let an attacker enumerate registered
+        # emails, or learn that one has just locked, by timing /login.  The
+        # check is against the dummy hash, never the account's, so a locked
+        # account's reply cannot depend on whether the password was right.
+        # verify_password mirrors the real branch's input-validation
+        # short-circuits exactly (empty / non-string passwords stay fast on
+        # every path), so timing matches for every input shape.  The result is
+        # intentionally discarded.
         verify_password(password, _DUMMY_PASSWORD_HASH)
-        raise AuthError("Invalid email or password.")
-
-    # Lockout gate FIRST so we never run bcrypt on a locked account.
-    # See module docstring above for the timing-oracle rationale.
-    if is_locked_out(user, device):
         raise AuthError("Invalid email or password.")
 
     if not verify_password(password, user.password_hash):

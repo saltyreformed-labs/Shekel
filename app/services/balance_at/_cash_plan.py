@@ -290,6 +290,28 @@ def _stated_through(walk: CashLedgerWalk) -> date:
     return walk.opening.opened_on
 
 
+def _own_date(item: "_PlanItem | TransactionEntry") -> "date | None":
+    """Return the date a plan item on a card carries as its own, or ``None``.
+
+    The DATE half of :func:`_day_it_counts_from`, whose bullets say why each kind
+    has the date it has: a dated row and a transfer their ``due_date``, a swipe or
+    a refund in flight the day it happened, and an envelope's unspent budget and an
+    undated row none.  What the fold adds is WHEN a transfer starts counting from
+    it; the reconcile tick asks only the date (:func:`tick_day_on_a_card`).
+
+    Args:
+        item: A plan item on a card, or a purchase in flight as it is stored.
+
+    Returns:
+        That date, or ``None`` where the item has none of its own.
+    """
+    if isinstance(item, (InFlightMovement, TransactionEntry)):
+        return item.purchased_on
+    if item.due_date is None or item.tracks_purchases:
+        return None
+    return item.due_date
+
+
 def _day_it_counts_from(
     item: "_PlanItem | TransactionEntry", stated_through: date,
 ) -> "date | None":
@@ -307,8 +329,8 @@ def _day_it_counts_from(
       under R-BAL207: it has happened, and only the bank's posting is still to
       come.  The cost is a posting dated after a true-up that already held it: the
       posting comes on top, by the same date rule a recorded movement takes (ruling
-      R-FL), until the true-up is restated.  The reconcile tick hands the stored
-      purchase it is about to date (:func:`own_day_on_a_card`).
+      R-FL), until the true-up is restated.  The reconcile tick dates the stored
+      purchase by the same date (:func:`tick_day_on_a_card`).
     * **An envelope's unspent budget keeps R-G**, decided under R-BAL207: money not
       yet spent has no day it was spent on, so a true-up cannot hold it.  Its swipes
       are the in-flight items above.  The cost: left open past its paycheck, the
@@ -327,30 +349,29 @@ def _day_it_counts_from(
       had not really gone, the owner states $800, the row reads $800 and checking
       reads $200 low until he marks the transfer with a later day than the true-up;
       a true-up closes its own day, so money moved later that same day is inside it.
+      A tick on the card's reconcile panel records that date on both legs (ruling
+      plan#3046), so ticking such a transfer leaves the card as it was.
 
     Args:
-        item: A plan item on a card, not a worked-out payment, or a purchase
-            in flight as it is stored.
+        item: A plan item on a card, not a worked-out payment, or a purchase in
+            flight as it is stored.
         stated_through: The last day the card's balance was stated for.
 
     Returns:
         The day it counts from, or ``None`` where it lands by ruling R-G.
     """
-    if isinstance(item, (InFlightMovement, TransactionEntry)):
-        return item.purchased_on
-    if item.due_date is None:
+    own = _own_date(item)
+    if own is not None and isinstance(item, TransferLeg) and own > stated_through:
         return None
-    if isinstance(item, TransferLeg):
-        return item.due_date if item.due_date <= stated_through else None
-    return None if item.tracks_purchases else item.due_date
+    return own
 
 
 @dataclass(frozen=True)
 class OwnDay:
-    """The day a card counts a plan item from by itself (ruling plan#2926).
+    """The day a card dates a plan item by itself (ruling plan#2926).
 
     Attributes:
-        day: That day (:func:`_day_it_counts_from`).
+        day: That day (:func:`own_day_on_a_card`, :func:`tick_day_on_a_card`).
         moves: Whether the card's books hold it (``books_hold``).  ``False`` for
             a day by the books' opening, which already holds the money, so the
             item moves nothing.
@@ -359,31 +380,85 @@ class OwnDay:
     day: date
     moves: bool
 
+    @classmethod
+    def on_books_from(cls, day: "date | None", opened_on: date) -> "OwnDay | None":
+        """Return *day* with whether books opening on *opened_on* hold it, or ``None``.
+
+        Args:
+            day: The day, or ``None`` where the item has none.
+            opened_on: The day the card's books opened.
+
+        Returns:
+            The :class:`OwnDay`, or ``None`` for no day.
+        """
+        return None if day is None else cls(day, books_hold(opened_on, day))
+
 
 def own_day_on_a_card(
     item: "_PlanItem | TransactionEntry", *, stated_through: date, opened_on: date,
 ) -> "OwnDay | None":
     """Return the day a card counts *item* from by itself, or ``None`` for R-G's.
 
-    The ONE answer, read by the fold (:func:`_cash_plan`) and by the reconcile
-    tick (plan#2958): a tick on the card records the day the card already counts
-    the money from, so ticking it moves nothing (ruling plan#2926, "marked or
-    not").  It recorded the statement's day before, which moved $800 dated Jan 3
-    off the Jan 5 statement once it was ticked on the Jan 20 one.
+    The fold's answer (:func:`_cash_plan`).  A tick on the card's reconcile panel
+    records the same day for everything the fold counts so
+    (:func:`tick_day_on_a_card`), so ticking it moves nothing (ruling plan#2926,
+    "marked or not").  It recorded the statement's day before, which moved $800
+    dated Jan 3 off the Jan 5 statement once it was ticked on the Jan 20 one.
 
     Args:
-        item: A plan item on a card, not a worked-out payment, or a purchase
-            in flight as it is stored (the purchase arm's tick).
+        item: A plan item on a card, not a worked-out payment.
         stated_through: The last day the card's balance was stated for.
         opened_on: The day the card's books opened.
 
     Returns:
         The :class:`OwnDay`, or ``None`` where the card lands it by ruling R-G.
     """
-    counts_from = _day_it_counts_from(item, stated_through)
-    if counts_from is None:
-        return None
-    return OwnDay(counts_from, books_hold(opened_on, counts_from))
+    return OwnDay.on_books_from(_day_it_counts_from(item, stated_through), opened_on)
+
+
+def tick_day_on_a_card(
+    item: "_PlanItem | TransactionEntry", *, opened_on: date, calendar: PayCalendar,
+) -> "OwnDay | None":
+    """Return the day a card dates *item* by itself, or ``None`` for R-G's.
+
+    What the card's reconcile panel offers *item* by and a tick on it records
+    (plan#2958; ruling plan#3046 for a payment into the card, on both accounts).
+    The item's own date (:func:`_own_date`), so the panel offers nothing a
+    statement before that date could not show, and records for each item the
+    fold counts from its own date the day it counts it from: a payment it offers is
+    dated on or before the statement's true-up, the latest, which therefore holds
+    it (:func:`_day_it_counts_from`).  A transfer dated Jan 20 in a paycheck
+    ending Jan 15 is not offered on a Jan 18 true-up, where its paycheck's last day
+    offered it and the tick recorded Jan 18.
+
+    **A worked-out payment is dated as the fold dates it**
+    (:func:`_planned_day`), the day that prices it, which is its own date in its
+    own paycheck and that paycheck's first day once the row is moved into a later
+    one (its date stays, ruling plan#2991).  The fold holds one outside the
+    true-up that priced it and lands it by R-G (:mod:`._card_payment`), so its tick
+    does move the card, as the statement's day did: $800 owed from Jan 3, the
+    bank taking $500 of the Jan 16 payoff row, the card trued up to $300 on Jan
+    20; ticked with $500 typed, the card owes $300 from Jan 16, where the
+    statement's day left it owing $800 Jan 16-19.
+
+    Args:
+        item: A plan item on a card, a worked-out payment's leg among them, or a
+            purchase in flight as it is stored (the purchase arm's tick).
+        opened_on: The day the card's books opened.
+        calendar: The owner's pay calendar, which a worked-out payment is dated
+            by.
+
+    Returns:
+        The :class:`OwnDay`, or ``None`` where the card has no date of the item's
+        own: an envelope's unspent budget and an undated row.
+
+    Raises:
+        RuntimeError: A worked-out payment names a pay period *calendar* does
+            not hold (:func:`_planned_day`).
+    """
+    if _is_worked_out(item):
+        return OwnDay.on_books_from(_planned_day(item, calendar), opened_on)
+    return OwnDay.on_books_from(_own_date(item), opened_on)
 
 
 def _planned_day(item: _PlanItem, calendar: PayCalendar) -> date:

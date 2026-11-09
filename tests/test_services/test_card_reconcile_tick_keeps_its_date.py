@@ -20,18 +20,25 @@ owed $0.00 on Jan 3 through Jan 19 (measured on this tree before the fix).
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import pytest
+
 from app import ref_cache
 from app.enums import SettledDayBasisEnum, StatusEnum
+from app.exceptions import ValidationError
 from app.extensions import db
+from app.models.amount_ownership import AmountOwnership
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.services import cash_ledger, reconcile_service
+from app.models.transfer import Transfer
+from app.services import cash_ledger, reconcile_service, transfer_service
 from app.services.balance_at import BalanceContext, balance_at, cash_balance_at
 from app.services.pay_calendar import calendar_for
 from app.services.settle_day import recorded_settle_day
+from app.services.transfer_legs import transfer_sides
 from tests._test_helpers import (
     add_txn,
     append_balance_assertion,
+    create_account_via_service,
     make_expense_template,
     generate_row_of,
     outstanding_set_of,
@@ -46,6 +53,7 @@ from tests.test_services.test_card_payment_price import (
     _card,
     _one_off,
     _price,
+    _row,
     _spend,
 )
 
@@ -54,15 +62,22 @@ _OWED = Decimal("-800.00")
 _JAN_1 = date(2026, 1, 1)
 _JAN_2 = date(2026, 1, 2)
 _JAN_3 = date(2026, 1, 3)
+_JAN_4 = date(2026, 1, 4)
+_JAN_5 = date(2026, 1, 5)
 _JAN_7 = date(2026, 1, 7)
+_JAN_10 = date(2026, 1, 10)
 _JAN_14 = date(2026, 1, 14)
+_JAN_15 = date(2026, 1, 15)
 _JAN_16 = date(2026, 1, 16)
 _JAN_18 = date(2026, 1, 18)
 _JAN_19 = date(2026, 1, 19)
 _JAN_20 = date(2026, 1, 20)
 _JAN_21 = date(2026, 1, 21)
 _JAN_27 = date(2026, 1, 27)
+_JAN_29 = date(2026, 1, 29)
 _JAN_30 = date(2026, 1, 30)
+_FEB_1 = date(2026, 2, 1)
+_FEB_2 = date(2026, 2, 2)
 _FEB_27 = date(2026, 2, 27)
 
 
@@ -74,8 +89,10 @@ def _statement(seed_user, account):
     )
 
 
-def _tick(statement, *, rows=(), purchases=(), transfers=()):
+def _tick(statement, *, rows=(), purchases=(), transfers=(), typed=None):
     """Tick rows, purchases and transfers on *statement*'s panel and save.
+
+    *typed* is ``{transfer id: figure}`` for a transfer's amount box typed over.
 
     Returns:
         How many of the ticks landed.
@@ -84,16 +101,16 @@ def _tick(statement, *, rows=(), purchases=(), transfers=()):
         reconcile_service.ReconcileSubmission(
             statement=statement, entry_ids=set(purchases),
             transaction_ids=set(rows), corrections={},
-            transfer_ids=set(transfers), transfer_corrections={},
+            transfer_ids=set(transfers), transfer_corrections=dict(typed or {}),
         ),
     )
     db.session.commit()
     return landed
 
 
-def _card_at(seed_user, card, day):
-    """What the card holds at the end of *day*, read Jan 21: negative when owed."""
-    ctx = BalanceContext.build(seed_user["user"].id, as_of=_JAN_21)
+def _card_at(seed_user, card, day, as_of=_JAN_21):
+    """What the card holds at the end of *day*, read *as_of*: negative when owed."""
+    ctx = BalanceContext.build(seed_user["user"].id, as_of=as_of)
     return cash_balance_at(card, ctx, day)
 
 
@@ -261,25 +278,356 @@ class TestABillOnTheCard:
         assert recorded_settle_day(row).basis is SettledDayBasisEnum.ASSERTED
 
 
+def _sides(transfer):
+    """``{account id: (day, basis, statement id)}`` for each side of *transfer*, re-read."""
+    db.session.expire_all()
+    xfer = db.session.get(Transfer, transfer.id)
+    return {
+        side.account_id: (
+            side.record.settled_on,
+            recorded_settle_day(side.record).basis,
+            side.record.reconciled_by_id,
+        )
+        for side in transfer_sides(xfer)
+    }
+
+
+def _checking_at(seed_user, day, as_of=_JAN_21):
+    """What checking holds at the end of *day*, read *as_of*."""
+    ctx = BalanceContext.build(seed_user["user"].id, as_of=as_of)
+    return balance_at(seed_user["account"], ctx, day)
+
+
+def _payment(seed_user, seed_periods, card):
+    """$800 on *card* dated Jan 3, $200 sent to it dated Jan 5 and unmarked, $600 owed Jan 20.
+
+    Returns:
+        The $200 transfer, still Projected.
+    """
+    _spend(seed_user, card, seed_periods[0], "800.00", _JAN_3)
+    transfer = _one_off(seed_user, card, seed_periods[0], "200.00", _JAN_5)
+    _true_up(card, "600.00", _JAN_20)
+    return transfer
+
+
 class TestAPaymentIntoTheCard:
-    """A transfer's leg on the card is the transfer arm's, which this task leaves."""
+    """Ticked, a payment into the card keeps its own date on both accounts (plan#3046).
 
-    def test_its_tick_still_lands(self, seed_user, seed_periods):
-        """$200 sent to the card dated Jan 5, $600 trued up Jan 20, ticked: Paid.
+    The ruling's example: $800 on the card Jan 3, $200 sent to it dated Jan 5 and not
+    marked, the card trued up to $600 owed on Jan 20 and the $200 ticked there.  The
+    card counts the $200 from Jan 5 before the tick, because the Jan 20 true-up holds
+    it (ruling plan#2963).  **The control** for each case is the statement's day, as
+    the tick recorded it: Jan 20 on both accounts (measured on this tree before the
+    fix).
+    """
 
-        The statement dates no transfer by its own day (``Statement.own_day``), so
-        the tick settles it through the transfer arm and lands.  Which day it
-        should take is plan#3041's, so this asserts none.
+    def test_it_is_dated_its_own_date_on_both_accounts(self, seed_user, seed_periods):
+        """The card's side Jan 5, the owner's date, linked to the Jan 20 true-up;
+        checking's side borrows Jan 5 and names no statement.
+
+        The control: the card's side Jan 20 asserted, checking's Jan 20 borrowed.
+        """
+        card = _card(seed_user)
+        transfer = _payment(seed_user, seed_periods, card)
+        anchor_id = cash_ledger.governing_anchor(card.id).anchor_id
+
+        assert _tick(_statement(seed_user, card), transfers={transfer.id}) == 1
+        assert _sides(transfer) == {
+            card.id: (_JAN_5, SettledDayBasisEnum.ENTERED, anchor_id),
+            seed_user["account"].id: (_JAN_5, SettledDayBasisEnum.BORROWED, None),
+        }
+
+    def test_the_card_owes_what_it_owed_before_the_tick(self, seed_user, seed_periods):
+        """The card: -$800.00 on Jan 4, -$600.00 on Jan 5, Jan 19 and Jan 20, ticked as unticked.
+
+        0 - 800 = -800 from Jan 3; + 200 = -600 from Jan 5; the Jan 20 true-up states
+        -600, so it corrects nothing.  The control: -$800.00 through Jan 19, the $200
+        counted from Jan 20, so the card owed $200 more Jan 5-19.
+        """
+        card = _card(seed_user)
+        transfer = _payment(seed_user, seed_periods, card)
+        days = (_JAN_4, _JAN_5, _JAN_19, _JAN_20)
+        expected = [
+            Decimal("-800.00"), Decimal("-600.00"), Decimal("-600.00"),
+            Decimal("-600.00"),
+        ]
+        assert [_card_at(seed_user, card, day) for day in days] == expected
+
+        assert _tick(_statement(seed_user, card), transfers={transfer.id}) == 1
+        assert [_card_at(seed_user, card, day) for day in days] == expected
+
+    def test_checking_pays_it_on_its_date(self, seed_user, seed_periods):
+        """Checking: $1,000.00 on Jan 4, $800.00 on Jan 5, Jan 19 and Jan 20.
+
+        1,000 - 200 = 800 from Jan 5.  Before the tick checking lands its leg
+        tomorrow (ruling R-G): $1,000.00 through Jan 21.  The control: $1,000.00
+        through Jan 19, $800.00 from Jan 20.
+        """
+        card = _card(seed_user)
+        transfer = _payment(seed_user, seed_periods, card)
+        assert _checking_at(seed_user, _JAN_21) == Decimal("1000.00")
+
+        assert _tick(_statement(seed_user, card), transfers={transfer.id}) == 1
+        assert [
+            _checking_at(seed_user, day) for day in (_JAN_4, _JAN_5, _JAN_19, _JAN_20)
+        ] == [
+            Decimal("1000.00"), Decimal("800.00"), Decimal("800.00"),
+            Decimal("800.00"),
+        ]
+
+    def test_a_checking_true_up_after_it_left_holds_it(self, seed_user, seed_periods):
+        """Checking trued up to $800 on Jan 10, the $200 gone Jan 5: $800.00 on Jan 21.
+
+        The ruling's first figure.  Jan 5 is inside the Jan 10 true-up, which states
+        $800, so the $200 corrects nothing.  The control: $600.00, the $200 counted
+        again from Jan 20, after the true-up that already held it.
+        """
+        card = _card(seed_user)
+        transfer = _payment(seed_user, seed_periods, card)
+        _checking_true_up(seed_user, "800.00", _JAN_10)
+
+        assert _tick(_statement(seed_user, card), transfers={transfer.id}) == 1
+        assert _checking_at(seed_user, _JAN_21) == Decimal("800.00")
+
+    def test_a_checking_true_up_before_it_left_reads_high(self, seed_user, seed_periods):
+        """Checking trued up to $1,000 on Jan 10, the $200 not yet gone: $1,000.00 on Jan 21.
+
+        The ruling's cost, $200 high until the payment's date is fixed: Jan 5 is
+        inside the Jan 10 true-up, which states $1,000.  The control: $800.00, the
+        $200 counted from Jan 20.
+        """
+        card = _card(seed_user)
+        transfer = _payment(seed_user, seed_periods, card)
+        _checking_true_up(seed_user, "1000.00", _JAN_10)
+
+        assert _tick(_statement(seed_user, card), transfers={transfer.id}) == 1
+        assert _checking_at(seed_user, _JAN_21) == Decimal("1000.00")
+
+    def test_it_is_offered_by_its_own_date(self, seed_user, seed_periods):
+        """Dated Jan 14 with the transfer in Jan 16's paycheck: offered by Jan 14, dated Jan 14.
+
+        The control: offered by Jan 16, its paycheck's first day.
         """
         card = _card(seed_user)
         _spend(seed_user, card, seed_periods[0], "800.00", _JAN_3)
-        transfer = _one_off(seed_user, card, seed_periods[0], "200.00", date(2026, 1, 5))
+        transfer = _one_off(seed_user, card, seed_periods[1], "200.00", _JAN_14)
+        _true_up(card, "600.00", _JAN_20)
+        statement = _statement(seed_user, card)
+        row = _the_row(card)
+
+        assert _offered_rows(statement) == {
+            row.id: _JAN_3, (transfer.id, card.id): _JAN_14,
+        }
+        assert _tick(statement, transfers={transfer.id}) == 1
+        assert _sides(transfer)[card.id][0] == _JAN_14
+
+    def test_one_dated_on_the_true_ups_day_takes_its_own(
+        self, seed_user, seed_periods,
+    ):
+        """Dated Jan 20, the true-up's own day: dated Jan 20 entered, the owner's date.
+
+        A true-up closes its own day, so it holds money dated that day.  The
+        control: Jan 20 asserted, the statement's day.
+        """
+        card = _card(seed_user)
+        _spend(seed_user, card, seed_periods[0], "800.00", _JAN_3)
+        transfer = _one_off(seed_user, card, seed_periods[1], "200.00", _JAN_20)
         _true_up(card, "600.00", _JAN_20)
 
         assert _tick(_statement(seed_user, card), transfers={transfer.id}) == 1
+        assert _sides(transfer)[card.id][:2] == (_JAN_20, SettledDayBasisEnum.ENTERED)
+
+    def test_one_dated_after_the_statement_is_not_offered(
+        self, seed_user, seed_periods,
+    ):
+        """Dated Jan 20 with the transfer in Jan 2's paycheck, trued up Jan 18: not offered.
+
+        The Jan 18 statement cannot show money dated Jan 20, as it cannot show a
+        bill dated so.  The control: offered by Jan 15, its paycheck's last day,
+        and a tick dated it Jan 18 on both accounts, two days before its date,
+        absorbing the $200 into the Jan 18 true-up.
+        """
+        card = _card(seed_user)
+        transfer = _one_off(seed_user, card, seed_periods[0], "200.00", _JAN_20)
+        _true_up(card, "0.00", _JAN_18)
+        statement = _statement(seed_user, card)
+
+        assert _offered_rows(statement) == {}
+        assert _tick(statement, transfers={transfer.id}) == 0
         db.session.expire_all()
-        assert db.session.get(type(transfer), transfer.id).status_id == (
-            ref_cache.status_id(StatusEnum.DONE)
+        assert db.session.get(Transfer, transfer.id).status_id == (
+            ref_cache.status_id(StatusEnum.PROJECTED)
+        )
+
+
+def _worked_out_offer(statement):
+    """The one worked-out payment *statement*'s panel offers: ``(transfer id, (day, figure))``."""
+    offers = [
+        (group.settle.key, (group.settle.attributed_on, group.settle.amount))
+        for group in outstanding_set_of(statement).groups
+        if isinstance(group.settle.key, tuple)
+    ]
+    assert len(offers) == 1
+    ((transfer_id, _), offer), = offers
+    return transfer_id, offer
+
+
+class TestAWorkedOutPaymentIntoTheCard:
+    """Ticked, a worked-out payment keeps the day its fold dates it (plan#3046).
+
+    $800 on the card Jan 3; the bank takes $500 of the payment, the card is trued
+    up to $300 owed, and the owner ticks the payment with $500 typed.  **The
+    control** is the statement's day on both accounts (measured on this tree
+    before the fix).
+    """
+
+    def test_the_payoff_row_keeps_its_date(self, seed_user, seed_periods):
+        """The Jan 16 payoff row, $300 trued up Jan 20, ticked at $500: dated Jan 16.
+
+        Offered at min(800 owed at the end of Jan 15, 300 left now) = $300.00 by
+        Jan 16.  Ticked at $500: the card owes 800 - 500 = $300.00 from Jan 16,
+        which the Jan 20 true-up states, and checking is 1,000 - 500 = $500.00 from
+        Jan 16.  The control: dated Jan 20, the card owing $800.00 Jan 16-19, interest
+        on money paid, and checking $1,000.00 through Jan 19.
+        """
+        card = _card(seed_user)
+        _payoff(seed_user, card)
+        _spend(seed_user, card, seed_periods[0], "800.00", _JAN_3)
+        _true_up(card, "300.00", _JAN_20)
+        statement = _statement(seed_user, card)
+        transfer_id, offer = _worked_out_offer(statement)
+        assert offer == (_JAN_16, Decimal("300.00"))
+
+        assert _tick(
+            statement, transfers={transfer_id},
+            typed={transfer_id: Decimal("500.00")},
+        ) == 1
+        sides = _sides(db.session.get(Transfer, transfer_id))
+        days = (_JAN_15, _JAN_16, _JAN_19, _JAN_20)
+        assert (
+            {side: sides[side][:2] for side in sides},
+            [_card_at(seed_user, card, day) for day in days],
+            [_checking_at(seed_user, day) for day in days],
+        ) == (
+            {
+                card.id: (_JAN_16, SettledDayBasisEnum.ENTERED),
+                seed_user["account"].id: (_JAN_16, SettledDayBasisEnum.BORROWED),
+            },
+            [
+                Decimal("-800.00"), Decimal("-300.00"), Decimal("-300.00"),
+                Decimal("-300.00"),
+            ],
+            [
+                Decimal("1000.00"), Decimal("500.00"), Decimal("500.00"),
+                Decimal("500.00"),
+            ],
+        )
+
+    def test_one_moved_to_a_later_paycheck_takes_that_paychecks_day(
+        self, seed_user, seed_periods,
+    ):
+        """The Jan 27 scheduled row moved into Jan 30's paycheck, ticked Feb 1 at $500: Jan 30.
+
+        A moved worked-out row keeps its date (ruling plan#2991), and its fold
+        dates and prices it by Jan 30, its paycheck's first day.  Offered at
+        min(800 on the Jan 5 statement, 300 left now) = $300.00 by Jan 30.  Ticked at
+        $500, read Feb 2: the card owes $800.00 on Jan 29 and 800 - 500 = $300.00 from
+        Jan 30; checking is $1,000.00 on Jan 29 and $500.00 from Jan 30.  The
+        controls: offered by its own date, Jan 27, a day the fold never uses; dated
+        the statement's day, Feb 1, the card owing $800.00 on Jan 30.
+        """
+        card = _card(seed_user)
+        template = _scheduled(seed_user, card)
+        _spend(seed_user, card, seed_periods[0], "800.00", _JAN_3)
+        row = _row(template, _JAN_27)
+        transfer_service.update_transfer(
+            row.id, row.user_id, pay_period_id=seed_periods[2].id,
+        )
+        db.session.commit()
+        _true_up(card, "300.00", _FEB_1)
+        statement = _statement(seed_user, card)
+        transfer_id, offer = _worked_out_offer(statement)
+        assert (transfer_id, offer) == (row.id, (_JAN_30, Decimal("300.00")))
+
+        assert _tick(
+            statement, transfers={transfer_id},
+            typed={transfer_id: Decimal("500.00")},
+        ) == 1
+        sides = _sides(row)
+        days = (_JAN_29, _JAN_30, _FEB_1)
+        assert (
+            {side: sides[side][:2] for side in sides},
+            [_card_at(seed_user, card, day, _FEB_2) for day in days],
+            [_checking_at(seed_user, day, _FEB_2) for day in days],
+        ) == (
+            {
+                card.id: (_JAN_30, SettledDayBasisEnum.ENTERED),
+                seed_user["account"].id: (_JAN_30, SettledDayBasisEnum.BORROWED),
+            },
+            [Decimal("-800.00"), Decimal("-300.00"), Decimal("-300.00")],
+            [Decimal("1000.00"), Decimal("500.00"), Decimal("500.00")],
+        )
+
+
+class TestAPaymentOnTheCardsBooks:
+    """Where an account's books already hold a payment's date."""
+
+    def test_one_inside_the_cards_opening_keeps_the_statements_day(
+        self, seed_user, seed_periods,
+    ):
+        """Dated Jan 1, the day the card's books open: dated Jan 20 on both, not refused.
+
+        The card's opening already holds it, so the card counts it from no day of
+        its own; dated Jan 1 it would be refused as inside the card's opening.
+        """
+        card = _card(seed_user)
+        transfer = _one_off(seed_user, card, seed_periods[0], "200.00", _JAN_1)
+        _true_up(card, "0.00", _JAN_20)
+
+        assert _tick(_statement(seed_user, card), transfers={transfer.id}) == 1
+        sides = _sides(transfer)
+        assert {side: sides[side][:2] for side in sides} == {
+            card.id: (_JAN_20, SettledDayBasisEnum.ASSERTED),
+            seed_user["account"].id: (_JAN_20, SettledDayBasisEnum.BORROWED),
+        }
+
+    def test_one_the_paying_accounts_books_hold_is_refused(
+        self, seed_user, seed_periods,
+    ):
+        """From an account whose books open Jan 10, dated Jan 5: the save is refused.
+
+        Checking's side would borrow Jan 5, inside that account's opening, so the
+        settle refuses it, naming the day, as it refuses Jan 5 stated from any door;
+        nothing is written.  The control: ticked, dated Jan 20 on both.  That such a
+        transfer can be made at all is finding plan#3050.
+        """
+        card = _card(seed_user)
+        late = create_account_via_service(
+            seed_user, db.session, "Checking", "Second Checking",
+            Decimal("1000.00"), _JAN_10,
+        )
+        db.session.commit()
+        transfer = transfer_service.create_transfer(transfer_service.TransferSpec(
+            user_id=seed_user["user"].id,
+            from_account_id=late.id,
+            to_account_id=card.id,
+            pay_period_id=seed_periods[0].id,
+            scenario_id=seed_user["scenario"].id,
+            amount_ownership=AmountOwnership.own(Decimal("200.00")),
+            status_id=ref_cache.status_id(StatusEnum.PROJECTED),
+            category_id=seed_user["categories"]["Rent"].id,
+            name="Extra to the Visa",
+            due_date=_JAN_5,
+        ))
+        db.session.commit()
+        _true_up(card, "0.00", _JAN_20)
+
+        with pytest.raises(ValidationError, match="Money cannot have moved on 2026-01-05"):
+            _tick(_statement(seed_user, card), transfers={transfer.id})
+        db.session.rollback()
+        db.session.expire_all()
+        assert db.session.get(Transfer, transfer.id).status_id == (
+            ref_cache.status_id(StatusEnum.PROJECTED)
         )
 
 
@@ -427,3 +775,23 @@ class TestCheckingIsUnchanged:
         entry = db.session.get(TransactionEntry, entry.id)
         assert entry.settled_on == _JAN_20
         assert recorded_settle_day(entry).basis is SettledDayBasisEnum.ASSERTED
+
+    def test_a_payment_into_the_card_is_dated_the_statements_day(
+        self, seed_user, seed_periods,
+    ):
+        """$200 to the card dated Jan 5, $800 stated on checking Jan 20, ticked there: Jan 20.
+
+        Checking's side takes the statement's day, asserted, and names checking's
+        true-up, as before plan#3046, which rules the card's panel.  The card's side
+        borrows it, which moves the card off its date: finding plan#3053.
+        """
+        card = _card(seed_user)
+        transfer = _one_off(seed_user, card, seed_periods[0], "200.00", _JAN_5)
+        _checking_true_up(seed_user, "800.00", _JAN_20)
+        checking = seed_user["account"]
+
+        assert _tick(_statement(seed_user, checking), transfers={transfer.id}) == 1
+        assert _sides(transfer)[checking.id] == (
+            _JAN_20, SettledDayBasisEnum.ASSERTED,
+            cash_ledger.governing_anchor(checking.id).anchor_id,
+        )

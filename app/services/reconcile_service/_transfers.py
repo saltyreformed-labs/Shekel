@@ -114,7 +114,7 @@ def _settle_one(
     remembering it, and it is why a tick here settles the matching leg on the
     other account (the section note says so on the panel).
 
-    The submitted figure and the statement's day are handed straight through:
+    The submitted figure and the leg's day are handed straight through:
     what a tick BOOKS, whether the figure is written at all, and which status
     the transfer takes are the transfer service's rules and are not restated
     here.
@@ -122,13 +122,24 @@ def _settle_one(
     Args:
         leg: The leg on this account, its transfer still Projected.
         submitted: The figure the panel's amount box posted, or ``None``.
-        statement: The statement being reconciled; its day is what THIS leg
-            records the money as having moved on, on the ``asserted`` basis --
-            the owner asserted a BALANCE for that day, so the day bounds the
-            movement from above rather than naming it (plan step **X-az**).
-            The leg on the other account borrows it unless it holds evidence
-            of its own (ruling **R-BAL142**; it was stated for both legs until
-            plan step ``balance:X-bi-6-4c-3``, like the link below never was).
+        statement: The statement being reconciled; THIS leg records the money
+            as having moved on :meth:`~._rows.Statement.settle_day_of` the leg.
+            On a card that is the payment's own date, ``entered``, where the
+            card's books hold it (ruling **plan#3046**; a worked-out payment's
+            is the day its fold dates it): $200 dated Jan 5 and ticked on the
+            Jan 20 true-up is dated Jan 5, and the card owes what it owed
+            before the tick.  Elsewhere it is the statement's
+            day on the ``asserted`` basis -- the owner asserted a BALANCE for
+            that day, so the day bounds the movement from above rather than
+            naming it (plan step **X-az**).  The leg on the other account
+            borrows it unless it holds evidence of its own (ruling
+            **R-BAL142**; it was stated for both legs until plan step
+            ``balance:X-bi-6-4c-3``, like the link below never was), so a
+            payment into a card is dated by its own date on checking too, and
+            the settle refuses it, naming the day, where checking's books
+            already hold that date (:meth:`~._rows.Statement.settle_day_of`).
+            It recorded the statement's day on both accounts until plan#3041,
+            which put the card owing $200 more Jan 5-19 once ticked.
         press: The panel save's press (``_assemble.record_reconciliation``,
             ruling **R-CC135**), over the lines named under the ROWS ticked:
             the panel captions no leg (plan step ``credit_card:CC-5-4a-5``).
@@ -163,7 +174,9 @@ def _settle_one(
         leg.transfer.id, statement.owner_id,
         submitted=submitted,
         side_days=(
-            transfer_service.SideDay(leg.account_id, statement.settle_day),
+            transfer_service.SideDay(
+                leg.account_id, statement.settle_day_of(leg),
+            ),
         ),
         press=press,
     )
@@ -187,9 +200,10 @@ def _load(
     (``transfer_legs.offerable_transfer_legs``, over
     :attr:`~._rows.Statement.offerable_period_ids` -- the scope the
     transaction arm's rows take), narrowed by the shared landing-day bound
-    over each leg's TRANSFER (:func:`~._rows.lands_on_or_before`: a leg is
-    dated by its parent).  Keyed by the id a transfer's tick posts -- its own
-    -- and ordered by landing day, then transfer id.
+    over each leg (:func:`~._rows.lands_on_or_before`: a leg is filed by its
+    parent, and on a card is dated by its own date, ruling plan#3046).  Keyed by
+    the id a transfer's tick posts -- its own -- and ordered by landing day,
+    then transfer id.
 
     **The owner and the parent's soft-delete are the LOADER's clauses**, where
     they were a semi-join this arm added over its shadows: a leg whose parent
@@ -230,10 +244,10 @@ def _load(
             ),
             transfer_ids=transfer_ids,
         )
-        if _rows.lands_on_or_before(statement, leg.transfer)
+        if _rows.lands_on_or_before(statement, leg)
     ]
     legs.sort(key=lambda leg: (
-        _rows.attributed_on(statement, leg.transfer), leg.transfer.id,
+        _rows.attributed_on(statement, leg), leg.transfer.id,
     ))
     if transfer_ids is not None:
         transfer_legs.preload_side_records(leg.transfer for leg in legs)
@@ -260,8 +274,9 @@ def outstanding_transfers(
     The transfers this account is still holding forward on the day the balance
     was asserted -- a savings sweep the statement shows leaving, a loan payment
     it shows going out, or money arriving from another account.  Ticking one
-    records that the bank moved it by that day
-    (:func:`app.services.reconcile_service._rows.record_settled`).
+    records that the bank moved it by that day, or on its own date for a
+    payment into a card (:func:`_settle_one`, ruling plan#3046;
+    :func:`app.services.reconcile_service._rows.record_settled`).
 
     **It returns BLOCKS, not a map for the assembler to key**, since leaf
     ``balance:X-bi-6-4c-2``.  A leg holds no purchase, so its block is always
@@ -338,7 +353,7 @@ def outstanding_transfers(
             continue
         offer = OutstandingTransaction(
             key=leg.cell_key,
-            attributed_on=_rows.attributed_on(statement, leg.transfer),
+            attributed_on=_rows.attributed_on(statement, leg),
             amount=amount,
             # Always the whole figure: a leg can hold no PURCHASE (its one
             # possible entry is the seam's covering movement, written when it

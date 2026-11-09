@@ -42,9 +42,9 @@ transfer arm offered a transfer's SHADOW row -- so an arm was its membership
 clause over one shared query.  The transfer arm offers the transfer's LEG now,
 loaded off ``budget.transfers`` (``transfer_legs.offerable_transfer_legs``), so
 no clause over this module's query can describe it.  What is still shared is
-the day bound (:func:`attributed_on` / :func:`lands_on_or_before`, over the
-row a leg is filed by -- its transfer), the writer, and the value naming the
-statement.  The ROW scope and loader (:func:`outstanding_scope`,
+the day bound (:func:`attributed_on` / :func:`lands_on_or_before`, over a
+row or a leg, which is filed by its transfer), the writer, and the value naming
+the statement.  The ROW scope and loader (:func:`outstanding_scope`,
 :func:`outstanding_rows`, :func:`wholly_spent_by`) stay here beside them as
 the transaction arm's, which since plan step ``credit_card:CC-5-4b`` asks them
 for TWO scopes: the rows on this account, and the rows planned on another
@@ -72,7 +72,7 @@ from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services.account_projection import is_revolving
-from app.services.balance_at import own_day_on_a_card
+from app.services.balance_at import tick_day_on_a_card
 from app.services.cash_ledger import AnchorPoint, account_opening_fact
 from app.services.match_press import Press
 from app.services.stated_figure import StatedFigure
@@ -81,6 +81,7 @@ from app.services.reconcile_service._zero_payment import (
     refuse_a_zero_payment,
 )
 from app.services.settle_day import SettleDay
+from app.services.transfer_legs import TransferLeg, parent_of
 from app.utils.balance_predicates import (
     balance_contributing_clause,
     is_projected_clause,
@@ -89,7 +90,7 @@ from app.utils.log_events import BUSINESS, log_event
 
 logger = logging.getLogger(__name__)
 
-_Ticked = Transaction | TransactionEntry | Transfer  # what a tick can date
+_Ticked = Transaction | TransactionEntry | TransferLeg  # what a tick can date
 
 
 @dataclass(frozen=True)
@@ -133,7 +134,8 @@ class Statement:
             tick writes into ``reconciled_by_id``, and its ``observed_on`` is the
             day a tick records -- as a BOUND, which :attr:`settle_day` is what
             says (plan step **X-az**) -- but on a card, where a tick records the
-            item's own day (:meth:`settle_day_of`, plan#2958).
+            item's own day (:meth:`settle_day_of`; plan#2958, and ruling
+            plan#3046 for a payment into the card).
     """
 
     calendar: PayCalendar
@@ -234,8 +236,8 @@ class Statement:
         **The two sets are not interchangeable and the difference is an arm.**
         The source-row arms bound the ROW's own landing day, so a period that
         starts after the statement can hold nothing they may offer -- but a
-        card's row dated before its paycheck (:meth:`own_day`), which this set
-        leaves out until that paycheck starts (plan#3042).  The
+        card's row or payment dated before its paycheck (:meth:`own_day`), which
+        this set leaves out until that paycheck starts (plan#3042).  The
         purchase arm bounds the ENTRY's ``purchased_on`` instead and its
         parent's period is unbounded -- a purchase made today against next
         period's envelope is a state the app can express, and it is the
@@ -311,44 +313,49 @@ class Statement:
         return account_opening_fact(self.account_id).opened_on
 
     def own_day(self, item: "_Ticked") -> "date | None":
-        """Return the day this card counts *item* from by itself, or ``None``.
+        """Return the day this card dates *item* by itself, or ``None``.
 
-        A row or a purchase on this card that its fold counts from its own date
-        (ruling plan#2926; ``balance_at.own_day_on_a_card``) is bounded,
-        captioned and ticked by that day (plan#2958): ticked on the statement's
-        day it moved off the statement its date put it on.  A row dated before a
-        paycheck that has not started is not offered yet
-        (:attr:`offerable_period_ids`, plan#3042).  ``None`` off a card,
-        for a row planned on another account (the "Paid from this account"
-        list), for a transfer, and for a row the card holds forward by ruling R-G.
+        A row, a purchase or a payment's leg on this card is bounded, captioned
+        and ticked by its own date (``balance_at.tick_day_on_a_card``; plan#2958,
+        ruling plan#3046): ticked on the statement's day it moved off the
+        statement its date put it on, and a payment dated after the statement is
+        not offered, as a bill is not.  A worked-out payment's own date is the
+        day its fold dates it.  A row dated before a paycheck that has not
+        started is not offered yet (:attr:`offerable_period_ids`, plan#3042).
+        ``None`` off a card, for a row planned on another account (the "Paid
+        from this account" list), for an item with no date of its own (an
+        envelope's unspent budget, an undated row), which the card holds forward
+        by ruling R-G, and for one dated by the card's books' opening, which
+        already holds it.
 
         Args:
-            item: A row, a purchase, or the transfer a leg is filed by.
+            item: A row, a purchase, or a leg on this account.
 
         Returns:
             That day, or ``None``.
         """
         opened_on = self.card_books_open_on
-        if (
-            opened_on is None or isinstance(item, Transfer)
-            or item.account_id != self.account_id
-        ):
+        if opened_on is None or item.account_id != self.account_id:
             return None
-        # The governing assertion is the card's latest, so its day is the
-        # fold's ``stated_through``; only a transfer's leg reads it.
-        own = own_day_on_a_card(
-            item, stated_through=self.observed_on, opened_on=opened_on,
-        )
+        own = tick_day_on_a_card(item, opened_on=opened_on, calendar=self.calendar)
         return own.day if own is not None and own.moves else None
 
     def settle_day_of(self, item: "_Ticked") -> SettleDay:
         """Return the day a tick records for *item*: its own on a card, else :attr:`settle_day`.
 
         Its own day is the owner's date, so it is ``entered``; the link the
-        tick writes says which statement showed it.
+        tick writes says which statement showed it.  For a payment's leg it is
+        the card's side's day, and checking's side borrows it unless it holds a
+        day of its own (ruling **R-BAL142**), so the payment is dated by its own
+        date on both accounts (ruling plan#3046).  Where checking's books
+        already hold that date the settle refuses it, naming the day: its one
+        writer grades every side's day before it writes
+        (``status_seam._side._reject_days_before_books``), whichever door states
+        it, so ``settle_transfer`` stating the card's day from any door is
+        refused alike (finding plan#3050).
 
         Args:
-            item: A row, a purchase, or the transfer a leg is filed by.
+            item: A row, a purchase, or a leg on this account.
 
         Returns:
             The :class:`~app.services.settle_day.SettleDay`.
@@ -521,7 +528,7 @@ def filed_period(statement: Statement, row: Transaction | Transfer) -> DerivedPe
     return statement.calendar.require_period(FiledRow.for_row(row))
 
 
-def attributed_on(statement: Statement, txn: Transaction | Transfer) -> date:
+def attributed_on(statement: Statement, txn: Transaction | TransferLeg) -> date:
     """Return the day the projection lands *txn* on.
 
     Stated once because two things read it: the bound
@@ -566,26 +573,29 @@ def attributed_on(statement: Statement, txn: Transaction | Transfer) -> date:
     states: *where the precondition is carried by the QUERY, the total form is
     honest; where it rests on two reads agreeing, it is not.*
 
-    **A transfer's leg is dated by its TRANSFER** (leaf
+    **A transfer's leg is filed by its TRANSFER** (leaf
     ``balance:X-bi-6-4c-2``): a leg carries no period or due date of its own,
-    and both are the parent's, so the transfer arm hands this the transfer --
-    whose ``pay_period_id``, ``due_date``, ``id`` and ``__table__`` are what
-    this reads -- and the transfer loader's own clause on
-    :attr:`Statement.offerable_period_ids` makes the refusal just as
-    unconstructible there.  The shadow it handed before carried the same period
-    and due date by Transfer Invariant 3.
+    and both are the parent's, so its span is the one
+    ``transfer_legs.parent_of`` files it as -- the transfer, whose
+    ``pay_period_id``, ``id`` and ``__table__`` the calendar reads, as the cash
+    fold's plan files it (``balance_at._cash_plan._planned_day``) -- and the
+    transfer loader's own clause on :attr:`Statement.offerable_period_ids`
+    makes the refusal just as unconstructible there.  The shadow it was handed
+    before carried the same period and due date by Transfer Invariant 3.  **The
+    arm hands the LEG since plan#3041**, where it handed the transfer: a leg is
+    what a card dates by its own date (:meth:`Statement.own_day`), and a
+    transfer cannot say which side is on this account.
 
-    **A row a card counts from its own date lands on that date**
-    (:meth:`Statement.own_day`, plan#2958), never its paycheck's clamp: the day
-    the panel offers it by is the day a tick records, so no tick records a day
-    after its statement's.
+    **A row or a payment a card dates by itself lands on that date**
+    (:meth:`Statement.own_day`; plan#2958, ruling plan#3046), never its
+    paycheck's clamp: the day the panel offers it by is the day a tick records,
+    so no tick records a day after its statement's.
 
     Args:
         statement: The statement being reconciled, carrying the owner's
             calendar.
-        txn: The row -- a plan row, or a leg's transfer -- whose
-            ``pay_period_id`` names its span and whose ``due_date`` it lands
-            on.
+        txn: A plan row, or a leg on this account, whose ``due_date`` it lands
+            on and whose period (a leg's is its transfer's) names its span.
 
     Returns:
         Its clamped attribution date.
@@ -599,10 +609,10 @@ def attributed_on(statement: Statement, txn: Transaction | Transfer) -> date:
     own = statement.own_day(txn)
     if own is not None:
         return own
-    return filed_period(statement, txn).attribution_day(txn.due_date)
+    return filed_period(statement, parent_of(txn)).attribution_day(txn.due_date)
 
 
-def lands_on_or_before(statement: Statement, txn: Transaction | Transfer) -> bool:
+def lands_on_or_before(statement: Statement, txn: Transaction | TransferLeg) -> bool:
     """Return whether the projection lands *txn* on or before the statement day.
 
     The Python half of the bound, and the reason it is not SQL: the landing day
@@ -617,14 +627,14 @@ def lands_on_or_before(statement: Statement, txn: Transaction | Transfer) -> boo
     whose attribution day has already passed is precisely one the projection is
     still holding forward.  Measured on production 2026-08-11, Checking at its
     latest assertion: the SQL superset admits 5 rows and this narrows them to 3.
-    A card's row counted from its own date is not held forward (ruling
-    plan#2926): it is offered once that date is on or before the statement's.
+    A card's row or payment dated by itself is not held forward (rulings
+    plan#2926, plan#3046): it is offered once that date is on or before the
+    statement's.
 
     Args:
         statement: The statement being reconciled -- its ``observed_on`` is the
             bound and its calendar dates the row.
-        txn: A row from the SQL superset, or a leg's transfer
-            (:func:`attributed_on`).
+        txn: A row from the SQL superset, or a leg (:func:`attributed_on`).
 
     Returns:
         True when the row is OVERDUE against that day.

@@ -112,8 +112,9 @@ def _browser_standing(user) -> BrowserStanding | None:
     take it, and the signed-in doors (``/reauth``, ``/change-password``,
     ``/mfa/disable``), whose request took it at its boundary.  So everything in
     the request that turns on the browser judges it at one moment (plan#2772):
-    the lock, the count and what a success clears, and at ``/login`` the
-    trusted skip of the code.  It is the cookie for THAT user, judged by
+    the lock, the count and what a success clears, at ``/login`` the trusted
+    skip of the code, and at ``/mfa/verify`` whose tries a code spends
+    (plan#3025).  It is the cookie for THAT user, judged by
     :func:`~app.services.known_device_service.find_browser`, so no cookie, a
     token no record holds, another user's token and a browser past its thirty
     days all answer ``None``.  So does a signed-in browser whose record has

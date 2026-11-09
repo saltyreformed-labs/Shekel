@@ -22,6 +22,9 @@ Plan#2772.  A browser that finishes a sign-in holds one record and one cookie
   password and Disable two-factor let a known browser past the strangers' lock
   and count its wrong answers on its own record (ruling **plan#3034**).  Their
   stranger's side is ``tests/test_routes/test_every_guess_counts.py``.
+
+The code form's tries, which a known browser has of its own (ruling
+**plan#3023**), are ``test_known_browser_code_tries.py``.
 """
 
 import logging
@@ -746,4 +749,3 @@ class TestEveryDoorHasTheOneRule:
         assert db.session.query(MfaConfig).filter_by(
             user_id=user_id,
         ).one().is_enabled is False
-

@@ -26,8 +26,7 @@ from unittest.mock import patch
 import pyotp
 import pytest
 
-from app import CONFIG_MAP, create_app
-from app.extensions import db, limiter
+from app.extensions import db
 from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig, User
 from app.routes.auth._helpers import _MFA_PENDING_MAX_AGE
@@ -37,15 +36,13 @@ from app.utils.log_events import (
     EVT_LOGIN_FAILED,
     EVT_REAUTH_FAILED,
 )
+from tests._limited_app import limited_app, through_nginx
 
 _EMAIL = "test@shekel.local"
 _PASSWORD = "testpass"
 _NEW_PASSWORD = "a-new-password-of-length"
 _BACKUP_CODE = "abcdef0123456789abcdef012345"
 _LOCKED_MESSAGE = auth_service.LOCKED_OUT_MESSAGE.encode()
-
-# An address on ``TestConfig.FORWARDED_ALLOW_IPS``, as nginx is in production.
-_NGINX = "172.32.0.4"
 
 # The code form's limit by address and by pending account, in ``mfa.py``.
 _CODE_LIMIT = 5
@@ -131,21 +128,6 @@ def _set_lock_state(user_id: int, count: int = 0, locked_for: timedelta | None =
         None if locked_for is None else datetime.now(timezone.utc) + locked_for
     )
     db.session.commit()
-
-
-def _through_nginx(client_address: str) -> dict:
-    """Return request arguments for *client_address* arriving through nginx.
-
-    Args:
-        client_address: The address nginx saw.
-
-    Returns:
-        Keyword arguments for a test client's request method.
-    """
-    return {
-        "environ_base": {"REMOTE_ADDR": _NGINX},
-        "headers": {"X-Forwarded-For": client_address},
-    }
 
 
 def _type_password(client, **request_arguments):
@@ -709,7 +691,7 @@ class TestARefusedGuessLogsItsAddress:
         """
         assert client.post(
             "/login", data={"email": _EMAIL, "password": _PASSWORD},
-            **_through_nginx(self._CLIENT),
+            **through_nginx(self._CLIENT),
         ).status_code == 302
 
     @staticmethod
@@ -731,12 +713,12 @@ class TestARefusedGuessLogsItsAddress:
         """The code form logs a wrong code against the client's address."""
         with app.app_context():
             secret = _enable_mfa(seed_user["user"].id)
-            _type_password(client, **_through_nginx(self._CLIENT))
+            _type_password(client, **through_nginx(self._CLIENT))
 
             with caplog.at_level(logging.WARNING, logger="app.routes.auth.mfa"):
                 client.post(
                     "/mfa/verify", data={"totp_code": _wrong_code(secret)},
-                    **_through_nginx(self._CLIENT),
+                    **through_nginx(self._CLIENT),
                 )
 
             assert self._addresses(caplog, EVT_LOGIN_FAILED) == [self._CLIENT]
@@ -746,13 +728,13 @@ class TestARefusedGuessLogsItsAddress:
         with app.app_context():
             user_id = seed_user["user"].id
             secret = _enable_mfa(user_id)
-            _type_password(client, **_through_nginx(self._CLIENT))
+            _type_password(client, **through_nginx(self._CLIENT))
             _set_lock_state(user_id, locked_for=timedelta(minutes=5))
 
             with caplog.at_level(logging.WARNING, logger="app.routes.auth.mfa"):
                 client.post(
                     "/mfa/verify", data={"totp_code": _right_code(secret)},
-                    **_through_nginx(self._CLIENT),
+                    **through_nginx(self._CLIENT),
                 )
 
             assert self._addresses(caplog, EVT_LOGIN_FAILED) == [self._CLIENT]
@@ -761,6 +743,8 @@ class TestARefusedGuessLogsItsAddress:
         self, app, client, seed_user, caplog,
     ):
         """Change password logs a wrong current password."""
+        # Pylint: ``unused-argument`` -- ``seed_user`` is asked for so the
+        # account exists to sign in to.
         # pylint: disable=unused-argument
         with app.app_context():
             self._sign_in(client)
@@ -772,7 +756,7 @@ class TestARefusedGuessLogsItsAddress:
                     "current_password": "wrong",
                     "new_password": _NEW_PASSWORD,
                     "confirm_password": _NEW_PASSWORD,
-                }, **_through_nginx(self._CLIENT))
+                }, **through_nginx(self._CLIENT))
 
             assert self._addresses(caplog, EVT_REAUTH_FAILED) == [self._CLIENT]
 
@@ -785,7 +769,7 @@ class TestARefusedGuessLogsItsAddress:
             with caplog.at_level(logging.WARNING, logger="app.routes.auth.mfa"):
                 client.post("/mfa/disable", data={
                     "current_password": "wrong", "totp_code": _right_code(secret),
-                }, **_through_nginx(self._CLIENT))
+                }, **through_nginx(self._CLIENT))
 
             assert self._addresses(caplog, EVT_REAUTH_FAILED) == [self._CLIENT]
 
@@ -799,13 +783,16 @@ class TestARefusedGuessLogsItsAddress:
                 client.post("/mfa/disable", data={
                     "current_password": _PASSWORD,
                     "totp_code": _wrong_code(secret),
-                }, **_through_nginx(self._CLIENT))
+                }, **through_nginx(self._CLIENT))
 
             assert self._addresses(caplog, EVT_REAUTH_FAILED) == [self._CLIENT]
 
 
 class TestTheCodeFormIsLimitedByThePendingAccount:
-    """Beside the address limit, one budget per pending account, wherever it arrives from."""
+    """Beside the address limit, one budget per pending account, wherever it arrives from.
+
+    A known browser spends its own: ``tests/test_adversarial/test_known_browser_code_tries.py``.
+    """
 
     @pytest.fixture
     def rate_app(self, app, monkeypatch):
@@ -814,17 +801,11 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
         Yields:
             The app.
         """
+        # Pylint: ``unused-argument`` -- ``app`` is asked for so the suite's app is
+        # built first: the last app built decides whether the one limiter is on.
         # pylint: disable=unused-argument
-        # ``app.CONFIG_MAP``, the class ``create_app`` reads, whichever class a
-        # test that reloads ``app.config`` has left ``app.config.TestConfig`` as.
-        monkeypatch.setattr(CONFIG_MAP["testing"], "RATELIMIT_ENABLED", True)
-        limited_app = create_app("testing")
-        yield limited_app
-        with limited_app.app_context():
-            db.engine.dispose()
-        if limiter._storage is not None:  # pylint: disable=protected-access
-            limiter.reset()
-        limiter.enabled = False
+        with limited_app(monkeypatch) as limited:
+            yield limited
 
     def _guess_from(self, rate_app, address, email=_EMAIL, password=_PASSWORD):
         """Type *email*'s password from *address*, then guess one wrong code.
@@ -839,7 +820,7 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
             The code form's response.
         """
         browser = rate_app.test_client()
-        request_arguments = _through_nginx(address)
+        request_arguments = through_nginx(address)
         response = browser.post(
             "/login", data={"email": email, "password": password},
             **request_arguments,
@@ -900,11 +881,11 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
             assert browser.post(
                 "/login",
                 data={"email": "second@shekel.local", "password": "secondpass12"},
-                **_through_nginx("9.9.9.9"),
+                **through_nginx("9.9.9.9"),
             ).status_code == 302
             assert browser.post(
                 "/mfa/verify", data={"totp_code": _NEVER_A_CODE},
-                **_through_nginx("8.8.8.8"),
+                **through_nginx("8.8.8.8"),
             ).status_code == 429
 
     def test_requests_with_no_pending_account_share_no_count(self, rate_app):
@@ -912,7 +893,7 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
         for hit in range(_CODE_LIMIT + 1):
             response = rate_app.test_client().post(
                 "/mfa/verify", data={},
-                **_through_nginx(f"8.8.8.{hit}"),
+                **through_nginx(f"8.8.8.{hit}"),
             )
             assert response.status_code == 302
             assert "/login" in response.headers["Location"]
@@ -931,7 +912,7 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
         browser = rate_app.test_client()
         assert browser.post(
             "/login", data={"email": _EMAIL, "password": _PASSWORD},
-            **_through_nginx(secret_holder_address),
+            **through_nginx(secret_holder_address),
         ).status_code == 302
         with browser.session_transaction() as pending:
             pending["_mfa_pending_at"] = (
@@ -955,7 +936,7 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
                 kept.set_cookie(name, cookie)
                 response = kept.post(
                     "/mfa/verify", data={"totp_code": _NEVER_A_CODE},
-                    **_through_nginx(f"6.6.6.{hit}"),
+                    **through_nginx(f"6.6.6.{hit}"),
                 )
                 assert response.status_code == 302
                 assert "/login" in response.headers["Location"]
@@ -963,11 +944,11 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
             owner = rate_app.test_client()
             assert owner.post(
                 "/login", data={"email": _EMAIL, "password": _PASSWORD},
-                **_through_nginx("8.8.8.8"),
+                **through_nginx("8.8.8.8"),
             ).status_code == 302
             response = owner.post(
                 "/mfa/verify", data={"totp_code": _right_code(secret)},
-                **_through_nginx("8.8.8.8"),
+                **through_nginx("8.8.8.8"),
             )
 
             assert response.status_code == 302
@@ -985,7 +966,7 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
                 kept.set_cookie(name, cookie)
                 statuses.append(kept.post(
                     "/mfa/verify", data={"totp_code": _NEVER_A_CODE},
-                    **_through_nginx("7.7.7.7"),
+                    **through_nginx("7.7.7.7"),
                 ).status_code)
 
             assert statuses == [302] * _CODE_LIMIT + [429]

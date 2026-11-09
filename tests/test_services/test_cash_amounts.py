@@ -113,9 +113,9 @@ _POSTED_ON = date(2026, 1, 21)
 # `test_cash_walk.py`'s
 # `TestARecordedClearingFactMayNotMoveALineAcrossAStatement
 # ::test_a_PURCHASE_carries_its_OWN_link_not_its_parents` on the read side, and
-# `test_account_posting_service.py`'s
+# `test_ledger_lines/test_an_accounts_corrections/test_the_walk.py`'s
 # `TestWalkAccountLedger::test_a_purchases_clearing_link_is_read_off_the_PURCHASE`
-# on the posted one.  Both were ADDED at this step: the class existed for
+# on the account walk.  Both were ADDED at this step: the class existed for
 # transactions only, and citing it for purchases before that was an invented
 # citation an adversarial review caught.
 _STATEMENT_DAY = date(2026, 1, 22)

@@ -154,7 +154,8 @@ class TestTheTransferArm:
         This is also what makes the account walk's per-account read of a leg's
         statement link meaningful (the posted walk's until plan task plan#2525
         moved the walk onto the records) -- see
-        ``test_account_posting_service.TestWalkAccountLedger``'s own case, which
+        ``test_an_accounts_corrections/test_the_walk.py``'s
+        ``TestWalkAccountLedger`` case, which
         measures what reading the wrong leg's link costs.
 
         Each leg is its side's payment RECORD since plan step

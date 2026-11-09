@@ -92,7 +92,7 @@ as the Step-2 / Step-3 oracles.  The SPLIT VALUES are pinned by the first and th
 **Scope (deliberately non-duplicative).**  The per-payment split VALUES
 (on-schedule / extra / short / payoff-refund / ARM / escrow-effective-dating) are
 hand-computed at the unit level in
-``tests/test_services/test_loan_posting_service.py``; the lifecycle wiring
+``tests/test_services/test_ledger_lines/test_a_loans_lines/``; the lifecycle wiring
 (settle / revert / delete / restore / true-up / rate / N1 back-post) and the
 full-cash-reversal CRITICAL regression are driven through their real chokepoints
 in ``tests/test_integration/test_loan_posting_wiring.py``; the backfill's

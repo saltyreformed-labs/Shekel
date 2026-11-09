@@ -71,7 +71,7 @@ def _make_tracking_start_loan(
 def _add_rate_change(loan, effective_date, rate):
     """Append a :class:`RateHistory` rate change (an ARM recast) to a loan.
 
-    Mirrors the unit suite's helper (``test_loan_posting_service._add_rate_change``)
+    Mirrors the unit suite's helper (``test_a_loans_lines._helpers._add_rate_change``)
     so both suites drive an ARM step the same way: the rate feed the walk AND
     the resolver read (via ``load_rate_history`` / ``load_loan_context``) both
     pick it up, so the rate step reaches both producers of the parallel run.

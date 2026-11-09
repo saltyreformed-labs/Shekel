@@ -597,3 +597,36 @@ class TestTheChronologyKeyItself:
                 facts[1],
             )
             assert loan_resolver.select_latest_anchor(facts) is facts[1]
+
+
+class TestLoadLoanAccountIdsForUser:
+    """``load_loan_account_ids_for_user``: ONE owner's loans, ascending.
+
+    It moved here from the stored ledger's writer's tests, whose per-user
+    resync it served, when plan step plan#2914 deleted the writer; its reader
+    since is the loan-destination route (``routes/_loan_destination.py``).
+    """
+
+    def test_enumerator_returns_only_the_users_loans(
+        self, app, db, seed_user, seed_second_user,
+    ):
+        """It filters LoanParams by owner, ascending.
+
+        Two loans on the first user and one on the second: each owner's scoped
+        enumeration returns exactly its own loan ids -- proving the join is
+        owner-scoped, not global.
+        """
+        with app.app_context():
+            loan_a = create_loan_account(seed_user, _db.session, name="Loan A")
+            loan_b = create_loan_account(seed_user, _db.session, name="Loan B")
+            loan_c = create_loan_account(
+                seed_second_user, _db.session, name="Loan C",
+            )
+            _db.session.commit()
+
+            assert loan_loaders.load_loan_account_ids_for_user(
+                seed_user["user"].id,
+            ) == sorted([loan_a.id, loan_b.id])
+            assert loan_loaders.load_loan_account_ids_for_user(
+                seed_second_user["user"].id,
+            ) == [loan_c.id]

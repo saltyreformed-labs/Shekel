@@ -3,31 +3,26 @@
 Every family's target rule -- a movement's cash and counter legs, an account's
 opening and true-ups, a loan payment's split and a loan's opening and
 true-ups -- answers what the ledger should hold keyed by
-:class:`~app.services.ledger_lines.ChartKey`, and the writer resolves the keys
-to stored rows only at its emit step
-(:func:`app.services._posting_write.resolve_chart_targets`).  That is what
-lets the worked-out read (plan#2526) sum the very targets the writer posts.
+:class:`~app.services.ledger_lines.ChartKey`, and the worked-out read
+(:func:`app.services.ledger_lines.worked_out_lines`, plan#2526) sums those
+targets as its lines.
 
 What these cases pin:
 
 * **the rules touch no stored chart row**: each is run under a statement
   capture, and none issues a statement naming ``budget.ledger_accounts`` (the
-  rules each found or got-or-created a row there, on every call, until this
-  task) or leaves a new object in the session;
+  rules each found or got-or-created a row there, on every call, until plan
+  task plan#2524) or leaves a new object in the session;
 * **the keys are the right ones**, with the amounts the rule books, written
   out by hand where the arithmetic is the rule's own;
 * **a loan payment's split nets to zero by construction**: with a component
   planted out of its table, the loan's own leg drops it too (finding
   plan#2972), so no store need refuse an unbalanced split;
-* **the writer's resolve covers every kind** a rule names, and refuses the two
-  broken cases (an account with no linked row, a kind no rule books on);
-* **the writer mints what it minted before**: a key is resolved even when its
-  merged leg nets to zero, so two same-day true-ups that cancel still mint
-  their counter row, as the rule did when it resolved each correction's row
-  before the merge.
+* **a correction books only its own account's lines** (ruling plan#2784).
 
-The writer's own behaviour is the posting suites' to grade, and they pass
-unchanged.
+The stored ledger's writer resolved each key to a stored row at its emit step
+(``_posting_write.resolve_chart_targets``), and two classes here graded that
+resolve and what it minted until plan step plan#2914 deleted the writer.
 """
 
 from datetime import date, timedelta
@@ -45,10 +40,7 @@ from app.enums import (
 )
 from app.extensions import db as _db
 from app.models.account import Account, AccountAnchorHistory
-from app.models.journal_entry import JournalEntry
-from app.services import account_posting_service, ledger_account_service
 from app.services.ledger_lines import (
-    ChartKey,
     account_correction_targets,
     account_counter_key,
     anchor_correction_targets,
@@ -57,7 +49,6 @@ from app.services.ledger_lines import (
     linked_key,
     loan_correction_targets,
     loan_key,
-    owner_bucket_key,
     payment_split_targets,
     purchase_target,
     transit_key,
@@ -66,15 +57,13 @@ from app.services.ledger_lines import (
 )
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.pay_calendar import calendar_for
-from app.services.posting_reads import PostingError
 from app.services.transfer_legs import movement_parent, transfer_family_movements
 from app.utils.dates import display_today
 # The rules under test live in the worked-out ledger since plan task plan#2526,
-# which moved them out of the writers that post them; the account half's two
+# which moved them out of the writers that posted them; the account half's two
 # pieces are package-private there, and these cases reach them by name rather
 # than asking for a re-export that would exist only for a test (the posture
 # ``test_chart.py`` keeps for the report's label).
-from app.services._posting_write import ledger_row_for, resolve_chart_targets
 from app.services.ledger_lines._account_anchors import (
     _account_anchor_correction_targets,
     _counter_keys,
@@ -82,11 +71,6 @@ from app.services.ledger_lines._account_anchors import (
 # The split's component table, read to plant a component out of it (finding
 # plan#2972); the plant itself names the module by path.
 from app.services.ledger_lines._loan_payments import _LOAN_CORRECTION_COMPONENTS
-from tests._stored_ledger import (
-    ledger_account_of_kind,
-    stored_chart_key,
-    stored_ledger_net,
-)
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_with_trueup,
@@ -552,165 +536,3 @@ class TestACorrectionBooksOnlyItsOwnAccountsLines:
                 _assert_books_only_its_own_lines(
                     account, {("key",): {transit_key(): (Decimal("1"), 0)}},
                 )
-
-
-class TestTheWriterResolvesEveryKind:
-    """``_posting_write.ledger_row_for``: a key to the stored row it names."""
-
-    def test_every_kind_a_rule_names_resolves_to_its_own_row(
-        self, app, db, seed_user,
-    ):
-        """Each key resolves to a row whose own columns spell that key back.
-
-        Graded by ``stored_chart_key``, which reads the row as stored, and
-        against the family resolver's own answer, so the dispatch can neither
-        cross two families nor mint a second row for one key.
-        """
-        with app.app_context():
-            user_id = seed_user["user"].id
-            groceries = seed_user["categories"]["Groceries"]
-            interest = _opened_money_market(seed_user, "Resolve Money Market")
-            loan = create_loan_with_trueup(
-                seed_user, _db.session,
-                origination_principal=Decimal("20000.00"),
-                anchor_balance=Decimal("15000.00"),
-                anchor_date=date(2026, 1, 10), rate=Decimal("0.06000"),
-                origination_date=date(2025, 1, 1), name="Resolve Loan",
-            )
-            keys = [
-                linked_key(seed_user["account"]),
-                category_key(groceries.id, LedgerAccountClassEnum.EXPENSE),
-                owner_bucket_key(
-                    LedgerAccountKindEnum.FALLBACK,
-                    LedgerAccountClassEnum.INCOME,
-                ),
-                transit_key(),
-                account_counter_key(
-                    LedgerAccountKindEnum.INTEREST_INCOME, interest.id,
-                ),
-                loan_key(LedgerAccountKindEnum.LOAN_ESCROW, loan.id),
-            ]
-
-            rows = [ledger_row_for(user_id, key) for key in keys]
-
-            assert [stored_chart_key(row) for row in rows] == keys
-            assert [row.id for row in rows] == [
-                ledger_account_of_kind(
-                    _db.session, seed_user["account"].id,
-                    LedgerAccountKindEnum.LINKED,
-                ).id,
-                ledger_account_service.get_or_create_category_ledger_account(
-                    user_id, groceries.id, LedgerAccountClassEnum.EXPENSE,
-                ).id,
-                ledger_account_service.get_or_create_category_ledger_account(
-                    user_id, None, LedgerAccountClassEnum.INCOME,
-                ).id,
-                ledger_account_service.get_or_create_transit_ledger_account(
-                    user_id,
-                ).id,
-                ledger_account_service.get_or_create_account_counter_account(
-                    user_id, interest.id, LedgerAccountKindEnum.INTEREST_INCOME,
-                ).id,
-                ledger_account_service.get_or_create_loan_ledger_account(
-                    user_id, loan.id, LedgerAccountKindEnum.LOAN_ESCROW,
-                ).id,
-            ]
-
-    def test_an_account_with_no_linked_row_fails_loud(
-        self, app, db, seed_user,
-    ):
-        """A linked key whose account has no pairing raises, never mints one."""
-        with app.app_context():
-            unpaired = ChartKey(
-                LedgerAccountKindEnum.LINKED, LedgerAccountClassEnum.ASSET,
-                2_000_000_000,
-            )
-
-            with pytest.raises(PostingError, match="No ledger account is linked"):
-                ledger_row_for(seed_user["user"].id, unpaired)
-
-    def test_a_kind_no_rule_books_on_is_refused(self, app, db, seed_user):
-        """An ``orphan`` key -- which no constructor builds -- names no row."""
-        with app.app_context():
-            orphan = ChartKey(
-                LedgerAccountKindEnum.ORPHAN, LedgerAccountClassEnum.EXPENSE,
-                None,
-            )
-
-            with pytest.raises(ValueError, match="no target rule books on"):
-                ledger_row_for(seed_user["user"].id, orphan)
-
-
-class TestTheWriterMintsWhatItMinted:
-    """``resolve_chart_targets``: each key once, a zero leg included."""
-
-    def test_a_key_shared_by_two_targets_is_resolved_once(
-        self, app, db, seed_user,
-    ):
-        """Two targets naming one key map it to one row, looked up once.
-
-        The cash key and the category key are each read from the store once,
-        however many targets name them: two lookups of ``ledger_accounts``.
-        """
-        with app.app_context():
-            groceries = seed_user["categories"]["Groceries"]
-            cash = linked_key(seed_user["account"])
-            counter = category_key(groceries.id, LedgerAccountClassEnum.EXPENSE)
-            targets = {
-                "first": {cash: Decimal("-5.00"), counter: Decimal("5.00")},
-                "second": {cash: Decimal("-7.00"), counter: Decimal("7.00")},
-            }
-
-            resolved, statements = _statements_of(
-                lambda: resolve_chart_targets(seed_user["user"].id, targets),
-            )
-
-            cash_id = ledger_row_for(seed_user["user"].id, cash).id
-            counter_id = ledger_row_for(seed_user["user"].id, counter).id
-            assert resolved == {
-                "first": {cash_id: Decimal("-5.00"), counter_id: Decimal("5.00")},
-                "second": {
-                    cash_id: Decimal("-7.00"), counter_id: Decimal("7.00"),
-                },
-            }
-            lookups = [
-                s for s in statements
-                if s.lstrip().upper().startswith("SELECT")
-                and "FROM BUDGET.LEDGER_ACCOUNTS" in s.upper()
-            ]
-            assert len(lookups) == 2, lookups
-
-    def test_two_cancelling_same_day_true_ups_still_mint_their_counter(
-        self, app, db, seed_user,
-    ):
-        """$1,000.00 -> $1,150.00 -> $1,000.00 on one day: nothing posts, the row is minted.
-
-        The first true-up books ``+150.00`` and the second ``-150.00``
-        (``1,000.00 - 1,150.00``); sharing their source kind, period and day,
-        they merge to a target that nets to zero on both legs, so no true-up
-        entry is written.  The Interest Income counter row is minted all the
-        same, because each correction's own delta was non-zero -- the row the
-        rule minted when it resolved each correction's counter before the
-        merge, and the one the writer's resolve mints now.
-        """
-        with app.app_context():
-            account = _opened_money_market(seed_user, "Cancel Money Market")
-            _assert_on(account, "1150.00", days_after_opening=1, seconds=1)
-            _assert_on(account, "1000.00", days_after_opening=1, seconds=2)
-
-            account_posting_service.sync_account_anchor_postings_all_scenarios(
-                account.id,
-            )
-
-            counter = ledger_account_of_kind(
-                _db.session, account.id, LedgerAccountKindEnum.INTEREST_INCOME,
-            )
-            assert counter is not None
-            assert stored_ledger_net(
-                _db.session, counter.id, seed_user["scenario"].id,
-            ) == Decimal("0")
-            assert _db.session.query(JournalEntry).filter_by(
-                source_kind_id=ref_cache.posting_source_id(
-                    PostingSourceEnum.ACCOUNT_TRUEUP,
-                ),
-            ).count() == 0

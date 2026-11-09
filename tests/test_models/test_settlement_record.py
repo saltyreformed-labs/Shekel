@@ -13,10 +13,13 @@ second copy, written by the seam and, from 4b-1, read by nothing); ``settled_on`
 revert withdraws the assertion while KEEPING what moved (the movement, un-dated,
 since ``X-bi-3e-2``).
 
-**Both tiers read the row's ENTRIES** -- ``row_valuation.settled_figure`` and
-``posting_reads.settled_figure_clause`` -- and a settled row holding none is the
-``$0.00`` record (ruling **R-BAL82**): a movement of nothing is not one, so a
-close of nothing has no entry.  The cases that read a figure lay the movement
+**The reader reads the row's ENTRIES** -- ``row_valuation.settled_figure`` --
+and a settled row holding none is the ``$0.00`` record (ruling **R-BAL82**): a
+movement of nothing is not one, so a close of nothing has no entry.  Its SQL
+twin, ``posting_reads.settled_figure_clause``, had no reader in ``app/`` since
+leaf ``balance:X-bi-6-4a``, and its parity class here
+(``TestTheSQLTierReadsTheSameHomeAsPython``) went at plan step plan#2914 with
+the stored ledger's readers.  The cases that read a figure lay the movement
 (:func:`~tests._test_helpers.cover_bare_settled_row`), and the case that once
 graded the reader's REFUSAL of a settled row recording nothing grades its
 answer.
@@ -38,7 +41,7 @@ dated close of nothing).
 4).  A test that merely asserted a rule EXISTS would pass against a rule
 admitting everything, so each one below writes the state the rule is supposed
 to refuse and asserts the refusal, or writes the legitimate state and asserts
-what both tiers read.
+what the reader reads.
 
 The shapes under test, and the real writer each stands for:
 
@@ -46,12 +49,12 @@ The shapes under test, and the real writer each stands for:
   constructor invariant, from both sides; a door that writes what moved and
   forgets who said so is the overload ``actual_amount`` carried;
 * **a settled row asserting a DAY and holding no entry** -- the ``$0.00``
-  record, dated: legal, and read as ``0`` by both tiers;
+  record, dated: legal, and read as ``0``;
 * **a Projected row still holding its un-dated movement** -- the RETAINED
   state a revert leaves, which a draft refused and which is worth nothing to a
   balance because the STATUS decides;
 * **the whole record together** -- the legitimate act, read off the movement
-  by both tiers even where the row's plan says otherwise;
+  even where the row's plan says otherwise;
 * **entering the settled band with no record at all** -- the seam's own
   refusal, which is what makes "a settled row states what moved" a property of
   the seam rather than a convention its callers keep.
@@ -70,7 +73,6 @@ from app.extensions import db
 from app.models.ref import TransactionType
 from app.models.amount_ownership import AmountOwnership
 from app.models.transaction import Transaction
-from app.services.posting_reads import settled_figure_clause
 from app.services.row_valuation import settled_figure
 from app.services.status_seam import (
     Settlement,
@@ -172,9 +174,9 @@ class TestTheRecordIsTheCoveringMovement:
         """The state ``ck_transactions_settle_day_needs_a_record`` refused: legal now.
 
         A settled row asserting the day its money moved and holding no entry
-        is a close of nothing on that day.  Stored, read as ``0`` by both
-        tiers, and recorded as ``Settlement(None, None)`` -- its entries are
-        its record, and there are none.
+        is a close of nothing on that day.  Stored, read as ``0``, and
+        recorded as ``Settlement(None, None)`` -- its entries are its record,
+        and there are none.
         """
         with app.app_context():
             txn = _make_transaction(
@@ -241,8 +243,8 @@ class TestTheRecordIsTheCoveringMovement:
         "records no settlement"); since plan step ``balance:X-bi-4b-1`` the
         record is the row's entries and a settled row holding none IS the
         ``$0.00`` record (ruling **R-BAL82**: a movement of nothing is not
-        one, so a close of nothing has no entry), which is what both tiers
-        answer.  What this case still grades is the substitution: the answer is
+        one, so a close of nothing has no entry), which is what the reader
+        answers.  What this case still grades is the substitution: the answer is
         ``0``, not the ``$300.00`` plan.
 
         **The row carries no settle DAY**: a settled row with no day is
@@ -467,82 +469,3 @@ class TestTheSeamRefusesAnUnrecordedSettle:
 # test_a_SETTLED_row_holding_no_entry_records_ZERO_and_never_its_plan``), and
 # that ``45f10b870c8b``'s downgrade rebuilds the column the pre-flight read
 # from the movements exactly (``test_the_record_is_its_movements``).
-
-
-class TestTheSQLTierReadsTheSameHomeAsPython:
-    """``posting_reads.settled_figure_clause`` and ``settled_figure`` agree.
-
-    **Measured 2026-08-17 by an adversarial mutation pass**: reverting the SQL
-    expression of the time to the ``COALESCE(settled_amount, Sigma(entries))``
-    it replaced left the entire suite green -- so its stated reason to exist
-    had no firing control at all, and this class became one.  Through
-    ``X-bi-4a`` the two tiers disagreed on exactly ONE row, a settled row
-    recording NOTHING (Python refused, SQL had to be made to answer ``NULL``
-    rather than ``0``), and that difference was money: the one-entry
-    transfer writer's figure read (deleted at plan step
-    ``balance:X-bi-6-3``) was a LOOKUP, not a fold -- it refused a ``None``
-    and posted nothing, where a ``0`` was a figure it would post.
-
-    **Since plan step ``balance:X-bi-4b-1`` both tiers read the row's ENTRIES**
-    (ruling **R-BAL80**), and a settled row holding none is the ``$0.00``
-    record on both (ruling **R-BAL82**); the row the two disagreed about has
-    one answer.  The cases grade that agreement from both sides: the empty
-    row, and a row whose covering movement carries its figure while its plan
-    says something the readers must NOT be reading.
-    """
-
-    def test_a_settled_row_holding_no_entry_answers_ZERO_on_both_tiers(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """The one row the two expressions used to disagree about.
-
-        Both tiers answer the ``$0.00`` record.
-        """
-        with app.app_context():
-            txn = _make_transaction(
-                seed_user, seed_periods,
-                status_id=ref_cache.status_id(StatusEnum.DONE),
-                settled_on=None,
-            )
-            db.session.add(txn)
-            db.session.flush()
-
-            answered = (
-                db.session.query(settled_figure_clause())
-                .filter(Transaction.id == txn.id)
-                .scalar()
-            )
-            assert answered == Decimal("0")
-            assert settled_figure(txn) == Decimal("0")
-
-    def test_both_tiers_read_the_movement_and_neither_reads_the_plan(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A row whose plan and movement DISAGREE is read off the movement.
-
-        A reader still pricing the row -- the ``$300.00`` plan -- would answer
-        it here, where the covering movement (the record's one home since
-        ``X-bi-4b-2``; through ``X-bi-4b-1`` the row's own columns carried the
-        same trap one column over) carries ``$287.31``.  Both tiers must
-        answer the movement.  An expression that answered ``0`` for everything
-        would pass the case above and fail this one.
-        """
-        with app.app_context():
-            txn = _make_transaction(
-                seed_user, seed_periods,
-                status_id=ref_cache.status_id(StatusEnum.DONE),
-                settled_on=seed_periods[0].start_date,
-            )
-            db.session.add(txn)
-            db.session.flush()
-            cover_bare_settled_row(
-                db.session, txn, "300.00", submitted="287.31",
-            )
-
-            answered = (
-                db.session.query(settled_figure_clause())
-                .filter(Transaction.id == txn.id)
-                .scalar()
-            )
-            assert answered == Decimal("287.31")
-            assert settled_figure(txn) == Decimal("287.31")

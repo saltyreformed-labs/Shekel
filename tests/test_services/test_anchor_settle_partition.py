@@ -12,7 +12,8 @@ deletes for free.
 Every assertion here is at the **projected end balance** grain -- the figure the
 grid renders and the one production got wrong by ``-$4,001.42`` -- not at the
 walk grain underneath it.  The walk has its own controls
-(``test_cash_walk.py``, ``test_account_posting_service.py``); what those cannot
+(``test_cash_walk.py``, ``test_ledger_lines/test_an_accounts_corrections/test_the_walk.py``);
+what those cannot
 show is that the seam, the entries-aware reservation and the anchor reset
 compose to a stable number, because each of the three is individually correct
 about a different thing.

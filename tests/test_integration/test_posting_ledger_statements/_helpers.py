@@ -258,9 +258,11 @@ def _true_up_at(account, balance, created_at) -> None:
     true-up chokepoint calls.  Pinning the instant is what makes the moment
     partition exact -- ``apply_anchor_true_up`` stamps ``created_at = now()``,
     which cannot be placed between two synthetic settles; the C5/C8 suites use
-    the same affordance for the same reason.  The chokepoint itself is covered
-    end to end by ``test_account_posting_service.py``; this oracle validates the
-    resulting statements against an independent second opinion.
+    the same affordance for the same reason.  The corrections themselves are
+    graded on the worked-out read in
+    ``tests/test_services/test_ledger_lines/test_an_accounts_corrections/``;
+    this oracle validates the resulting statements against an independent
+    second opinion.
 
     The account is re-fetched into the CURRENT session first: the ``seed_user``
     fixture object is attached to the fixture-setup session, so mutating its

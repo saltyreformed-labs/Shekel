@@ -4,8 +4,10 @@ Shekel Budget App -- the worked-out ledger against the stored one, cell by cell.
 The comparison X-ew's first leaf proved its read by (plan step plan#2513), over
 the posting fixtures and, in the production run (plan task plan#2528), over a
 production copy.  Since plan#2914 the suite no longer grades the store by it:
-what still calls it is the writers' own unit tests and the manual harnesses,
-which go with the writers.
+what still calls it is the production run's harness (``tests._worked_out_ledger``),
+which goes with the manual harnesses that read the store (plan task plan#3080).
+``assert_ledger_parity``, the suite's assertion over it, went with its last
+callers, the stored ledger's writers' unit tests (plan task plan#3079).
 
 Both ledgers are netted per (chart account, paycheck, entry day):
 
@@ -57,7 +59,7 @@ _ZERO = Decimal("0.00")
 
 # One (chart account, paycheck, day) cell at which the worked-out ledger and
 # the stored one hold different nets: what :func:`ledger_parity_differences`
-# returns and :func:`assert_ledger_parity` names.  ``key`` and
+# returns.  ``key`` and
 # ``stored_row_ids`` are the cell's chart account (:class:`ParityChart`): the
 # one stored row it is booked on, or none when the store holds no row of the
 # owner's for ``key``.
@@ -107,50 +109,6 @@ def ledger_parity_differences(db_session, scenario_id):
             worked_out=worked_out.get(cell, _ZERO),
         ))
     return sorted(differences, key=_parity_order)
-
-
-def assert_ledger_parity(db_session, scenario_id, known=()):
-    """Assert the worked-out ledger equals the stored one to the cent.
-
-    Over every cell of the scenario owner's ledger in *scenario_id*
-    (:func:`ledger_parity_differences`), but for the cells a caller names in
-    *known*: a world whose fixture wrote a record directly, past every writer,
-    leaves the store behind it, and the caller states each cell that leaves,
-    by hand, rather than skip the comparison.  A known cell that does NOT
-    differ as stated fails too, so a stated difference cannot go stale.  The
-    message names each cell (:func:`_described_parity_difference`); the
-    parity test's negative controls force each of its two sections to fire,
-    so it is graded code rather than code a green suite never runs.
-
-    A test whose subject is a door's act on the ledger ends on this line: the
-    worked-out read follows the records and cannot see the door's sync, so
-    this is the one assertion there that fails when the sync is deleted.  It
-    goes with the sync (plan#2914).
-
-    Args:
-        db_session: The test ``db.session``.
-        scenario_id: The ``budget.scenarios`` row to compare in.
-        known: The :data:`LedgerParityDifference` cells the caller expects,
-            each exactly as :func:`ledger_parity_differences` would return
-            it; none by default.
-    """
-    differences = set(ledger_parity_differences(db_session, scenario_id))
-    sections = (
-        ("parts from the stored one at {} cell(s) no caller expected",
-         differences - set(known)),
-        ("does not part from it as stated at {} cell(s) the caller expected",
-         set(known) - differences),
-    )
-    failures = [
-        f"the worked-out ledger in scenario {scenario_id} "
-        + heading.format(len(cells)) + ":\n" + "\n".join(
-            f"  {_described_parity_difference(cell)}"
-            for cell in sorted(cells, key=_parity_order)
-        )
-        for heading, cells in sections
-        if cells
-    ]
-    assert not failures, "\n".join(failures)
 
 
 class ParityChart:
@@ -316,25 +274,4 @@ def _parity_order(difference):
         key.ledger_class.value,
         -1 if key.record_id is None else key.record_id,
         difference.stored_row_ids,
-    )
-
-
-def _described_parity_difference(difference):
-    """Return one :data:`LedgerParityDifference` as a line of a failure message.
-
-    Args:
-        difference: The cell.
-
-    Returns:
-        Its stored chart row (``(none stored)`` when the store holds no row
-        of the owner's for its key), the key's kind, class and record, the
-        paycheck and the day, then both nets.
-    """
-    rows = ", ".join(f"#{row_id}" for row_id in difference.stored_row_ids)
-    key = difference.key
-    return (
-        f"chart row {rows or '(none stored)'} [{key.kind.value} / "
-        f"{key.ledger_class.value} / record {key.record_id}], paycheck "
-        f"{difference.pay_period_id}, day {difference.entry_date.isoformat()}: "
-        f"stored {difference.stored}, worked out {difference.worked_out}"
     )

@@ -7,7 +7,8 @@ every historical balance rests on.
 
 The fold's own arithmetic over that level is graded in ``test_cash_fold.py``
 (:class:`~tests.test_services.test_cash_fold.TestTheOpeningEquityIsTheSeed`) and
-the posted ledger's use of it in ``test_account_posting_service.py``; this file
+the worked-out ledger's use of it in
+``tests/test_services/test_ledger_lines/test_an_accounts_corrections/``; this file
 is about the RECORD.
 
 **Every account here is built with**

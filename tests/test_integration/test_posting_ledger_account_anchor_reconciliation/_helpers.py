@@ -349,9 +349,11 @@ def _true_up_at(account, balance, created_at) -> None:
     chokepoint calls.  Pinning the instant is what makes the civil-day partition
     exact -- ``apply_anchor_true_up`` stamps ``created_at = now()``, which cannot
     be placed between two synthetic settles; the C5 unit suite uses the same
-    affordance for the same reason.  The chokepoint itself is covered end to end
-    by ``test_account_posting_service.py``; this oracle validates the resulting
-    ledger against an independent second opinion.
+    affordance for the same reason.  The corrections themselves are graded on
+    the worked-out read in
+    ``tests/test_services/test_ledger_lines/test_an_accounts_corrections/``;
+    this oracle validates the resulting ledger against an independent second
+    opinion.
     """
     _assert_balance_at(account, balance, created_at)
     account_posting_service.sync_account_anchor_postings_all_scenarios(

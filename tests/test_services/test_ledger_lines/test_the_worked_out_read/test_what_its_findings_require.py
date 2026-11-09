@@ -282,8 +282,8 @@ class TestAMovedSettleDayIsReadWhereItLands:
     Nothing special: the read is the records each time, so a settle day
     moved across a balance check moves the movement's lines and the check's
     true-up with it, both ways.  ``TestASettleDayMoveAcrossAnAssertion``
-    (``test_account_posting_service.py``) shows the stored half through the
-    same door.
+    (``test_an_accounts_corrections/test_its_lines.py``) shows the walk's half
+    beside the read's, through the same door.
     """
 
     def test_a_day_moved_past_a_balance_check_and_back_moves_its_true_up(

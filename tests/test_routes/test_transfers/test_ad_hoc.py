@@ -4,14 +4,13 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.extensions import db
-from app.models.journal_entry import JournalEntry
 from app.models.transfer import Transfer
 from app.services import transfer_service
 from app.utils.dates import display_today
+from tests._ledger_reads import net_posted_by_day, transfer_family_movement_ids
 from tests._test_helpers import (
     an_entered_day,
     on_both_sides,
-    transfer_family_journal_filter,
     transfer_side_record,
 )
 
@@ -322,14 +321,10 @@ class TestAdHoc:
             db.session.commit()
 
             def _ledger_days():
-                return sorted(
-                    entry.entry_date
-                    for entry in db.session.query(JournalEntry)
-                    .filter(transfer_family_journal_filter(xfer.id))
-                    .all()
-                )
+                return sorted(net_posted_by_day(transfer_family_movement_ids(xfer.id)))
 
             days_before = _ledger_days()
+            assert days_before == [settled_a_week_ago]
             side_days_before = {
                 account_id: transfer_side_record(
                     db.session, xfer.id, account_id,

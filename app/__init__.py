@@ -21,6 +21,10 @@ from app.jinja_filters import register_template_filters
 from app.login_gate import register_login_gate
 from app.routes.static_pass import static_file_version
 from app.url_converters import register_url_converters
+from app.utils.client_address import (
+    believe_forwarded_address_from,
+    parse_trusted_networks,
+)
 from app.utils.logging_config import setup_logging
 from app.utils.session_helpers import (
     SESSION_LAST_ACTIVITY_KEY,
@@ -72,6 +76,13 @@ def create_app(config_name=None, *, init_ref_cache=True):
     # Built, not copied off the class: ``from_object`` instantiates nothing,
     # so ProdConfig's refusals ran in no boot until finding plan#2652.
     app.config.from_object(config_class())
+
+    # --- The client's real address ---------------------------------------
+    # Parsed here so a malformed trusted list refuses start, before the
+    # dev/test arm below writes anything.
+    app.wsgi_app = believe_forwarded_address_from(
+        app.wsgi_app, parse_trusted_networks(app.config["FORWARDED_ALLOW_IPS"]),
+    )
 
     # --- Logging ---------------------------------------------------------
     setup_logging(app)

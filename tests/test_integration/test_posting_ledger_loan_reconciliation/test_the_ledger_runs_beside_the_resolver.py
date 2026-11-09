@@ -15,16 +15,24 @@ from app.models.ledger_account import LedgerAccount
 from app.models.loan_features import RateHistory
 from app.models.scenario import Scenario
 from app.services import loan_ledger, loan_loaders, loan_posting_service, posting_service
+from app.services.ledger_lines import loan_key
+from tests._ledger_reads import (
+    account_net,
+    ledger_net,
+    loan_correction_lines,
+)
+from tests._stored_ledger import (
+    loan_correction_entries,
+    stored_account_net,
+    stored_loan_balance_at,
+    stored_loan_balance_map,
+    stored_per_loan_net,
+)
 from tests._test_helpers import (
     create_loan_account,
-    find_loan_ledger_account,
-    insert_tracking_start_event,
     derived_span,
-    ledger_net,
+    insert_tracking_start_event,
     load_migration_module,
-    loan_correction_entries,
-    posted_loan_balance_at,
-    posted_loan_balance_map,
 )
 
 from ._helpers import (
@@ -40,12 +48,10 @@ from ._helpers import (
     _make_loan,
     _resolved_at,
     _settle,
-    _independent_loan_linked_net,
     _per_loan_correction_net,
     _resolver_balance,
     _ledger_balance,
     _posted_balance,
-    _posted_period_map,
     _assert_loan_reconciles,
 )
 
@@ -123,11 +129,8 @@ def _clear_all_loan_postings():
 
 
 def _loan_ledger_net(loan, kind, scenario_id: int) -> Decimal:
-    """Return the net of a loan's per-loan ledger of *kind* (0 if not minted)."""
-    ledger = find_loan_ledger_account(_db.session, loan.id, kind)
-    if ledger is None:
-        return Decimal("0")
-    return ledger_net(_db.session, ledger.id, scenario_id)
+    """Return the net of a loan's own line of *kind*."""
+    return ledger_net(_db.session, loan_key(kind, loan.id), scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -172,13 +175,13 @@ class TestParallelRunAgainstResolver:
             # Non-vacuity: the genesis linked total is opening (-250000) + true-up
             # (+150000) + the real principal (scheduled P&I - round(100000*0.005)
             # = -500.00 interest), i.e. principal - _ANCHOR_BALANCE.
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == scheduled_pi - Decimal("500.00") - _ANCHOR_BALANCE
             assert len(
                 loan_correction_entries(db.session, xfer.id, loan.id),
             ) == 1
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_tracking_start_opening_matches_resolver(
         self, app, db, seed_user, seed_periods,
@@ -210,7 +213,7 @@ class TestParallelRunAgainstResolver:
             # Opened at the tracking-start 100000, so the balance is far below
             # the 250000 origination -- proving the walk did NOT seed from it.
             assert ledger < _ORIGINATION_PRINCIPAL
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_on_schedule_multi_payment_matches_resolver(
         self, app, db, seed_user, seed_periods,
@@ -237,7 +240,7 @@ class TestParallelRunAgainstResolver:
             ledger = _ledger_balance(loan.id, scenario_id)
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             assert ledger == resolver
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_short_payment_diverges_and_ledger_owes_more(
         self, app, db, seed_user, seed_periods,
@@ -263,13 +266,13 @@ class TestParallelRunAgainstResolver:
             # The ledger's real balance, hand-computed.
             assert ledger == Decimal("99500.00")
             # Genesis: opening (-250000) + true-up (+150000) + principal (+500).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-99500.00")
             # They DIVERGE, and the ledger (short paydown) owes MORE.
             assert ledger != resolver
             assert resolver < ledger
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_extra_principal_diverges_and_ledger_owes_less(
         self, app, db, seed_user, seed_periods,
@@ -294,13 +297,13 @@ class TestParallelRunAgainstResolver:
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             assert ledger == Decimal("98500.00")
             # Genesis: opening (-250000) + true-up (+150000) + principal (+1500).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-98500.00")
             # They DIVERGE, and the ledger (extra paydown) owes LESS.
             assert ledger != resolver
             assert ledger < resolver
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_arm_rate_step_matches_a_hand_computed_post_step_balance(
         self, app, db, seed_user, seed_periods,
@@ -349,13 +352,13 @@ class TestParallelRunAgainstResolver:
             # The hand-computed post-step balance -- the shared-kernel teeth.
             assert ledger == Decimal("99495.00")
             assert reader == Decimal("99495.00")
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-99495.00")
             # The resolver books scheduled principal at each rate; short payments
             # mean it owes LESS -- divergence survives the rate step.
             assert resolver < ledger
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_pre_anchor_payment_is_correctly_summed_under_genesis(
         self, app, db, seed_user, seed_periods,
@@ -393,7 +396,7 @@ class TestParallelRunAgainstResolver:
             )
             assert len(splits) == 1
             assert splits[0].interest == Decimal("1250.00")
-            assert loan_correction_entries(db.session, xfer.id, loan.id) != []
+            assert loan_correction_lines(db.session, xfer.id, loan.id) != []
 
             # Post the opening + true-up (the read-switch corrections): the
             # ONE sync since plan step ``balance:X-bi-6-3`` (the anchor-only
@@ -405,8 +408,8 @@ class TestParallelRunAgainstResolver:
             # -(linked net) reproduces the resolver's anchor, which subsumes P1.
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             assert resolver == _ANCHOR_BALANCE  # 100000.00
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == -_ANCHOR_BALANCE  # -100000.00, no pre-anchor pollution
 
 
@@ -441,7 +444,7 @@ class TestSupersedesCashInvariantForLoans:
             _settle(seed_user, loan, seed_periods[_P1], amount=Decimal("1000.00"))
             db.session.commit()
 
-            linked = posting_service.account_posting_total(loan.id, scenario_id)
+            linked = account_net(_db.session, loan.id, scenario_id)
             cash_effect = posting_service.settled_transfer_effect(
                 loan.id, scenario_id,
             )
@@ -461,7 +464,7 @@ class TestSupersedesCashInvariantForLoans:
             # -250000 + true-up +150000)).
             assert non_principal == Decimal("100500.00")
             assert linked == cash_effect - non_principal
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -509,8 +512,8 @@ class TestRichFixtureFullSweep:
                 loan, LedgerAccountKindEnum.LOAN_REFUND, scenario_id,
             ) == Decimal("895.00")
             # Paid off: opening (-250000) + true-up (+249000) + principal (+1000).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("0.00")
             # Per-loan net = non-principal (1000) + opening-equity legs (+1000,
             # the negatives of opening -250000 + true-up +249000).
@@ -525,7 +528,7 @@ class TestRichFixtureFullSweep:
                 .filter_by(loan_account_id=loan.id)
                 .count()
             ) == 4
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -568,14 +571,14 @@ class TestScenarioAndOwnerIsolation:
             db.session.commit()
 
             # Each scenario nets -99500 in isolation -- never -199000.
-            assert posting_service.account_posting_total(
-                loan.id, baseline.id,
+            assert account_net(
+                _db.session, loan.id, baseline.id,
             ) == Decimal("-99500.00")
-            assert posting_service.account_posting_total(
-                loan.id, whatif.id,
+            assert account_net(
+                _db.session, loan.id, whatif.id,
             ) == Decimal("-99500.00")
-            _assert_loan_reconciles(loan, baseline.id, _AS_OF)
-            _assert_loan_reconciles(loan, whatif.id, _AS_OF)
+            _assert_loan_reconciles(loan, baseline.id)
+            _assert_loan_reconciles(loan, whatif.id)
 
     def test_two_owners_reconcile_independently(
         self, app, db, seed_user, seed_second_user, seed_periods,
@@ -604,11 +607,11 @@ class TestScenarioAndOwnerIsolation:
             scenario2 = seed_second_user["scenario"].id
             # Genesis linked net = opening (-250000) + true-up (+150000) + real
             # principal: owner 1 -> -99500 (+500), owner 2 -> -98500 (+1500).
-            assert posting_service.account_posting_total(
-                loan1.id, scenario1,
+            assert account_net(
+                _db.session, loan1.id, scenario1,
             ) == Decimal("-99500.00")
-            assert posting_service.account_posting_total(
-                loan2.id, scenario2,
+            assert account_net(
+                _db.session, loan2.id, scenario2,
             ) == Decimal("-98500.00")
 
             # Ownership is normalized onto the journal entry, not the posting.
@@ -629,8 +632,8 @@ class TestScenarioAndOwnerIsolation:
                 for posting in entry.postings:
                     assert posting.ledger_account.user_id == entry.user_id
 
-            _assert_loan_reconciles(loan1, scenario1, _AS_OF)
-            _assert_loan_reconciles(loan2, scenario2, _AS_OF)
+            _assert_loan_reconciles(loan1, scenario1)
+            _assert_loan_reconciles(loan2, scenario2)
 
 
 # ---------------------------------------------------------------------------
@@ -672,28 +675,26 @@ class TestBackfillEqualsGoForward:
             _settle(seed_user, loan, seed_periods[_P2], amount=Decimal("1000.00"))
             db.session.commit()
 
-            forward_linked = _independent_loan_linked_net(loan.id, scenario_id)
-            forward_per_loan = _per_loan_correction_net(loan.id, scenario_id)
+            # The store's own act, so its own figures: the read follows the
+            # records and never saw the clearing.  Goes with the store.
+            forward_linked = stored_account_net(loan.id, scenario_id)
+            forward_per_loan = stored_per_loan_net(loan.id, scenario_id)
             # Opening (-250000) + true-up (+150000) + principal (500 + 502.50).
             assert forward_linked == Decimal("-98997.50")
             # Interest (500 + 497.50) + opening-equity legs (+100000).
             assert forward_per_loan == Decimal("100997.50")
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
             # Reproduce the pre-wiring state (no loan postings), then backfill.
             _clear_all_loan_postings()
-            assert _per_loan_correction_net(loan.id, scenario_id) == Decimal("0")
+            assert stored_per_loan_net(loan.id, scenario_id) == Decimal("0")
             loan_posting_service.backfill_all_loan_postings()
             db.session.commit()
 
             # The backfilled nets equal the go-forward nets, and the sweep ties.
-            assert _independent_loan_linked_net(
-                loan.id, scenario_id,
-            ) == forward_linked
-            assert _per_loan_correction_net(
-                loan.id, scenario_id,
-            ) == forward_per_loan
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            assert stored_account_net(loan.id, scenario_id) == forward_linked
+            assert stored_per_loan_net(loan.id, scenario_id) == forward_per_loan
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_reader_reads_none_before_backfill_then_matches_resolver_after(
         self, app, db, seed_user, seed_periods,
@@ -736,7 +737,7 @@ class TestBackfillEqualsGoForward:
             # go-forward reader already matches it (the C6 gate); the contrast is the
             # point: authoritative now, None in a moment, == again after.
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            assert _posted_balance(loan.id, scenario_id) == resolver
+            assert stored_loan_balance_at(loan.id, scenario_id, _AS_OF) == resolver
 
             # Reproduce the pre-wiring historical state (no loan postings).
             _clear_all_loan_postings()
@@ -744,10 +745,10 @@ class TestBackfillEqualsGoForward:
             # BEFORE: the unposted-opening gap.  No OPENING leg -> the reader cannot
             # produce a balance (both producers return None), yet the resolver -- which
             # never read the ledger -- is unchanged, so the gap is purely the ledger's.
-            assert posted_loan_balance_at(
+            assert stored_loan_balance_at(
                 loan.id, scenario_id, _AS_OF,
             ) is None
-            assert posted_loan_balance_map(
+            assert stored_loan_balance_map(
                 loan.id, scenario_id, seed_periods,
             ) is None
             assert _resolver_balance(loan.id, scenario_id, _AS_OF) == resolver
@@ -757,9 +758,9 @@ class TestBackfillEqualsGoForward:
 
             # AFTER: zero mismatch.  The scalar (C8 producer) and every period of the
             # map (C9 producer) read back == the resolver to the penny.
-            reader = _posted_balance(loan.id, scenario_id)
+            reader = stored_loan_balance_at(loan.id, scenario_id, _AS_OF)
             assert reader == resolver, f"reader {reader} != resolver {resolver}"
-            balance_map = _posted_period_map(loan.id, scenario_id, seed_periods)
+            balance_map = stored_loan_balance_map(loan.id, scenario_id, seed_periods)
             for period in seed_periods:
                 assert balance_map[period.id] == _resolver_balance(
                     loan.id, scenario_id, period.start_date,

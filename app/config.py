@@ -275,7 +275,8 @@ class BaseConfig:
     # there is no fallback.
     RATELIMIT_STORAGE_URI = "memory://"
 
-    # Default per-IP ceiling applied to every route that does NOT carry
+    # Default ceiling, per signed-in account or else per client
+    # (``rate_limit_key``), applied to every route that does NOT carry
     # an explicit ``@limiter.limit`` decorator.  As of audit verification
     # (Phase A 2026-04-15) only 4 of ~93 mutating routes have an explicit
     # rate limit.  Without this ceiling, an authenticated attacker could
@@ -286,6 +287,15 @@ class BaseConfig:
     # ``<count> per <window>`` strings, parsed by Flask-Limiter into
     # individual Limit objects.
     RATELIMIT_DEFAULT = "200 per hour;30 per minute"
+
+    # The callers whose X-Forwarded-For the app believes, so that it sees each
+    # client's address rather than nginx's.  The same setting gunicorn reads
+    # for the forwarded scheme (gunicorn.conf.py), and it is required there, so
+    # a gunicorn process cannot reach this empty; empty here trusts no caller,
+    # so each client counts as the socket's peer: a process run directly, and
+    # the dev container, which sets no list.  Parsed and refused if malformed
+    # in ``create_app``.
+    FORWARDED_ALLOW_IPS = os.getenv("FORWARDED_ALLOW_IPS", "")
 
     # Fail-closed posture: if Valkey becomes unreachable, do NOT silently
     # drop rate-limit checks (which would let an attacker brute-force
@@ -553,6 +563,10 @@ class TestConfig(BaseConfig):
     WTF_CSRF_ENABLED = False
     LOGIN_DISABLED = False
     RATELIMIT_ENABLED = False
+
+    # Production's bridge, pinned so the suite is hermetic: a test that sends
+    # a request from this range with nginx's headers is what production sees.
+    FORWARDED_ALLOW_IPS = "172.32.0.0/24"
 
     # Pin the idle window regardless of any IDLE_TIMEOUT_MINUTES in the
     # developer's shell or .env, so the suite is hermetic.  The dev

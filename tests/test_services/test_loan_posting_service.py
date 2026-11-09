@@ -19,7 +19,7 @@ with it, both -99000 -> -100000 and both named in their own docstrings
 deleted direct doors produced -- the split reversed with the cash leg still
 posted -- which no production door reaches.  What the posted legs SUM to is
 read back through the test
-suite's dated posting window (``tests._test_helpers.posted_loan_balance_at`` /
+suite's dated posting window (``tests._ledger_reads.posted_loan_balance_at`` /
 ``posted_loan_balance_map``) -- plan step E1e deleted the production readers that
 used to answer that, since nothing in ``app/`` called them; the values pinned
 below are the LEDGER's, and the window is only how the test looks at it.  Those
@@ -72,31 +72,46 @@ from app.services import (
     transfer_service,
 )
 from app.services._posting_write import _emit_balanced_entry, _PostingLeg
+from app.services.ledger_lines import loan_key
 from app.services.transfer_legs import transfer_side_leg
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import (
+    account_net,
+    correction_net_in_period,
+    ledger_net,
+    linked_key_of,
+    linked_net_by_date,
+    loan_correction_lines_at,
+    posted_loan_balance_at,
+    posted_loan_balance_map,
+    source_lines,
+    source_net,
+)
+from tests._stored_ledger import (
+    find_loan_ledger_account,
+    ledger_accounts_for_account,
+    loan_correction_entries,
+    loan_correction_entries_at,
+    stored_ledger_net,
+    stored_loan_balance_at,
+    stored_loan_balance_map,
+    stored_net_by_date,
+    transfer_family_journal_filter,
+)
 from tests._test_helpers import (
-    SPLIT_LOAN,
     add_escrow_line,
     an_entered_day,
     clear_loan_ledger,
-    correction_net_in_period,
     create_loan_account,
     create_loan_with_trueup,
     create_settled_cash_transaction,
     create_settled_transfer,
-    find_loan_ledger_account,
     freeze_today,
     insert_tracking_start_event,
     insert_trueup_event,
     last_covered_day,
-    ledger_accounts_for_account,
-    ledger_net,
-    linked_net_by_date,
-    loan_correction_entries,
-    loan_correction_entries_at,
     on_both_sides,
-    posted_loan_balance_at,
-    posted_loan_balance_map,
-    transfer_family_journal_filter,
+    SPLIT_LOAN,
     transfer_side_record,
     typed,
 )
@@ -196,9 +211,33 @@ def _find_loan_ledger(loan_id, kind):
     return find_loan_ledger_account(_db.session, loan_id, kind)
 
 
-def _ledger_net(ledger_id, scenario_id):
-    """Return the net of a ledger account's posting legs (shared query helper)."""
-    return ledger_net(_db.session, ledger_id, scenario_id)
+def _ledger_net(kind, loan, scenario_id):
+    """Return the net of one of the loan's own chart accounts, worked out."""
+    return ledger_net(_db.session, loan_key(kind, loan.id), scenario_id)
+
+
+def _interest_net(loan, scenario_id):
+    """Return the net of the loan's interest account, worked out."""
+    return _ledger_net(LedgerAccountKindEnum.LOAN_INTEREST, loan, scenario_id)
+
+
+def _equity_net(loan, scenario_id):
+    """Return the net of the loan's opening-equity account, worked out."""
+    return _ledger_net(LedgerAccountKindEnum.EQUITY_OPENING, loan, scenario_id)
+
+
+def _anchor_net(loan, scenario_id, source_enum):
+    """Return one anchor kind's net on the loan's own line, worked out."""
+    return source_net(
+        _db.session, linked_key_of(_db.session, loan.id), scenario_id, source_enum,
+    )
+
+
+def _anchor_lines(loan, scenario_id, source_enum):
+    """Return one anchor kind's lines on the loan's own line, worked out."""
+    return source_lines(
+        _db.session, linked_key_of(_db.session, loan.id), scenario_id, source_enum,
+    )
 
 
 def _genesis_entry_count(user_id):
@@ -272,12 +311,9 @@ def _split_and_interest(xfer, loan, scenario_id):
     The ledger is the loan's, so its net is the split's interest only while
     the payment is the loan's one split.
     """
-    interest_ledger = _find_loan_ledger(
-        loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-    )
     return (
         len(_correction_entries(xfer, loan)),
-        _ledger_net(interest_ledger.id, scenario_id),
+        _interest_net(loan, scenario_id),
     )
 
 
@@ -795,13 +831,15 @@ class TestWalkReadsNoClock:
         a function of the loan's facts alone.  The loan is configured and synced at
         2026-03-20 (before it closes); the clock then moves past origination to
         2026-05-07 and the SAME sync re-runs.  Reconcile-to-target means an
-        already-correct ledger is not re-posted, so an unchanged ledger is the
-        proof: the first sync already recorded everything.
+        already-correct ledger is not re-posted, so an unchanged entry count is
+        the proof: the first sync already recorded everything.  The read's figure
+        beside it grades that the walk's answer did not move with the clock.
 
         Both halves are asserted, because the clock moved both: the OPENING leg
         (-$200,000.00 on the linked ledger) and the payment's split correction.
 
-        NEGATIVE CONTROL (measured): restore the ``anchor.anchor_date <= as_of``
+        NEGATIVE CONTROL (measured on the store, before plan#2913): restore the
+        ``anchor.anchor_date <= as_of``
         filter and the first sync posts no opening AND routes the whole payment to
         Refund, so the linked ledger nets to exactly ``0.00`` -- the loan reads as
         owing NOTHING while $1,073.64 of the borrower's cash sits in a Refund
@@ -817,10 +855,9 @@ class TestWalkReadsNoClock:
             )
             db.session.commit()
             scenario_id = seed_user["scenario"].id
-            linked_id = _linked_ledger_id(loan)
 
             # The settle already synced, as of 2026-03-20 -- before origination.
-            linked_after_first = _ledger_net(linked_id, scenario_id)
+            linked_after_first = account_net(_db.session, loan.id, scenario_id)
             entries_after_first = _genesis_entry_count(seed_user["user"].id)
             # -200,000.00 opening + 1,073.64 cash - 833.33 interest
             # - 0.00 escrow = -199,759.69 owed, from a sync run 26 days before
@@ -832,7 +869,7 @@ class TestWalkReadsNoClock:
             loan_posting_service.sync_loan_postings_all_scenarios(loan.id)
             db.session.commit()
 
-            assert _ledger_net(linked_id, scenario_id) == linked_after_first
+            assert account_net(_db.session, loan.id, scenario_id) == linked_after_first
             assert _genesis_entry_count(
                 seed_user["user"].id,
             ) == entries_after_first
@@ -1095,10 +1132,10 @@ class TestSyncLoanPaymentPostings:
             )
             # Genesis: opening (-250000) + true-up (+150000) + principal (+500)
             # = -(current balance 99500); interest ledger holds the +500.
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-99500.00")
-            assert _ledger_net(interest_ledger.id, scenario_id) == Decimal("500.00")
+            assert _interest_net(loan, scenario_id) == Decimal("500.00")
 
     def test_sync_posts_each_payment_in_a_multi_payment_loan(
         self, app, db, seed_user, seed_periods,
@@ -1133,8 +1170,8 @@ class TestSyncLoanPaymentPostings:
             assert all(
                 len(_correction_entries(xfer, loan)) == 1 for xfer in payments
             )
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-98492.49")
 
             # Idempotent across the whole loan: a re-sync adds no entries.
@@ -1215,9 +1252,11 @@ class TestSyncLoanPaymentPostings:
                 loan.id, LedgerAccountKindEnum.LOAN_REFUND,
             )
             assert refund_ledger is not None
-            assert _ledger_net(refund_ledger.id, scenario_id) == Decimal("698.50")
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert _ledger_net(
+                LedgerAccountKindEnum.LOAN_REFUND, loan, scenario_id,
+            ) == Decimal("698.50")
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("0.00")
 
     def test_sync_never_touches_checking(
@@ -1289,8 +1328,8 @@ class TestSyncLoanPaymentPostings:
             ) == Decimal("1000.00")
             # But the full ledger (opening -250000 + true-up +150000 + cash 1000
             # + correction -500) nets to -(current balance 99500) = -99500.
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-99500.00")
 
     def test_new_trueup_resplits_later_payments_and_keeps_earlier(
@@ -1325,12 +1364,7 @@ class TestSyncLoanPaymentPostings:
                 loan.id, scenario_id,
             )
             db.session.commit()
-            interest_ledger = _find_loan_ledger(
-                loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-            )
-            assert _ledger_net(
-                interest_ledger.id, scenario_id,
-            ) == Decimal("997.50")
+            assert _interest_net(loan, scenario_id) == Decimal("997.50")
 
             # New trueup at 90000 on 02-15 falls between P1 (due 02-01) and P2
             # (due 03-01): it re-bases P2 but leaves P1 untouched.
@@ -1344,9 +1378,7 @@ class TestSyncLoanPaymentPostings:
             db.session.commit()
 
             # P1's 500 kept, P2 re-split 497.50 -> 450: interest ledger 950.
-            assert _ledger_net(
-                interest_ledger.id, scenario_id,
-            ) == Decimal("950.00")
+            assert _interest_net(loan, scenario_id) == Decimal("950.00")
             # P1's correction is NOT reversed -- genesis keeps pre-trueup splits.
             assert len(_correction_entries(p1_xfer, loan)) == 1
 
@@ -1399,8 +1431,7 @@ class TestSyncLoanPaymentPostings:
             # The split: one entry, 100000 * 0.06 / 12 = 500.00 of interest.
             whole = (1, Decimal("500.00"))
             assert _split_and_interest(xfer, loan, scenario_id) == whole
-            linked = _linked_ledger_id(loan)
-            without_the_row = _ledger_net(linked, scenario_id)
+            without_the_row = account_net(_db.session, loan.id, scenario_id)
 
             # Settling the row posts it: its FIRST post, the loan leg -25.00.
             row = create_settled_cash_transaction(
@@ -1413,7 +1444,7 @@ class TestSyncLoanPaymentPostings:
             assert not posting_service.sync_transaction_postings(row)
             db.session.commit()
             assert _split_and_interest(xfer, loan, scenario_id) == whole
-            assert _ledger_net(linked, scenario_id) == (
+            assert account_net(_db.session, loan.id, scenario_id) == (
                 without_the_row - Decimal("25.00")
             )
 
@@ -1423,7 +1454,7 @@ class TestSyncLoanPaymentPostings:
             )
             db.session.commit()
             assert _split_and_interest(xfer, loan, scenario_id) == whole
-            assert _ledger_net(linked, scenario_id) == without_the_row
+            assert account_net(_db.session, loan.id, scenario_id) == without_the_row
 
             # Deleted through the delete door: the row's teardown.
             transaction_service.delete_transaction(
@@ -1434,7 +1465,7 @@ class TestSyncLoanPaymentPostings:
             )
             db.session.commit()
             assert _split_and_interest(xfer, loan, scenario_id) == whole
-            assert _ledger_net(linked, scenario_id) == without_the_row
+            assert account_net(_db.session, loan.id, scenario_id) == without_the_row
 
     def test_early_settled_payment_splits_at_settle(
         self, app, db, monkeypatch, seed_user, seed_periods,
@@ -1570,7 +1601,7 @@ class TestTheSplitIsADateKeyedCorrection:
             db.session.commit()
 
             assert transfer_side_record(db.session, xfer.id, loan.id) is None
-            assert loan_correction_entries_at(
+            assert loan_correction_lines_at(
                 db.session, loan.id, scenario_id, seed_periods[_P1].id,
                 pressed_on,
             ) == []
@@ -1593,8 +1624,8 @@ class TestTheSplitIsADateKeyedCorrection:
                 Decimal("500.00"),
                 ref_cache.posting_kind_id(PostingKindEnum.INTEREST),
             )
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100500.00")
             # A repeat sync -- the assert inside it holding -- writes nothing.
             before = _source_entry_count(xfer.id, loan.id)
@@ -1658,7 +1689,7 @@ class TestTheSplitIsADateKeyedCorrection:
             assert sum(
                 legs[_linked_ledger_id(loan)][0] for legs in by_entry
             ) == Decimal("-997.50")
-            assert _ledger_net(interest_ledger.id, scenario_id) == Decimal("997.50")
+            assert _interest_net(loan, scenario_id) == Decimal("997.50")
 
             rows = loan_posting_service.confirmed_loan_payment_history(
                 loan.id, scenario_id, date.today(),
@@ -1695,8 +1726,8 @@ class TestTheSplitIsADateKeyedCorrection:
                 seed_user, loan, seed_periods[_P1], Decimal("1000.00"),
             )
             db.session.commit()
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-99500.00")
             assert len(_correction_entries(xfer, loan)) == 1
             # The settle day's key, captured before the act: the record that
@@ -1722,13 +1753,10 @@ class TestTheSplitIsADateKeyedCorrection:
                 db.session, loan.id, scenario_id, seed_periods[_P1].id,
                 date(2026, 2, 1),
             )) == 1
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100500.00")
-            interest_ledger = _find_loan_ledger(
-                loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-            )
-            assert _ledger_net(interest_ledger.id, scenario_id) == Decimal("500.00")
+            assert _interest_net(loan, scenario_id) == Decimal("500.00")
 
     def test_residue_at_a_key_the_walk_does_not_price_self_heals(
         self, app, db, seed_user, seed_periods,
@@ -1777,7 +1805,9 @@ class TestTheSplitIsADateKeyedCorrection:
                 ),
             ])
             db.session.commit()
-            assert _ledger_net(interest_ledger.id, scenario_id) == Decimal("507.00")
+            assert stored_ledger_net(
+                _db.session, interest_ledger.id, scenario_id,
+            ) == Decimal("507.00")
 
             loan_posting_service.sync_loan_postings(loan.id, scenario_id)
             db.session.commit()
@@ -1789,7 +1819,9 @@ class TestTheSplitIsADateKeyedCorrection:
             assert _entry_legs(at_key[-1].id)[interest_ledger.id][0] == (
                 Decimal("-7.00")
             )
-            assert _ledger_net(interest_ledger.id, scenario_id) == Decimal("500.00")
+            assert stored_ledger_net(
+                _db.session, interest_ledger.id, scenario_id,
+            ) == Decimal("500.00")
             assert len(_correction_entries(xfer, loan)) == 1
 
 
@@ -1865,7 +1897,7 @@ class TestReverseLoanPaymentPostings:
             )
             # And the new period holds no split at all: the walk no longer
             # prices the payment, so no key of its own was posted there.
-            assert not loan_correction_entries_at(
+            assert not loan_correction_lines_at(
                 _db.session, loan.id, scenario_id, moved_to.id, original_day,
             )
             interest_ledger = _find_loan_ledger(
@@ -1880,9 +1912,7 @@ class TestReverseLoanPaymentPostings:
                 Decimal("-500.00"),
                 ref_cache.posting_kind_id(PostingKindEnum.INTEREST),
             )
-            assert _ledger_net(interest_ledger.id, scenario_id) == (
-                Decimal("0.00")
-            )
+            assert _interest_net(loan, scenario_id) == Decimal("0.00")
 
     def test_hard_delete_reverses_the_correction_at_its_own_key(
         self, app, db, seed_user, seed_periods,
@@ -1943,10 +1973,10 @@ class TestReverseLoanPaymentPostings:
                 Decimal("-500.00"),
                 ref_cache.posting_kind_id(PostingKindEnum.INTEREST),
             )
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
-            assert _ledger_net(interest_ledger.id, scenario_id) == Decimal("0")
+            assert _interest_net(loan, scenario_id) == Decimal("0")
 
     def test_deleting_an_unposted_payment_writes_no_split(
         self, app, db, seed_user, seed_periods,
@@ -2137,18 +2167,15 @@ class TestSyncLoanAnchorCorrections:
             )
             db.session.commit()
 
-            equity = _find_loan_ledger(
-                loan.id, LedgerAccountKindEnum.EQUITY_OPENING,
-            )
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-250000.00")
-            assert _ledger_net(equity.id, scenario_id) == Decimal("250000.00")
+            assert _equity_net(loan, scenario_id) == Decimal("250000.00")
             assert len(_anchor_correction_entries(
                 loan.id, scenario_id, PostingSourceEnum.LOAN_OPENING,
             )) == 1
-            assert _anchor_correction_entries(
-                loan.id, scenario_id, PostingSourceEnum.LOAN_TRUEUP,
+            assert _anchor_lines(
+                loan, scenario_id, PostingSourceEnum.LOAN_TRUEUP,
             ) == []
 
     def test_opening_and_trueup_drive_linked_to_negative_verified(
@@ -2171,14 +2198,10 @@ class TestSyncLoanAnchorCorrections:
             )
             db.session.commit()
 
-            linked_id = ledger_accounts_for_account(db.session, loan.id)[0].id
-            equity = _find_loan_ledger(
-                loan.id, LedgerAccountKindEnum.EQUITY_OPENING,
-            )
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
-            assert _ledger_net(equity.id, scenario_id) == Decimal("100000.00")
+            assert _equity_net(loan, scenario_id) == Decimal("100000.00")
 
             opening = _anchor_correction_entries(
                 loan.id, scenario_id, PostingSourceEnum.LOAN_OPENING,
@@ -2187,8 +2210,12 @@ class TestSyncLoanAnchorCorrections:
                 loan.id, scenario_id, PostingSourceEnum.LOAN_TRUEUP,
             )
             assert len(opening) == 1 and len(trueup) == 1
-            assert _entry_legs(opening[0].id)[linked_id][0] == Decimal("-250000.00")
-            assert _entry_legs(trueup[0].id)[linked_id][0] == Decimal("150000.00")
+            assert _anchor_net(
+                loan, scenario_id, PostingSourceEnum.LOAN_OPENING,
+            ) == Decimal("-250000.00")
+            assert _anchor_net(
+                loan, scenario_id, PostingSourceEnum.LOAN_TRUEUP,
+            ) == Decimal("150000.00")
 
     def test_anchor_corrections_are_idempotent(
         self, app, db, seed_user, seed_periods,
@@ -2236,11 +2263,11 @@ class TestSyncLoanAnchorCorrections:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-250000.00")
-            assert _anchor_correction_entries(
-                loan.id, scenario_id, PostingSourceEnum.LOAN_TRUEUP,
+            assert _anchor_lines(
+                loan, scenario_id, PostingSourceEnum.LOAN_TRUEUP,
             ) == []
 
     def test_opening_payments_trueup_reproduce_resolver_balance(
@@ -2273,8 +2300,8 @@ class TestSyncLoanAnchorCorrections:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-98492.49")
 
     def test_trueup_self_heals_when_a_pre_trueup_payment_is_added(
@@ -2309,16 +2336,11 @@ class TestSyncLoanAnchorCorrections:
                 loan.id, scenario_id,
             )
             db.session.commit()
-            equity_ledger = _find_loan_ledger(
-                loan.id, LedgerAccountKindEnum.EQUITY_OPENING,
-            )
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
             # Opening (+250000) + true-up (-150000) on the equity ledger.
-            assert _ledger_net(
-                equity_ledger.id, scenario_id,
-            ) == Decimal("100000.00")
+            assert _equity_net(loan, scenario_id) == Decimal("100000.00")
 
             # Settle a pre-trueup payment; the unified wiring re-bases the true-up
             # in the same transaction (no manual anchor re-sync needed).
@@ -2329,12 +2351,10 @@ class TestSyncLoanAnchorCorrections:
 
             # Self-healed automatically: linked still -(verified 100000); the
             # equity ledger re-based to opening (+250000) + true-up (-150250).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
-            assert _ledger_net(
-                equity_ledger.id, scenario_id,
-            ) == Decimal("99750.00")
+            assert _equity_net(loan, scenario_id) == Decimal("99750.00")
 
             # A further unified sync is a no-op: no new true-up entry, balance holds.
             trueups_after_heal = len(_anchor_correction_entries(
@@ -2347,9 +2367,10 @@ class TestSyncLoanAnchorCorrections:
             assert len(_anchor_correction_entries(
                 loan.id, scenario_id, PostingSourceEnum.LOAN_TRUEUP,
             )) == trueups_after_heal
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_payment_due_on_anchor_date_is_subsumed_by_the_reset(
         self, app, db, seed_user, seed_periods,
@@ -2396,22 +2417,21 @@ class TestSyncLoanAnchorCorrections:
                 loan.id, scenario_id,
             )
             db.session.commit()
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
 
 
 def _anchor_net_in_period(loan_id, scenario_id, source_enum, period_id):
     """Sum a loan's anchor-correction legs on its LINKED ledger in ONE period.
 
-    Resolves the loan's linked ledger, then defers to the shared
-    ``tests._test_helpers.correction_net_in_period`` -- the same reading the
-    account anchor suite makes, so the two halves of the R2 fix are graded by
-    one query rather than two that happen to agree.
+    Defers to the shared ``tests._ledger_reads.correction_net_in_period`` -- the
+    same reading the account anchor suite makes, so the two halves of the R2 fix
+    are graded by one read rather than two that happen to agree.
     """
-    linked_id = ledger_accounts_for_account(_db.session, loan_id)[0].id
     return correction_net_in_period(
-        _db.session, linked_id, scenario_id, source_enum, period_id,
+        _db.session, linked_key_of(_db.session, loan_id), scenario_id,
+        source_enum, period_id,
     )
 
 
@@ -2504,9 +2524,10 @@ class TestLoanAnchorPeriodAttribution:
             ) == Decimal("150000.00")
             # -250000 opening + 150000 true-up: the attribution moved, the
             # balance did not.
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_the_refiled_anchor_reconcile_is_idempotent(
         self, app, db, seed_user, seed_periods,
@@ -2571,9 +2592,10 @@ class TestLoanAnchorPeriodAttribution:
                 loan.id, scenario_id,
                 PostingSourceEnum.LOAN_TRUEUP, stale_period.id,
             ) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
+            assert_ledger_parity(db.session, scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -2606,16 +2628,14 @@ class TestUnifiedAllScenariosSync:
             db.session.commit()
 
             # Opening (-250000) + true-up (+150000), no payment.
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
+            assert account_net(
+                _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
             equity_ledger = _find_loan_ledger(
                 loan.id, LedgerAccountKindEnum.EQUITY_OPENING,
             )
             assert equity_ledger is not None
-            assert _ledger_net(
-                equity_ledger.id, scenario_id,
-            ) == Decimal("100000.00")
+            assert _equity_net(loan, scenario_id) == Decimal("100000.00")
             # No payment-correction ledger is minted without a payment.
             assert _find_loan_ledger(
                 loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
@@ -2645,7 +2665,7 @@ class TestPostedLoanBalanceSums:
     **These pin the LEDGER, not a reader.**  Plan step E1e deleted the two
     production sum-of-postings readers -- nothing in ``app/`` called them once the
     balance seam folded a loan from source events -- so the sum is read through
-    the test suite's own window (:func:`tests._test_helpers.posted_loan_balance_at`).
+    the test suite's own window (:func:`tests._ledger_reads.posted_loan_balance_at`).
     Every expected value here is unchanged by that move: it was always the
     ledger's number.
     """
@@ -2764,7 +2784,7 @@ class TestPostedLoanBalanceSums:
         shrinking real balance; principal 500.00 / 502.50 / 505.01) leaves
         100000 - 1507.51 = 98492.49 -- the resolver's confirmed balance
         (``test_opening_payments_trueup_reproduce_resolver_balance`` proves the
-        equality against ``account_posting_total``); the reader negates the same
+        equality against ``account_net``); the reader negates the same
         linked net to the same figure.
         """
         with app.app_context():
@@ -2838,10 +2858,9 @@ class TestPostedLoanBalanceSums:
                 loan.id, scenario_id, _AS_OF,
             ) == Decimal("0.00")
             # The surplus lives on the Refund ledger, invisible to the reader.
-            refund = _find_loan_ledger(
-                loan.id, LedgerAccountKindEnum.LOAN_REFUND,
-            )
-            assert _ledger_net(refund.id, scenario_id) == Decimal("49500.00")
+            assert _ledger_net(
+                LedgerAccountKindEnum.LOAN_REFUND, loan, scenario_id,
+            ) == Decimal("49500.00")
 
     def test_as_of_bounds_the_sum_by_settled_date(
         self, app, db, seed_user, seed_periods,
@@ -2912,10 +2931,10 @@ class TestPostedLoanBalanceSums:
             )
             clear_loan_ledger(loan.id)
 
-            assert posted_loan_balance_at(
+            assert stored_loan_balance_at(
                 loan.id, scenario_id, _AS_OF,
             ) is None
-            assert posted_loan_balance_map(
+            assert stored_loan_balance_map(
                 loan.id, scenario_id, seed_periods,
             ) is None
 
@@ -2955,13 +2974,14 @@ class TestPostedLoanBalanceSums:
     def test_window_is_scenario_scoped_and_none_off_scenario(
         self, app, db, seed_user, seed_periods,
     ):
-        """The window isolates scenarios; a scenario with no opening reads None.
+        """The window isolates scenarios; a scenario with no payment reads its anchor.
 
         A $1,000 payment settled in the baseline auto-posts the opening, true-up,
         and split there only (a what-if with no payment is neither in the payment
-        set nor the baseline).  The baseline reads 99500.00; the what-if -- which
-        holds no opening -- reads ``None``, never a misleading $0 or the
-        baseline's balance.
+        set nor the baseline).  The baseline reads 99500.00.  The what-if holds
+        no opening on the store, whose window reads ``None``, and the worked-out
+        read answers the loan's anchor, 100000.00.  Neither is a misleading $0
+        or the baseline's balance.
         """
         with app.app_context():
             baseline = seed_user["scenario"]
@@ -2983,8 +3003,11 @@ class TestPostedLoanBalanceSums:
             ) == Decimal("99500.00")
             assert posted_loan_balance_at(
                 loan.id, whatif.id, _AS_OF,
+            ) == Decimal("100000.00")
+            assert stored_loan_balance_at(
+                loan.id, whatif.id, _AS_OF,
             ) is None
-            assert posted_loan_balance_map(
+            assert stored_loan_balance_map(
                 loan.id, whatif.id, seed_periods,
             ) is None
 
@@ -3254,17 +3277,6 @@ class TestPrePeriodAnchor:
 # ---------------------------------------------------------------------------
 
 
-def _linked_net_by_date(ledger_id, scenario_id):
-    """Return ``{entry_date: net}`` over one ledger's postings in a scenario.
-
-    Delegates to the shared :func:`tests._test_helpers.linked_net_by_date` -- an
-    INDEPENDENT re-implementation of the grouped read the checked-projection assert
-    performs (production groups via ``_visible_nets``), kept independent of the
-    production query so this suite still has teeth if that query drifts.
-    """
-    return linked_net_by_date(_db.session, ledger_id, scenario_id)
-
-
 def _source_entry_count(transfer_id, loan_account_id):
     """Count the journal entries a payment's lineage owns (cash + corrections).
 
@@ -3275,8 +3287,9 @@ def _source_entry_count(transfer_id, loan_account_id):
     hold one payment per loan, and a convergence check ("a repeat sync writes
     nothing") is a count over the whole lineage either way.
     """
-    # pylint: disable=import-outside-toplevel  -- the reconcile's own scope
-    # helper, imported here so the count reads the same rows the writer does.
+    # The reconcile's own scope helper, imported here so the count reads the
+    # same rows the writer does.
+    # pylint: disable-next=import-outside-toplevel
     from app.services._posting_reconcile import account_chart_row_ids
 
     on_loan_rows = (
@@ -3387,8 +3400,9 @@ class TestCheckedProjection:
         A PURE settle-day edit to 2026-02-05 changes no amount, so the
         pre-E1a reconcile wrote nothing and the entries kept the old date --
         while the fold moved to 02-05, a divergence the checked-projection
-        assert now refuses.  After the edit: 01-20 nets 0.00 (reversed at its
-        own date), 02-05 nets +500.00, and a repeat sync writes NOTHING (the
+        assert now refuses.  After the edit: 01-20 holds no line (the store nets
+        0.00 there, reversed at its own date), 02-05 nets +500.00, and a repeat sync
+        writes NOTHING (the
         reconcile converged in one pass -- no churn).
         """
         with app.app_context():
@@ -3399,8 +3413,8 @@ class TestCheckedProjection:
                 settled_on=date(2026, 1, 20),
             )
             db.session.commit()
-            linked_id = _linked_ledger_id(loan)
-            assert _linked_net_by_date(linked_id, scenario_id)[
+            linked = linked_key_of(_db.session, loan.id)
+            assert linked_net_by_date(_db.session, linked, scenario_id)[
                 date(2026, 1, 20)
             ] == Decimal("500.00")
 
@@ -3416,9 +3430,9 @@ class TestCheckedProjection:
             )
             db.session.commit()
 
-            by_date = _linked_net_by_date(linked_id, scenario_id)
-            # Old date: reversed at its own date (present but net zero).
-            assert by_date[date(2026, 1, 20)] == Decimal("0.00")
+            by_date = linked_net_by_date(_db.session, linked, scenario_id)
+            # Old date: nothing left there, the read holding no $0.00 line.
+            assert date(2026, 1, 20) not in by_date
             # New date: the full effect -- cash +1000.00, correction -500.00.
             assert by_date[date(2026, 2, 5)] == Decimal("500.00")
 
@@ -3438,7 +3452,7 @@ class TestCheckedProjection:
         the old-dated reversal as "the latest posting" after a BACKWARD move
         and re-churn (reverse + repost) on every later sync forever.  The
         per-(period, date) reconcile keys each delta to its exact date, so the
-        backward move (02-05 -> 01-20) lands in one pass: 02-05 nets 0.00,
+        backward move (02-05 -> 01-20) lands in one pass: 02-05 holds no line,
         01-20 nets +500.00, and a repeat sync writes nothing.
         """
         with app.app_context():
@@ -3449,7 +3463,6 @@ class TestCheckedProjection:
                 settled_on=date(2026, 2, 5),
             )
             db.session.commit()
-            linked_id = _linked_ledger_id(loan)
 
             transfer_service.update_transfer(
                 xfer.id, seed_user["user"].id,
@@ -3460,8 +3473,10 @@ class TestCheckedProjection:
             )
             db.session.commit()
 
-            by_date = _linked_net_by_date(linked_id, scenario_id)
-            assert by_date[date(2026, 2, 5)] == Decimal("0.00")
+            by_date = linked_net_by_date(
+                _db.session, linked_key_of(_db.session, loan.id), scenario_id,
+            )
+            assert date(2026, 2, 5) not in by_date
             assert by_date[date(2026, 1, 20)] == Decimal("500.00")
 
             before = _source_entry_count(xfer.id, loan.id)
@@ -3521,7 +3536,7 @@ class TestCheckedProjection:
                 {"day": date(2026, 1, 5), "entry_id": cash_entry_id},
             )
             db.session.commit()
-            assert _linked_net_by_date(linked_id, scenario_id)[
+            assert stored_net_by_date(_db.session, linked_id, scenario_id)[
                 date(2026, 1, 5)
             ] == Decimal("1000.00")
 
@@ -3529,7 +3544,7 @@ class TestCheckedProjection:
             # the checked-projection assert passes.
             loan_posting_service.sync_loan_postings(loan.id, scenario_id)
             db.session.commit()
-            by_date = _linked_net_by_date(linked_id, scenario_id)
+            by_date = stored_net_by_date(_db.session, linked_id, scenario_id)
             # Forged date: reversed at its own date; settle date: the full
             # effect (cash +1000.00, correction -500.00).
             assert by_date[date(2026, 1, 5)] == Decimal("0.00")
@@ -3573,7 +3588,7 @@ class TestCheckedProjection:
             linked_id = _linked_ledger_id(loan)
             # Clean revert: the settle date nets zero (the anchor dates --
             # the opening and true-up -- legitimately keep their nets).
-            assert _linked_net_by_date(linked_id, scenario_id)[
+            assert stored_net_by_date(_db.session, linked_id, scenario_id)[
                 date(2026, 1, 20)
             ] == Decimal("0.00")
 
@@ -3600,7 +3615,7 @@ class TestCheckedProjection:
                 {"day": date(2026, 1, 8), "entry_id": reversal_id},
             )
             db.session.commit()
-            by_date = _linked_net_by_date(linked_id, scenario_id)
+            by_date = stored_net_by_date(_db.session, linked_id, scenario_id)
             assert by_date[date(2026, 1, 20)] == Decimal("1000.00")
             assert by_date[date(2026, 1, 8)] == Decimal("-1000.00")
 
@@ -3609,7 +3624,7 @@ class TestCheckedProjection:
             # its own checked-projection assert: both payment dates net zero.
             loan_posting_service.sync_loan_postings(loan.id, scenario_id)
             db.session.commit()
-            by_date = _linked_net_by_date(linked_id, scenario_id)
+            by_date = stored_net_by_date(_db.session, linked_id, scenario_id)
             assert by_date[date(2026, 1, 20)] == Decimal("0.00")
             assert by_date[date(2026, 1, 8)] == Decimal("0.00")
 

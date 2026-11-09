@@ -43,7 +43,9 @@ from app.services import transaction_service
 from app.services.row_valuation import purchases_total, settled_figure
 from app.enums import StatusEnum
 from app.exceptions import ValidationError
+from app.services.ledger_lines import linked_key
 from app.utils.dates import DISPLAY_TIMEZONE, display_today, to_display_date
+from tests._ledger_reads import family_movement_ids, movement_nets_by_date
 from tests._test_helpers import (
     account_never_asserted,
     add_txn,
@@ -272,47 +274,6 @@ def _replay_terminal_balance(account, scenario):
         ),
         Decimal("0.00"),
     )
-
-
-def _linked_ledger_net(account, scenario, *, transaction_id=None):
-    """Return the net posted on *account*'s LINKED ledger, optionally per row.
-
-    The posted-side window the walk's deltas are graded against.  Reads a
-    DIFFERENT join shape from anything production runs, so the two cannot share
-    a lookup bug -- the same rule the loan reconciliation suite follows.
-
-    **``transaction_id`` scopes to a row's whole posted FAMILY** since plan step
-    X-f3b (ruling **R-FM**): every leg the row's movements -- its covering
-    movement and its PURCHASES -- booked on their own days, found by the row's
-    id through a ``transaction_entries`` subquery, where the production
-    reconcile reads one movement's ``transaction_entry_id`` at a time; that is
-    what keeps the grading window a different shape from it.  The row's own
-    cash leg, linked by ``journal_entries.transaction_id``,
-    was unioned beside them until plan step ``balance:X-bi-6-5``'s second leaf
-    (card plan#1845) deleted that link.
-    """
-    from app.models.journal_entry import JournalEntry, Posting  # pylint: disable=import-outside-toplevel
-    from app.models.transaction_entry import TransactionEntry  # pylint: disable=import-outside-toplevel
-    from app.services.posting_reads import _ledger_account_for  # pylint: disable=import-outside-toplevel
-
-    linked = _ledger_account_for(account.id)
-    query = (
-        db.session.query(db.func.coalesce(db.func.sum(Posting.amount), 0))
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            Posting.ledger_account_id == linked.id,
-            JournalEntry.scenario_id == scenario.id,
-        )
-    )
-    if transaction_id is not None:
-        query = query.filter(
-            JournalEntry.transaction_entry_id.in_(
-                db.session.query(TransactionEntry.id).filter(
-                    TransactionEntry.transaction_id == transaction_id,
-                )
-            ),
-        )
-    return Decimal(str(query.scalar()))
 
 
 class TestTheClosingBalancePartition:
@@ -693,13 +654,12 @@ class TestSourceFactValuation:
         assert _running_balance(account, scenario) == Decimal("880.00")
         # The claim the row-leg move to ``cash_ledger`` rested on (plan step
         # X-a), and the movement's fact inherits it: the walk's delta IS the
-        # amount the writer booked on the linked ledger, in the SAME sign.
-        # Asserting the sign here is what keeps plan step X-d from
-        # wiring the writer onto a negated feed -- a flip that still balances
-        # every entry, so nothing else would catch it.
-        assert _linked_ledger_net(
-            account, scenario, transaction_id=txn.id,
-        ) == purchase_fact.delta
+        # amount the ledger books on the account's own line, in the SAME sign
+        # and on the same day.  A flipped sign still balances every entry, so
+        # nothing else would catch it.
+        assert movement_nets_by_date(
+            db.session, family_movement_ids(txn), linked_key(account), scenario.id,
+        ) == {purchase_fact.settled_on: purchase_fact.delta}
 
     def test_a_settled_transfer_out_reduces_the_walk_like_any_other_row(
         self, db, seed_user, seed_periods,

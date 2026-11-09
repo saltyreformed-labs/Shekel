@@ -7,11 +7,12 @@ imports: models can import `db` from here without importing the app.
 """
 
 from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
+
+from app.utils.client_address import rate_limit_key
 
 # Project-wide constraint-naming convention.  Documented here so the
 # constant has a single canonical location and can be reused by tests,
@@ -103,4 +104,4 @@ csrf = CSRFProtect()
 # (DevConfig / TestConfig / ProdConfig) own its own posture without
 # touching this file.  See audit finding F-034 and remediation Commit
 # C-06.
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=rate_limit_key)

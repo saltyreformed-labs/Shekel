@@ -11,6 +11,8 @@ plan#3048 owns, each pinned on a worked example, every figure made up
   moves the money;
 * **plan#3091** -- recorded pay holds only the raises dated by the first day
   its paycheck pays for, and its banner compares pay with pay;
+* **plan#3092** -- a raise's banner shows on the first paycheck it reaches,
+  the one whose pay period holds its day, and nowhere else (task plan#3101);
 * **plan#3096** -- the job's pay periods end a fixed number of days before
   payday, here six;
 * and the task's own two rules: a change of rhythm takes effect from the first
@@ -74,11 +76,15 @@ def _calendar(paydays, eras):
     )
 
 
-def _biweekly():
-    """Thirty paydays every 14 days from Thursday 2027-01-14."""
+def _biweekly(count=30):
+    """*count* paydays every 14 days from Thursday 2027-01-14 (thirty reach 2028-02-24)."""
     return _calendar(
-        [_OPENS + timedelta(days=14 * step) for step in range(30)], (_era(_OPENS, 14),),
+        [_OPENS + timedelta(days=14 * step) for step in range(count)], (_era(_OPENS, 14),),
     )
+
+
+#: Sixty paydays reach 2029-04-19, past a July raise's second year.
+_TWO_YEARS = 60
 
 
 def _biweekly_then_weekly():
@@ -98,6 +104,22 @@ def _percent(day, pct):
     return RaiseTerms(
         effective_date=day, is_recurring=False, percentage=Decimal(pct),
         flat_amount=None, terminal_year=None, raise_type_name="merit",
+    )
+
+
+def _recurring(day, pct, terminal_year=None):
+    """A merit raise of *pct* from *day*, every year on its month and day through *terminal_year*."""
+    return RaiseTerms(
+        effective_date=day, is_recurring=True, percentage=Decimal(pct),
+        flat_amount=None, terminal_year=terminal_year, raise_type_name="merit",
+    )
+
+
+def _flat(day, yearly):
+    """A one-time cola raise of *yearly* dollars a year (a string) from *day*."""
+    return RaiseTerms(
+        effective_date=day, is_recurring=False, percentage=None,
+        flat_amount=Decimal(yearly), terminal_year=None, raise_type_name="cola",
     )
 
 
@@ -284,6 +306,136 @@ class TestTheBannerComparesPayWithPay:
             _WEDNESDAY_RAISE,
         )
         assert _badge(basis, date(2027, 3, 25)) == "PAY +$10.00"
+
+
+def _badges(basis, *paydays):
+    """The banner of each of *paydays*' paychecks, in order."""
+    return [_badge(basis, payday) for payday in paydays]
+
+
+class TestARaiseBadgesTheFirstPaycheckItReaches:
+    """A raise's banner shows on the paycheck whose pay period holds its day, and nowhere else.
+
+    Ruling plan#3092, task plan#3101.  Until then a raise badged every
+    paycheck DATED in its month, a recurring one every year: the 03-03 raise
+    badged 03-11 and 03-25 alike, and a raise from 03-29 badged those two and
+    not 04-08, the only one of the three it reaches.
+    """
+
+    def test_it_badges_the_paycheck_its_day_falls_in(self):
+        """5% from Wednesday 03-03, inside 03-11's 02-20..03-05: 03-11 alone.
+
+        03-25, paying 03-06..03-19 wholly at the raise, is dated in March too
+        and changes nothing.  The label is 0.05 x 100 = 5.00.
+        """
+        basis = _basis(_biweekly(), [(_OPENS, "2000.00")], _WEDNESDAY_RAISE)
+        assert _badges(
+            basis, date(2027, 2, 25), date(2027, 3, 11), date(2027, 3, 25),
+        ) == ["", "MERIT +5.00%", ""]
+
+    def test_on_a_pay_periods_first_day_it_badges_that_paycheck(self):
+        """From Saturday 03-06, 03-25's first day: 03-25, not 03-11, which ends 03-05."""
+        basis = _basis(
+            _biweekly(), [(_OPENS, "2000.00")], (_percent(date(2027, 3, 6), "0.05"),),
+        )
+        assert _badges(basis, date(2027, 3, 11), date(2027, 3, 25)) == ["", "MERIT +5.00%"]
+
+    def test_on_a_pay_periods_last_day_it_badges_that_paycheck(self):
+        """From Friday 03-05, 03-11's last day: 03-11, one weekday at the raise, and not 03-25."""
+        basis = _basis(
+            _biweekly(), [(_OPENS, "2000.00")], (_percent(date(2027, 3, 5), "0.05"),),
+        )
+        assert _badges(basis, date(2027, 3, 11), date(2027, 3, 25)) == ["MERIT +5.00%", ""]
+
+    def test_late_in_a_month_it_badges_a_paycheck_dated_the_next(self):
+        """From Monday 03-29, inside 04-08's 03-20..04-02: April's paycheck, neither of March's."""
+        basis = _basis(
+            _biweekly(), [(_OPENS, "2000.00")], (_percent(date(2027, 3, 29), "0.05"),),
+        )
+        assert _badges(
+            basis, date(2027, 3, 11), date(2027, 3, 25), date(2027, 4, 8),
+        ) == ["", "", "MERIT +5.00%"]
+
+    def test_a_recurring_raise_badges_its_first_paycheck_each_year(self):
+        """3% every July 1 from 2027: 2027-07-15 and 2028-07-13, never a July 1 payday.
+
+        2027: 07-01 pays 06-12..06-25, before the raise; 07-15 pays
+        06-26..07-09, holding Thursday 07-01; 07-29 pays 07-10..07-23.
+        2028: 06-29 pays 06-10..06-23; 07-13 pays 06-24..07-07, holding
+        Saturday 07-01; 07-27 pays 07-08..07-21.
+        """
+        basis = _basis(
+            _biweekly(_TWO_YEARS), [(_OPENS, "2000.00")],
+            (_recurring(date(2027, 7, 1), "0.03"),),
+        )
+        assert _badges(
+            basis, date(2027, 7, 1), date(2027, 7, 15), date(2027, 7, 29),
+        ) == ["", "MERIT +3.00%", ""]
+        assert _badges(
+            basis, date(2028, 6, 29), date(2028, 7, 13), date(2028, 7, 27),
+        ) == ["", "MERIT +3.00%", ""]
+
+    def test_a_recurring_raise_badges_nothing_after_its_end_year(self):
+        """Believed through 2027: 2027-07-15 badges it, 2028-07-13 does not.
+
+        The pricing walk stops applying it after 2027 (``_is_believed_in``),
+        so the banner, which names what the walk applied, stops with it.
+        """
+        basis = _basis(
+            _biweekly(_TWO_YEARS), [(_OPENS, "2000.00")],
+            (_recurring(date(2027, 7, 1), "0.03", terminal_year=2027),),
+        )
+        assert _badges(basis, date(2027, 7, 15), date(2028, 7, 13)) == ["MERIT +3.00%", ""]
+
+    def test_a_one_time_raise_badges_once(self):
+        """3% once from 2027-07-01: 2027-07-15, and nothing a year on."""
+        basis = _basis(
+            _biweekly(_TWO_YEARS), [(_OPENS, "2000.00")], (_percent(date(2027, 7, 1), "0.03"),),
+        )
+        assert _badges(basis, date(2027, 7, 15), date(2028, 7, 13)) == ["MERIT +3.00%", ""]
+
+    def test_a_raise_its_entry_holds_badges_nowhere(self):
+        """The only entry, $2,100.00 from 03-25 (opens 03-06), holds the 03-03 raise.
+
+        03-11's pay period holds 03-03, but 03-11 is priced from the entry and
+        raised by nothing (R-SAL59), so no paycheck of the thirty badges it.
+        """
+        basis = _basis(_biweekly(), [(date(2027, 3, 25), "2100.00")], _WEDNESDAY_RAISE)
+        paydays = [_OPENS + timedelta(days=14 * step) for step in range(30)]
+        assert [payday for payday in paydays if _badge(basis, payday)] == []
+
+    def test_raises_reaching_one_paycheck_are_named_in_the_order_they_apply(self):
+        """A cola from Thursday 03-04 given first, a merit from Wednesday 03-03 second: merit first.
+
+        03-11 pays both for the first time; the merit lands a day earlier, so
+        it compounds first and is named first, whatever order the set lists
+        them in.
+        """
+        basis = _basis(
+            _biweekly(), [(_OPENS, "2000.00")],
+            (_flat(date(2027, 3, 4), "2600"), _percent(date(2027, 3, 3), "0.05")),
+        )
+        assert _badge(basis, date(2027, 3, 11)) == "MERIT +5.00%, COLA +$2,600.00"
+
+    def test_a_paycheck_badges_exactly_where_its_rate_first_moves(self):
+        """Two years of the July raise: the badged paydays are the paydays whose rate moves.
+
+        The rate is 2,000.00 through 07-01, 2,000.00 x 1.03 = 2,060.00 from
+        07-15, and 2,060.00 x 1.03 = 2,121.80 from 2028-07-13.  The banner and
+        the figure beside it read one walk, so they move on the same paychecks.
+        """
+        basis = _basis(
+            _biweekly(_TWO_YEARS), [(_OPENS, "2000.00")],
+            (_recurring(date(2027, 7, 1), "0.03"),),
+        )
+        paydays = [_OPENS + timedelta(days=14 * step) for step in range(_TWO_YEARS)]
+        moved = [
+            later for earlier, later in zip(paydays, paydays[1:])
+            if basis.base_pay_on(later).rate != basis.base_pay_on(earlier).rate
+        ]
+        badged = [payday for payday in paydays if _badge(basis, payday)]
+        assert badged == moved == [date(2027, 7, 15), date(2028, 7, 13)]
+        assert basis.base_pay_on(date(2028, 7, 13)).rate.per_paycheck == Decimal("2121.80")
 
 
 class TestARhythmSeam:

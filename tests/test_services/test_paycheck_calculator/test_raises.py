@@ -583,14 +583,17 @@ class TestTheBasisNamesItsRaiseSet:
     ):
         """The banner announces the set the paycheck was PRICED under.
 
-        March 2029 badges the forever raise on the rows; under terms believed
-        through 2027 it moved nothing that year and must badge nothing --
+        2029-03-16, paying 02-25..03-10, is the first paycheck the 2029-03-01
+        application reaches (ruling plan#3092; it was 03-02, the first dated
+        in March, until task plan#3101, though 03-02 pays 02-11..02-24).  It
+        badges the forever raise on the rows; under terms believed through
+        2027 the raise moved nothing that year and must badge nothing --
         otherwise the surface announces a raise the gross beside it was not
         priced with, the two-walks defect ``salary_raises`` records.
         """
         profile, terms = self._rows_and_terms()
         periods = self._periods_2029()
-        march = periods[4]  # 2029-03-02
+        march = periods[5]  # 2029-03-16
         stored = payroll_basis(profile, periods)
         believed = replace(stored, raise_terms=terms)
 

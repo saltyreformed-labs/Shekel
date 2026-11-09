@@ -45,7 +45,7 @@ from app.services.recurrence import (
 from app.services.salary_raises import (
     RaiseTerms,
     applications_between,
-    get_raise_event,
+    raise_banner,
     raise_pay,
     terms_of,
 )
@@ -264,11 +264,15 @@ class _InForce:
         entry: The entry the pay was walked from.
         carried: ``(day, yearly pay)`` of the LAST change of count the walk
             carried the pay across, or ``None`` when it crossed none.
+        raised: ``(landing day, raise)`` of every forecast application the
+            walk raised the pay by, in the order it applied them: what a
+            paycheck's banner names (:meth:`PayrollBasis.pay_event_on`).
     """
 
     rate: PayRate
     entry: _Entry
     carried: "tuple[date, Decimal] | None"
+    raised: "tuple[tuple[date, RaiseTerms], ...]"
 
 
 def _carry(pay: Decimal, paid_at: PayCadence, to: PayCadence) -> Decimal:
@@ -659,15 +663,14 @@ class PayrollBasis:
         paid_at = self._rhythm_on(entry.opens)
         final = self._rhythm_on(day)
         carried = None
+        applications = applications_between(self.raises, entry.opens, day)
         events = [
             (first, 0, 0, index)
             for first, index in self._seams
             if entry.opens < first <= day
         ] + [
             (landed, 1, method_rank, raise_obj)
-            for landed, method_rank, raise_obj in applications_between(
-                self.raises, entry.opens, day,
-            )
+            for landed, method_rank, raise_obj in applications
         ]
         for landed, kind, _rank, subject in sorted(events, key=lambda e: e[:3]):
             if kind == 0:
@@ -681,7 +684,10 @@ class PayrollBasis:
         if final.periods_per_year != paid_at.periods_per_year:
             carried = (day, PayRate(pay, paid_at).annual)
             pay = _carry(pay, paid_at, final)
-        return _InForce(PayRate(pay, final), entry, carried)
+        return _InForce(
+            PayRate(pay, final), entry, carried,
+            tuple((landed, raise_obj) for landed, _rank, raise_obj in applications),
+        )
 
     def pay_rate_on(self, day: date) -> PayRate:
         """Return the pay in force on *day*, at the rhythm in force that day.
@@ -800,10 +806,21 @@ class PayrollBasis:
         wholly at the raise, would have read ``PAY +$70.00`` for a change of
         nothing.  Pay with pay it is $2,100.00 against the $2,100.00 in force
         on 03-05, the day before the entry's paycheck opens, and badges
-        nothing.  A forecast raise that entry replaces
-        badges nothing
-        (:func:`~app.services.salary_raises.get_raise_event` with the day the
-        entry opens).  An entry changing nothing badges nothing.
+        nothing.  An entry changing nothing badges nothing.
+
+        **A forecast raise badges the first paycheck it reaches** (ruling
+        **plan#3092**, task plan#3101): the paycheck whose pay period holds
+        the day it lands, and only where that paycheck is priced under it.
+        The banner names the applications the walk to the paycheck's last day
+        applied -- the walk its rate is (:meth:`_walk`, ``raised``) -- that
+        land on or after the first day it pays for: the pricing's own read of
+        the pay period and of the entry in force, so a banner cannot announce
+        a raise the figure beside it was not priced under.  A raise dated on
+        or before the day the paycheck's entry opens is inside the entry
+        (ruling **plan#3091**), never applied, and badges nothing.  Made-up:
+        5% from Wednesday 2027-03-03 badges 03-11, paying 02-20..03-05, and
+        neither 02-25 nor 03-25; until this task it badged every paycheck
+        dated in March, 03-11 and 03-25.
 
         **The FIRST entry badges no pay change**: every paycheck before it is
         priced FROM it (R-SAL59), so there is no earlier recorded pay to
@@ -827,9 +844,8 @@ class PayrollBasis:
         compared per paycheck.
 
         Args:
-            period: The paycheck's pay period: its ``start_date`` is the
-                payday, and it is handed on to ``get_raise_event``.  One
-                argument, so the payday and the period cannot disagree.
+            period: The paycheck's span on the calendar, read for its
+                ``start_date``, the payday, alone.
 
         Returns:
             The comma-joined labels, or ``""``.
@@ -849,8 +865,12 @@ class PayrollBasis:
                 return ""
             sign = "+" if change > 0 else "-"
             return f"PAY {sign}${abs(change):,.2f}{unit}"
-        opens = self._in_force_on(self._paid_days_of(payday).last).entry.opens
-        return get_raise_event(self.raises, period, opens)
+        paid = self._paid_days_of(payday)
+        return raise_banner(
+            raise_obj
+            for landed, raise_obj in self._in_force_on(paid.last).raised
+            if landed >= paid.first
+        )
 
     def rhythm_changes_without_pay(self) -> "list[RhythmChangeWithoutPay]":
         """Return each change of rhythm whose pay is priced by carrying the yearly pay.

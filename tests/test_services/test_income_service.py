@@ -1711,7 +1711,9 @@ class TestThePricerIsKeyedOnTheRaiseSet:
         plan#3091), so the February raise is after it.  The case priced
         February's first paycheck, 02-13, until a paycheck paid each weekday
         at its own pay (ruling plan#3089): 02-13 pays 01-25..02-07, half
-        before the raise, so it moves by $500.00.
+        before the raise, so it moves by $500.00.  **Its banner is read on
+        02-13** since task plan#3101: that is the first paycheck the raise
+        reaches (ruling plan#3092), and 02-27 badges nothing.
         """
         with app.app_context():
             profile = _create_profile(
@@ -1729,6 +1731,14 @@ class TestThePricerIsKeyedOnTheRaiseSet:
                 ).first >= date(first.start_date.year, 2, 1)
             )
             assert february.start_date == date(first.start_date.year, 2, 27)
+            reached = next(
+                period for period in calendar.saved()
+                if days_paid_for(
+                    calendar, period.start_date,
+                    profile.period_end_days_before_payday,
+                ).last >= date(first.start_date.year, 2, 1)
+            )
+            assert reached.start_date == date(first.start_date.year, 2, 13)
             before = pricing_over(calendar).for_profile(
                 profile,
             ).at(february).earnings.gross_biweekly
@@ -1748,12 +1758,13 @@ class TestThePricerIsKeyedOnTheRaiseSet:
                 # is the state under test; ``no_autoflush`` is what keeps it
                 # pending through the pricing below.
                 assert pending.raise_type is None
-                after = pricing_over(
-                    calendar,
-                ).for_profile(profile).at(february)
+                paychecks = pricing_over(calendar).for_profile(profile)
+                after = paychecks.at(february)
+                first_reached = paychecks.at(reached)
                 db.session.rollback()
 
             # $26,000 a year is exactly $1,000.00 a paycheck over 26.
             assert after.earnings.gross_biweekly == before + Decimal("1000.00")
-            assert after.period.raise_event == "CUSTOM +$26,000.00"
+            assert first_reached.period.raise_event == "CUSTOM +$26,000.00"
+            assert after.period.raise_event == ""
 

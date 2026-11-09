@@ -40,6 +40,7 @@ that one changed.  That is an INPUT the owner typed for one request, with the
 row still the one home of the stored fact -- not a second home computed from a
 global on every render, which is what S3-c deleted.
 """
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -199,7 +200,7 @@ class RaiseTerms:
     Frozen and hashable by value.  ``percentage`` and ``flat_amount`` are
     carried as the ``Decimal`` the column holds (``Decimal("0.0500")`` and
     ``Decimal("0.05")`` are equal and hash alike); ``raise_type_name`` is the
-    type's display name, which :func:`get_raise_event` composes a label from
+    type's display name, which :func:`raise_banner` composes a label from
     and which is the only thing the engine reads of a raise's type.
 
     Attributes:
@@ -250,9 +251,10 @@ def terms_of(raises) -> "tuple[RaiseTerms, ...]":
     """Every raise in *raises* as :class:`RaiseTerms`, in the order given.
 
     **The one canonical spelling of a raise set.**  Order is kept rather than
-    sorted because it is part of the answer: :func:`get_raise_event` joins
-    labels in iteration order, and :func:`applications_between` keeps input
-    order between two applications on one date by one method.
+    sorted because it is part of the answer: :func:`applications_between`
+    keeps input order between two applications on one date by one method,
+    which is the order they compound in and the order :func:`raise_banner`
+    names them in.
 
     Args:
         raises: An iterable of raise-shaped objects (see :meth:`RaiseTerms.of`).
@@ -347,12 +349,15 @@ def _is_believed_in(raise_obj, year):
 
     **The one place this project answers that question.**  It was answered
     twice until an adversarial review of plan step salary:S3-c -- once as a
-    clamp inside :func:`_applications` and once as a comparison inside
-    :func:`get_raise_event`, sixty lines apart, agreeing because they were
+    clamp inside :func:`_applications` and once as a comparison inside the
+    banner's own month walk, sixty lines apart, agreeing because they were
     read together rather than because anything held them to each other.  Two
     spellings of one rule are two spellings whether or not they agree today
     (CLAUDE.md rule 14), and the money either side of a disagreement is a
-    projected paycheck against the banner announcing it.
+    projected paycheck against the banner announcing it.  Since task
+    plan#3101 the banner asks it nothing: it names the applications the
+    pricing walk applied (:func:`raise_banner`), so :func:`_applications` is
+    the one caller.
 
     Args:
         raise_obj: A raise exposing ``effective_date`` and ``terminal_year``.
@@ -414,108 +419,57 @@ def _applications(raises, through):
             yield starts, method_rank, raise_obj
 
 
-def get_raise_event(raises, period, replaced_through=None):
-    """Return a description of any raise event occurring in this period.
+def raise_banner(raises: "Iterable[RaiseTerms]") -> str:
+    """Return the banner announcing *raises*: each one's label, comma-joined in the order given.
 
     Public because the paycheck engine's basis composes each paycheck's
     banner from it (:meth:`~app.services.payroll_basis.PayrollBasis
-    .pay_event_on`).  Pure over *raises* and
-    ``period.start_date`` -- no breakdown, no DB, no ``float``.
+    .pay_event_on`).  Pure string composition over the values it is handed --
+    no period, no DB, no ``float``.
 
-    **It takes the RAISE SET rather than the profile since plan step
-    salary:S3-f-1** (ruling **R-SAL20**), for the same reason
-    :func:`applications_between` does: the engine badges the event of the set it
-    PRICED, which is its basis's and not necessarily the profile's rows, and a
-    banner announcing a raise the paycheck beside it was not priced under is
-    the two-walks-disagreeing defect the paragraph below records.  Its one
-    caller is :meth:`~app.services.payroll_basis.PayrollBasis.pay_event_on`
-    since plan step salary:X-av-3a; the cockpit route passed
-    ``profile.raises`` here directly until then, and reads the engine's own
-    banner now.
-
-    **It badges only an application the paycheck is PRICED under since plan
-    step salary:X-av-3a** (ruling **R-SAL84**): a forecast raise dated on or
-    before the day the pay entry a paycheck is priced from opens is replaced
-    by that entry (:func:`applications_between`, ruling **plan#3091**), so
-    its banner would announce money that never arrives.  *replaced_through*
-    is that day.
+    **It is handed the raises to announce, and chooses none, since task
+    plan#3101** (ruling **plan#3092**: a raise's banner shows on the first
+    paycheck it reaches).  It was ``get_raise_event(raises, period,
+    replaced_through)`` until then, and chose for itself: every raise dated
+    in the period's month, a recurring one in each year
+    :func:`_is_believed_in` admits, less those dated by the day the
+    paycheck's pay entry opens.  That is a second walk beside
+    :func:`applications_between`'s, and the two parted on every raise: 5%
+    from Wednesday 2027-03-03 (made-up) badged both March paychecks, 03-11
+    and 03-25, while only 03-11's pay period, 02-20..03-05, holds the day it
+    starts; from Monday 03-29 it badged the same two, neither of which it
+    reaches, and missed 04-08, the one that it does.  The basis now names
+    the applications its own pricing walk applied, so the banner cannot
+    announce a raise the figure beside it was not priced under, nor a raise
+    the walk stopped applying after its end year (plan step salary:S3-c's
+    obligation, kept by construction now rather than by a second reading of
+    ``terminal_year``).
 
     Args:
-        raises: The raise set -- each exposing what
-            :func:`applications_between` documents PLUS ``raise_type_name``,
-            which is what :class:`RaiseTerms` carries and what a
-            :class:`~app.models.salary_raise.SalaryRaise` row exposes as a
-            property; a falsy/empty set badges nothing.
-        period: The pay period, read for ``start_date`` alone.
-        replaced_through: The first day the pay entry the period's paycheck
-            is priced from is in force (its own paycheck's first day); an
-            application landing on or before it badges nothing.  ``None``
-            badges every application of the month.
+        raises: The raises whose applications the paycheck is the first to
+            reach, in the order they apply
+            (:func:`applications_between`'s); empty for none.
 
     Returns:
-        The comma-joined event labels for *period*, or ``""``.
-
-    **It honours ``terminal_year`` as of plan step salary:S3-c**, which is an
-    obligation that step INHERITED rather than created: plan step salary:S3-a
-    added the field and named this function as the walk that did not know
-    about it, so a recurring raise went on badging an event every year after
-    its last believed one -- a banner on a paycheck whose gross the same field
-    had already stopped moving.  **Both walks go through
-    :func:`_is_believed_in`**, so they agree by construction rather than by
-    being read together -- a draft of this paragraph claimed the weaker thing,
-    and an adversarial review of this step took that admission as the finding
-    it was.
+        The comma-joined labels -- ``"{TYPE} +{pct}%"`` for a percentage
+        raise, ``"{TYPE} +${amount:,.2f}"`` for a flat one -- or ``""``.
     """
-    if not raises:
-        return ""
-
-    period_year = period.start_date.year
-    period_month = period.start_date.month
     events = []
-
     for raise_obj in raises:
-        eff_month = raise_obj.effective_date.month
-        eff_year = raise_obj.effective_date.year
-
-        is_match = False
-        if (raise_obj.is_recurring and period_month == eff_month
-                and _is_believed_in(raise_obj, period_year)):
-            # A recurring raise recurs at eff_month every year from
-            # eff_year onward and stops after the last year it is believed,
-            # matching _applications' gate at BOTH ends -- so it
-            # must not badge an event in a calendar year before it takes
-            # effect (deep-hunt #13) or after it is over (salary:S3-c).
-            is_match = True
-        elif eff_year == period_year and eff_month == period_month:
-            # The one-time arm, which a terminated recurring raise cannot
-            # fall through into: reaching here needs ``period_year ==
-            # eff_year``, and ``ck_salary_raises_terminal_year_not_before_
-            # effective`` guarantees a raise is still believed in its own
-            # effective year.  A one-time raise carries no terminal year at
-            # all (``ck_salary_raises_terminal_year_only_on_a_recurring_
-            # raise``), so there is nothing to test here.
-            is_match = True
-
-        if is_match and replaced_through is not None:
-            # The application this match announces lands on the raise's own
-            # month and day in the period's year (a one-time raise's own
-            # year is that year).
-            is_match = raise_obj.effective_date.replace(year=period_year) > replaced_through
-        if is_match:
-            # The type's display name, ONE attribute on rows and values alike.
-            # A ``raise_type is None`` arm stood here; a row's property now
-            # resolves the name from ``raise_type_id`` through the ref cache,
-            # which answers a never-flushed row too (the relationship does
-            # not), so the fallback label "raise" that arm produced for such a
-            # row is gone with it.
-            raise_type = raise_obj.raise_type_name
-            if raise_obj.percentage:
-                pct = Decimal(str(raise_obj.percentage)) * 100
-                events.append(f"{raise_type.upper()} +{pct}%")
-            else:
-                events.append(f"{raise_type.upper()} +${raise_obj.flat_amount:,.2f}")
-
+        # The type's display name, ONE attribute on rows and values alike.
+        # A ``raise_type is None`` arm stood here; a row's property now
+        # resolves the name from ``raise_type_id`` through the ref cache,
+        # which answers a never-flushed row too (the relationship does
+        # not), so the fallback label "raise" that arm produced for such a
+        # row is gone with it.
+        raise_type = raise_obj.raise_type_name
+        if raise_obj.percentage:
+            pct = Decimal(str(raise_obj.percentage)) * 100
+            events.append(f"{raise_type.upper()} +{pct}%")
+        else:
+            events.append(f"{raise_type.upper()} +${raise_obj.flat_amount:,.2f}")
     return ", ".join(events)
+
 
 __all__ = [
     "EndYearError",
@@ -527,7 +481,7 @@ __all__ = [
     "RaiseTerms",
     "applications_between",
     "end_year_of",
-    "get_raise_event",
+    "raise_banner",
     "raise_pay",
     "terms_of",
 ]

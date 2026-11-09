@@ -414,11 +414,14 @@ class TestThePayChangeBadge:
     """R-SAL84 / R-SAL85, and yearly pay across a seam."""
 
     def test_a_recorded_raise_badges_its_change_and_the_replaced_forecast_badges_nothing(self):
-        """From 07-30 (opens 07-11): 'PAY +$72.10'; 08-13 nothing; 2027-07-01 the forecast.
+        """From 07-30 (opens 07-11): 'PAY +$72.10'; 08-13 nothing; 2027-07-15 the forecast.
 
         2,132.10 against the 2,060.00 in force on 07-10, the day before the
         entry opens (ruling plan#3091: pay with pay).  The entry holds July
-        2026's raise, so no later paycheck badges it.  An entry from 07-02,
+        2026's raise, so no later paycheck badges it.  July 2027's badges
+        2027-07-15, paying 06-26..07-09, the first paycheck it reaches (ruling
+        plan#3092); it badged 2027-07-01, paying 06-12..06-25, until task
+        plan#3101.  An entry from 07-02,
         which opens 06-13, holds no July raise and the raise goes on reaching
         07-16 (``test_an_entry_before_a_raise_keeps_the_raise``), so 07-16
         badges it: 'MERIT +3.00%'.  That case badged '' while an entry held
@@ -431,7 +434,8 @@ class TestThePayChangeBadge:
         )
         assert _badge(basis, date(2026, 7, 30)) == "PAY +$72.10"
         assert _badge(basis, date(2026, 8, 13)) == ""
-        assert _badge(basis, date(2027, 7, 1)).startswith("MERIT +")
+        assert _badge(basis, date(2027, 7, 1)) == ""
+        assert _badge(basis, date(2027, 7, 15)) == "MERIT +3.00%"
         before_the_raise = _basis(
             _biweekly(),
             [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 2), "2070.00")],
@@ -441,9 +445,18 @@ class TestThePayChangeBadge:
         assert _badge(before_the_raise, date(2026, 7, 16)) == "MERIT +3.00%"
 
     def test_the_forecast_badges_where_no_entry_replaces_it(self):
-        """No recorded change: July 2026 badges its merit raise."""
+        """No recorded change: July 2026's merit raise badges 07-16 alone.
+
+        07-16 is the first paycheck it reaches (ruling plan#3092), paying
+        06-27..07-10; 07-02 pays 06-13..06-26, before it, and 07-30 is the
+        second.  It badged all three, every payday dated in July, until task
+        plan#3101.
+        """
         basis = _basis(_biweekly(), [(date(2026, 1, 1), "2000.00")], _EVERY_JULY)
-        assert _badge(basis, date(2026, 7, 2)).startswith("MERIT +")
+        assert [
+            _badge(basis, payday)
+            for payday in (date(2026, 7, 2), date(2026, 7, 16), date(2026, 7, 30))
+        ] == ["", "MERIT +3.00%", ""]
 
     def test_a_recorded_cut_badges_a_minus_and_reads_as_a_cut(self):
         """2,000.00 then 1,930.00 from 07-02: 'PAY -$70.00', which the screens show amber."""

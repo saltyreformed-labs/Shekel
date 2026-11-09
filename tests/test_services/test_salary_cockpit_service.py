@@ -148,9 +148,9 @@ def _scenario():
 class TestCleanRaiseLabel:
     """clean_raise_label: display cleaning of calculator raise_event strings.
 
-    Input shapes are exactly what get_raise_event emits (verified against
-    app/services/salary_raises.py, which the engine package's ``_pricing``
-    leaf calls): "{TYPE} +{pct}%" for percentage
+    Input shapes are exactly what raise_banner emits (verified against
+    app/services/salary_raises.py, which the basis's ``pay_event_on``
+    calls): "{TYPE} +{pct}%" for percentage
     raises (pct = stored Numeric(5,4) percentage * 100, e.g. "2.5000"),
     "{TYPE} +${amount:,.2f}" for flat raises, multiple events joined with
     ", ", and "RAISE" as the null-relationship type fallback.

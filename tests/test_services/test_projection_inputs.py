@@ -735,8 +735,9 @@ class TestLoadPayrollFeeds:
                 event.remove(db.engine, "before_cursor_execute", _count)
             assert statements == []
             # Non-vacuity for the raise path: the pricer the feed read priced
-            # at least one walked July with the raise's own label, so the
-            # raise-month branch of ``get_raise_event`` was on the path.
+            # at least one walked paycheck with the raise's own label, the
+            # first each July's application reaches, so the banner's path
+            # (``PayrollBasis.pay_event_on``) was walked.
             assert any(
                 pricing.for_profile(profile).at(period).period.raise_event
                 for period in projected

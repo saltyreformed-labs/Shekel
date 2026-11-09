@@ -30,16 +30,17 @@ migration drift apart silently, and this one is a DROP, so the direction that
 matters is a column that survived the migration.
 
 :class:`TestARaiseStopsBadgingAfterItsEndYear` covers the obligation this step
-INHERITED from salary:S3-a rather than created -- ``get_raise_event`` walks
-the same rows to badge a raise on the salary surfaces and knew nothing about
+INHERITED from salary:S3-a rather than created -- the banner walked the same
+rows to badge a raise on the salary surfaces and knew nothing about
 termination, so it went on announcing a raise every year after the field had
-already stopped moving the gross.
+already stopped moving the gross.  Since task plan#3101 the banner names the
+applications the pricing walk applied, so the cases read it through the
+paycheck engine.
 """
 
 from datetime import date
 from decimal import Decimal
 
-import pytest
 from sqlalchemy import text
 
 from app import ref_cache
@@ -49,7 +50,8 @@ from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
 from app.models.salary_raise import SalaryRaise
 from app.models.user import UserSettings
-from app.services.salary_raises import get_raise_event
+from app.services.pay_calendar import calendar_for
+from app.services.payroll_basis import PayrollBasis
 from tests._test_helpers import load_migration_module, start_test_pay_list
 
 MIGRATION = "d4e8b1c62f07_the_end_year_moves_onto_the_raise.py"
@@ -114,6 +116,33 @@ def _raise(profile, *, raise_type=RaiseTypeEnum.MERIT, effective_year=2027,
     return row
 
 
+def _badged_paydays(profile, year):
+    """The paydays from December of the year before *year* through its February that badge a raise.
+
+    The paycheck engine's banner
+    (:meth:`~app.services.payroll_basis.PayrollBasis.pay_event_on`) over the
+    profile's own rows, on the owner's calendar projected past its record.
+    Every raise here starts on January 1, so the window holds the one
+    paycheck whose pay period holds that day in *year* (ruling plan#3092: a
+    raise's banner shows on the first paycheck it reaches) and the paychecks
+    either side of it.
+
+    Args:
+        profile: The committed profile, its raises refreshed.
+        year: The year whose January 1 application is asked about.
+
+    Returns:
+        The badged paydays, ascending.
+    """
+    calendar = calendar_for(profile.user_id)
+    basis = PayrollBasis(profile, calendar)
+    return [
+        period.start_date
+        for period in calendar.projection_axis(date(year - 1, 12, 1), date(year, 2, 28))
+        if basis.pay_event_on(period)
+    ]
+
+
 def _restore_the_deleted_setting(user_id, horizon):
     """Put ``merit_raise_horizon_years`` back, holding *horizon* for *user_id*.
 
@@ -163,8 +192,11 @@ def _run_backfill(base_year=BASE_YEAR):
     module = load_migration_module(MIGRATION)
     _restore_the_raise_year()
     db.session.execute(
+        # Pylint: ``protected-access`` -- the case runs the migration's own
+        # private statement, the one part of it a recorder cannot grade.
         module._BACKFILL.bindparams(  # pylint: disable=protected-access
             base_year=base_year,
+            # Pylint: ``protected-access`` -- the default the same statement binds.
             default_years=module._DEFAULT_HORIZON_YEARS,  # pylint: disable=protected-access
         )
     )
@@ -498,22 +530,16 @@ class TestTheGlobalSettingIsGone:
 
 
 class TestARaiseStopsBadgingAfterItsEndYear:
-    """``get_raise_event`` honours the end year (the INHERITED obligation).
+    """The banner honours the end year (the INHERITED obligation).
 
-    Plan step salary:S3-a named this walk as the one that did not know about
-    termination and left nothing enforcing it.  It badges a raise on the
-    salary surfaces -- the paycheck engine's ``PeriodInfo`` and the cockpit's
-    one-banner-per-run collapse -- so before this step a raise whose end year
-    had already stopped moving the gross went on announcing itself every
-    January for as long as the projection ran.
+    Plan step salary:S3-a named the banner's walk as the one that did not know
+    about termination and left nothing enforcing it.  The banner is the
+    paycheck engine's ``PeriodInfo.raise_event``, which every salary surface
+    reads, so before this step a raise whose end year had already stopped
+    moving the gross went on announcing itself every January for as long as
+    the projection ran.  Each case counts the badged paychecks around one
+    January 1: exactly one where the raise applies, none where it does not.
     """
-
-    class _Period:
-        """The one attribute ``get_raise_event`` reads off a period."""
-
-        def __init__(self, start_date):
-            """Pin the period's start date."""
-            self.start_date = start_date
 
     def test_a_recurring_raise_badges_through_its_end_year(
         self, app, seed_user,
@@ -529,9 +555,9 @@ class TestARaiseStopsBadgingAfterItsEndYear:
             db.session.refresh(profile)
 
             for year in (2027, 2029, 2031):
-                assert get_raise_event(
-                    profile.raises, self._Period(date(year, 1, 15)),
-                ), f"no raise event badged in {year}, which is within its run"
+                assert len(_badged_paydays(profile, year)) == 1, (
+                    f"not one raise banner around {year}-01-01, which is within its run"
+                )
 
     def test_a_recurring_raise_stops_badging_after_its_end_year(
         self, app, seed_user,
@@ -550,10 +576,8 @@ class TestARaiseStopsBadgingAfterItsEndYear:
             _raise(profile, effective_year=2027, terminal_year=2031)
             db.session.refresh(profile)
 
-            assert get_raise_event(
-                profile.raises, self._Period(date(2032, 1, 15)),
-            ) == "", (
-                "get_raise_event badged a raise in 2032 whose last believed "
+            assert _badged_paydays(profile, 2032) == [], (
+                "the banner badged a raise in 2032 whose last believed "
                 "year is 2031; the raise walk stopped applying it, so the "
                 "surfaces now announce a raise that moves no money"
             )
@@ -571,7 +595,7 @@ class TestARaiseStopsBadgingAfterItsEndYear:
             _raise(profile, effective_year=2027, terminal_year=None)
             db.session.refresh(profile)
 
-            assert get_raise_event(profile.raises, self._Period(date(2040, 1, 15)))
+            assert len(_badged_paydays(profile, 2040)) == 1
 
 
 #: The tightest end year ``ck_salary_raises_terminal_year_not_before_
@@ -599,10 +623,4 @@ def test_a_raise_believed_only_in_its_first_year_still_badges_there(
         )
         db.session.refresh(profile)
 
-        class _Period:  # pylint: disable=too-few-public-methods
-            """Pylint: ``too-few-public-methods`` -- a one-attribute stub is
-            the whole of what ``get_raise_event`` reads off a period."""
-
-            start_date = date(_BOUNDARY_YEAR, 1, 15)
-
-        assert get_raise_event(profile.raises, _Period())
+        assert len(_badged_paydays(profile, _BOUNDARY_YEAR)) == 1

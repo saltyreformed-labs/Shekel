@@ -56,6 +56,10 @@ TRUST_LIFETIME = timedelta(days=30)
 #: length as trust (ruling plan#2995), so it is stated once and named twice.
 #: A trust begins at a finished sign-in, which renews this too, so the
 #: browser's cookie, which lasts this long, can never die before a trust does.
+#: A session ends this long after its sign-in too, however active (ruling
+#: plan#3069, ``app.utils.session_helpers.sign_in_is_live``): the sign-in that
+#: starts it renews the record from the same instant, so a browser that is
+#: signed in is known, unless its own wrong guesses removed its record.
 KNOWN_LIFETIME = TRUST_LIFETIME
 
 #: The longest User-Agent a record keeps.  It is kept only to name the device

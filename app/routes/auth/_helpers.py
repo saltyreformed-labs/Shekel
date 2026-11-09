@@ -164,9 +164,10 @@ def _complete_sign_in(
     plan#3007) unless the browser is *known*, records the browser (plan#2772,
     ruling plan#2994) so a password alone never makes one known on an account
     with a code, calls ``login_user``, stamps the user and every lifecycle key
-    from one instant so the idle and fresh-login checks start where the
-    session did (commit C-10) and no other user's id can be loaded on it
-    (plan#2173), and chooses the landing page.  What differs per proof stays
+    from the instant the record was renewed at, so the idle and fresh-login
+    checks start where the session did (commit C-10), no other user's id can
+    be loaded on it (plan#2173) and the session ends when the browser stops
+    being known (ruling plan#3069), and chooses the landing page.  What differs per proof stays
     with its caller: the log event, and a backup code's sign-out of every other
     session.
 
@@ -193,13 +194,17 @@ def _complete_sign_in(
     _clear_mfa_pending_state()
     if not known:
         auth_service.clear_failed_attempts(user, device=None)
+    # One instant for the record and the session's stamps: a session ends
+    # KNOWN_LIFETIME after its sign-in stamp (ruling plan#3069), and one read
+    # a moment after the record's would outlive the browser's standing.
+    now = datetime.now(timezone.utc)
     token = known_device_service.record_sign_in(
         user.id, device_token(user.id),
-        request.headers.get("User-Agent", ""), trust=trust,
+        request.headers.get("User-Agent", ""), now=now, trust=trust,
     )
     db.session.commit()
     login_user(user)
-    stamp_login_session(datetime.now(timezone.utc), user.id)
+    stamp_login_session(now, user.id)
     response = redirect(_landing_page(user, next_page))
     set_device_cookie(response, user.id, token)
     return response

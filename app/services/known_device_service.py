@@ -23,7 +23,9 @@ browsers refused by a lock a stranger holds shut.
 
 **The clock is the process's**, ``datetime.now(timezone.utc)``, read once per
 act: the same clock the sign-in stamps and most ``session_invalidated_at``
-writers use.  Two writers (the owner's companion password reset and
+writers use.  A finished sign-in's instant is its caller's, handed to
+:func:`record_sign_in`, because the session's sign-in stamp is written from
+the same instant (ruling plan#3069).  Two writers (the owner's companion password reset and
 deactivation, ``app/routes/settings.py``) use the database's ``now()``, which
 is the moment their transaction BEGAN, not the moment it commits: a device
 trusted while such a request runs is not before the bump and survives it, as a
@@ -187,7 +189,8 @@ def find_browser(user_id: int, token: str | None) -> BrowserStanding | None:
 
 
 def record_sign_in(
-    user_id: int, token: str | None, user_agent: str, *, trust: bool = False,
+    user_id: int, token: str | None, user_agent: str,
+    *, now: datetime, trust: bool = False,
 ) -> str:
     """Record a finished sign-in on this browser, and return its new token.
 
@@ -212,13 +215,18 @@ def record_sign_in(
         user_agent: The browser's User-Agent header, ``""`` when it sent none.
             Kept to name the device in settings and cut to
             :data:`~app.models.known_device.USER_AGENT_MAX_LENGTH`.
+        now: The sign-in's instant: the record's ``last_signed_in_at``, its
+            ``trusted_at`` when *trust*, and the moment the standing and the
+            purge are judged at.  Required, with no default reading the
+            clock, because the session's sign-in stamp must be written from
+            this same instant: one a moment later would outlive the record
+            by the gap (ruling plan#3069).
         trust: Whether the user typed a code and asked to be trusted.
 
     Returns:
         The new token, for the browser's cookie.  This is the only place it
         exists: the row holds its hash.
     """
-    now = datetime.now(timezone.utc)
     db.session.execute(
         delete(KnownDevice).where(
             KnownDevice.user_id == user_id, ~_known(now),

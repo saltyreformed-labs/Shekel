@@ -149,7 +149,9 @@ def _browser_trusted_through_the_service(app, user_id):
     test whose one code another act needs (replay prevention refuses a second
     inside its thirty-second step).
     """
-    token = known_device_service.record_sign_in(user_id, None, "", trust=True)
+    token = known_device_service.record_sign_in(
+        user_id, None, "", now=datetime.now(timezone.utc), trust=True,
+    )
     db.session.commit()
     browser = app.test_client()
     browser.set_cookie(f"shekel_device_{user_id}", token)

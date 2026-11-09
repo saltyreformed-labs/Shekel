@@ -32,6 +32,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import time_machine
 
 from app.models.user import User
 from app.utils.log_events import AUTH
@@ -39,10 +40,14 @@ from app.utils.session_helpers import (
     FRESH_LOGIN_AT_KEY,
     SESSION_CREATED_AT_KEY,
     SESSION_LAST_ACTIVITY_KEY,
+    SESSION_SIGNED_IN_AT_KEY,
     SESSION_USER_ID_KEY,
     invalidate_other_sessions,
+    session_stamp,
     sign_in_created_at,
+    sign_in_is_live,
     stamp_login_session,
+    stamp_password_change,
     stamp_reauth_session,
     stamp_session_refresh,
 )
@@ -582,3 +587,109 @@ class TestStampHelpersWriteIsoStrings:
                 assert isinstance(value, str)
                 parsed = datetime.fromisoformat(value)
                 assert parsed.tzinfo is not None
+
+
+#: Ruling plan#3069's thirty days, spelled here as an oracle the model's
+#: constant cannot move silently.
+_THIRTY_DAYS = timedelta(days=30)
+
+
+class TestTheSignInStamp:
+    """Only a sign-in writes ``_signed_in_at``; a password change does not."""
+
+    def test_stamp_login_session_writes_it(self, app):
+        """The sign-in stamp carries the same ``now`` as the other three."""
+        with app.test_request_context("/") as ctx:
+            now = datetime.now(timezone.utc)
+            stamp_login_session(now, _STAMPED_USER_ID)
+
+            assert ctx.session[SESSION_SIGNED_IN_AT_KEY] == now.isoformat()
+
+    def test_stamp_password_change_writes_the_three_and_leaves_the_sign_in(
+        self, app,
+    ):
+        """Created, activity and fresh move to ``now``; the user and sign-in stay.
+
+        So a password change survives its own bump and restarts the step-up
+        window, and does not restart the session's thirty days.
+        """
+        with app.test_request_context("/") as ctx:
+            ctx.session[SESSION_USER_ID_KEY] = str(_STAMPED_USER_ID)
+            ctx.session[SESSION_SIGNED_IN_AT_KEY] = "the-sign-in"
+            now = datetime.now(timezone.utc)
+
+            stamp_password_change(now)
+
+            iso = now.isoformat()
+            assert ctx.session[SESSION_CREATED_AT_KEY] == iso
+            assert ctx.session[SESSION_LAST_ACTIVITY_KEY] == iso
+            assert ctx.session[FRESH_LOGIN_AT_KEY] == iso
+            assert ctx.session[SESSION_USER_ID_KEY] == str(_STAMPED_USER_ID)
+            assert ctx.session[SESSION_SIGNED_IN_AT_KEY] == "the-sign-in"
+
+
+class TestSessionStamp:
+    """``session_stamp`` reads a stamp, or ``None`` for one that cannot be read."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(None, id="missing"),
+            pytest.param("not-a-timestamp", id="malformed"),
+            pytest.param(12345, id="not-a-string"),
+            pytest.param("2026-03-01T12:00:00", id="naive"),
+        ],
+    )
+    def test_an_unreadable_stamp_is_none(self, app, value):
+        """Never an exception: each of these must read as "sign in again"."""
+        with app.test_request_context("/") as ctx:
+            if value is not None:
+                ctx.session[SESSION_SIGNED_IN_AT_KEY] = value
+
+            assert session_stamp(SESSION_SIGNED_IN_AT_KEY) is None
+
+    def test_an_aware_stamp_is_its_moment(self, app):
+        """A future one too: each check says what a clock jump means to it."""
+        with app.test_request_context("/") as ctx:
+            moment = datetime.now(timezone.utc) + timedelta(hours=1)
+            ctx.session[SESSION_SIGNED_IN_AT_KEY] = moment.isoformat()
+
+            assert session_stamp(SESSION_SIGNED_IN_AT_KEY) == moment
+
+
+class TestSignInIsLive:
+    """A sign-in younger than thirty days is live, for the user it stamped."""
+
+    @pytest.mark.parametrize(
+        "age, live",
+        [
+            pytest.param(_THIRTY_DAYS, False, id="thirty-days-to-the-second"),
+            pytest.param(
+                _THIRTY_DAYS - timedelta(seconds=1), True, id="a-second-younger",
+            ),
+            pytest.param(-timedelta(hours=1), True, id="in-the-future"),
+        ],
+    )
+    def test_its_age_decides(self, app, age, live):
+        """Frozen, so the age is exact: thirty days to the second is too old."""
+        moment = datetime.now(timezone.utc)
+        with time_machine.travel(moment, tick=False):
+            with app.test_request_context("/"):
+                stamp_login_session(moment - age, _STAMPED_USER_ID)
+
+                assert sign_in_is_live(str(_STAMPED_USER_ID)) is live
+
+    def test_another_users_session_is_not_live(self, app):
+        """Asked for any user but the one the sign-in stamped: ``False``."""
+        with app.test_request_context("/"):
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
+
+            assert sign_in_is_live(str(_STAMPED_USER_ID + 1)) is False
+
+    def test_a_session_with_no_sign_in_stamp_is_not_live(self, app):
+        """Every session signed in before the stamp existed is one."""
+        with app.test_request_context("/") as ctx:
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
+            del ctx.session[SESSION_SIGNED_IN_AT_KEY]
+
+            assert sign_in_is_live(str(_STAMPED_USER_ID)) is False

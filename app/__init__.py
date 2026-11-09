@@ -28,7 +28,9 @@ from app.utils.client_address import (
 from app.utils.logging_config import setup_logging
 from app.utils.session_helpers import (
     SESSION_LAST_ACTIVITY_KEY,
+    session_stamp,
     sign_in_created_at,
+    sign_in_is_live,
 )
 
 
@@ -119,6 +121,10 @@ def create_app(config_name=None, *, init_ref_cache=True):
             F-003, F-032).
           * Session whose last activity is older than
             ``IDLE_TIMEOUT_MINUTES`` or absent (commit C-10 -- F-006).
+          * Session whose sign-in is ``KNOWN_LIFETIME`` old or more, or
+            unstamped, however active (ruling plan#3069;
+            ``sign_in_is_live`` in session_helpers), so a browser that is
+            signed in is a known one.
 
         A None return triggers Flask-Login's "logged out" flow on the
         next request, redirecting to the configured ``login_view``.
@@ -148,13 +154,16 @@ def create_app(config_name=None, *, init_ref_cache=True):
             datetime.fromisoformat(session_created) < invalidated_at
         ):
             return None
-        # Idle-timeout check (commit C-10 / F-006).  Reject the
-        # session if ``_session_last_activity_at`` is older than
+        # The two checks the session's own stamps answer, one refusal.
+        # Idle timeout (commit C-10 / F-006): reject the session if
+        # ``_session_last_activity_at`` is older than
         # ``IDLE_TIMEOUT_MINUTES``.  See ``_idle_session_is_fresh``
         # docstring for the per-state policy (missing -> stale,
         # malformed/naive -> stale, future-dated -> fresh,
-        # within-window -> fresh, beyond-window -> stale).
-        if not _idle_session_is_fresh(app):
+        # within-window -> fresh, beyond-window -> stale).  The
+        # sign-in's lifetime (ruling plan#3069): reject it once its
+        # sign-in is ``KNOWN_LIFETIME`` old, however active.
+        if not _idle_session_is_fresh(app) or not sign_in_is_live(user_id):
             return None
         return user
 
@@ -446,14 +455,9 @@ def _idle_session_is_fresh(app):
         bool: True if the session may continue; False if ``load_user``
             must reject it.
     """
-    raw = flask_session.get(SESSION_LAST_ACTIVITY_KEY)
-    if raw is None:
-        return False
-    try:
-        last_activity = datetime.fromisoformat(raw)
-    except (TypeError, ValueError):
-        return False
-    if last_activity.tzinfo is None:
+    # The missing, malformed and naive cases are the one stamp parse's.
+    last_activity = session_stamp(SESSION_LAST_ACTIVITY_KEY)
+    if last_activity is None:
         return False
     elapsed = datetime.now(timezone.utc) - last_activity
     if elapsed < timedelta(0):

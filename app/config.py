@@ -174,8 +174,10 @@ class BaseConfig:
     # non-permanent so Flask-Login's ``strong`` session protection
     # (F-038 / C-07) keeps wiping the session on IP / User-Agent drift
     # -- a permanent session is exempt from that wipe.  The effective
-    # bound on an open session is therefore IDLE_TIMEOUT_MINUTES below,
-    # not this value.  Nothing signs a browser back in once its session
+    # bounds on an open session are therefore IDLE_TIMEOUT_MINUTES below
+    # and KNOWN_LIFETIME after its sign-in however active (ruling
+    # plan#3069, ``app/models/known_device.py``), not this value.
+    # Nothing signs a browser back in once its session
     # cookie is gone: plan#2173 deleted "Remember me", whose cookie could
     # not be revoked (ruling plan#2406).
     PERMANENT_SESSION_LIFETIME = timedelta(

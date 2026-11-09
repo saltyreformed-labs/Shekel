@@ -336,7 +336,7 @@ class TestTheCookieIsReplaced:
         user_id = seed_user["user"].id
         enable_mfa(db.session, user_id)
         token = known_device_service.record_sign_in(
-            user_id, None, "", trust=True,
+            user_id, None, "", now=datetime.now(timezone.utc), trust=True,
         )
         db.session.commit()
         (device,) = _rows_of(user_id)

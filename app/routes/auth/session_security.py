@@ -49,7 +49,7 @@ from app.utils.security_events import (
     record_security_event,
 )
 from app.utils.session_helpers import (
-    stamp_login_session,
+    stamp_password_change,
     stamp_reauth_session,
     stamp_session_refresh,
 )
@@ -84,10 +84,12 @@ def change_password():
         # single ``now`` value flows into both the DB column and
         # every cookie key so the strict-less-than comparison in
         # ``load_user`` accepts this session and rejects every
-        # parallel one.  ``stamp_login_session`` ALSO refreshes
+        # parallel one.  ``stamp_password_change`` ALSO refreshes
         # ``_fresh_login_at``: the user just typed their current
         # password, so this counts as a step-up re-auth and the
-        # five-minute fresh-login window restarts here.
+        # five-minute fresh-login window restarts here.  It is not a
+        # sign-in, so the session's thirty days run on from its own
+        # (ruling plan#3069).
         #
         # The same ``now`` is also written to the security-event
         # columns (audit F-091 / C-16) so the "was this you?" banner
@@ -102,7 +104,7 @@ def change_password():
             current_user, SecurityEventKind.PASSWORD_CHANGED, now=now,
         )
         db.session.commit()
-        stamp_login_session(now, current_user.id)
+        stamp_password_change(now)
         log_event(logger, logging.INFO, EVT_PASSWORD_CHANGED, AUTH,
                   "Password changed", user_id=current_user.id)
         flash("Password changed successfully.", "success")

@@ -144,7 +144,8 @@ class TestExecuteRotation:
         with time_machine.travel(an_hour_ago, tick=False):
             for user in (seed_user["user"], seed_second_user["user"]):
                 tokens[user.id] = known_device_service.record_sign_in(
-                    user.id, None, "Firefox", trust=True,
+                    user.id, None, "Firefox",
+                    now=datetime.now(timezone.utc), trust=True,
                 )
         db.session.commit()
         for user_id, token in tokens.items():

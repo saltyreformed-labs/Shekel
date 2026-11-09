@@ -63,7 +63,7 @@ class _Acts:
         """Trust a device for *user_id* at *moment*; return its token."""
         self._at(moment)
         return known_device_service.record_sign_in(
-            user_id, None, user_agent, trust=True,
+            user_id, None, user_agent, now=moment, trust=True,
         )
 
     def find(self, moment, user_id, token):
@@ -533,7 +533,9 @@ class TestCountingAWrongGuess:
         known_device_service.count_failed_attempt(device, 3)
         db.session.commit()
 
-        new_token = known_device_service.record_sign_in(user_id, token, _FIREFOX)
+        new_token = known_device_service.record_sign_in(
+            user_id, token, _FIREFOX, now=_T0,
+        )
         db.session.commit()
 
         db.session.expire_all()

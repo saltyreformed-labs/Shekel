@@ -367,7 +367,9 @@ def _known_browser(user_id: int) -> str:
     Returns:
         The browser's token.
     """
-    token = known_device_service.record_sign_in(user_id, None, "")
+    token = known_device_service.record_sign_in(
+        user_id, None, "", now=datetime.now(timezone.utc),
+    )
     db.session.commit()
     return token
 

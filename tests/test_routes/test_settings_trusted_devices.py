@@ -98,7 +98,9 @@ def _firefox_that_trusted_itself(app, secret):
 
 def _trust(user_id, user_agent):
     """Trust a device for *user_id* through the service, committed; return its id."""
-    known_device_service.record_sign_in(user_id, None, user_agent, trust=True)
+    known_device_service.record_sign_in(
+        user_id, None, user_agent, now=datetime.now(timezone.utc), trust=True,
+    )
     db.session.commit()
     return db.session.execute(
         sqlalchemy.select(sqlalchemy.func.max(KnownDevice.id))

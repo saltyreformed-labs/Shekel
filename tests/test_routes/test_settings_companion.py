@@ -250,7 +250,7 @@ class TestCreateCompanion:
             ),
         )
         with app.app_context():
-            user = authenticate(find_sign_in_user("login@shekel.local"), "loginpassword12")
+            user = authenticate(find_sign_in_user("login@shekel.local"), "loginpassword12", device=None)
             assert user.role_id == ref_cache.role_id(RoleEnum.COMPANION)
             assert user.is_active is True
 
@@ -378,12 +378,12 @@ class TestEditCompanion:
 
         # New password authenticates.
         with app.app_context():
-            user = authenticate(find_sign_in_user(updated.email), "brandnewpass12")
+            user = authenticate(find_sign_in_user(updated.email), "brandnewpass12", device=None)
             assert user.id == comp_id
 
             # Old password no longer works.
             with pytest.raises(AuthError):
-                authenticate(find_sign_in_user(updated.email), "companionpass")
+                authenticate(find_sign_in_user(updated.email), "companionpass", device=None)
 
     def test_edit_companion_blank_password_keeps_hash(
         self, app, auth_client, db, seed_user, seed_companion,
@@ -408,7 +408,7 @@ class TestEditCompanion:
         assert updated.password_hash == original_hash
         # Old password still works.
         with app.app_context():
-            user = authenticate(find_sign_in_user(updated.email), "companionpass")
+            user = authenticate(find_sign_in_user(updated.email), "companionpass", device=None)
             assert user.id == comp_id
 
     def test_edit_companion_password_change_sets_session_invalidated_at(
@@ -513,7 +513,7 @@ class TestDeactivateCompanion:
         with app.app_context():
             # auth_service.authenticate raises AuthError for inactive users.
             with pytest.raises(AuthError, match="disabled"):
-                authenticate(find_sign_in_user("companion@shekel.local"), "companionpass")
+                authenticate(find_sign_in_user("companion@shekel.local"), "companionpass", device=None)
 
     def test_deactivate_preserves_entries(
         self, app, db, auth_client, seed_user, seed_companion, seed_periods_today,
@@ -613,7 +613,7 @@ class TestReactivateCompanion:
         auth_client.post(f"/settings/companions/{comp_id}/reactivate")
 
         with app.app_context():
-            user = authenticate(find_sign_in_user("companion@shekel.local"), "companionpass")
+            user = authenticate(find_sign_in_user("companion@shekel.local"), "companionpass", device=None)
             assert user.id == comp_id
             assert user.is_active is True
 

@@ -208,7 +208,7 @@ class TestVerifyPasswordC44Hardening:
         """
         with app.app_context():
             with pytest.raises(AuthError, match="Invalid email or password"):
-                auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), b"testpass")
+                auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), b"testpass", device=None)
 
     def test_failure_modes_are_indistinguishable(self):
         """Every failure mode returns the same ``False`` value, not a tagged sentinel.

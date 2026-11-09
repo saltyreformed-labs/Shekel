@@ -317,7 +317,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         _clear_mfa_pending_state()
         return redirect(url_for("auth.login"))
 
-    if auth_service.is_locked_out(user, device):
+    if auth_service.is_locked_out(user, device=device):
         # Read under the owner's lock taken above.  This person has the
         # password, so naming the lock tells them nothing a stranger could
         # use.  Back to /login, where the lock refuses them until it ends.
@@ -359,7 +359,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         return redirect(url_for("auth.login"))
 
     if not valid:
-        auth_service.record_failed_attempt(user, device)
+        auth_service.record_failed_attempt(user, device=device)
         log_event(
             logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
             "Login failed: bad code", user_id=pending_user_id,
@@ -735,7 +735,8 @@ def mfa_disable_confirm():
     # Verify the user's current password first.
     try:
         auth_service.check_signed_in_password(
-            current_user, current_password, "Invalid password.", device,
+            current_user, current_password, "Invalid password.",
+            device=device,
         )
     except AuthError as exc:
         log_event(
@@ -769,7 +770,7 @@ def mfa_disable_confirm():
         return redirect(url_for("settings.show", section="security"))
 
     if not accepted:
-        auth_service.record_failed_attempt(current_user, device)
+        auth_service.record_failed_attempt(current_user, device=device)
         log_event(
             logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
             "Disable two-factor failed: bad code",

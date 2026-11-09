@@ -77,7 +77,7 @@ def change_password():
     try:
         auth_service.change_password(
             current_user, current_password, new_password,
-            _known_device(current_user),
+            device=_known_device(current_user),
         )
         db.session.commit()
         # Invalidate all other sessions after password change.  A
@@ -254,7 +254,8 @@ def reauth():
     device = _known_device(current_user)
     try:
         auth_service.check_signed_in_password(
-            current_user, reauth_data["password"], "Invalid password.", device,
+            current_user, reauth_data["password"], "Invalid password.",
+            device=device,
         )
     except AuthError as exc:
         log_event(
@@ -278,7 +279,7 @@ def reauth():
         if key_failure:
             return render_template("auth/reauth.html", next=safe_next)
         if not accepted:
-            auth_service.record_failed_attempt(current_user, device)
+            auth_service.record_failed_attempt(current_user, device=device)
             log_event(
                 logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
                 "Step-up re-auth failed: bad TOTP",
@@ -287,7 +288,7 @@ def reauth():
             flash("Invalid authentication code.", "danger")
             return render_template("auth/reauth.html", next=safe_next)
 
-    auth_service.clear_failed_attempts(current_user, device)
+    auth_service.clear_failed_attempts(current_user, device=device)
     stamp_reauth_session(datetime.now(timezone.utc))
     log_event(
         logger, logging.INFO, EVT_REAUTH_SUCCESS, AUTH,

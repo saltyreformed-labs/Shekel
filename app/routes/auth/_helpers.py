@@ -192,7 +192,7 @@ def _complete_sign_in(
     """
     _clear_mfa_pending_state()
     if not known:
-        auth_service.clear_failed_attempts(user)
+        auth_service.clear_failed_attempts(user, device=None)
     token = known_device_service.record_sign_in(
         user.id, device_token(user.id),
         request.headers.get("User-Agent", ""), trust=trust,

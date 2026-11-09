@@ -411,7 +411,7 @@ def find_sign_in_user(email):
     return db.session.query(User).filter_by(email=email).first()
 
 
-def is_locked_out(user: User, device: KnownDevice | None = None) -> bool:
+def is_locked_out(user: User, *, device: KnownDevice | None) -> bool:
     """Return True while the lock refuses this attempt on *user*.
 
     The lock is the account's, and it refuses only strangers (plan#2772): a
@@ -428,7 +428,10 @@ def is_locked_out(user: User, device: KnownDevice | None = None) -> bool:
         user: The account being checked.
         device: This browser's record for *user*, as
             :func:`~app.services.known_device_service.find_browser` read it
-            under the owner's lock, or ``None`` for a stranger.
+            under the owner's lock, or ``None`` for a stranger.  Keyword-only
+            with no default, as in every public function below that takes
+            it: a default would let a door that forgot the browser judge a
+            known browser as a stranger.
 
     Returns:
         True while the account's lock window is open and the attempt is a
@@ -441,7 +444,7 @@ def is_locked_out(user: User, device: KnownDevice | None = None) -> bool:
     )
 
 
-def record_failed_attempt(user: User, device: KnownDevice | None = None) -> None:
+def record_failed_attempt(user: User, *, device: KnownDevice | None) -> None:
     """Count one wrong password or code on *user*, from a stranger or a known browser.
 
     The ONE home of the count and the trip, whichever check the guess failed:
@@ -514,7 +517,7 @@ def _count_on_the_browser(user: User, device: KnownDevice) -> None:
         )
 
 
-def clear_failed_attempts(user: User, device: KnownDevice | None = None) -> None:
+def clear_failed_attempts(user: User, *, device: KnownDevice | None) -> None:
     """Clear the count the guesses went to, once every check has passed.
 
     Called at a finished sign-in and a finished re-confirm, and nowhere else
@@ -553,7 +556,7 @@ def clear_failed_attempts(user: User, device: KnownDevice | None = None) -> None
 
 def check_signed_in_password(
     user: User, password: str, wrong_password_message: str,
-    device: KnownDevice | None = None,
+    *, device: KnownDevice | None,
 ) -> None:
     """Check a signed-in door's password, counting a wrong one toward the lock.
 
@@ -583,15 +586,15 @@ def check_signed_in_password(
             this attempt, else with *wrong_password_message* when the password
             is wrong.
     """
-    if is_locked_out(user, device):
+    if is_locked_out(user, device=device):
         raise AuthError(LOCKED_OUT_MESSAGE)
     if not verify_password(password, user.password_hash):
-        record_failed_attempt(user, device)
+        record_failed_attempt(user, device=device)
         raise AuthError(wrong_password_message)
 
 
 def authenticate(
-    user: User | None, password: str, device: KnownDevice | None = None,
+    user: User | None, password: str, *, device: KnownDevice | None,
 ) -> User:
     """Check *password* for *user* from this browser, enforcing account lockout.
 
@@ -652,7 +655,7 @@ def authenticate(
             active lockout window and the attempt is a stranger's, the
             password is wrong, or the account is disabled.
     """
-    if user is None or is_locked_out(user, device):
+    if user is None or is_locked_out(user, device=device):
         # Timing equalization (deep-hunt #27, ruling plan#2999): pay the same
         # bcrypt cost as the wrong-password branch below, so neither an
         # address with no account nor a stranger's attempt at a locked one is
@@ -668,7 +671,7 @@ def authenticate(
         raise AuthError("Invalid email or password.")
 
     if not verify_password(password, user.password_hash):
-        record_failed_attempt(user, device)
+        record_failed_attempt(user, device=device)
         raise AuthError("Invalid email or password.")
 
     if not user.is_active:
@@ -682,7 +685,7 @@ def authenticate(
 
 def change_password(
     user: User, current_password: str, new_password: str,
-    device: KnownDevice | None = None,
+    *, device: KnownDevice | None,
 ) -> None:
     """Change a user's password after verifying the current one.
 
@@ -703,7 +706,8 @@ def change_password(
         ValidationError: If new_password is shorter than 12 characters.
     """
     check_signed_in_password(
-        user, current_password, "Current password is incorrect.", device,
+        user, current_password, "Current password is incorrect.",
+        device=device,
     )
     if len(new_password) < 12:
         raise ValidationError("New password must be at least 12 characters.")

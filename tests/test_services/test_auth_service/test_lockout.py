@@ -96,6 +96,7 @@ class TestAccountLockoutBehaviour:
             with pytest.raises(AuthError):
                 auth_service.authenticate(
                     auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
+                    device=None,
                 )
 
             user = db.session.get(User, user_id)
@@ -118,6 +119,7 @@ class TestAccountLockoutBehaviour:
                 with pytest.raises(AuthError):
                     auth_service.authenticate(
                         auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
+                        device=None,
                     )
             user = db.session.get(User, user_id)
             assert user.failed_login_count == 3
@@ -142,6 +144,7 @@ class TestAccountLockoutBehaviour:
                 with pytest.raises(AuthError):
                     auth_service.authenticate(
                         auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
+                        device=None,
                     )
             user = db.session.get(User, user_id)
             assert user.failed_login_count == 0
@@ -175,7 +178,7 @@ class TestAccountLockoutBehaviour:
             db.session.commit()
 
             with pytest.raises(AuthError, match="Invalid email or password"):
-                auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass")
+                auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass", device=None)
 
     def test_locked_account_does_not_increment_counter(
         self, app, db, seed_user,
@@ -200,6 +203,7 @@ class TestAccountLockoutBehaviour:
                 with pytest.raises(AuthError):
                     auth_service.authenticate(
                         auth_service.find_sign_in_user("test@shekel.local"), "anything",
+                        device=None,
                     )
             user = db.session.get(User, user_id)
             assert user.failed_login_count == 0
@@ -223,7 +227,7 @@ class TestAccountLockoutBehaviour:
             user.failed_login_count = 0
             db.session.commit()
 
-            result = auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass")
+            result = auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass", device=None)
             assert result.id == user_id
 
             # A correct password alone clears nothing (ruling plan#3007): the
@@ -248,11 +252,12 @@ class TestAccountLockoutBehaviour:
                 with pytest.raises(AuthError):
                     auth_service.authenticate(
                         auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
+                        device=None,
                     )
             user = db.session.get(User, user_id)
             assert user.failed_login_count == 3
 
-            auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass")
+            auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass", device=None)
             user = db.session.get(User, user_id)
             assert user.failed_login_count == 3
             assert user.locked_until is None
@@ -272,7 +277,7 @@ class TestAccountLockoutBehaviour:
         with app.app_context():
             user = db.session.get(User, user_id)
             with patch.object(auth_service.db.session, "commit") as commit:
-                auth_service.clear_failed_attempts(user)
+                auth_service.clear_failed_attempts(user, device=None)
             commit.assert_not_called()
 
     @pytest.mark.parametrize(
@@ -296,7 +301,7 @@ class TestAccountLockoutBehaviour:
             )
             db.session.commit()
 
-            auth_service.clear_failed_attempts(user)
+            auth_service.clear_failed_attempts(user, device=None)
             db.session.rollback()
 
             db.session.expire_all()
@@ -320,6 +325,7 @@ class TestAccountLockoutBehaviour:
             with pytest.raises(AuthError):
                 auth_service.authenticate(
                     auth_service.find_sign_in_user("test@shekel.local"), "wrong-password",
+                    device=None,
                 )
             user = db.session.get(User, user_id)
             assert user.locked_until is not None
@@ -381,7 +387,8 @@ def _attempt(token: str | None, password: str) -> User:
     user = auth_service.find_sign_in_user(_EMAIL)
     standing = known_device_service.find_browser(user.id, token)
     return auth_service.authenticate(
-        user, password, None if standing is None else standing.device,
+        user, password,
+        device=None if standing is None else standing.device,
     )
 
 
@@ -506,7 +513,7 @@ def _hashes_checked(email: str, password: str) -> list[str]:
     ) as checkpw:
         with pytest.raises(AuthError, match="Invalid email or password"):
             auth_service.authenticate(
-                auth_service.find_sign_in_user(email), password,
+                auth_service.find_sign_in_user(email), password, device=None,
             )
     return [call.args[1].decode("utf-8") for call in checkpw.call_args_list]
 

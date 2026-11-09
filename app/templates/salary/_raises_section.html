@@ -63,6 +63,11 @@
                     data-raise-percentage="{{ '%.2f'|format((r.percentage|to_percent)) if r.percentage else '' }}"
                     data-raise-flat="{{ '%.2f'|format(r.flat_amount) if r.flat_amount else '' }}"
                     data-raise-recurring="{{ 'true' if r.is_recurring else 'false' }}"
+                    {# The end-year answer as the radios post it, so the edit
+                       fill and the refused-form fill read one attribute: a
+                       refused form may hold it unanswered, which no stored
+                       raise can (task plan#3136). #}
+                    data-raise-end-mode="{{ ('year' if r.terminal_year else 'none') if r.is_recurring else '' }}"
                     data-raise-terminal-year="{{ r.terminal_year if r.terminal_year else '' }}"
                     data-raise-version-id="{{ r.version_id }}"
                     data-raise-edit-url="{{ url_for('salary.update_raise', raise_id=r.id) }}">
@@ -92,6 +97,27 @@
     {# Add/edit raise form (collapsed) #}
     <div class="collapse mt-3" id="add-raise-form">
       <hr>
+      {# A refused save, redrawn where it was made (task plan#3136, ruling
+         plan#3134): an htmx answer carries no flash.  The box carries what
+         was typed as the edit button's data-raise-* names, and app.js fills
+         the form from it with the edit button's fill, which also opens the
+         form and puts an edit back in edit mode.  Never as the controls'
+         value attributes: the Add Raise button's form.reset() restores
+         those, and would refill the refused raise instead of clearing. #}
+      {% if refused %}
+      <div class="alert alert-{{ refused.category }}" role="alert" id="raise-refusal"
+           data-raise-type-id="{{ refused.posted.get('raise_type_id', '') }}"
+           data-raise-date="{{ refused.posted.get('effective_date', '') }}"
+           data-raise-percentage="{{ refused.posted.get('percentage', '') }}"
+           data-raise-flat="{{ refused.posted.get('flat_amount', '') }}"
+           data-raise-recurring="{{ 'true' if refused.recurring else 'false' }}"
+           data-raise-end-mode="{{ refused.posted.get('raise_end_mode', '') }}"
+           data-raise-terminal-year="{{ refused.posted.get('terminal_year', '') }}"
+           data-raise-version-id="{{ refused.posted.get('version_id', '') }}"
+           {% if refused.edit_url %}data-raise-edit-url="{{ refused.edit_url }}"{% endif %}>
+        <i class="bi bi-exclamation-triangle" aria-hidden="true"></i> {{ refused.message }}
+      </div>
+      {% endif %}
       <form method="POST" id="raise-form"
             action="{{ url_for('salary.add_raise', profile_id=profile.id) }}"
             hx-post="{{ url_for('salary.add_raise', profile_id=profile.id) }}"

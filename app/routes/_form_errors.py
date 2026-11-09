@@ -22,6 +22,7 @@ BUSINESS rule the user cannot see from the form -- a cross-field validator, or
 a value that is well-formed but names something this application does not
 model.  Those are worth saying out loud.
 """
+from collections.abc import Callable
 from typing import Any
 
 from flask import Response, flash, request
@@ -29,6 +30,14 @@ from marshmallow import ValidationError
 from marshmallow.exceptions import SCHEMA
 
 from app.routes._redirect_target import RedirectTarget
+
+#: What a door answers a refused payload with, handed the one sentence
+#: :func:`flash_message_for_errors` picked: a flash and a redirect
+#: (:func:`load_form_or_redirect`), right for a form that is a page of its
+#: own, or the form's own region redrawn, for the raise form, which saves in
+#: place (task plan#3136).  The payroll-line form saves in place too and
+#: still redirects, which finding plan#3138 records.
+FormRefusal = Callable[[str], Response]
 
 #: Marshmallow error keys whose messages are flashed VERBATIM.
 #:
@@ -178,6 +187,29 @@ def load_form_or_redirect(
 ) -> dict[str, Any] | Response:
     """Load ``request.form`` through *schema*, flashing and redirecting on failure.
 
+    :func:`load_form_or_refuse` with the refusal every door but the raise
+    doors answers: the sentence flashed as ``danger`` and the browser sent to
+    *redirect*.
+
+    Args:
+        schema: The Marshmallow schema to load ``request.form`` through.
+        redirect: Where to send the user when the payload is refused --
+            typically back to the form they submitted.
+
+    Returns:
+        The deserialized payload when it is valid, or a Flask redirect
+        :class:`Response` when it is not.
+    """
+    def flash_and_redirect(message: str) -> Response:
+        flash(message, "danger")
+        return redirect.to_response()
+
+    return load_form_or_refuse(schema, flash_and_redirect)
+
+
+def load_form_or_refuse(schema: Any, refuse: FormRefusal) -> dict[str, Any] | Response:
+    """Load ``request.form`` through *schema*, answering a refusal through *refuse*.
+
     The whole "refuse a bad payload, or hand back the good one" step of a CRUD
     route, in one place.  All four template-CRUD routes ran it inline; once
     plan step R2e-2 gave the two transfer routes the same message-picking as
@@ -205,13 +237,23 @@ def load_form_or_redirect(
     ``load`` in one ``try`` is what makes a refusal's placement in the schema
     stop mattering to the route.
 
+    **What the door answers is the caller's, since task plan#3136**; the load
+    and the sentence stay here.  A form that saves in place cannot be answered
+    with a redirect: the browser follows it and htmx swaps the whole page it
+    lands on INTO the form's region, where the flash is never shown (measured
+    on the raise form in Chromium, htmx 2.0.10: two navigation bars, the
+    toast hidden).  So the raise doors hand a *refuse* that redraws their
+    card on an htmx request, while every other door goes through
+    :func:`load_form_or_redirect`.
+
     Args:
         schema: The Marshmallow schema to load ``request.form`` through.
-        redirect: Where to send the user when the payload is refused --
-            typically back to the form they submitted.
+        refuse: The door's answer to a refusal, handed the sentence
+            :func:`flash_message_for_errors` picked
+            (:data:`FormRefusal`).
 
     Returns:
-        The deserialized payload when it is valid, or a Flask redirect
+        The deserialized payload when it is valid, or *refuse*'s
         :class:`Response` when it is not.  The caller distinguishes them with
         ``isinstance(result, Response)``, the idiom
         ``recurrence_spec_from_form`` already uses for the same
@@ -220,13 +262,14 @@ def load_form_or_redirect(
     try:
         return schema.load(request.form)
     except ValidationError as exc:
-        flash(flash_message_for_errors(exc.normalized_messages()), "danger")
-        return redirect.to_response()
+        return refuse(flash_message_for_errors(exc.normalized_messages()))
 
 
 __all__ = [
     "ACTIONABLE_FLASH_FIELDS",
+    "FormRefusal",
     "GENERIC_VALIDATION_FLASH",
     "flash_message_for_errors",
     "load_form_or_redirect",
+    "load_form_or_refuse",
 ]

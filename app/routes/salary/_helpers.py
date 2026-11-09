@@ -9,14 +9,15 @@ Constructed once at import time so every handler reuses the same
 instances, preserving the pre-split monolith's behaviour.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
 
-from flask import abort, flash, redirect, render_template, request, url_for
+from flask import Response, abort, flash, make_response, render_template, request
 from flask.typing import ResponseReturnValue
 
 from app.utils.auth_helpers import get_or_404, log_refused_lookup
+from app.utils.error_fragments import designed_error
 from app.extensions import db
 from app.models.salary_profile import SalaryProfile
 from app.models.account import Account
@@ -25,6 +26,7 @@ from app.models.ref import (
     RaiseType,
 )
 from app.routes._recurrence_conflict_chooser import flash_retained_notice
+from app.routes._redirect_target import RedirectTarget
 from app.routes._recurrence_form_render import (
     RecurrenceEnd,
     RecurrenceStart,
@@ -197,6 +199,17 @@ def _regenerate_salary_transactions(
     flash_retained_notice(retained)
 
 
+def _edit_page(profile_id: int) -> RedirectTarget:
+    """Where every refused or failed line-item submission sends the user: the profile's edit page.
+
+    Twelve literal spellings of one target until plan step salary:R15-c
+    added four more; one function is the answer to a review that counted them.
+    It moved here from ``items.py`` with task plan#3136, so the responders
+    below, which spelled the target twice more, reach the one home too.
+    """
+    return RedirectTarget("salary.edit_profile", {"profile_id": profile_id})
+
+
 def _raise_form_bounds() -> dict[str, int]:
     """The years the raise form's date and end-year controls offer.
 
@@ -212,8 +225,47 @@ def _raise_form_bounds() -> dict[str, int]:
     return {"raise_year_min": RAISE_YEAR_MIN, "raise_year_max": RAISE_YEAR_MAX}
 
 
-def _render_raises_partial(profile):
-    """Return the raises table partial for HTMX updates."""
+@dataclass(frozen=True)
+class RefusedRaise:
+    """A refused raise form, as the Raises card redraws it (ruling plan#3134).
+
+    The card's form opens in the mode it was posted in, holding what was
+    typed, under the reason.  What was typed rides on the reason's box as
+    ``data-raise-*`` attributes, the names the row's edit button carries, and
+    ``app.js`` fills the form from the box with the one fill the edit button
+    runs (``_fillRaiseForm``).  It is never rendered as the controls'
+    ``value``: the Add Raise button resets the form with ``form.reset()``,
+    which restores RENDERED values, so a value attribute would make Add Raise
+    refill the refused raise instead of clearing the form.
+
+    Attributes:
+        message: Why, in the refusal's own words.
+        category: Its flash category, which colours the box the way the flash
+            is coloured on a plain post: ``danger``, or ``warning`` for a form
+            another action made stale.
+        posted: The form as posted (``request.form``).
+        recurring: Whether the posted Recur box reads as ticked, by the
+            schema's own ``is_recurring`` field (its ``truthy`` set), so the
+            redraw cannot read the box one way and the refusal another.
+        edit_url: The update door the form posted to, or ``None`` for an add.
+    """
+    message: str
+    category: str
+    posted: Mapping[str, str]
+    recurring: bool
+    edit_url: str | None
+
+
+def _render_raises_partial(
+    profile: SalaryProfile, refused: RefusedRaise | None = None,
+) -> str:
+    """Return the raises section partial for HTMX updates.
+
+    Args:
+        profile: The owned profile.
+        refused: A refused form to redraw open, with its reason
+            (:class:`RefusedRaise`), or ``None`` for the card after a change.
+    """
     # Refresh relationships
     db.session.refresh(profile)
     raise_types = db.session.query(RaiseType).all()
@@ -221,6 +273,7 @@ def _render_raises_partial(profile):
         "salary/_raises_section.html",
         profile=profile,
         raise_types=raise_types,
+        refused=refused,
         **_raise_form_bounds(),
     )
 
@@ -231,11 +284,65 @@ def _respond_after_raise_change(profile):
     Returns the raises-section partial for an in-page HTMX swap, or a
     full-page redirect to the profile edit view for a normal form post.
     Centralises the response branch shared by the add/update/delete raise
-    handlers so each has a single success exit point.
+    handlers so each has a single success exit point.  A refused form is
+    :class:`RaiseRefusal`'s.
     """
     if request.headers.get("HX-Request"):
         return _render_raises_partial(profile)
-    return redirect(url_for("salary.edit_profile", profile_id=profile.id))
+    return _edit_page(profile.id).to_response()
+
+
+@dataclass(frozen=True)
+class RaiseRefusal:
+    """How a raise door answers a refused form (task plan#3136, ruling plan#3134).
+
+    The raise form saves in place (``hx-target="#raises-section"``), so on an
+    htmx request the answer is the Raises card itself, at 422 and marked as a
+    designed fragment (:func:`~app.utils.error_fragments.designed_error`):
+    the reason in a box and the form open, holding what was typed
+    (:class:`RefusedRaise`).  A redirect there is followed by the browser and
+    the whole edit page it lands on is swapped INTO the card, where its flash
+    never shows.  A plain form post keeps the flash and the redirect to the
+    edit page.
+
+    Called with the sentence alone it is a
+    :data:`~app.routes._form_errors.FormRefusal`, the loader's
+    (:func:`~app.routes._form_errors.load_form_or_refuse`); the update
+    door's stale-form pre-check calls it with ``"warning"`` too.  It flashes
+    nothing on an htmx request, so the reason is not shown a second time on
+    the next page loaded.
+
+    Attributes:
+        profile: The owned profile whose card is redrawn.
+        edit_url: The update door the form posted to, so the form reopens in
+            edit mode; ``None`` for the add door.
+    """
+    profile: SalaryProfile
+    edit_url: str | None = None
+
+    def __call__(self, message: str, category: str = "danger") -> Response:
+        """Answer the refusal *message* in the request's own shape.
+
+        Args:
+            message: Why, in the refusal's own words.
+            category: The flash category: ``danger``, or ``warning`` for a
+                stale form.
+
+        Returns:
+            The card at 422 on an htmx request, else a redirect to the edit
+            page with *message* flashed.
+        """
+        if request.headers.get("HX-Request"):
+            refused = RefusedRaise(
+                message, category, request.form,
+                request.form.get("is_recurring") in _raise_schema.fields["is_recurring"].truthy,
+                self.edit_url,
+            )
+            return make_response(designed_error(
+                _render_raises_partial(self.profile, refused), 422,
+            ))
+        flash(message, category)
+        return _edit_page(self.profile.id).to_response()
 
 
 def _line_cadence_phrases(
@@ -441,7 +548,7 @@ def _respond_after_line_change(
         return _render_lines_partial(profile, notice)
     if notice is not None:
         flash(notice, "warning")
-    return redirect(url_for("salary.edit_profile", profile_id=profile.id))
+    return _edit_page(profile.id).to_response()
 
 
 def _get_investment_accounts(user_id):

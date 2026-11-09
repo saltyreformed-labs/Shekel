@@ -527,7 +527,7 @@ class TestARaisesEndYearIsWrittenHere:
         """ends-2031 -> no end year actually writes ``NULL``.
 
         **It posts the year the FORM still holds, not an empty box**, and
-        an adversarial review of this step is why.  ``_populateRaiseForm``
+        an adversarial review of this step is why.  ``_fillRaiseForm``
         fills the year input from the stored value when the edit form opens,
         and choosing "no end year" does not empty it -- so a browser sends
         ``raise_end_mode=none`` WITH ``terminal_year=2031``.  This test

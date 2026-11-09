@@ -304,13 +304,15 @@ class RaiseCreateSchema(BaseSchema):
         generic failure; neither copy is the source of truth for the other,
         and the database's is the one that cannot be bypassed.
 
-        **Each message is flashed in its own words since task plan#3125**:
+        **Each message is said in its own words since task plan#3125**:
         ``salary.add_raise`` and ``update_raise`` load through the shared
-        loader (:func:`~app.routes._form_errors.load_form_or_redirect`), whose
+        loader (:func:`~app.routes._form_errors.load_form_or_refuse`), whose
         allowlist carries ``raise_end_mode`` and ``terminal_year``.  Until then
         both doors flashed "Please correct the highlighted errors and try
         again." for every refusal, on a form that highlights nothing.
-        Nothing is rendered ON the control: the flash is the message.
+        Nothing is rendered ON the control: the message is the reason box
+        the Raises card is redrawn with on an htmx save (task plan#3136),
+        and the flash on a plain post.
 
         Raises:
             ValidationError: The end year contradicts the raise's kind, is

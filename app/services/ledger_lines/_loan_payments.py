@@ -67,15 +67,17 @@ from app.services.loan_ledger import PaymentOutcome
 from ._chart import linked_key, loan_key
 from ._targets import ChartLegMap, CorrectionKey, merge_target_legs
 
+_ZERO_MONEY = Decimal("0.00")
 
 # The three per-loan correction components, each a tuple of (the per-loan ledger
 # account KIND to resolve, the posting-leg KIND to tag the leg, the
 # :class:`~app.services.loan_ledger.PaymentOutcome` attribute holding the leg's
 # amount -- its flat read-through properties).  The loan-linked principal leg
 # is handled separately -- it books onto the loan's existing Asset/Liability
-# account mirror (the ``linked`` ledger), not a per-loan account.  Driving the
-# three components off one table keeps the target builder DRY and makes "add a
-# component" a one-line change.
+# account mirror (the ``linked`` ledger), not a per-loan account -- and is
+# summed from the legs this table emits (finding plan#2972), so this table is
+# the one list of what a split moves off the loan: adding a component is a
+# one-line change, and dropping one cannot unbalance the entry.
 _LOAN_CORRECTION_COMPONENTS = (
     (LedgerAccountKindEnum.LOAN_INTEREST, PostingKindEnum.INTEREST, "interest"),
     (LedgerAccountKindEnum.LOAN_ESCROW, PostingKindEnum.ESCROW, "escrow"),
@@ -90,23 +92,36 @@ def _loan_payment_target(outcome: PaymentOutcome, loan: Account) -> ChartLegMap:
     dropping any zero component so no empty per-loan ledger account is minted and
     no zero leg is written:
 
-    * the loan's LINKED ledger (the Asset/Liability mirror the cash movement
-      dumped the whole cash onto) gets ``-(interest + escrow + excess)`` tagged
-      ``principal`` -- so the loan's NET across the cash leg and this
-      correction is exactly ``principal`` (plan Section 1);
     * the per-loan ``loan_interest`` Expense ledger gets ``+interest``;
     * the per-loan ``loan_escrow`` Expense ledger gets ``+escrow``;
-    * the per-loan ``loan_refund`` Asset ledger gets ``+excess``.
+    * the per-loan ``loan_refund`` Asset ledger gets ``+excess``;
+    * the loan's LINKED ledger (the Asset/Liability mirror the cash movement
+      dumped the whole cash onto) gets the negative of those legs' sum,
+      ``-(interest + escrow + excess)``, tagged ``principal`` -- so the loan's
+      NET across the cash leg and this correction is exactly ``principal``
+      (plan Section 1).
 
     Each leg is named by its :class:`~app.services.ledger_lines.ChartKey` (the
     loan's own line, or one of its component lines) and only when its amount
     is non-zero, so the writer mints a per-loan row only for a component that
     books (:func:`app.services._posting_write.resolve_chart_targets`, plan task
     plan#2524; until that task this resolved and minted the rows as it went).
-    The legs sum to zero by
-    construction.  An all-principal payment (``interest == escrow == excess ==
-    0``) yields an EMPTY target: the loan already nets to principal from the
-    cash leg, so no correction is owed.
+    An all-principal payment (``interest == escrow == excess == 0``) yields an
+    EMPTY target: the loan already nets to principal from the cash leg, so no
+    correction is owed.
+
+    **The legs sum to zero by construction, because the loan's leg is summed
+    from the component legs as built** (finding plan#2972).  It was a second
+    spelling of them, ``-(outcome.interest + outcome.escrow +
+    outcome.excess)`` beside the component table, so a component dropped from
+    one and not the other left the entry unbalanced, and only the stored
+    ledger's writer refused it (``_posting_write._emit_balanced_entry``, with
+    the ``ck_account_postings_balanced`` trigger behind it), which the
+    worked-out read never passes through.  Now a dropped component books
+    a balanced but WRONG split, the loan keeping the part no leg carries off
+    it, and that is a wrong loan balance: the loan's figure tests grade it
+    (``test_payoff_overpayment`` in ``tests/test_services/
+    test_loan_fold_oracle.py`` for the excess).
 
     Args:
         outcome: The payment's :class:`~app.services.loan_ledger.PaymentOutcome`
@@ -124,23 +139,29 @@ def _loan_payment_target(outcome: PaymentOutcome, loan: Account) -> ChartLegMap:
         ``{chart key: (amount, posting_kind_id)}`` for the non-zero legs
         (empty when no correction is owed).
     """
-    target: ChartLegMap = {}
-
-    # The loan-linked leg backs the non-principal cash out of the loan; its
-    # magnitude mirrors the interest + escrow + refund legs, so the four sum to
-    # zero and the loan nets to the real principal.
-    loan_leg = -(outcome.interest + outcome.escrow + outcome.excess)
-    if loan_leg != 0:
-        target[linked_key(loan)] = (
-            loan_leg, ref_cache.posting_kind_id(PostingKindEnum.PRINCIPAL),
-        )
+    components: ChartLegMap = {}
     for ledger_kind, posting_kind, attr in _LOAN_CORRECTION_COMPONENTS:
         amount: Decimal = getattr(outcome, attr)
         if amount != 0:
-            target[loan_key(ledger_kind, loan.id)] = (
+            components[loan_key(ledger_kind, loan.id)] = (
                 amount, ref_cache.posting_kind_id(posting_kind),
             )
-    return target
+
+    # The loan-linked leg backs the non-principal cash out of the loan: what
+    # the component legs above carry, read off them rather than off the
+    # outcome again, so the entry nets to zero whatever they hold.
+    loan_leg = -sum(
+        (amount for amount, _kind in components.values()), _ZERO_MONEY,
+    )
+    if loan_leg == 0:
+        return components
+    # The loan's own leg first, where it stood before finding plan#2972.
+    return {
+        linked_key(loan): (
+            loan_leg, ref_cache.posting_kind_id(PostingKindEnum.PRINCIPAL),
+        ),
+        **components,
+    }
 
 
 def payment_split_targets(

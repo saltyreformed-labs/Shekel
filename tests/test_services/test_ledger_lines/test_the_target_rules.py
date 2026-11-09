@@ -16,6 +16,9 @@ What these cases pin:
   task) or leaves a new object in the session;
 * **the keys are the right ones**, with the amounts the rule books, written
   out by hand where the arithmetic is the rule's own;
+* **a loan payment's split nets to zero by construction**: with a component
+  planted out of its table, the loan's own leg drops it too (finding
+  plan#2972), so no store need refuse an unbalanced split;
 * **the writer's resolve covers every kind** a rule names, and refuses the two
   broken cases (an account with no linked row, a kind no rule books on);
 * **the writer mints what it minted before**: a key is resolved even when its
@@ -76,6 +79,9 @@ from app.services.ledger_lines._account_anchors import (
     _account_anchor_correction_targets,
     _counter_keys,
 )
+# The split's component table, read to plant a component out of it (finding
+# plan#2972); the plant itself names the module by path.
+from app.services.ledger_lines._loan_payments import _LOAN_CORRECTION_COMPONENTS
 from tests._stored_ledger import (
     ledger_account_of_kind,
     stored_chart_key,
@@ -338,6 +344,75 @@ class TestTheLoanRulesNameKeys:
                 },
             ]
             _assert_the_chart_is_untouched(statements)
+
+    def test_a_split_missing_a_component_still_nets_to_zero(
+        self, app, db, seed_user, seed_periods, monkeypatch,
+    ):
+        """$150,000.00 on a loan trued up to $100,000.00, then the excess planted out.
+
+        The month's interest is ``100,000.00 x 0.06 / 12 = 500.00``; the
+        principal is capped at the ``100,000.00`` that closes the loan, so the
+        excess is ``150,000.00 - 500.00 - 100,000.00 = 49,500.00``.  The split
+        moves ``500.00 + 49,500.00 = 50,000.00`` off the loan's own line, and
+        the four legs net to zero.
+
+        The plant is finding plan#2972's dropped excess.  The finding dropped
+        it from the loan's own leg, which restated ``interest + escrow +
+        excess`` beside the component table; that leg is now summed from the
+        component legs as built, so the one place left to drop the excess is
+        the table, and the loan's leg drops it too: ``-500.00`` against
+        ``+500.00``, still balanced.  The old leg kept ``-50,000.00`` here,
+        ``49,500.00`` out of balance, which only the stored ledger's writer
+        refused.  What the plant leaves wrong is the loan's balance, and the
+        loan's figure tests grade that (``test_payoff_overpayment`` in
+        ``test_loan_fold_oracle.py``).
+        """
+        with app.app_context():
+            loan = create_loan_with_trueup(
+                seed_user, _db.session,
+                origination_principal=Decimal("250000.00"),
+                anchor_balance=Decimal("100000.00"),
+                anchor_date=date(2026, 1, 10), rate=Decimal("0.06000"),
+                origination_date=date(2025, 1, 1), name="Payoff Keys Loan",
+            )
+            create_settled_transfer(
+                seed_user, _db.session, seed_user["account"], loan,
+                seed_periods[1], amount=Decimal("150000.00"),
+            )
+            walk = walk_loan_ledger(loan.id, seed_user["scenario"].id)
+            own = linked_key(loan)
+            interest = loan_key(LedgerAccountKindEnum.LOAN_INTEREST, loan.id)
+            principal_kind = ref_cache.posting_kind_id(PostingKindEnum.PRINCIPAL)
+            interest_kind = ref_cache.posting_kind_id(PostingKindEnum.INTEREST)
+
+            assert list(payment_split_targets(
+                walk.settled_splits, loan,
+            ).values()) == [{
+                own: (Decimal("-50000.00"), principal_kind),
+                interest: (Decimal("500.00"), interest_kind),
+                loan_key(LedgerAccountKindEnum.LOAN_REFUND, loan.id): (
+                    Decimal("49500.00"),
+                    ref_cache.posting_kind_id(PostingKindEnum.REFUND),
+                ),
+            }]
+
+            monkeypatch.setattr(
+                "app.services.ledger_lines._loan_payments."
+                "_LOAN_CORRECTION_COMPONENTS",
+                tuple(
+                    component for component in _LOAN_CORRECTION_COMPONENTS
+                    if component[0] is not LedgerAccountKindEnum.LOAN_REFUND
+                ),
+            )
+            planted = list(payment_split_targets(
+                walk.settled_splits, loan,
+            ).values())
+
+            assert planted == [{
+                own: (Decimal("-500.00"), principal_kind),
+                interest: (Decimal("500.00"), interest_kind),
+            }]
+            assert sum(amount for amount, _kind in planted[0].values()) == 0
 
 
 # Every source kind that is a correction rather than a movement.  Listed by hand

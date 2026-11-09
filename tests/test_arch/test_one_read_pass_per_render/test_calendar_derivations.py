@@ -12,11 +12,11 @@ from app.models.salary_pay_entry import SalaryPayEntry
 from app.models.salary_profile import SalaryProfile
 from app.services import pay_schedule_service
 from tests._stub_period import stub_period_on
+from tests._form_controls import rendered_form_controls
 from tests._test_helpers import (
     counting_calls,
     freeze_today,
     make_investment_account,
-    rendered_form_controls,
 )
 
 from ._helpers import _CALENDAR_DOOR, _seed_projecting_account, _seed_dashboard_owner

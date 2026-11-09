@@ -21,7 +21,6 @@ from datetime import (
     timezone as _real_timezone,
 )
 from decimal import Decimal
-from html.parser import HTMLParser
 
 import pytest
 from sqlalchemy import exc as sa_exc
@@ -9976,89 +9975,6 @@ def build_pay_stub_world(owner):
     make_line_cadence_rule(db.session, lines["dental"], 12)
     db.session.commit()
     return profile, lines
-
-
-class _FormControls(HTMLParser):
-    """Every control of the ONE form posting to *action*, as a browser submits it.
-
-    Repeated names (the stub form's one-off rows) keep every value in order;
-    an ``<input>`` submits its ``value`` and a ``<select>`` its ``selected``
-    option, else its first, and a select with no option submits nothing.  A
-    control without a name submits nothing.  It reads only those two shapes:
-    any other control inside the form -- an input of any type but hidden,
-    text, number or date (a checkbox or radio, say), a ``<textarea>``, a named
-    button, a disabled input, a disabled or multiple select, a disabled
-    option or an option without a ``value`` in a named select (a browser
-    posts such an option's text), or a disabled ``<fieldset>`` or
-    ``<optgroup>`` -- fails the reading loudly rather than being posted as a
-    browser would not post it.  A disabled fieldset fails whole, even a
-    control in its first legend, which a browser does post: the safe side.
-    The reader of the pay stub form's and the stub setting's route suites
-    (plan step salary:S11-c-2b, its delta review's LOW-3 and LOW-4).
-    """
-
-    #: Input types a browser posts by their ``value`` alone.
-    _PLAIN_INPUTS = frozenset({"hidden", "text", "number", "date"})
-
-    def __init__(self, action):
-        super().__init__()
-        self.action = action
-        self.controls: "dict[str, list[str]]" = {}
-        self._inside = False
-        self._select = None
-        self._chosen = None
-
-    def handle_starttag(self, tag, attrs):
-        """Open the form, record an input, or read a select's options."""
-        attributes = dict(attrs)
-        if tag == "form":
-            self._inside = attributes.get("action") == self.action
-        elif self._inside and tag in ("textarea", "button") and attributes.get("name"):
-            raise AssertionError(f"the reader does not post a named <{tag}>")
-        elif self._inside and tag in ("fieldset", "optgroup") and "disabled" in attributes:
-            raise AssertionError(f"the reader does not post a disabled <{tag}>")
-        elif self._inside and tag == "input" and attributes.get("name"):
-            plain = attributes.get("type", "text") in self._PLAIN_INPUTS
-            if not plain or "disabled" in attributes:
-                raise AssertionError(f"the reader does not post {attributes}")
-            self.controls.setdefault(attributes["name"], []).append(attributes.get("value") or "")
-        elif self._inside and tag == "select":
-            if "disabled" in attributes or "multiple" in attributes:
-                raise AssertionError(f"the reader does not post {attributes}")
-            self._select, self._chosen = attributes.get("name"), None
-        elif self._select is not None and tag == "option":
-            if "value" not in attributes or "disabled" in attributes:
-                raise AssertionError(f"the reader does not post the option {attributes}")
-            if self._chosen is None or "selected" in attributes:
-                self._chosen = attributes["value"]
-
-    def handle_endtag(self, tag):
-        """Close a select, submitting its choice, or close the form."""
-        if tag == "select" and self._select is not None:
-            if self._chosen is not None:
-                self.controls.setdefault(self._select, []).append(self._chosen)
-            self._select = None
-        elif tag == "form":
-            self._inside = False
-
-
-def rendered_form_controls(html, action):
-    """What the form posting to *action* submits, read off the rendered *html*.
-
-    A route test posts this rather than a hand-picked payload, so a control
-    the template renders is posted as a browser posts it.
-
-    Args:
-        html: A rendered page.
-        action: The form's ``action``, as the page renders it.
-
-    Returns:
-        ``{name: [value, ...]}``, a repeated name's values in order.
-    """
-    reader = _FormControls(action)
-    reader.feed(html)
-    assert reader.controls, f"no form posts to {action}"
-    return reader.controls
 
 
 def add_test_pay_stub(profile, payday, base_pay, taxes, lines=()):

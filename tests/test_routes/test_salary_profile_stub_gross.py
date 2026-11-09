@@ -27,7 +27,8 @@ from app.extensions import db
 from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
 from tests._stub_period import stub_period_on
-from tests._test_helpers import freeze_today, rendered_form_controls
+from tests._form_controls import rendered_form_controls
+from tests._test_helpers import freeze_today
 
 _FIELD = "stub_gross_includes_after_tax"
 

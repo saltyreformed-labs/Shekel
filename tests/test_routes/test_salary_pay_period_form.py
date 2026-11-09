@@ -34,10 +34,10 @@ from app.extensions import db
 from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
 from app.services import salary_pay_period
+from tests._form_controls import rendered_form_controls
 from tests._test_helpers import (
     freeze_today,
     rebuild_calendar_on,
-    rendered_form_controls,
     rhythm_of,
 )
 

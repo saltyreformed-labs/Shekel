@@ -22,6 +22,7 @@ from app import ref_cache
 from app.enums import MovementFigureSourceEnum, StatusEnum
 from app.exceptions import ValidationError
 
+from app.services.credit_workflow import get_active_payback
 from app.services.row_valuation import settled_figure
 from tests._test_helpers import (
     typed,
@@ -293,7 +294,10 @@ class TestCreditStatusGuard:
     ):
         """PATCH with status_id=CREDIT on tracked transaction returns 400.
 
-        The Credit status conflicts with entry-level credit handling.
+        The Credit status conflicts with entry-level credit handling, and
+        the refusal says so (since plan task plan#3057 in the status door's
+        words, ``transaction_service.verify_requested_status``: no row enters
+        Credit, and this one puts each purchase on the card by its CC tick).
         """
         with app.app_context():
             txn = _create_tracked_txn(seed_user, seed_periods)
@@ -305,20 +309,25 @@ class TestCreditStatusGuard:
                 data={"status_id": str(credit_id)},
             )
             assert resp.status_code == 400
-            assert b"Credit status" in resp.data
-            assert b"entry-level credit" in resp.data
+            assert b"tracks its purchases" in resp.data
+            assert b"each purchase goes on the card by its own CC tick" in resp.data
 
             # Transaction status must be unchanged.
             txn = db.session.get(Transaction, txn_id)
             assert txn.status_id != credit_id
 
-    def test_update_allows_credit_status_non_tracked(
+    def test_update_refuses_credit_status_non_tracked(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """PATCH with status_id=CREDIT on non-tracked transaction succeeds.
+        """PATCH with status_id=CREDIT on non-tracked transaction is refused too.
 
-        Legacy credit workflow is unaffected for non-entry-capable
-        transactions.
+        It succeeded until plan task plan#3057 -- finding plan#2133: the Save
+        set the bare Credit status, with no payback and no movement, so the
+        row's money left checking's projection -- and this test, named
+        ``test_update_allows_credit_status_non_tracked``, pinned that.  No row
+        enters Credit now: the Credit button puts a row on the card (rulings
+        plan#2887, plan#2888), the refusal points there, and the row is
+        untouched.
         """
         with app.app_context():
             txn = _create_non_tracked_txn(seed_user, seed_periods)
@@ -329,10 +338,13 @@ class TestCreditStatusGuard:
                 f"/transactions/{txn_id}",
                 data={"status_id": str(credit_id)},
             )
-            assert resp.status_code == 200
+            assert resp.status_code == 400
+            assert b"open it and press Credit instead" in resp.data
 
             txn = db.session.get(Transaction, txn_id)
-            assert txn.status_id == credit_id
+            assert txn.status_id == ref_cache.status_id(StatusEnum.PROJECTED)
+            assert not txn.entries
+            assert get_active_payback(txn_id) is None
 
 
 # ── Post-Paid Entry Mutations ────────────────────────────────────

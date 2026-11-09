@@ -116,6 +116,7 @@ from app.services.transaction_service._status_rules import (
     requested_status_id,
     settled_status_id,
     settled_status_member,
+    verify_requested_status,
 )
 
 __all__ = [
@@ -150,4 +151,5 @@ __all__ = [
     "repays_tracked_purchases",
     "settles_from_entries",
     "undo_credit",
+    "verify_requested_status",
 ]

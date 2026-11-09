@@ -35,12 +35,13 @@ the stored one it asks for (plan task plan#3054).
 
 import logging
 
-from app import ref_cache
-from app.enums import StatusEnum
 from app.exceptions import ValidationError
 from app.services.card_today import a_save_may_date
-from app.services.state_machine import verify_transition
-from app.services.transaction_service import repays_card_spend, requested_status_id
+from app.services.transaction_service import (
+    repays_card_spend,
+    requested_status_id,
+    verify_requested_status,
+)
 
 from app.routes._render_helpers import render_transaction_cell
 from app.routes.transactions._helpers import _error_transaction_response
@@ -51,26 +52,38 @@ logger = logging.getLogger(__name__)
 def _resolve_status_change(txn, data):
     """Validate a PATCH status transition early, before any column is mutated.
 
-    Runs the status-dependent guards for a regular (non-shadow)
-    :func:`update_transaction` before the ``setattr`` loop dirties the session:
-    verifies the requested transition through the state machine (F-161 / C-21)
-    and blocks the Credit status on purchase-tracking transactions (credit is
-    per-entry, scope doc 5.2).  Doing it here gives the precise 400 precedence
-    (an illegal transition reports before a finalised-field lock or an FK error)
-    and leaves the row untouched on rejection.  ``settled_on`` is NOT decided here:
-    the status seam (:func:`status_seam.apply_status_change`, invoked
-    once the field is applied) owns the stamp/clear and re-runs this same
-    verification as the single source of truth -- this early call exists purely
-    for error precedence.
+    Runs the status guard for a regular (non-shadow) :func:`update_transaction`
+    before the ``setattr`` loop dirties the session: the requested transition,
+    verified through the state machine (F-161 / C-21).  Doing it here gives the
+    precise 400 precedence (an illegal transition reports before a
+    finalised-field lock or an FK error) and leaves the row untouched on
+    rejection.  ``settled_on`` is NOT decided here: the status seam
+    (:func:`status_seam.apply_status_change`, invoked once the field is
+    applied) owns the stamp/clear and re-runs this same verification as the
+    single source of truth -- this early call exists purely for error
+    precedence.
 
     **It first reads the posted status as the stored one** (plan task
-    plan#3054, ``transaction_service.requested_status_id``): the Status
-    dropdown speaks the status a row is DRAWN as, so on a row put on the card
-    it selects Credit and an untouched Save posts Credit, which means the
-    row's stored Paid.  Written back into *data* here because this gate is the
-    chain's first reader of it: the finalised-field lock, the Credit-revert
-    test, the lock-lifting order and the status verb all read the stored
-    status after it.
+    plan#3054, ``transaction_service.requested_status_id``), then verifies it
+    (``transaction_service.verify_requested_status``): the Status dropdown
+    speaks the status a row is DRAWN as, so on a row put on the card it
+    selects Credit and an untouched Save posts Credit, which means the row's
+    stored Paid, and a refusal is said in the drawn status (plan task
+    plan#3057).  Written back into *data* here because this gate
+    is the chain's first reader of it: the finalised-field lock, the
+    Credit-revert test, the lock-lifting order and the status verb all read
+    the stored status after it.
+
+    **It no longer has a Credit-on-tracked guard of its own** (plan task
+    plan#3057): no row enters the Credit status, so the state machine
+    refuses every such move first, for every row, and
+    ``verify_requested_status`` says so in a sentence for a row tracking its
+    purchases.  What the deleted guard alone reached was a Save posting
+    Credit for an OLD Credit row whose item tracks purchases -- Credit to
+    Credit, nothing moving -- which it refused.  A browser never posted one:
+    the dropdown drew that selected option disabled, and a disabled option
+    is not submitted, so such a Save carried no status at all.  The dropdown
+    now offers it there as on any old Credit row, and the Save passes.
 
     Args:
         txn: The Transaction being edited.
@@ -84,27 +97,15 @@ def _resolve_status_change(txn, data):
     """
     if "status_id" not in data:
         return None
-    data["status_id"] = requested_status_id(txn, data["status_id"])
-
     # Verify the transition BEFORE any other status-dependent work.  An illegal
-    # transition -- for example settled -> projected -- short-circuits the
-    # request with a 400 and leaves the row untouched.  Audit reference: F-161 /
-    # commit C-21 of the 2026-04-15 security remediation plan.
+    # transition -- for example Cancelled -> Paid -- short-circuits the request
+    # with a 400 and leaves the row untouched.  Audit reference: F-161 / commit
+    # C-21 of the 2026-04-15 security remediation plan.
+    data["status_id"] = requested_status_id(txn, data["status_id"])
     try:
-        verify_transition(txn, data["status_id"])
+        verify_requested_status(txn, data["status_id"])
     except ValidationError as exc:
         return _error_transaction_response(txn.id, str(exc))
-
-    # Block Credit status on entry-capable transactions -- credit
-    # handling is per-entry, not per-transaction (scope doc section 5.2).
-    credit_id = ref_cache.status_id(StatusEnum.CREDIT)
-    if data["status_id"] == credit_id and txn.tracks_purchases:
-        return _error_transaction_response(
-            txn.id,
-            "Cannot set Credit status on transactions with individual "
-            "purchase tracking. Use entry-level credit instead.",
-        )
-
     return None
 
 

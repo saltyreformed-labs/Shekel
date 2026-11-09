@@ -441,10 +441,14 @@ class TestWhatIsAlreadyCredit:
     """An old Credit row holding its payback is a press made; a bare Credit status is not."""
 
     def test_a_credit_status_with_no_payback_is_refused(self, seed_user, seed_periods):
-        """Status Credit, no payback (finding plan#2133's shape): refused, as the old press did."""
+        """Status Credit, no payback (finding plan#2133's shape): refused, as the old press did.
+
+        Written as the column: no door writes the shape since plan task
+        plan#3057, where the Status dropdown's Save did.
+        """
         _card(seed_user)
         row = _groceries(seed_user, seed_periods[0])
-        status_seam.apply_status_change(row, ref_cache.status_id(StatusEnum.CREDIT))
+        row.status_id = ref_cache.status_id(StatusEnum.CREDIT)
         db.session.commit()
 
         with pytest.raises(ValidationError, match="Only projected transactions"):

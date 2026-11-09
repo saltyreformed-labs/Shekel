@@ -335,6 +335,32 @@ def reverts_to_projected(row: Transaction | Transfer, new_status_id: int) -> boo
     )
 
 
+def enters_credit(row: Transaction, new_status_id: int) -> bool:
+    """Return whether moving *row* to *new_status_id* puts it IN the Credit status.
+
+    **The move no row makes any more** (plan task plan#3057, finding
+    plan#2133): a Credit press settles a row as Paid with its movement on the
+    card (rulings plan#2887, plan#2888), so the stored status is the old rows'
+    alone and the state machine admits no edge into it.  Asked by the popover's
+    status door to say so in words when a Save posts Credit for a row not in
+    it (``transaction_service._status_rules.verify_requested_status``), where the
+    state machine's own refusal would only name the two statuses.  An old
+    Credit row asked for Credit again is the identity move, not this one.
+
+    Args:
+        row: The :class:`~app.models.transaction.Transaction`, read for its
+            CURRENT ``status_id``.  A transfer has no Credit at all.
+        new_status_id: The status a door is asking for.
+
+    Returns:
+        True when *new_status_id* is Credit and *row* is not in it.
+    """
+    return (
+        new_status_id == ref_cache.status_id(StatusEnum.CREDIT)
+        and not is_credit(row)
+    )
+
+
 def delete_returns_to_plan(row: Transaction | Transfer, *, took_off: bool) -> bool:
     """Return whether the delete that took *row*'s payments off sets it back to Projected.
 

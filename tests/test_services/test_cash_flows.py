@@ -97,7 +97,9 @@ def _set_status(txn, status_enum):
     are display only.  The suites this moved from queried
     ``Status.filter_by(name=...)`` directly, and this assigned ``status_id``
     past the seam; :func:`~app.services.status_seam.apply_status_change`
-    reaches both statuses the cases below need.
+    reaches the status the cases below need (Cancelled; the legacy Credit
+    case writes its status as a column, since no door enters Credit after
+    plan task plan#3057).
     """
     status_seam.apply_status_change(txn, ref_cache.status_id(status_enum))
 
@@ -194,14 +196,16 @@ class TestOnlyProjectedRowsContribute:
 
         An entry-capable row should never reach Credit (OQ-10); this pins the
         legacy edge rather than endorsing it.  Reduction: (0.00, 0.00).
-        (Was: the balance stayed at 5000.00.)
+        (Was: the balance stayed at 5000.00.)  The status is written as a
+        column: no door enters Credit since plan task plan#3057, and
+        production holds no Credit row that tracks purchases (2026-11-09).
         """
         with app.app_context():
             txn = create_envelope_txn(
                 seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
             _add_outstanding_purchases(db.session, seed_user, txn, [("300.00", True)])
-            _set_status(txn, StatusEnum.CREDIT)
+            txn.status_id = ref_cache.status_id(StatusEnum.CREDIT)
             db.session.commit()
 
             assert sum_projected([txn], _unreconciled(txn)) == (_ZERO, _ZERO)

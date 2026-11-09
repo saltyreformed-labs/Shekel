@@ -115,8 +115,8 @@ def apply_requested_status(
     So the routes stop choosing.  A door states the status the USER asked for
     and this decides what applying it means.  After plan step X-ap the only
     ``app/`` callers of the seam are this function, :func:`._settle.settle_transaction`,
-    :func:`._settle.settle_from_entries`, ``credit_workflow`` (Credit and its revert,
-    neither of them settled statuses) and ``transfer_service._status`` (a transfer,
+    :func:`._settle.settle_from_entries`, ``credit_workflow`` (an old Credit row's
+    revert, not a settled status) and ``transfer_service._status`` (a transfer,
     one row, which settles through ``transfer_service`` because every write of a
     transfer does: the transfer paragraph of ``CLAUDE.md``'s Architecture) -- so
     a FOURTH transaction settle door cannot be opened by reaching for the obvious

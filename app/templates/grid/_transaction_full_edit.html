@@ -604,29 +604,35 @@
       {# Status selector.  Pre-hint (grid audit D2, ruled 2026-07-11):
          options the state machine would reject from the CURRENT status
          render disabled, so an illegal transition cannot be picked
-         instead of failing as a 400 after Save.  Credit is also
-         disabled for purchase-tracking rows (credit is per-entry, the
-         same predicate as the Credit quick-action above).  The
-         allowed_status_ids default keeps legacy render sites without
-         the context permissive.
+         instead of failing as a 400 after Save.  The allowed_status_ids
+         default keeps legacy render sites without the context permissive.
 
          **It speaks the DRAWN status** (plan task plan#3054): a row put on
          the card selects Credit, offers Credit and Projected
          (`transaction_service.offerable_status_ids`), and an untouched Save
-         posts Credit, which the door reads as the stored Paid. #}
+         posts Credit, which the door reads as the stored Paid.
+
+         **No Status pick enters Credit** (plan task plan#3057, finding
+         plan#2133): the state machine admits no move into it, so Credit is
+         offered only on a row drawn Credit and is disabled elsewhere.  Its
+         title names the Credit button above on a row that offers it
+         (`credit_offered`) and the purchases on a row tracking them; on any
+         other row it is the generic one.  (Until plan task plan#2931, Paid
+         with a card under "Paid from" also puts a row on the card.) #}
       {% set allowed_ids = allowed_status_ids if allowed_status_ids is defined else none %}
       <div class="mb-2">
         <label class="form-label mb-0 small">Status</label>
         <select name="status_id" class="form-select form-select-sm">
           {% for s in statuses %}
           {% set illegal = allowed_ids is not none and s.id not in allowed_ids %}
-          {% set credit_blocked = s.id == STATUS_CREDIT and txn.tracks_purchases %}
           <option value="{{ s.id }}"
                   {{ 'selected' if drawn and drawn.id == s.id else '' }}
-                  {% if illegal %}disabled
-                  title="Not reachable from {{ drawn.name if drawn else 'the current status' }}"
-                  {% elif credit_blocked %}disabled
-                  title="Credit is recorded per purchase entry on tracked rows"{% endif %}>
+                  {% if illegal and s.id == STATUS_CREDIT and credit_offered %}disabled
+                  title="Press Credit above to put this on a card"
+                  {% elif illegal and s.id == STATUS_CREDIT and txn.tracks_purchases %}disabled
+                  title="Credit is recorded per purchase entry on tracked rows"
+                  {% elif illegal %}disabled
+                  title="Not reachable from {{ drawn.name if drawn else 'the current status' }}"{% endif %}>
             {{ s.name }}
           </option>
           {% endfor %}

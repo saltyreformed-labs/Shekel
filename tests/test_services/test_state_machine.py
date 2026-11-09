@@ -92,7 +92,9 @@ def _xfer(status_id):
 
 class TestLegalTransitionsFromProjected:
     """Projected is the workflow's entry point; every active state is
-    reachable from it, plus the identity edge for idempotent resubmits."""
+    reachable from it, plus the identity edge for idempotent resubmits.
+    Credit is not active: the old rows keep it, and nothing enters it (plan
+    task plan#3057)."""
 
     def test_projected_to_done(self, app):
         """Mark expense paid -- the most common transition."""
@@ -106,11 +108,21 @@ class TestLegalTransitionsFromProjected:
         with app.app_context():
             verify_transition(_txn(ids["projected"]), ids["received"])
 
-    def test_projected_to_credit(self, app):
-        """Mark as credit -- triggers the auto-payback workflow."""
+    def test_projected_to_credit_rejected(self, app):
+        """No row enters Credit: the Credit press settles it as Paid on the card.
+
+        Plan task plan#3057, finding plan#2133: this edge was legal and the
+        popover's Status dropdown offered it, so a Save picking Credit set the
+        bare status, with no payback and no movement, and the row's money left
+        checking's projection.  Credit puts a row on the card as Paid since
+        plan task plan#2929 (rulings plan#2887, plan#2888), so nothing is left
+        to enter the stored status, which the old rows keep.  It was
+        ``test_projected_to_credit``, asserting the edge legal.
+        """
         ids = _ids(app)
         with app.app_context():
-            verify_transition(_txn(ids["projected"]), ids["credit"])
+            with pytest.raises(ValidationError, match="from Projected .* to Credit"):
+                verify_transition(_txn(ids["projected"]), ids["credit"])
 
     def test_projected_to_cancelled(self, app):
         """Cancel a projected item -- never paid."""
@@ -129,7 +141,7 @@ class TestLegalTransitionsFromProjected:
 
 
 class TestProjectedReachesEveryStatus:
-    """Projected is the OPEN state: every status is a legal successor.
+    """Projected is the OPEN state: every status but Credit is a legal successor.
 
     This class used to pin the one move Projected could NOT make -- direct
     ``projected -> settled``, which bypassed the Done/Received audit row.  Plan
@@ -145,15 +157,24 @@ class TestProjectedReachesEveryStatus:
     """
 
     def test_projected_reaches_every_seeded_status(self, app):
-        """The successor set is exactly the five statuses, identity included."""
+        """The successor set is every status but Credit, identity included.
+
+        Every status until plan task plan#3057, which decided that Projected
+        may not reach Credit (:meth:`TestLegalTransitionsFromProjected.
+        test_projected_to_credit_rejected` says why): the decision this
+        class's docstring asks each status to have.
+        """
         with app.app_context():
             reachable = allowed_transitions(
                 _txn(ref_cache.status_id(StatusEnum.PROJECTED))
             )
-            every = {ref_cache.status_id(m) for m in StatusEnum}
+            every = {
+                ref_cache.status_id(m) for m in StatusEnum
+                if m is not StatusEnum.CREDIT
+            }
             names = {ref_cache.status_id(m): m.value for m in StatusEnum}
             assert reachable == every, (
-                "Projected no longer reaches every status: missing "
+                "Projected no longer reaches every status but Credit: missing "
                 f"{sorted(names[i] for i in every - reachable)}, "
                 f"unexpected {sorted(names.get(i, i) for i in reachable - every)}"
             )

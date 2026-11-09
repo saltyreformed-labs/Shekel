@@ -110,7 +110,10 @@ class TestMarkDoneDirectStateMachine:
         """A Credit row cannot jump straight to Paid."""
         with app.app_context():
             txn = _create_projected_expense(seed_user, seed_periods_today)
-            _walk_to(txn, "Credit")
+            # An OLD Credit row: no door enters Credit since plan task
+            # plan#3057, so it is planted as the deleted writer left it.
+            plant_old_credit(txn)
+            db.session.commit()
 
             resp = auth_client.post(f"/transactions/{txn.id}/mark-done")
             assert resp.status_code == 400
@@ -173,7 +176,10 @@ class TestCancelTransactionStateMachine:
         """Credit can only revert to Projected, not Cancelled."""
         with app.app_context():
             txn = _create_projected_expense(seed_user, seed_periods_today)
-            _walk_to(txn, "Credit")
+            # An OLD Credit row: no door enters Credit since plan task
+            # plan#3057, so it is planted as the deleted writer left it.
+            plant_old_credit(txn)
+            db.session.commit()
 
             resp = auth_client.post(f"/transactions/{txn.id}/cancel")
             assert resp.status_code == 400

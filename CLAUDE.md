@@ -264,9 +264,10 @@ Routes (Blueprints) → Services (no Flask imports) → Models (SQLAlchemy) / Sc
 
 **Key domain concepts:** Anchor Balance (real checking balance, projections flow forward from it).
 Balance Calculator (period-by-period from anchor). Recurrence Engine (8 patterns from templates).
-Paycheck Calculator (salary + raises - taxes - deductions). Status workflow:
-`projected -> done|received|credit|cancelled`, and every one of those back to `projected` (revert).
-No status is terminal.
+Paycheck Calculator (salary + raises - taxes - deductions). Status workflow: `projected ->
+done|received|cancelled`, and every one of those back to `projected` (revert); `credit` is the old
+rows' alone and reverts the same way, since no row enters it: Credit puts a row on the card as Paid
+(plan#3057). No status is terminal.
 
 **Established patterns -- use these, do not reinvent:** Authentication is the login gate
 (`app/login_gate.py`, ruling `bank_import:R-BI4`): every route is gated by existing, NO view carries

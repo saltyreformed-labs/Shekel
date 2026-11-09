@@ -10,7 +10,9 @@ so this module also holds what a status POSTED from it means
 (:func:`requested_status_id`): a row put on the card is stored Paid and drawn
 Credit (``status_seam.drawn_status_id``), the dropdown selects Credit on it,
 and an untouched Save posts Credit back.  What it offers and what it posts are
-read through the same answer, so they cannot part.
+read through the same answer, so they cannot part, and a refusal of what it
+posts is said in that status too (:func:`verify_requested_status`, plan task
+plan#3057).
 
 **It is a display convention with an enforced consequence**, which is why it is
 a leaf of its own rather than a line inside the settle.  Every reader of the
@@ -27,9 +29,13 @@ from app import ref_cache
 from app.enums import StatusEnum
 from app.exceptions import ValidationError
 from app.models.transaction import Transaction
-from app.services.state_machine import allowed_transitions
-from app.services.status_seam import drawn_status_id
-from app.utils.balance_predicates import is_identity_move
+from app.services.state_machine import allowed_transitions, verify_transition
+from app.services.status_seam import drawn_status_id, settled_on_a_card
+from app.utils.balance_predicates import (
+    enters_credit,
+    is_identity_move,
+    is_projected,
+)
 
 
 def settled_status_member(txn: Transaction) -> StatusEnum:
@@ -250,7 +256,7 @@ def requested_status_id(txn: Transaction, posted_status_id: int) -> int:
     admitting Paid -> Credit there instead would store status Credit holding
     the movement, which drops the $800 from the card's balance (review B of
     plan#2890).  Every other posted status is the move it names, graded by
-    the state machine on the stored status.
+    the state machine on the stored status (:func:`verify_requested_status`).
 
     Args:
         txn: The row the popover was drawn for, before any field is written.
@@ -269,3 +275,80 @@ def requested_status_id(txn: Transaction, posted_status_id: int) -> int:
     """
     stored_for_drawn = {drawn_status_id(txn): txn.status_id}
     return stored_for_drawn.get(posted_status_id, posted_status_id)
+
+
+def verify_requested_status(txn: Transaction, requested: int) -> None:
+    """Refuse a move the popover's Save asks for that the row cannot make, in its drawn status.
+
+    The state machine grades the move on the STORED status
+    (``state_machine.verify_transition``), and its sentence names that status,
+    so on a row put on the card it said "from Paid" in a cell labelled Credit
+    (review L4 of plan#3054).  Two refusals are therefore said here in plain
+    words, each with what to do instead (plan task plan#3057); every other
+    keeps the state machine's sentence, on a row whose drawn status is its
+    stored one:
+
+    * **Credit, for a row not in it.**  No row enters the Credit status
+      (``state_machine``, finding plan#2133): the Credit button puts a row on
+      the card, and a row tracking its purchases puts each purchase there by
+      its CC tick, so the popover draws this option disabled and what posts
+      it is a crafted request or a stale page;
+    * **any other move refused on a row on the card**, whose only moves are
+      staying as it is and going back to Projected.
+
+    The PATCH door's early check, for error precedence (``routes/transactions/
+    _gates``); the status seam re-runs the state machine's own.
+
+    Args:
+        txn: The row the popover was drawn for, before any field is written.
+        requested: What :func:`requested_status_id` read the posted status as.
+
+    Raises:
+        ValidationError: When the state machine refuses the move.  A 400 at
+            the route.
+        ValueError: From ``status_seam.settled_on_a_card``, on a row holding
+            two covering movements.
+    """
+    try:
+        verify_transition(txn, requested)
+    except ValidationError as refusal:
+        if enters_credit(txn, requested):
+            raise ValidationError(
+                f"Status cannot put {txn.name} on a credit card: "
+                f"{_how_it_goes_on_a_card(txn)}."
+            ) from refusal
+        if settled_on_a_card(txn):
+            raise ValidationError(
+                f"{txn.name} is on the card, so its Status can only stay "
+                "Credit or go back to Projected, which takes it off the card."
+            ) from refusal
+        raise
+
+
+def _how_it_goes_on_a_card(txn: Transaction) -> str:
+    """Return what puts *txn* on a credit card, for :func:`verify_requested_status`'s refusal.
+
+    Said for the row's own shape, because the refusal renders in its grid
+    cell and each shape has a different answer: income goes on no card; a
+    row tracking its purchases puts each purchase there by its CC tick
+    (Credit is per purchase); any other expense by its Credit button, which
+    the popover offers on a Projected row only
+    (``transaction_service.credit_offered``), so a paid or cancelled one is
+    set back to Projected first.
+
+    Args:
+        txn: The row a Save asked to put in Credit.
+
+    Returns:
+        The clause after "Status cannot put <row> on a credit card: ".
+    """
+    if txn.is_income:
+        return "only an expense can go on a card"
+    if txn.tracks_purchases:
+        return (
+            "it tracks its purchases, so each purchase goes on the card by its "
+            "own CC tick"
+        )
+    if is_projected(txn):
+        return "open it and press Credit instead"
+    return "set it back to Projected, then open it and press Credit"

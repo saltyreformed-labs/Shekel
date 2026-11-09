@@ -8,11 +8,19 @@ call before mutating ``status_id`` on a Transaction or Transfer.
 Transaction workflow per CLAUDE.md
 ----------------------------------
 
-  projected -> done | received | credit | cancelled
+  projected -> done | received | cancelled
   done -> projected (revert mistakes)
   received -> projected (revert mistakes)
   credit -> projected (unmark credit)
   cancelled -> projected (reactivate cancelled item)
+
+**Nothing enters Credit** (plan task plan#3057, finding plan#2133): a Credit
+press puts a row on the card as Paid with its movement there (rulings
+plan#2887, plan#2888, ``transaction_service.mark_as_credit``), so the stored
+status is the old rows' alone, and they keep their edge back to Projected.  The
+edge into it outlived the press, and the Status dropdown offered it: a Save
+picking Credit set the bare status, no payback and no movement, and the row's
+money left checking's projection.
 
 Transfer workflow
 -----------------
@@ -58,7 +66,9 @@ dropdown).  The conjunction is the defect, and each half alone is not:
   locked ruling 5 (2026-07-19, *do not reopen*) makes ``Credit`` exactly that at
   step ``CC3b``: ``projected`` loses its edge to ``credit`` in the same commit
   that makes ``credit: {credit}`` terminal, so the surviving rows are frozen
-  history and no door can create another.
+  history and no door can create another.  The first half came first, at plan
+  task plan#3057 (above), and alone it is the safe one: ``credit`` keeps its
+  edge to ``projected``, so it is unreachable without being absorbing.
 
 So the law this module holds is the CONJUNCTION, and
 ``TestNoStateIsBothReachableAndAbsorbing`` grades it that way rather than
@@ -139,10 +149,12 @@ paying for:
   ``_validation.assert_restorable`` asked :func:`allowed_transitions` of a
   drifted twin (ruling R-DO), until plan step ``balance:X-bi-6-4d-2``
   stopped keeping a twin's status.
-* ``app/routes/transactions/mutations.py`` -- the PATCH handler's
-  error-precedence pre-check, which deliberately duplicates the seam's
-  own verification so an illegal transition reports its own message
-  before any other guard speaks.
+* ``app/services/transaction_service/_status_rules.py:verify_requested_status``
+  -- the PATCH handler's error-precedence pre-check (its gate,
+  ``app/routes/transactions/_gates.py``), which deliberately duplicates the
+  seam's own verification so an illegal transition reports its own message
+  before any other guard speaks, worded in the status the row is drawn as
+  (plan task plan#3057).
 * ``app/routes/transfers/forms.py`` / ``app/routes/transactions/forms.py``
   -- the two status dropdowns' pre-hint.
 
@@ -252,18 +264,20 @@ def _build_transitions():
         "transaction": {
             # Projected can move to any active workflow state and absorbs
             # idempotent re-submission via the projected -> projected entry.
-            projected: {projected, done, received, credit, cancelled},
+            # Not to Credit: a Credit press settles the row as Paid on the
+            # card, so no row enters the stored status (plan task plan#3057).
+            projected: {projected, done, received, cancelled},
             # Paid expenses can be reverted or re-marked.  The third edge
             # here was ``settled`` -- the archive -- deleted with the status
             # at plan step X-am; see the module docstring.
             done: {done, projected},
             # Received income mirrors the Paid expense transitions.
             received: {received, projected},
-            # Credit can only revert to Projected -- both revert paths
-            # (the dedicated unmark_credit workflow and the PATCH status
-            # edit) delete the auto-generated payback row through the
-            # shared credit_workflow cleanup helper.  No direct -> Done
-            # jump.
+            # Credit, the old rows', can only revert to Projected -- both
+            # revert paths (the dedicated unmark_credit workflow and the
+            # PATCH status edit) delete the auto-generated payback row
+            # through the shared credit_workflow cleanup helper.  No direct
+            # -> Done jump.
             credit: {credit, projected},
             # Cancelled rows can be reactivated to Projected.  No direct
             # transitions to Done / Received -- the user must reproject

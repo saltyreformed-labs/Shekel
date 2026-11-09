@@ -659,7 +659,12 @@ class TestASettledStatusMustMatchTheRowsType:
                 f"offered={sorted(names[i] for i in offerable)}"
             )
 
-            assert legal == {ref_cache.status_id(m) for m in StatusEnum}, shown
+            # Every status but Credit, which no row enters since plan task
+            # plan#3057 (finding plan#2133); every status until then.
+            assert legal == {
+                ref_cache.status_id(m) for m in StatusEnum
+                if m is not StatusEnum.CREDIT
+            }, shown
             assert legal - offerable == {
                 ref_cache.status_id(StatusEnum.RECEIVED),
             }, shown

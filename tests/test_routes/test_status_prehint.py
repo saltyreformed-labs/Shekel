@@ -70,7 +70,7 @@ class TestTransactionCardPreHint:
         option.  Plan step **balance:X-am** deleted that status, and Projected
         now reaches every status the enum has -- so a from-Projected card has
         nothing disabled to assert, and the case moves to the row state that
-        does.  ``test_projected_offers_every_status`` below is the other half.
+        does.  ``test_projected_offers_every_status_but_credit`` below is the other half.
         """
         with app.app_context():
             txn = _create_expense(seed_user, seed_periods_today)
@@ -96,16 +96,18 @@ class TestTransactionCardPreHint:
             )
             assert "disabled" not in projected_tag
 
-    def test_projected_offers_every_status(
+    def test_projected_offers_every_status_but_credit(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """From Projected, no option is disabled but the type mismatch.
+        """From Projected, no option is disabled but the type mismatch and Credit.
 
         The other half of the pre-hint, and it is the assertion plan step
-        **balance:X-am** makes possible: Projected reaches every status, so the
-        only thing greyed on an EXPENSE card is ``Received`` -- which the
-        state machine allows and ``transaction_service.offerable_status_ids``
-        removes, because an expense settles as Paid.
+        **balance:X-am** makes possible: Projected reaches every status but
+        Credit, so what is greyed on an EXPENSE card is ``Received`` -- which
+        the state machine allows and ``transaction_service.offerable_status_ids``
+        removes, because an expense settles as Paid -- and ``Credit``, which
+        no row enters since plan task plan#3057 (finding plan#2133: the
+        Credit button puts a row on the card).  Only Received until then.
 
         Asserting the whole set rather than one option is what catches a status
         added to the enum with nobody deciding whether Projected may reach it.
@@ -123,9 +125,9 @@ class TestTransactionCardPreHint:
                     html, ref_cache.status_id(member),
                 )
             }
-            assert disabled == {"Received"}, (
+            assert disabled == {"Received", "Credit"}, (
                 f"expense card disables {sorted(disabled)}; expected only the "
-                "type-mismatched settled status"
+                "type-mismatched settled status and Credit"
             )
 
     def test_envelope_row_disables_credit_option(
@@ -133,9 +135,10 @@ class TestTransactionCardPreHint:
     ):
         """A purchase-tracking row's Credit option is disabled.
 
-        Credit is per-entry on tracked rows (the route guard's message);
-        the dropdown pre-hints the same rule the Credit quick-action
-        button already follows.
+        Credit is per-entry on tracked rows, and the dropdown says so (plan
+        task plan#3057: no row enters Credit, so the option is disabled on
+        every row not drawn Credit; a projected expense's title points to the
+        Credit button instead, and every other row's is the generic one).
         """
         with app.app_context():
             txn = _create_expense(

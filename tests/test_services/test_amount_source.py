@@ -123,6 +123,7 @@ from app.routes.grid._items import build_amount_maps
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import parent_of
 from tests._definition_price import newest_price
+from tests._legacy_credit import plant_old_credit
 
 
 # The definition's price history, and the row dates that select from it.  TWO
@@ -668,7 +669,8 @@ class TestTheDeclarationDecides:
     from having left Projected -- neither of which
     ``ck_transactions_amount_ownership`` can see -- so four live doors could
     write a row the schema admits and the resolver refuses.  Each of the four is
-    reached here on a DECLARED row and shown to resolve through its relation
+    reached here on a DECLARED row (Credit's planted, no door since plan#3057)
+    and shown to resolve through its relation
     rather than falling into OWN and raising.
     """
 
@@ -679,10 +681,11 @@ class TestTheDeclarationDecides:
     def test_leaving_projected_does_not_take_a_declared_row_back(
         self, app, db, seed_user, seed_periods, status,
     ):
-        """A declared row keeps its relation in every status the machine admits.
+        """A declared row keeps its relation in every status a row can be in.
 
-        Credit and Cancelled are the reachable half and they are why this is a
-        parametrize rather than a settled-only case: both leave Projected WITHOUT
+        Credit and Cancelled are the unsettled half and they are why this is a
+        parametrize rather than a settled-only case (Credit an old row's alone
+        since plan task plan#3057, planted): both leave Projected WITHOUT
         entering the settled band, so no freeze fires and no figure is written
         back.  Under the inference such a row took the OWN arm and
         ``_own_figure`` raised on its empty column -- and production carries 7
@@ -694,15 +697,22 @@ class TestTheDeclarationDecides:
         template = _priced_template(seed_user)
         txn = _template_row(seed_periods[0], template)
         status_id = ref_cache.status_id(status)
-        # Through the seam, and the two settling arms record a figure no rule
-        # may answer: a resolver that read the settlement record instead of
-        # the series would answer 999.99 here rather than the old price.
-        status_seam.apply_status_change(
-            txn, status_id,
-            settlement=settlement_if_settling(
-                txn, status_id, submitted=Decimal(_NOT_AN_ANSWER),
-            ),
-        )
+        if status is StatusEnum.CREDIT:
+            # An OLD Credit row, the shape the 2 production rows have: no door
+            # enters Credit since plan task plan#3057, so it is planted as the
+            # deleted writer left it.
+            plant_old_credit(txn)
+        else:
+            # Through the seam, and the two settling arms record a figure no
+            # rule may answer: a resolver that read the settlement record
+            # instead of the series would answer 999.99 here rather than the
+            # old price.
+            status_seam.apply_status_change(
+                txn, status_id,
+                settlement=settlement_if_settling(
+                    txn, status_id, submitted=Decimal(_NOT_AN_ANSWER),
+                ),
+            )
         db.session.flush()
         assert amount_rule(txn) is AmountRule.TEMPLATE
         assert _resolve(seed_user, txn) == _OLD_PRICE

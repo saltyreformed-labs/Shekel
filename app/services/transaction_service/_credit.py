@@ -110,8 +110,10 @@ def mark_as_credit(
     not Projected (a stale press on a row another tab settled or cancelled).
     A row already on a card, or an old Credit row holding its live payback,
     is a press already made, so a double click changes nothing; a row in
-    status Credit holding no payback (the Status dropdown's, finding
-    plan#2133) is refused as not Projected, as the old press refused it.
+    status Credit holding no payback (what the Status dropdown wrote until
+    plan task plan#3057 took the state machine's edge into Credit away,
+    finding plan#2133) is refused as not Projected, as the old press refused
+    it.
     A day the owner typed over the one the popover showed is bounded as every
     typed settle day is, by ``status_seam.settle_day_for_status``: not before
     the owner's schedule starts (ruling **R-EL**, a door rule the settle verb

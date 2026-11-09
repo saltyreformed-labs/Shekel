@@ -169,7 +169,9 @@ class TestOneOffPurchaseTracking:
     ):
         """Setting Credit status on a one-off envelope row is rejected (400).
 
-        Credit is per-entry on tracked rows, never per-transaction.
+        Credit is per-entry on tracked rows, never per-transaction, and the
+        refusal says so in the status door's words since plan task plan#3057
+        (``transaction_service.verify_requested_status``).
         """
         with app.app_context():
             txn = _make_one_off(
@@ -181,7 +183,7 @@ class TestOneOffPurchaseTracking:
                 data={"status_id": credit_id, "version_id": txn.version_id},
             )
             assert resp.status_code == 400
-            assert b"individual purchase tracking" in resp.data
+            assert b"each purchase goes on the card by its own CC tick" in resp.data
 
 
 class TestOneOffFlagUI:

@@ -34,7 +34,7 @@ from app.routes.loan._helpers import (
     _update_schema,
     render_loan_setup,
 )
-from app.services import loan_anchor_service, loan_posting_service
+from app.services import loan_anchor_service
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.utils.account_validation import (
     INVALID_COLLATERAL_LINK,
@@ -55,9 +55,11 @@ def create_params(account_id):
     The loan's genesis, in ONE transaction: the :class:`LoanParams` row, the
     origination :class:`RateHistory` row, the ``tracking_start``
     :class:`LoanAnchorEvent` for the balance the owner states (when the loan
-    originated before the date it is stated for), the genesis posting ledger
-    reconciled over all of it, and the standing payment's start brought onto
-    the contract -- then the single commit.  A refusal anywhere ahead of the
+    originated before the date it is stated for), and the standing payment's
+    start brought onto the contract -- then the single commit.  (The genesis
+    posting ledger was reconciled over all of it too, until plan task plan#3076
+    deleted the stored ledger's syncs; the worked-out ledger reads the loan's
+    terms and statements as they stand.)  A refusal anywhere ahead of the
     commit rolls the whole write back.
 
     **The balance stated at setup IS an assertion and is recorded as one**
@@ -160,22 +162,16 @@ def create_params(account_id):
     # transaction whenever the loan originated BEFORE the day it is stated
     # for, and refused as the dashboard's door refuses one (ruling R-R115).
     # Its row is constructed by the anchor service, the one place a loan
-    # anchor is written; the ledger re-sync and the commit below are the
-    # door's, as they were.
+    # anchor is written; the commit below is the door's, as it was.
     refused = _stage_stated_balance_or_refuse(
         account, account_type, params, anchor_balance, anchor_date,
     )
     if refused is None:
-        # Posting ledger (read switch): now that the params / origination
-        # rate exist, reconcile the loan's full genesis ledger.  For a
-        # brand-new loan this posts the OPENING (-original_principal onto the
-        # loan, its positive onto a per-loan opening-equity account) in the
-        # baseline scenario -- the payment-less case the all-scenarios sync
-        # covers by including the baseline -- and the stated balance's TRUEUP
-        # correction at its date.  A loan that had payments settled before it
-        # was configured (not yet resolvable, so uncorrected) also gets those
-        # payments' split corrections back-posted here.
-        loan_posting_service.sync_loan_postings_all_scenarios(account.id)
+        # The standing-payment helper below is called once the door's write
+        # is FLUSHED (its contract), so the origination rate and the stated
+        # balance land here, outside its refusal's catch.  The stored ledger's
+        # genesis sync stood here and flushed them until plan task plan#3076.
+        db.session.flush()
         # A recurring transfer that already pays into this account is the
         # loan's standing payment from this moment, and its start is the
         # contract's (ruling **R-R81**; plan step R7d-g).  Until that step the
@@ -344,14 +340,14 @@ def update_params(account_id):
         if field in _PARAM_FIELDS:
             setattr(params, field, value)
 
-    # Posting ledger: a params edit can change the origination rate (via
-    # ``_upsert_origination_rate`` above) OR the ``payment_day`` -- both move
-    # the confirmed-payment split (the rate drives interest; ``payment_day``
-    # drives the monthly-due-date eligibility boundary) AND any true-up's
-    # ``owed_before`` (the running balance a later true-up corrects from), so
-    # re-sync every scenario's full genesis ledger UNCONDITIONALLY, not only on
-    # the rate path.
-    loan_posting_service.sync_loan_postings_all_scenarios(account.id)
+    # A params edit can change the origination rate (via
+    # ``_upsert_origination_rate`` above) OR the ``payment_day``, and both
+    # move the confirmed-payment split and any true-up's ``owed_before``; the
+    # worked-out ledger reads them as they stand.  The edit is FLUSHED before
+    # the standing-payment helper below, by that helper's contract, and outside
+    # its refusal's catch.  (The stored ledger's genesis re-sync stood here
+    # and flushed it, until plan task plan#3076.)
+    db.session.flush()
     # Re-derive the standing payment's OPENING bound before committing: a
     # PAYMENT-DAY change moves the loan's first contractual installment
     # (plan step C9a), the one stored bound on that rule a params edit can
@@ -499,10 +495,10 @@ def true_up_balance(account_id):
         )
         return redirect(url_for("loan.dashboard", account_id=account_id))
 
-    # ``apply_loan_anchor_true_up`` committed the event and the posting
-    # re-sync.  The recurring payment's closing bound is not written here or
-    # anywhere (plan step R7d-g): the payoff this true-up moves is derived on
-    # every read through the composed door.
+    # ``apply_loan_anchor_true_up`` committed the event (and the posting
+    # re-sync, until plan task plan#3076).  The recurring payment's closing
+    # bound is not written here or anywhere (plan step R7d-g): the payoff this
+    # true-up moves is derived on every read through the composed door.
 
     logger.info(
         "Loan trueup: account %d set to $%s as of %s",
@@ -630,9 +626,9 @@ def record_tracking_start(account_id):
         )
         return redirect(url_for("loan.dashboard", account_id=account_id))
 
-    # ``record_loan_tracking_start`` committed the event and the posting
-    # re-sync; the payoff it moves is derived on every read (plan step R7d-g),
-    # as at the true-up route above.
+    # ``record_loan_tracking_start`` committed the event (and the posting
+    # re-sync, until plan task plan#3076); the payoff it moves is derived on
+    # every read (plan step R7d-g), as at the true-up route above.
 
     logger.info(
         "Loan tracking-start: account %d set to $%s as of %s",

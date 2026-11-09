@@ -62,12 +62,12 @@ every other reconcile in this ledger already gets.
 existing correction reaches this.  A period being DELETED takes the stored
 correction with it through the ``pay_period_id`` cascade, so no stale key is
 left to reverse and the next reconcile posts the target fresh.
-``reset_pay_periods`` wipes and pairs itself with a full resync
-(``resync_user_loan_postings`` / ``resync_user_account_anchor_postings``);
-``truncate_pay_periods`` and ``regenerate_pay_periods`` run none, so since
-ruling plan#2782 deleted the lock that refused them the stored copy is short
-until that next re-sync, while the worked-out line files by its day on
-whichever paycheck stands.
+``reset_pay_periods`` wiped and paired itself with a full resync
+(``resync_user_loan_postings`` / ``resync_user_account_anchor_postings``)
+until plan task plan#3076, and ``truncate_pay_periods`` and
+``regenerate_pay_periods`` ran none, so since ruling plan#2782 deleted the lock
+that refused them the stored copy was short until that next re-sync; the
+worked-out line files by its day on whichever paycheck stands.
 
 **Where the period comes from is the SAME on both halves, and this paragraph
 used to say it was not.**  A loan anchor's period is DERIVED from its date

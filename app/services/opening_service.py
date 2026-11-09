@@ -75,7 +75,7 @@ from app.exceptions import ValidationError
 from app.extensions import db
 from app.models.account import Account
 from app.models.account_opening import AccountOpening
-from app.services import account_posting_service, cash_ledger, planned_rows_books
+from app.services import cash_ledger, planned_rows_books
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import RecurrenceGenerationError, RecurrenceResolutionError
 from app.utils.dates import display_today
@@ -133,8 +133,9 @@ class OpeningRestatementOutcome(enum.Enum):
 
     Members:
         COMMITTED: A new :class:`~app.models.account_opening.AccountOpening`
-            row was appended, the account's posted anchor corrections were
-            re-based onto it, and the commit succeeded.
+            row was appended and the commit succeeded.  (The account's posted
+            anchor corrections were re-based onto it too, until plan task
+            plan#3076 deleted the stored ledger's re-sync.)
         UNCHANGED: The submission matched the opening that already GOVERNS, so
             nothing was written and the session was rolled back.
     """
@@ -473,13 +474,12 @@ def stage_account_opening(
 def apply_opening_restatement(
     *, account: Account, opening: BooksOpening,
 ) -> OpeningRestatementOutcome:
-    """Restate what *account*'s books opened with, re-base its postings, commit.
+    """Restate what *account*'s books opened with, and commit.
 
     The owner-facing door (plan step **X-f3c-2b-2a**): bounds the day, appends
-    the restatement through :func:`stage_account_opening`, re-bases the
-    account's posted anchor corrections onto it, and commits.  Returns an
-    :class:`OpeningRestatementOutcome` the caller translates into its rendered
-    response.
+    the restatement through :func:`stage_account_opening`, and commits.
+    Returns an :class:`OpeningRestatementOutcome` the caller translates into
+    its rendered response.
 
     **The provenance is ``user_declared`` and this door cannot say otherwise.**
     Only the X-f3c-2a migration writes ``migration_derived``, and it is frozen
@@ -487,17 +487,19 @@ def apply_opening_restatement(
     can tell a guess from an observation.  A door that let an owner mark their
     own figure "derived" would erase the distinction the column exists for.
 
-    **The posting re-sync is not optional and it moves more than the amount.**
-    ``budget.account_openings`` is read by BOTH the balance fold and the posted
-    ledger (ruling **R-GX**): ``ledger_lines.walk_account_ledger``
-    books the ``account_opening`` journal entry dated on ``opened_on`` and
-    seeds every later correction's ``ledger_before`` from the equity.  Moving
-    either therefore re-keys that entry -- ``(source kind, pay period, entry
-    date)`` -- and changes the delta of every true-up after it.  The reconcile
-    walks the UNION of the target and posted keys
-    (:func:`app.services._posting_reconcile.emit_correction_deltas`), so the
-    old-dated entry is reversed to zero and the new one posted in the same
-    transaction; nothing is orphaned and nothing needs a backfill.
+    **A restatement moves more than the amount.**  ``budget.account_openings``
+    is read by BOTH the balance fold and the worked-out ledger (ruling
+    **R-GX**): ``ledger_lines.walk_account_ledger`` books the
+    ``account_opening`` entry dated on ``opened_on`` and seeds every later
+    correction's ``ledger_before`` from the equity, so moving either re-keys
+    that entry -- ``(source kind, pay period, entry date)`` -- and changes the
+    delta of every true-up after it.  The worked-out ledger reads the new row
+    as it stands, so nothing is left to re-sync.  *Until plan task plan#3076
+    this door re-synced the stored ledger here, which walked the UNION of the
+    target and posted keys
+    (:func:`app.services._posting_reconcile.emit_correction_deltas`) to
+    reverse the old-dated entry to zero and post the new one in the same
+    transaction.*
 
     **Restating the opening ALONE does not settle the account's books, and the
     step that ships this door measured why.**  The account's later assertions
@@ -584,13 +586,9 @@ def apply_opening_restatement(
         )
         return OpeningRestatementOutcome.UNCHANGED
 
-    # EVERY scenario, because a books opening is per-ACCOUNT and scenario-free
-    # (ruling **R-GX**, defect 2 of four): the quantity is what existed before
-    # tracking began, and money that existed before tracking began cannot be a
-    # function of a what-if.  The fresh row autoflushes into the walk's first
-    # query, so the reconcile re-keys the opening entry in this transaction.
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        account.id,
-    )
+    # The commit flushes the staged row.  The stored ledger's re-sync of every
+    # scenario stood here until plan task plan#3076: a books opening is
+    # per-ACCOUNT and scenario-free (ruling **R-GX**), and the worked-out
+    # ledger reads it in whichever scenario it is asked for.
     db.session.commit()
     return OpeningRestatementOutcome.COMMITTED

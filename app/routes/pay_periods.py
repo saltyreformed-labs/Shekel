@@ -438,8 +438,9 @@ def remove_earlier():
     payday of the earliest pay rhythm (**R-PC110**) -- the last two
     ``PayPeriodRemovalRefused``, each raised before the door writes.
     The catch is that class and not
-    the generic ``ValidationError``, because both ledger re-syncs run below
-    it: a refusal of theirs is a defect to surface, not advice to flash.
+    the generic ``ValidationError``: a refusal of anything else the door
+    reaches is a defect to surface, not advice to flash (both ledger re-syncs
+    ran below it until plan task plan#3076).
     The rollback here is for the page this redirects to, which reads the
     owner's schedule back.  There is no discard-confirm panel: the ruling
     refused one.
@@ -633,15 +634,15 @@ def reset():
             current_user.id, data["new_start_date"], data["num_periods"],
             data["rhythm"],
         )
-        # LAST, after the wipe, the rebuild and both posting re-syncs -- see
-        # ``reset_pay_periods`` for why the re-syncs cannot see what this
-        # writes and why generating AFTER them is the order R7d-c-2 needs, and
-        # the extend route for why the pass opens here.
+        # LAST, after the wipe and the rebuild -- see the extend route for
+        # why the pass opens here.  (It ran after both posting re-syncs too,
+        # until plan task plan#3076; ``reset_pay_periods`` keeps why that
+        # order was the one R7d-c-2 needed.)
         populate_new_periods(current_user.id, new_periods)
     except (PayPeriodResetBlocked, ValidationError) as exc:
         # ``reset_pay_periods`` wipes every period before it records the new
-        # schedule, so a refusal raised after that leaves the wipe, the
-        # rebuild and both posting re-syncs staged in the session -- as does
+        # schedule, so a refusal raised after that leaves the wipe and the
+        # rebuild staged in the session -- as does
         # one raised by the repopulation below it.  Both reset refusals happen
         # before any of it; the rollback is for the rest.
         db.session.rollback()

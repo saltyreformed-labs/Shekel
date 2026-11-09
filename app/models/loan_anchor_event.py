@@ -37,7 +37,7 @@ Duplicate-submit prevention follows the :class:`AccountAnchorHistory`
 precedent, and since ruling **R-EQ** (plan step X-f1c4b) that precedent is a
 WRITE-DOOR rule rather than a unique index: an event is appended only when it
 differs from the event that already governs its source.  See
-:func:`app.services.loan_anchor_service._append_loan_anchor_and_sync` for the rule
+:func:`app.services.loan_anchor_service._append_loan_anchor_and_commit` for the rule
 and the ``__table_args__`` comment below for what the deleted index could not
 express.
 """
@@ -120,7 +120,7 @@ class LoanAnchorEvent(AccountScopedMixin, CreatedAtMixin, db.Model):
         # correcting it earlier on the same recording day, and the write was
         # rejected while the route flashed "already recorded".  The rule now
         # lives at the write door
-        # (``loan_anchor_service._append_loan_anchor_and_sync``), which compares the
+        # (``loan_anchor_service._append_loan_anchor_and_commit``), which compares the
         # submission against the event that GOVERNS for its own source and so
         # answers exactly.
         #

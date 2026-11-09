@@ -90,8 +90,6 @@ from app.exceptions import (
     PayPeriodUnresolved,
 )
 from app.services import (
-    account_posting_service,
-    loan_posting_service,
     pay_period_gates,
     pay_period_write,
 )
@@ -257,10 +255,10 @@ def remove_earlier_pay_periods(user_id: int, start_from_period_id: int) -> int:
       a true-up holds no paycheck of its own: the ledger files one dated
       before the first paycheck in the earliest, so an added paycheck can
       hold a loan's opening from years back, and once that paycheck goes it
-      files in the new first one.  What this door
-      still owes is the store's upkeep: its delete takes the stored entries
-      the head holds, and Reset's two re-syncs (:func:`_refile_ledger`) book
-      them on the kept paychecks until the store is deleted.
+      files in the new first one.  *Until plan task plan#3076 this door also
+      kept the stored ledger up: its delete took the stored entries the head
+      held, and Reset's two re-syncs (``_refile_ledger``) booked them on the
+      kept paychecks.  No door writes the store now.*
 
     Nothing is populated: a removal records no payday.  Deletion is the
     writer's one bulk ``DELETE``, whose cascade takes the template rows and
@@ -303,35 +301,9 @@ def remove_earlier_pay_periods(user_id: int, start_from_period_id: int) -> int:
     )
     if not doomed:
         return 0
-    removed = pay_period_write.retire_paydays(
+    return pay_period_write.retire_paydays(
         user_id, {period.period_id for period in doomed},
     )
-    _refile_ledger(user_id)
-    return removed
-
-
-def _refile_ledger(user_id: int) -> None:
-    """Re-derive the owner's loan and account ledger corrections onto their schedule.
-
-    The two re-syncs a schedule change owes the posted ledger, in the order
-    :func:`reset_pay_periods` has always run them: a loan's opening and
-    true-up entries, then every account's opening and anchor corrections,
-    each re-derived from the records they come from (``LoanParams`` and the
-    loan's statements, the account's assertions) and filed through
-    ``PayCalendar.filing_period`` on the schedule as it now stands.  The
-    loan half does more than its name says: it also reconciles a loan
-    payment's split corrections and re-dates a settled payment's cash
-    entries (``sync_transfer_postings``, which reaches the paying
-    account's ledger too).  Reset
-    needs it because its wipe took them; "Remove earlier paychecks"
-    (**R-PC114**) because its delete took the ones the ledger had filed in
-    the removed paychecks.
-
-    Args:
-        user_id: The owning user's id.
-    """
-    loan_posting_service.resync_user_loan_postings(user_id)
-    account_posting_service.resync_user_account_anchor_postings(user_id)
 
 
 def truncate_pay_periods(
@@ -639,31 +611,31 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
          writer's own rule rather than a cascade (plan step C17-a).
       4. Generate the fresh schedule from ``new_start_date``, minting its
          one era there.
-      5. Re-sync each of the user's loans' genesis postings onto the
-         rebuilt schedule (:func:`loan_posting_service.resync_user_loan_postings`).
-         A loan's opening / true-up ledger entries carry a ``pay_period_id``
-         and so CASCADE-delete with the wiped periods, but they exist
-         independently of any settled row or transfer, so the zero-settled gate
-         does NOT keep them; their SOURCE facts (``LoanParams`` and the
-         ``user_trueup`` ``LoanAnchorEvent`` rows) survive, so this re-derives
-         and re-posts them attributed to the new periods.  Then the same for
-         the non-loan accounts' anchor corrections (Build-Order Step 5,
-         :func:`account_posting_service.resync_user_account_anchor_postings`):
-         the wipe took their correction ENTRIES, which are keyed on a pay
-         period, but not the assertions those entries derive from -- so this
-         re-derives every one of the user's real assertions onto the rebuilt
-         schedule rather than one fabricated opening per account.
+
+    The worked-out ledger files each loan's and account's opening and
+    true-ups on the rebuilt schedule by their days: their SOURCE facts
+    (``LoanParams``, the loan's statements, the accounts' assertions) carry no
+    pay period, so the wipe does not reach them.
+
+    *A step 5 stood here until plan task plan#3076, which deleted it with the
+    stored ledger's doors:* it re-synced each loan's genesis postings and
+    every account's anchor corrections onto the rebuilt schedule
+    (``_refile_ledger``), because their stored ENTRIES carry a
+    ``pay_period_id`` and CASCADE-deleted with the wiped periods while the
+    facts they derive from survived.
 
     **The REPOPULATION left this list at plan step R7d-c-1** (ruling
     **R-R38**), and it moved to the CALLER rather than merely to the end: it
-    used to run between steps 4 and 5, and it runs after both re-syncs now.
+    used to run between steps 4 and 5, and it ran after both re-syncs from
+    then until plan task plan#3076.
 
-    **Neither re-sync can see what the repopulation writes, and the reason is
-    ONE property rather than a list of readers: both read only what has
-    SETTLED.**  The account side reads the account's DATED movements
-    (``cash_ledger.settled_cash_facts``, through the read fold's assertion
-    replay since plan task plan#2525; it read the linked ledger's nonzero
-    per-row nets until then), and the loan side reads only the loan walk's own
+    *History, with the re-syncs:* **neither re-sync could see what the
+    repopulation writes, and the reason was ONE property rather than a list of
+    readers: both read only what has SETTLED.**  The account side read the
+    account's DATED movements (``cash_ledger.settled_cash_facts``, through the
+    read fold's assertion replay since plan task plan#2525; it read the linked
+    ledger's nonzero per-row nets until then), and the loan side read only the
+    loan walk's own
     ``settled_income_legs`` (its lineage pass's reads of stale transfers, keyed
     on ids taken from ``budget.journal_entries``, went at plan task
     plan#3093).
@@ -677,10 +649,10 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     property is stated instead of the roll-call.*  The pre-split order was
     measured equal on 82 journal entries (2026-08-27); this is why it is equal.
 
-    **The other direction is what R7d-c-2 makes load-bearing.**  The wipe
-    CASCADE-deletes the loan's genesis entries, so the OLD order generated
-    against an EMPTIED loan ledger and the new one generates against the
-    re-posted ledger.  Before plan step R7d-c-2 nothing on the generation
+    **The other direction is what R7d-c-2 made load-bearing**, while the
+    re-syncs stood.  The wipe CASCADE-deletes the loan's genesis entries, so
+    the OLD order generated against an EMPTIED loan ledger and the new one
+    against the re-posted ledger.  Before plan step R7d-c-2 nothing on the generation
     path read a loan (its reads off the schedule were four of
     ``schedule.calendar`` and two of ``schedule.write_period_ids``), so the
     order was invisible; since R7d-c-2 the pass folds the loan through
@@ -741,13 +713,13 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     # books (movement_removal.remove_movements, ruling plan#2564) reversed a
     # row's and a transfer's alike until plan task plan#3097.
     #
-    # The gate does NOT protect a LOAN's genesis postings: a loan's opening /
-    # true-up entries exist without any settled row or transfer (a payment-less
-    # configured loan posts its opening at params-create), so the wipe DOES
-    # CASCADE-delete them.  That is safe because their source facts (LoanParams,
-    # user_trueup LoanAnchorEvent) survive the wipe, and
-    # ``resync_user_loan_postings`` below re-posts them onto the rebuilt
-    # schedule in this same transaction (review M2 / R7).
+    # The gate does NOT protect a LOAN's stored genesis postings: a loan's
+    # opening / true-up entries exist without any settled row or transfer, so
+    # the wipe DOES CASCADE-delete them.  That is safe because nothing reads
+    # them and their source facts (LoanParams, the loan's statements) survive
+    # the wipe, which the worked-out ledger reads.  (A re-sync below re-posted
+    # them onto the rebuilt schedule in this same transaction until plan task
+    # plan#3076, review M2 / R7.)
     settled = pay_period_gates.settled_item_count(user_id)
     if settled > 0:
         raise PayPeriodResetBlocked(settled_count=settled)
@@ -775,22 +747,12 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
         user_id, new_start_date, num_periods, rhythm,
         retiring_ids=pay_period_write.owner_period_ids(user_id),
     )
-    # Re-post the loan genesis (opening / true-up) corrections the period
-    # CASCADE wiped: their source facts survived, so this re-derives them
-    # onto the rebuilt schedule inside this transaction (review M2 / R7).
-    # Then the same for the NON-loan accounts' anchor corrections (Build-Order
-    # Step 5): the wipe CASCADEd their opening / true-up ENTRIES with the old
-    # periods, but no longer their assertions (ruling R-EO), so this re-derives
-    # every real assertion's correction onto the rebuilt schedule.  Both are
-    # ``_refile_ledger``, which "Remove earlier paychecks" runs too.  Post-reset
-    # is clean by construction, and since plan step X-f3b the reason is the
-    # CASCADE rather than the gate alone: a PURCHASE whose bank posting day is
-    # recorded posts its own cash leg even under a Projected envelope (ruling
-    # **R-FM**), so the zero-settled gate no longer implies "nothing has
-    # posted".  What it does still imply, and what matters here, is that every
-    # journal entry the wipe reaches carries a ``pay_period_id`` and goes WHOLE
-    # -- both legs of each balanced pair -- along with the transactions and
-    # purchases that sourced them.  So each account walks to exactly the
-    # balance its latest assertion declares.
-    _refile_ledger(user_id)
+    # The two re-syncs of the stored ledger (``_refile_ledger``, which "Remove
+    # earlier paychecks" ran too) stood here until plan task plan#3076: the
+    # wipe CASCADEd the loans' genesis entries and the accounts' opening /
+    # true-up ENTRIES with the old periods, and they re-posted them onto the
+    # rebuilt schedule.  The worked-out ledger files each one by its day, and
+    # every journal entry the wipe reaches carries a ``pay_period_id`` and goes
+    # WHOLE -- both legs of each balanced pair -- so the store it leaves stays
+    # balanced.
     return new_periods

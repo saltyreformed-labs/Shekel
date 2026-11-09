@@ -9,12 +9,7 @@ from decimal import Decimal
 
 from app.enums import PostingSourceEnum
 from app.models.account import Account, AccountAnchorHistory
-from app.models.transaction import Transaction
-from app.services import (
-    account_posting_service,
-    loan_posting_service,
-    pay_period_admin,
-)
+from app.services import pay_period_admin
 from app.services.ledger_lines import linked_key
 from scripts.integrity_check import check_referential_integrity
 from tests._ledger_reads import account_net, source_lines
@@ -23,13 +18,10 @@ from tests._test_helpers import (
     all_periods,
     assert_pay_period_invariants,
     create_loan_with_trueup,
-    create_savings_account,
     derived_span,
-    make_expense_template,
-    make_transfer_template,
 )
 
-from ._helpers import _NEW_START, _seed_old_schedule, _reset_and_populate
+from ._helpers import _NEW_START, _seed_old_schedule
 
 
 # A configured loan for the genesis-resync regression (review M2 / R7):
@@ -64,16 +56,20 @@ def _genesis_filed_in(db_session, loan, scenario_id):
     }
 
 
-class TestResetResyncsLoanGenesis:
+class TestAResetFilesTheLoanGenesis:
     """A full reset files the loan's genesis lines on the rebuilt schedule.
 
     A configured loan's opening and true-up are worked out from its source facts
     (``LoanParams``, the ``user_trueup`` ``LoanAnchorEvent``), which the period
     wipe does not touch, so after the reset they file in the rebuilt schedule
-    and the loan nets what it did (review M2 / R7).
+    and the loan nets what it did (review M2 / R7).  *The reset re-synced the
+    stored ledger's copy of them until plan task plan#3076; this class was
+    ``TestResetResyncsLoanGenesis``, and its case beside this one,
+    ``test_the_repopulation_cannot_invalidate_either_resync``, graded that the
+    repopulation left both re-syncs at their fixpoint, and went with them.*
     """
 
-    def test_genesis_reposted_and_reconciles_after_reset(
+    def test_the_genesis_files_anew_and_nets_the_same_after_a_reset(
         self, app, db, seed_user,
     ):
         """Genesis nets -(anchor) before AND after reset, re-attributed anew.
@@ -95,8 +91,6 @@ class TestResetResyncsLoanGenesis:
                 rate=_LOAN_RATE,
                 origination_date=_LOAN_ORIGINATION_DATE,
             )
-            # Post the genesis corrections (opening + true-up) as the precondition.
-            loan_posting_service.sync_loan_postings_all_scenarios(loan.id)
             db.session.commit()
 
             assert account_net(
@@ -118,75 +112,8 @@ class TestResetResyncsLoanGenesis:
             assert_pay_period_invariants(db.session, user_id)
             assert all(r.passed for r in check_referential_integrity(db.session))
 
-    def test_the_repopulation_cannot_invalidate_either_resync(
-        self, app, db, seed_user,
-    ):
-        """The loan nets -(anchor) after the repopulation and a re-run of both re-syncs.
 
-        Ruling R-R38 moved the repopulation from BETWEEN the rebuild and the
-        two posting re-syncs to AFTER both.  An owner holding a loan AND both
-        kinds of active template is reset and repopulated, and the loan's own
-        line nets -100000 (opening -250000 + true-up +150000); re-running both
-        re-syncs then leaves it there.  Whether the re-syncs are still at their
-        fixpoint was graded on the stored entries they write, and went with the
-        store's grading (plan step plan#2914).
-        """
-        with app.app_context():
-            user_id = seed_user["user"].id
-            scenario_id = seed_user["scenario"].id
-            _seed_old_schedule(db.session, seed_user)
-            loan = create_loan_with_trueup(
-                seed_user, db.session,
-                origination_principal=_LOAN_ORIGINATION,
-                anchor_balance=_LOAN_ANCHOR_BALANCE,
-                anchor_date=_LOAN_ANCHOR_DATE,
-                rate=_LOAN_RATE,
-                origination_date=_LOAN_ORIGINATION_DATE,
-            )
-            loan_posting_service.sync_loan_postings_all_scenarios(loan.id)
-            make_expense_template(db.session, seed_user, amount="1200.00")
-            savings = create_savings_account(
-                seed_user, db.session, "Savings", Decimal("500.00"),
-            )
-            make_transfer_template(db.session, seed_user, savings)
-            db.session.commit()
-
-            new_periods = _reset_and_populate(
-                user_id, new_start_date=_NEW_START, num_periods=4,
-                rhythm=rhythm_of(14),
-            )
-            db.session.commit()
-
-            # The repopulation really ran: without rows in the new periods
-            # there is nothing that could have disturbed a re-sync, and this
-            # case would pass for the wrong reason.
-            generated = db.session.query(Transaction).filter(
-                Transaction.pay_period_id.in_([p.id for p in new_periods]),
-                Transaction.template_id.isnot(None),
-            ).count()
-            assert generated == len(new_periods), (
-                f"the repopulation wrote {generated} template rows into "
-                f"{len(new_periods)} periods; with none there is nothing for "
-                f"a re-sync to have been disturbed by"
-            )
-
-            net_before = account_net(
-                db.session, loan.id, scenario_id,
-            )
-            assert net_before == _LOAN_GENESIS_NET
-
-            # Re-run BOTH re-syncs at the post-repopulation state.
-            loan_posting_service.resync_user_loan_postings(user_id)
-            account_posting_service.resync_user_account_anchor_postings(user_id)
-            db.session.flush()
-
-            assert account_net(
-                db.session, loan.id, scenario_id,
-            ) == net_before
-            assert all(r.passed for r in check_referential_integrity(db.session))
-
-
-class TestResetResyncsAccountOpenings:
+class TestAResetFilesTheAccountOpenings:
     """A full reset files the non-loan account openings on the rebuilt schedule.
 
     The Step-5 analogue of the loan class above (plan Section 3.3, point 4):
@@ -204,7 +131,7 @@ class TestResetResyncsAccountOpenings:
     this docstring named it until X-f1c3c.
     """
 
-    def test_openings_reposted_and_reconcile_after_reset(
+    def test_the_openings_file_anew_and_net_the_same_after_a_reset(
         self, app, db, seed_user,
     ):
         """The Checking opening nets +1000 before AND after, re-attributed anew.

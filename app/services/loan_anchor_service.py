@@ -22,9 +22,9 @@ docstring had always drawn -- "the checking-anchor path" and "the loan-anchor
 path", one table each, one mutation set each -- rather than the line count:
 what a CASH assertion decides (an observation day, an amortizing-kind refusal,
 the origination stager the account factory shares) is one subject, and what a
-LOAN assertion decides (a per-source governing compare, a genesis re-sync in
-every scenario) is another.  Nothing here changed in the move; the shared
-contract both halves hold -- append-only rows, ruling **R-EQ**'s
+LOAN assertion decides (a per-source governing compare; a genesis re-sync in
+every scenario too, until plan task plan#3076) is another.  Nothing here
+changed in the move; the shared contract both halves hold -- append-only rows, ruling **R-EQ**'s
 "refused only when it changes nothing", the per-owner write lock held before
 the first read (since plan step ``balance:X-bn`` the signed-in request's
 transaction's, not either door's) -- is stated once, in
@@ -36,7 +36,7 @@ payoff date, so a new event immediately changes every loan surface
 consistently without writing a column.
 
 The third door is the loan SETUP door's, :func:`stage_loan_tracking_start`: it
-stages a ``tracking_start`` row WITHOUT the re-sync and commit, so the balance
+stages a ``tracking_start`` row WITHOUT the commit, so the balance
 the owner states at setup is recorded as the assertion it is inside the
 transaction that writes the params (plan step ``recurrence:R20``, ruling
 **R-R72** part 3).  All three construct the row in one place,
@@ -103,7 +103,7 @@ def _governing_loan_anchor(
     Args:
         account_id: The loan account whose statements to search.
         source: The source to scope to (see
-            :func:`_append_loan_anchor_and_sync` for why the scope is per
+            :func:`_append_loan_anchor_and_commit` for why the scope is per
             source): ``USER_TRUEUP`` or ``TRACKING_START``, the two stored
             assertion sources and the only two the producer loads, told apart
             by ``is_tracking_start``.  The origination is synthesized, never a
@@ -128,40 +128,38 @@ def _governing_loan_anchor(
     return governing
 
 
-def _append_loan_anchor_and_sync(
+def _append_loan_anchor_and_commit(
     *,
     account: Account,
     anchor_balance: Decimal,
     anchor_date: date,
     source: LoanAnchorSourceEnum,
 ) -> AnchorTrueUpOutcome:
-    """Append one :class:`LoanAnchorEvent` of ``source`` and re-sync the ledger.
+    """Append one :class:`LoanAnchorEvent` of ``source`` and commit.
 
     The shared transactional core of :func:`apply_loan_anchor_true_up` (a
     ``user_trueup`` balance assertion) and :func:`record_loan_tracking_start`
     (the ``tracking_start`` opening of a mid-life-imported loan): the two differ
-    ONLY in the anchor source, so they must not drift on the append + re-sync +
+    ONLY in the anchor source, so they must not drift on the append + commit +
     idempotency handling.
 
     Stages ONE row on the append-only :class:`LoanAnchorEvent` table (through
-    :func:`_stage_loan_anchor`, the one constructor site), then re-syncs the
-    loan's genesis postings in EVERY scenario (the anchor is per-account, not
-    per-scenario) via
-    :func:`app.services.loan_posting_service.sync_loan_postings_all_scenarios` --
-    which re-runs the running-balance walk so payments re-split from the new
-    anchor.  The just-added event becomes visible to that walk because the sync's
-    first query autoflushes it (load-bearing -- must NOT run under
-    ``session.no_autoflush``).
+    :func:`_stage_loan_anchor`, the one constructor site) and commits; the
+    worked-out ledger and the balance seam walk the loan from the new anchor
+    on their next read.  *It was ``_append_loan_anchor_and_sync`` until plan
+    task plan#3076, which deleted the re-sync it ran between the two: the
+    stored ledger's genesis postings, re-walked in EVERY scenario through
+    ``loan_posting_service.sync_loan_postings_all_scenarios``.*
 
     **Whether there is anything to append is decided in the staging core, by
     ruling R-EQ**, and the decision is the checking door's rule on this table:
     under the owner's write lock the transaction already holds, read the event
     that currently GOVERNS, append only when the submission differs.  It replaced
-    ``loan_posting_service.sync_all_scenarios_or_duplicate`` on this path (that
-    helper survives for the ARM rate change, whose table is EDITABLE and whose
-    unique key is therefore a real business rule rather than an idempotency
-    guess) and with it the partial expression index
-    ``uq_loan_anchor_events_acct_date_bal_day``.
+    ``loan_posting_service.sync_all_scenarios_or_duplicate`` on this path (whose
+    duplicate translation the ARM rate change's door holds itself since plan task
+    plan#3076, its table being EDITABLE and its unique key therefore a real
+    business rule rather than an idempotency guess) and with it the partial
+    expression index ``uq_loan_anchor_events_acct_date_bal_day``.
 
     **"Governing" is scoped per SOURCE here and not on the checking side, and
     that difference is the tables', not a drift.**  A ``tracking_start`` and a
@@ -219,7 +217,6 @@ def _append_loan_anchor_and_sync(
         )
         return AnchorTrueUpOutcome.UNCHANGED
 
-    loan_posting_service.sync_loan_postings_all_scenarios(account.id)
     db.session.commit()
     return AnchorTrueUpOutcome.COMMITTED
 
@@ -237,18 +234,17 @@ def _stage_loan_anchor(
     R-EQ's duplicate rule is applied: under the owner's write lock the
     transaction already holds, read the event that currently GOVERNS
     ``anchor_date`` for this source, and add the row only when the submission
-    differs.  It neither re-syncs the posted
-    ledger nor commits, because the transaction is its CALLER's:
+    differs.  It does not commit, because the transaction is its CALLER's:
 
-    * :func:`_append_loan_anchor_and_sync` (the true-up and tracking-start
-      doors) re-syncs every scenario and commits, or rolls back when nothing
-      was staged;
+    * :func:`_append_loan_anchor_and_commit` (the true-up and tracking-start
+      doors) commits, or rolls back when nothing was staged;
     * :func:`stage_loan_tracking_start` (the loan SETUP door) leaves the
       staged row in the door's own transaction, beside the params it is an
-      assertion about, and the door runs the one re-sync and the one commit
-      it already runs.
+      assertion about, and the door runs the one commit it already runs.
 
-    Splitting the append from the sync-and-commit is what lets the setup door
+    (Both callers re-synced the stored ledger before committing until plan
+    task plan#3076.)  Splitting the append from the commit is what lets the
+    setup door
     record the assertion in the SAME transaction as the params (plan step
     ``recurrence:R20``): the committing wrapper cannot be called from inside
     a door that still has a refusal ahead of its commit, since a refusal rolls
@@ -351,9 +347,10 @@ def apply_loan_anchor_true_up(
     that, on the ground that this contract had documented since Commit 16.
 
     **What that ruling did NOT inherit from here is a concurrency guarantee,
-    because there was none to inherit.**  Both paths then re-sync the posted
-    ledger, and a re-sync is a read-modify-write with no unique index behind
-    it; nothing serialised this one between Commit 16 and X-f1c3c.  It is
+    because there was none to inherit.**  Both paths then re-synced the posted
+    ledger (until plan task plan#3076), and a re-sync is a read-modify-write
+    with no unique index behind it; nothing serialised this one between Commit
+    16 and X-f1c3c.  It is
     serialised now by the per-owner write lock
     (:mod:`app.services.user_write_lock`), which since plan step
     ``balance:X-bn`` every command transaction a signed-in request opens takes
@@ -395,7 +392,7 @@ def apply_loan_anchor_true_up(
         ``STALE_CONFLICT`` (plan step X-f1c3c), so the two anchor paths return
         the same pair.
     """
-    return _append_loan_anchor_and_sync(
+    return _append_loan_anchor_and_commit(
         account=account,
         anchor_balance=anchor_balance,
         anchor_date=anchor_date,
@@ -468,7 +465,8 @@ def _earliest_payment_moved_on(account: Account) -> date | None:
 
     **Every scenario the loan has a payment in**, through
     :func:`app.services.loan_posting_service.scenarios_with_loan_payments`, the
-    same enumeration the all-scenario re-sync walks: a tracking start is a fact
+    same enumeration the all-scenario re-sync walked (until plan task
+    plan#3076): a tracking start is a fact
     of the loan ACCOUNT and re-bases the walk in each of them, so a payment in
     any one of them contradicts it.  Read for the days alone: the caller adds
     no load (``options=()``; the producer still loads each transfer's pay
@@ -558,8 +556,8 @@ def record_loan_tracking_start(
     **N-193**), and such a payment could commit unseen after this door's
     read.
 
-    Shares the append + all-scenario re-sync + duplicate rule of
-    :func:`apply_loan_anchor_true_up` via :func:`_append_loan_anchor_and_sync`;
+    Shares the append + commit + duplicate rule of
+    :func:`apply_loan_anchor_true_up` via :func:`_append_loan_anchor_and_commit`;
     the only difference is the anchor source, which is also the scope the
     duplicate rule compares within.  Like a true-up it never mutates
     :class:`LoanParams`.
@@ -579,7 +577,7 @@ def record_loan_tracking_start(
         submission asserts what the governing ``tracking_start`` already asserts
         (idempotent success).  The comparison is scoped to this source, so a
         re-submitted tracking-start is recognised even when true-ups have been
-        recorded after it -- see :func:`_append_loan_anchor_and_sync`.
+        recorded after it -- see :func:`_append_loan_anchor_and_commit`.
 
     Raises:
         TrackingStartRefused: From :func:`_stage_loan_anchor`, when a payment
@@ -587,7 +585,7 @@ def record_loan_tracking_start(
             staged; the transaction is the caller's to roll back, as the
             route does.
     """
-    return _append_loan_anchor_and_sync(
+    return _append_loan_anchor_and_commit(
         account=account,
         anchor_balance=anchor_balance,
         anchor_date=anchor_date,
@@ -607,17 +605,16 @@ def stage_loan_tracking_start(
     **R-R72** part 3, finding **REC-519**): the balance the owner states at
     setup IS a dated assertion, and the door records it as one beside the
     :class:`LoanParams` row it is an assertion about -- same transaction, one
-    ledger re-sync, one commit, and a refusal later in the door rolls both
-    back together.  Until R20 the form required that balance and stored it in
+    commit, and a refusal later in the door rolls both back together.  Until
+    R20 the form required that balance and stored it in
     ``LoanParams.current_principal``, which nothing read: a loan configured
     mid-life then had only its synthesized origination assertion, and under
     ruling R-R71 every unrecorded month since origination read as unpaid.
 
-    Stages and returns; it does NOT re-sync the posted ledger and does NOT
-    commit.  The door runs ``sync_loan_postings_all_scenarios`` after this
-    exactly as it did before, so the genesis walk folds the assertion the
-    first time it runs, and commits once its own remaining refusals have
-    passed.  Shares :func:`_stage_loan_anchor` with the two committing doors,
+    Stages and returns; it does NOT commit.  The door commits once its own
+    remaining refusals have passed (it ran
+    ``sync_loan_postings_all_scenarios`` after this too, until plan task
+    plan#3076).  Shares :func:`_stage_loan_anchor` with the two committing doors,
     ruling R-EQ's duplicate rule included; at setup no ``tracking_start`` can
     already stand (anchor rows are written only for a configured loan, and
     the account's history is cascade-deleted with it), so the rule is

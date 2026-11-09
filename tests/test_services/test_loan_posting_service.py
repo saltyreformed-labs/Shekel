@@ -63,6 +63,7 @@ from app.models.loan_features import RateHistory
 from app.models.loan_params import LoanParams
 from app.models.scenario import Scenario
 from app.services import (
+    account_posting_service,
     loan_ledger,
     loan_loaders,
     loan_posting_service,
@@ -215,6 +216,20 @@ def _sync_as_the_doors_did(loan, scenario_id, xfer=None):
     if xfer is not None:
         posting_service.sync_transfer_postings(xfer)
     loan_posting_service.sync_loan_postings(loan.id, scenario_id)
+
+
+def _post_the_seed_opening(seed_user):
+    """Post the seed Checking's opening, as account create did.
+
+    ``account_service.create_account`` posted every account's opening into the
+    stored ledger until plan task plan#3076 deleted its anchor sync.  A case
+    whose parity line grades the whole scenario, and which never moves the
+    seed Checking, drives the writer the door called; both go with this
+    suite at plan#3079.
+    """
+    account_posting_service.sync_account_anchor_postings_all_scenarios(
+        seed_user["account"].id,
+    )
 
 
 def _linked_ledger_id(account):
@@ -2325,6 +2340,7 @@ class TestLoanAnchorPeriodAttribution:
             scenario_id = seed_user["scenario"].id
             user_id = seed_user["user"].id
             loan = _make_loan(seed_user, anchor_date=self._LATE_ANCHOR_DATE)
+            _post_the_seed_opening(seed_user)
             loan_posting_service.sync_loan_postings(
                 loan.id, scenario_id,
             )
@@ -2384,6 +2400,7 @@ class TestLoanAnchorPeriodAttribution:
             scenario_id = seed_user["scenario"].id
             user_id = seed_user["user"].id
             loan = _make_loan(seed_user, anchor_date=self._LATE_ANCHOR_DATE)
+            _post_the_seed_opening(seed_user)
             loan_posting_service.sync_loan_postings(
                 loan.id, scenario_id,
             )

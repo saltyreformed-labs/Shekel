@@ -917,9 +917,10 @@ def create_baseline():
 
     Thin wrapper over
     :func:`app.services.baseline_service.create_baseline_scenario`, which owns
-    the create-or-noop AND the recovery of both posting ledgers that had no
-    scenario to post into while the baseline was missing.  ``None`` means the
-    user already had one, so nothing was created and nothing is logged.
+    the create-or-noop (and the recovery of both posting ledgers that had no
+    scenario to post into while the baseline was missing, until plan task
+    plan#3076).  ``None`` means the user already had one, so nothing was
+    created and nothing is logged.
     """
     scenario = baseline_service.create_baseline_scenario(current_user.id)
     if scenario is not None:

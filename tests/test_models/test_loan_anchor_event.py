@@ -204,7 +204,7 @@ class TestSchemaShape:
         It could not do that job without also refusing a correction, because a
         retry and a deliberate re-assertion carry identical values -- so the
         rule moved to the write door
-        (``loan_anchor_service._append_loan_anchor_and_sync``), which compares the
+        (``loan_anchor_service._append_loan_anchor_and_commit``), which compares the
         submission against the event that GOVERNS and can tell them apart.  The
         door's coverage is
         ``test_anchor_service.TestApplyLoanAnchorTrueUpUnchanged``.

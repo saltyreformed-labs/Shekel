@@ -805,8 +805,9 @@ def _apply_maintain_work(work, derived, template, scenario_id, projected_id):
     # transfer carries nothing
     # of the owner's.  Routed through the canonical hard-delete path (Transfer
     # Invariant 4): ``delete_transfer`` reverses any posted cash effect while
-    # the rows still exist to link against, re-syncs a loan the payment left
-    # (its split links no row, ruling **R-BAL102**) and emits
+    # the rows still exist to link against (and re-synced a loan the payment
+    # left, its split linking no row, ruling **R-BAL102**, until plan task
+    # plan#3075) and emits
     # ``EVT_TRANSFER_HARD_DELETED`` per deletion; its orphan self-check went
     # with the twins at plan step ``balance:X-bi-6-4d-2``.  See audit B6-03 / LOW-02.
     for xfer in work.retire:

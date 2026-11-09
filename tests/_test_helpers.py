@@ -819,19 +819,21 @@ def insert_origination_rate(loan_params, interest_rate):
 
 
 def _sync_loan_ledger(loan_account_id):
-    """Reconcile a loan's genesis ledger, exactly as every production writer does.
+    """Reconcile a loan's genesis ledger, as every production door did.
 
     The shared write-through step of the three loan fixtures below
     (:func:`create_loan_account`, :func:`insert_trueup_event`,
-    :func:`insert_tracking_start_event`).  Every production path that creates or
-    re-bases a loan's anchors reconciles the genesis postings in the SAME
-    transaction as the source row:
+    :func:`insert_tracking_start_event`).  *No production door writes the
+    stored ledger since plan task plan#3076; this keeps the writers' own suite
+    in the state the doors left until plan task plan#3079 deletes both.*  Every
+    production path that created or re-based a loan's anchors reconciled the
+    genesis postings in the SAME transaction as the source row:
 
     * ``loan.create_params`` / ``loan.update_params`` call
       :func:`~app.services.loan_posting_service.sync_loan_postings_all_scenarios`
       (``app/routes/loan/params.py:125`` and ``:177``).
     * The balance true-up and the tracking-start opening both route through
-      :func:`app.services.loan_anchor_service._append_loan_anchor_and_sync`, which
+      :func:`app.services.loan_anchor_service._append_loan_anchor_and_commit`, which
       appends the event, re-syncs, and commits (``anchor_service.py:390``).
 
     The property that matters, and the one this helper reproduces, is that the
@@ -989,7 +991,7 @@ def insert_trueup_event(loan_params, anchor_balance, anchor_date=None):
     Like production, the event is RECONCILED INTO POSTINGS in the same
     transaction (:func:`_sync_loan_ledger`): ``apply_loan_anchor_true_up`` appends
     the row and re-syncs every scenario
-    (``loan_anchor_service._append_loan_anchor_and_sync``, which then commits; this
+    (``loan_anchor_service._append_loan_anchor_and_commit``, which then commits; this
     helper leaves the commit to its caller).  An un-reconciled true-up
     does not exist as far as the ledger is concerned -- and the ledger is what
     every loan surface now reads -- so a fixture that only wrote the event left
@@ -1049,7 +1051,7 @@ def insert_tracking_start_event(loan_params, anchor_balance, anchor_date):
     Like production, the event is RECONCILED INTO POSTINGS in the same
     transaction (:func:`_sync_loan_ledger`): ``record_loan_tracking_start``
     appends the row and re-syncs every scenario (it shares
-    ``loan_anchor_service._append_loan_anchor_and_sync`` with the true-up, which then
+    ``loan_anchor_service._append_loan_anchor_and_commit`` with the true-up, which then
     commits; this helper leaves the commit to its caller).
 
     Args:

@@ -51,7 +51,6 @@ from app.routes._redirect_target import RedirectTarget
 from app.routes.accounts._bp import accounts_bp
 from app.routes.accounts.opening import books_opening_context
 from app.services import (
-    account_posting_service,
     account_service,
     definition_delete,
     ledger_account_service,
@@ -401,7 +400,7 @@ def update_account(account_id):
     type_changed = account.account_type_id != old_type_id
 
     # The side effects and the commit live inside the same try/except
-    # because the resync below flushes the pending Account mutation -- the
+    # because the type step below flushes the pending Account mutation -- the
     # version-pinned WHERE clause is checked at flush time, so
     # ``StaleDataError`` would otherwise escape outside the catch.
     # See the matching comment in :func:`true_up`.
@@ -409,22 +408,23 @@ def update_account(account_id):
     def _reconcile_type_effects():
         """Reconcile the type-change side effects (in-transaction step).
 
-        Re-class the stored linked ledger row when the Asset/Liability
-        boundary was crossed, history or not (ruling plan#2785) -- the
-        worked-out ledger classes each line by the account's current type when
-        it reads it -- and re-sync the account's Step-5 anchor corrections so
-        an amortizing-boundary crossing, which ``_validate_update_account``
-        allows only on an account holding no line, swaps correction families
-        instead of stranding one (the sync structurally no-ops for the loan
-        side).
+        Seed the new kind's params row, read off the NEW type.  The worked-out
+        ledger classes each line by the account's current type when it reads
+        it (ruling plan#2785), so a crossing of the Asset/Liability boundary,
+        or of the amortizing one (which ``_validate_update_account`` allows only
+        on an account holding no line), leaves nothing to bring in step.
+        *Until plan task plan#3076 this also re-classed the account's stored
+        linked ledger row and re-synced its stored anchor corrections; no door
+        writes the stored ledger now.*
 
-        **It reconciles nothing for an ANCHOR any more, because this route no
-        longer asserts one** (plan step X-f1e, finding N-195).  It ran the same
+        **It reconciles nothing for an ANCHOR, because this route no longer
+        asserts one** (plan step X-f1e, finding N-195).  It ran the same
         re-sync on ``anchor_changed or type_changed``; with the anchor branch
-        deleted, a type change is the only thing here that can move a posted
-        correction, so the whole body is one condition.  A balance assertion
-        re-syncs through its own door (``anchor_service.apply_anchor_true_up``),
-        which is where the assertion is now written.
+        deleted, a type change was the only thing here that could move a
+        posted correction, so the whole body is one condition.  A balance
+        assertion goes through its own door
+        (``anchor_service.apply_anchor_true_up``), which is where the assertion
+        is now written.
 
         **It stopped touching entries at plan step S1-c** (ruling R-DH (d)).  An
         anchor change here used to bulk-flip ``is_cleared``, which made "is this
@@ -446,16 +446,11 @@ def update_account(account_id):
         if not type_changed:
             return
         # Flush the new FK and expire the stale ``account_type``
-        # relationship so the re-class and the resync's classifier both
-        # read the NEW type (the relationship attribute is not refreshed
-        # by the setattr alone).
+        # relationship so the seeder's classifier reads the NEW type (the
+        # relationship attribute is not refreshed by the setattr alone).
         db.session.flush()
         db.session.expire(account, ["account_type"])
         ensure_type_params(account, classify_account(account))
-        ledger_account_service.sync_linked_ledger_class(account)
-        account_posting_service.sync_account_anchor_postings_all_scenarios(
-            account.id,
-        )
 
     # The reconcile step must run inside the same stale-race guard as
     # the commit (it flushes and can itself raise StaleDataError).
@@ -776,16 +771,6 @@ def hard_delete_account(account_id):
         return _archive_instead_of_delete(account, account_id, history_refusal)
 
     # All guards passed -- permanently delete.
-    # A loan's terms go first, before step 1.  Step 1's delete of a hidden
-    # payment re-syncs the loan it left, and a loan the store is short of
-    # would have the sync post on the very chart rows step 3 disposes of:
-    # those legs go by the cascade, their entries stay empty, and the balanced
-    # trigger their inserts queued refuses at COMMIT.  A loan with no terms
-    # walks to nothing and the sync writes nothing
-    # (``LoanLedgerWalk.is_empty``, the N1 guard), so this door never writes
-    # on rows it deletes.
-    db.session.query(LoanParams).filter_by(account_id=account_id).delete()
-
     # Step 1: delete remaining Transfer rows (soft-deleted or ghost
     # ad-hoc) through the transfer service, which every write of a transfer
     # goes through (CLAUDE.md, Architecture).
@@ -828,6 +813,13 @@ def hard_delete_account(account_id):
     # relationships on Account.  Without explicit relationships,
     # SQLAlchemy's unit of work tries to SET NULL on their account_id
     # column before the DB-level CASCADE fires, violating NOT NULL.
+    # A loan's terms are among them.  They went first, ahead of step 1, from
+    # plan task plan#2867 until plan task plan#3076: step 1's delete of a
+    # hidden payment re-synced the loan it left, and a loan with no terms
+    # walked to nothing, so that sync could not post on the chart rows this
+    # step disposes of.  Plan task plan#3075 deleted that re-sync, and with it
+    # the reason for the order.
+    db.session.query(LoanParams).filter_by(account_id=account_id).delete()
     db.session.query(InterestParams).filter_by(account_id=account_id).delete()
     db.session.query(InvestmentParams).filter_by(account_id=account_id).delete()
     db.session.query(AssetAppreciationParams).filter_by(

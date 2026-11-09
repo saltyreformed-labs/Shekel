@@ -196,13 +196,14 @@ class TestASaveLocksBeforeItReadsTheOwnersData:
     def test_a_cash_true_up_reads_nothing_of_the_owners_before_the_lock(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """The cash true-up: the governing assertion and the ledger, both after the lock.
+        """The cash true-up: the governing assertion is read after the lock.
 
-        The door's compare-then-append (ruling R-EQ) and the reconcile it
-        reaches (the account anchor sync) are both read-modify-writes, so both
-        of their reads are named, and every statement before the lock is
-        checked to name no table but the two a sign-in reads (the user's row
-        and the role row joined to it).
+        The door's compare-then-append (ruling R-EQ) is a read-modify-write, so
+        its read is named, and every statement before the lock is checked to
+        name no table but the two a sign-in reads (the user's row and the role
+        row joined to it).  *The reconcile it reached, the stored ledger's
+        account anchor sync, was the second read-modify-write named here until
+        plan task plan#3076 deleted it.*
         """
         assert seed_periods_today
         with app.app_context():
@@ -220,9 +221,6 @@ class TestASaveLocksBeforeItReadsTheOwnersData:
             assert _read_after_the_lock(statements, "account_anchor_history"), (
                 "the door read the governing assertion before the lock, or "
                 "not at all"
-            )
-            assert _read_after_the_lock(statements, "journal_entries"), (
-                "the reconcile read the ledger before the lock, or not at all"
             )
 
     def test_the_signed_in_user_is_read_again_under_the_lock(
@@ -269,12 +267,13 @@ class TestASaveLocksBeforeItReadsTheOwnersData:
     def test_a_loan_true_up_reads_the_governing_event_after_the_lock(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """The loan true-up's compare-then-append, and its reconcile.
+        """The loan true-up's compare-then-append reads after the lock.
 
-        The loan reconcile never had even the accidental serialisation the
-        cash side lost at ruling R-EN: a loan true-up appends an event and
-        UPDATEs no row, so nothing serialised it between Commit 16 and plan
-        step X-f1c3c.
+        A loan true-up appends an event and UPDATEs no row, so nothing
+        serialised its reads between Commit 16 and plan step X-f1c3c, not even
+        the accidental serialisation the cash side lost at ruling R-EN.  *Its
+        reconcile, the stored ledger's loan sync, was graded here too until
+        plan task plan#3076 deleted it.*
         """
         assert seed_periods_today
         with app.app_context():
@@ -301,7 +300,6 @@ class TestASaveLocksBeforeItReadsTheOwnersData:
                 owner_lock_key(seed_user["user"].id),
             }
             assert _read_after_the_lock(statements, "loan_anchor_events")
-            assert _read_after_the_lock(statements, "journal_entries")
 
     def test_an_opening_restatement_reads_the_opening_and_the_movements_after_the_lock(
         self, app, auth_client, seed_user, seed_periods_today,

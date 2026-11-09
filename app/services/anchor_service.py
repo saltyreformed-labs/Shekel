@@ -58,9 +58,12 @@ assertions of different balances are two FACTS, the later-observed one is
 current, and neither is overwritten.  This is the contract the loan path has
 documented since Commit 16, now shared.
 
-**The posted LEDGER is a separate question, and the shared contract never
-answered it.**  Both paths re-sync the ledger after appending, and a re-sync is
-a reconcile-to-target: read what is posted, subtract, INSERT the difference.
+**The posted LEDGER was a separate question, and the shared contract never
+answered it.**  *History since plan task plan#3076, which deleted both paths'
+re-syncs (the worked-out ledger reads the assertions as they stand, and no door
+writes the stored ledger):* both paths re-synced the ledger after appending,
+and a re-sync is a reconcile-to-target: read what is posted, subtract, INSERT
+the difference.
 Two of those interleaved both subtract the same posted state.  The cash side
 had been serialised by accident (the deleted ``version_id`` UPDATE autoflushed
 and took a row lock before the walk) and the loan side never was at all.  Plan
@@ -192,7 +195,6 @@ from app.exceptions import ValidationError
 from app.extensions import db
 from app.models.account import Account, AccountAnchorHistory
 from app.services import (
-    account_posting_service,
     cash_ledger,
     pay_period_service,
 )
@@ -439,9 +441,10 @@ def resolve_observation_day(
     R-ER.**  The rule it replaced did, on the stated ground that "the account's
     anchor has a period to reference" -- which ruling R-EO falsified by deleting
     ``account_anchor_history.pay_period_id``.  The live reason belongs to
-    ACCOUNT CREATION rather than to a day (the opening's posting reconcile
-    derives each correction's period from the owner's calendar, finding
-    **N-192**), so it stays there as ``account_service``'s own precondition.
+    ACCOUNT CREATION rather than to a day (the worked-out ledger files the
+    opening's correction in the pay period containing its day, finding
+    **N-192**; the stored ledger's reconcile did until plan task plan#3076), so
+    it stays there as ``account_service``'s own precondition.
     Asking it here would have re-imposed on the true-up door exactly the refusal
     ruling R-EO deleted from it -- a balance the user typed, refused for want of
     a budgeting artifact that has nothing to do with what their bank holds --
@@ -710,12 +713,13 @@ def apply_anchor_true_up(
     new_balance: Decimal,
     observed_on: date | None = None,
 ) -> AnchorTrueUpReport:
-    """Append a balance assertion for ``account``, re-base its postings, commit.
+    """Append a balance assertion for ``account`` and commit.
 
-    Stages the assertion via :func:`stage_anchor_true_up`, re-bases the
-    account's posted anchor corrections, and commits.  Returns an
-    :class:`AnchorTrueUpReport` the caller translates into its rendered
-    response.
+    Stages the assertion via :func:`stage_anchor_true_up` and commits.  Returns
+    an :class:`AnchorTrueUpReport` the caller translates into its rendered
+    response.  *It re-based the account's posted anchor corrections in the
+    stored ledger between the two until plan task plan#3076; the worked-out
+    ledger reads the new assertion as it stands.*
 
     **It reports the assertion that governs today on both sides of the write,
     and reads both under the owner's lock** (ruling **R-CC79**, developer
@@ -757,9 +761,11 @@ def apply_anchor_true_up(
     ``accounts`` whose only purpose is to keep a lock alive is a mechanism with
     no fact under it.
 
-    **That is a property of ONE table in a transaction that mutates three, and
+    **That is a property of ONE table in a transaction that mutated three, and
     a first version of this paragraph stated it as though it covered the whole
-    call.**  The ``sync_account_anchor_postings_all_scenarios`` below is a
+    call.**  *History since plan task plan#3076, which deleted the re-sync this
+    paragraph is about; the call now writes the one table.*  The
+    ``sync_account_anchor_postings_all_scenarios`` that stood below was a
     RECONCILE-TO-TARGET: it reads what is posted, subtracts that from what the
     assertions say, and INSERTs the difference into ``budget.journal_entries``
     / ``budget.account_postings``.  Nothing about append-only makes a
@@ -853,9 +859,11 @@ def apply_anchor_true_up(
             the cash column must not become a second stored loan balance
             (B-15 / ruling D4).
             Raised BEFORE anything is staged, so the session is clean.
-        IntegrityError: When the posting re-sync or the commit trips a
-            constraint.  No longer caught here -- ruling R-EQ made the only
-            reachable one (the deleted unique index) impossible -- so it
+        IntegrityError: When the commit, or the after-read's autoflush of the
+            staged assertion, trips a constraint (the posting re-sync's
+            autoflush did, until plan task plan#3076).  No longer caught
+            here -- ruling R-EQ made the only reachable one (the deleted
+            unique index) impossible -- so it
             propagates as the 500 an unexpected DB-level failure deserves.
             Flask's teardown removes the session, which rolls the transaction
             back and releases the advisory lock.
@@ -911,17 +919,11 @@ def apply_anchor_true_up(
             governing_after=governing_before,
         )
 
-    # Build-Order Step 5: the new assertion re-bases the account's
-    # anchor corrections in EVERY scenario (anchor history is
-    # per-account) -- the fresh history row autoflushes into the walk's
-    # first query, so the reconcile books the true-up delta in the same
-    # transaction.  An amortizing loan is a structural no-op (loans true-up
-    # through :func:`app.services.loan_anchor_service.apply_loan_anchor_true_up`).
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        account.id,
-    )
     # After the write and BEFORE the commit, because the commit releases the
-    # lock: read after it, a second tab's save could already govern.
+    # lock: read after it, a second tab's save could already govern.  Its
+    # query autoflushes the staged assertion, so it reads the write it follows.
+    # (The stored ledger's anchor re-sync stood here until plan task
+    # plan#3076; the worked-out ledger reads the assertion as it stands.)
     governing_after = cash_ledger.governing_anchor(account.id)
     db.session.commit()
     return AnchorTrueUpReport(

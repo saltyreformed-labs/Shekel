@@ -1581,24 +1581,25 @@ class TestApplyAnchorTrueUpReraisesUnknownIntegrityError:
     ruling R-EQ was ruled on.
     """
 
-    def test_integrity_error_from_the_resync_is_not_swallowed(
+    def test_integrity_error_from_the_commit_is_not_swallowed(
         self, app, db, seed_user, seed_periods_today,
     ):
-        """An ``IntegrityError`` raised by the posting re-sync reaches the caller.
+        """An ``IntegrityError`` raised by the door's commit reaches the caller.
 
-        Engineered at the re-sync rather than at a real constraint because
+        Engineered at the commit rather than at a real constraint because
         every constraint the true-up can now violate is a programming error
         with no reachable input: the decision that used to end in a unique
-        violation is made before anything is staged.  Patching the one call
-        that can still raise from the database keeps the contract testable
-        without asserting on a specific constraint.
+        violation is made before anything is staged.  Patching the call where
+        a deferred constraint would raise keeps the contract testable without
+        asserting on a specific constraint.  *It was engineered at the posting
+        re-sync, the door's other call into the database, until plan task
+        plan#3076 deleted it.*
         """
         with app.app_context():
             account = db.session.get(Account, seed_user["account"].id)
 
-            with patch(
-                "app.services.account_posting_service."
-                "sync_account_anchor_postings_all_scenarios",
+            with patch.object(
+                db.session, "commit",
                 side_effect=IntegrityError("stmt", {}, Exception("boom")),
             ):
                 with pytest.raises(IntegrityError):
@@ -2543,22 +2544,27 @@ class TestApplyLoanAnchorTrueUpReraisesUnknownIntegrityError:
 
     The loan twin of the checking class above.  Its ``except IntegrityError``
     lived in ``loan_posting_service.sync_all_scenarios_or_duplicate``, which the
-    loan anchor path stopped calling at plan step X-f1c4b (that helper survives
-    for the ARM rate change, whose table is EDITABLE and whose unique key is a
-    real business rule).  The contract it protected is graded here directly.
+    loan anchor path stopped calling at plan step X-f1c4b (the ARM rate change
+    kept that translation, whose table is EDITABLE and whose unique key is a
+    real business rule, and holds it itself since plan task plan#3076).  The
+    contract it protected is graded here directly.
     """
 
-    def test_integrity_error_from_the_resync_is_not_swallowed(
+    def test_integrity_error_from_the_commit_is_not_swallowed(
         self, app, db, seed_user, seed_periods_today,
     ):
-        """An ``IntegrityError`` raised by the loan re-sync reaches the caller."""
+        """An ``IntegrityError`` raised by the door's commit reaches the caller.
+
+        Engineered at the commit, as the checking class above is and for its
+        reason; it was engineered at the loan re-sync until plan task plan#3076
+        deleted it.
+        """
         with app.app_context():
             account = _make_loan_account(seed_user)
             today = date.today()
 
-            with patch(
-                "app.services.loan_posting_service."
-                "sync_loan_postings_all_scenarios",
+            with patch.object(
+                db.session, "commit",
                 side_effect=IntegrityError("stmt", {}, Exception("boom")),
             ):
                 with pytest.raises(IntegrityError):

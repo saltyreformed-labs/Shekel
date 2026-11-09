@@ -54,7 +54,6 @@ from app.models.user import User
 from app.services import (
     account_posting_service,
     account_service,
-    anchor_service,
     balance_at,
     ledger_lines,
     loan_posting_service,
@@ -62,7 +61,6 @@ from app.services import (
     status_seam,
     transaction_service,
 )
-from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.pay_calendar import PayCalendarError
 from app.services.auth_service import hash_password
 from app.utils.dates import display_today, to_display_date
@@ -1865,24 +1863,6 @@ class TestSyncEntryPoints:
                 savings.id, scenario_id,
             ) == Decimal("500.00")
 
-    def test_wired_create_posts_opening_unprompted(self, app, db, seed_user):
-        """``create_account`` posts the opening with NO manual sync call (C6).
-
-        The factory itself drives the all-scenarios sync after the ledger
-        pairing, so a $750.00 account carries its balanced opening the
-        moment the creating transaction commits -- nothing here invokes the
-        posting package.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            account = _make_account_as_created(seed_user, "750.00")
-            assert account_net(
-                _db.session, account.id, scenario_id,
-            ) == Decimal("750.00")
-            assert len(_correction_entries(
-                account.id, scenario_id, PostingSourceEnum.ACCOUNT_OPENING,
-            )) == 1
-
     def test_wired_self_heal_absorbs_pre_assertion_settle(
         self, app, db, seed_user,
     ):
@@ -1924,75 +1904,6 @@ class TestSyncEntryPoints:
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             ) == Decimal("200.00")
             assert_ledger_parity(_db.session, scenario_id)
-
-    def test_wired_trueup_and_revert_self_heal_end_to_end(
-        self, app, db, seed_user,
-    ):
-        """The true-up chokepoint books the delta; a revert re-bases it (C6).
-
-        End to end with NO manual account-sync call anywhere:
-
-          settle -200 at server-now, then assert $350.00 through
-          ``anchor_service.apply_anchor_true_up`` (a later instant, so the
-          settle is absorbed): the wiring books the true-up delta
-          350 - (500 - 200) = +50.00 and the total lands on the anchor.
-
-          revert the settle: the ``posting_service`` tail self-heal alone
-          re-derives the true-up (ledger_before 500, delta -150; heal
-          -200), keeping the total exactly on the 350.00 anchor.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            account = _make_account(seed_user, "500.00")
-            # The frozen suite TODAY, as a civil day.  It read
-            # ``_db.func.now()`` until plan step X-f3c-2b, which is a SQL
-            # expression rather than a date: it reached ``settled_on`` without
-            # ever being evaluated in Python, so the column took whatever the
-            # (clock-rewritten) server said and this file's own
-            # ``_settle_expense`` contract -- "a pinned civil DAY", which every
-            # other caller honours -- was the one thing it did not supply.  The
-            # books-boundary read is the first Python consumer of that value
-            # and it surfaced as a ``TypeError`` from comparing a clause.  The
-            # day is the same one the rewritten server clock produced, so the
-            # arithmetic below is unchanged; what is gone is a settle whose day
-            # came from a different clock than the assertion that absorbs it.
-            txn = _settle_expense(
-                seed_user, account, "200.00", display_today(),
-            )
-            _db.session.commit()
-
-            outcome = anchor_service.apply_anchor_true_up(
-                account=account,
-                new_balance=Decimal("350.00"),
-            ).outcome
-            assert outcome is AnchorTrueUpOutcome.COMMITTED
-            assert account_net(
-                _db.session, account.id, scenario_id,
-            ) == Decimal("350.00")
-            trueups = _correction_entries(
-                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
-            )
-            assert len(trueups) == 1
-            assert _linked_source_net(
-                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
-            ) == Decimal("50.00")
-
-            # The revert goes through the ONE status door first (plan step
-            # X-bi-3a): the settle wrote a covering movement that carries the
-            # money, and only the seam's revert releases it; the primitive then
-            # reconciles what is left.  Every figure below is unchanged.
-            status_seam.apply_status_change(
-                txn, ref_cache.status_id(StatusEnum.PROJECTED),
-            )
-            posting_service.sync_transaction_postings(txn)
-            _db.session.commit()
-
-            assert account_net(
-                _db.session, account.id, scenario_id,
-            ) == Decimal("350.00")
-            assert _linked_source_net(
-                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
-            ) == Decimal("-150.00")
 
     def test_baselineless_owner_skips_loudly_then_recovers(
         self, app, db, seed_user, caplog,

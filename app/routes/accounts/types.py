@@ -24,11 +24,9 @@ from app.extensions import db
 from app.models.account import Account
 from app.models.ref import AccountType
 from app.routes.accounts._bp import accounts_bp
-from app.services import account_posting_service, ledger_account_service
 from app.services.account_params import ensure_type_params
 from app.services.account_projection import classify_account
 from app.utils.account_validation import (
-    _crosses_posting_boundary,
     _owned_account_type,
     _type_create_schema,
     _type_update_schema,
@@ -146,11 +144,6 @@ def update_account_type(type_id):
     if failure is not None:
         flash(failure[0], failure[1])
         return redirect(url_for("settings.show", section="account-types"))
-    boundary_crossed = _crosses_posting_boundary(
-        account_type,
-        data.get("has_amortization", account_type.has_amortization),
-        data.get("category_id", account_type.category_id),
-    )
 
     for field in ("name", "category_id", "has_parameters", "has_amortization",
                   "has_interest", "is_pretax", "is_liquid", "icon_class",
@@ -183,19 +176,13 @@ def update_account_type(type_id):
         ensure_type_params(account, classify_account(account))
 
     # An ALLOWED crossing (an Asset/Liability one, or a loan one holding no
-    # line, per the guard above) still leaves each account's stored pairing
-    # stale: re-class the linked rows to the new category's class and re-sync
-    # the anchor corrections so an amortizing crossing swaps correction
-    # families instead of stranding one (the sync structurally no-ops for
-    # loans).  The worked-out ledger needs none of it: it classes each line by
-    # its account's current type.
-    if boundary_crossed:
-        for account in affected_accounts:
-            ledger_account_service.sync_linked_ledger_class(account)
-            account_posting_service.sync_account_anchor_postings_all_scenarios(
-                account.id,
-            )
-
+    # line, per the guard above) needs nothing more: the worked-out ledger
+    # classes each line by its account's current type, and reads a kind flag
+    # such as ``has_interest`` the same way.  *Until plan task plan#3076 a
+    # crossing re-classed each account's stored linked row and re-synced its
+    # stored anchor corrections here, and a kind flag re-synced nothing, so the
+    # store held the old reading (finding plan#2883); no door writes the store
+    # now.*
     db.session.commit()
 
     logger.info(

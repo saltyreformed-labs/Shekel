@@ -13,6 +13,7 @@ from datetime import date
 
 from flask import flash, render_template, request
 from flask_login import current_user
+from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models.escrow_line import EscrowComponentVersion, EscrowLine
@@ -36,10 +37,10 @@ from app.routes.loan._helpers import (
 from app.services import (
     escrow_calculator,
     loan_loaders,
-    loan_posting_service,
 )
 from app.services.scenario_resolver import get_baseline_scenario
 from app.utils.auth_helpers import require_owner
+from app.utils.db_errors import is_unique_violation
 from app.utils.money import ZERO
 
 logger = logging.getLogger(__name__)
@@ -139,15 +140,23 @@ def add_rate_change(account_id):
     # for a backdated or out-of-order change); RateHistory is now the
     # sole source of truth and the resolver derives the current rate from
     # it, so no scalar needs maintaining here.
-    # Build-Order Step 4: a rate change moves the interest split of every
-    # confirmed post-anchor payment, in every scenario.  The shared helper
-    # re-syncs those corrections in the same transaction as the new rate row and
-    # translates a same-effective-date duplicate (which its flush surfaces) into
-    # the idempotent re-render below; a non-rate IntegrityError propagates from
-    # the helper (the correct 500 disposition).
-    if not loan_posting_service.sync_all_scenarios_or_duplicate(
-        account.id, RATE_HISTORY_UNIQUE_CONSTRAINT,
-    ):
+    # A rate change moves the interest split of every confirmed post-anchor
+    # payment, which the worked-out ledger reads as it stands.  The flush
+    # surfaces a same-effective-date duplicate HERE, inside the one ``try``,
+    # where it becomes the idempotent re-render below rather than a 500 at the
+    # unguarded commit; a non-rate ``IntegrityError`` propagates (the correct
+    # 500 disposition).  ``uq_rate_history_account_effective_date`` states a
+    # real business rule: one rate per effective date, corrected by editing
+    # the row.  *Until plan task plan#3076 the flush was the tail of the
+    # stored ledger's re-sync helper
+    # (``loan_posting_service.sync_all_scenarios_or_duplicate``), whose
+    # translation this is.*
+    try:
+        db.session.flush()
+    except IntegrityError as exc:
+        db.session.rollback()
+        if not is_unique_violation(exc, RATE_HISTORY_UNIQUE_CONSTRAINT):
+            raise
         # Same-effective-date double-submit (F-104 / C-22): the composite
         # unique ``uq_rate_history_account_effective_date`` rejected the second
         # INSERT when the user clicked Save twice in a row.  Flash a clear
@@ -360,34 +369,6 @@ def _render_escrow_list(account, params):
     )
 
 
-def _commit_escrow_change(account):
-    """Re-derive the loan's postings, then commit the escrow mutation (E1b).
-
-    The shared write-commit tail EVERY escrow route ends on: funnel the loan
-    through the posting sync chokepoint
-    (:func:`app.services.loan_posting_service.sync_loan_postings_all_scenarios`)
-    so the linked ledger re-derives as a CHECKED projection of the loan's facts --
-    and the E1a per-visible-date assert runs -- and THEN commit, so the escrow
-    mutation and any posting corrections land in one transaction.
-
-    Under the forward-only guard (:func:`_reject_effective_date`, spec Sec. 4.2)
-    an escrow change can never move an already-settled payment's split, so this
-    sync is an idempotent no-op that at most heals a stale posting rather than
-    writing a correction.  It runs on EVERY escrow write regardless -- the
-    display-only rename and the escrow-per-date-preserving merge included -- so
-    escrow is not the one loan-write door that leaves the postings unre-derived
-    (finding N-3): "every loan write leaves ``sum(postings) == fold(events)``" has
-    no exception to remember.
-
-    Args:
-        account: The loan :class:`~app.models.account.Account` whose postings to
-            re-derive before committing (the escrow mutation is already staged in
-            the session; the sync's queries autoflush it into the walk).
-    """
-    loan_posting_service.sync_loan_postings_all_scenarios(account.id)
-    db.session.commit()
-
-
 @loan_bp.route("/accounts/<int:account_id>/loan/escrow", methods=["POST"])
 @require_owner
 def add_escrow(account_id):
@@ -431,7 +412,7 @@ def add_escrow(account_id):
         annual_amount=data["annual_amount"],
         inflation_rate=data.get("inflation_rate"),
     ))
-    _commit_escrow_change(account)
+    db.session.commit()
 
     logger.info("Added escrow line '%s' to loan %d", data["name"], account.id)
     return _render_escrow_list(account, params)
@@ -466,7 +447,7 @@ def delete_escrow(account_id, line_id):
         return guard_error, 400
 
     _tombstone_line_today(line)
-    _commit_escrow_change(account)
+    db.session.commit()
     logger.info("Removed escrow line %d from loan %d", line_id, account.id)
     return _render_escrow_list(account, params)
 
@@ -534,7 +515,7 @@ def add_escrow_version(account_id, line_id):
     )
     if collision is not None:
         return collision, 400
-    _commit_escrow_change(account)
+    db.session.commit()
     logger.info(
         "Scheduled escrow change on line %d (loan %d) effective %s",
         line_id, account.id, effective_date.isoformat(),
@@ -619,7 +600,7 @@ def edit_escrow_version(account_id, version_id):
     version.effective_date = new_date
     version.annual_amount = data["annual_amount"]
     version.inflation_rate = data.get("inflation_rate")
-    _commit_escrow_change(account)
+    db.session.commit()
     logger.info(
         "Edited escrow version %d (loan %d) -> %s effective %s",
         version_id, account.id, data["annual_amount"], new_date.isoformat(),
@@ -681,7 +662,7 @@ def delete_escrow_version(account_id, version_id):
     )
     if remaining == 0:
         db.session.delete(line)
-    _commit_escrow_change(account)
+    db.session.commit()
     logger.info("Deleted scheduled escrow version %d from loan %d", version_id, account.id)
     return _render_escrow_list(account, params)
 
@@ -717,7 +698,7 @@ def rename_escrow_line(account_id, line_id):
         return "An escrow component with that name already exists.", 400
 
     line.name = data["name"]
-    _commit_escrow_change(account)
+    db.session.commit()
     logger.info(
         "Renamed escrow line %d (loan %d) to '%s'", line_id, account.id, data["name"],
     )
@@ -769,9 +750,9 @@ def merge_escrow_line(account_id, line_id):
     so it can neither move a settled split nor drop a concurrent charge; it is
     rejected otherwise with an actionable message.  A merge moves no split (escrow
     per date is byte-identical, and the split stores the escrow amount, never a line
-    id), so the shared posting sync (:func:`_commit_escrow_change`, E1b) re-derives
-    to the same ledger -- an idempotent no-op -- and runs only for the one uniform
-    invariant every escrow write shares, not because a merge could move a posting.
+    id).  *Every escrow write ended on the stored ledger's posting sync
+    (``_commit_escrow_change``, E1b) until plan task plan#3076, a no-op for a
+    merge; each now commits.*
     """
     account, params, _account_type = _load_loan_account(account_id)
     if account is None:
@@ -795,7 +776,7 @@ def merge_escrow_line(account_id, line_id):
         version.line = target
     db.session.flush()
     db.session.delete(source)
-    _commit_escrow_change(account)
+    db.session.commit()
     logger.info(
         "Merged escrow line %d into %d (loan %d)", source.id, target.id, account.id,
     )

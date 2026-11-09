@@ -287,9 +287,12 @@ class TestTypeChangeBoundaryGuard:
     ):
         """Unticking "Interest" on a custom type moves a past true-up at once.
 
-        No crossing, so nothing re-syncs the stored ledger: it holds the old reading
-        until the account's next balance (finding plan#2883), and parity is
-        deliberately not asserted here.  Nothing reads the store.
+        The worked-out ledger reads the account's kind as it stands, so the edit
+        re-reads its past true-up with nothing re-synced.  *Until plan task
+        plan#3076 the edit re-synced the stored ledger only across a loan or an
+        asset-and-liability crossing, so the store held the old reading here
+        until the account's next balance (finding plan#2883); no door writes the
+        store now.*
         """
         with app.app_context():
             custom_type = AccountType(

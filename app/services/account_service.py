@@ -46,7 +46,6 @@ from app.models.account import Account
 from app.models.pay_period import PayPeriod
 from app.models.ref import AccountType
 from app.services import (
-    account_posting_service,
     anchor_service,
     ledger_account_service,
     opening_service,
@@ -71,12 +70,16 @@ def _require_pay_period_schedule(user_id: int) -> None:
     **Its stated reason was already false when it moved.**  It read "so the
     account's anchor has a period to reference", which ruling R-EO falsified by
     deleting ``account_anchor_history.pay_period_id`` -- an assertion references
-    no period.  The live reason is one line further down this module: the tail
-    of :func:`create_account` posts the opening's anchor correction, and
-    ``account_posting_service`` derives each correction's pay period from the
-    day it asserts, raising when the owner's calendar is empty (finding
-    **N-192**).  Refusing here turns that 500 into a ``ValidationError`` the
-    route can route to the generate-periods page.
+    no period.  The live reason is the worked-out ledger: it files the
+    account's opening correction into the pay period containing the day it
+    asserts (:func:`app.services.ledger_lines.account_correction_targets`,
+    through :meth:`~app.services.pay_calendar.PayCalendar.filing_period`), and
+    raises when the owner's calendar is empty (finding **N-192**), so an account
+    created without one would fail the first statement read that reaches it.
+    Refusing here turns that 500 into a ``ValidationError`` the route can route
+    to the generate-periods page.  *Until plan task plan#3076 the reason was the
+    tail of :func:`create_account` itself, whose anchor sync posted that
+    correction into the stored ledger and derived its period the same way.*
 
     Args:
         user_id: The prospective account owner.
@@ -93,8 +96,8 @@ def _require_pay_period_schedule(user_id: int) -> None:
         raise ValidationError(
             f"Cannot create an account for user_id={user_id}: the user has no "
             "pay periods.  Generate pay periods first -- the opening balance "
-            "posts a correction into the period containing the day it asserts, "
-            "and an empty calendar has no such period."
+            "is filed in the period containing the day it asserts, and an "
+            "empty calendar has no such period."
         )
 
 
@@ -214,15 +217,14 @@ def create_account(spec: AccountSpec, **extra_columns) -> Account:
     ``pay_period_id`` that ruling R-EO deleted.  With neither, an account is
     created from a name, a type, a balance and the day that balance was true.
 
-    **The origination row is DATED here, before anything reads it**, and
-    that ordering is load-bearing (ruling R-DH, plan step 2).  This
-    function's tail posts the opening's anchor correction, whose journal
-    entry is keyed on the assertion's ``observed_on``; a caller that
-    created the account and re-stamped the day afterwards would leave the
-    ledger holding a correction under the old key until some later sync
-    happened to run, and whichever reader triggered that sync would see
-    the re-date as its own change.  Supplying the day up front is what
-    makes "the account was opened on day X" one write rather than two.
+    **The origination row is DATED here, before anything reads it** (ruling
+    R-DH, plan step 2): supplying the day up front is what makes "the account
+    was opened on day X" one write rather than two.  *The ordering was
+    load-bearing while this function's tail posted the opening's anchor
+    correction into the stored ledger, keyed on the assertion's
+    ``observed_on``: a re-stamp afterwards left a correction under the old key
+    until some later sync ran.  Plan task plan#3076 deleted that sync, and the
+    worked-out ledger reads the day as it stands.*
 
     Args:
         spec: The :class:`AccountSpec` carrying the owner, type, name,
@@ -314,10 +316,10 @@ def create_account(spec: AccountSpec, **extra_columns) -> Account:
     # (``_resolution.configured_loan`` answers ``None``), and that fold refuses
     # an account with no opening rather than fabricating a level for it.
     #
-    # It is written BEFORE the assertion and the posting sync below, and the
-    # order is load-bearing: ``account_posting_service`` walks this record to
-    # book the ``account_opening`` journal entry, and
-    # ``cash_ledger.account_opening_fact`` raises without it.
+    # It is written BEFORE the assertion: ``cash_ledger.account_opening_fact``
+    # raises without it, and every reader of the account's books walks it.
+    # (The anchor sync that once followed the assertion walked it too, to book
+    # the ``account_opening`` journal entry, until plan task plan#3076.)
     #
     # **Through ``opening_service``'s door rather than by constructing the row
     # here** (plan step X-f3c-2b-2a), and that is ruling **R-ES** applied one
@@ -373,20 +375,13 @@ def create_account(spec: AccountSpec, **extra_columns) -> Account:
     # (Build-Order Step 2): exactly one Asset/Liability ledger account per
     # real account, so the double-entry posting ledger has somewhere to
     # post.  Idempotent and side-effecting only -- the returned Account is
-    # unchanged.  Historical accounts were paired by the Commit-2 backfill
-    # migration; this call is the go-forward half.
+    # unchanged.  **It outlives the anchor sync that stood below it**, which
+    # plan task plan#3076 deleted (the worked-out ledger books the opening
+    # from the records, and no door posts it): the suite's setup helpers still
+    # drive the stored ledger's writers until plan task plan#3079 deletes
+    # them, and every writer finds an account's line on this row, so the
+    # pairing goes with them there.
     ledger_account_service.create_ledger_account_for_account(account)
-
-    # Post the account's OPENING anchor correction (Build-Order Step 5): a
-    # non-zero anchor books a balanced opening onto the fresh pairing, so
-    # the linked ledger's ABSOLUTE total equals the asserted balance from
-    # t0 (a $0 anchor books nothing and stays hard-deletable; an amortizing
-    # loan is a structural no-op -- its opening posts from LoanParams at
-    # params-create).  A baseline-less owner is skipped with a loud log and
-    # recovered by ``create_baseline``'s per-user resync.
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        account.id,
-    )
 
     logger.info(
         "Created account %s (id=%d, user_id=%d) asserted at $%s on %s",

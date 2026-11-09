@@ -68,7 +68,7 @@ from app.schemas.validation import (
     InterestParamsUpdateSchema,
 )
 from app.services.account_category import is_liability_category
-from app.services.ledger_lines import accounts_hold_lines, linked_ledger_class
+from app.services.ledger_lines import accounts_hold_lines
 
 
 # Marshmallow schema singletons.  Constructed once per process and
@@ -223,36 +223,6 @@ def _crosses_amortizing_boundary(old_type: AccountType, new_amortization: bool) 
     return bool(old_type.has_amortization) != bool(new_amortization)
 
 
-def _crosses_posting_boundary(
-    old_type: AccountType, new_amortization: bool, new_category_id: int,
-) -> bool:
-    """Return True iff a type edit leaves the stored chart to bring back in step.
-
-    The upkeep of the stored ledger, which X-ew's third leaf (plan#2516)
-    deletes, and refuses nothing: an amortizing crossing swaps which family of
-    corrections the account books, and an Asset/Liability crossing flips the
-    class its stored linked row was stamped with (per
-    :func:`app.services.ledger_lines.linked_ledger_class`).  A flag that changes
-    the account's kind alone, such as ``has_interest``, is neither: the worked-out
-    ledger re-reads it at once (ruling plan#2880), and the stored one holds the old
-    reading until the account's next balance (finding plan#2883).
-
-    Args:
-        old_type: The account's current :class:`~app.models.ref.AccountType`.
-        new_amortization: The proposed ``has_amortization`` value.
-        new_category_id: The proposed ``category_id`` value.
-
-    Returns:
-        bool -- True when either is crossed.
-    """
-    if _crosses_amortizing_boundary(old_type, new_amortization):
-        return True
-    return (
-        linked_ledger_class(old_type.category_id)
-        is not linked_ledger_class(new_category_id)
-    )
-
-
 #: Rulings R-CC87 / R-CC91's refusal, as a ready-to-``flash``
 #: ``(message, category)`` pair, for re-typing an account -- or editing its
 #: custom type -- between savings and debt, or between a loan type and a
@@ -335,8 +305,8 @@ def _validate_account_type_change(account, new_type_id):
     a line of the worked-out ledger (:func:`accounts_hold_lines`, ruling
     plan#2785).  Any other change passes, an Asset/Liability crossing with
     history included, and so does a crossing on an account holding no line (a
-    $0-anchor account); the route then re-classes its stored linked row and
-    re-syncs the corrections.
+    $0-anchor account), and the worked-out ledger re-reads the account under
+    its new type.
 
     **A change of what a goal on the account IS -- savings to debt, or a loan
     type to a card-style debt -- is refused FIRST while an active goal is on
@@ -389,9 +359,8 @@ def _validate_account_type_boundary_edit(account_type, data):
     see.  The edit is refused while ANY account of this type holds a line of
     the worked-out ledger (:func:`accounts_hold_lines`; the type row is one
     row -- it cannot change for some of its accounts and not others).  Any
-    other edit passes, an Asset/Liability crossing with history included; the
-    route then re-classes those accounts' stored linked rows and re-syncs
-    their corrections.
+    other edit passes, an Asset/Liability crossing with history included, and
+    the worked-out ledger re-reads those accounts under the edited type.
 
     **An edit changing what a goal on the type's accounts IS (its category
     between savings and debt, or a debt's amortization flag) is refused first

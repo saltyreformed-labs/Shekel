@@ -27,6 +27,7 @@ import pytest
 from sqlalchemy import text
 
 from app.extensions import db as _db
+from app.services import account_posting_service, posting_service
 from tests._stored_ledger import ledger_accounts_for_account
 from tests._test_helpers import (
     add_txn,
@@ -128,8 +129,11 @@ def _world(seed_user, seed_periods):
 
     A settled transfer Checking -> Savings (its two movement entries are the
     ``transfer_movement`` entries a delete must leave alone), a second
-    transfer and a plain row for the links to name, and three accounts'
-    linked ledgers.  Plain ids, read before the downgrade.
+    transfer and a plain row for the links to name, the seed Checking's
+    opening, and three accounts' linked ledgers.  The movement entries and the
+    opening are posted through the stored ledger's writers, as the doors did
+    until plan tasks plan#3075 and plan#3076.  Plain ids, read before the
+    downgrade.
     """
     savings = create_savings_account(
         seed_user, _db.session, "Savings", Decimal("0.00"),
@@ -148,6 +152,14 @@ def _world(seed_user, seed_periods):
     )
     txn = add_txn(
         _db.session, seed_user, seed_periods[0], "Groceries", "40.00",
+    )
+    # The entries the delete must leave alone, posted through the writers
+    # where the doors posted them: the transfer settle until plan task
+    # plan#3075, account create's opening until plan task plan#3076.
+    for transfer in (xfer, other_xfer):
+        posting_service.sync_transfer_postings(transfer)
+    account_posting_service.sync_account_anchor_postings_all_scenarios(
+        seed_user["account"].id,
     )
     _db.session.commit()
     world = {

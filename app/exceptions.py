@@ -470,10 +470,12 @@ class PayPeriodRemovalRefused(ValidationError):
     anything.
 
     **Its own class, for the reason** :class:`PayPeriodUnresolved` **gives**:
-    the route must catch the door's refusals and nothing else.  The door
-    runs both ledger re-syncs below that catch, and a catch on the generic
-    :class:`ValidationError` would flash any refusal they raise as advice
-    about paychecks instead of surfacing it (review 2 of C21).  A subclass
+    the route must catch the door's refusals and nothing else.  The door ran
+    both ledger re-syncs below that catch until plan task plan#3076, and a
+    catch on the generic :class:`ValidationError` would have flashed any
+    refusal they raised as advice about paychecks instead of surfacing it
+    (review 2 of C21); a refusal of anything else the door reaches is no
+    advice about paychecks either.  A subclass
     of :class:`ValidationError`, so a caller asking the broader question
     still hears it.
     """

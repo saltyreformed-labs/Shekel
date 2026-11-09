@@ -236,14 +236,16 @@ class TestTheRouteCatchesTheDoorsRefusalsOnly:
             assert b"A pay stub is saved for 2025-12-19." in resp.data
             assert _paydays(user_id) == before
 
-    def test_a_re_syncs_own_refusal_is_not_flashed_as_advice(
+    def test_a_refusal_from_below_the_door_is_not_flashed_as_advice(
         self, app, db, bare_auth_client, bare_user, monkeypatch,
     ):
         """A ValidationError from below the door is a defect: it surfaces, unflashed.
 
-        The ledger re-syncs run inside the door; the route's catch is the
-        door's class, so a refusal of theirs propagates (the test client
-        re-raises it; production answers 500 and rolls back).
+        The route's catch is the door's class, so a plain ``ValidationError``
+        raised by what the door calls after its gate -- here the writer's
+        delete -- propagates (the test client re-raises it; production answers
+        500 and rolls back).  The injection was the door's ledger re-syncs
+        until plan task plan#3076 deleted them.
         """
         with app.app_context():
             user_id = bare_user["user"].id
@@ -251,16 +253,16 @@ class TestTheRouteCatchesTheDoorsRefusalsOnly:
             pay_period_admin.add_earlier_pay_periods(user_id, 1)
             db.session.commit()
 
-            def _refusing(_user_id):
-                raise ValidationError("a re-sync refused")
+            def _refusing(_user_id, _period_ids):
+                raise ValidationError("a writer refused")
 
-            monkeypatch.setattr(pay_period_admin, "_refile_ledger", _refusing)
+            monkeypatch.setattr(pay_period_write, "retire_paydays", _refusing)
             first = next(
                 period for period in all_periods(user_id)
                 if period.start_date == date(2026, 1, 2)
             )
 
-            with pytest.raises(ValidationError, match="a re-sync refused"):
+            with pytest.raises(ValidationError, match="a writer refused"):
                 bare_auth_client.post(
                     "/pay-periods/remove-earlier",
                     data={"start_from_period_id": str(first.id)},

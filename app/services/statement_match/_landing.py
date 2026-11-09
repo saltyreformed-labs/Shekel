@@ -147,16 +147,24 @@ class DifferenceLanding:
     **plan#2866 attributed it, on a same-day production copy, 2026-11-06.**
     Every saved stub's own figures add up to its deposit to the cent and its
     deductions agree with the app's line for line, so a mistyped deduction is
-    not the cause, and past the first raise the one line the calculator
-    differs from a stub on is BASE PAY: the walked pay list, four
-    cents ABOVE what the employer prints, the sign having flipped at that raise
-    because the employer's raise was not exactly the forecast's percentage.
-    The cent either way that remains is the employer's: two stubs with one
-    gross and one set of lines print Medicare a cent apart.  The figures stay
-    outside the repository.  A Fix of the first entry to the pay the earlier
-    stub printed WIDENS the gap, because the raise walks from it; what closes
-    it is a new entry past the raise, plan step ``salary:X-av-3b``'s Record
-    door.
+    not the cause.  On a stub's own payday its taxes are that stub's by
+    construction (:func:`~app.services.paycheck_calculator._stubs
+    .priced_taxes`), so that comparison grades no tax formula; what it does
+    grade is that on the four stubs past the first raise the one line left to
+    differ is BASE PAY: the walked pay list, four cents ABOVE what the employer
+    prints, the sign having flipped at that raise because the employer's raise
+    was not exactly the forecast's percentage.  A cent either way beyond that
+    is read as the employer's -- two stubs with one gross and one set of lines
+    print Medicare a cent apart -- and on the paydays with no stub it is
+    inferred.  The first two paydays of the raise's month differ by dollars,
+    not cents: the employer paid that raise by the hours worked after it, where
+    the app prices every payday of the month at the whole raise (plan#3048);
+    and where a forecast raise moves the state line, its rounding to the cent
+    against the employer's whole dollars is plan#2682's.  The figures stay
+    outside the repository.  While no later entry covers those paydays, a Fix
+    of the first entry to the pre-raise pay WIDENS the gap, because the raise
+    walks from it; the ruled way to state a raise received is a new entry
+    (**R-SAL59**), plan step ``salary:X-av-3b``'s Record door.
 
     Attributes:
         on_row: The member the difference is written to, or ``None`` where it

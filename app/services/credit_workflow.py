@@ -1,9 +1,15 @@
 """
-Shekel Budget App -- Credit Card Workflow Service
+Shekel Budget App -- Credit Card Workflow Service: the CC Payback rows.
 
-Handles the credit card status + auto-payback mechanism described
-in §4.5 of the requirements.  When an expense is marked 'credit',
-a payback expense is auto-generated in the next pay period.
+The pre-card spelling of "this went on the card": a row in status Credit with
+an auto-generated CC Payback expense in the next pay period, and an envelope's
+card purchases each repaid the same way (``entry_credit_workflow``).  Since plan
+task plan#2929 a Credit press writes no payback: it puts the row on the card
+(``transaction_service._credit``, rulings plan#2887 and plan#2888), and the
+card's own payment pays it off.  What stays here is what the rows ALREADY
+holding a payback need until plan#1034's re-plan: finding a row's live payback,
+Undo CC deleting it (:func:`unmark_credit`), a deleted source taking its chain
+down, and the payback's shape for the envelope purchases that still write one.
 """
 
 import logging
@@ -24,17 +30,12 @@ from app.services import (
     posting_service,
     status_seam,
 )
-from app.services.cash_ledger import (
-    derived_amount_basis,
-    resolve_transaction_amount,
-)
 from app.services.owned_transaction import load_owned_transaction
-from app.services.pay_calendar import DerivedPeriod, FiledRow, calendar_for
-from app.exceptions import NotFoundError, ValidationError
-from app.utils.balance_predicates import is_credit, is_projected
+from app.services.pay_calendar import DerivedPeriod
+from app.exceptions import ValidationError
+from app.utils.balance_predicates import is_credit
 from app.utils.log_events import (
     BUSINESS,
-    EVT_CREDIT_MARKED,
     EVT_CREDIT_UNMARKED,
     EVT_PAYBACK_DELETED_WITH_SOURCE,
     log_event,
@@ -51,7 +52,7 @@ def get_active_payback(source_txn_id: int) -> Transaction | None:
     """Return the live (non-soft-deleted) CC payback for a source txn.
 
     The single definition of "the payback for this transaction," shared
-    by the mark / unmark / entry-sync paths so they cannot disagree on
+    by the unmark and entry-sync paths so they cannot disagree on
     which row counts.  The ``is_deleted == False`` filter mirrors the
     partial unique index ``uq_transactions_credit_payback_unique``
     (partial on ``credit_payback_for_id IS NOT NULL AND is_deleted =
@@ -323,179 +324,6 @@ def delete_payback_on_source_delete(txn: Transaction, user_id: int) -> None:
         )
 
 
-def mark_as_credit(transaction_id, user_id):
-    """Mark a transaction as 'credit' and auto-generate a payback expense.
-
-    Steps:
-      1. Load the source transaction, refusing it unless *user_id* owns it.
-      2. Set the transaction's status to 'credit'.
-      3. Find or create the CC payback category.
-      4. Find the next pay period.
-      5. Create a payback expense in the next period linked to the original.
-
-    Concurrency model (plan step ``balance:X-bn``, ruling **R-CC106**): the
-    request's transaction took its owner's write lock before it read any of
-    the owner's data (:mod:`app.db_transaction`), so a second Mark Credit on
-    the same row -- a double click, or another tab -- waits for the first to
-    commit and then reads the row as Credit with its payback, and the
-    idempotency check below returns that payback without inserting a
-    duplicate.  Until that step this door took the row's own
-    ``FOR NO KEY UPDATE`` lock for the same serialisation (audit F-008 /
-    commit C-19).  ``budget.transactions`` carries
-    ``uq_transactions_credit_payback_unique`` as the database-level backstop
-    for a writer that holds no request: a duplicate payback surfaces as an
-    ``IntegrityError`` that the route layer converts to idempotent success.
-
-    Args:
-        transaction_id: The ID of the transaction to mark as credit.
-        user_id: The ID of the user who owns the transaction.
-            Defense-in-depth: ownership is verified against the row's own
-            ``user_id`` column even if the caller already checked at the
-            route level.
-
-    Returns:
-        The newly created payback Transaction, or the existing
-        payback if the transaction is already in ``credit`` status.
-
-    Raises:
-        NotFoundError:  If the transaction doesn't exist, doesn't
-            belong to *user_id*, or was deleted (ruling **R-CC99** (b)).
-        ValidationError: If the transaction is income (can't credit income),
-            uses entry tracking, has a status other than projected, or has
-            no following pay period.
-    """
-    txn = load_owned_transaction(transaction_id, user_id)
-    # **A deleted row is "not found"** (plan step ``credit_card:CC-5-4a-4``,
-    # ruling **R-CC99** (b), extending **R-CC89**: "the stale Mark Credit gets
-    # 'not found', exactly as for another user's row").  The route's ownership
-    # door already answers a deleted row so, and since plan step
-    # ``balance:X-bn`` a Delete from another tab can no longer land between
-    # that door's read and this one: both run after the request's owner lock,
-    # and the Delete either committed before it or waits behind it.  Measured
-    # 2026-09-23, before either lock: a Delete landing between them left this
-    # door turning the hidden $80.00 Dinner Credit and creating a live $80.00
-    # payback in the next period with no visible source.  Kept for a service
-    # caller that skips the route's door.
-    if txn.is_deleted:
-        raise NotFoundError(f"Transaction {transaction_id} not found.")
-    if txn.is_income:
-        raise ValidationError("Cannot mark income as credit.")
-
-    # Block legacy credit on entry-capable transactions.
-    if txn.tracks_purchases:
-        raise ValidationError(
-            "This transaction uses individual purchase tracking. "
-            "Mark individual entries as credit instead of the whole transaction."
-        )
-
-    credit_id = ref_cache.status_id(StatusEnum.CREDIT)
-
-    # Idempotency: if already credited with existing payback, return it.
-    # Routed through the centralized ``is_credit`` predicate
-    # (D6-09 / MED-02) so the idempotency gate shares one definition
-    # with ``unmark_credit`` and ``entry_service.create_entry``.
-    if is_credit(txn):
-        existing_payback = get_active_payback(txn.id)
-        if existing_payback:
-            return existing_payback
-
-    # Only projected transactions can be newly marked as credit.
-    # Routed through the centralized ``is_projected`` predicate
-    # (D6-09 / MED-02).
-    if not is_projected(txn):
-        raise ValidationError(
-            f"Cannot mark a '{txn.status.name}' transaction as credit. "
-            "Only projected transactions can be marked as credit."
-        )
-
-    # Update the original transaction's status through the single status seam.
-    # The seam assigns ``status_id`` and expires the eagerly-joined ``status``
-    # relationship so downstream code (test assertions, the post-flush cell
-    # render) observes ``Credit`` rather than the stale ``Projected`` row
-    # SQLAlchemy leaves cached when only the FK column is rewritten.  Credit is
-    # a non-settled status, so the seam also leaves ``settled_on`` clear.
-    status_seam.apply_status_change(txn, credit_id)
-
-    # Find or create the CC Payback category for this user.
-    category = get_or_create_cc_category(user_id)
-
-    # Find the next pay period, asked of the owner's one calendar (plan step
-    # C2-f) rather than of a ``period_index + 1`` query.  It is the payday
-    # rather than the end deliberately: ``start_date`` is the only fact in
-    # that row, so this survives plan step C4 unchanged.  The entry-level twin
-    # (``entry_credit_workflow._create_payback``) reads it the same way.
-    #
-    # **The payday it counts FROM comes out of that same calendar** since plan
-    # step ``pay_calendar:C13-b``.  It was ``txn.pay_period.start_date``, and
-    # the comment here said the payday "comes off the relationship
-    # ``lock_source_transaction_for_payback`` has already loaded".  That door
-    # loaded it as a side effect of walking ``txn.pay_period.user_id`` for its
-    # ownership check; the check reads ``txn.user_id`` now and hydrates
-    # nothing, so the same expression would have become a LAZY load -- a
-    # second read of a span the derivation on this line already holds.
-    #
-    # **The READ ORDER, stated because ``require_period`` requires every caller
-    # to state its own**: the ROW is read first, the paydays second, and since
-    # plan step ``balance:X-bn`` no DESTRUCTIVE pay-period door -- reset,
-    # regenerate, truncate or remove-earlier -- can commit between them.  Each
-    # is reached only from a route, so its request takes the owner's write lock
-    # before it reads any of the owner's data, and this door's request took
-    # that lock before it read the row: such a door committed before both
-    # reads or waits for this one.
-    # *Until that step the order decided how this door lost the race: a door
-    # committing between the reads raised here rather than answering off a
-    # stale picture (balance finding **N-358**, whose remedy is
-    # ``balance:X-i5``).*
-    calendar = calendar_for(user_id)
-    next_period = calendar.period_starting_after(
-        calendar.require_period(FiledRow.for_row(txn)).start_date,
-    )
-    if next_period is None:
-        raise ValidationError(
-            "No next pay period exists.  Generate more periods first."
-        )
-
-    # Determine the payback amount (use actual if set, else the source row's
-    # RESOLVED amount).  That second term was ``txn.estimated_amount``, the
-    # COLUMN, until plan step X-au-c2b: this runs on a row that is still
-    # Projected -- ``is_projected`` is asserted twenty lines up -- so it is
-    # exactly the state a per-kind cutover declares derived, and the column
-    # would be ``None`` in a money path.  What the payback's own figure SHOULD
-    # be is a different question, and it is plan step X-au-i's (finding
-    # **N-243**): a payback is worth the credit entries it repays, and neither
-    # of this line's two terms is that.
-    payback_amount = resolve_transaction_amount(
-        txn, derived_amount_basis(txn.account.user_id, txn.scenario_id),
-    )
-
-    # Create the payback transaction via the shared factory (see
-    # entry_credit_workflow for the entry-level twin).
-    payback = create_cc_payback_transaction(
-        txn, next_period, category, payback_amount,
-    )
-
-    # Posting ledger reconcile (Build-Order Step 3): reconcile the SOURCE row's
-    # family as the final step (the transfer pattern: reconcile on every status
-    # change).  Credit is non-contributing, so every dated purchase the row
-    # holds reverses to zero here (``purchase_posts`` reads the contributing
-    # gate); it is reachable only from Projected, so a source with no dated
-    # purchase is an idempotent no-op -- and the call keeps the "every status
-    # handler reconciles last" invariant complete.  The payback itself is
-    # born Projected and posts nothing until it settles through the seam.
-    posting_service.sync_transaction_postings(txn)
-
-    log_event(
-        logger, logging.INFO, EVT_CREDIT_MARKED, BUSINESS,
-        "Transaction marked Credit; payback expense generated",
-        user_id=user_id,
-        transaction_id=txn.id,
-        payback_id=payback.id,
-        next_period_id=next_period.period_id,
-        amount=str(payback_amount),
-    )
-    return payback
-
-
 def unmark_credit(
     transaction_id, user_id, *,
     press: match_press.Press | None = None,
@@ -622,16 +450,14 @@ def create_cc_payback_transaction(
 ) -> Transaction:
     """Build, add, and flush the CC Payback expense for a credit transaction.
 
-    Shared by the transaction-level mark-Credit flow in this module and
-    the entry-level credit payback in
-    :mod:`app.services.entry_credit_workflow`.  Both produce the
-    identical payback shape -- a PROJECTED EXPENSE in the next pay
-    period, categorised to the user's CC Payback category, linked back
-    to the source transaction via ``credit_payback_for_id`` -- and
-    differ only in the amount source (the entry-level path sums the
-    credit entries; the transaction-level path uses the actual-or-
-    estimated amount).  PROJECTED status and EXPENSE type are invariants
-    of a payback, so they are resolved here rather than passed in.
+    Written by the entry-level credit payback in
+    :mod:`app.services.entry_credit_workflow`, at the sum of the envelope's
+    card purchases: a PROJECTED EXPENSE in the next pay period, categorised to
+    the user's CC Payback category, linked back to the source transaction via
+    ``credit_payback_for_id``.  The row-level Credit press wrote the same
+    shape until plan task plan#2929, which puts the row on the card instead
+    (``transaction_service._credit``).  PROJECTED status and EXPENSE type are
+    invariants of a payback, so they are resolved here rather than passed in.
 
     **``next_period.period_id`` is an ``int`` by a PROPERTY of the search that
     produced it**, which is what makes the ``NOT NULL`` write below safe with
@@ -642,11 +468,11 @@ def create_cc_payback_transaction(
     for the same reason -- so it cannot answer a projection or an unsaved
     candidate, the two states in which
     :attr:`~app.services.pay_calendar.DerivedPeriod.period_id` is ``None``.
-    Past the last payday it answers ``None`` outright and both callers raise a
+    Past the last payday it answers ``None`` outright and the caller raises a
     :class:`~app.exceptions.ValidationError` instead of reaching here.
 
-    *An earlier draft argued this from a CALL-SITE census instead -- both
-    callers build their calendar with ``calendar_for``, which reads saved rows
+    *An earlier draft argued this from a CALL-SITE census instead -- the
+    callers built their calendar with ``calendar_for``, which reads saved rows
     only.  That was true and is not a property*, which is the distinction an
     adversarial review of C2-f1 made and which this package had already been
     corrected on once, at ``filing_period``.

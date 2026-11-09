@@ -43,19 +43,11 @@ from app.utils.auth_helpers import (
     is_not_found_to_transaction_doors,
     log_refused_lookup,
 )
-from app.utils.db_errors import is_unique_violation
 from app.utils.error_fragments import (
     INVALID_REFERENCE_MSG,
     designed_error,
     refusal_for_a_gone_row,
 )
-
-# Name of the partial unique index that backstops commit C-19's
-# duplicate CC Payback fix.  Mirrors the literal in
-# ``migrations/versions/b3d8f4a01c92_*.py`` and
-# ``app.models.transaction.Transaction.__table_args__``; renaming
-# the index requires a coordinated edit across all three sites.
-_CREDIT_PAYBACK_UNIQUE_INDEX = "uq_transactions_credit_payback_unique"
 
 # Package-local alias of the shared foreign-key rejection message so the
 # mutation handlers import it alongside the other private helpers.
@@ -115,9 +107,11 @@ _mark_done_schema = MarkDoneSchema()
 # **R-CC127** / **R-CC131**).
 _delete_dialog_schema = TransactionDeleteSchema()
 
-# Undo CC's, also a DELETE: the bank lines the card's caption named for the
-# payback it deletes (plan step ``credit_card:CC-5-4a-5``, ruling **R-CC80**).
-_unmark_credit_schema = ShownLinesSchema()
+# The two Credit presses': the bank lines the card's caption named -- for the
+# payback Undo CC deletes, a DELETE's query string (plan step
+# ``credit_card:CC-5-4a-5``, ruling **R-CC80**), and for the kept payment a
+# Credit press puts on the card, a POST's form (plan task plan#2929).
+_credit_press_schema = ShownLinesSchema()
 
 
 def _mark_done_success_response(txn, target):
@@ -167,36 +161,6 @@ def _mark_done_success_response(txn, target):
             {"HX-Trigger": "mobileCardSettled"},
         )
     return render_transaction_cell(txn), 200, {"HX-Trigger": "balanceChanged"}
-
-
-def _credit_payback_idempotent_response(exc, txn_id):
-    """Translate a credit-payback unique-index violation into a 200.
-
-    Backstop for commit C-19 (audit finding F-008): if a writer that
-    holds no owner lock races ``credit_workflow.mark_as_credit`` (the
-    request's owner write lock serialises every request since plan step
-    ``balance:X-bn``) and a duplicate payback INSERT reaches PostgreSQL,
-    ``uq_transactions_credit_payback_unique`` rejects it and this
-    helper rolls back, re-fetches the source row, and renders the
-    cell at HTTP 200 -- matching what a serialised request would
-    have produced.  Other ``IntegrityError`` constraint hits return
-    the standard 400 so unrelated FK / check failures stay visible.
-    """
-    db.session.rollback()
-    if not is_unique_violation(exc, _CREDIT_PAYBACK_UNIQUE_INDEX):
-        return _error_transaction_response(txn_id, _INVALID_REFERENCE_MSG)
-    logger.info(
-        "Duplicate CC payback prevented on mark_credit id=%d "
-        "(idempotent success)", txn_id,
-    )
-    refreshed = _get_owned_transaction(txn_id)
-    if refreshed is None:
-        return "Not found", 404
-    return (
-        render_transaction_cell(refreshed),
-        200,
-        {"HX-Trigger": "gridRefresh"},
-    )
 
 
 def _stale_transaction_response(txn_id, target=None):

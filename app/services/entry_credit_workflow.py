@@ -536,7 +536,8 @@ def _create_payback(
 ) -> Transaction:
     """Create a new CC Payback transaction in the next pay period.
 
-    Sets every field identically to credit_workflow.mark_as_credit:
+    Writes the payback through ``credit_workflow.create_cc_payback_transaction``,
+    the shape the row-level Credit press also wrote until plan task plan#2929:
     account_id, template_id (None), pay_period_id (next period),
     scenario_id, status_id (PROJECTED), name, category_id (CC Payback),
     transaction_type_id (EXPENSE), estimated_amount, and
@@ -556,7 +557,8 @@ def _create_payback(
     """
     # **The payday this counts FROM comes out of the same calendar** since
     # plan step ``pay_calendar:C13-b`` -- the transaction-level twin
-    # (``credit_workflow.mark_as_credit``) carries the same argument.
+    # (the row-level Credit press, until plan task plan#2929) carried the same
+    # argument.
     # It was ``txn.pay_period.start_date``, read off a relationship the entry
     # doors hydrated while walking it for their ownership check; those doors
     # read ``entry.transaction.user_id`` now, so the walk would have become a

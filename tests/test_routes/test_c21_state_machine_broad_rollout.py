@@ -19,7 +19,7 @@ from app.extensions import db
 from app.models.ref import Status, TransactionType
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
-from app.services import account_service
+from app.services import account_service, status_seam
 from tests._test_helpers import (
     one_off_row_of,
     open_books_before_the_first_assertion,
@@ -27,6 +27,7 @@ from tests._test_helpers import (
     transfer_side_settle_day,
 )
 from app.models.amount_ownership import AmountOwnership
+from tests._legacy_credit import plant_old_credit
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -70,9 +71,6 @@ def _walk_to(txn, status_name):
     refusal is what found them.  A test that grades a refusal against an
     impossible row grades nothing.
     """
-    # pylint: disable=import-outside-toplevel  -- test-module local import.
-    from app.services import status_seam
-
     target = db.session.query(Status).filter_by(name=status_name).one()
     status_seam.apply_status_change(
         txn, target.id,
@@ -261,10 +259,11 @@ class TestUnmarkCreditStateMachine:
         deletes the auto-generated payback."""
         with app.app_context():
             txn = _create_projected_expense(seed_user, seed_periods_today)
-            # Use the real mark-credit workflow to seed a payback row;
-            # _walk_to writes status only and would not produce one.
-            mark_resp = auth_client.post(f"/transactions/{txn.id}/mark-credit")
-            assert mark_resp.status_code == 200
+            # Plant the old Credit shape, a payback row beside the status
+            # (no door writes it since plan task plan#2929); _walk_to writes
+            # status only and would not produce one.
+            plant_old_credit(txn)
+            db.session.commit()
 
             db.session.refresh(txn)
             assert txn.status.name == "Credit"

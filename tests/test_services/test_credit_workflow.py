@@ -11,12 +11,17 @@ from decimal import Decimal
 import pytest
 
 from app.extensions import db
-from app.models.account import Account
 from app.models.category import Category
 from app.models.ref import Status, TransactionType
 from app.models.transaction import Transaction
 from app.services.balance_at import BalanceContext
-from app.services import carry_forward_service, credit_workflow, pay_period_write
+from app.services import (
+    carry_forward_service,
+    credit_workflow,
+    pay_period_write,
+    transaction_service,
+)
+from tests._legacy_credit import plant_old_credit
 from app.exceptions import NotFoundError, ValidationError
 from tests._test_helpers import (
     cover_bare_settled_row,
@@ -56,28 +61,11 @@ class TestCreditWorkflow:
         db.session.flush()
         return txn
 
-    def test_mark_as_credit_creates_payback(self, app, db, seed_user, seed_periods):
-        """Marking an expense as credit creates a payback in the next period."""
-        with app.app_context():
-            txn = self._create_expense(seed_user, seed_periods)
-
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
-            db.session.flush()
-
-            # Original is now 'credit' status.
-            assert txn.status.name == "Credit"
-
-            # Payback exists in the next period.
-            assert payback.pay_period_id == seed_periods[1].id
-            assert payback.estimated_amount == Decimal("100.00")
-            assert payback.name == "CC Payback: Test Expense"
-            assert payback.credit_payback_for_id == txn.id
-
     def test_unmark_credit_deletes_payback(self, app, db, seed_user, seed_periods):
         """Reverting credit status deletes the auto-generated payback."""
         with app.app_context():
             txn = self._create_expense(seed_user, seed_periods)
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            payback = plant_old_credit(txn)
             db.session.flush()
             payback_id = payback.id
 
@@ -108,7 +96,7 @@ class TestCreditWorkflow:
             db.session.flush()
 
             with pytest.raises(ValidationError):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+                transaction_service.mark_as_credit(txn)
 
     # ``test_payback_uses_actual_amount_when_set`` lived here until plan step
     # X-au-c3.  It put ``actual_amount = 75.00`` on a PROJECTED ``$100.00``
@@ -119,13 +107,21 @@ class TestCreditWorkflow:
     # a settle and this row's money has not moved.
     # ``mark_as_credit`` refuses any status but Projected, so the column arm it
     # graded was unreachable the moment that CHECK landed and was deleted with
-    # it; the payback is the row's RESOLVED amount, which
-    # ``test_mark_as_credit_creates_payback`` above grades.
+    # it.  Since plan task plan#2929 the press writes no payback at all: it
+    # puts the row on the card, graded in
+    # ``tests/test_services/test_credit_puts_the_row_on_the_card.py``, with the
+    # payback's tests (its figure, its next paycheck, its idempotency, the
+    # press's own ownership refusals, now the door's) gone with it.
 
     def test_auto_creates_cc_category_if_missing(
         self, app, db, seed_user, seed_periods
     ):
-        """mark_as_credit auto-creates the CC Payback category if missing."""
+        """The old Credit shape's payback auto-creates the CC Payback category.
+
+        Planted (``tests._legacy_credit``), as the old press wrote it; the
+        envelope's credit purchases still write a payback through the same
+        ``get_or_create_cc_category`` (plan task plan#2929 stopped the row's).
+        """
         with app.app_context():
             # Delete the pre-seeded CC Payback category by ID (re-fetch to
             # avoid cross-session issues).
@@ -136,7 +132,7 @@ class TestCreditWorkflow:
             db.session.flush()
 
             txn = self._create_expense(seed_user, seed_periods)
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            payback = plant_old_credit(txn)
             db.session.flush()
 
             # A new category should have been created.
@@ -152,51 +148,13 @@ class TestCreditWorkflow:
             # .one() above already raises if not found; accessing .id validates non-None
             assert payback.category_id == new_cat.id
 
-    def test_no_next_period_raises_validation_error(
-        self, app, db, seed_user, seed_periods
-    ):
-        """mark_as_credit raises ValidationError when no next period exists."""
-        with app.app_context():
-            # Create expense in the last period (no period follows it).
-            expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
-
-            txn = one_off_row_of(
-                seed_periods[-1],
-                name="Last Period Expense",
-                amount=Decimal("50.00"),
-                user_id=seed_periods[-1].user_id,
-                account_id=seed_user["account"].id,
-                scenario_id=seed_user["scenario"].id,
-                transaction_type_id=expense_type.id,
-                category_id=seed_user["categories"]["Groceries"].id,
-            )
-            db.session.flush()
-
-            with pytest.raises(ValidationError):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
-
-    def test_mark_as_credit_wrong_user_raises_not_found(
-        self, app, db, seed_user, seed_periods
-    ):
-        """Defense-in-depth: mark_as_credit with wrong user_id raises NotFoundError."""
-        with app.app_context():
-            txn = self._create_expense(seed_user, seed_periods)
-            db.session.flush()
-
-            with pytest.raises(NotFoundError):
-                credit_workflow.mark_as_credit(txn.id, user_id=999999)
-
-            # Transaction status must be unchanged -- no partial modification.
-            db.session.refresh(txn)
-            assert txn.status.name == "Projected"
-
     def test_unmark_credit_wrong_user_raises_not_found(
         self, app, db, seed_user, seed_periods
     ):
         """Defense-in-depth: unmark_credit with wrong user_id raises NotFoundError."""
         with app.app_context():
             txn = self._create_expense(seed_user, seed_periods)
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            payback = plant_old_credit(txn)
             db.session.flush()
             payback_id = payback.id
 
@@ -209,14 +167,6 @@ class TestCreditWorkflow:
 
             # Payback transaction must still exist.
             assert db.session.get(Transaction, payback_id) is not None
-
-    def test_mark_as_credit_nonexistent_txn_raises_not_found(
-        self, app, db, seed_user, seed_periods
-    ):
-        """mark_as_credit on a nonexistent transaction raises NotFoundError."""
-        with app.app_context():
-            with pytest.raises(NotFoundError):
-                credit_workflow.mark_as_credit(999999, seed_user["user"].id)
 
     def test_unmark_credit_nonexistent_txn_raises_not_found(
         self, app, db, seed_user, seed_periods
@@ -238,7 +188,7 @@ class TestCreditWorkflow:
         """
         with app.app_context():
             txn = self._create_expense(seed_user, seed_periods)
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            payback = plant_old_credit(txn)
             db.session.flush()
             payback_id = payback.id
 
@@ -279,7 +229,7 @@ class TestCreditWorkflow:
         """
         with app.app_context():
             txn = self._create_expense(seed_user, seed_periods)
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            payback = plant_old_credit(txn)
             db.session.flush()
             payback_id = payback.id
 
@@ -359,9 +309,9 @@ class TestCreditWorkflow:
         with app.app_context():
             user_id = seed_user["user"].id
             txn = self._create_expense(seed_user, seed_periods)
-            payback = credit_workflow.mark_as_credit(txn.id, user_id)
+            payback = plant_old_credit(txn)
             db.session.flush()
-            grandchild = credit_workflow.mark_as_credit(payback.id, user_id)
+            grandchild = plant_old_credit(payback)
             db.session.flush()
             payback_id, grandchild_id = payback.id, grandchild.id
 
@@ -705,7 +655,6 @@ class TestCarryForward:
             from app.models.user import User, UserSettings
             from app.models.scenario import Scenario
             from app.services.auth_service import hash_password
-            from app.services import pay_period_service
 
             # Create a second user with their own pay period.
             user2 = User(
@@ -828,70 +777,6 @@ class TestNegativePaths:
             )
             assert payback_count == 0
 
-    def test_double_mark_as_credit_returns_existing_payback(
-        self, app, db, seed_user, seed_periods
-    ):
-        """Double-marking a transaction as credit returns the existing payback idempotently.
-
-        The function checks if the transaction's status is already 'credit'
-        and, if so, returns the existing payback rather than creating a duplicate.
-        This is critical: a duplicate payback would mean the user sees double
-        the debt repayment on their grid.
-        """
-        with app.app_context():
-            txn = self._create_expense(seed_user, seed_periods)
-
-            # First mark: creates the payback.
-            first_payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
-            db.session.flush()
-            first_payback_id = first_payback.id
-
-            # Second mark: should return the existing payback, not create a new one.
-            second_payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
-            db.session.flush()
-
-            # Same payback returned.
-            assert second_payback.id == first_payback_id
-
-            # Only one payback exists for this transaction.
-            payback_count = (
-                db.session.query(Transaction)
-                .filter_by(credit_payback_for_id=txn.id)
-                .count()
-            )
-            assert payback_count == 1
-
-    def test_mark_as_credit_idempotency_ignores_soft_deleted_payback(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A soft-deleted payback is not returned by the idempotency gate (#58).
-
-        ``uq_transactions_credit_payback_unique`` is partial on
-        ``is_deleted = FALSE``, so a soft-deleted payback may legally
-        coexist with a fresh one.  The idempotency lookup in
-        ``mark_as_credit`` must therefore exclude soft-deleted rows: a
-        source still in Credit whose only payback has been soft-deleted
-        has no live payback, so re-marking must NOT return the dead row.
-        With the ``is_deleted`` filter the lookup returns ``None`` and
-        the already-not-Projected guard rejects the re-mark loudly
-        instead of resurrecting an invisible payback.
-        """
-        with app.app_context():
-            txn = self._create_expense(seed_user, seed_periods)
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
-            db.session.flush()
-
-            # Soft-delete the only payback while the source stays Credit --
-            # the latent state the partial unique index anticipates.
-            payback.is_deleted = True
-            db.session.flush()
-
-            # Without the filter this returned the soft-deleted payback as
-            # idempotent "success"; with it, the source is Credit with no
-            # live payback, so the "only projected" guard fires.
-            with pytest.raises(ValidationError, match="Cannot mark a 'Credit'"):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
-
     def test_unmark_credit_ignores_soft_deleted_payback(
         self, app, db, seed_user, seed_periods,
     ):
@@ -906,7 +791,7 @@ class TestNegativePaths:
         """
         with app.app_context():
             txn = self._create_expense(seed_user, seed_periods)
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            payback = plant_old_credit(txn)
             db.session.flush()
             payback_id = payback.id
 
@@ -988,7 +873,7 @@ class TestNegativePaths:
             )
 
             with pytest.raises(ValidationError, match="Only projected transactions"):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+                transaction_service.mark_as_credit(txn)
 
             # Status unchanged -- still 'done'.
             db.session.refresh(txn)
@@ -1014,7 +899,7 @@ class TestNegativePaths:
             )
 
             with pytest.raises(ValidationError, match="Only projected transactions"):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+                transaction_service.mark_as_credit(txn)
 
             # Status unchanged -- still 'cancelled'.
             db.session.refresh(txn)
@@ -1022,7 +907,7 @@ class TestNegativePaths:
 
     # ``test_mark_credit_rejects_shadow_transaction`` stood here until plan
     # step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer 2026-10-15:
-    # "Delete all 27").  It handed ``mark_as_credit`` a transfer's expense
+    # "Delete all 27").  It handed the old ``mark_as_credit`` a transfer's expense
     # SHADOW row and asserted the service's own refusal (M-03, the
     # ``transfer_id`` guard in ``credit_workflow``).  No shadow can exist now:
     # no transaction has a transfer column since plan step X-bi-6-5, and

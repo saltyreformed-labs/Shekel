@@ -42,6 +42,7 @@ from ._helpers import (
     _mark_credit,
     _save_an_actual,
 )
+from tests._cards import add_card
 
 
 #: The database arrival arm's refusal, as it words it.
@@ -522,8 +523,13 @@ class TestTheOwnersLockComesFirst:
             )
 
     def test_mark_credit(self, app, db, seed_user, seed_periods):
-        """Mark Credit on an $80.00 Dinner locks the owner before it reads the row."""
+        """Mark Credit on an $80.00 Dinner locks the owner before it reads the row.
+
+        The press puts the row on the owner's card since plan task plan#2929,
+        so the fixture adds one.
+        """
         with app.app_context():
+            add_card(seed_user)
             row_id = _dinner(seed_user, seed_periods)
             (client,) = signed_in_clients(app, 1)
             self._assert_the_owners_lock_first(

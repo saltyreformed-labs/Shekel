@@ -34,35 +34,38 @@ from app.utils.log_events import (
 from tests._test_helpers import typed
 
 from ._helpers import _LogCapture
+from tests._cards import add_card
+from tests._legacy_credit import plant_old_credit
 
 
 class TestCreditWorkflowLogging:
-    """credit_workflow.mark_as_credit / unmark_credit emit one event each."""
+    """The Credit press and unmark_credit emit one event each."""
 
     def test_mark_as_credit_emits_event(self, app, db, seed_user, _projected_expense):
-        """mark_as_credit emits ``credit_marked`` with payback id."""
-        with app.app_context(), _LogCapture(
-            "app.services.credit_workflow",
-        ) as cap:
-            payback = credit_workflow.mark_as_credit(
-                _projected_expense.id, seed_user["user"].id,
-            )
-            assert payback is not None
+        """The press emits ``credit_marked`` naming the card, the day and the figure.
 
-        record = cap.find(EVT_CREDIT_MARKED)
-        assert record is not None
-        assert record.category == BUSINESS
-        assert record.user_id == seed_user["user"].id
-        assert record.transaction_id == _projected_expense.id
-        assert record.payback_id == payback.id
-        assert record.amount == "50.00"
+        It named the payback it wrote until plan task plan#2929, which puts
+        the row on the card and writes none (rulings plan#2887 / plan#2888).
+        """
+        with app.app_context():
+            card = add_card(seed_user)
+            row = db.session.get(Transaction, _projected_expense.id)
+            with _LogCapture("app.services.transaction_service._credit") as cap:
+                transaction_service.mark_as_credit(row)
+
+            record = cap.find(EVT_CREDIT_MARKED)
+            assert record is not None
+            assert record.category == BUSINESS
+            assert record.user_id == seed_user["user"].id
+            assert record.transaction_id == _projected_expense.id
+            assert record.card_account_id == card.id
+            assert record.settled_on == row.settled_on.isoformat()
+            assert record.amount == "50.00"
 
     def test_unmark_credit_emits_event(self, app, db, seed_user, _projected_expense):
         """unmark_credit emits ``credit_unmarked`` with deleted_payback_id."""
         with app.app_context():
-            payback = credit_workflow.mark_as_credit(
-                _projected_expense.id, seed_user["user"].id,
-            )
+            payback = plant_old_credit(db.session.get(Transaction, _projected_expense.id))
             db.session.commit()
             with _LogCapture("app.services.credit_workflow") as cap:
                 credit_workflow.unmark_credit(

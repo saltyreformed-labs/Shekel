@@ -27,6 +27,7 @@ from tests._test_helpers import (
 )
 from app.models.amount_ownership import AmountOwnership
 from app.services import status_seam
+from tests._cards import add_card
 
 
 def _create_savings(seed_user):
@@ -191,15 +192,22 @@ class TestRegularTransactionUnaffected:
     def test_mark_credit_regular_transaction(
         self, app, db, auth_client, seed_user, seed_periods_today
     ):
-        """Mark-credit on regular expense transaction works normally."""
+        """Mark-credit on regular expense transaction works normally.
+
+        Normally means on the card since plan task plan#2929 (rulings
+        plan#2887 / plan#2888): the row is Paid with its money moved on the
+        card, where it read status Credit with a payback until then.
+        """
         with app.app_context():
+            card = add_card(seed_user)
             txn = _create_regular_txn(seed_user, seed_periods_today)
 
             resp = auth_client.post(f"/transactions/{txn.id}/mark-credit")
 
             assert resp.status_code == 200
             db.session.refresh(txn)
-            assert txn.status.name == "Credit"
+            assert txn.status.name == "Paid"
+            assert status_seam.covering_movement_of(txn).account_id == card.id
 
     def test_cancel_regular_transaction(
         self, app, db, auth_client, seed_user, seed_periods_today

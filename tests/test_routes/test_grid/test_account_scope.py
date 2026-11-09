@@ -16,6 +16,7 @@ from app.services.generation_schedule import GenerationSchedule
 
 from tests._test_helpers import current_pay_period, one_off_row_of, resolved_amount
 from app.models.amount_ownership import AmountOwnership
+from tests._legacy_credit import plant_old_credit
 
 
 class TestAccountIdColumn:
@@ -102,8 +103,11 @@ class TestAccountIdColumn:
             assert txn.account_id == template.account_id
 
     def test_credit_payback_inherits_account_id(self, app, db, seed_user, seed_periods_today):
-        """The payback transaction created by mark_as_credit inherits account_id."""
-        from app.services import credit_workflow
+        """An old Credit row's payback inherits its source's account_id.
+
+        The old Credit shape is planted (``tests._legacy_credit``): no door
+        writes a row-level payback since plan task plan#2929.
+        """
 
         expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
         account = seed_user["account"]
@@ -120,7 +124,7 @@ class TestAccountIdColumn:
         )
         db.session.commit()
 
-        payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+        payback = plant_old_credit(txn)
         db.session.commit()
 
         assert payback.account_id == account.id

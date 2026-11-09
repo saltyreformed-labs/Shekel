@@ -429,8 +429,9 @@ class StatementMatchCreation(db.Model):
     recorded and still has no purchases" is three guesses about which edits
     matter; a counter that moves on every ORM update is the fact itself.  It
     also covers what nothing else would: a row nothing edited cannot have grown
-    a CC payback either, because ``mark_as_credit`` writes the source row's own
-    status.
+    a CC payback either, because a Credit press writes the source row's own
+    status (``transaction_service.mark_as_credit``, which since plan task
+    plan#2929 writes no payback at all).
 
     **A SUBJECT and a CONTAINER are told apart by MEMBERSHIP, not by a column
     here.**  A creation whose subject is also a member of the same act is what

@@ -38,7 +38,7 @@ from app.services import (
     status_seam,
     transaction_service,
 )
-from app.services.match_press import NOTHING_SHOWN, Press
+from app.services.match_press import MARK_PAID, NOTHING_SHOWN, Press
 from app.services.settle_day import recorded_settle_day
 from app.exceptions import NotFoundError, ValidationError
 from app.utils.auth_helpers import require_owner
@@ -62,7 +62,6 @@ from app.utils.rendered_figure import as_rendered_field
 from app.routes._render_helpers import render_transaction_cell
 from app.routes._shown_lines import read_posted
 from app.routes.transactions._helpers import (
-    _credit_payback_idempotent_response,
     _deleted_row_change_refusal,
     _door_naming_a_gone_row,
     _error_transaction_response,
@@ -73,7 +72,7 @@ from app.routes.transactions._helpers import (
     _mark_done_success_response,
     _delete_dialog_schema,
     _stale_transaction_response,
-    _unmark_credit_schema,
+    _credit_press_schema,
     _update_schema_for,
     _verify_owned_fks_in_update,
 )
@@ -333,8 +332,8 @@ def _apply_regular_update(txn, txn_id, data, *, target_period, posted):
     # under ``ShekelError`` rather than a subclass, so a broken ledger invariant
     # still fails loud instead of rendering as a designed refusal, and
     # ``credit_workflow.delete_payback_on_credit_revert`` raises neither (its
-    # three ``ValidationError`` siblings are in ``mark_as_credit`` /
-    # ``unmark_credit``, which this path does not call).
+    # ``ValidationError`` sibling is ``unmark_credit``'s guard, which this path
+    # does not call).
     try:
         # ONE press for the save (R-CC135); a field refusal abandons it.
         with Press(posted.shown) as one_save:
@@ -872,37 +871,37 @@ def mark_done(txn, target):
 @transactions_bp.route("/transactions/<int:txn_id>/mark-credit", methods=["POST"])
 @require_owner
 def mark_credit(txn_id):
-    """Mark a transaction as 'credit' and auto-generate a payback expense.
+    """Put a row on the credit card: settle it with its money moved on the card.
 
-    Optimistic locking (commit C-18 / F-010):
-    ``StaleDataError`` -> 409 conflict cell.
-
-    TOCTOU duplicate-payback prevention (commit C-19 / F-008): the
-    request's owner write lock (:mod:`app.db_transaction`, plan step
-    ``balance:X-bn``) serialises two Mark Credits; the partial unique
-    index ``uq_transactions_credit_payback_unique`` backstops a writer
-    that holds no request, and the IntegrityError catch below converts
-    the violation into idempotent success.  (C-19's row lock, a
-    ``FOR NO KEY UPDATE`` on the source row, was deleted at that step.)
+    The HTTP shape of ``transaction_service.mark_as_credit`` (plan task
+    plan#2929, rulings plan#2887 / plan#2888), which writes no CC Payback row,
+    so the payback's unique-index backstop (commit C-19) has nothing left to
+    catch here.  The press declares what Mark Paid's does: the lines its page
+    named, and silence from the owner's one-click (ruling **R-CC56**), because
+    putting a reverted row's kept payment on the card takes it out of a match
+    naming it.  The door is the owner's, so a companion's press is a 404.
+    Optimistic locking (commit C-18 / F-010): ``StaleDataError`` -> 409.
     """
     txn = _get_owned_transaction(txn_id)
     if txn is None:
         return "Not found", 404
-
+    errors = _credit_press_schema.validate(request.form)
+    if errors:
+        return _error_transaction_response(
+            txn_id, flatten_schema_errors(errors), status=422,
+        )
+    posted = read_posted(_credit_press_schema.load(request.form), absent=MARK_PAID)
     try:
-        credit_workflow.mark_as_credit(txn_id, current_user.id)
+        with Press(posted.shown) as one_save:
+            transaction_service.mark_as_credit(txn, press=one_save)
         db.session.commit()
     except StaleDataError:
-        logger.info(
-            "Stale-data conflict on mark_credit id=%d", txn_id,
-        )
+        logger.info("Stale-data conflict on mark_credit id=%d", txn_id)
         return _stale_transaction_response(txn_id)
-    except IntegrityError as exc:
-        # Defensive backstop for commit C-19 -- see
-        # ``_credit_payback_idempotent_response`` docstring.
-        return _credit_payback_idempotent_response(exc, txn_id)
+    except IntegrityError:
+        return _error_transaction_response(txn_id, _INVALID_REFERENCE_MSG)
     except (NotFoundError, ValidationError) as exc:
-        return _error_transaction_response(txn_id, str(exc))
+        return _refused(txn_id, exc, posted)
     response = render_transaction_cell(txn)
     return response, 200, {"HX-Trigger": "gridRefresh"}
 
@@ -919,13 +918,13 @@ def unmark_credit(txn_id):
     txn = _get_owned_transaction(txn_id)
     if txn is None:
         return "Not found", 404
-    errors = _unmark_credit_schema.validate(request.args)
+    errors = _credit_press_schema.validate(request.args)
     if errors:
         return _error_transaction_response(
             txn_id, flatten_schema_errors(errors), status=422,
         )
     posted = read_posted(
-        _unmark_credit_schema.load(request.args), absent=NOTHING_SHOWN,
+        _credit_press_schema.load(request.args), absent=NOTHING_SHOWN,
     )
 
     try:

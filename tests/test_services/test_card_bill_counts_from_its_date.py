@@ -18,7 +18,7 @@ from decimal import Decimal
 import pytest
 
 from app.extensions import db
-from app.services import bank_agreement, credit_workflow, entry_service
+from app.services import bank_agreement, entry_service
 from app.services.balance_at import (
     BalanceContext,
     balance_at,
@@ -42,7 +42,6 @@ from tests._test_helpers import (
 )
 from tests.test_services.test_card_payment_dates import _bought_and_refunded
 from tests.test_services.test_card_payment_follows_what_is_owed import (
-    _balances,
     _on_the_card,
     _payoff,
     _scheduled,
@@ -57,6 +56,7 @@ from tests.test_services.test_card_payment_price import (
 )
 from tests.test_services.test_outstanding_difference import _FILE_CHAIN
 from tests.test_services.test_statement_import.test_anchor import _seed_import
+from tests._legacy_credit import plant_old_credit
 
 _ZERO = Decimal("0.00")
 _JAN_1 = date(2026, 1, 1)
@@ -289,7 +289,11 @@ class TestWhatKeepsTheStandingRule:
         assert fold.plan.on_their_dates == {}
 
     def _payback_on_the_card(self, seed_user, card, period):
-        """A $500 row on *card* pressed Credit, which leaves an undated payback there.
+        """A $500 row on *card* in the old Credit shape, an undated payback there.
+
+        Planted (``tests._legacy_credit``): the press puts a row on its card
+        since plan task plan#2929 and writes no payback, so only an old Credit
+        row holds one.
 
         The one undated row the schema can hold: a row naming a definition must
         carry a date (``ck_transactions_template_row_needs_due_date``).  The row
@@ -300,7 +304,7 @@ class TestWhatKeepsTheStandingRule:
             due_date=_JAN_3, account=card,
         )
         db.session.commit()
-        credit_workflow.mark_as_credit(row.id, seed_user["user"].id)
+        plant_old_credit(row)
         db.session.commit()
 
     def test_an_undated_row_on_a_card_lands_tomorrow(self, seed_user, seed_periods):

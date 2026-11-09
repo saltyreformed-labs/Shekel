@@ -15,6 +15,7 @@ from tests._test_helpers import (
     one_off_row_of,
 )
 from app.models.amount_ownership import AmountOwnership
+from tests._legacy_credit import plant_old_credit
 
 
 class TestTransactionNameRows:
@@ -542,9 +543,9 @@ class TestTransactionNameRows:
             resp = auth_client.post(f"/transactions/{exp_done.id}/mark-done")
             assert resp.status_code == 200
 
-            # Step 5: Mark expense credit.
-            resp = auth_client.post(f"/transactions/{exp_credit.id}/mark-credit")
-            assert resp.status_code == 200
+            # Step 5: the expense in the old Credit shape (no door writes it since plan task plan#2929; plan#2933 puts the press back here once the card's payoff row repays it).
+            plant_old_credit(exp_credit)
+            db.session.commit()
 
             # Verify balances.
             resp = auth_client.get(
@@ -646,9 +647,9 @@ class TestTransactionNameRows:
             )
             db.session.commit()
 
-            # Mark as credit -- generates payback in next period.
-            resp = auth_client.post(f"/transactions/{txn.id}/mark-credit")
-            assert resp.status_code == 200
+            # The row in the old Credit shape (no door writes it since plan task plan#2929; plan#2933 puts the press back here once the card's payoff row repays it): a payback in the next period.
+            plant_old_credit(txn)
+            db.session.commit()
 
             # GET the grid showing the next period where the payback lives.
             resp = auth_client.get("/grid?periods=3")

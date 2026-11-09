@@ -75,6 +75,7 @@ from tests._test_helpers import (
 )
 from tests.test_routes._statement_forms import form_fields
 from tests._definition_price import newest_price
+from tests._legacy_credit import plant_old_credit
 
 
 def _one_off(seed_user, seed_periods_today):
@@ -1349,15 +1350,24 @@ class TestUnlockEditLock:
             )
             assert row.is_override is False
 
-    @pytest.mark.parametrize("locked_by", ["cancel", "mark-credit"])
+    @pytest.mark.parametrize("locked_by", ["cancel", "old-credit"])
     def test_un_cancelling_or_un_crediting_and_a_re_category_reach_the_row(
         self, app, auth_client, seed_user, seed_periods_today, locked_by,
     ):
-        """The lock is ``is_immutable``, not the settled band: both lifts unlock."""
+        """The lock is ``is_immutable``, not the settled band: both lifts unlock.
+
+        The Credit status is an old Credit row's, planted
+        (``tests._legacy_credit``): the press puts a row on the card as Paid
+        since plan task plan#2929, so it no longer reaches that status.
+        """
         with app.app_context():
             row = _placed(seed_user, seed_periods_today[0])
-            resp = auth_client.post(f"/transactions/{row.id}/{locked_by}")
-            assert resp.status_code == 200, resp.data
+            if locked_by == "old-credit":
+                plant_old_credit(row)
+                db.session.commit()
+            else:
+                resp = auth_client.post(f"/transactions/{row.id}/{locked_by}")
+                assert resp.status_code == 200, resp.data
             db.session.refresh(row)
             assert row.status.is_immutable is True
             assert row.status.is_settled is False

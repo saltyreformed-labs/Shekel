@@ -51,11 +51,12 @@ class HiddenRow:
     skips every door meets), which says "was deleted" whether or not the
     item is archived (finding **CC-377**); the transfer service's settle
     refusal of a deleted transfer (``transfer_service._settle``), which no
-    screen reaches because the transfer's door answers "not found" first;
-    and Mark
-    Credit's "not found" for a deleted row
-    (``credit_workflow.mark_as_credit``), which never reaches a screen --
-    the route answers ruling **R-CC89**'s bare "not found" (**R-CC99** (b)).
+    screen reaches because the transfer's door answers "not found" first.
+    Mark Credit's own "not found" for a deleted row went with plan task
+    plan#2929, which makes the press a settle: a deleted row meets the
+    settle verb's refusal, which takes one, and no screen reaches that
+    either -- the route answers ruling **R-CC89**'s bare "not found"
+    (**R-CC99** (b)).
 
     Attributes:
         name: The row's name (ruling **R-CC98**: never its id).

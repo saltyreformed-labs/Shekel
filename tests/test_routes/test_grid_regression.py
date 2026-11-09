@@ -38,7 +38,7 @@ from app.extensions import db
 from app.models.account import Account
 from app.models.transaction import Transaction
 from app.models.ref import Status, TransactionType
-from app.services import cash_ledger
+from app.services import cash_ledger, status_seam
 
 from tests._test_helpers import (
     current_pay_period,
@@ -47,6 +47,8 @@ from tests._test_helpers import (
     make_expense_template,
     one_off_row_of,
 )
+from tests._cards import add_card
+from tests._legacy_credit import plant_old_credit
 
 
 class TestPaydayWorkflowRegression:
@@ -288,23 +290,22 @@ class TestPaydayWorkflowRegression:
 
     # -- C-0-5 -------------------------------------------------------
 
-    def test_mark_credit_creates_payback(self, app, auth_client,
-                                         seed_user, seed_periods_today):
-        """Marking an expense as credit sets status to 'credit' and
-        auto-generates a payback transaction in the next pay period
-        with matching amount and 'Credit Card: Payback' category.
+    def test_mark_credit_puts_the_row_on_the_card(self, app, auth_client,
+                                                  seed_user, seed_periods_today):
+        """Marking an expense as credit puts it on the card, with no payback.
 
         Covers Step 6: the user indicates an expense was charged to a
-        credit card rather than paid from checking.
+        credit card rather than paid from checking.  Since plan task
+        plan#2929 (rulings plan#2887 / plan#2888) the row settles with its
+        $75.00 moved on the card and no CC Payback row is written; until then
+        it took status Credit and a payback in the next pay period.
         """
         with app.app_context():
+            card = add_card(seed_user)
             expense_type = (
                 db.session.query(TransactionType)
                 .filter_by(name="Expense").one()
             )
-
-            # Create expense in seed_periods_today[0]; the payback will go to
-            # seed_periods_today[1] (the next period by index).
             txn = one_off_row_of(
                 seed_periods_today[0],
                 name="Restaurant",
@@ -323,29 +324,15 @@ class TestPaydayWorkflowRegression:
             assert response.status_code == 200
             assert response.headers.get("HX-Trigger") == "gridRefresh"
 
-            # Original transaction now has status 'credit'.
             db.session.refresh(txn)
-            assert txn.status.name == "Credit"
-
-            # Payback transaction created by credit_workflow.mark_as_credit.
-            # Verified: credit_workflow.py creates payback with:
-            #   credit_payback_for_id = original txn id
-            #   pay_period_id = get_next_period(original's period)
-            #   status = projected
-            #   estimated_amount = original's estimated (no actual set)
-            #   category = "Credit Card: Payback"
-            #   transaction_type = expense
-            payback = (
-                db.session.query(Transaction)
-                .filter_by(credit_payback_for_id=txn.id)
-                .one()
+            assert txn.status.name == "Paid"
+            movement = status_seam.covering_movement_of(txn)
+            assert (movement.account_id, movement.amount) == (
+                card.id, Decimal("75.00"),
             )
-            assert payback.pay_period_id == seed_periods_today[1].id
-            assert payback.status.name == "Projected"
-            assert payback.estimated_amount == Decimal("75.00")
-            assert payback.category.group_name == "Credit Card"
-            assert payback.category.item_name == "Payback"
-            assert payback.transaction_type.name == "Expense"
+            assert db.session.query(Transaction).filter_by(
+                credit_payback_for_id=txn.id,
+            ).count() == 0
 
     # -- C-0-6 -------------------------------------------------------
 
@@ -587,11 +574,9 @@ class TestPaydayWorkflowRegression:
             )
             assert resp.status_code == 200
 
-            # -- Step 5: Mark expense as credit --
-            resp = auth_client.post(
-                f"/transactions/{expense_credit.id}/mark-credit"
-            )
-            assert resp.status_code == 200
+            # -- Step 5: the expense in the old Credit shape (no door writes it since plan task plan#2929; plan#2933 puts the press back here once the card's payoff row repays it) --
+            plant_old_credit(expense_credit)
+            db.session.commit()
 
             # -- Verify final state --
 

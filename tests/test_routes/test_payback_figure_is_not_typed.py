@@ -29,6 +29,7 @@ from app.models.transaction_entry import TransactionEntry
 from app.services import credit_workflow
 from app.services.entry_credit_workflow import sync_entry_payback
 from tests._test_helpers import figure_source_columns, one_off_row_of, resolved_amount
+from tests._legacy_credit import plant_old_credit
 
 
 @pytest.fixture(name="payback_pair")
@@ -43,7 +44,8 @@ def _payback_pair(app, seed_user, seed_periods):
 
     Yields:
         The source :class:`~app.models.transaction.Transaction` and the payback
-        ``credit_workflow.mark_as_credit`` created for it.
+        the old Credit shape holds for it (``tests._legacy_credit``; no door
+        writes one since plan task plan#2929).
     """
     with app.app_context():
         source = one_off_row_of(
@@ -57,9 +59,7 @@ def _payback_pair(app, seed_user, seed_periods):
             category_id=seed_user["categories"]["Groceries"].id,
         )
         _db.session.flush()
-        payback = credit_workflow.mark_as_credit(
-            source.id, seed_user["user"].id,
-        )
+        payback = plant_old_credit(source)
         _db.session.commit()
         yield source.id, payback.id
 

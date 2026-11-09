@@ -13,7 +13,6 @@ from app.models.transaction_template import TransactionTemplate
 from app.services import account_service
 from app.services import (
     carry_forward_service,
-    credit_workflow,
     recurrence_engine,
     transaction_service,
 )
@@ -34,6 +33,7 @@ from tests._test_helpers import (
 from tests.oracles.recurrence_baseline import MONTHLY
 from app.services.row_valuation import settled_contribution, settled_figure
 from app.models.amount_ownership import AmountOwnership
+from tests._legacy_credit import plant_old_credit
 
 
 class TestSalaryToGrid:
@@ -313,8 +313,8 @@ class TestFullBudgetWorkflow:
             )
             db.session.commit()
 
-            # Step 3: Mark Dining Out as 'credit' → payback in period 1.
-            credit_workflow.mark_as_credit(txn2_id, seed_user["user"].id)
+            # Step 3: Dining Out in the old Credit shape (no door writes it since plan task plan#2929; plan#2933 puts the press back here once the card's payoff row repays it) -> payback in period 1.
+            plant_old_credit(db.session.get(Transaction, txn2_id))
             db.session.commit()
 
             # Step 4: Gas Station stays projected.

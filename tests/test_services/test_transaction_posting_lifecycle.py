@@ -72,6 +72,7 @@ from tests._test_helpers import (
 )
 from tests.test_routes.test_cc5_4a5_popover_presses import dialog_delete_values
 from app.services import cash_ledger
+from tests._legacy_credit import plant_old_credit
 
 
 # ---------------------------------------------------------------------------
@@ -1146,7 +1147,7 @@ class TestDeleteReversesPostings:
             db.session.commit()
             source_id = source.id
 
-            payback = credit_workflow.mark_as_credit(source_id, user_id)
+            payback = plant_old_credit(db.session.get(Transaction, source_id))
             db.session.commit()
             payback_id = payback.id
             auth_client.post(f"/transactions/{payback_id}/mark-done")
@@ -1175,7 +1176,6 @@ class TestDeleteReversesPostings:
         so the CC Payback ledger nets to zero.
         """
         with app.app_context():
-            user_id = seed_user["user"].id
             checking = seed_user["account"]
             scenario_id = seed_user["scenario"].id
             source = add_txn(
@@ -1185,9 +1185,9 @@ class TestDeleteReversesPostings:
             db.session.commit()
             source_id = source.id
 
-            payback1 = credit_workflow.mark_as_credit(source_id, user_id)
+            payback1 = plant_old_credit(db.session.get(Transaction, source_id))
             db.session.commit()
-            payback2 = credit_workflow.mark_as_credit(payback1.id, user_id)
+            payback2 = plant_old_credit(payback1)
             db.session.commit()
             payback2_id = payback2.id
             auth_client.post(f"/transactions/{payback2_id}/mark-done")

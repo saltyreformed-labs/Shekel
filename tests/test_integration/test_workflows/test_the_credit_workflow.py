@@ -1,6 +1,13 @@
 """The mark-as-credit workflow: a payback in the next period leaving the balance unaffected, and
-its edge cases (the payback's amount, a row already on credit, done or cancelled, the last
-period with no next one, unmarking removing the payback, an income row refused).
+its edge cases (a row already on credit, done or cancelled, unmarking removing the payback, an
+income row refused).
+
+**Since plan task plan#2929 the press writes no payback**: it puts the row on the card (rulings
+plan#2887, plan#2888), graded in ``tests/test_services/test_credit_puts_the_row_on_the_card.py``.
+The payback shape here is an OLD Credit row's, planted (``tests._legacy_credit``), and its
+balance is the one the new press must reproduce to the cent once the card's payoff row repays
+it (plan#2933, which puts the press back in this file's first test).  The payback's own figure
+and the last paycheck's refusal went with the payback.
 """
 
 from decimal import Decimal
@@ -9,9 +16,10 @@ import pytest
 
 from app.models.ref import Status, TransactionType
 from app.models.transaction import Transaction
-from app.services import credit_workflow
+from app.services import credit_workflow, transaction_service
 from app.services import balance_at
 from app.services.balance_at import BalanceContext
+from tests._legacy_credit import plant_old_credit
 from tests._test_helpers import one_off_row_of
 from app.services.row_valuation import settled_contribution
 
@@ -36,8 +44,8 @@ class TestCreditPaybackBalance:
             )
             db.session.commit()
 
-            # Mark as credit -- creates payback in next period.
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            # The old Credit shape -- a payback in the next period.
+            payback = plant_old_credit(txn)
             db.session.commit()
 
             db.session.refresh(txn)
@@ -74,55 +82,14 @@ class TestCreditPaybackBalance:
 class TestCreditWorkflowEdgeCases:
     """Edge-case scenarios for the mark-as-credit workflow."""
 
-    def test_mark_as_credit_creates_payback_with_correct_amount(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Marking as credit creates a payback in the next period with exact amount.
-
-        Verifies the payback transaction's name, amount, status, and
-        credit_payback_for_id link back to the original.
-        """
-        with app.app_context():
-            expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
-
-            txn = one_off_row_of(
-                seed_periods[0],
-                name="Grocery Run",
-                amount=Decimal("75.43"),
-                user_id=seed_periods[0].user_id,
-                account_id=seed_user["account"].id,
-                scenario_id=seed_user["scenario"].id,
-                transaction_type_id=expense_type.id,
-                category_id=seed_user["categories"]["Groceries"].id,
-            )
-            db.session.commit()
-            txn_id = txn.id
-
-            payback = credit_workflow.mark_as_credit(txn_id, seed_user["user"].id)
-            db.session.commit()
-
-            db.session.expire_all()
-            txn = db.session.get(Transaction, txn_id)
-
-            # Original transaction status changed to credit.
-            assert txn.status.name == "Credit"
-            assert settled_contribution(txn) == Decimal("0")
-
-            # Payback transaction created in next period.
-            assert payback.pay_period_id == seed_periods[1].id
-            assert payback.estimated_amount == Decimal("75.43")
-            assert payback.status.name == "Projected"
-            assert payback.credit_payback_for_id == txn_id
-            assert payback.name == "CC Payback: Grocery Run"
-
     def test_mark_as_credit_on_already_credit_transaction(
         self, app, db, seed_user, seed_periods,
     ):
-        """Marking as credit twice is idempotent -- returns existing payback.
+        """A press on an old Credit row is idempotent -- its payback stays the one.
 
-        The source code has an idempotency guard: if already credit with
-        an existing payback, it returns that payback instead of creating
-        a second one.
+        The old Credit row is planted (``tests._legacy_credit``); the press
+        changes nothing on it, so no second payback appears and the row is
+        not put on the card as well (plan task plan#2929).
         """
         with app.app_context():
             expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
@@ -140,16 +107,17 @@ class TestCreditWorkflowEdgeCases:
             db.session.commit()
             txn_id = txn.id
 
-            # First mark-as-credit.
-            payback1 = credit_workflow.mark_as_credit(txn_id, seed_user["user"].id)
+            # The old Credit shape.
+            payback1 = plant_old_credit(txn)
             db.session.commit()
             payback1_id = payback1.id
 
-            # Second mark-as-credit -- idempotent, returns same payback.
-            payback2 = credit_workflow.mark_as_credit(txn_id, seed_user["user"].id)
+            # The press on it -- idempotent, nothing written.
+            transaction_service.mark_as_credit(db.session.get(Transaction, txn_id))
             db.session.commit()
 
-            assert payback2.id == payback1_id
+            assert credit_workflow.get_active_payback(txn_id).id == payback1_id
+            assert not db.session.get(Transaction, txn_id).entries
 
             # Exactly 1 payback exists.
             db.session.expire_all()
@@ -183,7 +151,7 @@ class TestCreditWorkflowEdgeCases:
 
             from app.exceptions import ValidationError as ShekelValidationError
             with pytest.raises(ShekelValidationError, match="Cannot mark a 'Paid' transaction"):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+                transaction_service.mark_as_credit(txn)
 
     def test_mark_as_credit_on_cancelled_transaction(self, app, db, seed_user, seed_periods):
         """Cannot mark a 'Cancelled' transaction as credit -- raises ValidationError.
@@ -209,35 +177,7 @@ class TestCreditWorkflowEdgeCases:
 
             from app.exceptions import ValidationError as ShekelValidationError
             with pytest.raises(ShekelValidationError, match="Cannot mark a 'Cancelled' transaction"):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
-
-    def test_mark_as_credit_last_period_no_next_period(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Credit on last period raises ValidationError -- no next period for payback.
-
-        The source calls pay_period_service.get_next_period() which returns
-        None for the last period. The source then raises ValidationError.
-        """
-        with app.app_context():
-            expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
-
-            last_period = seed_periods[-1]
-            txn = one_off_row_of(
-                last_period,
-                name="Last Period Purchase",
-                amount=Decimal("99.99"),
-                user_id=last_period.user_id,
-                account_id=seed_user["account"].id,
-                scenario_id=seed_user["scenario"].id,
-                transaction_type_id=expense_type.id,
-                category_id=seed_user["categories"]["Groceries"].id,
-            )
-            db.session.commit()
-
-            from app.exceptions import ValidationError as ShekelValidationError
-            with pytest.raises(ShekelValidationError, match="No next pay period"):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+                transaction_service.mark_as_credit(txn)
 
     def test_unmark_credit_removes_payback(self, app, db, seed_user, seed_periods):
         """Unmarking credit reverts status to projected and deletes the payback.
@@ -262,7 +202,7 @@ class TestCreditWorkflowEdgeCases:
             txn_id = txn.id
 
             # Mark as credit → creates payback.
-            payback = credit_workflow.mark_as_credit(txn_id, seed_user["user"].id)
+            payback = plant_old_credit(db.session.get(Transaction, txn_id))
             db.session.commit()
             payback_id = payback.id
 
@@ -307,4 +247,4 @@ class TestCreditWorkflowEdgeCases:
 
             from app.exceptions import ValidationError as ShekelValidationError
             with pytest.raises(ShekelValidationError, match="Cannot mark income as credit"):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+                transaction_service.mark_as_credit(txn)

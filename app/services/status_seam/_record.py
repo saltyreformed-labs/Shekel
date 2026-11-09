@@ -49,6 +49,7 @@ from app.enums import MovementFigureSourceEnum
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
+from app.services.account_projection import is_revolving
 from app.services.stated_figure import StatedFigure
 from app.utils.balance_predicates import settled_status_ids
 
@@ -477,6 +478,31 @@ def tender_account_id_of(row: Transaction) -> int:
     """
     movement = covering_movement_of(row)
     return row.account_id if movement is None else movement.account_id
+
+
+def settled_on_a_card(row: Transaction) -> bool:
+    """Return whether *row* is settled with its money moved on a credit card.
+
+    **What Credit IS since plan task plan#2929** (rulings plan#2887,
+    plan#2888): a row put on the card is stored as Paid with its one covering
+    movement on the card, and drawn as Credit, so the movement's account is
+    the fact's one home and this reads it there.  A Credit press asks it so a
+    double press changes nothing (``transaction_service._credit``).
+
+    Args:
+        row: The transaction, with ``entries`` loaded or loadable.
+
+    Returns:
+        ``True`` when *row* is in the settled band and its covering movement
+        is on a revolving account.
+
+    Raises:
+        ValueError: From :func:`covering_movement_of`, on a row holding two.
+    """
+    if row.status_id not in settled_status_ids():
+        return False
+    movement = covering_movement_of(row)
+    return movement is not None and is_revolving(movement.account)
 
 
 def _movement_settlement(movement) -> Settlement:

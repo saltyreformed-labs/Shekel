@@ -36,6 +36,7 @@ from tests.test_services.test_opening_restatement_planned_rows import (
     _account_opened_early,
     _account_with_projected_rows,
 )
+from tests._legacy_credit import plant_old_credit
 
 
 class TestATransactionsRevert:
@@ -107,9 +108,8 @@ class TestATransactionsRevert:
         """The third door back to unpaid, through the same seam."""
         with app.app_context():
             account, first_id, first_due = _first_rent_row(seed_user, seed_periods)
-            assert auth_client.post(
-                f"/transactions/{first_id}/mark-credit",
-            ).status_code == 200
+            plant_old_credit(_db.session.get(Transaction, first_id))
+            _db.session.commit()
             _db.session.expire_all()
             paybacks = _paybacks_of(first_id)
             assert len(paybacks) == 1, "precondition: the credit made its payback"

@@ -27,8 +27,8 @@ the next.  The five-character SQLSTATE is the server's own answer and
 does not move with the driver.
 
 The helper is the load-bearing piece of the C-19 idempotency
-backstop: when ``credit_workflow.mark_as_credit`` or
-``entry_credit_workflow.sync_entry_payback`` is bypassed by a future
+backstop: when ``entry_credit_workflow.sync_entry_payback`` (the one
+payback writer left since plan task plan#2929) is bypassed by a future
 caller and a duplicate CC Payback insert reaches PostgreSQL, the
 partial unique index ``uq_transactions_credit_payback_unique``
 rejects it, the route layer recognises the constraint name through

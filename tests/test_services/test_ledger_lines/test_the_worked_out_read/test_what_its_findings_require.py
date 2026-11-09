@@ -15,7 +15,7 @@ from app.exceptions import ValidationError
 from app.extensions import db as _db
 from app.models.account import AccountAnchorHistory
 from app.models.transaction_entry import TransactionEntry
-from app.services import credit_workflow, entry_service, transaction_service, transfer_service
+from app.services import entry_service, transaction_service, transfer_service
 from app.services.cash_ledger import settled_cash_facts
 from app.services.ledger_lines import LedgerLine, category_key, linked_key, transit_key
 from app.services.settle_day import record_settle_day
@@ -31,6 +31,7 @@ from tests._test_helpers import (
 )
 
 from ._helpers import _TODAY, _read, _lines_of, _source, _kind
+from tests._legacy_credit import plant_old_credit
 
 
 def _true_ups_of(lines, account):
@@ -83,10 +84,14 @@ def _revert(txn):
 
 
 def _revert_then_credit(txn):
-    """Revert *txn*, then mark it Credit through its door."""
+    """Revert *txn*, then put it in the old Credit shape, which leaves the plan.
+
+    Planted (``tests._legacy_credit``): since plan task plan#2929 the press
+    settles a row on its card, so it no longer takes a row out of the plan.
+    """
     _revert(txn)
     _db.session.flush()
-    credit_workflow.mark_as_credit(txn.id, txn.user_id)
+    plant_old_credit(txn)
 
 
 def _revert_then_cancel(txn):

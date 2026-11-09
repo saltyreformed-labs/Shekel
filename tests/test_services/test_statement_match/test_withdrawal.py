@@ -81,6 +81,7 @@ from ._builders import (
     an_import,
 )
 from app.models.amount_ownership import AmountOwnership
+from tests._legacy_credit import plant_old_credit
 
 
 def _submit(
@@ -377,7 +378,7 @@ class TestEveryDoorThatRemovesARowWithdrawsItsMatches:
         )
         db.session.flush()
         a_later_period(seed_user)
-        credit_workflow.mark_as_credit(source.id, seed_user["user"].id)
+        plant_old_credit(source)
         db.session.flush()
         payback = credit_workflow.get_active_payback(source.id)
         assert payback is not None
@@ -408,7 +409,7 @@ class TestEveryDoorThatRemovesARowWithdrawsItsMatches:
         )
         db.session.flush()
         a_later_period(seed_user)
-        credit_workflow.mark_as_credit(source.id, seed_user["user"].id)
+        plant_old_credit(source)
         db.session.flush()
         payback = credit_workflow.get_active_payback(source.id)
         line = a_bank_line(seed_user, statement, amount="-200.00")
@@ -567,7 +568,7 @@ class TestTheDialogCoversEVERYTHINGThePressRemoves:
         )
         db.session.flush()
         a_later_period(seed_user)
-        credit_workflow.mark_as_credit(source.id, seed_user["user"].id)
+        plant_old_credit(source)
         db.session.flush()
         payback = credit_workflow.get_active_payback(source.id)
         line = a_bank_line(seed_user, statement, amount="-200.00")
@@ -880,7 +881,7 @@ class TestARowThatIsHalfOfSomethingElseRefusesTheDelete:
         )
         db.session.flush()
         a_later_period(seed_user)
-        credit_workflow.mark_as_credit(source.id, seed_user["user"].id)
+        plant_old_credit(source)
         db.session.flush()
         payback = credit_workflow.get_active_payback(source.id)
 
@@ -908,7 +909,7 @@ class TestARowThatIsHalfOfSomethingElseRefusesTheDelete:
         )
         db.session.flush()
         a_later_period(seed_user)
-        credit_workflow.mark_as_credit(source.id, seed_user["user"].id)
+        plant_old_credit(source)
         db.session.flush()
         payback = credit_workflow.get_active_payback(source.id)
         line = a_bank_line(seed_user, statement, amount="-200.00")

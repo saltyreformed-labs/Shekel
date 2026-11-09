@@ -56,11 +56,14 @@ from app.services import (
     carry_forward_service,
     credit_workflow,
     status_seam,
+    transaction_service,
 )
+from tests._cards import add_card
 from app.services import account_service
 from app.services.cash_ledger import contribution_of
 from app.services.row_valuation import settled_contribution, settled_figure
 from tests._test_helpers import amount_basis_for
+from tests._legacy_credit import plant_old_credit
 
 
 def _worth(txn):
@@ -382,9 +385,10 @@ class TestStateMachineViolations:
             txn = _make_transaction(seed_user, seed_periods, period_index=0)
             db.session.commit()
 
-            # Mark as credit -- creates payback in next period.
-            resp = auth_client.post(f"/transactions/{txn.id}/mark-credit")
-            assert resp.status_code == 200
+            # The old Credit shape, a payback in the next period (no door
+            # writes it since plan task plan#2929).
+            plant_old_credit(txn)
+            db.session.commit()
 
             db.session.refresh(txn)
             assert txn.status.name == "Credit"
@@ -430,8 +434,8 @@ class TestStateMachineViolations:
             txn = _make_transaction(seed_user, seed_periods, period_index=0)
             db.session.commit()
 
-            resp = auth_client.post(f"/transactions/{txn.id}/mark-credit")
-            assert resp.status_code == 200
+            plant_old_credit(txn)
+            db.session.commit()
 
             payback = db.session.query(Transaction).filter_by(
                 credit_payback_for_id=txn.id,
@@ -547,7 +551,7 @@ class TestStateMachineViolations:
     ):
         """POST mark-credit on a done transaction -- rejected by service.
 
-        credit_workflow.mark_as_credit only allows projected transactions.
+        The Credit press only allows projected transactions.
         Attempting to mark a done transaction as credit returns 400.
         """
         with app.app_context():
@@ -558,7 +562,7 @@ class TestStateMachineViolations:
             db.session.commit()
 
             resp = auth_client.post(f"/transactions/{txn.id}/mark-credit")
-            # credit_workflow raises ValidationError for non-projected transactions.
+            # The press raises ValidationError for non-projected transactions.
             # Route catches it and returns 400.
             assert resp.status_code == 400
             assert b"Only projected" in resp.data
@@ -719,8 +723,8 @@ class TestCreditWorkflowEdgeCases:
             txn = _make_transaction(seed_user, seed_periods, period_index=0)
             db.session.commit()
 
-            # Mark as credit -- creates payback in next period.
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            # The old Credit shape, a payback in the next period.
+            payback = plant_old_credit(txn)
             db.session.commit()
             payback_id = payback.id
 
@@ -756,24 +760,34 @@ class TestCreditWorkflowEdgeCases:
 
             from app.exceptions import ValidationError
             with pytest.raises(ValidationError, match="Cannot mark income as credit"):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+                transaction_service.mark_as_credit(txn)
 
     def test_mark_credit_on_last_period(self, app, auth_client, seed_user, seed_periods):
-        """Mark credit on a transaction in the last period -- no next period.
+        """A row in the LAST pay period goes on the card all the same.
 
-        Bug: get_next_period() returns None when the transaction is in the
-        last pay period.  mark_as_credit raises ValidationError.
+        The old press refused it ("No next pay period"), because it wrote a
+        payback into the paycheck after.  Since plan task plan#2929 the press
+        puts the row on the card (rulings plan#2887, plan#2888) and writes no
+        payback, so it needs no next paycheck: the $100.00 moves on the card.
         """
         with app.app_context():
+            card = add_card(seed_user)
             last_period_idx = len(seed_periods) - 1
             txn = _make_transaction(
                 seed_user, seed_periods, period_index=last_period_idx,
             )
             db.session.commit()
 
-            from app.exceptions import ValidationError
-            with pytest.raises(ValidationError, match="No next pay period"):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            transaction_service.mark_as_credit(txn)
+            db.session.commit()
+
+            movement = status_seam.covering_movement_of(txn)
+            assert (movement.account_id, movement.amount) == (
+                card.id, Decimal("100.00"),
+            )
+            assert db.session.query(Transaction).filter_by(
+                credit_payback_for_id=txn.id,
+            ).count() == 0
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -821,10 +835,10 @@ class TestCarryForwardEdgeCases:
         credit-status items are correctly excluded.
         """
         with app.app_context():
-            # Create a transaction and mark it as credit.
+            # A transaction in the old Credit shape (status Credit, a payback).
             txn = _make_transaction(seed_user, seed_periods, period_index=0)
             db.session.commit()
-            credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            plant_old_credit(txn)
             db.session.commit()
 
             # Also create a projected transaction in the same period.

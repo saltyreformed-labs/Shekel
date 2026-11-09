@@ -116,8 +116,9 @@ TEMPLATE rows and **X-au-f** a generated transfer's own amount.  *The sentence
 this replaces still said every production row was OWN; it went stale at the
 first of those and is corrected here rather than at the step that made it false
 a second time.*  A CC payback is the kind carrying NEITHER link while its
-amount is derived (``credit_workflow.create_cc_payback_transaction`` copies the
-source row's figure, ``entry_credit_workflow.sync_entry_payback`` re-states it as
+amount is derived (``credit_workflow.create_cc_payback_transaction`` copied the
+source row's figure for the row-level Credit press until plan task plan#2929,
+``entry_credit_workflow.sync_entry_payback`` re-states it as
 the sum of the source's credit entries), so it places as OWN here and needs a
 relation of its own to stop -- finding **N-243**, plan step X-au-i.
 

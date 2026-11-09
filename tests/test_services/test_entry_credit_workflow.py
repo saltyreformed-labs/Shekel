@@ -16,15 +16,17 @@ import pytest
 
 from app.extensions import db
 from app.models.category import Category
-from app.models.ref import Status, TransactionType
+from app.models.ref import TransactionType
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app import ref_cache
 from app.enums import StatusEnum, TxnTypeEnum
 from app.exceptions import NotFoundError, ValidationError
-from app.services import credit_workflow, entry_service, transaction_service
+from app.services import credit_workflow, entry_service, status_seam, transaction_service
 from app.services.row_valuation import settled_figure
 from app.services.entry_credit_workflow import sync_entry_payback
+from tests._cards import add_card
+from tests._legacy_credit import plant_old_credit
 from tests._test_helpers import (
     typed,
     an_entered_day,
@@ -503,10 +505,11 @@ class TestPaybackCorrectness:
     def test_payback_fields_match_legacy(
         self, app, db, seed_user, seed_periods, seed_entry_template,
     ):
-        """Entry-level payback has every field that legacy mark_as_credit sets.
+        """Entry-level payback has every field the old row-level press set.
 
-        Compares each of the 10 fields set by credit_workflow.mark_as_credit
-        against the payback created by sync_entry_payback.
+        Compares each of the 10 fields the row-level Credit press set until
+        plan task plan#2929 (``credit_workflow.create_cc_payback_transaction``'s
+        shape) against the payback created by sync_entry_payback.
         """
         with app.app_context():
             txn = seed_entry_template["transaction"]
@@ -529,7 +532,7 @@ class TestPaybackCorrectness:
             projected_id = ref_cache.status_id(StatusEnum.PROJECTED)
             expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
 
-            # All 10 fields from mark_as_credit (lines 104-115).
+            # All 10 fields of the payback's shape.
             assert payback.account_id == txn.account_id
             assert payback.template_id is None
             assert payback.pay_period_id == seed_periods[1].id
@@ -1026,7 +1029,7 @@ class TestPaybackLifecycle:
 
 
 class TestLegacyCreditGuard:
-    """Guard tests for legacy mark_as_credit on tracked transactions."""
+    """Guard tests for the row-level Credit press on tracked transactions."""
 
     def test_legacy_credit_blocked_on_tracked(
         self, app, db, seed_user, seed_periods, seed_entry_template,
@@ -1038,20 +1041,22 @@ class TestLegacyCreditGuard:
         """
         with app.app_context():
             txn = seed_entry_template["transaction"]
-            user = seed_user["user"]
 
             with pytest.raises(ValidationError, match="individual purchase tracking"):
-                credit_workflow.mark_as_credit(txn.id, user.id)
+                transaction_service.mark_as_credit(txn)
 
     def test_legacy_credit_still_works_non_tracked(
         self, app, db, seed_user, seed_periods,
     ):
-        """4.10: Legacy mark_as_credit still works on non-tracked transactions.
+        """4.10: The Credit press still works on non-tracked transactions.
 
         Regression: the guard must not affect transactions whose template
-        does not have is_envelope enabled.
+        does not have is_envelope enabled.  Works means on the card since plan
+        task plan#2929 (rulings plan#2887 / plan#2888): the $100.00 moves on
+        the card and no payback is written, where this graded the payback.
         """
         with app.app_context():
+            card = add_card(seed_user)
             expense_type = (
                 db.session.query(TransactionType).filter_by(name="Expense").one()
             )
@@ -1068,12 +1073,12 @@ class TestLegacyCreditGuard:
             )
             db.session.flush()
 
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            transaction_service.mark_as_credit(txn)
             db.session.flush()
 
-            assert payback is not None
-            assert payback.name == "CC Payback: Non-Tracked Expense"
-            assert payback.estimated_amount == Decimal("100.00")
+            movement = status_seam.covering_movement_of(txn)
+            assert (movement.account_id, movement.amount) == (card.id, Decimal("100.00"))
+            assert credit_workflow.get_active_payback(txn.id) is None
 
     def test_legacy_unmark_credit_still_works(
         self, app, db, seed_user, seed_periods,
@@ -1100,7 +1105,7 @@ class TestLegacyCreditGuard:
             )
             db.session.flush()
 
-            payback = credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
+            payback = plant_old_credit(txn)
             db.session.flush()
             payback_id = payback.id
 

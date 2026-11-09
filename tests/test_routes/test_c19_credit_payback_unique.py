@@ -51,15 +51,16 @@ from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.user import User, UserSettings
-from app.services import credit_workflow
 from app.services.auth_service import hash_password
 from app.services.entry_credit_workflow import sync_entry_payback
 from app.services import account_service
 from app.utils.dates import display_today
+from tests._cards import add_card
 from tests._test_helpers import (
     generate_row_of,
     make_expense_template,
     one_off_row_of,
+    open_books_before_the_first_assertion,
     open_owner_calendar,
     record_paydays_across_a_hole,
     rhythm_of,
@@ -458,99 +459,44 @@ class TestPartialUniqueIndexEnforcement:
 
 
 class TestMarkAsCreditTOCTOUPrevention:
-    """``credit_workflow.mark_as_credit`` is safe under concurrent calls."""
+    """Two Credit presses on one row put it on the card once.
 
-    def test_double_call_is_idempotent(self, app, db, seed_user, seed_periods):
-        """Sequential second call returns the existing payback (no duplicate)."""
-        with app.app_context():
-            source = _make_projected_expense(seed_user, seed_periods)
-            first = credit_workflow.mark_as_credit(
-                source.id, seed_user["user"].id,
-            )
-            db.session.commit()
-            first_id = first.id
-            second = credit_workflow.mark_as_credit(
-                source.id, seed_user["user"].id,
-            )
-            db.session.commit()
-            assert second.id == first_id, (
-                "Second mark_as_credit must return the existing payback, "
-                "not create a duplicate."
-            )
-            count = (
-                db.session.query(Transaction)
-                .filter_by(credit_payback_for_id=source.id)
-                .count()
-            )
-            assert count == 1
+    Since plan task plan#2929 the press writes no payback (rulings plan#2887,
+    plan#2888): it settles the row on the card, so what a race could double is
+    the covering movement, and the owner lock is what keeps it single.  This
+    class graded the payback until then; its sequential double press and its
+    re-mark after a soft-deleted payback went with the payback, the double
+    press re-graded in ``tests/test_services/test_credit_puts_the_row_on_the_card.py``.
+    """
 
-    def test_mark_after_softdelete_creates_new_payback(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A re-mark after the prior payback was soft-deleted succeeds.
-
-        The partial unique index leaves room for a new active payback
-        once the previous one carries ``is_deleted = TRUE``; the
-        service-level idempotency check sees no live payback and the
-        normal create path runs.  Asserts the regression that the
-        partial predicate is the right shape end-to-end.
-        """
-        with app.app_context():
-            source = _make_projected_expense(seed_user, seed_periods)
-            first = credit_workflow.mark_as_credit(
-                source.id, seed_user["user"].id,
-            )
-            db.session.commit()
-            first.is_deleted = True
-            # Reset source back to projected so mark_as_credit's status
-            # guard permits a re-mark.
-            projected_id = (
-                db.session.query(Status).filter_by(name="Projected").one().id
-            )
-            source.status_id = projected_id
-            db.session.expire(source, ["status"])
-            db.session.commit()
-
-            second = credit_workflow.mark_as_credit(
-                source.id, seed_user["user"].id,
-            )
-            db.session.commit()
-            assert second.id != first.id, (
-                "Re-mark after soft-delete must create a fresh payback."
-            )
-            # Both rows persist, but only one is active; the partial
-            # unique index permits this.
-            active_count = (
-                db.session.query(Transaction)
-                .filter_by(
-                    credit_payback_for_id=source.id, is_deleted=False,
-                )
-                .count()
-            )
-            assert active_count == 1
-
-    def test_concurrent_mark_credit_yields_one_payback(self, app, db):
-        """Two simultaneous /mark-credit POSTs end with exactly one payback.
+    def test_concurrent_mark_credit_yields_one_payment_on_the_card(self, app, db):
+        """Two simultaneous /mark-credit POSTs end with ONE movement on the card.
 
         The request's owner write lock serialises the threads at the
         database level: the losing request's transaction waits for it
-        before reading the row, then reads the winner's committed CREDIT
-        status and short-circuits to "return existing payback" without
-        inserting a duplicate.  *Until plan step ``balance:X-bn`` a
-        ``FOR NO KEY UPDATE`` inside ``mark_as_credit`` did this, and
-        ``populate_existing()`` refreshed the row.*
+        before reading the row, then reads the winner's committed row, on
+        the card, and the press changes nothing.  *Until plan task plan#2929
+        the loser returned the winner's payback; until plan step
+        ``balance:X-bn`` a ``FOR NO KEY UPDATE`` inside ``mark_as_credit``
+        did the serialising.*
         """
         data = _create_concurrent_user(db.session)
+        owner = {
+            "scenario": data["scenario"],
+            "account": data["account"],
+            "categories": data["categories"],
+            "user": data["user"],
+        }
+        card = add_card(owner)
+        # Checking's books too open before any day the row could carry: the
+        # seam grades the row's own day against them as well as the card's
+        # (the user above opens checking today, after the row's date).
+        open_books_before_the_first_assertion(db.session, data["account"])
         source = _make_projected_expense(
-            seed_user={
-                "scenario": data["scenario"],
-                "account": data["account"],
-                "categories": data["categories"],
-                "user": data["user"],
-            },
-            seed_periods=data["periods"],
+            seed_user=owner, seed_periods=data["periods"],
         )
         db.session.commit()
+        card_id = card.id
         source_id = source.id
 
         # Single shared client with two concurrent requests -- see
@@ -584,18 +530,19 @@ class TestMarkAsCreditTOCTOUPrevention:
             f"Thread B status {resp_b.status_code}: {resp_b.data[:200]!r}"
         )
 
-        # Final-state invariant: exactly one active payback exists.
+        # Final-state invariant: one movement, on the card, and no payback.
         db.session.expire_all()
-        active_paybacks = (
-            db.session.query(Transaction)
-            .filter_by(
-                credit_payback_for_id=source_id, is_deleted=False,
-            )
-            .count()
+        movements = (
+            db.session.query(TransactionEntry)
+            .filter_by(transaction_id=source_id)
+            .all()
         )
-        assert active_paybacks == 1, (
-            f"Expected 1 active payback, found {active_paybacks}"
+        assert [m.account_id for m in movements] == [card_id], (
+            f"Expected one movement on the card, found {movements!r}"
         )
+        assert db.session.query(Transaction).filter_by(
+            credit_payback_for_id=source_id,
+        ).count() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -925,71 +872,19 @@ class TestMigrationPreFlightCheck:
 
 
 class TestMarkCreditRouteIntegrityErrorCatch:
-    """The mark_credit route converts the partial-unique-index violation
-    into an idempotent 200 response."""
+    """The mark_credit route answers an IntegrityError with the designed 400.
 
-    def test_unique_violation_returns_200(
-        self, app, db, auth_client, seed_user, seed_periods,
-    ):
-        """Pre-seed a payback so the route's own INSERT collides.
-
-        Inserts an active payback for the source row outside any
-        request, so no owner lock orders it against the route that
-        follows.  The route's call to ``mark_as_credit`` then runs the
-        normal flow but sees ``status_id == projected`` (we leave the
-        source row's status alone), so the idempotency check does
-        not short-circuit; the eventual ``db.session.add(payback)``
-        flush triggers the unique-index violation and the route's
-        ``except IntegrityError`` branch fires.
-
-        Verifies the user-facing contract: 200 OK with an HTMX
-        ``gridRefresh`` trigger, identical to a serialised second
-        click.
-        """
-        with app.app_context():
-            source = _make_projected_expense(seed_user, seed_periods)
-            # Pre-seed a duplicate-blocking payback that the service
-            # cannot see via its idempotency check (because source's
-            # status is still "Projected", and the idempotency clause
-            # only fires when status == "Credit").
-            _insert_payback_directly(
-                source, seed_periods[1],
-                account_id=seed_user["account"].id,
-                scenario_id=seed_user["scenario"].id,
-                category_id=seed_user["categories"]["Payback"].id,
-            )
-            db.session.commit()
-            source_id = source.id
-
-        # The pre-seed leaves the system in a state that mark_as_credit
-        # naturally cannot reach via its own service path; that's the
-        # whole point -- the route's IntegrityError catch is the
-        # backstop.
-        resp = auth_client.post(f"/transactions/{source_id}/mark-credit")
-        assert resp.status_code == 200, (
-            f"Expected idempotent 200, got {resp.status_code}: "
-            f"{resp.data[:200]!r}"
-        )
-        assert resp.headers.get("HX-Trigger") == "gridRefresh"
-
-        # Active payback count remains 1 -- the duplicate INSERT was
-        # rolled back.
-        with app.app_context():
-            active = (
-                db.session.query(Transaction)
-                .filter_by(
-                    credit_payback_for_id=source_id, is_deleted=False,
-                )
-                .count()
-            )
-            assert active == 1
+    It converted the partial-unique-index violation into an idempotent 200
+    until plan task plan#2929, when the press stopped writing a payback and
+    the arm had nothing left to catch; that test went with the arm.
+    """
 
     def test_other_integrity_errors_still_return_400(
         self, app, db, auth_client, seed_user, seed_periods,
     ):
         """Non-credit-payback IntegrityErrors do not silently 200.
 
-        Patches ``credit_workflow.mark_as_credit`` to raise an
+        Patches ``transaction_service.mark_as_credit`` to raise an
         ``IntegrityError`` whose ``orig.diag.constraint_name`` is a
         different name -- the route's discriminator must reject it
         and surface the standard 400 response so unrelated FK or
@@ -1016,7 +911,7 @@ class TestMarkCreditRouteIntegrityErrorCatch:
             raise forged
 
         with patch(
-            "app.routes.transactions.mutations.credit_workflow.mark_as_credit",
+            "app.routes.transactions.mutations.transaction_service.mark_as_credit",
             _raise_other_integrity_error,
         ):
             resp = auth_client.post(f"/transactions/{source_id}/mark-credit")

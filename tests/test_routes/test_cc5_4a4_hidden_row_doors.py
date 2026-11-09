@@ -101,6 +101,7 @@ from app.services import (
     entry_service,
     match_press,
     pay_period_gates,
+    status_seam,
     transaction_service,
 )
 from app.services.one_off import OneOffToPlace, place_one_off
@@ -136,6 +137,7 @@ from tests.test_services.test_statement_match._builders import (
     a_purchase_in_a_minted_envelope,
     a_transaction,
 )
+from tests._cards import add_card
 
 #: Mark Paid's refusal of a deleted Hotel (the status seam's sentence).
 _PAYMENT_REFUSED = (
@@ -408,11 +410,17 @@ class TestADeletedRowIsNotFound:
                 credit_payback_for_id=row_id,
             ).count() == 0
 
-    def test_the_live_rows_mark_credit_still_creates_its_payback(
+    def test_the_live_rows_mark_credit_puts_it_on_the_card(
         self, app, db, auth_client, seed_user, seed_periods_today,
     ):
-        """The control: the same press on the live $80.00 row creates one payback."""
+        """The control: the same press on the live $80.00 row puts it on the card.
+
+        It created one payback until plan task plan#2929; the press writes
+        none now (rulings plan#2887 / plan#2888), and the $80.00 moves on the
+        card instead.
+        """
         with app.app_context():
+            card = add_card(seed_user)
             _template, row = _occurrence(
                 seed_user, seed_periods_today[3], name="Phone",
                 amount="80.00", is_envelope=False,
@@ -421,9 +429,13 @@ class TestADeletedRowIsNotFound:
             response = auth_client.post(f"/transactions/{row.id}/mark-credit")
 
             assert response.status_code == 200
+            db.session.expire_all()
+            row = db.session.get(Transaction, row.id)
+            movement = status_seam.covering_movement_of(row)
+            assert (movement.account_id, movement.amount) == (card.id, Decimal("80.00"))
             assert db.session.query(Transaction).filter_by(
                 credit_payback_for_id=row.id,
-            ).count() == 1
+            ).count() == 0
 
 
 class TestTheSeamRefusesADeletedRow:

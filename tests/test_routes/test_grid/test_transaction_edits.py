@@ -9,7 +9,8 @@ from decimal import Decimal
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.ref import Status, TransactionType
-from app.enums import MovementFigureSourceEnum
+from app import ref_cache
+from app.enums import MovementFigureSourceEnum, StatusEnum
 from app.services import status_seam
 from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
 from app.services.pay_calendar import calendar_for
@@ -18,6 +19,8 @@ from tests._test_helpers import generate_row_of, make_expense_template, resolved
 from app.services.row_valuation import settled_contribution, settled_figure
 
 from ._helpers import _generate_first_row, _TestTransactionCRUDMembers
+from tests._cards import add_card
+from tests._legacy_credit import plant_old_credit
 
 
 class TestTransactionCRUD(_TestTransactionCRUDMembers):
@@ -59,7 +62,8 @@ class TestTransactionCRUD(_TestTransactionCRUDMembers):
         """
         with app.app_context():
             txn = self._create_test_txn(seed_user, seed_periods_today)
-            auth_client.post(f"/transactions/{txn.id}/mark-credit")
+            plant_old_credit(txn)
+            db.session.commit()
             payback = (
                 db.session.query(Transaction)
                 .filter_by(credit_payback_for_id=txn.id, is_deleted=False)
@@ -122,36 +126,39 @@ class TestTransactionCRUD(_TestTransactionCRUDMembers):
             assert txn.status.name == "Cancelled"
             assert settled_contribution(txn) == Decimal("0")
 
-    def test_mark_credit_creates_payback(self, app, auth_client, seed_user, seed_periods_today):
-        """POST /transactions/<id>/mark-credit creates payback in next period."""
+    def test_mark_credit_puts_the_row_on_the_card(self, app, auth_client, seed_user, seed_periods_today):
+        """POST /transactions/<id>/mark-credit puts the row on the card, no payback.
+
+        Rulings plan#2887 / plan#2888 (plan task plan#2929): the row settles
+        with its $123.45 moved on the card from its own day, and no CC Payback
+        row is written -- the card's own payment pays it off.  This test graded
+        the payback in the next period until then.
+        """
         with app.app_context():
+            card = add_card(seed_user)
             txn = self._create_test_txn(seed_user, seed_periods_today)
 
             response = auth_client.post(f"/transactions/{txn.id}/mark-credit")
             assert response.status_code == 200
+            assert response.headers["HX-Trigger"] == "gridRefresh"
+            assert "123.45" in response.get_data(as_text=True)
 
             db.session.refresh(txn)
-            assert txn.status.name == "Credit"
-
-            # A payback transaction should exist in the next period.
-            payback = db.session.query(Transaction).filter(
-                Transaction.name.like("%Payback%"),
-                Transaction.pay_period_id == seed_periods_today[1].id,
-            ).first()
-            assert payback is not None, "Payback transaction was not created"
-            assert payback.name == "CC Payback: Test Expense"
-            assert payback.estimated_amount == Decimal("123.45")
-            assert payback.status.name == "Projected"
-            assert payback.pay_period_id == seed_periods_today[1].id
-            assert payback.credit_payback_for_id == txn.id
+            assert txn.status_id == ref_cache.status_id(StatusEnum.DONE)
+            movement = status_seam.covering_movement_of(txn)
+            assert (movement.account_id, movement.amount) == (card.id, Decimal("123.45"))
+            assert db.session.query(Transaction).filter_by(
+                credit_payback_for_id=txn.id,
+            ).count() == 0
 
     def test_unmark_credit_reverts_and_deletes_payback(self, app, auth_client, seed_user, seed_periods_today):
         """DELETE /transactions/<id>/unmark-credit reverts to projected and deletes payback."""
         with app.app_context():
             txn = self._create_test_txn(seed_user, seed_periods_today)
 
-            # First mark as credit.
-            auth_client.post(f"/transactions/{txn.id}/mark-credit")
+            # First, the old Credit shape (no door writes it since plan#2929).
+            plant_old_credit(txn)
+            db.session.commit()
             db.session.refresh(txn)
             assert txn.status.name == "Credit"
 
@@ -181,7 +188,8 @@ class TestTransactionCRUD(_TestTransactionCRUDMembers):
         with app.app_context():
             txn = self._create_test_txn(seed_user, seed_periods_today)
             txn_id = txn.id
-            auth_client.post(f"/transactions/{txn_id}/mark-credit")
+            plant_old_credit(txn)
+            db.session.commit()
             payback = db.session.query(Transaction).filter_by(
                 credit_payback_for_id=txn_id, is_deleted=False,
             ).one()
@@ -211,7 +219,8 @@ class TestTransactionCRUD(_TestTransactionCRUDMembers):
             txn = generate_row_of(template, seed_periods_today[0])
             db.session.commit()
 
-            auth_client.post(f"/transactions/{txn.id}/mark-credit")
+            plant_old_credit(txn)
+            db.session.commit()
             payback = db.session.query(Transaction).filter_by(
                 credit_payback_for_id=txn.id, is_deleted=False,
             ).one()

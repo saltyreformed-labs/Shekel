@@ -66,6 +66,7 @@ from tests.test_services.test_statement_match._builders import (
     an_import,
 )
 from app.services.statement_match import accept_match, release_match
+from tests._legacy_credit import plant_old_credit
 
 #: The bank's own words for the Kroger line -- distinct from the purchase's
 #: description, so a page that leaked the line would be caught naming it.
@@ -170,7 +171,7 @@ def _credit_row_matched(seed_user):
     )
     db.session.flush()
     a_later_period(seed_user)
-    credit_workflow.mark_as_credit(source.id, seed_user["user"].id)
+    plant_old_credit(source)
     db.session.commit()
     payback = credit_workflow.get_active_payback(source.id)
     line = a_bank_line(
@@ -832,7 +833,7 @@ class TestLeavingCreditNamesThePaybacksLine:
             )
             db.session.flush()
             a_later_period(seed_user)
-            credit_workflow.mark_as_credit(source.id, seed_user["user"].id)
+            plant_old_credit(source)
             db.session.commit()
             path = f"/transactions/{source.id}/unmark-credit"
             stale = _vals(_popover(auth_client, source.id), "delete", path)

@@ -57,8 +57,9 @@ transaction_table_args = (
     db.Index("idx_transactions_template", "template_id"),
     db.Index("idx_transactions_credit_payback", "credit_payback_for_id"),
     # At most one *active* CC Payback row per source transaction.
-    # Backstops the serialisation of ``credit_workflow.mark_as_credit``
-    # and ``entry_credit_workflow.sync_entry_payback`` -- the request's
+    # Backstops the serialisation of ``entry_credit_workflow
+    # .sync_entry_payback`` (and of the row-level Credit press, which wrote a
+    # payback until plan task plan#2929 put the row on the card) -- the request's
     # owner write lock since plan step ``balance:X-bn``, C-19's row lock
     # before it -- so a writer that holds no request fails loudly with an
     # IntegrityError on this index instead of silently doubling the

@@ -22,6 +22,7 @@ from ._helpers import (
     _mark_credit,
     _save_an_actual,
 )
+from tests._cards import add_card
 
 
 #: The purchase door's refusal of a deleted row, naming it (ruling R-CC98),
@@ -353,17 +354,21 @@ class TestMarkCreditAgainstDelete:
     def test_mark_credit_first_the_delete_takes_the_payback_too(
         self, app, db, seed_user, seed_periods,
     ):
-        """Mark Credit lands first: the delete waits, then deletes the Credit row and its payback.
+        """Mark Credit lands first: the delete waits, then deletes the row and its payment.
 
         The delete reads Dinner after Mark Credit committed, so it deletes the
-        Credit row and takes its $80.00 payback down with it, as a Delete of a
-        Credit row always does.  Until plan step ``balance:X-bn`` the delete
+        row and takes its $80.00 off the card with it.  Since plan task
+        plan#2929 the press puts the row on the card and writes no payback, so
+        the card the fixture adds is the press's precondition; until then the
+        delete took the Credit row's payback down, as a Delete of a Credit row
+        always does.  Until plan step ``balance:X-bn`` the delete
         had read the row before its row lock and answered the change with the
         route's 409, keeping the payback; whether a Delete pressed on a row
         another tab has since changed should be told so is plan step
         ``balance:X-da``'s question.
         """
         with app.app_context():
+            add_card(seed_user)
             row_id = _dinner(seed_user, seed_periods)
             one, two = signed_in_clients(app)
             credit, delete = race_two_requests(

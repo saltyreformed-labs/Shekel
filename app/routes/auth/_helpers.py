@@ -37,7 +37,7 @@ from marshmallow import ValidationError as MarshmallowValidationError
 from app import ref_cache
 from app.enums import RoleEnum
 from app.extensions import db
-from app.services import known_device_service, mfa_service
+from app.services import auth_service, known_device_service, mfa_service
 from app.utils.device_cookie import device_token, set_device_cookie
 from app.utils.log_events import (
     AUTH,
@@ -107,14 +107,15 @@ def _complete_sign_in(
     The one completion of a sign-in, called once the proof is in: the
     ``/login`` password with no second factor, ``/mfa/verify``'s code, or
     the ``/login`` password on a trusted device (plan#2173).  It clears any
-    pending code state (a completed sign-in leaves none behind), records the
-    browser (plan#2772, ruling plan#2994) so a password alone never makes one
-    known on an account with a code, calls ``login_user``, stamps the user and
-    every lifecycle key from one instant so the idle and fresh-login checks
-    start where the session did (commit C-10) and no other user's id can be
-    loaded on it (plan#2173), and chooses the landing page.  What differs per
-    proof stays with its caller: the log event, and a backup code's sign-out of
-    every other session.
+    pending code state (a completed sign-in leaves none behind), clears the
+    wrong-guess count now that every check has passed (ruling plan#3007),
+    records the browser (plan#2772, ruling plan#2994) so a password alone
+    never makes one known on an account with a code, calls ``login_user``,
+    stamps the user and every lifecycle key from one instant so the idle and
+    fresh-login checks start where the session did (commit C-10) and no other
+    user's id can be loaded on it (plan#2173), and chooses the landing page.
+    What differs per proof stays with its caller: the log event, and a backup
+    code's sign-out of every other session.
 
     The record is committed before its cookie rides the response, so a browser
     never holds a token whose record a failed commit lost.
@@ -131,6 +132,7 @@ def _complete_sign_in(
         dashboard.
     """
     _clear_mfa_pending_state()
+    auth_service.clear_failed_attempts(user)
     token = known_device_service.record_sign_in(
         user.id, device_token(user.id),
         request.headers.get("User-Agent", ""), trust=trust,

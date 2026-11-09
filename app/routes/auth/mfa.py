@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timezone
 
 from flask import (
+    current_app,
     flash,
     redirect,
     render_template,
@@ -39,6 +40,7 @@ from app.schemas.validation import (
     MfaVerifySchema,
 )
 from app.services import auth_service, mfa_service
+from app.exceptions import AuthError
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     MFA_SETUP_PENDING_TTL,
@@ -49,13 +51,16 @@ from app.routes.auth._helpers import (
     _totp_accepted_or_key_failure,
     _verify_totp_with_replay_logging,
 )
+from app.utils.auth_helpers import fresh_login_required
 from app.utils.log_events import (
     AUTH,
     EVT_BACKUP_CODES_REGENERATED,
     EVT_DEVICE_TRUSTED,
     EVT_MFA_DISABLED,
     EVT_MFA_ENABLED,
+    EVT_LOGIN_FAILED,
     EVT_MFA_LOGIN_SUCCESS,
+    EVT_REAUTH_FAILED,
     log_event,
 )
 from app.utils.security_events import (
@@ -65,6 +70,39 @@ from app.utils.security_events import (
 from app.utils.session_helpers import invalidate_other_sessions
 
 logger = logging.getLogger(__name__)
+
+
+def _pending_user_key() -> str:
+    """Return what the code form's per-account limit counts against.
+
+    The session is signed, so a client cannot choose this id, and it survives
+    a change of address, which is the point: moving between addresses buys the
+    holder of a password no more code guesses.
+
+    Returns:
+        ``pending-user:<id>``.
+    """
+    return f"pending-user:{flask_session.get('_mfa_pending_user_id')}"
+
+
+def _no_live_pending_sign_in() -> bool:
+    """Return True when the request has no live pending sign-in to count against.
+
+    Such a request checks no code: the view only redirects it to /login.  With
+    no id they would all share one count under ``None``.  With an id past its
+    time, a kept cookie would spend the account's tries long after the password
+    step, because this limit runs before the view's own freshness check, and
+    the owner's right code would be refused.  Either way the request still
+    spends its own address's limit.
+
+    Returns:
+        True when the session holds no pending user, or one
+        :func:`~app.routes.auth._helpers._mfa_pending_is_fresh` refuses.
+    """
+    return (
+        not flask_session.get("_mfa_pending_user_id")
+        or not _mfa_pending_is_fresh()
+    )
 
 
 def _check_mfa_code(mfa_config, user_id, totp_code, backup_code):
@@ -106,8 +144,35 @@ def _render_verify_form():
     )
 
 
+def _flash_backup_codes_left(mfa_config: MfaConfig) -> None:
+    """Tell a backup-code sign-in how many codes are left and how long it has.
+
+    Re-confirm takes no backup code, so someone without their phone can
+    replace their codes only inside the fresh-login window this sign-in just
+    opened, the one Regenerate's ``@fresh_login_required()`` reads (ruling
+    plan#3035).  The minutes are that config value, never a second spelling.
+
+    Args:
+        mfa_config: The signing-in user's config, the spent code already
+            removed from its ``backup_codes``.
+    """
+    minutes = current_app.config["FRESH_LOGIN_MAX_AGE_MINUTES"]
+    unit = "minute" if minutes == 1 else "minutes"
+    flash(
+        f"You signed in with a backup code and have "
+        f"{len(mfa_config.backup_codes)} left. For the next {minutes} {unit} "
+        f"you can replace them on the Security page without your "
+        f"authenticator app.",
+        "warning",
+    )
+
+
 @auth_bp.route("/mfa/verify", methods=["GET", "POST"])
 @limiter.limit("5 per 15 minutes", methods=["POST"])
+@limiter.limit(
+    "5 per 15 minutes", methods=["POST"],
+    key_func=_pending_user_key, exempt_when=_no_live_pending_sign_in,
+)
 def mfa_verify():  # pylint: disable=too-many-return-statements
     """Display the MFA verification form and handle code submission.
 
@@ -115,7 +180,8 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     route after successful password verification). Completes the login
     on valid TOTP or backup code.  An authenticator code with "Trust this
     device" ticked also trusts this browser for the user (plan#2173); a
-    backup code never does, whatever the form posts.
+    backup code never does, whatever the form posts, and instead says how
+    many codes are left and how long there is to replace them.
 
     Pending state freshness is enforced on every entry to this view
     (both GET and POST) via :func:`_mfa_pending_is_fresh`.  A pending
@@ -123,9 +189,17 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     is bounced back to /login with a flash message -- the F-002
     cookie-replay window closes at exactly this gate.
 
-    Pylint: ``too-many-return-statements`` (8/6) -- each early return is a
+    A wrong, replayed or empty code and a wrong backup code count toward the
+    account's lock, and a locked account is refused here even with the right
+    code.  Not counted: a form the schema rejects, which cannot be a right
+    answer, and a failed encryption key, which is the operator's fault.  Two
+    limits apply, one by address and one by the pending account, so that
+    moving between addresses buys no more guesses.  A pending sign-in past its
+    time spends only the address's.
+
+    Pylint: ``too-many-return-statements`` (9/6) -- each early return is a
     distinct semantic exit (no pending state, stale state, GET render,
-    malformed form, missing user-or-config, key failure, invalid code,
+    malformed form, missing user-or-config, locked, key failure, invalid code,
     success), each with its own clear/flash/redirect side effects, so
     they cannot be collapsed without merging distinct security messaging.
     The explicit returns are the readable form.  (``too-many-branches`` is
@@ -196,6 +270,19 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         _clear_mfa_pending_state()
         return redirect(url_for("auth.login"))
 
+    if auth_service.is_locked_out(user):
+        # Read under the owner's lock taken above.  This person has the
+        # password, so naming the lock tells them nothing a stranger could
+        # use.  Back to /login, where the lock refuses them until it ends.
+        log_event(
+            logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
+            "Login failed: account locked at the code form",
+            user_id=pending_user_id, ip=request.remote_addr,
+        )
+        _clear_mfa_pending_state()
+        flash(auth_service.LOCKED_OUT_MESSAGE, "danger")
+        return redirect(url_for("auth.login"))
+
     # Single try/except wraps both the up-front decrypt (preserving
     # the pre-C-09 fail-fast behaviour: a missing encryption key
     # disables BOTH the TOTP and backup-code paths) and the verifier
@@ -219,6 +306,12 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         return redirect(url_for("auth.login"))
 
     if not valid:
+        auth_service.record_failed_attempt(user)
+        log_event(
+            logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
+            "Login failed: bad code", user_id=pending_user_id,
+            ip=request.remote_addr,
+        )
         flash("Invalid verification code.", "danger")
         return _render_verify_form()
 
@@ -253,6 +346,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         # so it never trusts this browser, which stays known all the same
         # (ruling plan#2997): it has just finished a sign-in.
         invalidate_other_sessions(user, "backup_code_consumed")
+        _flash_backup_codes_left(mfa_config)
     elif trust:
         log_event(logger, logging.INFO, EVT_DEVICE_TRUSTED, AUTH,
                   "Device trusted", user_id=user.id)
@@ -496,8 +590,13 @@ def mfa_confirm():
 
 
 @auth_bp.route("/mfa/regenerate-backup-codes", methods=["POST"])
+@fresh_login_required()
 def regenerate_backup_codes():
-    """Generate and display new backup codes, replacing the old ones."""
+    """Generate and display new backup codes, replacing the old ones.
+
+    Takes a step-up (ruling plan#3010): new codes void the old ones, so a
+    stolen session must not be able to mint them.
+    """
     mfa_config = (
         db.session.query(MfaConfig)
         .filter_by(user_id=current_user.id)
@@ -557,6 +656,11 @@ def mfa_disable_confirm():
     enforced -- an attacker who has captured the user's password and a
     recently-used TOTP code cannot use that code to disable MFA, the
     same defence that ``/mfa/verify`` provides at login.
+
+    A wrong password or code counts toward the account's lock, and a locked
+    account is refused here even with the right ones (ruling plan#3008).
+    Success does not clear the count: that is a finished sign-in's or
+    re-confirm's (ruling plan#3007).
     """
     # Schema validates shape before bcrypt is invoked.  current_password
     # accepts any historical length (legacy short passwords still work
@@ -572,8 +676,17 @@ def mfa_disable_confirm():
     totp_code = disable_data["totp_code"]
 
     # Verify the user's current password first.
-    if not auth_service.verify_password(current_password, current_user.password_hash):
-        flash("Invalid password.", "danger")
+    try:
+        auth_service.check_signed_in_password(
+            current_user, current_password, "Invalid password.",
+        )
+    except AuthError as exc:
+        log_event(
+            logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
+            f"Disable two-factor failed: {exc}",
+            user_id=current_user.id, ip=request.remote_addr,
+        )
+        flash(str(exc), "danger")
         return redirect(url_for("auth.mfa_disable"))
 
     # Load MFA config and verify TOTP code.
@@ -599,6 +712,12 @@ def mfa_disable_confirm():
         return redirect(url_for("settings.show", section="security"))
 
     if not accepted:
+        auth_service.record_failed_attempt(current_user)
+        log_event(
+            logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
+            "Disable two-factor failed: bad code",
+            user_id=current_user.id, ip=request.remote_addr,
+        )
         flash("Invalid authentication code.", "danger")
         return redirect(url_for("auth.mfa_disable"))
 

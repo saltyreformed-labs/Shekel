@@ -2715,7 +2715,7 @@ class TestLoginLockoutIntegration:
     """End-to-end tests that exercise lockout through the /login route.
 
     The service-level tests in
-    ``tests/test_services/test_auth_service.py`` cover the lockout
+    ``tests/test_services/test_auth_service/test_lockout.py`` cover the lockout
     semantics in isolation; this class verifies the integration with
     the Flask route -- in particular that the route's flash message,
     redirect target, and ``failed_login_count`` persistence remain

@@ -11,9 +11,10 @@ plan Section 6.
 
 **The ledger they grade is the one worked out from the records since plan step
 plan#2913** (``tests/_ledger_reads.py``); they say "legs" and "postings" as they
-were written of the store.  A deleted category's lines book on the Uncategorized
-bucket there, so invariant 2's orphan is the store's alone, as are invariant 3 and
-the sweep's parity arm, each of which goes with it.
+were written of the store, whose own invariants (a per-entry balance, an owner
+read off a journal entry, a deleted category's orphan row) went with it at
+plan#2914.  Worked out, a deleted category's lines book on the Uncategorized
+bucket.
 
 
   1. **Per linked account (cash side).**  For each real account A (its linked
@@ -44,22 +45,18 @@ the sweep's parity arm, each of which goes with it.
      "Reconciliation of orphans" note).  It is equally load-bearing through a
      **recategorize** (A -> B): the transaction's reversal nets it to zero on A
      (excluded by the non-zero-net guard) and posts its effect to B.
-  3. **Per-entry balance.**  Every journal entry's legs ``SUM(amount) = 0`` and
-     ``COUNT(*) >= 2`` (also DB-enforced by ``ck_account_postings_balanced``).
-  4. **Trial balance.**  ``SUM(account_postings.amount) = 0`` across the whole
-     ledger (follows from 3, asserted directly as a cheap self-check).
-  5. **Per-transaction completeness.**  Every settled, non-deleted, non-transfer
-     transaction whose family holds a NONZERO dated cash movement has at least
-     one journal entry -- no settled cash transaction is silently unposted.  A
+  3. **Trial balance.**  The worked-out lines sum to ``0`` across the whole
+     ledger, a cheap self-check.
+  4. **Per-transaction completeness.**  Every settled, non-deleted, non-transfer
+     transaction whose family holds a NONZERO dated cash movement books at least
+     one line -- no settled cash transaction is silently unbooked.  A
      zero-effect row (an envelope closed from card purchases alone) is
      correctly NOT required to post; so is a settled row the seam wrote no
      mirror for, whose family is empty (that the seam writes one is
      the ``test_covering_movement`` package's pin, not this file's).
-  6. **Multi-scenario isolation** and **owner isolation** (via
-     ``journal_entry.user_id``) -- a posting carries no ``user_id``; its owner is
-     reached only through its journal entry, and one owner's / scenario's
-     reconciliation never picks up another's.
-  7. **Revert-and-recategorize reconciles (the plan Section 2.8 CRITICAL
+  5. **Multi-scenario isolation** and **owner isolation** -- one owner's /
+     scenario's reconciliation never picks up another's.
+  6. **Revert-and-recategorize reconciles (the plan Section 2.8 CRITICAL
      regression lock)** -- driven through the real PATCH route, then swept.
 
 **A "backfill == go-forward" invariant was listed here and its case is DELETED**
@@ -78,12 +75,8 @@ Adversarial cases prove the oracle is not vacuous: a read that loses lines makes
 the per-account reconciliation and the trial balance FAIL -- driven through the
 real ``_assert_full_reconciliation`` sweep helper under ``pytest.raises``, so a
 regression in the helper itself is caught, not only in an inline re-derivation.
-Tampering a settled transaction's covering movement and injecting one extra stored
-leg are the store's own cases: the first leaves it behind the records, which the
-sweep's parity arm names, and the second unbalances it.  A reverted
-transaction reconciles at zero (original + reversal net to zero; the source-side
-query drops its kept movement once the revert UN-DATES it), proving the
-append-only correction discipline end to end.
+A reverted transaction reconciles at zero (the revert UN-DATES its kept movement,
+so neither the read nor the source-side query counts it).
 
 **Non-tautological by construction**, the same three independent ways as Step 2:
 
@@ -96,10 +89,9 @@ append-only correction discipline end to end.
     (``_independent_combined_source_effect`` / ``_signed_cash_effect``) reads the
     ``transactions`` and ``transaction_entries`` tables by its own SQL; asserting
     the two equal reconciles what the read BOOKS against the source of truth;
-  * **the production service helpers** -- ``account_posting_total``,
-    ``settled_transfer_effect``, and ``posted_purchase_effect`` (the readers
-    Steps 4-5 will switch balances onto) must match the hand-computed literals
-    too.
+  * **the production service helpers** -- ``settled_transfer_effect`` and
+    ``posted_purchase_effect``, reads of the records, must match the
+    hand-computed literals too.
 
 Cash transactions are settled through the real go-forward primitives -- the
 status seam plus the posting builder -- via

@@ -56,9 +56,8 @@ cash oracle is (the ``test_posting_ledger_cash_reconciliation`` package):
     the transfers' side records with
     independently-written Python / SQL, so asserting the two reconcile checks
     what the read BOOKS against the transaction source of truth;
-  * **the production service helpers** -- ``account_posting_total`` and
-    ``settled_transfer_effect`` / ``settled_transaction_effect`` must match the
-    hand-computed literals too.
+  * **the production service helpers** -- ``settled_transfer_effect`` /
+    ``settled_transaction_effect`` must match the hand-computed literals too.
 
 Every account and every settle is produced through the REAL go-forward
 primitives -- ``create_account`` (fires the C6 opening sync),
@@ -73,8 +72,6 @@ row's stored ``created_at`` (the one instant the test cannot choose).
 
 Adversarial cases prove the oracle is not vacuous: a read that loses lines makes
 the per-account reconciliation and the trial balance FAIL under the real sweep
-helper.  Tampering the latest anchor balance and injecting one extra stored leg are
-the store's own cases: the first leaves it behind the records, which the sweep's
-parity arm names, and the second unbalances it.  All money is ``Decimal`` from
+helper.  All money is ``Decimal`` from
 strings, with the arithmetic shown per the testing standard.
 """

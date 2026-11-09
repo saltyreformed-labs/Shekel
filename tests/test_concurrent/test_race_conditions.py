@@ -33,7 +33,6 @@ from app.services import (
     account_service,
     pay_schedule_service,
 )
-from tests._stored_ledger import stored_linked_ledger_total
 from tests._test_helpers import (
     assert_pay_period_invariants,
     capture_sql_statements,
@@ -420,8 +419,6 @@ class TestConcurrentAnchorUpdate:
       2. BOTH return 200, and BOTH assertions are recorded.
       3. The resolved balance is one of the two submitted values.
 
-      4. The account's LINKED LEDGER sums to the resolved assertion.
-
     **Invariant 2 was the opposite until plan step X-f1c3c** (ruling R-EN),
     and this docstring is rewritten rather than annotated because the old
     text read as instructions to restore the deleted behaviour.  It said:
@@ -438,23 +435,16 @@ class TestConcurrentAnchorUpdate:
     compares against the governing assertion under the owner's write lock, so
     the waiter sees the winner's row, writes nothing and reports success.
 
-    **Invariant 4 is the one this class was missing, and it is the reason the
-    409's deletion was not free.**  "Append-only" is true of
-    ``account_anchor_history`` and FALSE of the transaction a true-up runs: it
-    also RECONCILES the account's posted corrections, which reads what is
-    posted, subtracts it from what the assertions say, and writes the
-    difference.  The deleted ``version_id`` UPDATE had been serialising that
-    read-modify-write by accident, because it autoflushed and took a row lock
-    before the walk.  Measured with the interleave forced at the reconcile's
-    read: both requests answer 200, both assertions are recorded, and the
-    resolver returns one of them -- every invariant above HELD -- while the
-    account's linked ledger settled at ``$1,000.00`` against a resolved
-    ``$2,000.00``.  Invariants 1-3 cannot see that, and the trial balance
-    cannot either, because the anchor-equity leg mirrors the error exactly.
-    The serialisation is now explicit and per-owner
-    (:mod:`app.services.user_write_lock`), and its own deterministic tests are
-    in ``tests/test_services/test_user_write_lock.py``; invariant 4 is what
-    grades the MONEY rule those tests protect.
+    **A fourth invariant graded the STORED ledger until plan#2914**: the
+    account's stored linked ledger summed to the resolved assertion.  A
+    true-up also reconciles the account's stored corrections, a
+    read-modify-write that two interleaved requests could leave apart from the
+    assertions; the serialisation is explicit and per-owner
+    (:mod:`app.services.user_write_lock`), with its own deterministic tests in
+    ``tests/test_services/test_user_write_lock.py``.  The worked-out ledger is
+    computed from the assertions themselves and writes nothing two requests
+    could race on, so that invariant went with the suite's grading of the
+    store.
 
     The old "tolerance for serialised-without-contention runs" paragraph is
     gone with the branch it excused: {200, 200} is no longer the rare
@@ -528,20 +518,6 @@ class TestConcurrentAnchorUpdate:
         assert resolved in (Decimal("2000.00"), Decimal("3000.00")), (
             f"Resolved balance is {resolved}, "
             f"expected one of the two concurrently asserted values"
-        )
-
-        # Invariant 4: the posted ledger AGREES with the resolved assertion.
-        # This account has no settled movements, so its linked ledger must sum
-        # to exactly the balance the resolver reports.  Two reconciles that
-        # both computed their delta against the same posted state leave these
-        # permanently apart -- with every assertion above still passing, and
-        # with the trial balance still at $0.00 because the anchor-equity leg
-        # carries the mirror-image error.  See the class docstring for the
-        # measured broken state.
-        assert stored_linked_ledger_total(account_id) == resolved, (
-            f"the account's linked ledger sums to "
-            f"{stored_linked_ledger_total(account_id)} while its resolved assertion "
-            f"is {resolved}; two anchor reconciles interleaved"
         )
 
 

@@ -7,10 +7,9 @@ payback-delete paths, and carry-forward -- so settling, editing, reverting,
 deleting, and carrying forward a transaction keep the append-only double-entry
 ledger in step.  These tests drive transactions END TO END through those
 handlers (NOT by calling ``posting_service`` directly -- that is Commit 4's unit
-suite) and assert the resulting ledger state.  A figure is the worked-out read,
-which follows the records and holds no reversal, so where a test's subject is the
-door's act on the store it also ends on ``assert_ledger_parity``, and that line is
-what grades the act.
+suite) and assert the resulting ledger state, read from the ledger worked out
+from the records, which holds no reversal: a door's act on the store itself is
+not graded here (plan step plan#2914).
 
 The load-bearing wiring properties, each pinned by a test below:
 
@@ -18,14 +17,13 @@ The load-bearing wiring properties, each pinned by a test below:
     ``actual_amount`` posts the ACTUAL not the estimate, and a
     settle-and-recategorize PATCH posts the NEW category (the 2.8b HIGH, both
     directions);
-  * a revert-and-recategorize PATCH reverses the OLD category read from the
-    ledger, not the new ``category_id`` (the 2.8 CRITICAL), at the route level;
+  * a revert-and-recategorize PATCH leaves neither the OLD category nor the
+    new ``category_id`` holding the row (the 2.8 CRITICAL), at the route level;
   * the PATCH reconcile is gated, so a metadata-only edit posts nothing;
   * an envelope posts its debit-only effect (``effective - Sigma(credit)``), and
-    an entry mutation on a SETTLED envelope re-syncs while ``toggle_cleared``
-    does not;
+    an entry mutation on a posted envelope moves its ledger figure;
   * every delete path (hard / soft, the settled-payback unmark, and a recursive
-    payback chain) reverses before the row leaves the table;
+    payback chain) leaves the accounts where they were before the settle;
   * carry-forward posts the confirmed effect of each envelope source it settles.
 
 After each mutation the per-account reconciliation invariant is asserted in
@@ -49,7 +47,6 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import LedgerAccountClassEnum, StatusEnum
 from app.extensions import db
-from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services.balance_at import BalanceContext
@@ -61,7 +58,6 @@ from app.services import (
 )
 from app.services.entry_service import EntryDetails
 from app.services.ledger_lines import category_key, linked_key
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     account_net,
     family_movement_ids,
@@ -69,7 +65,6 @@ from tests._ledger_reads import (
     period_nets_of_movements,
     scenario_lines,
 )
-from tests._stored_ledger import family_journal_filter
 from tests._test_helpers import (
     add_txn,
     an_entered_day,
@@ -102,40 +97,6 @@ def _cc_payback_chart_key(seed_user):
 def _ledger_total(seed_user, key):
     """Return the worked-out net of chart account *key* in the owner's baseline."""
     return ledger_net(db.session, key, seed_user["scenario"].id)
-
-
-def _entries_for_transaction(transaction_id):
-    """Return every journal entry still linked to the row's FAMILY, oldest first.
-
-    The row's movements together (plan step **X-bi-3a**): a settled bill's
-    money is posted under the movement the seam writes for it, so a read
-    keyed on the row's own ``journal_entries.transaction_id`` link found the
-    parent's now-zero leg and none of the money, until plan step
-    ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted that link.
-    Every leg figure asserted through this reader is unchanged.
-    """
-    return (
-        db.session.query(JournalEntry)
-        .filter(family_journal_filter(transaction_id))
-        .order_by(JournalEntry.id)
-        .all()
-    )
-
-
-def _entries_for_purchase(entry_id):
-    """Return every journal entry linked to one PURCHASE, oldest first.
-
-    The purchase twin of :func:`_entries_for_transaction` (plan step X-f3b,
-    ruling **R-FM**): a purchase's own cash leg links by
-    ``transaction_entry_id``, so the family read sees it beside the row's
-    other movements and this read sees it alone.
-    """
-    return (
-        db.session.query(JournalEntry)
-        .filter_by(transaction_entry_id=entry_id)
-        .order_by(JournalEntry.id)
-        .all()
-    )
 
 
 def _family_nets(transaction_id, scenario_id):
@@ -241,12 +202,10 @@ class TestMarkDoneRoutePostsTransaction:
             )
             db.session.commit()
             txn_id = txn.id
-            assert _entries_for_transaction(txn_id) == []
 
             resp = auth_client.post(f"/transactions/{txn_id}/mark-done")
             assert resp.status_code == 200
 
-            assert len(_entries_for_transaction(txn_id)) == 1
             assert _family_nets(txn_id, scenario_id) == {seed_periods[0].id: {
                 linked_key(checking): Decimal("-50.00"),
                 _category_chart_key(
@@ -278,7 +237,6 @@ class TestMarkDoneRoutePostsTransaction:
             resp = auth_client.post(f"/transactions/{txn_id}/mark-done")
             assert resp.status_code == 200
 
-            assert len(_entries_for_transaction(txn_id)) == 1
             assert _family_nets(txn_id, scenario_id) == {seed_periods[0].id: {
                 linked_key(checking): Decimal("2000.00"),
                 _category_chart_key(
@@ -313,7 +271,6 @@ class TestMarkDoneRoutePostsTransaction:
             )
             assert resp.status_code == 200
 
-            assert len(_entries_for_transaction(txn_id)) == 1
             assert _family_nets(txn_id, seed_user["scenario"].id) == {seed_periods[0].id: {
                 linked_key(checking): Decimal("-75.00"),
                 _category_chart_key(
@@ -373,7 +330,6 @@ class TestPatchPostingLifecycle:
                 db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("950.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
-            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_revert_and_recategorize_reconciles(
         self, app, auth_client, seed_user, seed_periods,
@@ -382,10 +338,9 @@ class TestPatchPostingLifecycle:
 
         A Paid Groceries expense (posted -50 / +50 Groceries) is reverted to
         Projected AND recategorized to Rent in ONE PATCH (the lock lifts on the
-        revert).  The reconcile reads the posted legs back from the ledger by
-        ``transaction_id``, so it reverses GROCERIES (+50 -> 0), never Rent --
-        Groceries nets to zero, Rent stays untouched, Checking nets to zero.  A
-        later re-settle then posts cleanly to Rent.
+        revert).  Groceries nets back to zero (+50 -> 0), Rent stays untouched,
+        and Checking nets back to its $1,000.00 opening.  A later re-settle then
+        posts cleanly to Rent.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -434,7 +389,6 @@ class TestPatchPostingLifecycle:
             assert _ledger_total(seed_user, rent_ledger) == Decimal("50.00")
             assert _ledger_total(seed_user, groceries_ledger) == Decimal("0.00")
             _assert_reconciles(scenario_id, checking)
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_notes_only_edit_posts_nothing(
         self, app, auth_client, seed_user, seed_periods,
@@ -442,11 +396,11 @@ class TestPatchPostingLifecycle:
         """A metadata-only PATCH on a Paid row leaves the ledger untouched.
 
         ``notes`` is not in ``_POSTING_RELEVANT_FIELDS``, so the reconcile is
-        skipped.  This asserts the observable RESULT (still exactly one entry,
-        same legs), not that the gate fired: because ``sync_transaction_postings``
+        skipped.  This asserts the observable RESULT (Checking still nets
+        $950.00), not that the gate fired: because ``sync_transaction_postings``
         is idempotent, an ungated call here would also be a no-op (delta 0).
         The gate is a pure performance pre-filter that avoids the ledger
-        round-trip; its only effect is on cost, not on the stored ledger.
+        round-trip; its only effect is on cost, not on the ledger.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -457,15 +411,12 @@ class TestPatchPostingLifecycle:
             db.session.commit()
             txn_id = txn.id
             auth_client.post(f"/transactions/{txn_id}/mark-done")
-            assert len(_entries_for_transaction(txn_id)) == 1
 
             resp = auth_client.patch(
                 f"/transactions/{txn_id}",
                 data={"notes": "reconciled at the bank"},
             )
             assert resp.status_code == 200
-            # Still exactly one entry -- no reconcile fired.
-            assert len(_entries_for_transaction(txn_id)) == 1
             assert account_net(
                 db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("950.00")
@@ -482,10 +433,10 @@ class TestCancelPostsNothing:
     def test_cancel_projected_posts_nothing(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """Cancelling a never-posted Projected expense writes no ledger entry.
+        """Cancelling a never-posted Projected expense books nothing.
 
-        Cancelled is non-settled and reachable only from Projected, so the
-        reconcile reverses a zero posted balance to zero: no entry is written.
+        Cancelled is non-settled and reachable only from Projected, so the row
+        moves no money: Checking stays at its $1,000.00 opening.
         """
         with app.app_context():
             txn = add_txn(
@@ -497,7 +448,6 @@ class TestCancelPostsNothing:
 
             resp = auth_client.post(f"/transactions/{txn_id}/cancel")
             assert resp.status_code == 200
-            assert _entries_for_transaction(txn_id) == []
             assert account_net(
                 db.session, seed_user["account"].id, seed_user["scenario"].id,
             ) == Decimal("1000.00")
@@ -534,13 +484,11 @@ class TestEnvelopePostingLifecycle:
             _add_purchase(seed_user, txn, "40.00", is_credit=True)
             db.session.commit()
             txn_id = txn.id
-            assert len(_entries_for_transaction(txn_id)) == 1
 
             resp = auth_client.post(f"/transactions/{txn_id}/mark-done")
             assert resp.status_code == 200
 
-            # The close wrote nothing: the one entry is the dated purchase's.
-            assert len(_entries_for_transaction(txn_id)) == 1
+            # The close booked nothing: the family's lines are the dated purchase's.
             assert _family_nets(txn_id, seed_user["scenario"].id) == {seed_periods[0].id: {
                 linked_key(checking): Decimal("-60.00"),
                 _category_chart_key(
@@ -618,7 +566,6 @@ class TestEnvelopePostingLifecycle:
                 db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("930.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
-            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_entry_credit_flip_on_a_posted_envelope_resyncs(
         self, app, auth_client, seed_user, seed_periods,
@@ -643,7 +590,6 @@ class TestEnvelopePostingLifecycle:
                 seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
             )
             assert _ledger_total(seed_user, groceries_ledger) == Decimal("40.00")
-            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
             entry_service.update_entry(entry_id, user_id, is_credit=True)
             db.session.commit()
@@ -653,7 +599,6 @@ class TestEnvelopePostingLifecycle:
                 db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("1000.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
-            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_entry_delete_on_a_posted_envelope_resyncs(
         self, app, auth_client, seed_user, seed_periods,
@@ -687,7 +632,6 @@ class TestEnvelopePostingLifecycle:
                 db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("960.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
-            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_recording_a_posting_day_moves_the_leg_onto_its_own_day(
         self, app, auth_client, seed_user, seed_periods,
@@ -720,10 +664,10 @@ class TestEnvelopePostingLifecycle:
           opening correction absorbs it, and the ledger reads the ``$1,000.00``
           the owner actually declared.
 
-        The envelope's own leg reverses to zero (a second transaction-linked
-        entry) and one purchase-linked entry appears.  Both halves are asserted:
-        a test checking only the total would pass against a build that recorded
-        the day and posted nothing.
+        The purchase's own line appears on that day, and the envelope books
+        nothing of its own.  Both halves are asserted: a test checking only the
+        total would pass against a build that recorded the day and posted
+        nothing.
 
         **The ORDER of the two acts changed at plan step X-au-c3** and the end
         state did not.  The parent used to be SETTLED when the day was
@@ -773,12 +717,7 @@ class TestEnvelopePostingLifecycle:
             assert updated.settled_on == purchased_on
             # The purchase carries the money on the day the bank was seen to
             # take it; the envelope posts nothing of its own (a plan row has
-            # no leg, ruling **R-BAL80**).  The old ordering reached the same
-            # place in two journal entries -- a close that posted the $40 and
-            # a re-date that reversed it -- where recording the day FIRST
-            # meant the close had nothing left to post; since plan step
-            # ``balance:X-bi-4a`` a close never has.
-            assert len(_entries_for_purchase(entry_id)) == 1
+            # no leg, ruling **R-BAL80**).
             assert [
                 (line.entry_date, line.amount)
                 for line in _purchase_lines(entry_id, seed_user["scenario"].id)
@@ -843,7 +782,6 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             )
             db.session.commit()
 
-            assert len(_entries_for_purchase(entry_id)) == 1
             lines = _purchase_lines(entry_id, seed_user["scenario"].id)
             assert {line.entry_date for line in lines} == {seed_periods[0].start_date}
             assert {line.key: line.amount for line in lines}[
@@ -894,7 +832,6 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             assert _ledger_total(seed_user, _category_chart_key(
                 seed_user, "Car Payment", LedgerAccountClassEnum.EXPENSE,
             )) == Decimal("40.00")
-            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_moving_the_parent_between_periods_re_files_its_purchases_legs(
         self, app, auth_client, seed_user, seed_periods,
@@ -942,18 +879,14 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             assert by_period[seed_periods[1].id][
                 linked_key(seed_user["account"])
             ] == Decimal("-40.00")
-            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_deleting_a_purchase_reverses_its_leg_before_the_row_goes(
         self, app, seed_user, seed_periods,
     ):
         """The reverse-before-delete discipline, on the purchase half.
 
-        ``journal_entries.transaction_entry_id`` is ON DELETE SET NULL, so a
-        purchase deleted without reversing leaves both of its legs stranded on
-        their ledger accounts with nothing to offset them -- residue the posted
-        walk can absorb but never explain.  After the delete the entries survive
-        as an immutable net-zero PAIR and the account is whole again.
+        A purchase that posted its $40.00 leg is deleted: the ledger holds no
+        line for it afterwards, and the account is whole again.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -972,10 +905,11 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
                 entry_id, user_id, settle_day=an_entered_day(seed_periods[0].start_date),
             )
             db.session.commit()
-            assert _entries_for_purchase(entry_id), (
-                "the purchase must really have posted, or the reversal below "
-                "would be a no-op and prove nothing"
-            )
+            # The purchase really posted, or the delete below would be a no-op
+            # and prove nothing: Checking's own line falls by its $40.00.
+            assert account_net(
+                db.session, checking.id, seed_user["scenario"].id,
+            ) == before - Decimal("40.00")
 
             entry_service.delete_entry(entry_id, user_id)
             db.session.commit()
@@ -983,9 +917,6 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             assert account_net(
                 db.session, checking.id, seed_user["scenario"].id,
             ) == before
-            # The pair survives the delete with its links SET NULL, which is
-            # what keeps every ledger account netting correctly.
-            assert not _entries_for_purchase(entry_id)
 
 
 # ---------------------------------------------------------------------------
@@ -994,7 +925,7 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
 
 
 class TestDeleteReversesPostings:
-    """Deleting a posted transaction (or a posted payback) reverses it first."""
+    """Deleting a posted transaction (or a posted payback) takes its money off the ledger."""
 
     def test_hard_delete_adhoc_settled_reverses(
         self, app, auth_client, seed_user, seed_periods,
@@ -1002,10 +933,7 @@ class TestDeleteReversesPostings:
         """Hard-deleting a Paid ad-hoc expense reverses its postings first.
 
         The $50 expense posts -50 / +50, and after the delete the read holds no
-        line for it, so every account is back where it was.  On the store the
-        delete reverses to zero BEFORE the row goes (the original + reversal
-        survive as a net-zero pair with their movement link SET NULL as the
-        movement goes with the row), which the parity line grades.
+        line for it, so every account is back where it was.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -1025,15 +953,13 @@ class TestDeleteReversesPostings:
             resp = auth_client.delete(f"/transactions/{txn_id}")
             assert resp.status_code == 200
 
-            # Row is gone with its movement; the link SET-NULLed on both entries.
+            # Row is gone with its movement.
             assert db.session.get(Transaction, txn_id) is None
-            assert _entries_for_transaction(txn_id) == []
             assert _ledger_total(seed_user, groceries_ledger) == Decimal("0.00")
             assert account_net(
                 db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_soft_delete_template_settled_reverses(
         self, app, auth_client, seed_user, seed_periods,
@@ -1043,9 +969,8 @@ class TestDeleteReversesPostings:
         A template-linked envelope holds one $40 purchase the bank took
         (posted -40 / +40 by its own leg -- the close books nothing, ruling
         **R-BAL77**) and settles.  The delete soft-deletes it (template_id
-        set), reversing first: the row survives with ``is_deleted=True`` and
-        its two ledger entries net to zero, dropping it out of
-        ``posted_purchase_effect`` too.
+        set): the row survives with ``is_deleted=True`` holding nothing, so it
+        books nothing and drops out of ``posted_purchase_effect`` too.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -1070,24 +995,19 @@ class TestDeleteReversesPostings:
             )
             assert resp.status_code == 200
 
-            # Soft delete: the row survives holding nothing, and the pair nets
-            # zero.  Its purchase goes with the delete since ruling R-CC75, so
-            # the pair's link to it is blanked exactly as on a hard delete --
-            # rule-5 re-expression, developer-confirmed 2026-09-23 (this read
-            # "the link stays", 2 entries linked through the purchase).
+            # Soft delete: the row survives holding nothing.  Its purchase goes
+            # with the delete since ruling R-CC75.
             survivor = db.session.get(Transaction, txn_id)
             assert survivor is not None
             assert survivor.is_deleted is True
             assert db.session.query(TransactionEntry).filter_by(
                 transaction_id=txn_id,
             ).count() == 0
-            assert _entries_for_transaction(txn_id) == []
             assert _ledger_total(seed_user, groceries_ledger) == Decimal("0.00")
             assert account_net(
                 db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_settled_payback_reversed_on_unmark_credit(
         self, app, auth_client, seed_user, seed_periods,
@@ -1096,9 +1016,7 @@ class TestDeleteReversesPostings:
 
         Mark an $80 expense Credit (creating a Projected payback), settle that
         payback (posting -80 / +80 on the CC Payback account), then un-mark the
-        source: the CC Payback ledger nets to zero.  On the store
-        ``delete_payback_on_credit_revert`` reverses the payback's postings BEFORE
-        deleting it, which the parity line grades.
+        source: the CC Payback ledger nets to zero.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -1121,14 +1039,13 @@ class TestDeleteReversesPostings:
             credit_workflow.unmark_credit(source_id, user_id)
             db.session.commit()
 
-            # Payback gone, its postings reversed to zero before deletion.
+            # Payback gone, and the CC Payback account back to zero.
             assert db.session.get(Transaction, payback_id) is None
             assert _ledger_total(seed_user, cc_ledger) == Decimal("0.00")
             assert account_net(
                 db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_recursive_payback_chain_reverses_on_source_delete(
         self, app, auth_client, seed_user, seed_periods,
@@ -1137,9 +1054,7 @@ class TestDeleteReversesPostings:
 
         source -> payback1 -> payback2, with payback2 settled (posted -100 /
         +100 on CC Payback).  Deleting the source recurses through the chain, and
-        the CC Payback ledger nets to zero.  On the store payback2's postings
-        reverse at its level before each row is removed, which the parity line
-        grades.
+        the CC Payback ledger nets to zero.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -1164,14 +1079,13 @@ class TestDeleteReversesPostings:
             resp = auth_client.delete(f"/transactions/{source_id}")
             assert resp.status_code == 200
 
-            # Whole chain gone; payback2's deep postings reversed to zero.
+            # Whole chain gone; the CC Payback account back to zero.
             assert db.session.get(Transaction, payback2_id) is None
             assert _ledger_total(seed_user, cc_ledger) == Decimal("0.00")
             assert account_net(
                 db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
-            assert_ledger_parity(db.session, scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1192,8 +1106,8 @@ class TestCarryForwardPostsSettledSources:
         Carry-forward settles the source at sum(entries) = 30 and rolls the
         $70 leftover into the target.  The close books nothing (ruling
         **R-BAL77**, plan step ``balance:X-bi-4a``; through ``X-bi-3e`` it
-        booked the -30 / +30 itself), so the family still holds exactly the
-        purchase's one entry; the target row (Projected) posts nothing.
+        booked the -30 / +30 itself), so the family's lines are exactly the
+        purchase's; the target row (Projected) posts nothing.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -1212,7 +1126,6 @@ class TestCarryForwardPostsSettledSources:
             )
             db.session.commit()
 
-            assert len(_entries_for_transaction(source_id)) == 1
             assert _family_nets(source_id, scenario_id) == {seed_periods[0].id: {
                 linked_key(checking): Decimal("-30.00"),
                 _category_chart_key(
@@ -1224,20 +1137,19 @@ class TestCarryForwardPostsSettledSources:
     def test_carry_forward_empty_envelope_posts_nothing(
         self, app, db, seed_user, seed_periods,
     ):
-        """An empty carried envelope settles at zero and posts no entry.
+        """An empty carried envelope settles at zero and books nothing.
 
         With no entries the source settles at ``actual_amount`` = 0, so its
-        effect is zero and the reconcile writes nothing -- the full estimate
-        rolls forward instead.
+        effect is zero and Checking stays at its $1,000.00 opening -- the full
+        estimate rolls forward instead.
         """
         with app.app_context():
             user_id = seed_user["user"].id
             scenario_id = seed_user["scenario"].id
-            source = create_envelope_txn(
+            create_envelope_txn(
                 seed_user, db.session, seed_periods[0], "Food", Decimal("100.00"),
             )
             db.session.commit()
-            source_id = source.id
 
             carry_forward_service.carry_forward_unpaid(
                 seed_periods[0].id, seed_periods[1].id, scenario_id,
@@ -1245,7 +1157,6 @@ class TestCarryForwardPostsSettledSources:
             )
             db.session.commit()
 
-            assert _entries_for_transaction(source_id) == []
             assert account_net(
                 db.session, seed_user["account"].id, scenario_id,
             ) == Decimal("1000.00")

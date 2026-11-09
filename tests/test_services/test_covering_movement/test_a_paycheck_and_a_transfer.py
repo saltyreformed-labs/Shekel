@@ -16,7 +16,6 @@ from app.enums import (
     StatusEnum,
 )
 from app.extensions import db
-from app.models.journal_entry import JournalEntry
 from app.models.transaction_entry import TransactionEntry
 from app.services import (
     balance_at,
@@ -37,7 +36,6 @@ from tests._ledger_reads import (
     posted_loan_balance_at,
     scenario_lines,
 )
-from tests._stored_ledger import stored_loan_balance_at
 from tests._test_helpers import (
     create_loan_account,
     create_savings_account,
@@ -191,15 +189,6 @@ def _side_records_of(leg):
     return leg.transfer.expense_movements
 
 
-def _movement_entries(movement_ids):
-    """Return the journal entries linked to any of *movement_ids*."""
-    return (
-        db.session.query(JournalEntry)
-        .filter(JournalEntry.transaction_entry_id.in_(movement_ids))
-        .all()
-    )
-
-
 class TestATransferIsCoveredOnBothLegs:
     """Plan step X-bi-3c: each leg of a settled transfer holds its movement.
 
@@ -209,13 +198,9 @@ class TestATransferIsCoveredOnBothLegs:
     direction.  Each leg is read as its TRANSFER and its side's record, which
     hangs off the transfer since plan step balance:X-bi-6-4d-2 (off the side's
     shadow until then; ruling R-BAL167 classes 1 and 4, :func:`_legs_of`).
-    The posted ledger books each side's movement as an entry of its own
-    against the owner's transfers-in-transit account, and nothing for the
-    transfer whole (ruling **R-BAL45**, built at plan step
-    ``balance:X-bi-6-3``; a transfer the ledger booked before that step
-    keeps its legacy whole-transfer entries beside their reversal, netting
-    to zero under ``journal_entries.transfer_id`` until plan step
-    ``balance:X-bi-6-5``, and this class builds none); the walk reads each
+    The ledger books each side's movement against the owner's
+    transfers-in-transit account, and nothing for the transfer whole (ruling
+    **R-BAL45**, built at plan step ``balance:X-bi-6-3``); the walk reads each
     leg's movement and nothing of the leg (ruling **R-BAL80**), and each leg
     is worth its movement (ruling **R-BAL81**), so the fold reads nothing for
     a leg without one -- the control below.  Worked on ``$500.00`` Checking
@@ -297,13 +282,11 @@ class TestATransferIsCoveredOnBothLegs:
         Re-expressed from ``test_the_ledger_books_the_pair_whole_and_the_
         movements_nowhere`` at plan step ``balance:X-bi-6-3`` (ruling
         **R-BAL101**), which pinned the interval that step closes.  The cash
-        nets move by exactly the figure on each account, each MOVEMENT links
-        its own entry (two, against the owner's Transfers-in-transit
-        account), the oracle's per-account identity holds on both, transit
-        nets to zero, and the deploy resync --
-        which walks every settled source -- finds nothing to post.  A
-        movement posted beside a whole-pair entry would read ``$1,000.00``
-        against the oracle's ``$500.00`` on that account.
+        nets move by exactly the figure on each account, the oracle's
+        per-account identity holds on both, and the owner's
+        Transfers-in-transit account nets to zero.  A movement booked beside a
+        whole-pair line would read ``$1,000.00`` against the oracle's
+        ``$500.00`` on that account.
         """
         with app.app_context():
             # Opened BEFORE the settle day, so the pair rides on top of the
@@ -319,18 +302,13 @@ class TestATransferIsCoveredOnBothLegs:
                 account.id: account_net(db.session, account.id, scenario_id)
                 for account in accounts
             }
-            _xfer, expense, income = _settled_pair(
-                seed_user, seed_periods[0], to_account=savings,
-            )
-            movement_ids = [_only_movement(leg).id for leg in (expense, income)]
+            _settled_pair(seed_user, seed_periods[0], to_account=savings)
             after = {
                 account.id: account_net(db.session, account.id, scenario_id)
                 for account in accounts
             }
             assert after[accounts[0].id] - before[accounts[0].id] == Decimal("-500.00")
             assert after[savings.id] - before[savings.id] == Decimal("500.00")
-            # ONE entry per MOVEMENT.
-            assert len(_movement_entries(movement_ids)) == 2
             assert ledger_net(db.session, transit_key(), scenario_id) == Decimal("0.00")
             for account in accounts:
                 opening = Decimal(str(cash_ledger.resolve_anchor(account).balance))
@@ -339,9 +317,6 @@ class TestATransferIsCoveredOnBothLegs:
                     + posting_service.settled_transfer_effect(account.id, scenario_id)
                     + posting_service.posted_purchase_effect(account.id, scenario_id)
                 )
-            db.session.commit()
-            assert posting_service.resync_all_cash_postings() == (0, 0)
-            assert len(_movement_entries(movement_ids)) == 2
 
     def test_a_revert_un_dates_both_movements_and_the_ledger_reverses_the_pair(
         self, app, seed_user, seed_periods,
@@ -505,7 +480,6 @@ class TestATransfersMovementsFollowItsLifecycle:
             db.session.commit()
             for movement_id in movement_ids:
                 assert db.session.get(TransactionEntry, movement_id) is None
-            assert _movement_entries(movement_ids) == []
 
     def test_an_endpoint_move_carries_the_movements_to_the_new_account(
         self, app, seed_user, seed_periods,
@@ -552,7 +526,7 @@ class TestATransfersMovementsFollowItsLifecycle:
             assert _only_movement(expense).account_id == seed_user["account"].id
 
 
-class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
+class TestALoanPaymentReStatedAtZeroMovesTheLoansPosition:
     """The loan replay prices a payment by its RECORD: the transfer's settled figure.
 
     A payment's income leg sits on the LOAN account and carries a covering
@@ -572,9 +546,7 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
     ``transfer_service.update_transfer`` records the close too, but reverses
     what the records posted) now reads it as nothing moved, and moves the
     loan's position with
-    it.  The posted ledger does not move: the re-statement reaches no posting
-    door, and the loan side's entry against transit (one of ruling R-BAL45's
-    two) keeps its postings.
+    it, and the worked-out ledger follows the records to the position.
     Since plan step ``balance:X-bi-6-4d-2``'s 4d-4 half the figure
     the record states lives on the TRANSFER (rulings **R-BAL365**,
     **R-BAL366**), so the re-statement writes it there: ``0.00``, with both
@@ -592,7 +564,7 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
     that review.
     """
 
-    def test_a_zero_close_is_worth_nothing_to_the_loan_and_moves_its_position_not_its_posted_ledger(
+    def test_a_zero_close_is_worth_nothing_to_the_loan_and_moves_its_position(
         self, app, seed_user, seed_periods,
     ):
         with app.app_context():
@@ -609,10 +581,7 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
 
             def _read():
                 ctx = balance_at.BalanceContext.build(user_id, as_of=as_of)
-                return (
-                    balance_at.positions(loan, ctx, [as_of])[as_of],
-                    stored_loan_balance_at(loan.id, scenario_id, as_of),
-                )
+                return balance_at.positions(loan, ctx, [as_of])[as_of]
 
             assert row_valuation.settled_contribution(parent_of(income)) == Decimal("1910.95")
             with_movement = _read()
@@ -641,21 +610,16 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
             db.session.expire_all()
             assert xfer.status.is_settled
             # The record is the transfer's figure: at 0.00 the leg records
-            # $0.00 (R-BAL82's close of nothing), the loan's position moves,
-            # and the posted ledger does not move: the loan side's entry
-            # against transit, one of R-BAL45's two, keeps its postings.
+            # $0.00 (R-BAL82's close of nothing) and the loan's position moves.
             income = _leg_again(income)
             assert row_valuation.settled_contribution(parent_of(income)) == Decimal("0")
             without_movement = _read()
             # A $1,000.00 loan at 5%, which the $1,910.95 paid off.  At the
             # $0.00 close nothing paid it, and the missed installment charges
             # 1000 x 0.05 / 12 = 4.17: 1,004.17 owed.
-            assert with_movement[0] == Decimal("0.00")
-            assert without_movement[0] == Decimal("1004.17")
-            # The records came off past every writer, so the store, which
-            # nothing re-synced, reads what it read.  The worked-out ledger
-            # follows the records to the position.
-            assert without_movement[1] == with_movement[1] == Decimal("0.00")
+            assert with_movement == Decimal("0.00")
+            assert without_movement == Decimal("1004.17")
+            # The worked-out ledger follows the records to the position.
             assert posted_loan_balance_at(
                 loan.id, scenario_id, as_of,
             ) == Decimal("1004.17")

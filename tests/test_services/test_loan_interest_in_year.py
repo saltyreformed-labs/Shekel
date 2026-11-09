@@ -16,10 +16,7 @@ the live value test alone does not reach:
 * the PROJECTED (future) interest is folded from the loan's forward payment PLAN
   (step C6c), the SAME plan the projected BALANCE folds -- an early-settled
   installment counts once because the plan excludes its slot BY CONSTRUCTION (the
-  C3c schedule-slot merge is gone; the de-dup lives in ``loan_plan``);
-* the figure comes from the loan's SOURCE events, so it answers even for a loan the
-  posting cache cannot value (no genesis opening posting) -- closing B-6, where the
-  old hybrid fell back to the schedule and reported the wrong number.
+  C3c schedule-slot merge is gone; the de-dup lives in ``loan_plan``).
 
 Relocated from the retired ``test_tax_mortgage_interest.py`` (which tested the
 deleted hybrid); the value assertions are hand-computed, never the producer as its
@@ -35,10 +32,8 @@ from app.services.balance_at._loan_stream import loan_timeline
 from app.services.balance_at._plan import loan_plan
 from app.services.balance_at import BalanceContext
 from app.services.liability_sign import owed
-from tests._stored_ledger import stored_loan_balance_at
 from tests.oracles.loan_monthly_composition import charge_then_allocate
 from tests._test_helpers import (
-    clear_loan_ledger,
     create_loan_with_trueup,
     create_settled_transfer,
     freeze_today,
@@ -396,50 +391,3 @@ class TestLoanInterestInYearMerge:
             # The producer counts this payment ONCE either way.
             result = balance_at.loan_interest_in_year(loan, ctx, 2026)
             assert result == Decimal("1000.00") + merged
-
-
-class TestLoanInterestAnswersFromTheFold:
-    """B-6: the figure comes from source events, not the posting cache."""
-
-    def test_cleared_ledger_still_answers_from_the_fold(
-        self, app, db, seed_user, seed_periods, monkeypatch,
-    ):
-        """No genesis opening posting -> the FOLD answers, where the old hybrid did not.
-
-        The old hybrid asked the posting reader, which returns ``None`` for a loan
-        with no opening posting, and then fell back to the schedule -- reporting
-        0.00 for a 2025 payment (no 2025 rows) that genuinely paid 500.00 of
-        interest.  The producer folds the loan's SOURCE events, so a cleared posting
-        cache does not change the answer.  This is B-6 closed: the interest figure
-        and the balance both come from the total fold.
-        """
-        with app.app_context():
-            freeze_today(monkeypatch, date(2026, 6, 1))
-            scenario_id = seed_user["scenario"].id
-            _, _, _, _, _, p1, _p2, _p3 = SPLIT_LOAN
-            loan = _split_loan(seed_user)
-            create_settled_transfer(
-                seed_user, db.session, seed_user["account"], loan,
-                seed_periods[p1], amount=Decimal("1000.00"),
-                settled_on=date(2025, 12, 20),
-            )
-            db.session.commit()
-
-            ctx = BalanceContext.build(seed_user["user"].id)
-            before = balance_at.loan_interest_in_year(loan, ctx, 2025)
-            assert before == Decimal("500.00")
-
-            # Break the posting cache: with no opening posting the sum-of-postings
-            # balance reader declines (None), which is what makes this test's teeth
-            # real -- the postings genuinely no longer answer for this loan.
-            clear_loan_ledger(loan.id)
-            db.session.commit()
-            assert stored_loan_balance_at(
-                loan.id, scenario_id, date(2025, 12, 31),
-            ) is None
-
-            # The fold-based producer is unchanged: it never read the postings.
-            ctx_after = BalanceContext.build(seed_user["user"].id)
-            assert balance_at.loan_interest_in_year(
-                loan, ctx_after, 2025,
-            ) == Decimal("500.00")

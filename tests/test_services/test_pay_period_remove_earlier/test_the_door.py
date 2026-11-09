@@ -43,8 +43,6 @@ from ._helpers import (
     _added_head,
     _monthly_bill_from,
     _monthly_transfer_from,
-    _entries_in,
-    _stored_totals,
 )
 
 
@@ -259,8 +257,8 @@ class TestTheEarliestRhythmKeepsAPaycheck:
         re-synced into it, and the later rhythm's first paycheck chosen: only
         R-PC110 can refuse.  Read after a COMMIT and a fresh session
         (``_unchanged``'s reason), with nothing rolled back here, so a delete
-        or a re-sync staged ahead of the refusal shows in the paydays, the
-        rows, the head's entries or either ledger's totals.
+        staged ahead of the refusal shows in the paydays, the rows or the
+        worked-out totals.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -275,13 +273,12 @@ class TestTheEarliestRhythmKeepsAPaycheck:
             assert last == date(2026, 5, 8)
             _record(user_id, last + timedelta(days=21), 3, rhythm_of(7))
             paydays, eras = _paydays(user_id), _stored_eras(user_id)
-            rows, entries = _rows_by_period(user_id), set(_entries_in(head))
-            stored, worked_out = _stored_totals(user_id), worked_out_totals(_db.session, user_id)
+            rows = _rows_by_period(user_id)
+            worked_out = worked_out_totals(_db.session, user_id)
             # What the comparison below holds: Checking's seeded $1,000.00 opening.
             assert worked_out[(
                 seed_user["scenario"].id, linked_key_of(_db.session, seed_user["account"].id),
             )] == Decimal("1000.00")
-            assert entries, "the re-sync must file the opening in the head"
             assert _db.session.query(Transaction).filter(
                 Transaction.pay_period_id.in_(head),
             ).count() == 2, "the head must hold the template bill the delete would take"
@@ -297,8 +294,6 @@ class TestTheEarliestRhythmKeepsAPaycheck:
             )
             _unchanged(user_id, paydays, eras)
             assert _rows_by_period(user_id) == rows
-            assert set(_entries_in(head)) == entries
-            assert _stored_totals(user_id) == stored
             assert worked_out_totals(_db.session, user_id) == worked_out
 
 
@@ -403,11 +398,8 @@ class TestAnAddUndoneLeavesNothingBehind:
 
         Compared: the paydays, the stored eras, every row's period, id,
         name, status and delete flag, every transfer's period, id, status
-        and delete flag, every stored total per scenario and ledger account,
-        and every worked-out total per scenario and chart key.  Not compared:
-        journal entry ROWS, which a re-sync appends to
-        by design (a reversal and a re-post), and amounts on rows, which no
-        door here writes.
+        and delete flag, and every worked-out total per scenario and chart
+        key.  Not compared: amounts on rows, which no door here writes.
 
         The rows compared carried their transfer link, and the template bill
         was counted with ``transfer_id IS NULL``, until plan step
@@ -434,7 +426,7 @@ class TestAnAddUndoneLeavesNothingBehind:
             db.session.commit()
             paydays, eras = _paydays(user_id), _stored_eras(user_id)
             rows = _rows_by_period(user_id)
-            stored, worked_out = _stored_totals(user_id), worked_out_totals(_db.session, user_id)
+            worked_out = worked_out_totals(_db.session, user_id)
             # What the comparison below holds: Savings' $500.00 opening, among others.
             assert worked_out[(
                 seed_user["scenario"].id, linked_key_of(_db.session, savings.id),
@@ -445,7 +437,6 @@ class TestAnAddUndoneLeavesNothingBehind:
             loan_posting_service.resync_user_loan_postings(user_id)
             account_posting_service.resync_user_account_anchor_postings(user_id)
             db.session.commit()
-            assert _entries_in(added), "the re-sync must file the opening in the head"
             assert _db.session.query(Transfer).filter(
                 Transfer.pay_period_id.in_(added),
             ).count() == 2, "the added paychecks must hold the recurring transfer"
@@ -462,6 +453,5 @@ class TestAnAddUndoneLeavesNothingBehind:
             assert _paydays(user_id) == paydays
             assert _stored_eras(user_id) == eras
             assert _rows_by_period(user_id) == rows
-            assert _stored_totals(user_id) == stored
             assert worked_out_totals(_db.session, user_id) == worked_out
             assert_pay_period_invariants(db.session, user_id)

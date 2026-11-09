@@ -24,12 +24,12 @@ against a displayed balance.  The invariants below are plan Section 8.
      record the read switch will move onto (plan Section 10), where the resolver
      needs an anchor true-up.
   2. **Supersedes the cash per-account invariant for loans (plan 8.7).**  The
-     Step-2 / Step-3 oracle asserts ``account_posting_total(A) ==
-     settled_transfer_effect(A) + settled_transaction_effect(A)``.  That BREAKS
+     Step-2 / Step-3 oracle asserts an account's own line nets to
+     ``settled_transfer_effect(A) + settled_transaction_effect(A)``.  That BREAKS
      for a loan once corrections exist: the linked ledger nets to -(current
-     balance), not to the cash.  The loan-aware invariant is
-     ``account_posting_total(loan) == settled_transfer_effect(loan) -
-     per_loan_correction_net`` where ``per_loan_correction_net`` is the sum of the
+     balance), not to the cash.  The loan-aware invariant is that the loan's own
+     line nets to ``settled_transfer_effect(loan) - per_loan_correction_net``,
+     where ``per_loan_correction_net`` is the sum of the
      per-loan legs -- interest / escrow / excess PLUS the opening-equity legs (the
      negatives of the opening + true-up).  One test drives this where the cash
      invariant provably fails.
@@ -39,18 +39,12 @@ against a displayed balance.  The invariants below are plan Section 8.
      all-principal payment legitimately carries none.  Future-dated settled
      payments (none in these fixtures) are asserted absent, not silently passed
      (they are a read-switch concern).
-  4. **Per-entry balance and trial balance (plan 8.4).**  Every journal entry's
-     legs ``SUM(amount) = 0`` with ``COUNT >= 2`` (also DB-enforced by
-     ``ck_account_postings_balanced``), and the whole ledger -- corrections
+  4. **Trial balance (plan 8.4).**  The whole worked-out ledger -- corrections
      included -- sums to zero.
-  5. **Scenario and owner isolation (plan 8.8).**  A correction carries no owner
-     of its own; its owner is its journal entry's, and one scenario's / owner's
-     loan reconciliation never picks up another's.
-  6. **Backfill == go-forward (plan 8.8).**  The historical backfill and the
-     go-forward wiring post identical corrections, so a ledger rebuilt by the
-     backfill reconciles identically to the go-forward one.
-  7. **The DATED posting window parallel run (plan 4-commit-6 / 8.2).**
-     Invariants 1-6 pin the LEDGER against the resolver via the read's unbounded
+  5. **Scenario and owner isolation (plan 8.8).**  One scenario's / owner's loan
+     reconciliation never picks up another's.
+  6. **The DATED posting window parallel run (plan 4-commit-6 / 8.2).**
+     Invariants 1-5 pin the LEDGER against the resolver via the read's unbounded
      net of the loan's own line (``_ledger_balance``); this pins the
      ``entry_date``-BOUNDED read of the same lines -- at a point in time
      (``_posted_balance``) and at every period boundary (``_posted_period_map``)
@@ -65,11 +59,8 @@ against a displayed balance.  The invariants below are plan Section 8.
      ledger bug a literal happened to share is still caught (the ``+$10`` injection
      below fails these too).
 
-Adversarial cases prove the oracle is not vacuous: tampering a settled payment's
-``actual_amount`` makes the real sweep helper raise on the store's reader, arm (a),
-because the read follows the record and the store does not; a read that loses a
-loan's component lines fails the loan-aware invariant; injecting one extra leg
-makes the STORED trial balance go non-zero; and injecting $10 of
+Adversarial cases prove the oracle is not vacuous: a read that loses a loan's
+component lines fails the loan-aware invariant, and injecting $10 of
 phantom interest into the walk fails the parallel-run VALUE checks while the
 structural sweep -- an accounting identity -- correctly survives (the executable
 form of the "+$10 injection failed 9 of 11 tests" evidence).  A companion guard
@@ -94,8 +85,8 @@ as the Step-2 / Step-3 oracles.  The SPLIT VALUES are pinned by the first and th
     (``tests/_ledger_reads.py``, plan step plan#2913) and the source side
     (``_independent_settled_income_cash``) reads ``transfers`` and their loan-side
     records in ``transaction_entries``.  This pins the
-    READERS (a scenario-scope or ledger-resolution bug in ``account_posting_total``
-    is caught here), NOT the split value -- which the sweep's identities hold
+    READ (a scenario-scope or chart-resolution bug in it is caught here), NOT the
+    split value -- which the sweep's identities hold
     regardless of.
 
 **Scope (deliberately non-duplicative).**  The per-payment split VALUES

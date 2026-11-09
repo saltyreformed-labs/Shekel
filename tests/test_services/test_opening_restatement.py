@@ -25,9 +25,8 @@ stacked on the figure it names.
   posted PURCHASE (the other half of the movement UNION) -- and pin that
   they do not.
 * :class:`TestThePostedLedgerFollows` -- the half a reader would assume and
-  should not.  The opening's journal entry is DATED on ``opened_on``, so moving
-  the day re-keys it; the reconcile walks the union of target and posted keys,
-  reverses the old entry to zero and posts the new one in the same transaction.
+  should not.  The opening's ledger line is DATED on ``opened_on``, so moving
+  the day moves it: the ledger holds it on the new day and nothing on the old.
 
 **Why the movement row set is graded from the WIDE side.** A predicate that
 narrowed to the fold's contributing rows would look right and be wrong: a
@@ -71,7 +70,6 @@ from app.services.opening_service import (
 from app.services.settle_day import SettleDay, record_settle_day
 from app.utils.dates import display_today
 from app.services.ledger_lines import account_counter_key, linked_key
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import scenario_lines, source_lines
 from tests._test_helpers import (
     account_never_asserted,
@@ -927,11 +925,11 @@ class TestTheTwoTiersAgree:
 class TestThePostedLedgerFollows:
     """The half a reader would assume, measured instead.
 
-    ``budget.account_openings`` is read by BOTH the balance fold and the posted
-    ledger (ruling **R-GX**), and the ``account_opening`` journal entry is DATED
-    on ``opened_on``.  Moving either fact therefore re-keys that entry, and a
-    door that appended the row without re-basing the postings would leave the
-    general ledger describing an opening the app no longer holds.
+    ``budget.account_openings`` is read by BOTH the balance fold and the
+    ledger (ruling **R-GX**), and the ``account_opening`` line is DATED on
+    ``opened_on``.  Moving either fact therefore moves that line, and a ledger
+    that kept it on the old day would describe an opening the app no longer
+    holds.
     """
 
     def test_the_opening_entry_moves_to_the_new_day_and_the_old_one_nets_to_zero(
@@ -970,8 +968,6 @@ class TestThePostedLedgerFollows:
             assert _linked_ledger_total(
                 scenario_id, account, opening,
             ) == Decimal("650.00")
-            # The door's re-sync: the store followed the records, cell by cell.
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_the_opening_books_its_counter_to_ANCHOR_EQUITY(
         self, app, db, seed_user, seed_periods,

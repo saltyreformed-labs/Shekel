@@ -7,7 +7,6 @@ from decimal import Decimal
 
 from app import ref_cache
 from app.enums import AcctTypeEnum, StatusEnum
-from app.models.escrow_line import EscrowComponentVersion, EscrowLine
 from app.extensions import db as _db
 from app.models.ref import Status
 from app.services.balance_at import BalanceContext
@@ -195,122 +194,6 @@ def _make_sync_loan(seed_user, db_session):
         origination_date=date(2026, 1, 1), payment_day=1,
         account_type=AcctTypeEnum.MORTGAGE,
     )
-
-
-# Each escrow WRITE route, as a (precondition + POST) callable returning the
-# response.  Every escrow effective date is strictly AFTER the settled payment's
-# 2026-02-01 DUE date -- the forward-only boundary, which is the date its split
-# resolves escrow on (ruling D5, finding N-34), NOT the 2026-01-16 pay-period
-# start these dates were first chosen against.  So no case moves the settled
-# split, and the only ledger change the sync makes is to HEAL the forged cash
-# entry, proving the route ran the sync regardless of its escrow op.
-
-
-def _write_add_escrow(client, db_session, loan):
-    """add_escrow: POST a brand-new line, its opening version future-dated."""
-    return client.post(
-        f"/accounts/{loan.id}/loan/escrow",
-        data={"name": "Property Tax", "annual_amount": "4800.00",
-              "effective_date": "2026-04-01"},
-    )
-
-
-def _write_delete_escrow(client, db_session, loan):
-    """delete_escrow: tombstone a post-boundary line as of today."""
-    line = add_escrow_line(
-        db_session, loan.id, "Old Tax", Decimal("6000.00"),
-        effective_date=date(2026, 3, 1),
-    ).line
-    db_session.commit()
-    return client.post(f"/accounts/{loan.id}/loan/escrow/{line.id}/delete")
-
-
-def _write_add_version(client, db_session, loan):
-    """add_escrow_version: schedule a future change on an existing line."""
-    line = add_escrow_line(
-        db_session, loan.id, "Tax", Decimal("6000.00"),
-        effective_date=date(2026, 3, 1),
-    ).line
-    db_session.commit()
-    return client.post(
-        f"/accounts/{loan.id}/loan/escrow/{line.id}/version",
-        data={"annual_amount": "7200.00", "effective_date": "2026-05-01"},
-    )
-
-
-def _write_edit_version(client, db_session, loan):
-    """edit_escrow_version: edit a future (post-boundary) version's amount."""
-    version = add_escrow_line(
-        db_session, loan.id, "Tax", Decimal("6000.00"),
-        effective_date=date(2026, 4, 1),
-    )
-    db_session.commit()
-    return client.post(
-        f"/accounts/{loan.id}/loan/escrow/version/{version.id}/edit",
-        data={"annual_amount": "7200.00"},
-    )
-
-
-def _write_delete_version(client, db_session, loan):
-    """delete_escrow_version: delete a future scheduled version."""
-    version = add_escrow_line(
-        db_session, loan.id, "Tax", Decimal("6000.00"),
-        effective_date=date(2026, 5, 1),
-    )
-    db_session.commit()
-    return client.post(
-        f"/accounts/{loan.id}/loan/escrow/version/{version.id}/delete",
-    )
-
-
-def _write_rename(client, db_session, loan):
-    """rename_escrow_line: rename a line in place (display-only)."""
-    line = add_escrow_line(
-        db_session, loan.id, "Tax", Decimal("6000.00"),
-        effective_date=date(2026, 3, 1),
-    ).line
-    db_session.commit()
-    return client.post(
-        f"/accounts/{loan.id}/loan/escrow/{line.id}/rename",
-        data={"name": "Property Tax"},
-    )
-
-
-def _write_merge(client, db_session, loan):
-    """merge_escrow_line: fold a removed predecessor into the active line."""
-    boundary = date(2026, 4, 1)
-    old = add_escrow_line(
-        db_session, loan.id, "Old Tax", Decimal("6000.00"),
-        effective_date=date(2026, 3, 1),
-    ).line
-    db_session.add(EscrowComponentVersion(
-        line_id=old.id, effective_date=boundary,
-        annual_amount=Decimal("0.00"), is_removed=True,
-    ))
-    add_escrow_line(
-        db_session, loan.id, "New Tax", Decimal("7200.00"),
-        effective_date=boundary,
-    )
-    db_session.commit()
-    new = (
-        db_session.query(EscrowLine)
-        .filter_by(account_id=loan.id, name="New Tax").one()
-    )
-    return client.post(
-        f"/accounts/{loan.id}/loan/escrow/{new.id}/merge",
-        data={"source_line_id": old.id},
-    )
-
-
-_ESCROW_WRITES = [
-    ("add_escrow", _write_add_escrow),
-    ("delete_escrow", _write_delete_escrow),
-    ("add_escrow_version", _write_add_version),
-    ("edit_escrow_version", _write_edit_version),
-    ("delete_escrow_version", _write_delete_version),
-    ("rename_escrow_line", _write_rename),
-    ("merge_escrow_line", _write_merge),
-]
 
 
 # ── Payoff Chart Shape Tests (Commit 4) ─────────────────────────────

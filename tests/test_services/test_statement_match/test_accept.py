@@ -46,7 +46,6 @@ from app.services.row_valuation import settled_figure
 from app.services.statement_match import MatchSubmission
 
 from app.services.ledger_lines import linked_key
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import family_movement_ids, movement_nets_by_date
 from tests._test_helpers import (
     an_entered_day,
@@ -2114,8 +2113,6 @@ class TestARedatedSettleLeavesNoPostingBehind:
         assert _posted_cash_by_day(db, txn, account) == {
             bank_day: Decimal("-180.00"),
         }
-        # The match's re-sync moved the stored copy too.
-        assert_ledger_parity(db.session, txn.scenario_id)
 
 
 class TestTheBankCanCONFIRMADayThePanelOnlyBOUNDED:

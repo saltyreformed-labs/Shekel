@@ -19,7 +19,6 @@ from app.services.installment_calendar import monthly_due_date
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
 from app.services.liability_sign import owed
-from tests._ledger_parity import assert_ledger_parity
 from tests._test_helpers import rhythm_of, last_covered_day
 
 from ._helpers import (
@@ -335,7 +334,9 @@ class TestDueDateEditReconcilesTheLedger:
     set).  Left out, a due-date edit would move every live READER (the history
     rows, the payment table, the resolver's replay) while the posted ledger kept
     the old numbers -- a silent ledger-vs-resolver divergence that would persist
-    until some unrelated chokepoint happened to fire.
+    until some unrelated chokepoint happened to fire.  Since plan#2914 the
+    figures here are the worked-out read, which follows the due date itself, so
+    this grades the ledger the edit leaves and not the re-sync of the store.
     """
 
     def test_editing_due_date_reposts_the_balance(
@@ -364,8 +365,7 @@ class TestDueDateEditReconcilesTheLedger:
             posted_after = _ledger_balance(loan.id, scenario_id)
             assert posted_after == _ANCHOR_BALANCE
 
-            # And every reader agrees with the ledger -- the edit reconciled,
-            # rather than leaving the posted numbers behind.  The seam reports
+            # And every reader agrees with the ledger.  The seam reports
             # the balance HELD (negative for a loan, ruling R-CC47), so it is
             # compared through ``owed()``: what the loan owes.
             bctx = BalanceContext(
@@ -374,4 +374,3 @@ class TestDueDateEditReconcilesTheLedger:
             )
             assert owed(balance_at.balance_at(loan, bctx, _AS_OF)) == posted_after
             assert _posted_balance(loan.id, scenario_id) == posted_after
-            assert_ledger_parity(db.session, scenario_id)

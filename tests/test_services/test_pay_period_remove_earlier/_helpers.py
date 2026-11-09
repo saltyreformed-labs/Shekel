@@ -12,7 +12,6 @@ from app import ref_cache
 from app.enums import BusinessDayShiftEnum, TxnTypeEnum
 from app.exceptions import PayPeriodRemovalRefused
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.pay_era import PayEra
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
@@ -110,36 +109,6 @@ def _monthly_transfer_from(seed_user, to_account, starts_on):
     state_template_price(template, Decimal("200.00"))
     make_cadence_rule(template, MONTHLY, starts_on=starts_on)
     return template
-
-
-def _entries_in(period_ids):
-    """Return the journal entries filed in *period_ids* as ``(id, source kind id)``."""
-    return _db.session.query(JournalEntry.id, JournalEntry.source_kind_id).filter(
-        JournalEntry.pay_period_id.in_(list(period_ids)),
-    ).all()
-
-
-def _stored_totals(user_id):
-    """Return the owner's stored total per ``(scenario_id, ledger_account_id)``.
-
-    Read here since ruling plan#2517 deleted the door's own reader
-    (``pay_period_locks.posted_totals``): nothing but a test asks it now, and
-    it goes with the store.  Grouped by SCENARIO as well as ledger account,
-    because journal entries are scenario-scoped and a move in one scenario
-    must not be cancelled by another's.
-    """
-    return {
-        (scenario_id, ledger_account_id): total
-        for scenario_id, ledger_account_id, total in (
-            _db.session.query(
-                JournalEntry.scenario_id, Posting.ledger_account_id,
-                _db.func.sum(Posting.amount),
-            )
-            .join(Posting, Posting.journal_entry_id == JournalEntry.id)
-            .filter(JournalEntry.user_id == user_id)
-            .group_by(JournalEntry.scenario_id, Posting.ledger_account_id)
-        )
-    }
 
 
 def _held(user_id, first_kept):

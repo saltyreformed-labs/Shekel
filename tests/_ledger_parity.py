@@ -1,11 +1,11 @@
 """
 Shekel Budget App -- the worked-out ledger against the stored one, cell by cell.
 
-The comparison X-ew's first leaf proves its read by (plan step plan#2513): the
-parity test (plan task plan#2527) runs it over the posting fixtures -- every
-sweep of the posting reconciliation suites, and a world for each source kind
-in ``tests/test_services/test_ledger_lines/test_parity_with_the_stored_ledger.py``
--- and the production run (plan task plan#2528) over a production copy.
+The comparison X-ew's first leaf proved its read by (plan step plan#2513), over
+the posting fixtures and, in the production run (plan task plan#2528), over a
+production copy.  Since plan#2914 the suite no longer grades the store by it:
+what still calls it is the writers' own unit tests and the manual harnesses,
+which go with the writers.
 
 Both ledgers are netted per (chart account, paycheck, entry day):
 

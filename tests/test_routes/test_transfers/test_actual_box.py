@@ -11,7 +11,6 @@ from app.extensions import db
 from app.models.transfer import Transfer
 from app.services import transfer_service
 from app.utils.dates import display_today
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     account_net,
     linked_key_of,
@@ -345,7 +344,6 @@ class TestTransferActualBox:
                 ).get(day) == posted, (
                     f"the correction did not reach the leg on account {account_id}"
                 )
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_an_ECHO_of_the_recorded_figure_records_nothing(
         self, app, auth_client, seed_user, seed_periods_today,

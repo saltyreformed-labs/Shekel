@@ -17,7 +17,6 @@ from app.models.ref import AccountType
 from app.services import account_service
 
 from tests._test_helpers import (
-    clear_loan_ledger,
     create_account_of_type,
     create_loan_account,
     create_settled_transfer,
@@ -52,14 +51,14 @@ class TestLoanDashboard:
     def test_broken_loan_detail_page_folds_not_the_money_blind_replay(
         self, auth_client, seed_user, db, seed_periods,
     ):
-        """A broken loan's detail page shows the seam's fold, not the replay (B-13, C4).
+        """A loan's detail page shows the seam's fold, not the replay (B-13, C4).
 
-        Before C4 the loan route rendered ``LoanState.current_balance``: for a loan
-        whose genesis POSTING ledger is missing, the resolver falls back to the
-        MONEY-BLIND anchor replay, which advances only the SCHEDULED principal per
-        payment and discards the actual cash.  C4 points the route at the
-        ``balance_at`` seam, which FOLDS the loan's source facts (origination anchor
-        + settled shadows), so the page shows what the borrower actually owes.
+        Before C4 the loan route rendered ``LoanState.current_balance``, the
+        resolver's MONEY-BLIND anchor replay, which advances only the SCHEDULED
+        principal per payment and discards the actual cash.  C4 points the route at
+        the ``balance_at`` seam, which FOLDS the loan's source facts (origination
+        anchor + settled payments), so the page shows what the borrower actually
+        owes.
 
         The $240,000 loan (6%, originated 2026-01-01, the month before the
         payment's 2026-02-01 installment -- ruling R-R101 moved it from
@@ -69,9 +68,7 @@ class TestLoanDashboard:
         the fold owes $240,000 - $8,800 = $231,200.00.  The money-blind replay
         advances only the scheduled first-month principal of $238.92 ->
         $239,761.08, silently ignoring the $8,561.08 the borrower actually paid
-        down.  The posting ledger is cleared EXPLICITLY (``clear_loan_ledger`` --
-        production cannot make this state) so the resolver's fallback is the one
-        under test.
+        down.
 
         Control that fires: asserting the pre-C4 replay value ($239,761.08) is
         ABSENT proves the route moved off the money-blind path -- reverting C4 to
@@ -94,9 +91,6 @@ class TestLoanDashboard:
             settled_on=seed_periods[0].start_date,
         )
         db.session.commit()
-        # The BROKEN state, built on purpose: only the postings are removed; the
-        # LoanParams + settled shadows the fold reads are untouched.
-        clear_loan_ledger(acct.id)
 
         resp = auth_client.get(f"/accounts/{acct.id}/loan")
         assert resp.status_code == 200

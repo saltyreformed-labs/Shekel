@@ -1,5 +1,5 @@
 """The loan's posted ledger run beside the resolver: the parallel run, the cash invariant it
-supersedes, the full sweep, scenario and owner isolation, and backfill against go-forward.
+supersedes, the full sweep, and scenario and owner isolation.
 """
 
 from __future__ import annotations
@@ -7,11 +7,8 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from app import ref_cache
-from app.enums import LedgerAccountKindEnum, PostingSourceEnum
+from app.enums import LedgerAccountKindEnum
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.loan_features import RateHistory
 from app.models.scenario import Scenario
 from app.services import loan_ledger, loan_loaders, loan_posting_service, posting_service
@@ -21,18 +18,9 @@ from tests._ledger_reads import (
     ledger_net,
     loan_correction_lines,
 )
-from tests._stored_ledger import (
-    loan_correction_entries,
-    stored_account_net,
-    stored_loan_balance_at,
-    stored_loan_balance_map,
-    stored_per_loan_net,
-)
 from tests._test_helpers import (
     create_loan_account,
-    derived_span,
     insert_tracking_start_event,
-    load_migration_module,
 )
 
 from ._helpers import (
@@ -53,20 +41,6 @@ from ._helpers import (
     _ledger_balance,
     _posted_balance,
     _assert_loan_reconciles,
-)
-
-
-# The two boundary migrations, loaded so their raw-SQL teardowns can reproduce
-# the pre-wiring historical state directly (the same pattern the backfill suite
-# uses).  The genesis teardown (opening / true-up + equity accounts) runs before
-# the Step-4 payment teardown -- the real downgrade-chain order.
-_BACKFILL_MIGRATION = load_migration_module(
-    "e2a9f1c7b4d6_backfill_loan_payment_split_postings.py"
-)
-
-
-_GENESIS_MIGRATION = load_migration_module(
-    "f3d6b1a8c2e4_loan_genesis_postings_data_boundary.py"
 )
 
 
@@ -108,26 +82,6 @@ def _add_rate_change(loan, effective_date, rate):
     _db.session.flush()
 
 
-def _clear_all_loan_postings():
-    """Reproduce the pre-wiring historical state: remove EVERY loan posting.
-
-    Runs the two boundary migrations' own raw-SQL teardowns in real
-    downgrade-chain order -- the genesis teardown FIRST (the opening / true-up
-    entries + per-loan opening-equity accounts), THEN the Step-4 payment teardown
-    (the loan_payment corrections + interest / escrow / refund accounts) -- then
-    commits.  The order is load-bearing: the genesis boundary migration
-    (``f3d6b1a8c2e4``) is the head, above the Step-4 boundary, so its teardown
-    runs first in a real downgrade; running the payment teardown first would
-    strand the per-loan opening-equity legs on an already-deleted account.
-    Single-sources that ordering so the callers (the backfill-equivalence and the
-    reader-gap tests) cannot drift on it -- the same helper the backfill suite
-    keeps as ``_clear_corrections``.
-    """
-    _GENESIS_MIGRATION._remove_loan_genesis_postings(_db.session)
-    _BACKFILL_MIGRATION._remove_loan_payment_postings(_db.session)
-    _db.session.commit()
-
-
 def _loan_ledger_net(loan, kind, scenario_id: int) -> Decimal:
     """Return the net of a loan's own line of *kind*."""
     return ledger_net(_db.session, loan_key(kind, loan.id), scenario_id)
@@ -162,7 +116,7 @@ class TestParallelRunAgainstResolver:
                 loan.id, scenario_id, _AS_OF,
             ).state.monthly_payment
 
-            xfer = _settle(
+            _settle(
                 seed_user, loan, seed_periods[_P1], amount=scheduled_pi,
             )
             db.session.commit()
@@ -178,9 +132,6 @@ class TestParallelRunAgainstResolver:
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == scheduled_pi - Decimal("500.00") - _ANCHOR_BALANCE
-            assert len(
-                loan_correction_entries(db.session, xfer.id, loan.id),
-            ) == 1
             _assert_loan_reconciles(loan, scenario_id)
 
     def test_tracking_start_opening_matches_resolver(
@@ -488,8 +439,7 @@ class TestRichFixtureFullSweep:
         (Expense), refund +895.00 (Asset), and the loan leg -1,000.00.  The
         payment contributes +1,000 of principal; with the opening (-250000) and
         true-up (+249000 = 250000 - 1000) the loan-linked ledger nets 0.00 -- the
-        loan is paid off.  FOUR per-loan ledgers are minted (interest, escrow,
-        refund, opening-equity) and the whole sweep ties (this is the only fixture
+        loan is paid off, and the whole sweep ties (this is the only fixture
         exercising interest + escrow + refund together).
         """
         with app.app_context():
@@ -522,12 +472,6 @@ class TestRichFixtureFullSweep:
             ) == Decimal("2000.00")
             # The loan is paid off: the ledger balance is zero.
             assert _ledger_balance(loan.id, scenario_id) == Decimal("0.00")
-            # Four per-loan ledger accounts: interest, escrow, refund, opening-equity.
-            assert (
-                db.session.query(LedgerAccount)
-                .filter_by(loan_account_id=loan.id)
-                .count()
-            ) == 4
             _assert_loan_reconciles(loan, scenario_id)
 
 
@@ -588,10 +532,8 @@ class TestScenarioAndOwnerIsolation:
 
         Owner 1 settles a $1,000 payment on their loan (real principal 500); owner
         2 settles a $2,000 payment on theirs (real principal 1,500).  Each loan
-        reconciles in its owner's own baseline scenario, every correction's
-        journal entry carries its own owner's ``user_id``, and a ``Posting``
-        carries no ``user_id`` of its own -- so ownership is reachable only through
-        the entry and cannot cross-contaminate.
+        reconciles in its owner's own baseline scenario, and neither owner's
+        figure carries the other's.
         """
         with app.app_context():
             loan1 = _make_loan(seed_user, name="Owner1 Loan")
@@ -614,166 +556,5 @@ class TestScenarioAndOwnerIsolation:
                 _db.session, loan2.id, scenario2,
             ) == Decimal("-98500.00")
 
-            # Ownership is normalized onto the journal entry, not the posting.
-            assert not hasattr(Posting, "user_id")
-            owner1_id = seed_user["user"].id
-            owner2_id = seed_second_user["user"].id
-            loan_payment_source = ref_cache.posting_source_id(
-                PostingSourceEnum.LOAN_PAYMENT,
-            )
-            corrections = (
-                db.session.query(JournalEntry)
-                .filter_by(source_kind_id=loan_payment_source)
-                .all()
-            )
-            assert corrections  # both owners posted at least one
-            for entry in corrections:
-                assert entry.user_id in (owner1_id, owner2_id)
-                for posting in entry.postings:
-                    assert posting.ledger_account.user_id == entry.user_id
-
             _assert_loan_reconciles(loan1, scenario1)
             _assert_loan_reconciles(loan2, scenario2)
-
-
-# ---------------------------------------------------------------------------
-# 5. Backfill == go-forward (plan 8.8)
-# ---------------------------------------------------------------------------
-
-
-class TestBackfillEqualsGoForward:
-    """The backfill reproduces the go-forward ledger AND makes the reader authoritative.
-
-    Two faces of the C7 backfill guarantee (plan 8.8 / Section 4 commit 7): a
-    ledger rebuilt by the backfill reconciles identically to the go-forward one
-    (leg for leg), and the dated posting window -- ``None`` while no opening is
-    posted -- reads back == the resolver to the penny once the backfill posts it.
-    The second is the plan's "the oracle detects the unposted-opening gap before
-    and zero mismatches after," proven at a point in time AND at every period
-    boundary, so the historical-data path is pinned directly, not only by
-    transitivity through Sections 5 and 7.
-    """
-
-    def test_backfilled_ledger_reconciles_identically(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Clearing then backfilling a payment's correction restores the same ledger.
-
-        Settling posts the payment corrections AND the opening / true-up
-        go-forward; the sweep ties.  Clearing every loan posting (the anchor
-        corrections first, then the migration's own payment teardown) reproduces
-        the pre-wiring historical state (settled, no postings), and the historical
-        backfill (``backfill_all_loan_postings``, reusing the identical go-forward
-        sync) re-posts them all.  The linked and per-loan nets return to their
-        exact go-forward values and the whole sweep reconciles again -- backfill
-        == go-forward, leg for leg.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            _settle(seed_user, loan, seed_periods[_P1], amount=Decimal("1000.00"))
-            _settle(seed_user, loan, seed_periods[_P2], amount=Decimal("1000.00"))
-            db.session.commit()
-
-            # The store's own act, so its own figures: the read follows the
-            # records and never saw the clearing.  Goes with the store.
-            forward_linked = stored_account_net(loan.id, scenario_id)
-            forward_per_loan = stored_per_loan_net(loan.id, scenario_id)
-            # Opening (-250000) + true-up (+150000) + principal (500 + 502.50).
-            assert forward_linked == Decimal("-98997.50")
-            # Interest (500 + 497.50) + opening-equity legs (+100000).
-            assert forward_per_loan == Decimal("100997.50")
-            _assert_loan_reconciles(loan, scenario_id)
-
-            # Reproduce the pre-wiring state (no loan postings), then backfill.
-            _clear_all_loan_postings()
-            assert stored_per_loan_net(loan.id, scenario_id) == Decimal("0")
-            loan_posting_service.backfill_all_loan_postings()
-            db.session.commit()
-
-            # The backfilled nets equal the go-forward nets, and the sweep ties.
-            assert stored_account_net(loan.id, scenario_id) == forward_linked
-            assert stored_per_loan_net(loan.id, scenario_id) == forward_per_loan
-            _assert_loan_reconciles(loan, scenario_id)
-
-    def test_reader_reads_none_before_backfill_then_matches_resolver_after(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """The reader shows the unposted-opening gap before backfill, == resolver after.
-
-        The read switch (plan Section 8) turns every displayed loan balance onto the
-        genesis reader, so the C7 backfill is what makes that reader authoritative on
-        HISTORICAL data -- a loan / payment settled before the go-forward wiring
-        shipped, carrying no postings.  This is the plan's "gap before, zero
-        mismatches after," pinned on the exact producers the switch flips onto:
-
-        * BEFORE the backfill (openings cleared) the reader returns ``None`` --
-          needs-setup, the unposted-opening GAP -- in BOTH forms of the window,
-          while the resolver, which never reads the ledger, still reports the true
-          balance unchanged.  Any surface reading the postings HERE would wrongly
-          show this loan needs-setup.
-        * AFTER the backfill both read back == the resolver to the penny.
-
-        On-schedule (cash == scheduled P&I, no escrow), so the ledger's real
-        principal equals the resolver's scheduled principal and the two agree
-        exactly.  The resolver is invariant across the clear / backfill (the
-        teardowns remove only postings, not the anchors / transactions it replays),
-        so it is the stable independent reference both phases pin to.  Non-vacuity:
-        the after-balance is the $100,000 anchor less the real principal (scheduled
-        P&I - 500.00 interest), not the untouched anchor, and the map steps strictly
-        down as the payment lands.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            scheduled_pi = _resolved_at(
-                loan.id, scenario_id, _AS_OF,
-            ).state.monthly_payment
-            _settle(seed_user, loan, seed_periods[_P1], amount=scheduled_pi)
-            db.session.commit()
-
-            # The resolver never reads the ledger, so its balance is invariant across
-            # the clear / backfill -- the stable reference for both phases.  The
-            # go-forward reader already matches it (the C6 gate); the contrast is the
-            # point: authoritative now, None in a moment, == again after.
-            resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            assert stored_loan_balance_at(loan.id, scenario_id, _AS_OF) == resolver
-
-            # Reproduce the pre-wiring historical state (no loan postings).
-            _clear_all_loan_postings()
-
-            # BEFORE: the unposted-opening gap.  No OPENING leg -> the reader cannot
-            # produce a balance (both producers return None), yet the resolver -- which
-            # never read the ledger -- is unchanged, so the gap is purely the ledger's.
-            assert stored_loan_balance_at(
-                loan.id, scenario_id, _AS_OF,
-            ) is None
-            assert stored_loan_balance_map(
-                loan.id, scenario_id, seed_periods,
-            ) is None
-            assert _resolver_balance(loan.id, scenario_id, _AS_OF) == resolver
-
-            loan_posting_service.backfill_all_loan_postings()
-            db.session.commit()
-
-            # AFTER: zero mismatch.  The scalar (C8 producer) and every period of the
-            # map (C9 producer) read back == the resolver to the penny.
-            reader = stored_loan_balance_at(loan.id, scenario_id, _AS_OF)
-            assert reader == resolver, f"reader {reader} != resolver {resolver}"
-            balance_map = stored_loan_balance_map(loan.id, scenario_id, seed_periods)
-            for period in seed_periods:
-                assert balance_map[period.id] == _resolver_balance(
-                    loan.id, scenario_id, period.start_date,
-                ), (
-                    f"period {derived_span(period).period_index}: "
-                    f"map {balance_map[period.id]} "
-                    f"!= resolver at {period.start_date}"
-                )
-            # Non-vacuity: the anchor less the real principal (not the untouched
-            # anchor), and the map steps strictly down as the payment lands.
-            assert reader == _ANCHOR_BALANCE - (scheduled_pi - Decimal("500.00"))
-            assert balance_map[seed_periods[0].id] == _ANCHOR_BALANCE
-            assert (
-                balance_map[seed_periods[_P1].id]
-                < balance_map[seed_periods[0].id]
-            )

@@ -4,16 +4,12 @@ from dataclasses import fields
 from datetime import date
 from decimal import Decimal
 
-import pytest
-
 from app import ref_cache
 from app.enums import MovementFigureSourceEnum, StatusEnum
-from app.exceptions import ValidationError
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import (
     account_service,
-    posting_service,
     reconcile_service,
     status_seam,
     transfer_service,
@@ -468,71 +464,6 @@ class TestTheTransferArm:
             ]
             assert len(events) == 1
             assert events[0].corrected_count == 1
-
-    def test_the_close_re_checks_the_other_accounts_correction_over_its_ticks(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """The act's one anchor re-check runs at its close and absorbs the leg (ruling plan#2574).
-
-        Each settle's re-check is HELD for the act's close
-        (``posting_service.holding_the_anchor_re_check``), so this grades
-        that the close runs it.  A $75.00 transfer out of Checking into a
-        Savings account asserted at $100.00 today (the suite's frozen
-        2026-03-20), ticked on Checking's statement day before that.
-        Savings' assertion is its closing balance for today, so the leg dated
-        before it is inside it: its true-up is re-derived to absorb the
-        $75.00 and Savings totals $100.00.  Checking's latest assertion is the
-        seed's 2024 one, so the leg rides on top of it: Checking's total
-        falls by exactly $75.00.  With no re-check at the close Savings
-        totals 100.00 + 75.00 = $175.00 (measured at plan#2559).
-        """
-        with app.app_context():
-            transfer = self._transfer_out(seed_user, seed_periods)
-            scenario_id = seed_user["scenario"].id
-            checking_before = posting_service.account_posting_total(
-                transfer.from_account_id, scenario_id,
-            )
-
-            assert self._settle(seed_user, [], transfer_ids=[transfer.id]) == 1
-            db.session.commit()
-
-            db.session.expire_all()
-            assert posting_service.account_posting_total(
-                transfer.to_account_id, scenario_id,
-            ) == Decimal("100.00")
-            assert posting_service.account_posting_total(
-                transfer.from_account_id, scenario_id,
-            ) == checking_before - Decimal("75.00")
-
-    def test_a_refused_reconcile_leaves_no_held_re_check_behind(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A save the panel refuses takes its hold off the session, so a later act re-checks.
-
-        A ticked ``$0.00`` box is refused inside the reconcile's hold (ruling
-        **R-CC125**), and the route rolls the press back.  The same session
-        then settles the transfer by Mark Paid, on today, Savings' own
-        assertion day: its re-check must run there and then, so Savings
-        totals its asserted $100.00 with the $75.00 leg inside it.  A hold
-        left on the session would queue that re-check onto an act already
-        over, and Savings would total $175.00.
-        """
-        with app.app_context():
-            transfer = self._transfer_out(seed_user, seed_periods)
-            with pytest.raises(ValidationError):
-                self._settle(
-                    seed_user, [], transfer_ids=[transfer.id],
-                    transfer_corrections={transfer.id: Decimal("0.00")},
-                )
-            db.session.rollback()
-
-            transfer_service.settle_transfer(transfer.id, seed_user["user"].id)
-            db.session.commit()
-
-            db.session.expire_all()
-            assert posting_service.account_posting_total(
-                transfer.to_account_id, seed_user["scenario"].id,
-            ) == Decimal("100.00")
 
     def test_an_ECHOED_prefill_leaves_both_legs_NULL_and_counts_ZERO(
         self, app, db, seed_user, seed_periods, seed_entry_template, caplog,

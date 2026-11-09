@@ -18,7 +18,6 @@ from app.services.ledger_report_service import (
 )
 from app.services.pay_calendar import calendar_for
 from app.utils.dates import display_today
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import account_net
 from tests._test_helpers import (
     create_account_of_type,
@@ -116,7 +115,6 @@ def _assert_it_moved_to_liabilities(seed_user, equity_before):
     assert _sheet_line(after.equity, "Retained Earnings") == Decimal("-70.00")
     assert after.equity.total == equity_before
     assert after.tie_out.in_balance is True
-    assert_ledger_parity(db.session, seed_user["scenario"].id)
 
 
 def _assert_the_true_up_reads(seed_user, opening, interest):
@@ -157,8 +155,7 @@ class TestTypeChangeBoundaryGuard:
     from, so the crossing would drop its lines.  Across an asset type and a
     liability type nothing is refused, history or not: a line is classed by its
     account's current type, as it is labeled by its current name.  Either crossing
-    on an account holding no line passes.  An allowed crossing re-classes the
-    stored linked row and re-syncs the corrections.
+    on an account holding no line passes.
 
     Any allowed change of an account's kind re-reads its past true-ups under the
     new type, past income included (ruling plan#2880): a re-type means "it was
@@ -172,15 +169,8 @@ class TestTypeChangeBoundaryGuard:
 
         It read ``-600.00`` under Assets and reads ``600.00`` owed under Liabilities
         on every past balance sheet (ruling plan#2785), its true-up moves from
-        interest to its opening on every past statement (ruling plan#2880), and the
-        stored linked row follows its class.
+        interest to its opening on every past statement (ruling plan#2880).
         """
-        # Pylint: ``import-outside-toplevel`` -- localized to the one test
-        # that needs these helpers, matching the file's convention.
-        # pylint: disable=import-outside-toplevel
-        from app.enums import LedgerAccountClassEnum
-        from tests._stored_ledger import linked_ledger_account
-
         with app.app_context():
             account = _mistaken_card(seed_user)
             account_id = account.id
@@ -201,11 +191,6 @@ class TestTypeChangeBoundaryGuard:
             assert b"updated" in response.data
             db.session.expire_all()
             assert db.session.get(Account, account_id).account_type_id == cc_type.id
-            assert linked_ledger_account(
-                db.session, account_id,
-            ).class_id == ref_cache.ledger_account_class_id(
-                LedgerAccountClassEnum.LIABILITY,
-            )
             _assert_it_moved_to_liabilities(seed_user, equity_before)
 
     def test_type_edit_with_history_across_class_boundary_is_allowed(
@@ -217,12 +202,6 @@ class TestTypeChangeBoundaryGuard:
         ``account_type_id`` changes, only the type it is on, whose "Interest" tick
         goes with the Asset category that allows it.
         """
-        # Pylint: ``import-outside-toplevel`` -- localized to the one test
-        # that needs these helpers, matching the file's convention.
-        # pylint: disable=import-outside-toplevel
-        from app.enums import LedgerAccountClassEnum
-        from tests._stored_ledger import linked_ledger_account
-
         with app.app_context():
             custom_type = AccountType(
                 name="side_pocket",
@@ -233,7 +212,6 @@ class TestTypeChangeBoundaryGuard:
             db.session.add(custom_type)
             db.session.commit()
             account = _mistaken_card(seed_user)
-            account_id = account.id
             account.account_type_id = custom_type.id
             db.session.commit()
             equity_before = _assert_it_reads_as_interest_bearing(seed_user)
@@ -253,11 +231,6 @@ class TestTypeChangeBoundaryGuard:
             assert response.status_code == 200
             assert b"updated" in response.data
             db.session.expire_all()
-            assert linked_ledger_account(
-                db.session, account_id,
-            ).class_id == ref_cache.ledger_account_class_id(
-                LedgerAccountClassEnum.LIABILITY,
-            )
             _assert_it_moved_to_liabilities(seed_user, equity_before)
 
     @pytest.mark.parametrize(
@@ -308,7 +281,6 @@ class TestTypeChangeBoundaryGuard:
             assert b"updated" in response.data
             db.session.expire_all()
             assert _assert_the_true_up_reads(seed_user, *reads_after) == equity_before
-            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_type_edit_unticking_interest_re_reads_past_true_ups(
         self, app, auth_client, seed_user,
@@ -433,63 +405,6 @@ class TestTypeChangeBoundaryGuard:
             assert response.status_code == 200
             assert b"updated" in response.data
             assert db.session.get(Account, account_id).account_type_id == mortgage_type.id
-
-    def test_retype_unposted_account_reclasses_linked_row(
-        self, app, auth_client, seed_user,
-    ):
-        """A $0-anchor account re-types across the boundary and re-classes.
-
-        A zero opening books nothing, so the ledger is empty and the
-        crossing is allowed; the route re-snapshots the empty linked row's
-        class to the new category's (Asset -> Liability) so future postings
-        land in the right balance-sheet section.
-        """
-        # Pylint: ``import-outside-toplevel`` -- localized to the one test
-        # that needs these helpers, matching the file's convention.
-        # pylint: disable=import-outside-toplevel
-        from app.enums import LedgerAccountClassEnum
-        from tests._stored_ledger import linked_ledger_account
-
-        with app.app_context():
-            savings_type = (
-                db.session.query(AccountType)
-                .filter_by(name="Savings", user_id=None)
-                .one()
-            )
-            cc_type = (
-                db.session.query(AccountType)
-                .filter_by(name="Credit Card", user_id=None)
-                .one()
-            )
-            account = account_service.create_account(
-                account_service.AccountSpec(
-                    user_id=seed_user["user"].id,
-                    account_type_id=savings_type.id,
-                    name="Reclass Target",
-                    anchor_balance=Decimal("0.00"),
-                ),
-            )
-            db.session.commit()
-            linked = linked_ledger_account(db.session, account.id)
-            assert linked.class_id == ref_cache.ledger_account_class_id(
-                LedgerAccountClassEnum.ASSET,
-            )
-
-            response = auth_client.post(
-                f"/accounts/{account.id}",
-                data={"account_type_id": str(cc_type.id)},
-                follow_redirects=True,
-            )
-
-            assert response.status_code == 200
-            assert b"updated" in response.data
-            # Re-fetch: the request's session lifecycle detached the objects.
-            reloaded = db.session.get(Account, account.id)
-            assert reloaded.account_type_id == cc_type.id
-            relinked = linked_ledger_account(db.session, account.id)
-            assert relinked.class_id == ref_cache.ledger_account_class_id(
-                LedgerAccountClassEnum.LIABILITY,
-            )
 
     def test_type_edit_amortization_flip_refused_holding_a_line(
         self, app, auth_client, seed_user,
@@ -617,56 +532,6 @@ class TestTypeChangeBoundaryGuard:
             db.session.refresh(custom_type)
             assert custom_type.has_amortization is True
 
-    def test_type_edit_category_flip_reclasses_unposted_accounts(
-        self, app, auth_client, seed_user,
-    ):
-        """A category flip on a type whose accounts are unposted re-classes them.
-
-        The type's only account has a $0 anchor (empty ledger), so the
-        Asset -> Liability category flip is allowed and the account's empty
-        linked row re-snapshots to the Liability class.
-        """
-        # Pylint: ``import-outside-toplevel`` -- localized to the one test
-        # that needs these helpers, matching the file's convention.
-        # pylint: disable=import-outside-toplevel
-        from app.enums import LedgerAccountClassEnum
-        from tests._stored_ledger import linked_ledger_account
-
-        with app.app_context():
-            custom_type = AccountType(
-                name="side_pocket",
-                category_id=ref_cache.acct_category_id(AcctCategoryEnum.ASSET),
-                user_id=seed_user["user"].id,
-            )
-            db.session.add(custom_type)
-            db.session.commit()
-            account = account_service.create_account(
-                account_service.AccountSpec(
-                    user_id=seed_user["user"].id,
-                    account_type_id=custom_type.id,
-                    name="Unposted Pocket",
-                    anchor_balance=Decimal("0.00"),
-                ),
-            )
-            db.session.commit()
-
-            response = auth_client.post(
-                f"/accounts/types/{custom_type.id}",
-                data={
-                    "category_id": str(ref_cache.acct_category_id(
-                        AcctCategoryEnum.LIABILITY,
-                    )),
-                },
-                follow_redirects=True,
-            )
-
-            assert response.status_code == 200
-            assert b"updated" in response.data
-            linked = linked_ledger_account(db.session, account.id)
-            assert linked.class_id == ref_cache.ledger_account_class_id(
-                LedgerAccountClassEnum.LIABILITY,
-            )
-
     def test_update_account_anchor_edit_books_nothing(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
@@ -722,4 +587,3 @@ class TestTypeChangeBoundaryGuard:
             ) == assertions_before
             # ...and the edit this door DOES own still landed.
             assert db.session.get(Account, checking_id).name == "Renamed Checking"
-            assert_ledger_parity(db.session, scenario_id)

@@ -11,18 +11,14 @@ import pytest
 from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
-from app.models.journal_entry import JournalEntry
 from app.models.ref import AccountType
 from app.services import (
-    account_posting_service,
     account_service,
-    loan_posting_service,
     transfer_service,
 )
 from app.exceptions import NotFoundError, ValidationError
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import account_net
-from tests._test_helpers import add_anchor_history, create_loan_account
+from tests._test_helpers import create_loan_account
 from app.models.amount_ownership import AmountOwnership
 
 from ._helpers import (
@@ -92,50 +88,6 @@ class TestMovingATransferBetweenAccounts:
         )
         db.session.flush()
         return account
-
-    def _entries_a_re_sync_writes_after_moving_off(self, td, vacated, endpoint):
-        """Move a settled transfer off *vacated*, then count what a re-sync writes.
-
-        The two vacated-account cases' one body: the basic transfer is
-        settled, an anchor is asserted on *vacated* AFTER the settle (the
-        destination case says why) and its corrections synced, the endpoint
-        named *endpoint* is moved to a new account, and *vacated*'s anchor
-        corrections are synced again.  That second sync writes nothing when
-        the move re-derived them, which is the oracle.
-
-        Args:
-            td: The ``transfer_data`` fixture.
-            vacated: The account the move leaves -- the basic transfer's
-                destination or its source.
-            endpoint: ``"to_account_id"`` or ``"from_account_id"``, the
-                ``update_transfer`` keyword that moves off *vacated*.
-
-        Returns:
-            The number of journal entries the second sync wrote.
-        """
-        elsewhere = self._other_savings(
-            td, name="Moved Onto", observed_on=_the_day_before_today(),
-        )
-        xfer = _create_basic_transfer(td)
-        transfer_service.settle_transfer(xfer.id, td["user"].id)
-        db.session.flush()
-        add_anchor_history(db.session, vacated, Decimal("900.00"))
-        account_posting_service.sync_account_anchor_postings(
-            vacated.id, td["scenario"].id,
-        )
-        db.session.flush()
-
-        transfer_service.update_transfer(
-            xfer.id, td["user"].id, **{endpoint: elsewhere.id},
-        )
-        db.session.flush()
-
-        before_entries = db.session.query(JournalEntry).count()
-        account_posting_service.sync_account_anchor_postings(
-            vacated.id, td["scenario"].id,
-        )
-        db.session.flush()
-        return db.session.query(JournalEntry).count() - before_entries
 
     def test_a_destination_move_writes_the_new_destination(
         self, app, transfer_data
@@ -336,23 +288,11 @@ class TestMovingATransferBetweenAccounts:
             # makes reachable at all -- it is the vacated-SOURCE arm of
             # ``_resync_vacated_loan``, whose stated reason for taking both
             # endpoints was false while the guard refused every such row.
-            before_entries = db.session.query(JournalEntry).count()
             transfer_service.update_transfer(
                 xfer.id, td["user"].id,
                 from_account_id=td["account"].id,
             )
             assert _reread(xfer.id).from_account_id == td["account"].id
-            # The loan it left was reconciled by the move: a follow-up sync
-            # writes nothing.
-            after_move = db.session.query(JournalEntry).count()
-            loan_posting_service.sync_loan_postings(
-                loan.id, td["scenario"].id,
-            )
-            db.session.flush()
-            assert db.session.query(JournalEntry).count() == after_move, (
-                "the loan the source left was not reconciled"
-            )
-            assert after_move >= before_entries
 
     def test_a_move_onto_a_loan_is_graded_against_THAT_loan_s_origination(
         self, app, db, transfer_data
@@ -484,36 +424,16 @@ class TestMovingATransferBetweenAccounts:
     def test_moving_a_settled_payment_off_a_loan_reconciles_the_loan_it_left(
         self, app, db, transfer_data
     ):
-        """The accounts a move VACATES are reconciled, and reconciled LAST.
+        """A settled payment moved off a loan takes its lines off the loan's own line.
 
-        ``sync_transfer_postings`` heals the LEGS by itself, but the two things
-        it emits that are scoped to the transfer's CURRENT endpoints reach no
-        further: its Step-5 anchor self-heal names ``(from_account_id,
-        to_account_id)``, and a vacated LOAN's genesis ledger and recurring
-        payment window still count a payment it no longer has.  Both are
-        re-derived explicitly, after the cash reconcile has moved the legs.
-
-        **The ORDER was pinned at R10-b, but not by this case** -- an
-        adversarial review of R10-b measured which tests failed when the
-        vacated walk was hoisted above the cash reconcile, and this was not one
-        of them.  The three that were:
-        ``test_a_vacated_ACCOUNT_s_anchor_corrections_are_re_derived``,
-        ``test_moving_a_settled_payment_ONTO_a_loan_reconciles_that_loan`` and
-        ``test_a_settled_transfer_s_cash_legs_follow_the_move``.  Run first, the
-        vacated walk read a ledger still holding a net for a transfer with no
-        shadow on that account and ``walk_account_ledger`` raised
-        ``PostingError: Ledger account N holds a nonzero net for transfer ids
-        [...] but no active shadow on account M resolves them; Transfer
-        Invariant 1 is broken`` -- measured on a production clone before the
-        order was fixed.  That measurement is of the tree before plan step
-        ``balance:X-bi-6-3`` deleted the transfer loader that raised it (ruling
-        R-BAL102) and ``balance:X-bi-6-4d-2`` the shadows, and it has not been
-        re-run since.  What THIS case pins is the vacated loan's re-sync
-        AFTER the move (``_loan_posting._resync_vacated_loan``): remove it and
-        the loan keeps a correction for a payment it no longer has.  Through
-        plan step ``balance:X-bi-6-1b`` it pinned a split reversal BEFORE the
-        move as well; the split links no row since ``X-bi-6-3`` (ruling
-        R-BAL102), so the after-resync alone reverses the departed key.
+        A $250.00 payment into a loan, settled, is re-pointed at a savings
+        account: the move succeeds, its lines still balance, and none of them
+        is left on the loan's own line.  The loan's split of the payment is
+        worked out from the loan's walk and no record, so it is not among the
+        transfer's lines.  What this case pinned besides, the vacated loan's
+        STORED re-sync after the move (``_loan_posting._resync_vacated_loan``),
+        was graded by an idempotence oracle on the stored journal until plan
+        step plan#2914 took the store's grading off the suite.
         """
         with app.app_context():
             td = transfer_data
@@ -546,9 +466,6 @@ class TestMovingATransferBetweenAccounts:
                 "setup: a settled payment posts a cash leg on each side"
             )
 
-            # The move itself is the assertion: a wrong order raises here, and
-            # ``sync_loan_postings``' checked-projection assert would raise if
-            # the loan's ledger and its walk disagreed afterwards.
             transfer_service.update_transfer(
                 xfer.id, td["user"].id, to_account_id=elsewhere.id,
             )
@@ -560,26 +477,6 @@ class TestMovingATransferBetweenAccounts:
             # The loan's own ledger is left holding nothing of this transfer.
             assert set(after).isdisjoint(
                 {ledger for ledger, net in posted.items() if net > 0}
-            )
-
-            # **The oracle for the vacated reconcile itself**: both walks are
-            # idempotent, so re-running each one now must write NOTHING.  It is
-            # the only assertion that fails when the vacated arm is DELETED
-            # rather than merely mis-ordered -- the transfer's own legs
-            # reconcile either way, and what is left behind is the LOAN's split
-            # correction for a payment it no longer has, plus the vacated
-            # account's own anchor corrections.  Without this the arm had no
-            # firing control at all: removing it kept every other case green.
-            before_entries = db.session.query(JournalEntry).count()
-            loan_posting_service.sync_loan_postings(
-                loan.id, td["scenario"].id,
-            )
-            account_posting_service.sync_account_anchor_postings(
-                loan.id, td["scenario"].id,
-            )
-            db.session.flush()
-            assert db.session.query(JournalEntry).count() == before_entries, (
-                "the loan the payment LEFT was not reconciled by the move"
             )
 
     def test_moving_a_settled_payment_ONTO_a_loan_reconciles_that_loan(
@@ -597,9 +494,9 @@ class TestMovingATransferBetweenAccounts:
         and a move ONTO one -- this case -- reconciled NOTHING, leaving the new
         loan's genesis ledger without the payment it had just received.
 
-        The oracle is idempotence: both walks write nothing at a state they have
-        already reconciled, so a second sync that WRITES means the move did not
-        run the first.
+        The relationship read below is the control.  The stored re-sync it led
+        to was graded by an idempotence oracle on the stored journal until plan
+        step plan#2914 took the store's grading off the suite.
         """
         with app.app_context():
             td = transfer_data
@@ -623,138 +520,17 @@ class TestMovingATransferBetweenAccounts:
             assert xfer.to_account.id == loan.id, (
                 "the relationship must move with the column"
             )
-            before_entries = db.session.query(JournalEntry).count()
-            loan_posting_service.sync_loan_postings(
-                loan.id, td["scenario"].id,
-            )
-            db.session.flush()
-            assert db.session.query(JournalEntry).count() == before_entries, (
-                "the loan the payment JOINED was not reconciled by the move"
-            )
-
-    def test_a_vacated_LOAN_s_downstream_payments_are_re_split(
-        self, app, db, transfer_data
-    ):
-        """Removing one payment re-derives the ones whose balance it moved.
-
-        **The firing control for the post-move vacated reconcile.**  The
-        pre-move reversal takes back the DEPARTING payment's own split; every
-        LATER payment on that loan rode the running balance the departing one
-        advanced, so their splits are stale the moment it goes.  That is
-        exactly what ``_resync_loan_after_payment_left`` exists for on the
-        delete path, and an endpoint move needs it for the identical reason.
-
-        The oracle is idempotence plus the loan's own checked-projection
-        assert: re-running ``sync_loan_postings`` at a reconciled state writes
-        nothing, and refuses to commit at an unreconciled one.
-        """
-        with app.app_context():
-            td = transfer_data
-            loan = create_loan_account(
-                {"user": td["user"], "account": td["account"]}, db.session,
-                name="Two Payment Loan",
-                origination_date=date(2020, 1, 1),
-                principal=Decimal("5000.00"),
-            )
-            elsewhere = self._other_savings(
-                td, name="Off The Loan", observed_on=_the_day_before_today(),
-            )
-            payments = []
-            for index in (0, 1):
-                payment = transfer_service.create_transfer(
-                    transfer_service.TransferSpec(
-                        user_id=td["user"].id,
-                        from_account_id=td["account"].id,
-                        to_account_id=loan.id,
-                        pay_period_id=td["periods"][index].id,
-                        scenario_id=td["scenario"].id,
-                        amount_ownership=AmountOwnership.own(Decimal("400.00")),
-                        status_id=td["projected_status"].id,
-                        category_id=td["categories"]["Rent"].id,
-                        due_date=td["periods"][index].start_date,
-                    ),
-                )
-                transfer_service.settle_transfer(
-                    payment.id, td["user"].id,
-                )
-                payments.append(payment)
-            db.session.flush()
-
-            transfer_service.update_transfer(
-                payments[0].id, td["user"].id, to_account_id=elsewhere.id,
-            )
-            db.session.flush()
-
-            before_entries = db.session.query(JournalEntry).count()
-            loan_posting_service.sync_loan_postings(
-                loan.id, td["scenario"].id,
-            )
-            db.session.flush()
-            assert db.session.query(JournalEntry).count() == before_entries, (
-                "the surviving payment's split was left riding a balance the "
-                "departed payment no longer advances"
-            )
-
-    def test_a_vacated_ACCOUNT_s_anchor_corrections_are_re_derived(
-        self, app, transfer_data
-    ):
-        """An account the money stopped passing through re-bases its assertion.
-
-        The other half of the post-move vacated reconcile, and the half
-        ``sync_transfer_postings`` cannot reach: its Step-5 self-heal names the
-        transfer's CURRENT endpoints, so the account just vacated is outside it.
-        An anchor correction is "what the owner asserted minus what the ledger
-        walked", and the walk on that account just lost this transfer's leg --
-        so the correction is stale until something re-derives it.
-
-        The true-up is dated AFTER the settle deliberately: an assertion made
-        BEFORE the money moved does not depend on it, so the correction would
-        not move and the case would pass whether or not the arm ran.
-        """
-        with app.app_context():
-            td = transfer_data
-            assert self._entries_a_re_sync_writes_after_moving_off(
-                td, td["savings_account"], "to_account_id",
-            ) == 0, (
-                "the vacated account's anchor correction still counts a "
-                "transfer that no longer passes through it"
-            )
-
-    def test_a_vacated_SOURCE_s_anchor_corrections_are_re_derived(
-        self, app, transfer_data
-    ):
-        """The case above on the other side: the account the money stopped LEAVING.
-
-        The door works out the vacated source and the vacated destination as
-        two separate expressions (``_endpoints._resolve_endpoints``), and the
-        case above moves only the destination.  So the source's expression had
-        no catcher: a mutant handing the walk the owner's id in place of the
-        vacated source's account id failed no case in the transfer, statement
-        match and reconcile families that passes without it (measured
-        2026-10-22, ruling ``balance:R-BAL356``'s site ``ID1-VACATED-SRC``).
-        That id names no account, so the walk re-derived nothing, and
-        checking's anchor correction kept counting a transfer that no longer
-        leaves it.  Both cases share one body,
-        :meth:`_entries_a_re_sync_writes_after_moving_off`.
-        """
-        with app.app_context():
-            td = transfer_data
-            assert self._entries_a_re_sync_writes_after_moving_off(
-                td, td["account"], "from_account_id",
-            ) == 0, (
-                "the vacated source's anchor correction still counts a "
-                "transfer that no longer leaves it"
-            )
 
     def test_a_move_and_a_settle_in_ONE_call_settle_against_the_new_loan(
         self, app, db, transfer_data
     ):
         """A move and a settle in ONE call land on the destination it LEAVES.
 
-        The two acts compose: the cash legs post against the loan the transfer
-        is re-pointed at, and that loan books the payment's split -- asserted by
-        idempotence, since a follow-up ``sync_loan_postings`` that WRITES means
-        the call did not.
+        The two acts compose: the call re-points the transfer at the loan and
+        settles it, and its cash lines post.  That the loan's STORED split was
+        written during the call was graded by an idempotence oracle on the
+        stored journal until plan step plan#2914 took the store's grading off
+        the suite.
 
         **It does not pin the ORDER of the endpoint apply against the settle
         dispatch, and that is said because it was checked**: moving the apply
@@ -792,29 +568,16 @@ class TestMovingATransferBetweenAccounts:
             after = _ledger_nets_for_transfer(xfer.id)
             assert len(after) == 2
             assert sum(after.values()) == Decimal("0")
-            # And the loan booked the payment: a follow-up sync is a no-op, so
-            # the split the settle owed was written during the call.
-            before_entries = db.session.query(JournalEntry).count()
-            loan_posting_service.sync_loan_postings(
-                loan.id, td["scenario"].id,
-            )
-            db.session.flush()
-            assert db.session.query(JournalEntry).count() == before_entries, (
-                "the settle did not book this payment against the loan it "
-                "was re-pointed at"
-            )
 
     def test_a_settled_transfer_s_cash_legs_follow_the_move(
         self, app, db, transfer_data
     ):
-        """The posted ledger moves with the money it is about.
+        """The ledger moves with the money it is about.
 
-        ``reconcile_periods`` takes the per-ledger-account delta over the UNION
-        of what is posted and what is targeted, so the vacated ledger account
-        reverses to zero in the same pass the new one posts -- one pass, no
-        residue.  Asserted on the NETS rather than on entry counts, because what
-        must be true is that no account is left holding money the transfer no
-        longer moves through it.
+        The vacated account holds nothing of the transfer after the move, and
+        the account it now reaches holds it.  Asserted on the NETS, because
+        what must be true is that no account is left holding money the
+        transfer no longer moves through it.
         """
         with app.app_context():
             td = transfer_data
@@ -856,4 +619,3 @@ class TestMovingATransferBetweenAccounts:
             # zero and so absent from the nets entirely.
             assert destination[0] not in vacated
             assert sum(after.values()) == Decimal("0")
-            assert_ledger_parity(db.session, td["scenario"].id)

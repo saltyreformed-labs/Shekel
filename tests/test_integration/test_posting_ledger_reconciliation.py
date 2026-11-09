@@ -15,26 +15,17 @@ below are exactly plan Section 6:
      ``balance:X-bi-6-4d-2`` and hangs off the transfer since, and the figure
      is stored once on the transfer since that step's 4d-4 half; the oracle
      keeps the name "settled-shadow effect" (ruling R-BAL167 class 4).
-  2. **Per-entry balance**: every journal entry's legs ``SUM(amount) = 0`` and
-     ``COUNT(*) >= 2`` (also DB-enforced by ``ck_account_postings_balanced``).
-  3. **Trial balance**: ``SUM(account_postings.amount) = 0`` across the whole
-     ledger (follows from 2, asserted directly as a cheap self-check).
-  4. **Multi-scenario isolation**: postings in scenario X never reconcile
-     against transactions in scenario Y (the ``scenario_id`` denorm is honored).
-  5. **Owner isolation via ``journal_entry.user_id``**: a posting carries no
-     ``user_id`` of its own; its owner is reached only through its journal
-     entry, and one owner's reconciliation never picks up another owner's
-     postings.  (Plan Section 6 calls this the "companion-owner case".  A
+  2. **Per-entry balance** was the stored journal's own invariant, and its
+     grading went with the suite's grading of the store (plan#2914).
+  3. **Trial balance**: the worked-out lines of every owner, in every scenario,
+     sum to ``0`` (a cheap self-check on the read).
+  4. **Multi-scenario isolation**: lines in scenario X never reconcile
+     against transactions in scenario Y.
+  5. **Owner isolation**: one owner's reconciliation never picks up another
+     owner's lines.  (Plan Section 6 calls this the "companion-owner case".  A
      companion user cannot in fact OWN a transfer -- ``transfer_service``
      refuses any actor that does not own the from/to accounts, and a companion
-     owns none -- so the property the plan actually names, ownership inherited
-     via ``journal_entry.user_id``, is proven here with a second independent
-     owner, which exercises the identical join.)
-
-The oracle also holds over BOTH historical-backfilled postings (the raw-SQL
-migration builder) and go-forward postings (the ``posting_service`` Python
-builder): a dedicated case posts one transfer each way and asserts the two
-producers agree leg-for-leg and reconcile identically.
+     owns none -- so it is proven here with a second independent owner.)
 
 **Non-tautological by construction.**  Each invariant is checked three
 independent ways that must all agree:
@@ -53,17 +44,13 @@ independent ways that must all agree:
     ``settled_transfer_effect``'s semantics; the hand-computed literals, not this
     query, are what make the oracle non-tautological -- this layer adds the
     cross-table, whole-DB sweep the literals cannot.)
-  * **the production service helpers** -- ``account_posting_total`` and
-    ``settled_transfer_effect`` (the readers Steps 4-5 will switch balances
-    onto) must match the hand-computed literals too.
+  * **the production service helper** -- ``settled_transfer_effect`` must
+    match the hand-computed literals too.
 
 Adversarial cases prove the oracle is not vacuous: a read that loses lines makes
 the per-account reconciliation and the trial balance FAIL -- driven through the real
 ``_assert_full_reconciliation`` sweep helper under ``pytest.raises``, so a
 regression in the helper itself is caught, not only in an inline re-derivation.
-Tampering a settled transfer's figure and injecting one extra stored leg are the
-store's own cases: the first leaves it behind the records, which the sweep's parity
-arm names, and the second unbalances it.
 
 All money is ``Decimal`` from strings, with the arithmetic shown per the
 testing standard.  Transfers are built through ``transfer_service`` (the sole
@@ -78,14 +65,9 @@ import pytest
 from sqlalchemy import case
 
 from app import ref_cache
-from app.enums import (
-    PostingKindEnum,
-    PostingSourceEnum,
-    StatusEnum,
-)
+from app.enums import StatusEnum
 from app.extensions import db as _db
 from app.models.account import Account
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.ref import AccountType
 from app.models.scenario import Scenario
 from app.models.transaction_entry import TransactionEntry
@@ -100,14 +82,6 @@ from tests._ledger_reads import (
     transfer_family_movement_ids,
     trial_balance,
 )
-from tests._stored_ledger import (
-    entries_violating_balance,
-    linked_ledger_account,
-    stored_account_net,
-    stored_trial_balance,
-    transfer_family_journal_filter,
-)
-from tests._ledger_parity import assert_ledger_parity
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
@@ -205,14 +179,6 @@ def _assert_full_reconciliation(scenario_id: int) -> None:
     amortization split and is the loan oracle's job (the
     ``test_posting_ledger_loan_reconciliation`` package).  Holds over every such
     account, not only the ones a given test hand-computes.
-
-    Last, and going with the store, the ledger worked out from the records equals
-    the stored one to the cent per (chart row, paycheck, day) (plan task
-    plan#2527).  A NON-baseline scenario carries the stored openings here only
-    because these fixtures settle on the same UTC day the accounts were created,
-    so the effect-time self-heal fires alongside the scenario's first settle: a
-    what-if whose first settle lands on a later day gets them only at the next
-    account-global sync, where the read answers the anchors in any scenario.
     """
     scenario_owner_id = (
         _db.session.query(Scenario.user_id)
@@ -248,7 +214,6 @@ def _assert_full_reconciliation(scenario_id: int) -> None:
             f"opening {opening} + settled-shadow effect {effect} in "
             f"scenario {scenario_id}"
         )
-    assert_ledger_parity(_db.session, scenario_id)
 
 
 def _build_asset_and_liability_books(seed_user) -> tuple:
@@ -340,21 +305,17 @@ class TestPerAccountReconciliation:
                 mortgage.id: (Decimal("250.00"), Decimal("250.00")),
             }
             for account_id, (want_ledger, want_effect) in expected.items():
-                # (a) hand-computed literal == independent ledger-table query.
+                # (a) hand-computed literal == the worked-out read.
                 assert account_net(
                     _db.session, account_id, scenario_id,
                 ) == want_ledger
                 # (b) independent txn-table query == the hand-computed effect
-                #     (postings reconcile to the transaction source of truth
+                #     (the read reconciles to the transaction source of truth
                 #     through the absolute sweep below).
                 assert _independent_txn_effect(
                     account_id, scenario_id,
                 ) == want_effect
-                # (c) the production service helpers agree too (the readers
-                #     Steps 4-5 will switch balances onto).
-                assert posting_service.account_posting_total(
-                    account_id, scenario_id,
-                ) == want_ledger
+                # (c) the production service helper agrees too.
                 assert posting_service.settled_transfer_effect(
                     account_id, scenario_id,
                 ) == want_effect
@@ -365,13 +326,10 @@ class TestPerAccountReconciliation:
     def test_reverted_transfer_reconciles_at_zero(self, app, db, seed_user):
         """A settled-then-reverted transfer reconciles to zero on both sides.
 
-        Arithmetic: settle +100 (Savings), then revert.  The transfer nets to
-        zero (+100 settle, -100 reversal -- append-only), and the reverted
-        transfer's side records are un-dated, so it drops from the
-        settled-shadow effect too.  Each ledger lands back on its opening
-        (Checking 1000.00, Savings 100.00) with a zero effect, and two
-        transfer entries survive (the original is never edited).  This is
-        the append-only correction discipline proven through the oracle.
+        Arithmetic: settle +100 (Savings), then revert.  The reverted
+        transfer's side records are un-dated, so it books nothing and drops
+        from the settled-shadow effect too.  Each ledger lands back on its
+        opening (Checking 1000.00, Savings 100.00) with a zero effect.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -385,7 +343,7 @@ class TestPerAccountReconciliation:
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
             )
             _db.session.commit()
-            # Revert to Projected (Commit-5 wiring auto-reverses the posting).
+            # Revert to Projected.
             transfer_service.update_transfer(
                 transfer.id, seed_user["user"].id,
                 status_id=ref_cache.status_id(StatusEnum.PROJECTED),
@@ -402,13 +360,6 @@ class TestPerAccountReconciliation:
                 assert _independent_txn_effect(
                     account_id, scenario_id,
                 ) == Decimal("0.00")
-            # Four entries survive (a settle and a reversal per side, plan
-            # step ``balance:X-bi-6-3``); none was edited.
-            assert (
-                _db.session.query(JournalEntry)
-                .filter(transfer_family_journal_filter(transfer.id))
-                .count()
-            ) == 4
             _assert_full_reconciliation(scenario_id)
 
     @pytest.mark.server_clock
@@ -465,9 +416,6 @@ class TestPerAccountReconciliation:
                 assert _independent_txn_effect(
                     account_id, scenario_id,
                 ) == want_effect
-                assert posting_service.account_posting_total(
-                    account_id, scenario_id,
-                ) == want_ledger
                 assert posting_service.settled_transfer_effect(
                     account_id, scenario_id,
                 ) == want_effect
@@ -480,28 +428,21 @@ class TestPerAccountReconciliation:
 
 
 class TestEverySettledTransferPosts:
-    """Every settled, non-deleted transfer posts at least one journal entry."""
+    """Every settled, non-deleted transfer books at least one line."""
 
     def test_no_settled_transfer_is_silently_unposted(
         self, app, db, seed_user,
     ):
-        """Each settled transfer has >= 1 entry; none is silently skipped.
+        """Each settled transfer books >= 1 line; none is silently skipped.
 
         The direct per-transfer backstop (the localized companion to the
         aggregate per-account reconciliation): the per-account check catches a
-        SHORT account, but this pinpoints a settled transfer that posted
-        NOTHING -- e.g. one whose account lacked a paired ledger account, which
-        the historical backfill's INNER JOIN on ``ledger_accounts`` would
-        silently skip.  The Commit-2 pairing guarantees coverage, so this holds
-        in normal operation; the assertion is the production backstop the
-        Commit-4 review asked the oracle to carry.
+        SHORT account, but this pinpoints a settled transfer that books
+        NOTHING.
 
         Arithmetic: the two simple settles ($100 to Savings, $250 to Mortgage)
-        each post exactly two entries, one per side, so the 2 settled
-        non-deleted transfers map two-to-one onto the 4 TRANSFER_MOVEMENT-sourced
-        journal entries (the Step-5 account openings carry their own source
-        kinds and are excluded); the Projected $40 transfer is not settled and
-        posts none.
+        are the 2 settled non-deleted transfers, and each books a line; the
+        Projected $40 transfer is not settled.
         """
         with app.app_context():
             _build_asset_and_liability_books(seed_user)
@@ -520,58 +461,30 @@ class TestEverySettledTransferPosts:
                 assert period_nets_of_movements(
                     transfer_family_movement_ids(xfer.id), xfer.scenario_id,
                 ), f"settled transfer {xfer.id} books no line"
-            # Simple settles post exactly TWO entries each -- one per side,
-            # against transit (plan step ``balance:X-bi-6-3``) -- so the
-            # settled transfers and the transfer-movement-sourced journal
-            # entries are in a two-to-one bijection: no skip (an entry-less
-            # settled transfer) and no stray double-post.
-            assert (
-                _db.session.query(JournalEntry)
-                .filter(
-                    JournalEntry.source_kind_id == ref_cache.posting_source_id(
-                        PostingSourceEnum.TRANSFER_MOVEMENT,
-                    ),
-                )
-                .count()
-            ) == 2 * len(settled)
 
 
 # ---------------------------------------------------------------------------
-# 2. Per-entry balance + 3. global trial balance
+# 3. Global trial balance
 # ---------------------------------------------------------------------------
 
 
 class TestPerEntryAndTrialBalance:
-    """Every entry sums to zero with >= 2 legs; the whole ledger sums to zero."""
+    """The whole worked-out ledger sums to zero."""
 
     def test_every_entry_balances_and_trial_balance_is_zero(
         self, app, db, seed_user,
     ):
-        """Two settled transfers -> four balanced entries; trial balance 0.
+        """Two settled transfers book balanced lines; trial balance 0.
 
-        Arithmetic: the $100 and $250 settles each post two two-leg entries
-        (one per side, against transit -- plan step ``balance:X-bi-6-3``)
-        summing to zero, and the Step-5 openings (Checking +1000/-1000,
-        Savings +100/-100 against their equity twins) are balanced pairs too,
-        so no entry violates ``SUM = 0`` / ``COUNT >= 2`` and the
-        whole-ledger total stays 0.00.
+        Arithmetic: the $100 and $250 settles each book their sides against
+        transit (plan step ``balance:X-bi-6-3``), summing to zero, and the
+        Step-5 openings (Checking +1000/-1000, Savings +100/-100 against their
+        equity twins) are balanced pairs too, so the whole-ledger total stays
+        0.00.
         """
         with app.app_context():
             _build_asset_and_liability_books(seed_user)
 
-            # Exactly the two settled transfers produced transfer-movement-
-            # sourced entries, two each (the $40 Projected posted none).
-            assert (
-                _db.session.query(JournalEntry)
-                .filter(
-                    JournalEntry.source_kind_id == ref_cache.posting_source_id(
-                        PostingSourceEnum.TRANSFER_MOVEMENT,
-                    ),
-                )
-                .count()
-            ) == 4
-            # No entry violates the per-entry balanced invariant.
-            assert entries_violating_balance() == []
             # Whole-ledger trial balance is zero.
             assert trial_balance(_db.session) == Decimal("0.00")
 
@@ -590,12 +503,10 @@ class TestMultiScenarioIsolation:
 
         Arithmetic: Savings receives $100 in the baseline scenario and $70 in a
         separate what-if scenario, each riding the $100.00 opening its
-        scenario carries (the opening posts per scenario: in the baseline at
-        create time, in the what-if via the effect-time self-heal when the
-        $70 settle posts there).  Scoped to baseline the Savings ledger is
+        scenario carries.  Scoped to baseline the Savings ledger is
         100 + 100 = 200.00 (NOT 270); scoped to the what-if it is
-        100 + 70 = 170.00.  The ``scenario_id`` denorm on the journal entry
-        keeps the two apart, and each scenario reconciles independently.
+        100 + 70 = 170.00.  Each transfer's scenario keeps the two apart, and
+        each scenario reconciles independently.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -639,24 +550,18 @@ class TestMultiScenarioIsolation:
             assert account_net(
                 _db.session, checking.id, whatif.id,
             ) == Decimal("930.00")
-            # The service helper agrees, and each scenario reconciles alone.
-            assert posting_service.account_posting_total(
-                savings.id, baseline.id,
-            ) == Decimal("200.00")
-            assert posting_service.account_posting_total(
-                savings.id, whatif.id,
-            ) == Decimal("170.00")
+            # Each scenario reconciles alone.
             _assert_full_reconciliation(baseline.id)
             _assert_full_reconciliation(whatif.id)
 
 
 # ---------------------------------------------------------------------------
-# 5. Owner isolation via journal_entry.user_id (the "companion-owner" case)
+# 5. Owner isolation (the "companion-owner" case)
 # ---------------------------------------------------------------------------
 
 
 class TestOwnerIsolationViaJournalEntry:
-    """A posting's owner is its journal entry's; owners never cross-contaminate."""
+    """Owners never cross-contaminate."""
 
     @pytest.mark.server_clock
     def test_two_owners_reconcile_independently_and_posting_has_no_user_id(
@@ -667,10 +572,7 @@ class TestOwnerIsolationViaJournalEntry:
         Arithmetic: owner 1 settles $100 (their Checking -> their Savings);
         owner 2 settles $200 (their Checking -> their Savings).  Owner 1's
         Savings ledger is 100 (opening) + 100 = 200.00 and owner 2's is
-        100 (opening) + 200 = 300.00 with no leakage.
-        Every journal entry's ``user_id`` matches its account owner, the leg's
-        owner is reachable only via ``Posting.journal_entry.user_id`` (a
-        ``Posting`` carries no ``user_id`` column), and each owner's books
+        100 (opening) + 200 = 300.00 with no leakage, and each owner's books
         reconcile in their own baseline scenario.
         """
         with app.app_context():
@@ -707,22 +609,6 @@ class TestOwnerIsolationViaJournalEntry:
                 _db.session, savings2.id, scenario2,
             ) == Decimal("300.00")
 
-            # A Posting has no user_id of its own (ownership is normalized onto
-            # the journal entry); the owner is reached only via the entry.
-            assert not hasattr(Posting, "user_id")
-            owner1_id = seed_user["user"].id
-            owner2_id = seed_second_user["user"].id
-            for posting in _db.session.query(Posting).all():
-                entry_owner = posting.journal_entry.user_id
-                assert entry_owner in (owner1_id, owner2_id)
-                # The leg's ledger account belongs to the same owner as its
-                # journal entry -- the normalization holds end to end.
-                assert posting.ledger_account.user_id == entry_owner
-
-            # Every entry's user_id matches the owner whose account it touches.
-            for entry in _db.session.query(JournalEntry).all():
-                assert entry.user_id in (owner1_id, owner2_id)
-
             _assert_full_reconciliation(scenario1)
             _assert_full_reconciliation(scenario2)
 # ---------------------------------------------------------------------------
@@ -749,74 +635,6 @@ class TestOwnerIsolationViaJournalEntry:
 
 class TestOracleIsNotVacuous:
     """Prove the reconciliation and trial-balance checks catch real breakage."""
-
-    @pytest.mark.server_clock
-    def test_per_account_reconciliation_catches_a_tampered_settled_figure(
-        self, app, db, seed_user,
-    ):
-        """Tampering a transfer's settled figure leaves the STORE behind the records.
-
-        A reconciled $100 Checking -> Savings settle moves Savings' stored ledger
-        by +100 and has settled-shadow effect +100.  Forcing the TRANSFER's
-        settled figure -- the cash the Savings side's record moved, stored once
-        on the transfer since plan step balance:X-bi-6-4d-2 (its 4d-4 half; the
-        record carried it before, and the income shadow before that, ruling
-        R-BAL167 class 4) -- to 999 by raw SQL leaves the stored ledger where it
-        was but pushes the effect to +999.  A stale stored figure is the store's
-        own state: the worked-out read follows the record, so the per-account
-        comparison holds and the sweep's parity arm is what names the drift.
-        This goes with the store; :meth:`test_the_linked_sweep_catches_a_wrong_read`
-        grades the per-account comparison on the read.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            savings = create_account_of_type(
-                seed_user, _db.session, "Savings", "Tamper Savings",
-            )
-            _db.session.commit()
-            create_settled_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
-                seed_user["bootstrap_period"], amount=Decimal("100.00"),
-            )
-            _db.session.commit()
-            # Reconciled (absolutely) before tampering.
-            assert stored_account_net(
-                savings.id, scenario_id,
-            ) == _opening_anchor(savings.id) + _independent_txn_effect(
-                savings.id, scenario_id,
-            )
-
-            # Tamper the Savings side's RECORDED figure, not its estimate
-            # (plan step X-au-c3): a settled row's effect is what it recorded as
-            # having moved, so moving the plan on one is now inert.  The record
-            # is the side's covering movement (plan step balance:X-bi-4b-2),
-            # filed under the transfer's to-side on Savings rather than under
-            # the income shadow (ruling R-BAL167 class 4, plan step
-            # balance:X-bi-6-4d-2), and the figure it moved is stored once on
-            # the TRANSFER since that step's 4d-4 half.  A settled transfer
-            # holding two dated records and a figure above zero is a state the
-            # commit grade admits, so the tamper commits.
-            _db.session.execute(_db.text(
-                "UPDATE budget.transfers SET settled_figure = 999 "
-                "WHERE id IN ("
-                "  SELECT income_transfer_id FROM budget.transaction_entries "
-                "  WHERE income_transfer_id IS NOT NULL AND covers_settlement "
-                "    AND account_id = :a)"
-            ), {"a": savings.id})
-            _db.session.commit()
-
-            ledger = stored_account_net(savings.id, scenario_id)
-            effect = _independent_txn_effect(savings.id, scenario_id)
-            assert ledger == Decimal("200.00")  # stored ledger unchanged
-            assert effect == Decimal("999.00")  # transaction truth drifted
-            # opening (100) + effect (999) != ledger (200): the drift shows.
-            assert ledger != _opening_anchor(savings.id) + effect
-            # Drive the REAL production-wide sweep helper (not just the inline
-            # re-derivation above).  ``match`` pins the parity arm's message: the
-            # read and the source agree after this tamper, and only the store
-            # does not.
-            with pytest.raises(AssertionError, match="parts from the stored one"):
-                _assert_full_reconciliation(scenario_id)
 
     def test_the_linked_sweep_catches_a_wrong_read(
         self, app, db, seed_user, monkeypatch,
@@ -883,56 +701,3 @@ class TestOracleIsNotVacuous:
             ])
 
             assert trial_balance(_db.session) == Decimal("-100.00")
-
-    def test_stored_trial_balance_catches_an_injected_leg(self, app, db, seed_user):
-        """Injecting one extra leg pushes the stored trial balance off zero.
-
-        A balanced book has trial balance 0.00.  Inserting one unmatched +50
-        leg (raw SQL, flushed but never committed so the deferred per-entry
-        trigger never fires) makes the whole-ledger sum 0 + 50 = 50.00 -- so
-        the trial-balance ``= 0`` assertion is a real check, not one the
-        per-entry trigger makes vacuously true.  Rolled back so the leg never
-        lands.
-        """
-        with app.app_context():
-            savings = create_account_of_type(
-                seed_user, _db.session, "Savings", "TrialBalance Savings",
-            )
-            _db.session.commit()
-            transfer = create_settled_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
-                seed_user["bootstrap_period"], amount=Decimal("100.00"),
-            )
-            _db.session.commit()
-            assert stored_trial_balance() == Decimal("0.00")
-
-            # Inject one extra, unmatched leg onto one of the transfer's two
-            # entries (picked by its family link -- the Step-5 openings mean
-            # several entries exist).  Flush (not commit) makes it visible to
-            # the query; the DEFERRED balanced trigger validates only at
-            # COMMIT, which we never reach.
-            entry_id = (
-                _db.session.query(JournalEntry.id)
-                .filter(transfer_family_journal_filter(transfer.id))
-                .order_by(JournalEntry.id)
-                .limit(1)
-                .scalar()
-            )
-            _db.session.execute(_db.text(
-                "INSERT INTO budget.account_postings "
-                "  (journal_entry_id, ledger_account_id, amount, "
-                "   posting_kind_id) "
-                "VALUES (:e, :l, :a, :k)"
-            ), {
-                "e": entry_id,
-                "l": linked_ledger_account(_db.session, savings.id).id,
-                "a": Decimal("50.00"),
-                "k": ref_cache.posting_kind_id(PostingKindEnum.TRANSFER),
-            })
-            _db.session.flush()
-
-            assert stored_trial_balance() == Decimal("50.00")  # 0.00 + 50.00
-            assert stored_trial_balance() != Decimal("0.00")
-
-            # Discard the injected leg; the deferred trigger never fires.
-            _db.session.rollback()

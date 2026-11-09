@@ -12,8 +12,8 @@ Scope is the reporting SERVICE (``ledger_report_service``), which reads the
 ledger worked out from the records since plan task plan#2771: the reader
 contract over its lines (whole bookings, by their civil day; pay-period
 windows by the paycheck a line is filed in), the natural-balance presentation
-and derived retained earnings, the two-part balance-sheet tie-out, the labels
-of the worked-out chart, and that a planted stored entry moves no statement.
+and derived retained earnings, the two-part balance-sheet tie-out, and the
+labels of the worked-out chart.
 The exhaustive cross-year / loan / articulation oracle is Commit 13's
 ``tests/test_integration/test_posting_ledger_statements/`` package.
 
@@ -30,23 +30,17 @@ import sqlalchemy as sa
 
 from app.exceptions import BaselineMissingError
 
-from app.enums import LedgerAccountKindEnum, PostingKindEnum, PostingSourceEnum
 from app.models.category import Category
 from app.models.pay_period import PayPeriod
 from app.services import ledger_report_service
 from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 from app.utils.dates import pay_period_range_label
-from tests._stored_ledger import (
-    ledger_account_of_kind,
-    linked_ledger_account,
-)
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_cash_transaction,
     create_settled_transfer,
     last_covered_day,
-    make_balanced_entry,
 )
 
 # A far-future as-of that folds every posted source into the balance sheet,
@@ -771,71 +765,3 @@ class TestDisplayLabels:
             assert ledger_report_service.compute_balance_sheet(
                 user_id, _ALL_ACTIVITY,
             ).tie_out.in_balance is True
-
-
-# ---------------------------------------------------------------------------
-# 8. The statements read the worked-out ledger, never the stored journal
-# ---------------------------------------------------------------------------
-
-
-class TestAPlantedStoredEntryMovesNoStatement:
-    """A journal entry the records do not hold is no line of any statement.
-
-    The statements read the ledger worked out from the records (plan task
-    plan#2771), so an entry written into the stored journal by hand -- one
-    no record books -- moves no figure.  These two shapes are the two the
-    store's reader once had rules for: a SOURCELESS entry of a correction
-    kind, which it counted at its ``entry_date``, and a purchase-kind entry
-    whose movement link a hard delete SET-NULLed (residue), which it dropped.
-    """
-
-    @pytest.mark.parametrize("source_kind,posting_kind", [
-        (PostingSourceEnum.LOAN_PAYMENT, PostingKindEnum.PRINCIPAL),
-        (PostingSourceEnum.PURCHASE, PostingKindEnum.EXPENSE),
-    ])
-    def test_the_balance_sheet_is_unmoved(
-        self, app, db, seed_user, source_kind, posting_kind,
-    ):
-        """A $100.00 entry, Checking to its opening counter: nothing moves.
-
-        The seeded Checking opens at $1,000.00.  The planted entry's legs
-        are -$100.00 on Checking's stored row and +$100.00 on its opening
-        counter's, which a reader of the store would show as Checking
-        $900.00 (the store's reader did, for the correction kind).  The
-        sheet reads Checking $1,000.00 and is the same report before and
-        after, so the entry reached no figure.  The CONTROL: the entry is
-        really in the store, its two legs netting $0.00.
-        """
-        with app.app_context():
-            user_id = seed_user["user"].id
-            checking = seed_user["account"]
-            before = ledger_report_service.compute_balance_sheet(
-                user_id, _ALL_ACTIVITY,
-            )
-
-            entry = make_balanced_entry(
-                db.session, seed_user,
-                from_ledger_id=linked_ledger_account(
-                    db.session, checking.id,
-                ).id,
-                to_ledger_id=ledger_account_of_kind(
-                    db.session, checking.id,
-                    LedgerAccountKindEnum.ANCHOR_EQUITY,
-                ).id,
-                amount=Decimal("100.00"),
-                source_kind=source_kind,
-                posting_kind=posting_kind,
-            )
-            assert entry.transaction_entry_id is None
-            assert sorted(leg.amount for leg in entry.postings) == [
-                Decimal("-100.00"), Decimal("100.00"),
-            ]
-
-            after = ledger_report_service.compute_balance_sheet(
-                user_id, _ALL_ACTIVITY,
-            )
-            assert _find_line(
-                after.assets.lines, "Checking",
-            ).amount == Decimal("1000.00")
-            assert after == before
-            assert after.tie_out.in_balance is True

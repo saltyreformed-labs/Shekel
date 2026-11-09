@@ -10,9 +10,8 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import LedgerAccountClassEnum, PostingSourceEnum, StatusEnum
+from app.enums import LedgerAccountClassEnum, StatusEnum
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
 from app.models.account import AccountAnchorHistory
 from app.models.transaction_entry import TransactionEntry
@@ -78,7 +77,7 @@ class TestRevertAndRecategorizeReconciles:
         read holds nothing on Groceries, and Rent carries the expense.  Beyond the
         per-account check the Commit-6 lifecycle test makes, this asserts the
         COUNTER-ACCOUNT SWEEP reconciles after the move, attributing the effect to
-        Rent.  The sweep's parity arm grades the store's reversal of Groceries.
+        Rent.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -114,7 +113,7 @@ class TestRevertAndRecategorizeReconciles:
             ).status_code == 200
 
             # Rent now carries the expense; Groceries netted to zero; the whole
-            # ledger -- linked, counter (by linkage), per-entry, trial -- ties.
+            # ledger -- linked, counter (by linkage), trial -- ties.
             rent_counter = category_key(
                 rent_id, LedgerAccountClassEnum.EXPENSE,
             )
@@ -145,15 +144,12 @@ class TestRevertAndMoveReconciles:
         the revert), then re-settled.  The handler applies the new
         ``pay_period_id`` BEFORE the end-of-handler reconcile (since ruling
         **R-BAL58** the revert's own reconcile runs first and the handler
-        reconciles again after the move; this case holds under both), so a
-        reversal stamped with the row's current period would land in F --
-        leaving P's
-        entry and its reversal straddling two periods, where truncating F
-        CASCADE-deletes half the pair and permanently strands the other
-        (its link SET NULL, unhealable).  Under the R2 attribution
-        rule the reversal lands in P: P's entries net to zero per ledger
-        account, F carries exactly the re-settled -50/+50, and the whole
-        sweep ties after every step.
+        reconciles again after the move; this case holds under both).  Where
+        the STORE's reversal of P's entry lands (in P, by the R2 attribution
+        rule) is no longer graded here (plan#2914); the worked-out read holds
+        no reversal, so while the row is reverted P and F hold no line of it,
+        after the re-settle F carries exactly the -50/+50 and P still nothing,
+        and the whole sweep ties after every step.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -182,9 +178,7 @@ class TestRevertAndMoveReconciles:
                 },
             ).status_code == 200
             _assert_full_reconciliation(scenario_id)
-            # A reverted row books nothing: P and F each hold no line.  That the
-            # STORED reversal landed in the original period is the sweep's parity
-            # arm.
+            # A reverted row books nothing: P and F each hold no line.
             assert _period_ledger_nets(txn_id, original.id) == {}
             assert _period_ledger_nets(txn_id, moved_to.id) == {}
 
@@ -226,20 +220,15 @@ class TestRevertedTransactionReconcilesAtZero:
     ):
         """Settle +50 expense, revert; the ledger nets to zero and ties.
 
-        Arithmetic: a $50 Groceries expense posts -50 / +50, then a revert to
-        Projected reconciles a -50 / +50 reversal (append-only).
-        Groceries-Expense nets to zero and Checking lands back on its
-        $1000.00 opening, the revert UN-DATES the row's kept covering movement
-        so it drops from the source effect too, and two entries survive (the
-        original is never edited).
+        Arithmetic: a $50 Groceries expense books -50 / +50, then a revert to
+        Projected UN-DATES the row's kept covering movement, so it books
+        nothing and drops from the source effect too: Groceries-Expense nets
+        to zero and Checking lands back on its $1000.00 opening.
 
-        **The pair's LINK assertion was re-expressed at plan step
-        ``balance:X-bi-3e-2``** under ruling **R-BAL61**'s clause "a revert
-        UN-DATES the covering movement and keeps it" and the ``X-bi-3e`` step
-        sentence that ruled it: the old assertion (``transaction_entry_id IS
-        NULL`` on both entries) pinned the SET NULL side effect of the
-        revert DELETING the movement, which is the behaviour that ruling
-        changed; the money assertions and the full sweep are unchanged.
+        **The stored pair's LINK assertion went at plan#2914** with the suite's
+        grading of the store; what stays of ruling **R-BAL61**'s clause "a
+        revert UN-DATES the covering movement and keeps it" is the kept,
+        un-dated movement asserted below.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -272,26 +261,11 @@ class TestRevertedTransactionReconcilesAtZero:
             assert ledger_net(
                 _db.session, groceries_counter, scenario_id,
             ) == Decimal("0.00")
-            # Two entries survive (settle + reversal); neither was edited.
-            # They are the covering movement's (plan step X-bi-3a), and the
-            # revert KEEPS that mirror un-dated (plan step X-bi-3e-2, ruling
-            # R-BAL61) while the family reconcile reverses its legs -- so the
-            # pair stands as PURCHASE-sourced history still LINKED to the
-            # surviving movement, netting to zero.  (Through 3e-1 the revert
-            # deleted the mirror and the pair stood unlinked, SET NULL.)
+            # The revert KEEPS the covering movement (plan step X-bi-3a)
+            # un-dated (plan step X-bi-3e-2, ruling R-BAL61), so it books
+            # nothing.  (Through 3e-1 the revert deleted it.)
             (survivor,) = txn.covering_movements
             assert survivor.settled_on is None
-            assert (
-                _db.session.query(JournalEntry)
-                .filter(
-                    JournalEntry.scenario_id == scenario_id,
-                    JournalEntry.source_kind_id == ref_cache.posting_source_id(
-                        PostingSourceEnum.PURCHASE,
-                    ),
-                    JournalEntry.transaction_entry_id == survivor.id,
-                )
-                .count()
-            ) == 2
             _assert_full_reconciliation(scenario_id)
 
 
@@ -374,11 +348,6 @@ class TestAPostedPurchaseReconcilesUnderAnUnsettledParent:
             assert ledger_net(
                 _db.session, groceries_counter, scenario_id,
             ) == Decimal("40.00")
-            assert (
-                _db.session.query(JournalEntry)
-                .filter_by(transaction_entry_id=entry.id)
-                .count()
-            ) == 1
             _assert_full_reconciliation(scenario_id)
 
 
@@ -499,7 +468,7 @@ class TestASettledEnvelopesUndatedPurchasePostsNothing:
         purchase), so the seam writes no covering movement; the purchase
         carries no ``settled_on``, so it posts nothing.  Checking's linked
         ledger stays at its $1000.00 opening, the Groceries counter at 0.00,
-        the family holds no journal entry, and the independent movement
+        the family holds no line, and the independent movement
         effect is 0.00.  The sweep runs FIRST, because the sweep is the claim
         under test; the literals after it pin the same figures by hand.
         """
@@ -552,7 +521,7 @@ class TestASettledEnvelopesUndatedPurchasePostsNothing:
 
 
 class TestHardDeletedTransactionReconcilesAtZero:
-    """A hard-deleted settled cash transaction leaves a balanced net-zero pair."""
+    """A hard-deleted settled cash transaction leaves nothing booked."""
 
     def test_hard_delete_settled_cash_reconciles_via_null_linkage(
         self, app, db, auth_client, seed_user, seed_periods_today,
@@ -560,17 +529,12 @@ class TestHardDeletedTransactionReconcilesAtZero:
         """Hard-deleting a Paid ad-hoc expense severs the link but stays balanced.
 
         Arithmetic: a $50 Groceries expense books -50 / +50.  Deleting the ad-hoc
-        (template-less) row hard-deletes it: the route reverses the stored postings
-        FIRST (a -50 / +50 reversal), then the row is removed with its movement and
-        ``journal_entries.transaction_entry_id`` SET-NULLs on BOTH the original
-        and the reversal (the immutable legs survive, append-only).  The worked-out
+        (template-less) row hard-deletes it with its movement.  The worked-out
         read holds no line for a movement that is gone, so Groceries-Expense reads
-        0.00 and Checking its opening; that the STORED legs were reversed rather
-        than stranded is the sweep's parity arm.  This is the route-driven
-        production path (``delete_transaction`` -> the one removal act's
-        ``reverse_leaving_movements`` -> FK SET NULL; the row's own
-        ``reverse_postings_before_delete`` until plan task plan#2557) the
-        oracle claims to cover.
+        0.00 and Checking its opening.  This is the route-driven production path
+        (``delete_transaction``) the oracle claims to cover; what that path does
+        to the STORED postings (a reversal, then the FK SET NULL) is no longer
+        graded here (plan#2914).
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id

@@ -17,9 +17,7 @@ from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import account_posting_service
 from app.utils.balance_predicates import settled_status_ids
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import account_net, trial_balance
-from tests._stored_ledger import entries_violating_balance
 from tests._test_helpers import create_settled_cash_transaction, observed_day_of
 from app.services.row_valuation import settled_contribution
 
@@ -245,9 +243,7 @@ def _independent_post_assertion_source_effect(
 # ---------------------------------------------------------------------------
 
 
-def _assert_account_anchors_reconcile(
-    scenario_id: int, known_parity_differences: tuple = (),
-) -> None:
+def _assert_account_anchors_reconcile(scenario_id: int) -> None:
     """Assert every non-loan LINKED ledger reconciles ABSOLUTELY in *scenario_id*.
 
     For each of the scenario owner's non-loan real accounts, the worked-out net
@@ -256,12 +252,7 @@ def _assert_account_anchors_reconcile(
     EVERY such account, not only the ones a given test hand-computes.  Amortizing
     loans are excluded: their absolute invariant couples on the amortization
     split and is the loan oracle's job.  The trial balance is a global self-check
-    on the read.  Two arms grade the store and go with it: its per-entry balance,
-    and that the ledger worked out from the records equals the stored one to the
-    cent per (chart row, paycheck, day) (plan task plan#2527), every account's
-    opening and true-ups included.  A case whose fixture wrote a record past every
-    writer names the cells that leaves the store behind on in
-    *known_parity_differences* (``tests._ledger_parity.assert_ledger_parity``).
+    on the read.
     """
     scenario_owner_id = (
         _db.session.query(Scenario.user_id)
@@ -296,9 +287,7 @@ def _assert_account_anchors_reconcile(
             f"{latest_anchor} + post-assertion source effect {effect} in "
             f"scenario {scenario_id}"
         )
-    assert entries_violating_balance() == []
     assert trial_balance(_db.session) == Decimal("0")
-    assert_ledger_parity(_db.session, scenario_id, known_parity_differences)
 
 
 # ---------------------------------------------------------------------------

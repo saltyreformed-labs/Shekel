@@ -1,5 +1,4 @@
-"""Recurrence engine tests: which rows regenerate_for_template() keeps, retires and carries, and
-the ledger it reconciles as it maintains them.
+"""Recurrence engine tests: which rows regenerate_for_template() keeps, retires and carries.
 """
 
 import pytest
@@ -7,7 +6,6 @@ from decimal import Decimal
 
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.ref import AccountType, TransactionType
 from app.services import recurrence_engine
 from app.exceptions import RecurrenceConflict
@@ -26,7 +24,7 @@ from ._helpers import _TestRegenerateForTemplateMembers
 
 
 class TestRegenerateForTemplate(_TestRegenerateForTemplateMembers):
-    """Keeps, retires, carries, reconciles; members on _TestRegenerateForTemplateMembers."""
+    """Keeps, retires, carries; members on _TestRegenerateForTemplateMembers."""
 
     def test_regeneration_keeps_the_purchases_recorded_against_a_row(
         self, app, db, seed_user, seed_periods
@@ -411,156 +409,6 @@ class TestRegenerateForTemplate(_TestRegenerateForTemplateMembers):
                 assert txn.category_id == new_category.id
                 assert txn.transaction_type_id == income_type.id
                 assert txn.due_date.day == 5
-
-    def test_maintaining_a_row_reconciles_the_ledger_its_purchase_posted(
-        self, app, db, seed_user, seed_periods
-    ):
-        """A purchase's counter leg follows its parent's category.
-
-        **The ledger half of plan step R10-a, which had NO coverage**: an
-        adversarial review replaced the whole ``sync_transaction_postings``
-        loop with ``pass`` and the full suite still passed.  The cause was the
-        fixture -- every test purchase was built without a ``settled_on``, so
-        ``purchase_posts()`` returned False and no test in the suite ever
-        booked a ledger leg at all.
-
-        A purchase carrying a recorded bank posting day IS a cash movement
-        (ruling R-FM), debited against its envelope's category.  Move the
-        template's category and the counter leg must move with it, while the
-        cash leg stays where the money actually left.
-        """
-        with app.app_context():
-            template = self._make_envelope_template(seed_user)
-            created = recurrence_engine.generate_for_template(
-                template,
-                GenerationSchedule.for_period_ids(
-                    BalanceContext.build(template.user_id), {p.id for p in seed_periods},
-                ),
-                seed_user["scenario"].id,
-            )
-            db.session.flush()
-
-            spent_on = created[0]
-            self._record_purchase(
-                spent_on, seed_user, amount="120.00",
-                settled_on=spent_on.pay_period.start_date,
-            )
-            db.session.flush()
-
-            def legs():
-                """Every posting on this row's family, by ledger account."""
-                rows = (
-                    db.session.query(Posting.ledger_account_id, Posting.amount)
-                    .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-                    .filter(JournalEntry.transaction_entry_id.isnot(None))
-                    .all()
-                )
-                totals = {}
-                for ledger_account_id, amount in rows:
-                    totals[ledger_account_id] = (
-                        totals.get(ledger_account_id, Decimal("0.00")) + amount
-                    )
-                return {k: v for k, v in totals.items() if v != Decimal("0.00")}
-
-            before = legs()
-            assert before, (
-                "the purchase booked no ledger legs -- the fixture cannot see "
-                "the behaviour this test exists for"
-            )
-            assert sum(before.values()) == Decimal("0.00")
-
-            template.category_id = seed_user["categories"]["Groceries"].id
-            db.session.flush()
-            recurrence_engine.regenerate_for_template(
-                template,
-                GenerationSchedule.for_period_ids(
-                    BalanceContext.build(template.user_id), {p.id for p in seed_periods},
-                ),
-                seed_user["scenario"].id,
-            )
-            db.session.flush()
-
-            after = legs()
-            # Still balanced, and the counter leg actually MOVED: the set of
-            # ledger accounts holding a non-zero net is different, while the
-            # cash side is untouched.
-            assert sum(after.values()) == Decimal("0.00")
-            assert after != before, (
-                "the category move did not reach the purchase's counter leg"
-            )
-            moved_off = set(before) - set(after)
-            moved_onto = set(after) - set(before)
-            assert moved_off and moved_onto, (
-                f"expected the counter leg to move accounts, got "
-                f"{before} -> {after}"
-            )
-
-    def test_propagating_to_a_rule_less_definition_reconciles_the_ledger_too(
-        self, app, db, seed_user, seed_periods
-    ):
-        """The transaction twin of ``propagate_to_unruled_template``, ledger half.
-
-        Plan step balance:X-bi-7a.  ``propagate_to_unruled_definition`` is
-        what a rule-less definition's edit reaches its rows by, and it takes
-        the same two acts ``_apply_maintain_work`` takes after its splat: a
-        flush, then ``sync_transaction_postings`` on every updated row.  The
-        case above is why that loop is graded rather than trusted -- deleting
-        it once passed the whole suite.  Here the definition's cadence is
-        CLEARED after its row books a purchase leg, its category moves, and
-        the purchase's counter leg has to move with it.
-        """
-        with app.app_context():
-            template = self._make_envelope_template(seed_user)
-            created = recurrence_engine.generate_for_template(
-                template,
-                GenerationSchedule.for_period_ids(
-                    BalanceContext.build(template.user_id), {seed_periods[0].id},
-                ),
-                seed_user["scenario"].id,
-            )
-            db.session.flush()
-            (spent_on,) = created
-            self._record_purchase(
-                spent_on, seed_user, amount="120.00",
-                settled_on=spent_on.pay_period.start_date,
-            )
-            template.recurrence_rule = None
-            db.session.flush()
-            assert spent_on.recurs is False
-
-            def legs():
-                """Every posting on this row's family, by ledger account."""
-                rows = (
-                    db.session.query(Posting.ledger_account_id, Posting.amount)
-                    .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-                    .filter(JournalEntry.transaction_entry_id.isnot(None))
-                    .all()
-                )
-                totals = {}
-                for ledger_account_id, amount in rows:
-                    totals[ledger_account_id] = (
-                        totals.get(ledger_account_id, Decimal("0.00")) + amount
-                    )
-                return {k: v for k, v in totals.items() if v != Decimal("0.00")}
-
-            before = legs()
-            assert before and sum(before.values()) == Decimal("0.00")
-
-            template.category_id = seed_user["categories"]["Groceries"].id
-            db.session.flush()
-            retained = recurrence_engine.propagate_to_unruled_definition(
-                template, [spent_on],
-            )
-            db.session.flush()
-
-            assert retained == []
-            assert spent_on.category_id == template.category_id
-            after = legs()
-            assert sum(after.values()) == Decimal("0.00")
-            assert after != before, (
-                "the category move did not reach the purchase's counter leg"
-            )
-            assert (set(before) - set(after)) and (set(after) - set(before))
 
     def test_propagating_carries_a_row_holding_records_when_its_account_moves(
         self, app, db, seed_user, seed_periods

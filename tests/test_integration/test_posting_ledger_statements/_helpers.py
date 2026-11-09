@@ -14,7 +14,6 @@ from app.models.account import Account, AccountAnchorHistory
 from app.services import account_posting_service, ledger_report_service
 
 from tests._ledger_reads import scenario_lines, trial_balance
-from tests._stored_ledger import entries_violating_balance
 from tests._test_helpers import observed_day_of
 
 
@@ -222,8 +221,7 @@ def _windowed_equity_corrections(
 
 
 def _assert_ledger_self_consistent() -> None:
-    """Assert every stored entry balances and the read's trial balance is zero."""
-    assert entries_violating_balance() == []
+    """Assert the read's trial balance is zero."""
     assert trial_balance(_db.session) == Decimal("0")
 
 

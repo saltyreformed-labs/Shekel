@@ -84,15 +84,14 @@ class TestADeletedTransferItsBooksHoldStaysDeleted:
                 # The save has no category: its select posts the empty option.
                 category_id="",
             )
-            as_found = _transfer_as_stored(seed_user, first_id)
+            as_found = _transfer_as_stored(first_id)
 
             resp = _apply_use(auth_client, f"/transfers/{template_id}", edit, first_id)
 
             # Left exactly as found: the transfer's every column (deleted,
-            # status, owner flag, amount and its source among them) and the
-            # owner's journal.
-            assert _transfer_as_stored(seed_user, first_id) == as_found
-            assert as_found[0]["is_deleted"]
+            # status, owner flag, amount and its source among them).
+            assert _transfer_as_stored(first_id) == as_found
+            assert as_found["is_deleted"]
             assert {row.id for row in _transfers(template_id, deleted=False)} == others
             # The nine live transfers at the new $60.00 from the first
             # paycheck on, and nothing for the deleted one: 9 x $60.00.
@@ -255,23 +254,18 @@ def _priced_before_its_first_paycheck(column, template_id, seed_periods):
     _db.session.commit()
 
 
-def _transfer_as_stored(seed_user, transfer_id):
-    """The transfer's row and the owner's journal-entry count, by SQL.
+def _transfer_as_stored(transfer_id):
+    """The transfer's row, by SQL.
 
     Every stored column, read after the session is expired, so a write the
-    resolver made to any of them -- or to the ledger -- shows.  It read the
-    transfer's two twins too, until plan step ``balance:X-bi-6-4d-2`` deleted
-    them and ``balance:X-bi-6-5`` the column they named it by.
+    resolver made to any of them shows.  It read the transfer's two twins too,
+    until plan step ``balance:X-bi-6-4d-2`` deleted them and ``balance:X-bi-6-5``
+    the column they named it by, and the owner's stored journal until plan#2914.
     """
     _db.session.expire_all()
-    transfer = dict(_db.session.execute(
+    return dict(_db.session.execute(
         text("SELECT * FROM budget.transfers WHERE id = :id"), {"id": transfer_id},
     ).mappings().one())
-    journal = _db.session.execute(
-        text("SELECT count(*) FROM budget.journal_entries WHERE user_id = :user"),
-        {"user": seed_user["user"].id},
-    ).scalar_one()
-    return transfer, journal
 
 
 class _Forms(HTMLParser):

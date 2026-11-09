@@ -28,7 +28,6 @@ from app.enums import (
 from app.exceptions import NotFoundError, ValidationError
 from app.extensions import db
 from app.models.account import AccountAnchorHistory
-from app.models.journal_entry import JournalEntry
 from app.models.ref import Status
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
@@ -44,12 +43,12 @@ from app.services.cash_ledger import (
     derived_amount_basis,
     resolve_transaction_amount,
 )
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
+    account_net,
     family_movement_ids,
     net_posted_by_day,
+    owner_worked_out_lines,
 )
-from tests._stored_ledger import family_journal_filter
 from tests._test_helpers import NO_TAX_LAW
 from tests._test_helpers import (
     amount_basis_for,
@@ -1111,8 +1110,8 @@ class TestApplyRequestedStatusTheDoorVerb:
     ``status_seam.apply_status_change`` -- the MECHANICS primitive, which
     assigns the column and posts nothing -- so the PATCH door could flip a row
     into the settled band without ever asking what the row was worth (finding
-    **N-219**).  These grade the verb's two acts: the status change, and the
-    ledger reconcile that every status change owes.
+    **N-219**).  These grade the verb's status change, and the ledger it
+    leaves.
     """
 
     @staticmethod
@@ -1130,14 +1129,10 @@ class TestApplyRequestedStatusTheDoorVerb:
     def test_a_status_change_reconciles_the_ledger(
         self, app, db, seed_user, seed_periods,
     ):
-        """A settled status posts the row's effect, in the same call.
+        """A settled status books the row's effect, in the same call.
 
-        Act 2 is the point: the seam alone assigns a column and posts nothing,
-        so a door that called it settled a row while the double-entry ledger
-        stayed flat.  A $100.00 expense settles and exactly ONE journal entry
-        appears against it, booking $100.00 out of the cash account.
-
-        Shown to FIRE: deleting the reconcile leaves zero entries.
+        A $100.00 expense settles through the verb and its movement books
+        $100.00 out of the cash account on the settle day.
         """
         with app.app_context():
             txn = self._plain_row(seed_user, seed_periods[0])
@@ -1148,13 +1143,11 @@ class TestApplyRequestedStatusTheDoorVerb:
 
             assert txn.status_id == ref_cache.status_id(StatusEnum.DONE)
             assert txn.settled_on == display_today()
-            # The row's FAMILY (plan step X-bi-3a): the $100.00 is posted under
-            # the covering movement the seam wrote, the parent's leg is zero.
-            entries = (
-                db.session.query(JournalEntry)
-                .filter(family_journal_filter(txn)).all()
-            )
-            assert len(entries) == 1
+            # The row's FAMILY (plan step X-bi-3a): the $100.00 is booked under
+            # the covering movement the seam wrote, on today, its settle day.
+            assert net_posted_by_day(family_movement_ids(txn)) == {
+                display_today(): Decimal("100.00"),
+            }
             # effective_amount == estimated_amount == 100.00, nothing credited,
             # so the cash account's movement effect is a 100.00 outflow.
             assert posting_service.posted_purchase_effect(
@@ -1162,39 +1155,47 @@ class TestApplyRequestedStatusTheDoorVerb:
             ) == Decimal("-100.00")
 
     @staticmethod
-    def _ledger_entry_ids(user_id):
-        """Return the ids of every journal entry the owner's ledger holds, ascending.
+    def _ledger_nets(user_id):
+        """Return the owner's worked-out ledger, net per scenario, chart account and day.
 
-        The ledger is append-only, so a write of any kind -- a leg for this
-        row, its movement, or anything else -- adds an id, and the same list
-        before and after a call is the whole of "it posted nothing".  These
-        cases read the row's own ``transaction_id`` link until plan step
-        ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted it; that
-        read had found nothing since plan step ``balance:X-bi-4a``, when a
-        row's money moved onto its movements, so it graded nothing.
+        The ledger is worked out from the records, so a write of any kind that
+        books money -- a line for this row, its movement, or anything else --
+        moves a net here, and the same answer before and after a call is the
+        whole of "it posted nothing".  It read the stored journal's entry ids
+        until plan step plan#2914 took the store's grading off the suite.
         """
-        return [
-            entry_id for (entry_id,) in (
-                db.session.query(JournalEntry.id)
-                .filter(JournalEntry.user_id == user_id)
-                .order_by(JournalEntry.id)
-            )
-        ]
+        nets = {}
+        for scenario_id, line in owner_worked_out_lines(db.session, user_id):
+            cell = (scenario_id, line.key, line.entry_date)
+            nets[cell] = nets.get(cell, Decimal("0.00")) + line.amount
+        return {cell: net for cell, net in nets.items() if net != 0}
+
+    @staticmethod
+    def _assert_the_ledger_is_not_empty(seed_user):
+        """Assert the snapshot holds the seeded Checking's opening, so it is no empty one.
+
+        Hand arithmetic: the seeded Checking opens at $1,000.00 and the
+        Projected row books nothing, so Checking nets 1,000.00 + 0.00 =
+        1,000.00.
+        """
+        assert account_net(
+            db.session, seed_user["account"].id, seed_user["scenario"].id,
+        ) == Decimal("1000.00")
 
     def test_a_cancel_leaves_the_ledger_flat(
         self, app, db, seed_user, seed_periods,
     ):
-        """Cancelling a Projected row posts nothing, and that IS the reconcile.
+        """Cancelling a Projected row posts nothing.
 
-        The non-settled arm.  A Projected row has never posted, so reconciling
-        to Cancelled's empty target is an idempotent no-op -- the property the
-        cancel handler used to spell out for itself and now inherits.  The
-        settle day is cleared by the seam, because a cancelled row's money
-        never moved.
+        The non-settled arm.  A Projected row has never posted, so Cancelled
+        leaves the ledger as it was -- the property the cancel handler used to
+        spell out for itself and now inherits.  The settle day is cleared by
+        the seam, because a cancelled row's money never moved.
         """
         with app.app_context():
             txn = self._plain_row(seed_user, seed_periods[0])
-            ledger_before = self._ledger_entry_ids(seed_user["user"].id)
+            ledger_before = self._ledger_nets(seed_user["user"].id)
+            self._assert_the_ledger_is_not_empty(seed_user)
 
             transaction_service.apply_requested_status(
                 txn, ref_cache.status_id(StatusEnum.CANCELLED),
@@ -1202,7 +1203,7 @@ class TestApplyRequestedStatusTheDoorVerb:
 
             assert txn.status_id == ref_cache.status_id(StatusEnum.CANCELLED)
             assert txn.settled_on is None
-            assert self._ledger_entry_ids(seed_user["user"].id) == ledger_before
+            assert self._ledger_nets(seed_user["user"].id) == ledger_before
 
     def test_an_illegal_transition_raises_and_posts_nothing(
         self, app, db, seed_user, seed_periods,
@@ -1217,7 +1218,8 @@ class TestApplyRequestedStatusTheDoorVerb:
         """
         with app.app_context():
             txn = self._plain_row(seed_user, seed_periods[0])
-            ledger_before = self._ledger_entry_ids(seed_user["user"].id)
+            ledger_before = self._ledger_nets(seed_user["user"].id)
+            self._assert_the_ledger_is_not_empty(seed_user)
             transaction_service.apply_requested_status(
                 txn, ref_cache.status_id(StatusEnum.CANCELLED),
             )
@@ -1229,7 +1231,7 @@ class TestApplyRequestedStatusTheDoorVerb:
 
             assert "transition" in str(exc.value)
             assert txn.status_id == ref_cache.status_id(StatusEnum.CANCELLED)
-            assert self._ledger_entry_ids(seed_user["user"].id) == ledger_before
+            assert self._ledger_nets(seed_user["user"].id) == ledger_before
 
 
 class TestARevertKeepsWhatMovedAndReleasesTheAssertion:
@@ -1704,12 +1706,10 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
             # here: it queries ``budget.transactions`` through
             # ``posting_reads.settled_figure_clause``, the query-tier twin of
             # ``row_valuation.settled_figure``, so asserting on it is the line
-            # above restated in SQL.  This read cannot see the door's reconcile
-            # either, so the parity line below grades that.
+            # above restated in SQL.
             assert net_posted_by_day(
                 family_movement_ids(txn),
             ) == {day: Decimal("87.10")}
-            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_a_REVERT_carrying_a_figure_is_refused_and_changes_nothing(
         self, app, db, seed_user, seed_periods,

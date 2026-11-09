@@ -24,7 +24,6 @@ import pytest
 
 from app import ref_cache
 from app.enums import (
-    PostingKindEnum,
     PostingSourceEnum,
     StatusEnum,
 )
@@ -33,16 +32,12 @@ from app.exceptions import (
     PayPeriodLocked,
     PayPeriodUnresolved,
 )
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.pay_period import PayPeriod
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.services import (
     account_posting_service,
-    loan_posting_service,
     pay_period_admin,
-    posting_service,
     transfer_service,
 )
 from app.services.ledger_lines import linked_key
@@ -59,10 +54,6 @@ from scripts.integrity_check import (
 from tests._ledger_reads import (
     owner_worked_out_lines,
     worked_out_totals,
-)
-from tests._ledger_parity import (
-    assert_ledger_parity,
-    ledger_parity_differences,
 )
 from tests._test_helpers import (
     record_paydays_across_a_hole,
@@ -116,85 +107,9 @@ def _openings_filed_on(db_session, user_id, day):
     return {line.pay_period_id for line in lines}
 
 
-def _emit_untethered_entry(db_session, seed_user, savings, period, amount):
-    """Post one balanced entry whose per-account nets are NON-zero in *period*.
-
-    The shape a loan opening / true-up correction has -- balanced across two
-    ledger accounts (Checking ``-amount`` / Savings ``+amount``), each with a
-    non-zero net, linked to NO movement -- with no settled source row (which
-    would trip the SETTLED_TXN lock instead).  Built directly on the models
-    (tests are unfenced); the deferred balanced-journal trigger accepts it.
-    """
-    ledger_ids = {
-        account_id: ledger_id
-        for ledger_id, account_id in db_session.query(
-            LedgerAccount.id, LedgerAccount.account_id,
-        ).filter(LedgerAccount.account_id.isnot(None)).all()
-    }
-    entry = JournalEntry(
-        user_id=seed_user["user"].id,
-        scenario_id=seed_user["scenario"].id,
-        pay_period_id=period.id,
-        entry_date=period.start_date,
-        source_kind_id=ref_cache.posting_source_id(
-            PostingSourceEnum.TRANSFER_MOVEMENT,
-        ),
-        description="Untethered balanced correction",
-    )
-    db_session.add(entry)
-    transfer_kind = ref_cache.posting_kind_id(PostingKindEnum.TRANSFER)
-    entry.postings.append(Posting(
-        ledger_account_id=ledger_ids[seed_user["account"].id],
-        amount=-amount, posting_kind_id=transfer_kind,
-    ))
-    entry.postings.append(Posting(
-        ledger_account_id=ledger_ids[savings.id],
-        amount=amount, posting_kind_id=transfer_kind,
-    ))
-    db_session.flush()
-    return entry
-
-
 def _count_periods(db_session, user_id):
     """Count the user's pay periods."""
     return db_session.query(PayPeriod).filter_by(user_id=user_id).count()
-
-
-def _opening_entry_period(db_session, account_id):
-    """Return the pay period the account's OPENING correction is filed under.
-
-    The non-vacuity probe for the hard-lock case below: that case is about a
-    correction sitting inside the window being truncated, and since plan step
-    X-f3c-2a the opening entry is dated where the account's BOOKS open rather
-    than where its balance was observed.  A fixture whose books drift out of
-    the window would leave the case asserting a lock that nothing triggers, so
-    the placement is measured instead of assumed.
-
-    Args:
-        db_session: The test ``db.session``.
-        account_id: The account whose opening correction to locate.
-
-    Returns:
-        The ``budget.pay_periods`` id of its ``account_opening`` journal
-        entry, or ``None`` when it books none (a ``$0.00`` opening).
-    """
-    return (
-        db_session.query(JournalEntry.pay_period_id)
-        .filter(
-            JournalEntry.source_kind_id == ref_cache.posting_source_id(
-                PostingSourceEnum.ACCOUNT_OPENING,
-            ),
-            JournalEntry.id.in_(
-                db_session.query(Posting.journal_entry_id).join(
-                    LedgerAccount,
-                    Posting.ledger_account_id == LedgerAccount.id,
-                ).filter(LedgerAccount.account_id == account_id)
-            ),
-        )
-        .order_by(JournalEntry.id.desc())
-        .limit(1)
-        .scalar()
-    )
 
 
 def _txns_in(db_session, period_id):
@@ -498,8 +413,6 @@ class TestTruncateHardLocks:
         Ruling plan#2782.  The worked-out ledger files each opening by its
         day, so in the paycheck covering it before the truncate and in the
         last kept one after, clamped, with every per-key total unchanged.
-        The stored copy goes with the cascade, short until its next re-sync,
-        which the end of this case runs: the ruling's claim about the store.
 
         **The schedule is generated AROUND today deliberately** (plan step
         X-ai-r): the account's observed day (today) falls inside one of its
@@ -535,10 +448,6 @@ class TestTruncateHardLocks:
             )
             db.session.commit()
             scenario = seed_user["scenario"].id
-            assert _opening_entry_period(db.session, savings.id) == anchored.id, (
-                "the fixture must place the opening correction inside the "
-                "window this case truncates, or it grades nothing"
-            )
             day, last_kept = anchored.start_date, previous.id
             assert _openings_filed_on(db.session, user_id, day) == {anchored.id}
             totals = worked_out_totals(db.session, user_id)
@@ -555,96 +464,6 @@ class TestTruncateHardLocks:
             assert _count_periods(db.session, user_id) == before - len(doomed)
             assert _openings_filed_on(db.session, user_id, day) == {last_kept}
             assert worked_out_totals(db.session, user_id) == totals
-            # The stored copy is short until its next re-sync, and then equal.
-            assert ledger_parity_differences(db.session, scenario)
-            loan_posting_service.resync_user_loan_postings(user_id)
-            account_posting_service.resync_user_account_anchor_postings(user_id)
-            db.session.commit()
-            assert_ledger_parity(db.session, scenario)
-            assert_pay_period_invariants(db.session, user_id)
-
-    def test_a_stored_entry_no_record_rebuilds_no_longer_blocks(
-        self, app, db, seed_user,
-    ):
-        """A period holding a non-self-cancelling stored entry truncates (plan#2782).
-
-        The deleted lock's own firing case (the 2026-07-02 adversarial review's
-        R2): Checking -100 / Savings +100, built directly with no settled
-        transaction, in a to-delete period.  The cascade takes it, and the
-        worked-out ledger, which reads the records, never held it.
-        """
-        with app.app_context():
-            periods = _future_periods(db.session, seed_user, count=4)
-            user_id = seed_user["user"].id
-            savings = create_savings_account(
-                seed_user, db.session, "Savings", Decimal("500.00"),
-            )
-            db.session.flush()
-            _emit_untethered_entry(
-                db.session, seed_user, savings, periods[2],
-                Decimal("100.00"),
-            )
-            db.session.commit()
-            totals = worked_out_totals(db.session, user_id)
-            doomed_id = periods[2].id
-
-            assert pay_period_admin.truncate_pay_periods(
-                user_id, keep_through_period_id=periods[1].id,
-            ) == 2
-            db.session.commit()
-
-            assert db.session.query(JournalEntry).filter_by(
-                pay_period_id=doomed_id,
-            ).count() == 0
-            assert worked_out_totals(db.session, user_id) == totals
-
-    def test_zero_netting_reversal_pair_does_not_block(
-        self, app, db, seed_user,
-    ):
-        """A period whose entries fully cancel per ledger account may truncate.
-
-        After a settle-in-F, revert-and-move-to-P flow, F holds the original
-        entry AND its reversal (the R2 attribution rule keeps the reversal in
-        the period it reverses), netting every ledger account to zero.
-        Cascading that pair moves no account's sum -- truncating F
-        succeeds, the moved (now Projected) transaction survives in P, and
-        the whole-ledger trial balance stays zero.
-        """
-        with app.app_context():
-            periods = _future_periods(db.session, seed_user, count=4)
-            user_id = seed_user["user"].id
-            keep_period = seed_user["bootstrap_period"]
-            txn = add_txn(
-                db.session, seed_user, periods[2], "Early Bill", "100.00",
-                status_enum=StatusEnum.DONE, category_key="Groceries",
-            )
-            db.session.commit()
-            posting_service.sync_transaction_postings(txn)
-            db.session.commit()
-
-            # The H1 mirror flow: revert AND move back to the kept period.
-            txn.pay_period_id = keep_period.id
-            txn.status_id = ref_cache.status_id(StatusEnum.PROJECTED)
-            db.session.flush()
-            posting_service.sync_transaction_postings(txn)
-            db.session.commit()
-            # F holds the self-cancelling pair; the source row left it.
-            assert db.session.query(JournalEntry).filter_by(
-                pay_period_id=periods[2].id,
-            ).count() == 2
-
-            deleted = pay_period_admin.truncate_pay_periods(
-                user_id, keep_through_period_id=periods[1].id,
-                confirm_discard=True,
-            )
-
-            assert deleted == 2
-            # The moved transaction survives in the kept period; the cascade
-            # removed the netted pair without moving any account's sum.
-            assert db.session.get(Transaction, txn.id) is not None
-            assert db.session.query(
-                db.func.coalesce(db.func.sum(Posting.amount), Decimal("0")),
-            ).scalar() == Decimal("0")
             assert_pay_period_invariants(db.session, user_id)
 
     def test_a_rules_stated_start_no_longer_blocks_a_truncate(

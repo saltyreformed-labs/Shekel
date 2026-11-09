@@ -30,8 +30,6 @@ from tests._ledger_reads import (
     scenario_lines,
     trial_balance,
 )
-from tests._stored_ledger import entries_violating_balance
-from tests._ledger_parity import assert_ledger_parity
 from tests._test_helpers import (
     create_loan_with_trueup,
     create_settled_transfer,
@@ -438,40 +436,30 @@ def _assert_completeness(loan_account_id: int, scenario_id: int) -> None:
 
 
 def _assert_loan_reconciles(loan, scenario_id: int) -> None:
-    """Assert a loan's whole ledger reconciles: three-way + completeness + trial.
+    """Assert a loan's whole ledger reconciles: invariant + completeness + trial.
 
     The production-wide sweep run after each fixture's mutations (plan 8.3 / 8.4 /
     8.7).  It ties together, for one loan in one scenario:
 
-    * (a) the store's reader ``account_posting_total`` equals the worked-out net
-      of the loan's own line -- the store has caught up with the read;
-    * (b) the loan-aware superseding invariant, on the read and the independent
+    * (a) the loan-aware superseding invariant, on the read and the independent
       source query: ``linked_net == settled_income_cash - per_loan_correction_net``
       (the loan nets to cash minus the non-principal moved off it);
-    * (c) the same invariant through the store's readers
-      (``account_posting_total == settled_transfer_effect - per_loan_net``);
-    * (d) completeness -- every eligible payment owing a correction has one;
-    * (e) the stored journal's per-entry balance and the read's zero whole-ledger
-      trial balance;
-    * (f) the ledger worked out from the records equals the stored one to the
-      cent per (chart row, paycheck, day) over the scenario owner's whole
-      ledger, every loan's anchors and payment splits included (plan task
-      plan#2527).  It grades the STORE against the loan walk -- its filing,
-      its chart rows, whether it has caught up -- and no split VALUE: the
-      read and the writer take the split from the one walk, so a wrong split
-      moves both alike.
+    * (b) ``settled_transfer_effect``, a read of the records, equals that
+      independent source query;
+    * (c) completeness -- every eligible payment owing a correction has one;
+    * (d) the read's zero whole-ledger trial balance.
 
     IMPORTANT -- this is a STRUCTURAL / reader-consistency sweep, NOT a split-VALUE
-    check.  (a)/(b)/(c)/(e) are accounting IDENTITIES: given Step 2 is correct and
-    every correction balances (both DB-enforced by ``ck_account_postings_balanced``),
-    they hold no matter WHAT interest/principal the split posted -- if the split
+    check.  (a)/(b)/(d) are accounting IDENTITIES: given Step 2 is correct and
+    every correction balances, they hold no matter WHAT interest/principal the
+    split booked -- if the split
     booked interest 700 instead of 500, ``per_loan`` and the loan leg both shift and
     the identities still pass (this is why, in the injected-``+$10`` experiment, only
     the two invariant-only tests survived).  So every caller MUST pair this with a
     value assertion -- a parallel-run ``ledger == resolver`` or a hand-computed
     literal -- which is what actually pins the split; the sweep's job is to catch a
     reader / scenario-scope / routing / balance defect the value checks do not.
-    (b)/(c) also assume the loan has NO OUTBOUND transfer:
+    (a)/(b) also assume the loan has NO OUTBOUND transfer:
     ``_independent_settled_income_cash`` sums transfers INTO the loan only, which
     restates ``settled_transfer_effect`` faithfully only while every loan side is a
     to-side (income) -- true for a payment, false for a hypothetical disbursement.
@@ -481,35 +469,22 @@ def _assert_loan_reconciles(loan, scenario_id: int) -> None:
     transfer touching a loan is a payment IN by construction.
     """
     loan_id = loan.id
-    linked_reader = posting_service.account_posting_total(loan_id, scenario_id)
     linked_read = account_net(_db.session, loan_id, scenario_id)
     per_loan = _per_loan_correction_net(loan_id, scenario_id)
     income_independent = _independent_settled_income_cash(loan_id, scenario_id)
     income_reader = posting_service.settled_transfer_effect(loan_id, scenario_id)
 
-    # (a) the store's reader == the worked-out net of the loan's own line.
-    assert linked_reader == linked_read, (
-        f"loan {loan_id}: account_posting_total {linked_reader} != worked-out "
-        f"linked net {linked_read} in scenario {scenario_id}"
-    )
-    # (b) superseding invariant, on the read and the independent source query.
+    # (a) superseding invariant, on the read and the independent source query.
     assert linked_read == income_independent - per_loan, (
         f"loan {loan_id}: linked net {linked_read} != income cash "
         f"{income_independent} - non-principal corrections {per_loan}"
     )
-    # (c) superseding invariant through the store's readers.
+    # (b) the records' settled-transfer effect == the independent query.
     assert income_reader == income_independent, (
         f"loan {loan_id}: settled_transfer_effect {income_reader} != independent "
         f"income cash {income_independent}"
     )
-    assert linked_reader == income_reader - per_loan, (
-        f"loan {loan_id}: account_posting_total {linked_reader} != "
-        f"settled_transfer_effect {income_reader} - corrections {per_loan}"
-    )
-    # (d) completeness.
+    # (c) completeness.
     _assert_completeness(loan_id, scenario_id)
-    # (e) the store's per-entry balance + the read's trial balance.
-    assert entries_violating_balance() == []
+    # (d) the read's trial balance.
     assert trial_balance(_db.session) == Decimal("0")
-    # (f) parity with the worked-out ledger.
-    assert_ledger_parity(_db.session, scenario_id)

@@ -36,7 +36,6 @@ from app.services.loan_posting_service import LoanAnchorDrift, LoanPaymentHistor
 from tests._test_helpers import (
     SPLIT_LOAN,
     capture_sql_statements,
-    clear_loan_ledger,
     create_loan_account,
     create_loan_with_trueup,
     create_settled_transfer,
@@ -345,11 +344,11 @@ class TestConfirmedLoanPaymentHistory:
     def test_neither_surface_reads_the_stored_ledger(
         self, app, db, seed_user, seed_periods,
     ):
-        """With the loan's postings gone the table still lists the walk's payment.
+        """The table lists the walk's payment, and no statement names a stored table.
 
         Plan task plan#2779: whether the table shows is the walk's answer.  The
-        statements are captured too, so a read of a stored table that happened
-        to agree could not pass.  A load FROM the terms' table is what says the
+        statements are captured, so a read of a stored table that happened to
+        agree could not pass.  A load FROM the terms' table is what says the
         capture measured the walk, which reads the terms by the loan's id: merely
         naming that table says nothing, since ``Account.loan_params`` joins it
         into any load of the account.
@@ -362,7 +361,6 @@ class TestConfirmedLoanPaymentHistory:
                 Decimal("1000.00"), settled_on=date(2026, 6, 1),
             )
             db.session.commit()
-            clear_loan_ledger(loan.id)
 
             rows, table_reads = capture_sql_statements(
                 lambda: loan_posting_service.confirmed_loan_payment_history(

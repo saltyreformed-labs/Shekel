@@ -10,14 +10,6 @@ import os
 from decimal import Decimal
 
 import app.services
-from app import ref_cache
-from app.enums import PostingKindEnum
-from app.extensions import db as _db
-from tests._stored_ledger import (
-    linked_ledger_account,
-    loan_correction_entries,
-    stored_account_net,
-)
 
 from ._helpers import _P1, _AS_OF, _make_loan, _settle, _resolver_balance
 
@@ -33,15 +25,14 @@ from ._helpers import _P1, _AS_OF, _make_loan, _settle, _resolver_balance
 # the ledger would silently collapse the parallel run to a tautology and nothing
 # would fail.  These guards make it mechanical.
 #
-# **INDEPENDENCE IS GRADED AS A VALUE, AND ONLY BACKED BY IMPORT SHAPE**, and
-# plan step balance:X-au-g-2c-1 is where that inverted.  The primary control is
-# ``test_perturbing_the_posted_ledger_does_not_move_the_reference`` below: move
-# the stored ledger, then assert its net moved and
-# ``_resolver_balance`` did not.  That grades the property the oracle actually
-# needs -- no ledger VALUE reaches the reference -- and it is sound against
-# every route a static check cannot see: raw SQL, an ORM backref traversed off
-# a model, ``importlib``, ``getattr``, or a ledger model module simply being
-# RENAMED.
+# **INDEPENDENCE WAS GRADED AS A VALUE from plan step balance:X-au-g-2c-1 until
+# plan#2914**: ``test_perturbing_the_posted_ledger_does_not_move_the_reference``
+# moved the STORED ledger and asserted ``_resolver_balance`` did not, which is
+# sound against every route a static check cannot see: raw SQL, an ORM backref
+# traversed off a model, ``importlib``, ``getattr``, or a ledger model module
+# simply being RENAMED.  It went with the suite's grading of the store, since a
+# forged stored leg is a state only the store can hold; it never moved the
+# worked-out read the parallel run now compares against.
 #
 # **The static check is defence in depth, and it is now NARROW because a
 # stronger gate already owns most of it.**  The production checker W9908
@@ -89,7 +80,7 @@ from ._helpers import _P1, _AS_OF, _make_loan, _settle, _resolver_balance
 # already issues raw SQL through ``db.session.execute(text(...))`` and argues
 # for it in its own docstring, and ``app.models.account`` is in the closure, so
 # a ``backref`` on ``ledger_account`` would put every posting one attribute
-# away.  Neither exists today; both are why the VALUE control is the primary
+# away.  Neither exists today; both are why a VALUE control is the stronger
 # one and this is not.
 #
 # **The reference's dependency was far larger than its arithmetic, and plan
@@ -331,89 +322,17 @@ def _reference_call_qualifiers() -> set:
 class TestResolverIsLedgerFree:
     """The resolver reference reads NONE of the posted ledger -- mechanically.
 
-    **The load-bearing control is a VALUE control**
-    (:meth:`test_perturbing_the_posted_ledger_does_not_move_the_reference`):
-    perturb the posted ledger and assert the reference does not move.  It grades
-    the property the parallel run actually needs and is sound against every
-    route a static check cannot see -- raw SQL, an ORM backref, ``importlib``,
-    a renamed model module.
+    **The VALUE control that perturbed the stored ledger went at plan#2914**
+    with the suite's grading of the store (the block above
+    :data:`_RESOLVER_REFERENCE_ROOTS` says what it covered).
 
-    The static checks are defence in depth and deliberately narrow: the
+    The static checks are deliberately narrow: the
     reference reaches no ledger SEAM (the question the production W9908 fence
     cannot ask), and its roots are read off ``_resolver_balance`` itself rather
     than maintained beside it.  See the block above
     :data:`_RESOLVER_REFERENCE_ROOTS` for why three hand-maintained lists were
     deleted to get here, and for what a closure cannot see.
     """
-
-    def test_perturbing_the_posted_ledger_does_not_move_the_reference(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Moving the stored ledger moves its balance and NOT the reference.
-
-        **The oracle's independence, graded as a value.**  The parallel run
-        compares two derivations of one loan's balance and is only evidence
-        while the second cannot see the first.  Every earlier version of that
-        guarantee was an IMPORT rule -- a denylist, then a closure -- and an
-        import rule is orthogonal to value flow: raw SQL against
-        ``budget.account_postings``, an ORM backref traversed off a model
-        already in the closure, or a dynamic import all move a ledger figure
-        with no import edge to see.
-
-        This injects a leg on the loan's LINKED stored row -- the exact rows a
-        tautological reference would be reading -- and asserts the two sides
-        respond differently.  A reference that had quietly started reading the
-        stored ledger moves with it and fails HERE, whatever import shape it
-        used.  An injected leg is a state only the store can hold, so the moved
-        side is the stored net rather than :func:`_ledger_balance`, whose read
-        follows the records.  This goes with the store.
-
-        Raw SQL, flushed and never committed, then rolled back: the per-entry
-        balanced trigger is DEFERRED and validates only at COMMIT, which is the
-        same technique (and the same safety argument) as
-        :meth:`TestOracleIsNotVacuous.test_stored_trial_balance_catches_an_injected_leg`
-        two classes up.
-        """
-        with app.app_context():
-            loan = _make_loan(seed_user)
-            xfer = _settle(
-                seed_user, loan, seed_periods[_P1], amount=Decimal("1000.00"),
-            )
-            db.session.commit()
-            scenario_id = seed_user["scenario"].id
-
-            before_stored_net = stored_account_net(loan.id, scenario_id)
-            before_reference = _resolver_balance(loan.id, scenario_id, _AS_OF)
-
-            linked = linked_ledger_account(db.session, loan.id)
-            entry = loan_correction_entries(db.session, xfer.id, loan.id)[0]
-            db.session.execute(_db.text(
-                "INSERT INTO budget.account_postings "
-                "  (journal_entry_id, ledger_account_id, amount, posting_kind_id) "
-                "VALUES (:e, :l, :a, :k)"
-            ), {
-                "e": entry.id,
-                "l": linked.id,
-                "a": Decimal("-250.00"),
-                "k": ref_cache.posting_kind_id(PostingKindEnum.PRINCIPAL),
-            })
-            db.session.flush()
-
-            # The perturbation landed: the STORED side moved by exactly it.
-            assert stored_account_net(loan.id, scenario_id) == (
-                before_stored_net - Decimal("250.00")
-            ), "the injected leg did not reach the stored net"
-
-            # ...and the reference did not see it.  This is the assertion the
-            # whole parallel run rests on.
-            assert _resolver_balance(loan.id, scenario_id, _AS_OF) == (
-                before_reference
-            ), (
-                "the resolver reference MOVED when the posted ledger moved -- "
-                "the parallel run is a tautology, whatever the import fence says"
-            )
-
-            db.session.rollback()
 
     def test_the_reference_reaches_no_ledger_seam(self):
         """No module the reference can reach may import a posted-ledger model.

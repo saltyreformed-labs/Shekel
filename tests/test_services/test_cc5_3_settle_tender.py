@@ -53,7 +53,6 @@ from app.services.statement_match import candidates_for
 from app.services.statement_match import RowKind, _accepted_view, _valuation
 from app.services.transaction_service import settle_transaction
 from app.services.ledger_lines import linked_key
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import ledger_net
 from tests._test_helpers import (
     create_account_of_type,
@@ -397,9 +396,7 @@ class TestATenderCorrectionOnASettledRow:
         and the movement's key would refuse the pair); the row's version
         counter moves, so a second stale tab meets a 409 rather than
         overwriting the correction; and the ledger follows: checking's line
-        is back where it was and the card's carries the payment.  On the store
-        the door's reconcile after the seam reverses checking's leg and posts
-        the card's, which the parity line grades.
+        is back where it was and the card's carries the payment.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -432,7 +429,6 @@ class TestATenderCorrectionOnASettledRow:
             assert txn.settled_on not in _per_day(checking.id, scenario_id)
             assert ledger_net(db.session, checking_ledger, scenario_id) == checking_before
             assert ledger_net(db.session, card_ledger, scenario_id) - card_before == -_HOTEL
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_an_echo_of_the_recorded_tender_writes_nothing(
         self, app, seed_user, seed_periods,

@@ -8,7 +8,6 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import MovementFigureSourceEnum
 from app.extensions import db
-from app.models.journal_entry import JournalEntry
 from app.models.settled_figure import SettledFigure
 from app.models.transfer_template import TransferTemplate
 from app.models.transfer import Transfer
@@ -62,13 +61,6 @@ def _ledger_of(checking_id, savings_id, scenario_id):
         account_net(db.session, checking_id, scenario_id),
         account_net(db.session, savings_id, scenario_id),
     )
-
-
-def _stored_entry_count(seed_user):
-    """Return the owner's stored journal entry count; it goes with the store."""
-    return db.session.query(JournalEntry).filter(
-        JournalEntry.user_id == seed_user["user"].id,
-    ).count()
 
 
 def _create_template(seed_user, savings_acct, with_rule=True):

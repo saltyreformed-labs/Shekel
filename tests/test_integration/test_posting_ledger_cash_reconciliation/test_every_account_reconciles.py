@@ -1,5 +1,5 @@
-"""The posted cash ledger reconciles per linked account, per counter account, per entry and in the
-trial balance; every settled transaction posts; scenarios and owners stay apart.
+"""The cash ledger reconciles per linked account, per counter account and in the trial balance;
+every settled transaction posts; scenarios and owners stay apart.
 """
 
 from __future__ import annotations
@@ -11,19 +11,16 @@ import pytest
 from app import ref_cache
 from app.enums import (
     LedgerAccountClassEnum,
-    LedgerAccountKindEnum,
     TxnTypeEnum,
 )
 from app.extensions import db as _db
 from app.models.category import Category
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.services import ledger_account_service, posting_service, transaction_service
-from app.services.ledger_lines import ChartKey, category_key, owner_bucket_key
+from app.services import posting_service, transaction_service
+from app.services.ledger_lines import category_key
 from app.utils.balance_predicates import settled_status_ids
 from tests._ledger_reads import (
     account_net,
@@ -32,11 +29,6 @@ from tests._ledger_reads import (
     period_nets_of_movements,
     trial_balance,
 )
-from tests._stored_ledger import (
-    entries_violating_balance,
-    stored_ledger_net,
-)
-from tests._ledger_parity import LedgerParityDifference
 from tests._test_helpers import (
     create_account_of_type,
     create_envelope_txn,
@@ -54,62 +46,15 @@ from ._helpers import (
 )
 
 
-def _orphaned_expense_cells(
-    orphan_id: int, txn: Transaction, amount: Decimal,
-) -> tuple[LedgerParityDifference, ...]:
-    """Return the two cells a deleted category leaves the stored ledger behind on.
-
-    Worked out from the records, *txn*'s expense -- its category deleted, so
-    its ``category_id`` reads NULL -- books on the owner's Uncategorized
-    Expense bucket, which holds no stored row yet; the store keeps it on the
-    orphan until a resync re-books it.  The raw-SQL delete that makes the
-    orphan is one the category-delete route refuses for a category in use (it
-    archives one instead, ``routes/categories.delete_category``), so these two
-    cells are the fixture's, and every other cell of the world agrees (plan
-    task plan#2527).
-
-    Args:
-        orphan_id: The orphaned stored chart row's id.
-        txn: The expense row, its one movement dated.
-        amount: The expense's figure, as the case states it.
-
-    Returns:
-        The orphan's cell (stored, not worked out) and the bucket's (worked
-        out, not stored), each in *txn*'s paycheck on its movement's day.
-    """
-    (movement,) = txn.entries
-    return (
-        LedgerParityDifference(
-            # Spelled from the orphan's columns: no constructor builds a key
-            # with no category behind it.
-            key=ChartKey(
-                LedgerAccountKindEnum.CATEGORY,
-                LedgerAccountClassEnum.EXPENSE, None,
-            ),
-            stored_row_ids=(orphan_id,), pay_period_id=txn.pay_period_id,
-            entry_date=movement.settled_on,
-            stored=amount, worked_out=Decimal("0.00"),
-        ),
-        LedgerParityDifference(
-            key=owner_bucket_key(
-                LedgerAccountKindEnum.FALLBACK, LedgerAccountClassEnum.EXPENSE,
-            ),
-            stored_row_ids=(), pay_period_id=txn.pay_period_id,
-            entry_date=movement.settled_on,
-            stored=Decimal("0.00"), worked_out=amount,
-        ),
-    )
-
-
 def _assert_every_settled_transaction_posts(user_id: int) -> None:
-    """Assert every settled, nonzero-effect cash transaction posted >= 1 entry.
+    """Assert every settled, nonzero-effect cash transaction books >= 1 line.
 
     The per-transaction completeness backstop: a settled, non-deleted,
-    non-transfer transaction with a NONZERO cash effect must carry at least
-    one journal entry (no silent unposted row).  A zero-effect row (an
+    non-transfer transaction with a NONZERO cash effect must book at least
+    one worked-out line (no silent unposted row).  A zero-effect row (an
     envelope closed from card purchases alone, so its family holds no dated
-    non-card movement) posts nothing and is correctly NOT required to have an
-    entry.
+    non-card movement) books nothing and is correctly NOT required to have a
+    line.
     """
     settled = (
         _db.session.query(Transaction)
@@ -198,7 +143,7 @@ class TestPerLinkedAccountReconciliation:
                 mortgage.id: (Decimal("250.00"), Decimal("250.00")),
             }
             for account_id, (want_ledger, want_effect) in expected.items():
-                # (a) hand-computed literal == independent ledger-table query.
+                # (a) hand-computed literal == the worked-out read.
                 assert account_net(
                     _db.session, account_id, scenario_id,
                 ) == want_ledger
@@ -207,9 +152,6 @@ class TestPerLinkedAccountReconciliation:
                     account_id, scenario_id,
                 ) == want_effect
                 # (c) the production service helpers agree too.
-                assert posting_service.account_posting_total(
-                    account_id, scenario_id,
-                ) == want_ledger
                 assert (
                     posting_service.settled_transfer_effect(
                         account_id, scenario_id,
@@ -248,15 +190,14 @@ class TestPerCounterAccountReconciliation:
           - cash EXPENSE $30 (no cat)   -> Uncategorized-Expense fallback +30.00
           - cash INCOME  $2000 Salary   -> Salary-Income counter -2000.00
 
-        The categorized expense books the Groceries-Expense category row; the
-        uncategorized one books the per-(owner, class) Expense fallback
-        (``is_owner_bucket`` True); the income books the Salary-Income row.  Each
-        counter total is hand-checked, and the counter-account sweep reconciles
-        every one by the ``transaction_id`` linkage.
+        The categorized expense books the Groceries-Expense category key; the
+        uncategorized one books the per-(owner, class) Expense fallback bucket;
+        the income books the Salary-Income key.  Each counter total is
+        hand-checked, and the counter-account sweep reconciles every one by the
+        ``transaction_id`` linkage.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
-            user_id = seed_user["user"].id
             period = seed_user["bootstrap_period"]
 
             create_settled_cash_transaction(
@@ -294,13 +235,6 @@ class TestPerCounterAccountReconciliation:
                 _db.session, salary_counter, scenario_id,
             ) == Decimal("-2000.00")
 
-            # The fallback row is the is_owner_bucket singleton, not a category row.
-            fallback = ledger_account_service.get_or_create_category_ledger_account(
-                user_id, None, LedgerAccountClassEnum.EXPENSE,
-            )
-            assert fallback.is_owner_bucket is True
-            assert fallback.category_id is None
-
             _assert_full_reconciliation(scenario_id)
 
     def test_orphan_counter_account_reconciles_after_category_delete(
@@ -308,19 +242,15 @@ class TestPerCounterAccountReconciliation:
     ):
         """A deleted category's former counter account reconciles by linkage.
 
-        A $50 expense in a fresh "Leisure: Hobbies" category posts its counter
-        leg into that category's ledger account.  Deleting the budget category
-        (the schema's ``ON DELETE SET NULL`` clears ``category_id`` on BOTH the
-        ledger account -- which becomes an orphan -- and the transaction) leaves
-        the orphan still holding +50.00 while the transaction now reads
-        ``category_id IS NULL``.  A ``category_id`` match could no longer find
-        the transaction (it would mis-attribute it to the fallback), and the
-        stored row keeps its leg.  The read files the leg by the row's category,
-        so it books on the Uncategorized bucket, which is the sweep's answer.
-        (The category-delete *route* archives a category still in use
-        by a transaction; this raw-SQL delete reproduces the DB-level SET NULL
-        directly to lock the defensive linkage reconciliation -- see the
-        ``ledger_account.py`` "Reconciliation of orphans" note.)
+        A $50 expense in a fresh "Leisure: Hobbies" category books its counter
+        line on that category's key.  Deleting the budget category (the
+        schema's ``ON DELETE SET NULL`` clears the transaction's
+        ``category_id``) leaves the transaction reading ``category_id IS
+        NULL``.  The read files the leg by the row's category, so it books on
+        the Uncategorized bucket, which is the sweep's answer.  (The
+        category-delete *route* archives a category still in use by a
+        transaction; this raw-SQL delete reproduces the DB-level SET NULL
+        directly.)
 
         **The one-off's DEFINITION is un-categorised first**, by the same
         raw SQL: every plan row names a definition since the family's cutover
@@ -343,9 +273,6 @@ class TestPerCounterAccountReconciliation:
             db.session.add(hobbies)
             db.session.flush()
             hobbies_id = hobbies.id
-            # Capture the display name BEFORE the delete so the post-delete
-            # snapshot can be checked against it (not a bare string literal).
-            hobbies_display_name = hobbies.display_name
 
             txn = settle_cash_row(
                 one_off_row_of(
@@ -359,17 +286,14 @@ class TestPerCounterAccountReconciliation:
             db.session.commit()
             txn_id = txn.id
             definition_id = txn.template_id
-            orphan_id = ledger_account_service.get_or_create_category_ledger_account(
-                user_id, hobbies_id, LedgerAccountClassEnum.EXPENSE,
-            ).id
             assert ledger_net(
                 db.session,
                 category_key(hobbies_id, LedgerAccountClassEnum.EXPENSE),
                 scenario_id,
             ) == Decimal("50.00")
 
-            # Delete the budget category: the FK SET NULL turns its ledger
-            # account into an orphan and clears the transaction's category_id.
+            # Delete the budget category: the FK SET NULL clears the
+            # transaction's category_id.
             # The definition's RESTRICT key would refuse the delete, so its
             # own category is cleared first (the docstring says why).
             db.session.execute(
@@ -386,58 +310,36 @@ class TestPerCounterAccountReconciliation:
             db.session.commit()
             db.session.expire_all()
 
-            orphan = db.session.get(LedgerAccount, orphan_id)
-            assert orphan.category_id is None
-            assert orphan.account_id is None
-            assert orphan.is_owner_bucket is False  # an orphan, not the fallback
-            assert orphan.name == hobbies_display_name  # snapshot survives delete
             assert db.session.get(Transaction, txn_id).category_id is None
 
-            # The orphan is the store's: it still holds +50 there.  Worked out
-            # from the records no key names an orphan, so the row's category
-            # reading NULL books its +50 on the Uncategorized bucket.
-            assert stored_ledger_net(
-                db.session, orphan_id, scenario_id,
-            ) == Decimal("50.00")
+            # Worked out from the records no key names an orphan, so the row's
+            # category reading NULL books its +50 on the Uncategorized bucket.
             assert ledger_net(
                 db.session,
                 category_key(None, LedgerAccountClassEnum.EXPENSE),
                 scenario_id,
             ) == Decimal("50.00")
-            # The category's own chart row is gone, so nothing is left that a
-            # category_id match could find.
-            assert (
-                db.session.query(LedgerAccount)
-                .filter_by(
-                    user_id=user_id, account_id=None, category_id=hobbies_id,
-                )
-                .count()
-            ) == 0
-            _assert_full_reconciliation(scenario_id, _orphaned_expense_cells(
-                orphan_id, db.session.get(Transaction, txn_id), Decimal("50.00"),
-            ))
+            _assert_full_reconciliation(scenario_id)
 
 
 # ---------------------------------------------------------------------------
-# 3 + 4. Per-entry balance and global trial balance
+# 3 + 4. Global trial balance
 # ---------------------------------------------------------------------------
 
 
 class TestPerEntryAndTrialBalance:
-    """Every entry sums to zero with >= 2 legs; the whole ledger sums to zero."""
+    """The whole worked-out ledger sums to zero."""
 
     def test_every_entry_balances_and_trial_balance_is_zero(
         self, app, db, seed_user,
     ):
-        """A transfer plus a cash expense and income each post balanced entries.
+        """A transfer plus a cash expense and income book balanced lines.
 
-        Arithmetic: one $100 transfer (Checking -> Savings) posts two two-leg
-        entries via transit, one $50 Groceries expense and one $2000 Salary
-        income each post a single two-leg entry, every one summing to zero --
-        and the Step-5 openings (Checking +1000/-1000, Savings +100/-100
-        against their equity twins) are balanced pairs too -- so no entry
-        violates ``SUM = 0`` / ``COUNT >= 2`` and the whole-ledger total
-        stays 0.00.
+        Arithmetic: one $100 transfer (Checking -> Savings) books two balanced
+        pairs via transit, one $50 Groceries expense and one $2000 Salary
+        income each book one balanced pair -- and the Step-5 openings
+        (Checking +1000/-1000, Savings +100/-100 against their equity twins)
+        are balanced pairs too -- so the whole-ledger total stays 0.00.
         """
         with app.app_context():
             period = seed_user["bootstrap_period"]
@@ -459,19 +361,6 @@ class TestPerEntryAndTrialBalance:
             )
             db.session.commit()
 
-            # Three settled sources -> four source-linked balanced entries
-            # (the Step-5 openings carry their own correction sources).  Every
-            # one links by its covering movement (``transaction_entry_id``):
-            # the two cash rows since plan steps X-bi-3a / X-bi-3b, and the
-            # transfer's TWO sides since plan step ``balance:X-bi-6-3`` (one
-            # per movement, each against transit; it was one entry by
-            # ``transfer_id``).
-            assert (
-                _db.session.query(JournalEntry)
-                .filter(JournalEntry.transaction_entry_id.isnot(None))
-                .count()
-            ) == 4
-            assert entries_violating_balance() == []
             assert trial_balance(db.session) == Decimal("0.00")
 
 
@@ -481,18 +370,18 @@ class TestPerEntryAndTrialBalance:
 
 
 class TestEverySettledTransactionPosts:
-    """Every settled, nonzero-effect cash transaction posts at least one entry."""
+    """Every settled, nonzero-effect cash transaction books at least one line."""
 
     def test_no_settled_transaction_is_silently_unposted(
         self, app, db, seed_user,
     ):
         """Two posted expenses post entries; a zero-effect envelope posts none.
 
-        Two settled expenses ($50 Groceries, $40 Rent) each post one entry; an
+        Two settled expenses ($50 Groceries, $40 Rent) each book a line; an
         all-credit envelope (closed from its one $75 card purchase, so its
         record is ``purchases`` and its family holds no dated non-card
         movement -- effect 0) posts nothing and is correctly NOT flagged as
-        unposted.  The completeness sweep requires an entry for every settled
+        unposted.  The completeness sweep requires a line for every settled
         nonzero-effect row and excludes the zero-effect one.  Through
         ``X-bi-3e`` the zero-effect row was a typed $75 figure beside a $75
         card purchase, a shape ruling **R-BAL78** refuses at the door.
@@ -548,13 +437,11 @@ class TestMultiScenarioIsolation:
 
         Arithmetic: a $100 Groceries expense in the baseline scenario and a $70
         Groceries expense in a separate what-if scenario, both on Checking --
-        each scenario also carrying Checking's $1000.00 opening (posted in
-        the baseline at fixture time, into the what-if by the effect-time
-        self-heal alongside its settle).  Scoped to baseline the Checking
-        ledger is 1000 - 100 = 900.00 (NOT 830) and the Groceries-Expense
-        counter +100.00; scoped to the what-if they are 1000 - 70 = 930.00
-        and +70.00.  The ``scenario_id`` denorm keeps the two apart, and
-        each scenario reconciles independently.
+        each scenario also carrying Checking's $1000.00 opening.  Scoped to
+        baseline the Checking ledger is 1000 - 100 = 900.00 (NOT 830) and the
+        Groceries-Expense counter +100.00; scoped to the what-if they are
+        1000 - 70 = 930.00 and +70.00.  Each row's scenario keeps the two
+        apart, and each scenario reconciles independently.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -586,12 +473,6 @@ class TestMultiScenarioIsolation:
             assert account_net(
                 _db.session, checking.id, whatif.id,
             ) == Decimal("930.00")
-            assert posting_service.account_posting_total(
-                checking.id, baseline.id,
-            ) == Decimal("900.00")
-            assert posting_service.account_posting_total(
-                checking.id, whatif.id,
-            ) == Decimal("930.00")
 
             # The shared Groceries-Expense counter splits per scenario: +100 / +70.
             groceries_counter = category_key(
@@ -609,7 +490,7 @@ class TestMultiScenarioIsolation:
 
 
 class TestOwnerIsolationViaJournalEntry:
-    """A posting's owner is its journal entry's; owners never cross-contaminate."""
+    """Owners never cross-contaminate."""
 
     def test_two_owners_reconcile_independently_and_posting_has_no_user_id(
         self, app, db, seed_user, seed_second_user,
@@ -619,11 +500,8 @@ class TestOwnerIsolationViaJournalEntry:
         Arithmetic: owner 1 settles a $100 Groceries expense on their Checking
         ($1000.00 opening); owner 2 settles a $200 Groceries expense on theirs
         ($2000.00 opening).  Owner 1's Checking ledger is 1000 - 100 = 900.00
-        and owner 2's is 2000 - 200 = 1800.00 with no leakage.  Every
-        journal entry's ``user_id`` matches its account owner, a ``Posting``
-        carries no ``user_id`` of its own (its owner is reachable only via
-        ``Posting.journal_entry.user_id``), and each owner's books reconcile in
-        their own baseline scenario.
+        and owner 2's is 2000 - 200 = 1800.00 with no leakage, and each owner's
+        books reconcile in their own baseline scenario.
         """
         with app.app_context():
             create_settled_cash_transaction(
@@ -650,19 +528,6 @@ class TestOwnerIsolationViaJournalEntry:
             assert account_net(
                 _db.session, checking2, scenario2,
             ) == Decimal("1800.00")
-
-            # A Posting has no user_id; ownership is normalized onto the entry.
-            assert not hasattr(Posting, "user_id")
-            owner1_id = seed_user["user"].id
-            owner2_id = seed_second_user["user"].id
-            for posting in _db.session.query(Posting).all():
-                entry_owner = posting.journal_entry.user_id
-                assert entry_owner in (owner1_id, owner2_id)
-                # The leg's ledger account (cash or category) belongs to the
-                # same owner as its journal entry -- the normalization holds.
-                assert posting.ledger_account.user_id == entry_owner
-            for entry in _db.session.query(JournalEntry).all():
-                assert entry.user_id in (owner1_id, owner2_id)
 
             _assert_full_reconciliation(scenario1)
             _assert_full_reconciliation(scenario2)

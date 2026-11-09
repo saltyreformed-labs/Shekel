@@ -11,20 +11,17 @@ import pytest
 
 from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db as _db
-from app.services import account_posting_service, anchor_service, cash_ledger, posting_service
+from app.services import account_posting_service, anchor_service, cash_ledger
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.utils.dates import display_today
 from app.services.ledger_lines import account_counter_key, linked_key
 from tests._ledger_reads import (
     account_net,
     ledger_net,
+    scenario_lines,
     source_lines,
     source_net,
     trial_balance,
-)
-from tests._stored_ledger import (
-    entries_violating_balance,
-    ledger_account_of_kind,
 )
 from tests._test_helpers import (
     create_account_of_type,
@@ -56,12 +53,12 @@ class TestPreAnchorAbsorption:
         """A 2024-dated spend is inside the 2026 opening.
 
         A $200.00 expense settled on the 2024 bootstrap period's start day --
-        BEFORE the account's origination assertion (server-now, 2026).  The C6
-        self-heal at the settle re-derives the opening: its delta becomes
+        BEFORE the account's origination assertion (server-now, 2026).  The
+        origination assertion absorbs it: its corrections total
         500 - (-200) = +700.00, so the linked ledger stays exactly on the 500.00
         anchor and NO source rides on top.
 
-          linked = 700 (opening) - 200 = 500.00 = latest anchor 500 + 0
+          linked = 700 (opening + true-up) - 200 = 500.00 = latest anchor 500 + 0
 
         **The row reached that day through a FALLBACK until plan step X-f1** --
         it carried no ``paid_at`` and every reader substituted its pay period's
@@ -214,9 +211,8 @@ class TestZeroDeltaBooksNothing:
     ):
         """A fresh $0.00 Savings posts no entry, no twin, and the sweep still ties.
 
-        The opening delta is $0, so the reconcile books nothing: no correction
-        entry and no ``anchor_equity`` ledger row (the account stays
-        hard-deletable, Guard 5 never engaging).  The absolute invariant is
+        The opening delta is $0, so the read books nothing: no correction line
+        and no ``anchor_equity`` line.  The absolute invariant is
         0.00 == latest anchor 0.00 + 0, so the production-wide sweep reconciles
         it alongside the seeded Checking.
         """
@@ -231,9 +227,15 @@ class TestZeroDeltaBooksNothing:
             assert account_net(
                 _db.session, zero.id, scenario_id,
             ) == Decimal("0.00")
-            assert ledger_account_of_kind(
-                db.session, zero.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
-            ) is None
+            # 0.00 asserted - 0.00 booked = a $0.00 delta, and the read holds
+            # no $0.00 line, so the equity twin's key holds none at all.
+            equity_key = account_counter_key(
+                LedgerAccountKindEnum.ANCHOR_EQUITY, zero.id,
+            )
+            assert [
+                line for line in scenario_lines(db.session, scenario_id)
+                if line.key == equity_key
+            ] == []
             _assert_account_anchors_reconcile(scenario_id)
 
 
@@ -257,8 +259,9 @@ class TestBackDatedTrueUpReBasesTheLedger:
     ungraded for it**, and one demonstrated the gap by removing the re-sync
     entirely: all eleven of the step's own new tests still passed, because
     ``cash_balance_at`` does not read ``account_postings``.  These two cases
-    close that hole, using this file's independent oracles rather than the
-    service's own helpers.
+    closed that hole; since plan#2914 they grade the ledger worked out from
+    the records for the same input, using this file's independent oracles
+    rather than the service's own helpers.
 
     Both go through ``anchor_service.apply_anchor_true_up`` -- the production
     door, with its lock, its duplicate rule and its re-sync -- not the
@@ -314,14 +317,8 @@ class TestBackDatedTrueUpReBasesTheLedger:
             assert account_net(
                 _db.session, savings.id, scenario_id,
             ) == Decimal("900.00")
-            # ...and through the seam's own reader, which resolves the ledger
-            # row first, so a shared lookup bug cannot satisfy both.
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
-            ) == Decimal("900.00")
-            # Ledger-wide self-checks: nothing was double-posted or stranded.
+            # Ledger-wide self-check: nothing was double-booked or stranded.
             assert trial_balance(_db.session) == Decimal("0.00")
-            assert entries_violating_balance() == []
             _assert_account_anchors_reconcile(scenario_id)
 
     def test_back_dating_below_the_opening_re_designates_it_and_reconciles(
@@ -396,7 +393,6 @@ class TestBackDatedTrueUpReBasesTheLedger:
                 _db.session, savings.id, scenario_id,
             ) == Decimal("1000.00")
             assert trial_balance(_db.session) == Decimal("0.00")
-            assert entries_violating_balance() == []
             _assert_account_anchors_reconcile(scenario_id)
 
             # The source KIND flipped with the flag, graded on the read's

@@ -4,15 +4,11 @@ Ruling plan#2518 works the chart of accounts out instead of storing it: a
 ledger line names a :class:`~app.services.ledger_lines.ChartKey` -- its kind,
 its class and the record behind it -- and two pure rules answer its class and
 its label.  These tests build, for every kind the records can name, the key
-from a fixture's RECORDS and grade it against the row today's writer stores
-for the same thing (``ledger_account_service``): the same kind, the same
-class, the key the stored row's own columns spell (the mapping the parity test
-plan#2527 maps by), and the label a statement shows.  That was graded against
-the store's label reader too until plan task plan#2771 moved the statements
-onto these keys and deleted it; a statement's label is :func:`chart_label`'s
-now.  Every expected class and label is written out by hand, so the writer --
-which stamps its rows from these same rules since this task -- is never its
-own grader.
+from a fixture's RECORDS and grade its kind, its class and the label a
+statement shows (:func:`chart_label`'s since plan task plan#2771), each
+written out by hand.  Until plan step plan#2914 they also graded the key
+against the row the store's writer (``ledger_account_service``) kept for the
+same thing; that grade went with the store.
 
 Then the ruled difference (a rename relabels a worked-out line, where a stored
 snapshot kept its minted name), the deleted category no key names, and the
@@ -21,12 +17,10 @@ refusals the constructors and the label rule raise.
 
 import pytest
 
-from app import ref_cache
 from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
 from app.extensions import db as _db
 from app.models.account import Account
 from app.models.category import Category
-from app.models.ledger_account import LedgerAccount
 from app.models.transaction import Transaction
 from app.services import ledger_account_service
 from app.services.ledger_lines import (
@@ -41,34 +35,13 @@ from app.services.ledger_lines import (
     owner_bucket_key,
     transit_key,
 )
-from tests._stored_ledger import (
-    linked_ledger_account,
-    stored_chart_key,
-)
 from tests._test_helpers import (
     add_txn,
     create_account_of_type,
 )
 
 
-def _assert_key_matches_stored_row(stored, key, record, expected_label):
-    """Assert *key* and its label agree with the *stored* row the writer made.
-
-    Args:
-        stored: The :class:`LedgerAccount` today's writer stores for the line.
-        key: The key worked out from the records.
-        record: The record *key* names (an account, a category, or ``None``).
-        expected_label: The hand-written label a statement shows.
-    """
-    assert stored.kind_id == ref_cache.ledger_account_kind_id(key.kind)
-    assert stored.class_id == ref_cache.ledger_account_class_id(
-        key.ledger_class,
-    )
-    assert stored_chart_key(stored) == key
-    assert chart_label(key, record) == expected_label
-
-
-class TestEveryKindMatchesTheRowTheWriterStores:
+class TestEveryKindIsClassedAndLabelledByHand:
     """One test per kind the records can name, class and label by hand."""
 
     @pytest.mark.parametrize("type_name,expected_class", [
@@ -86,8 +59,7 @@ class TestEveryKindMatchesTheRowTheWriterStores:
 
         Asset, Retirement and Investment categories are all Asset class; only
         the Liability category (a card, a loan) is Liability.  The label is
-        the account's own name, and the stored linked row carries no name of
-        its own (it reads the account's too).
+        the account's own name.
         """
         with app.app_context():
             account = create_account_of_type(
@@ -99,11 +71,7 @@ class TestEveryKindMatchesTheRowTheWriterStores:
             assert key == ChartKey(
                 LedgerAccountKindEnum.LINKED, expected_class, account.id,
             )
-            stored = linked_ledger_account(_db.session, account.id)
-            assert stored.name is None
-            _assert_key_matches_stored_row(
-                stored, key, account, "Chart Own Line",
-            )
+            assert chart_label(key, account) == "Chart Own Line"
 
     @pytest.mark.parametrize("is_income,expected_class", [
         (True, LedgerAccountClassEnum.INCOME),
@@ -131,12 +99,7 @@ class TestEveryKindMatchesTheRowTheWriterStores:
             assert key == ChartKey(
                 LedgerAccountKindEnum.CATEGORY, expected_class, groceries.id,
             )
-            stored = ledger_account_service.get_or_create_category_ledger_account(
-                seed_user["user"].id, groceries.id, expected_class,
-            )
-            _assert_key_matches_stored_row(
-                stored, key, groceries, "Family: Groceries",
-            )
+            assert chart_label(key, groceries) == "Family: Groceries"
 
     @pytest.mark.parametrize("is_income,expected_class,expected_label", [
         (True, LedgerAccountClassEnum.INCOME, "Uncategorized Income"),
@@ -159,10 +122,7 @@ class TestEveryKindMatchesTheRowTheWriterStores:
             assert key == ChartKey(
                 LedgerAccountKindEnum.FALLBACK, expected_class, None,
             )
-            stored = ledger_account_service.get_or_create_category_ledger_account(
-                seed_user["user"].id, None, expected_class,
-            )
-            _assert_key_matches_stored_row(stored, key, None, expected_label)
+            assert chart_label(key, None) == expected_label
 
     def test_transit_is_the_owners_asset_bucket(self, app, db, seed_user):
         """Transfers in transit is an Asset bucket with no record behind it."""
@@ -174,12 +134,7 @@ class TestEveryKindMatchesTheRowTheWriterStores:
                 LedgerAccountClassEnum.ASSET,
                 None,
             )
-            stored = ledger_account_service.get_or_create_transit_ledger_account(
-                seed_user["user"].id,
-            )
-            _assert_key_matches_stored_row(
-                stored, key, None, "Transfers in transit",
-            )
+            assert chart_label(key, None) == "Transfers in transit"
 
     @pytest.mark.parametrize("kind,expected_class,component", [
         (LedgerAccountKindEnum.ANCHOR_EQUITY,
@@ -201,12 +156,7 @@ class TestEveryKindMatchesTheRowTheWriterStores:
             key = account_counter_key(kind, account.id)
 
             assert key == ChartKey(kind, expected_class, account.id)
-            stored = ledger_account_service.get_or_create_account_counter_account(
-                seed_user["user"].id, account.id, kind,
-            )
-            _assert_key_matches_stored_row(
-                stored, key, account, f"Chart Counter -- {component}",
-            )
+            assert chart_label(key, account) == f"Chart Counter -- {component}"
 
     @pytest.mark.parametrize("kind,expected_class,component", [
         (LedgerAccountKindEnum.LOAN_INTEREST,
@@ -230,12 +180,7 @@ class TestEveryKindMatchesTheRowTheWriterStores:
             key = loan_key(kind, loan.id)
 
             assert key == ChartKey(kind, expected_class, loan.id)
-            stored = ledger_account_service.get_or_create_loan_ledger_account(
-                seed_user["user"].id, loan.id, kind,
-            )
-            _assert_key_matches_stored_row(
-                stored, key, loan, f"Chart Loan -- {component}",
-            )
+            assert chart_label(key, loan) == f"Chart Loan -- {component}"
 
 
 class TestLabelsAreTodaysNames:
@@ -312,18 +257,15 @@ class TestLabelsAreTodaysNames:
 
 
 class TestADeletedCategoryIsNamedByNoKey:
-    """The stored ``category`` row outlives its category; no key names it."""
+    """A deleted category is named by no key; its rows' lines are Uncategorized."""
 
     def test_its_rows_book_on_the_uncategorized_bucket(
         self, app, db, seed_user, seed_periods,
     ):
         """After the delete the row reads no category, so it is Uncategorized.
 
-        The stored row keeps its kind and loses its ``category_id`` (SET
-        NULL), so its columns spell a category key with no record, which no
-        constructor builds; the transaction's own ``category_id`` is SET NULL
-        too, so worked out from the records its line is the Uncategorized
-        Expense bucket's.
+        The transaction's ``category_id`` is SET NULL by the delete, so worked
+        out from the records its line is the Uncategorized Expense bucket's.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -339,10 +281,7 @@ class TestADeletedCategoryIsNamedByNoKey:
                 "25.00",
             )
             txn.category_id = doomed.id
-            stored = ledger_account_service.get_or_create_category_ledger_account(
-                user_id, doomed.id, LedgerAccountClassEnum.EXPENSE,
-            )
-            txn_id, stored_id = txn.id, stored.id
+            txn_id = txn.id
             _db.session.commit()
 
             _db.session.execute(_db.text(
@@ -351,12 +290,6 @@ class TestADeletedCategoryIsNamedByNoKey:
             _db.session.commit()
             _db.session.expire_all()
 
-            stored = _db.session.get(LedgerAccount, stored_id)
-            assert stored_chart_key(stored) == ChartKey(
-                LedgerAccountKindEnum.CATEGORY,
-                LedgerAccountClassEnum.EXPENSE,
-                None,
-            )
             txn = _db.session.get(Transaction, txn_id)
             assert category_key(
                 txn.category_id, ledger_class_of(txn),

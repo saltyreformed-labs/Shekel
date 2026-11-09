@@ -17,15 +17,16 @@ What these cases pin, and each is a thing that could ship wrong on its own:
   onto the books is not something earned;
 * BALANCE NEUTRALITY -- the linked leg, and therefore every balance the app
   reports for the account, is byte-identical either side of the ruling;
-* the SELF-MIGRATION -- an account whose true-up is already posted against
-  equity re-points on the next sync, with no backfill, as one balanced delta;
+* the RE-TYPE -- an account re-typed after its true-up books that true-up on
+  the new counter, its linked leg unmoved;
 * the STATEMENTS -- the income statement reports the gain BELOW net income and
   the balance sheet still ties out, which are the two ways this change could
   have gone silently wrong (counted as earnings, or left out of equity).
 
 The oracle is deliberately independent of the writer: every assertion reads
-``budget.account_postings`` back through test-authored queries, and the
-statement cases read the public report functions rather than the chart.
+the worked-out ledger (``tests/_ledger_reads.py``) back through test-authored
+queries, and the statement cases read the public report functions rather than
+the chart.
 """
 from datetime import date, timedelta
 from decimal import Decimal
@@ -40,8 +41,6 @@ from app.enums import (
 )
 from app.extensions import db as _db
 from app.models.account import Account
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.services import account_posting_service, ledger_report_service
 from app.services.ledger_report_service import StatementWindow
 from app.utils.dates import display_today
@@ -51,9 +50,7 @@ from app.services.ledger_lines import (
     chart_record_type,
     linked_key,
 )
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import ledger_net, owner_worked_out_lines
-from tests._stored_ledger import ledger_account_of_kind
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
@@ -283,13 +280,16 @@ class TestTheTrueUpCounterLegNamesTheDifference:
                     Decimal("1000.00"),
                 ("anchor_equity", "Equity"): Decimal("-1000.00"),
             }
-            # And the true-up's counter row really is a DIFFERENT row whenever
-            # the dispatch names one -- otherwise this case would pass on an
-            # account that never dispatched at all.
+            # And the true-up's counter really is a DIFFERENT key whenever the
+            # dispatch names one -- otherwise this case would pass on an
+            # account that never dispatched at all.  1150.00 asserted -
+            # 1000.00 opened = a 150.00 true-up, booked -150.00 on its counter.
             if expected_kind is not LedgerAccountKindEnum.ANCHOR_EQUITY:
-                assert ledger_account_of_kind(
-                    _db.session, account.id, expected_kind,
-                ) is not None
+                assert ledger_net(
+                    _db.session,
+                    account_counter_key(expected_kind, account.id),
+                    seed_user["scenario"].id,
+                ) == Decimal("-150.00")
 
     def test_an_opening_the_records_explain_still_leaves_a_gain_a_gain(
         self, app, db, seed_user,
@@ -422,12 +422,12 @@ class TestTheTrueUpCounterLegNamesTheDifference:
 
 
 class TestThePostedLedgerSelfMigrates:
-    """An already-posted equity true-up re-points on the next sync, no backfill."""
+    """An equity true-up re-points to the new counter once the account is re-typed."""
 
     def test_an_equity_trueup_re_points_to_unrealized_change(
         self, app, db, seed_user,
     ):
-        """The reconcile emits ONE balanced delta and the linked leg does not move.
+        """The true-up moves to the gain line and the linked leg does not move.
 
         The upgrade path this step ships with: the migration seeds ref rows and
         moves no leg, because the reconcile reads back EVERY leg of a
@@ -438,9 +438,9 @@ class TestThePostedLedgerSelfMigrates:
 
         Two things are asserted because either alone would pass a broken
         implementation: the true-up's $150.00 leaves equity for the gain line, and
-        the linked ledger is UNCHANGED (the migration is balance-neutral).  The
-        read holds no reversal, so the parity line grades that the store reversed
-        the old leg rather than leaving it behind to double-count equity.
+        the linked ledger is UNCHANGED (the migration is balance-neutral).
+        Since plan#2914 both are graded on the worked-out read, which books the
+        true-up by the account's current type.
         """
         with app.app_context():
             account = _opened_account(
@@ -475,81 +475,6 @@ class TestThePostedLedgerSelfMigrates:
             assert ledger_net(_db.session, linked, scenario_id) == (
                 linked_before
             )
-            assert_ledger_parity(db.session, scenario_id)
-
-    def test_a_second_sync_after_the_re_point_writes_nothing(
-        self, app, db, seed_user,
-    ):
-        """The re-point happens ONCE, however many times the sync runs.
-
-        **This case exists because the implementation failed it**, and it
-        failed on real data: a second deploy backfill against a production
-        clone re-emitted all 14 re-point deltas, and every pass after it would
-        have too -- the value-change row growing without bound, equity
-        shrinking to match, and the linked ledger and the trial balance both
-        perfectly correct the whole way, so nothing else would have said a word.
-
-        The cause was the posted-side reader's SCOPE.  It selected the entries
-        carrying a leg on the account's LINKED ledger, which was sound while
-        every correction had one; a re-point moves only the counter side, so
-        its delta entry has no linked leg and the reader could not see the very
-        entry it had just written.
-        ``_posting_reconcile.posted_correction_legs`` now scopes to the
-        account's own chart rows.
-
-        **The RE-POINT is the whole precondition, and a first version of this
-        case did not reach it** (adversarial review, 2026-08-14): it opened the
-        account as a Roth, so every correction booked straight to the gain row,
-        carried a linked leg, and stayed visible to the narrow reader -- the
-        entire suite passed with the fix reverted.  The account must therefore
-        be re-typed FIRST, and the assertion is an ENTRY COUNT, so a second
-        delta that happened to net to zero still fails.
-        """
-        with app.app_context():
-            account = _opened_account(
-                seed_user, "Checking", "Idempotent Re-point", "1000.00",
-            )
-            _true_up(account, "1150.00")
-            _retype(account, "Roth IRA")
-            entries_after_the_re_point = _correction_entry_count(account.id)
-
-            for _ in range(2):
-                account_posting_service.\
-                    sync_account_anchor_postings_all_scenarios(account.id)
-
-            assert _correction_entry_count(account.id) == (
-                entries_after_the_re_point
-            )
-
-    def test_the_re_point_leaves_every_entry_balanced(
-        self, app, db, seed_user,
-    ):
-        """No entry sums to anything but zero after the move.
-
-        The delta the re-point emits carries a reversal leg and a fresh leg and
-        no linked leg at all (its delta is zero and is dropped), which is the
-        one entry shape this step introduces.  A whole-ledger sweep is the
-        cheapest way to say that shape is legal.
-        """
-        with app.app_context():
-            account = _opened_account(
-                seed_user, "Checking", "Balanced Re-point", "1000.00",
-            )
-            _true_up(account, "1015.01")
-            # The re-type is what PRODUCES the counter-only entry this case
-            # sweeps for; without it no such entry exists and the sweep is
-            # vacuous (adversarial review, 2026-08-14).
-            _retype(account, "Money Market")
-
-            unbalanced = _db.session.execute(_db.text("""
-                SELECT je.id, SUM(p.amount)
-                FROM budget.journal_entries je
-                JOIN budget.account_postings p ON p.journal_entry_id = je.id
-                GROUP BY je.id
-                HAVING SUM(p.amount) <> 0
-            """)).all()
-            assert unbalanced == []
-
 
 class TestTheStatementsReportTheDifference:
     """The two ways this change could have gone silently wrong."""
@@ -759,33 +684,3 @@ class TestTheDispatchIsNotVacuous:
                 LedgerAccountClassEnum.UNREALIZED,
             )
             assert ref_cache.ledger_class_is_debit_normal(class_id) is False
-
-
-def _correction_entry_count(account_id):
-    """Return how many anchor-correction journal entries an account carries.
-
-    Counted over the account's OWN chart rows rather than its linked row, for
-    the reason ``_posting_reconcile.posted_correction_legs`` is scoped that way:
-    a re-point delta touches only counter rows, so a linked-scoped count would
-    be blind to exactly the entries the idempotency case is about.
-    """
-    entry_ids = (
-        _db.session.query(Posting.journal_entry_id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(LedgerAccount.account_id == account_id)
-    )
-    correction_sources = [
-        ref_cache.posting_source_id(source)
-        for source in (
-            PostingSourceEnum.ACCOUNT_OPENING,
-            PostingSourceEnum.ACCOUNT_TRUEUP,
-        )
-    ]
-    return (
-        _db.session.query(JournalEntry)
-        .filter(
-            JournalEntry.source_kind_id.in_(correction_sources),
-            JournalEntry.id.in_(entry_ids),
-        )
-        .count()
-    )

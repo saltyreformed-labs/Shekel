@@ -540,7 +540,7 @@ class TestUpcomingLoanDoesNotCorruptTheSurfaces:
 
 
 class TestBrokenLoanFailsLoud:
-    """A configured, ORIGINATED loan whose POSTING ledger is missing.
+    """A configured, ORIGINATED loan, read from the fold of its source facts.
 
     The seam used to fall back to the loan's amortization SCHEDULE when the genesis
     ledger could not answer for a past date.  A schedule row is a payment the
@@ -556,20 +556,19 @@ class TestBrokenLoanFailsLoud:
     ``balance_at.balance_map`` (C3b3) both read
     :func:`~app.services.balance_at.positions`, which folds the loan's origination
     anchor and settled shadows -- neither of which lives in the posting ledger --
-    so a missing OPENING posting is a repairable cache inconsistency (plan step
-    E1), not a read-time outage (B-8).  They answer the CORRECT balance the
-    schedule-walk fallback could not, without the posting cache; the fail-loud
-    ``LoanLedgerNotOpenedError`` is retired.  The class name is kept for the B-21
-    finding its cash-degrade value assertion pins.
+    so no stored posting is read and none can be missing (plan step E1, B-8).
+    They answer the CORRECT balance the schedule-walk fallback could not; the
+    fail-loud ``LoanLedgerNotOpenedError`` is retired.  The class name is kept for
+    the B-21 finding its cash-degrade value assertion pins.
 
     Replaces ``TestUnpaidScheduleRowsNeverReduceTheDebt``, which pinned the
     behaviour of the fallback this deletes.
     """
 
-    def _broken_loan(
+    def _originated_loan(
         self, seed_user, db_session, periods, origination_date=date(2024, 9, 1),
     ):
-        """A configured loan whose genesis POSTING ledger has been removed.
+        """A configured $240,000 loan, originated on *origination_date*.
 
         A case that settles a payment passes the month before that payment's
         installment as *origination_date*: every contractual installment from
@@ -579,32 +578,26 @@ class TestBrokenLoanFailsLoud:
         """
         # pylint: disable=import-outside-toplevel
         from app.enums import AcctTypeEnum
-        from tests._test_helpers import clear_loan_ledger, create_loan_account
+        from tests._test_helpers import create_loan_account
 
-        acct = create_loan_account(
+        return create_loan_account(
             seed_user, db_session, name="Broken",
             principal=Decimal("240000.00"), rate=Decimal("0.06000"),
             term=360, origination_date=origination_date, payment_day=1,
             account_type=AcctTypeEnum.MORTGAGE,
         )
-        # The ONE way to build a ledger-less loan: production cannot make one.
-        # It clears only the POSTINGS; the source facts (LoanParams + shadows) that
-        # the fold reads are untouched.
-        clear_loan_ledger(acct.id)
-        return acct
 
-    def test_scalar_folds_source_events_when_the_posting_ledger_is_missing(
+    def test_scalar_folds_a_never_paid_loan_flat_not_down_the_schedule(
         self, app, db, seed_user, seed_periods,
     ):
-        """balance_at answers a broken loan from the fold, not a raise (step C3b).
+        """balance_at answers an unpaid loan from the fold, not a raise (step C3b).
 
-        The $240,000 loan originated 2024-09-01 and never paid; its posting ledger
-        is cleared.  The scalar folds the loan's SOURCE facts -- the synthesized
-        origination anchor ($240,000) plus its (empty) settled shadows -- and the
-        loan owes $240,000.00, flat: the honest balance of a loan borrowed and
-        never paid down.  The missing posting is a repairable cache miss (plan E1),
-        not the read-time outage the old fail-loud raised, and NOT the
-        schedule-walk's phantom $236,544.21 paid down by installments never made.
+        The $240,000 loan originated 2024-09-01 and never paid.  The scalar folds
+        the loan's SOURCE facts -- the synthesized origination anchor ($240,000)
+        plus its (empty) settled shadows -- and the loan owes $240,000.00, flat:
+        the honest balance of a loan borrowed and never paid down.  Not the
+        read-time outage the old fail-loud raised, and NOT the schedule-walk's
+        phantom $236,544.21 paid down by installments never made.
 
         The scalar reports what the loan HOLDS, negative when owed (ruling
         R-CC47, plan step credit_card:CC-5-5c), so it is read through
@@ -612,7 +605,7 @@ class TestBrokenLoanFailsLoud:
         """
         with app.app_context():
             periods = seed_periods
-            acct = self._broken_loan(seed_user, db.session, periods)
+            acct = self._originated_loan(seed_user, db.session, periods)
             bctx = BalanceContext.build(seed_user["user"].id)
 
             # Originated 2024-09-01, no payments: the fold holds the origination
@@ -621,23 +614,22 @@ class TestBrokenLoanFailsLoud:
                 balance_at.balance_at(acct, bctx, bctx.as_of),
             ) == Decimal("240000.00")
 
-    def test_map_folds_source_events_when_the_posting_ledger_is_missing(
+    def test_map_folds_a_never_paid_loan_flat_like_the_scalar(
         self, app, db, seed_user, seed_periods,
     ):
-        """balance_map on a broken loan folds from source, like the scalar (C3b3).
+        """balance_map on an unpaid loan folds from source, like the scalar (C3b3).
 
         The per-period map cut over to :func:`~app.services.balance_at.positions`
-        at step C3b3, so it no longer raises for a broken loan -- it folds the same
-        SOURCE facts the scalar does.  Originated 2024-09-01, never paid: every
-        begun period owes the origination principal ($240,000.00) flat, no debt
-        paid because no cash moved.  Same E1 repairable-cache decision as C3b1's
-        scalar.  The map reports what the loan HOLDS, negative when owed (ruling
+        at step C3b3, so it folds the same SOURCE facts the scalar does.
+        Originated 2024-09-01, never paid: every begun period owes the
+        origination principal ($240,000.00) flat, no debt paid because no cash
+        moved.  The map reports what the loan HOLDS, negative when owed (ruling
         R-CC47, plan step credit_card:CC-5-5c), so it is read through
         ``liability_sign.owed``.
         """
         with app.app_context():
             periods = seed_periods
-            acct = self._broken_loan(seed_user, db.session, periods)
+            acct = self._originated_loan(seed_user, db.session, periods)
             bctx = BalanceContext.build(seed_user["user"].id)
 
             result = balance_at.balance_map(acct, bctx)
@@ -649,16 +641,16 @@ class TestBrokenLoanFailsLoud:
                 result[begun[-1].id],
             ) == Decimal("240000.00")
 
-    def test_broken_loan_figures_follow_the_fold_not_the_replay(
+    def test_loan_figures_follow_the_fold_not_the_replay(
         self, app, db, seed_user, seed_periods,
     ):
-        """A broken loan's is_retired / payoff read the FOLD (plan step D2a).
+        """A loan's is_retired / payoff read the FOLD (plan step D2a).
 
-        The control for the D2a re-route: with the posting ledger cleared, the
-        pre-D2a ``LoanState.current_balance`` fell back to the money-blind
-        anchor replay (it advances one SCHEDULED step per confirmed payment and
-        discards the cash), while every displayed balance already folded the
-        SOURCE facts -- one loan, one page, two derivations.  D2a deleted the
+        The control for the D2a re-route: for a loan whose posting ledger could
+        not answer, the pre-D2a ``LoanState.current_balance`` fell back to the
+        money-blind anchor replay (it advances one SCHEDULED step per confirmed
+        payment and discards the cash), while every displayed balance already
+        folded the SOURCE facts -- one loan, one page, two derivations.  D2a deleted the
         field and pointed the seam's last two readers (the ``is_retired``
         predicate and the forward projection's seed) at the fold.
 
@@ -682,7 +674,7 @@ class TestBrokenLoanFailsLoud:
         """
         # pylint: disable=import-outside-toplevel
         from tests._test_helpers import (
-            clear_loan_ledger, create_settled_transfer, unseeded_replay_balance,
+            create_settled_transfer, unseeded_replay_balance,
         )
 
         with app.app_context():
@@ -692,7 +684,7 @@ class TestBrokenLoanFailsLoud:
             # ahead of it (ruling R-R103; it was originated 2024-09-01 and
             # settled 2024-10-01 until plan step recurrence:R16-c-2 began
             # charging every installment from origination).
-            acct = self._broken_loan(
+            acct = self._originated_loan(
                 seed_user, db.session, periods,
                 origination_date=date(2026, 1, 1),
             )
@@ -701,9 +693,6 @@ class TestBrokenLoanFailsLoud:
                 periods[1], amount=Decimal("241200.00"),
                 settled_on=periods[1].start_date,
             )
-            db.session.commit()
-            # Re-break the cache: settling re-synced the loan's postings.
-            clear_loan_ledger(acct.id)
             db.session.commit()
 
             # The control's teeth: the money-blind replay genuinely diverges.

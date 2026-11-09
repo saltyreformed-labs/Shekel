@@ -20,7 +20,6 @@ from tests._ledger_reads import (
     movement_nets_by_date,
     net_posted_by_day,
 )
-from tests._stored_ledger import family_journal_filter
 from tests._test_helpers import (
     an_entered_day,
     current_pay_period,
@@ -337,35 +336,13 @@ class TestSettleDayLifecycle:
             linked_key_of(db.session, txn.account_id), txn.scenario_id,
         ))
 
-    def _ledger_days_for(self, txn_id):
-        """Return the ``entry_date`` of every journal entry linked to *txn_id*.
-
-        The LEDGER half of every settle-day assertion below.  Ruling **R-ED**
-        names it as this half's gate in terms: the test must assert that the
-        ledger FOLLOWED, not merely that the column changed -- since plan step
-        E1a the settle day IS the ``entry_date`` a row's postings are filed
-        under, so a column that moves without the ledger is the books silently
-        disagreeing with the screen.
-        """
-        from app.models.journal_entry import JournalEntry
-
-        # The row's FAMILY (plan step X-bi-3a): a settled bill's money is
-        # posted under its covering movement, so the ledger half reads the
-        # row and its mirror together -- every day asserted below is unchanged.
-        return sorted(
-            entry.entry_date
-            for entry in db.session.query(JournalEntry)
-            .filter(family_journal_filter(txn_id))
-            .all()
-        )
-
     def _settled_txn_dated(self, seed_user, seed_periods_today, day):
         """Return a settled transaction whose money moved on *day*, ledger in step.
 
-        Built THROUGH the seam and reconciled, so the fixture's own postings
-        carry *day* -- a row dated by a bare attribute write would leave the
-        ledger at today and let a "the ledger followed" assertion pass on a
-        stale comparison rather than on the edit under test.
+        Built THROUGH the seam, so the row's own movement carries *day* -- a row
+        dated by a bare attribute write would leave its movement at today and let
+        a "the ledger followed" assertion pass on a stale comparison rather than
+        on the edit under test.  The ledger books the $100.00 expense on *day*.
         """
         from app import ref_cache
         from app.enums import StatusEnum
@@ -376,30 +353,24 @@ class TestSettleDayLifecycle:
             txn, ref_cache.status_id(StatusEnum.DONE), settle_day=an_entered_day(day),
             settlement=settlement_if_settling(txn, ref_cache.status_id(StatusEnum.DONE)),
         )
-        posting_service.sync_transaction_postings(txn)
         db.session.commit()
         assert txn.settled_on == day
-        assert self._ledger_days_for(txn.id) == [day], (
-            "fixture did not post its entry at the settle day"
+        assert self._net_by_day(txn.id) == {day: Decimal("100.00")}, (
+            "fixture did not book its expense at the settle day"
         )
         return txn
 
     def test_editing_the_settle_day_moves_the_ledger_with_it(
         self, app, auth_client, seed_user, seed_periods_today
     ):
-        """PATCH ``settled_on`` on a settled row re-dates its postings (R-ED).
+        """PATCH ``settled_on`` on a settled row re-dates its ledger lines (R-ED).
 
         The correction ruling **R-ED** exists for: the user read their
         statement and the money moved on a different day than the one-click
-        settle recorded.  ``settled_on`` is in
-        ``mutations._POSTING_RELEVANT_FIELDS``, so the per-``(period,
-        entry_date)`` reconcile reverses the stale-dated entry at ITS own day
-        and re-posts the effect at the corrected one (finding **N-13**).
+        settle recorded.  The ledger books a movement on its own settle day, so
+        the corrected day carries the whole effect and the original none.
 
-        The assertion is on the LEDGER, which is R-ED's stated gate.  The
-        corrected day must be present and the original must be net-zero
-        (reversal + original), never simply absent -- the reversal is history,
-        not an erasure.
+        The assertion is on the LEDGER, which is R-ED's stated gate.
         """
         with app.app_context():
             original_day = display_today() - timedelta(days=6)
@@ -419,20 +390,12 @@ class TestSettleDayLifecycle:
             assert txn.settled_on == corrected_day
 
             # The WHOLE effect must now sit at the corrected day and nothing at
-            # the original.  The original day's ENTRIES survive as history --
-            # the reconcile adds a reversal rather than erasing them -- so the
-            # raw list of ``entry_date`` values still contains it; only the NET
-            # separates "re-dated" from "posted twice", which is why the
-            # assertion is on the net and not on membership.
+            # the original.
             assert self._net_by_day(txn.id) == {corrected_day: Decimal("100.00")}, (
-                "the settle day moved but the posted ledger did not follow: "
+                "the settle day moved but the ledger did not follow: "
                 f"net effect by day is {self._net_by_day(txn.id)}, expected the "
                 f"whole $100.00 at {corrected_day} and nothing left at "
                 f"{original_day}"
-            )
-            assert original_day in self._ledger_days_for(txn.id), (
-                "the original day's entries vanished instead of reversing -- a "
-                "correction restates history, it does not erase it"
             )
 
     def _net_by_day(self, txn_id):
@@ -463,7 +426,7 @@ class TestSettleDayLifecycle:
         ``status_seam.settle_day_for_status`` drops the day instead: the user
         picked Projected, which says the money did not move.  Graded on the
         400 NOT happening, on the column being cleared, and on the ledger
-        being reversed -- a revert that left postings behind would be the
+        holding none of it -- a revert that left a line behind would be the
         balance keeping money the user just said was never spent.
         """
         with app.app_context():

@@ -316,7 +316,7 @@ class TestTransferResolveConflicts:
                 db.session.get(Transfer, xfer_id).transfer_template_id is None
                 for xfer_id in ids
             )
-            before = [_transfer_as_stored(seed_user, xfer_id) for xfer_id in ids]
+            before = [_transfer_as_stored(xfer_id) for xfer_id in ids]
 
             with _LogCapture("app.services.transfer_recurrence") as cap:
                 notice = transfer_recurrence.resolve_conflicts(
@@ -325,7 +325,7 @@ class TestTransferResolveConflicts:
             db.session.commit()
 
             assert notice is None
-            assert [_transfer_as_stored(seed_user, xfer_id) for xfer_id in ids] == before
+            assert [_transfer_as_stored(xfer_id) for xfer_id in ids] == before
             (event,) = [
                 record for record in cap.records
                 if getattr(record, "event", None)

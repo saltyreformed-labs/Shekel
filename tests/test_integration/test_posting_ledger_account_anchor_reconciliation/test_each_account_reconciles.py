@@ -127,10 +127,7 @@ class TestAbsoluteInvariantPerAccount:
             assert _independent_post_assertion_source_effect(
                 savings.id, scenario_id, latest_asserted_day,
             ) == Decimal("-100.00")
-            # (c) the production service helpers agree too.
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
-            ) == Decimal("250.00")
+            # (c) the production service helper agrees too.
             assert posting_service.posted_purchase_effect(
                 savings.id, scenario_id,
             ) == Decimal("-300.00")  # both spends' movements, the ledger-native cash effect
@@ -361,11 +358,10 @@ class TestRevertAfterTrueupSelfHeals:
         spend 100 (T+3h) -- linked ledger 250.00 -- the $200.00 pre-true-up
         expense is reverted through the real ``sync_transaction_postings``
         (``settled=False``) path.  The true-up's walked ``ledger_before`` moves
-        300 -> 500, so its delta moves +50 -> -150; the effect-time self-heal
-        appends the balancing -200.00 delta on the same key.  The reverted
-        source drops from the transaction truth too:
+        300 -> 500, so its delta moves +50 -> -150.  The reverted source drops
+        from the transaction truth too:
 
-          linked = 500 (opening) - 150 (healed true-up) - 100 = 250.00
+          linked = 500 (opening) - 150 (re-based true-up) - 100 = 250.00
                  = latest anchor 350 + post-assertion (-100.00)
 
         The account total never left the anchor + post-assertion balance.
@@ -413,12 +409,11 @@ class TestRevertAfterTrueupSelfHeals:
             assert account_net(
                 _db.session, savings.id, scenario_id,
             ) == Decimal("250.00")
-            # The self-heal re-based the true-up: its walked ledger_before moved
-            # 300 -> 500 (the $200 no longer absorbed), so the true-up key's
-            # linked legs now net -150.00 -- the original +50.00 plus the
-            # appended -200.00 balancing delta.  A stale correction left at +50
-            # would read the account at 450.00; this pins the re-derivation
-            # itself, not merely the total it happens to reach.
+            # The true-up re-based: its walked ledger_before moved 300 -> 500
+            # (the $200 no longer absorbed), so its line now nets
+            # 350 - 500 = -150.00.  A stale correction left at +50 would read
+            # the account at 450.00; this pins the re-derivation itself, not
+            # merely the total it happens to reach.
             assert source_net(
                 db.session, linked_key_of(db.session, savings.id), scenario_id,
                 PostingSourceEnum.ACCOUNT_TRUEUP,

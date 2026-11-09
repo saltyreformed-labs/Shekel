@@ -3,8 +3,7 @@
 :func:`app.services.ledger_lines.accounts_hold_lines` is the one question the re-type
 refusal asks at both of its doors.  What these cases pin: each kind of record makes a
 line and each is seen, a line that is not the account's does not count, every scenario is
-asked, and an account whose records hold nothing answers ``False`` where the stored
-ledger still holds its legs: the one way the answer parts from the store's.
+asked, and an account whose one record holding money is deleted answers ``False``.
 """
 
 from datetime import date
@@ -12,8 +11,6 @@ from decimal import Decimal
 
 from app.extensions import db as _db
 from app.models.category import Category
-from app.models.journal_entry import Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.scenario import Scenario
 from app.services import transfer_service
 from app.services.ledger_lines import accounts_hold_lines
@@ -145,16 +142,16 @@ class TestEveryScenarioIsAsked:
             assert accounts_hold_lines([account]) is True
 
 
-class TestWhatTheStoreHoldsWithNoRecordIsNoLine:
-    """The one way the answer parts from the stored ledger's."""
+class TestADeletedRecordLeavesNoLine:
+    """The answer follows the records: a line goes with the record behind it."""
 
-    def test_a_settled_transfer_deleted_leaves_legs_and_no_line(
+    def test_a_settled_transfer_deleted_leaves_no_line(
         self, app, db, seed_user,
     ):
-        """A settle and its reversal stay in the store, and no record is behind them.
+        """A settled transfer makes a line, and its hard delete takes it away.
 
-        The stored legs are asserted, so the ``False`` is a difference shown rather
-        than a world with nothing in it.
+        The ``True`` before the delete is asserted, so the ``False`` is a change
+        shown rather than a world with nothing in it.
         """
         with app.app_context():
             account = _empty_account(seed_user)
@@ -168,7 +165,4 @@ class TestWhatTheStoreHoldsWithNoRecordIsNoLine:
             )
             _db.session.flush()
 
-            assert _db.session.query(Posting).join(
-                LedgerAccount, Posting.ledger_account_id == LedgerAccount.id,
-            ).filter(LedgerAccount.account_id == account.id).count() > 0
             assert accounts_hold_lines([account]) is False

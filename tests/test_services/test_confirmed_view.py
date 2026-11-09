@@ -20,14 +20,11 @@ principal), balance -= principal, and the row's P&I split against the governing
 period's contractual payment under ``principal + interest == payment +
 extra_payment``.  A reader can check every number without running the code.
 
-**The fold is TOTAL, so two things the partial posting reader refused, this
-answers** -- both pinned below, not hidden:
-
-* a BROKEN loan (originated, no opening posting: a cold cache or a what-if never
-  posted into) folds from SOURCE facts where the reader returned ``None``
-  (finding B-12);
-* a what-if scenario with no postings answers from the loan's anchors rather
-  than falling back to the resolver's money-blind replay.
+**The fold is TOTAL, so what the partial posting reader refused, this
+answers** -- pinned below, not hidden: a what-if scenario with no postings
+answers from the loan's anchors rather than falling back to the resolver's
+money-blind replay.  (The reader's other refusal, a loan with no opening
+posting, finding B-12, is no state at all for a walk that reads no posting.)
 
 And one thing it is BLIND to: a raw transaction typed onto a loan account moves
 the posted balance but not the walk (finding N-11).  That shape is forbidden at
@@ -66,10 +63,8 @@ from app.services import (
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
 from tests._ledger_reads import posted_loan_balance_at
-from tests._stored_ledger import stored_loan_balance_at
 from tests._test_helpers import (
     amount_basis_for_scenario,
-    clear_loan_ledger,
     create_loan_account,
     create_loan_with_trueup,
     create_settled_cash_transaction,
@@ -159,7 +154,7 @@ def _economics(view):
 
 
 class TestConfirmedViewGuards:
-    """When the view withholds an answer -- and the two cases it no longer does.
+    """When the view withholds an answer -- and where it no longer does.
 
     Every ``None`` routes the caller to the resolver's anchor replay, exactly the
     pre-switch behaviour, so a withheld view is never a wrong one.
@@ -233,48 +228,6 @@ class TestConfirmedViewGuards:
             opening = _view(loan, seed_user, _ORIGINATION_DATE)
             assert opening.balance == _ORIGINATION_PRINCIPAL
             assert opening.history_rows == []
-
-    def test_a_loan_with_no_opening_posting_still_folds(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """B-12: a cold posting cache no longer costs the loan its confirmed view.
-
-        The posting reader this replaced returned ``None`` for a loan with no
-        OPENING posting -- a cold cache, or a what-if the opening was never
-        posted into -- which dropped the resolver back to its money-blind anchor
-        replay.  The walk reads SOURCE facts, so clearing the ledger moves
-        NOTHING: the same balance, the same rows, before and after.  That is the
-        repairable-cache decision the balance scalar and the per-period map
-        already took (plan steps C3b1 / C3b3), now closed for the confirmed view.
-
-        Hand-computed: one $1,000 payment due 2026-02-01 on the $100,000 anchor
-        -- interest round(100000 x 0.005) = 500.00, principal 1000 - 500 =
-        500.00, balance 99,500.00.
-        """
-        with app.app_context():
-            loan = _make_loan(seed_user)
-            _settle(seed_user, loan, seed_periods[_P1])
-            db.session.commit()
-
-            before = _view(loan, seed_user)
-            assert _economics(before) == [
-                (date(2026, 2, 1), Decimal("500.00"),
-                 Decimal("500.00"), Decimal("99500.00")),
-            ]
-            assert before.balance == Decimal("99500.00")
-            # The posting reader agrees while the cache is warm (the checked
-            # projection, plan step E1a).
-            assert stored_loan_balance_at(
-                loan.id, seed_user["scenario"].id, _AS_OF,
-            ) == Decimal("99500.00")
-
-            clear_loan_ledger(loan.id)
-
-            # The reader can no longer answer; the fold is UNCHANGED.
-            assert stored_loan_balance_at(
-                loan.id, seed_user["scenario"].id, _AS_OF,
-            ) is None
-            assert _view(loan, seed_user) == before
 
     def test_a_what_if_scenario_folds_its_own_anchors_not_the_baseline_payments(
         self, app, db, seed_user, seed_periods,

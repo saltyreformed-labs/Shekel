@@ -6,8 +6,9 @@ row of the owner's, so it needed a store of its own; these are its two doors.
 
 **Three subjects, and the third is the one that matters most.**  What the doors
 WRITE is one; what the review pass then STOPS asking about is the second; and
-the third is that a skip moves NO money -- which is a claim about four tables
-this leaf does not touch and about a hero figure it must not move.  A leaf that
+the third is that a skip moves NO money -- which is a claim about two record
+tables and the ledger this leaf does not touch, and about a hero figure it must
+not move.  A leaf that
 only proved the first two would have proved that the rows appear, not that they
 are harmless.
 
@@ -33,7 +34,6 @@ import pytest
 # pylint: disable=shekel-private-module-import
 from app.exceptions import ValidationError
 from app.models.account_opening import AccountOpening
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.statement_line_skip import StatementLineSkip
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
@@ -61,6 +61,7 @@ from app.services.statement_match._undisposed import (
     skipped_among,
     undisposed_lines,
 )
+from tests._ledger_reads import account_net, nets_by_key_and_day
 from tests._test_helpers import open_books_before_the_first_assertion
 from tests.test_services.test_statement_import.test_anchor import _seed_import
 
@@ -155,26 +156,28 @@ def _skip(seed_user, line):
     return skip_line(line.id, owner_id, account_id)
 
 
-def _money_row_counts(db):
-    """Return how many rows the four money tables hold, right now.
+def _money_snapshot(db, seed_user):
+    """Return how many rows the two money tables hold, and the ledger, right now.
 
-    **The four the app records a movement in**: a transaction, a purchase
-    against one, and the two ledger tables a posting lands in.  Counted rather
-    than compared field by field because the claim under test is that this door
-    writes NONE of them -- an absence, which a count states exactly and a
-    field comparison would state only for the rows it thought to look at.
+    **The two the app records a movement in**: a transaction and a purchase
+    against one.  Counted rather than compared field by field because the
+    claim under test is that this door writes NONE of them -- an absence,
+    which a count states exactly and a field comparison would state only for
+    the rows it thought to look at.  Beside them the ledger worked out from
+    every record, net per chart account and day, so money booked by any
+    other record shows too.
 
     Args:
         db: The session fixture.
+        seed_user: The seeded user bundle, whose scenario's ledger is read.
 
     Returns:
-        A dict of table name to row count.
+        A dict of table name to row count, and ``"ledger"`` to the nets.
     """
     return {
         "transactions": db.session.query(Transaction).count(),
         "transaction_entries": db.session.query(TransactionEntry).count(),
-        "journal_entries": db.session.query(JournalEntry).count(),
-        "account_postings": db.session.query(Posting).count(),
+        "ledger": nets_by_key_and_day(db.session, seed_user["scenario"].id),
     }
 
 
@@ -471,7 +474,7 @@ class TestTheExclusivityRunsBOTHWays:
         """It fires before anything is written, so the state is unchanged."""
         line, txn = self._skipped_line_and_a_row(db, seed_user)
         scope = a_scope(seed_user)
-        before = _money_row_counts(db)
+        before = _money_snapshot(db, seed_user)
 
         with pytest.raises(ValidationError):
             statement_match.accept_match(
@@ -486,7 +489,7 @@ class TestTheExclusivityRunsBOTHWays:
         # relocated below the INSERT, which is the one mutation this case is
         # named for.  Named by adversarial test-quality review 2026-09-02.
         assert db.session.query(StatementMatch).count() == 0
-        assert _money_row_counts(db) == before
+        assert _money_snapshot(db, seed_user) == before
 
     def test_the_ADD_door_inherits_the_same_refusal(
         self, app, db, seed_user,
@@ -780,28 +783,34 @@ class TestASkipMovesNoMoney:
     """The claim that makes this leaf safe, measured rather than asserted."""
 
     def test_it_writes_no_row_in_any_money_table(self, app, db, seed_user):
-        """Four tables, counted before and after both doors.
+        """Two tables counted, and the ledger read, before and after both doors.
 
-        A transaction, a purchase, a journal entry and a posting are where
-        this app records that money moved.  A skip records a decision about
-        the WORK, so every one of these counts must be unchanged -- by the
-        skip AND by the undo, because an undo that removed something would
+        A transaction and a purchase are where this app records that money
+        moved, and the ledger is what the records book.  A skip records a
+        decision about the WORK, so every one of these must be unchanged -- by
+        the skip AND by the undo, because an undo that removed something would
         mean the skip had created it.
         """
         an_envelope(seed_user)
         line = an_unexplained_outflow(seed_user)
         db.session.commit()
         owner_id, account_id = _owner(seed_user)
-        before = _money_row_counts(db)
+        before = _money_snapshot(db, seed_user)
+        # The ledger read is not an empty one: the seeded Checking's $1,000.00
+        # opening is on its own line, and the Projected envelope books nothing,
+        # so Checking nets 1,000.00 + 0.00 = 1,000.00.
+        assert account_net(
+            db.session, account_id, seed_user["scenario"].id,
+        ) == Decimal("1000.00")
 
         recorded = skip_line(line.id, owner_id, account_id)
         db.session.commit()
-        after_skip = _money_row_counts(db)
+        after_skip = _money_snapshot(db, seed_user)
         unskip_line(recorded.skip_id, owner_id, account_id)
         db.session.commit()
 
         assert after_skip == before
-        assert _money_row_counts(db) == before
+        assert _money_snapshot(db, seed_user) == before
 
     def test_the_banks_own_record_still_shows_the_skipped_line(
         self, app, db, seed_user,

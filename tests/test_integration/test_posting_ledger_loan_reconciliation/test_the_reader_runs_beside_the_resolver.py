@@ -21,10 +21,6 @@ from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.installment_calendar import monthly_due_date
 from app.services.balance_at import BalanceContext
 from app.services.liability_sign import owed
-from tests._stored_ledger import (
-    stored_loan_balance_at,
-    stored_loan_balance_map,
-)
 from tests._test_helpers import (
     amount_basis_for_scenario,
     create_account_of_type,
@@ -331,8 +327,8 @@ class TestReaderParallelRunAgainstResolver:
                 loan.id, scenario_id, frozen,
             ) == _resolver_balance(loan.id, scenario_id, frozen)
 
-            # The sweep: identities, per-entry balance, trial balance, and the
-            # completeness guarantee that now covers the early settle.
+            # The sweep: identities, trial balance, and the completeness
+            # guarantee that now covers the early settle.
             _assert_loan_reconciles(loan, scenario_id)
 
     def test_scalar_reader_diverges_by_the_exact_principal_delta_off_schedule(
@@ -527,11 +523,10 @@ class TestReaderParallelRunAgainstResolver:
         (balance 100,000 - one principal) and the what-if two (100,000 - two
         principals), each reading its OWN balance == its OWN resolver, the what-if's
         second payment lowering only the what-if (neither leaks into the other).  A
-        THIRD scenario the writers never opened holds no payment and no OPENING
-        posting.  The store's reader returns ``None`` there, the worked-out read
-        the loan's own anchor, because it answers whichever scenario it is asked
-        (``ledger_lines._worked_out`` names the difference; no route creates a
-        second scenario).  Neither is a misleading $0 or another scenario's
+        THIRD scenario the writers never opened holds no payment.  The
+        worked-out read answers the loan's own anchor there, because it answers
+        whichever scenario it is asked (``ledger_lines._worked_out``; no route
+        creates a second scenario): not a misleading $0 or another scenario's
         balance (the M2 latent multi-scenario guard, plan Section 4).
         """
         with app.app_context():
@@ -577,16 +572,10 @@ class TestReaderParallelRunAgainstResolver:
             assert baseline_reader == _ANCHOR_BALANCE - (
                 scheduled_pi - Decimal("500.00")
             )
-            # A scenario the writers never opened: the store reads None, the
-            # read the $100,000.00 anchor no payment has reduced.  Neither is
-            # the baseline's balance or a bare $0.
+            # A scenario the writers never opened: the read answers the
+            # $100,000.00 anchor no payment has reduced -- not the baseline's
+            # balance or a bare $0.
             assert _posted_balance(loan.id, unopened.id) == Decimal("100000.00")
-            assert stored_loan_balance_at(
-                loan.id, unopened.id, _AS_OF,
-            ) is None
-            assert stored_loan_balance_map(
-                loan.id, unopened.id, seed_periods,
-            ) is None
             _assert_loan_reconciles(loan, baseline.id)
             _assert_loan_reconciles(loan, whatif.id)
 

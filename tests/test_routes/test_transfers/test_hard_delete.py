@@ -17,7 +17,6 @@ from tests._test_helpers import transfer_amount
 from ._helpers import (
     _create_savings_account,
     _ledger_of,
-    _stored_entry_count,
     _create_template,
     _create_transfer,
     _received_transfer_of,
@@ -163,7 +162,6 @@ class TestTransferTemplateHardDelete:
                 f"/transfers/instance/{xfer_id}",
             ).status_code == 200
             ledger = _ledger_of(checking_id, savings_id, scenario_id)
-            entries = _stored_entry_count(seed_user)
             # The delete took the payment off: Savings, opened at $0.00,
             # holds nothing.
             assert ledger[1] == Decimal("0.00")
@@ -179,7 +177,6 @@ class TestTransferTemplateHardDelete:
             assert db.session.get(TransferTemplate, template_id) is None
             assert db.session.get(Transfer, xfer_id) is None
             assert _ledger_of(checking_id, savings_id, scenario_id) == ledger
-            assert _stored_entry_count(seed_user) == entries
 
     def test_hard_delete_transfer_template_with_history_already_archived(
         self, app, auth_client, seed_user, seed_periods_today,

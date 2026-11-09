@@ -9,9 +9,9 @@ change and origination-rate / params edit routes, and loan-params creation (the
 N1 back-post).  These integration tests drive each chokepoint through its REAL
 entry point (the service call or the HTTP route), with NO manual loan sync
 call anywhere, and assert the ledger ends in the right state.  Each figure is the
-worked-out read, which follows the records and cannot see a sync, so every test
-ends on ``assert_ledger_parity``: that is what fails when a chokepoint's sync is
-deleted, and it goes with the sync (plan#2914).
+worked-out read, which follows the records and cannot see a sync, so what these
+tests grade is the ledger each chokepoint's records work out to; the stored
+ledger the sync writes is no longer graded (plan#2914).
 
 The load-bearing invariant (plan Section 5 / 8.5): a Step-4 correction links
 NO row -- it is a date-keyed correction since plan step ``balance:X-bi-6-3``
@@ -44,14 +44,12 @@ from app.services import (
 )
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.ledger_lines import loan_key
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     account_net,
     ledger_net,
     loan_correction_lines,
     scenario_lines,
 )
-from tests._stored_ledger import loan_correction_entries
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_with_trueup,
@@ -112,9 +110,9 @@ class TestSettleWiringAutoPosts:
         """A single $1,000 settle posts Loan -500 / Interest +500 with no sync call.
 
         Arithmetic: interest round(100000 * 0.005) = 500.00; principal 500.00.
-        The wiring fires inside update_transfer's settle path, so right after
-        create_settled_transfer the payment correction (+500 principal) AND the
-        opening (-250000) + true-up (+150000) are posted: the loan-linked ledger
+        Right after create_settled_transfer the worked-out read holds the
+        payment's split (+500 principal) AND the opening (-250000) + true-up
+        (+150000): the loan-linked ledger
         nets -99500.00 == -(current balance 99500), the interest ledger holds
         +500, and Checking moved only by the Step-2 cash on top of its
         $1000.00 Step-5 opening: 1000 - 1000 = 0.00.
@@ -123,12 +121,9 @@ class TestSettleWiringAutoPosts:
             scenario_id = seed_user["scenario"].id
             checking = seed_user["account"]
             loan = _make_loan(seed_user)
-            xfer = _settle(seed_user, loan, seed_periods[_P1])
+            _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
 
-            assert len(
-                loan_correction_entries(db.session, xfer.id, loan.id),
-            ) == 1
             # Genesis: opening (-250000) + true-up (+150000) + principal (+500).
             assert account_net(
                 _db.session, loan.id, scenario_id,
@@ -139,26 +134,23 @@ class TestSettleWiringAutoPosts:
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == Decimal("0.00")
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_settle_with_actual_amount_splits_from_actual_cash(
         self, app, db, seed_user, seed_periods,
     ):
         """Settling with an actual over the estimate splits from the ACTUAL cash.
 
-        A single payoff-overpayment isolates the correction's cash-reading (one
-        settle, so no later re-sync can self-heal a wrong read).  On a $300
+        A single payoff-overpayment isolates the correction's cash-reading.  On a $300
         anchor, a payment settled with a $100 estimate but a $1,000 ACTUAL in ONE
         update_transfer call pays the loan off -- interest round(300*0.005)=1.50,
         principal capped at 300.00 -- and routes the 1000 - 1.50 - 300 = 698.50
         remainder to the per-loan Refund ledger.  That Refund leg is
         cash-DEPENDENT: a split that read the $100 estimate would under-cover
-        (principal 98.50, no cap, NO refund).  Its presence therefore pins both
-        that the split reads effective (actual) cash AND that the wiring runs the
-        sync AFTER the actual is applied in update_transfer (the actual-after-
-        status ordering).  With the opening (-250000) and true-up (+249700 =
-        250000 - 300) also posted, the loan-linked ledger nets 0.00 -- the loan is
-        paid off (its 300.00 principal exactly retires the 300 balance).
+        (principal 98.50, no cap, NO refund).  Its presence therefore pins
+        that the split reads effective (actual) cash.  With the opening
+        (-250000) and true-up (+249700 = 250000 - 300) also posted, the
+        loan-linked ledger nets 0.00 -- the loan is paid off (its 300.00
+        principal exactly retires the 300 balance).
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -181,7 +173,6 @@ class TestSettleWiringAutoPosts:
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("0.00")
-            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestRevertAndDeletePostFullCashReversal:
@@ -196,7 +187,7 @@ class TestRevertAndDeletePostFullCashReversal:
         so the Step-2 cash reader sees only the +1,000 cash on the loan ledger
         and posts the FULL -1,000 reversal: Checking returns to its $1000.00
         opening (not 1500).  The
-        loan sync reverses the now-projected payment's correction; the opening
+        now-projected payment holds no split; the opening
         (-250000) + true-up (+150000) remain (the revert does not touch them), so
         the loan-linked ledger returns to the trued-up baseline -100000.00 ==
         -(verified balance 100000).
@@ -230,7 +221,6 @@ class TestRevertAndDeletePostFullCashReversal:
             assert ledger_net(
                 db.session, _interest_key(loan), scenario_id,
             ) == Decimal("0.00")
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_hard_delete_strands_nothing_and_full_cash_reversal(
         self, app, db, seed_user, seed_periods,
@@ -238,10 +228,10 @@ class TestRevertAndDeletePostFullCashReversal:
         """Hard-deleting a corrected payment strands nothing; the loan resets to baseline.
 
         The teardown door posts the FULL cash reversal before the rows go (the
-        movement's link is what the CASCADE severs), and the loan's re-sync
-        AFTER the delete reverses the payment's split at its own key -- the
-        split links no row (ruling **R-BAL102**), so nothing about it needed
-        the shadow to still exist.  Nothing stranded: Checking returns to its
+        movement's link is what the CASCADE severs), and with the payment gone
+        its split at its own key is gone too -- the split links no row (ruling
+        **R-BAL102**), so nothing about it needed the shadow to still exist.
+        Nothing stranded: Checking returns to its
         $1000.00 opening, the interest ledger nets to zero, and the loan-linked
         ledger returns to the trued-up baseline -100000.00 (opening + true-up
         remain -- the delete touches only the payment correction).
@@ -269,7 +259,6 @@ class TestRevertAndDeletePostFullCashReversal:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("0.00")
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_soft_delete_reverses_correction_and_full_cash(
         self, app, db, seed_user, seed_periods,
@@ -295,7 +284,6 @@ class TestRevertAndDeletePostFullCashReversal:
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_delete_resplits_downstream_payments(
         self, app, db, seed_user, seed_periods,
@@ -333,7 +321,6 @@ class TestRevertAndDeletePostFullCashReversal:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("1000.00")
-            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestRestoreWiring:
@@ -390,7 +377,6 @@ class TestRestoreWiring:
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
-            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestTrueUpWiring:
@@ -407,8 +393,8 @@ class TestTrueUpWiring:
         and re-splits P2 from 90000 to round(90000 * 0.005) = 450.00, so the
         interest ledger holds 500 + 450 = 950.00 (Step 4 reversed P1 and left only
         450.00).  Checking is unchanged from its -1000.00 (the $1000.00
-        opening minus the two settles) -- the true-up sync touches only the
-        loan's own ledgers.
+        opening minus the two settles) -- the true-up moves only the loan's own
+        ledgers.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -439,7 +425,6 @@ class TestTrueUpWiring:
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == checking_before
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_trueup_syncs_every_scenario(
         self, app, db, seed_user, seed_periods,
@@ -450,7 +435,7 @@ class TestTrueUpWiring:
         each accruing interest 500.00 against 100000 @ 01-10.  A user-trueup of
         90000 @ 01-15 (after the 01-10 anchor, before P1's 02-01 due date)
         re-bases P1 in BOTH scenarios to round(90000 * 0.005) = 450.00 -- proving
-        the sync loops every scenario, since the anchor is per-account.
+        the re-base reaches every scenario, since the anchor is per-account.
         """
         with app.app_context():
             baseline = seed_user["scenario"]
@@ -486,8 +471,6 @@ class TestTrueUpWiring:
             assert ledger_net(
                 db.session, interest_key, whatif.id,
             ) == Decimal("450.00")
-            assert_ledger_parity(db.session, baseline.id)
-            assert_ledger_parity(db.session, whatif.id)
 
     def test_trueup_resubmit_is_idempotent(
         self, app, db, seed_user, seed_periods,
@@ -525,7 +508,6 @@ class TestTrueUpWiring:
             assert ledger_net(
                 db.session, _interest_key(loan), scenario_id,
             ) == Decimal("450.00")
-            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestNonLoanTransferIgnored:
@@ -536,9 +518,8 @@ class TestNonLoanTransferIgnored:
     ):
         """Settling a Checking -> Savings transfer creates no loan_payment entry.
 
-        classify_account(Savings) is not AMORTIZING, so the loan wiring
-        short-circuits: no loan-payment-sourced journal entry is booked under
-        the transfer's to-side.
+        classify_account(Savings) is not AMORTIZING, so the read books no
+        loan-payment line at the transfer's to-side.
 
         **Read at the savings side's key and over the owner's entries since
         plan step ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 1):
@@ -576,11 +557,10 @@ class TestNonLoanTransferIgnored:
                 for line in scenario_lines(db.session, scenario_id)
                 if line.source_kind_id == loan_payment_source
             } == {loan.id}
-            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestRouteChokepointWiring:
-    """The route chokepoints (rate change, params create) fire the re-sync."""
+    """The route chokepoints (rate change, params create) re-split the payments."""
 
     def test_rate_change_route_resplits_interest(
         self, app, db, seed_user, seed_periods, auth_client,
@@ -590,8 +570,8 @@ class TestRouteChokepointWiring:
         P1 (due 02-01, 6% origination rate) and P2 (due 03-01) settle:
         interest 500.00 + round(99500*0.005)=497.50 = 997.50.  A rate change to
         12% effective 2026-03-01 governs P2's installment: interest
-        round(99500 * 0.12 / 12) = 995.00.  The route wiring re-syncs, so the
-        interest ledger holds 500.00 + 995.00 = 1495.00 after the POST.  P2
+        round(99500 * 0.12 / 12) = 995.00.  So the interest ledger holds
+        500.00 + 995.00 = 1495.00 after the POST.  P2
         and not a later installment since plan step recurrence:R16-c-2: every
         contractual installment is charged now, so a payment skipping March
         would clear March's interest too (the fixture is restated so nothing
@@ -621,7 +601,6 @@ class TestRouteChokepointWiring:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("1495.00")
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_params_update_origination_rate_resplits_interest(
         self, app, db, seed_user, seed_periods, auth_client,
@@ -630,9 +609,8 @@ class TestRouteChokepointWiring:
 
         P1 settles at the 6% origination rate: interest round(100000*0.06/12) =
         500.00.  POSTing /loan/params with interest_rate 8.000 upserts the
-        origination RateHistory row to 8% (payment_day unchanged), and
-        update_params re-syncs UNCONDITIONALLY, so P1's interest re-splits to
-        round(100000 * 0.08 / 12) = 666.67.
+        origination RateHistory row to 8% (payment_day unchanged), so P1's
+        interest re-splits to round(100000 * 0.08 / 12) = 666.67.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -653,15 +631,14 @@ class TestRouteChokepointWiring:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("666.67")
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_params_payment_day_change_resplits_across_trueup(
         self, app, db, seed_user, seed_periods, auth_client,
     ):
         """Changing payment_day alone re-splits -- it moves the anchor boundary.
 
-        Pins the reason update_params syncs UNCONDITIONALLY, not only on a rate
-        change.  The trueup anchor is 2026-01-25.  P1 (period start 2026-01-16) has
+        Pins that a payment_day change re-splits, not only a rate change.  The
+        trueup anchor is 2026-01-25.  P1 (period start 2026-01-16) has
         monthly due date 2026-02-01 at payment_day=1 -- AFTER the trueup, so it
         splits on the 100000 trueup (interest round(100000 * 0.005) = 500.00).
         POSTing /loan/params with payment_day=20 (rate unchanged) moves P1's due
@@ -703,7 +680,6 @@ class TestRouteChokepointWiring:
             assert ledger_net(
                 db.session, interest_key, scenario_id,
             ) == Decimal("1250.00")
-            assert_ledger_parity(db.session, scenario_id)
 
     def test_params_created_after_settle_backposts(
         self, app, db, seed_user, seed_periods, auth_client,
@@ -711,10 +687,10 @@ class TestRouteChokepointWiring:
         """A payment settled before loan setup gets its correction on setup (N1).
 
         A bare amortizing-type account carries no LoanParams, so a payment
-        settled into it posts NO correction (the settle-time sync short-circuits
-        -- not resolvable).  POSTing /loan/setup configures the loan (origination
-        anchor 100000 @ 2026-01-01) and the create_params wiring back-posts: the
-        P1 correction now holds interest round(100000 * 0.005) = 500.00.
+        settled into it posts NO correction (the loan is not resolvable).
+        POSTing /loan/setup configures the loan (origination anchor 100000 @
+        2026-01-01) and the payment now splits: the P1 correction holds
+        interest round(100000 * 0.005) = 500.00.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -747,10 +723,7 @@ class TestRouteChokepointWiring:
             )
             assert resp.status_code == 302
 
-            # Back-posted: the correction now exists with interest 500.00.
-            entries = loan_correction_entries(db.session, xfer.id, loan.id)
-            assert len(entries) == 1
+            # Back-posted: the correction now holds interest 500.00.
             assert ledger_net(
                 db.session, _interest_key(loan), scenario_id,
             ) == Decimal("500.00")
-            assert_ledger_parity(db.session, scenario_id)

@@ -22,7 +22,6 @@ from app.models.account import AccountAnchorHistory
 from app.services import transfer_legs, transfer_service
 from app.services.settle_day import SettleDay, record_settle_day
 from app.utils.dates import display_today
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     net_posted_by_day,
     transfer_family_movement_ids,
@@ -146,7 +145,7 @@ class TestACorrection:
     def test_a_borrowing_side_follows_and_the_ledger_with_it(
         self, app, seed_user, seed_periods_today,
     ):
-        """Paid pressed today, Checking corrected: Savings follows, and so do both entries."""
+        """Paid pressed today, Checking corrected: Savings follows, and so does the ledger."""
         with app.app_context():
             xfer = _transfer(seed_user, seed_periods_today[3])
             owner = seed_user["user"].id
@@ -166,7 +165,6 @@ class TestACorrection:
             assert net_posted_by_day(transfer_family_movement_ids(xfer.id)) == {
                 corrected: Decimal("300.00"),
             }
-            assert_ledger_parity(db.session, xfer.scenario_id)
 
     def test_sides_on_two_days_post_on_two_days(
         self, app, seed_user, seed_periods_today,

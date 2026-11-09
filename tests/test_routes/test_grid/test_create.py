@@ -9,18 +9,13 @@ from decimal import Decimal
 from flask_login import login_user
 
 from app.extensions import db
-from app.models.account import Account
 from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.ref import TransactionType
 from app import ref_cache
 from app.enums import TxnTypeEnum
-from app.services import posting_service
-from app.services.liability_sign import owed
 
-from tests._stored_ledger import stored_loan_balance_at
 from tests._test_helpers import (
-    create_loan_account,
     current_pay_period,
     one_off_row_of,
     resolved_amount,
@@ -66,107 +61,6 @@ class TestCreateBaseline:
                 user_id=seed_user["user"].id, is_baseline=True
             ).count()
             assert count == 1
-
-    def test_create_baseline_reposts_stranded_openings(
-        self, app, auth_client, seed_user,
-    ):
-        """The recovery path re-posts openings stranded by baseline-lessness.
-
-        The Step-5 wiring (plan Section 3.3, point 6): deleting the baseline
-        CASCADE-disposes its journal entries -- including the seed
-        Checking's $1000.00 opening -- reproducing the baseline-less state
-        where an account's corrections had nowhere to post.  The route's
-        per-user resync then posts the opening into the NEW baseline in the
-        same transaction, so it is not silently stranded until the next
-        anchor event.
-        """
-        with app.app_context():
-            checking_id = seed_user["account"].id
-            Scenario.query.filter_by(
-                user_id=seed_user["user"].id, is_baseline=True
-            ).delete()
-            db.session.commit()
-
-            response = auth_client.post("/create-baseline")
-            assert response.status_code == 302
-
-            new_baseline = Scenario.query.filter_by(
-                user_id=seed_user["user"].id, is_baseline=True
-            ).one()
-            assert posting_service.account_posting_total(
-                checking_id, new_baseline.id,
-            ) == Decimal("1000.00")
-
-    def test_create_baseline_reposts_a_stranded_loan_opening(
-        self, app, auth_client, db, seed_user, seed_periods,
-    ):
-        """G1: the recovery path must repost the LOAN openings too, not just cash.
-
-        The loan half of the test above.  A loan's opening posts per SCENARIO, so a
-        baseline-less owner's loan has nowhere to put it; deleting the baseline
-        reproduces that state exactly (the CASCADE disposes its journal entries,
-        the loan's opening among them).
-
-        The route recovered the ACCOUNT anchors and not the loans.  Before the fold
-        cutover an ORIGINATED loan with no OPENING posting made the balance seam
-        500 every loan surface; since steps C3b1/C3b3 the seam folds the balance
-        from SOURCE facts, so a missing opening no longer breaks reads -- but the
-        POSTING ledger (the general ledger the balance sheet and statements read)
-        is out of sync until this reposts the opening.  So the recovery is pinned
-        by reading the POSTINGS, not ``balance_at``: the posting window answers
-        ONLY when the opening was reposted, where ``balance_at`` folds the
-        $200,000 debt from source either way and cannot tell reposted from not.
-
-        NEGATIVE CONTROL: drop the ``resync_user_loan_postings`` call from
-        ``baseline_service.create_baseline_scenario`` and
-        ``stored_loan_balance_at`` returns ``None`` (the opening is never
-        reposted), while ``balance_at`` still folds the $200,000.00 debt from
-        source.
-
-        The two readers speak different signs, and the test reads each in its
-        own.  The posting reader answers what the loan OWES; the seam reports
-        what it HOLDS -- ``-200,000.00`` -- since plan step credit_card:CC-5-5c
-        (ruling R-CC47), so its figure is read through ``owed()``.
-        """
-        # pylint: disable=import-outside-toplevel
-        from app.enums import AcctTypeEnum
-        from app.services import balance_at
-        from app.services.balance_at import BalanceContext
-
-        with app.app_context():
-            loan = create_loan_account(
-                seed_user, db.session, name="Mortgage",
-                principal=Decimal("200000.00"), rate=Decimal("0.05000"),
-                term=360, origination_date=date(2026, 1, 15), payment_day=1,
-                account_type=AcctTypeEnum.MORTGAGE,
-            )
-            loan_id = loan.id
-            Scenario.query.filter_by(
-                user_id=seed_user["user"].id, is_baseline=True
-            ).delete()
-            db.session.commit()
-
-            assert auth_client.post("/create-baseline").status_code == 302
-
-            bctx = BalanceContext.build(seed_user["user"].id)
-            reloaded = db.session.get(Account, loan_id)
-            new_baseline = Scenario.query.filter_by(
-                user_id=seed_user["user"].id, is_baseline=True,
-            ).one()
-            # The recovery REPOSTED the loan's opening: the posting reader answers
-            # $200,000 from the reconciled general ledger (None if still missing).
-            # This is what pins the recovery -- balance_at cannot, since it folds
-            # the same $200,000 debt from source whether or not the opening was
-            # reposted.
-            assert stored_loan_balance_at(
-                loan_id, new_baseline.id, bctx.as_of,
-            ) == Decimal("200000.00")
-            # And the user-facing balance is correct: no payment made, so the loan
-            # still owes its opening.  The seam holds it as -$200,000.00, so what
-            # it owes is read through ``owed()``.
-            assert owed(balance_at.balance_at(
-                reloaded, bctx, bctx.as_of,
-            )) == Decimal("200000.00")
 
     def test_create_baseline_requires_login(self, app, client):
         """POST /create-baseline without authentication redirects to login.

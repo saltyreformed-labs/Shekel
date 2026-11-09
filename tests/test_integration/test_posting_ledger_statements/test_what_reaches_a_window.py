@@ -1,4 +1,4 @@
-"""What a window takes: a reverted source, residue, the attribution edges."""
+"""What a window takes: a reverted source, the attribution edges."""
 
 from __future__ import annotations
 
@@ -6,19 +6,12 @@ from datetime import date
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import LedgerAccountClassEnum, PostingKindEnum, PostingSourceEnum, StatusEnum
-from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
+from app.enums import StatusEnum
 from app.models.pay_period import PayPeriod
 from app.services import ledger_report_service, posting_service, status_seam
 from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 
-from tests._stored_ledger import (
-    family_journal_filter,
-    linked_ledger_account,
-)
 from tests._test_helpers import create_settled_cash_transaction
 
 from ._helpers import (
@@ -32,12 +25,12 @@ from ._helpers import (
 
 
 # ---------------------------------------------------------------------------
-# 6. Revert and cross-year hard-delete residue drop cleanly
+# 6. A revert drops cleanly
 # ---------------------------------------------------------------------------
 
 
 class TestRevertAndResidueDropped:
-    """A reverted source and cross-year residue net to zero and disappear."""
+    """A reverted source disappears from both statements."""
 
     def test_reverted_expense_leaves_no_statement_footprint(
         self, app, db, seed_user,
@@ -66,8 +59,9 @@ class TestRevertAndResidueDropped:
             )
             assert before.expense.total == Decimal("400.00")
 
-            # Through the seam first (plan step X-bi-3a; see
-            # ``_expense_ledger_for_category``).
+            # Through the ONE status door first (plan step X-bi-3a): a settle
+            # writes a covering movement that carries the money, and only the
+            # seam's revert releases it.
             status_seam.apply_status_change(
                 txn, ref_cache.status_id(StatusEnum.PROJECTED),
             )
@@ -82,134 +76,6 @@ class TestRevertAndResidueDropped:
             sheet = _checking_at_its_opening(user_id)
             _assert_reader_matches_independent(scenario_id, sheet)
             _assert_ledger_self_consistent()
-
-    def test_cross_year_residue_dropped_from_every_window(
-        self, app, db, seed_user,
-    ):
-        """Residue split across two years reaches neither year, nor the sheet.
-
-        A hard delete SET-NULLs ``journal_entries.transaction_entry_id`` after
-        reversing the postings, leaving residue: purchase-source entries with
-        their movement link NULL.  Here the ORIGINAL residue lands in 2098 and its
-        REVERSAL in 2099 -- different calendar years, netting to zero per account
-        (the reverse-before-delete discipline).  A reader that took either half
-        would show a $100.00 line in one year and its opposite in the other.
-        The store's reader dropped residue by a rule; the statements read the
-        ledger worked out from the records since plan task plan#2771, and no
-        record books these entries, so they are planted stored entries that
-        move no statement: BOTH years' income statements are empty and the
-        balance sheet ties out at the $1,000.00 opening.
-        """
-        with app.app_context():
-            user_id = seed_user["user"].id
-            scenario_id = seed_user["scenario"].id
-            checking = seed_user["account"]
-            linked = linked_ledger_account(db.session, checking.id)
-            groceries_ledger_id = self._expense_ledger_for_category(
-                db, seed_user, checking, "Groceries",
-            )
-
-            # Residue original in 2098, reversal in 2099 -- both purchase-
-            # source, transaction_entry_id NULL, netting to zero on each account.
-            self._residue_entry(
-                seed_user, linked.id, groceries_ledger_id,
-                amount=Decimal("100.00"), entry_date=date(2098, 6, 15),
-            )
-            self._residue_entry(
-                seed_user, linked.id, groceries_ledger_id,
-                amount=Decimal("-100.00"), entry_date=date(2099, 6, 15),
-            )
-            db.session.commit()
-
-            for year in (2098, 2099):
-                statement = ledger_report_service.compute_income_statement(
-                    user_id, calendar_for(user_id), StatementWindow("year", year=year),
-                )
-                assert not statement.expense.lines, year
-                assert statement.net_income == Decimal("0.00"), year
-
-            sheet = _checking_at_its_opening(user_id)
-            _assert_reader_matches_independent(scenario_id, sheet)
-            # The residue is real postings that net to zero: the raw trial
-            # balance is still exactly zero (whole-entry, self-cancelling).
-            _assert_ledger_self_consistent()
-
-    @staticmethod
-    def _expense_ledger_for_category(db, seed_user, account, category_key):
-        """Mint the category's Expense ledger via a real settle, return its id.
-
-        Settling a $0.01 expense on the category through the go-forward builder
-        creates the per-category Expense ledger account exactly as production
-        does, so the residue entries below post onto a REAL ledger row (not a
-        hand-minted one).  The tiny settle is reverted immediately so it leaves
-        no footprint of its own.
-        """
-        txn = create_settled_cash_transaction(
-            seed_user, db.session, seed_user["bootstrap_period"],
-            Decimal("0.01"), account=account,
-            category=seed_user["categories"][category_key],
-            settled_on=date(_Y, 1, 1),
-        )
-        db.session.flush()
-        ledger_id = (
-            db.session.query(Posting.ledger_account_id)
-            .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-            .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-            .filter(
-                family_journal_filter(txn),
-                LedgerAccount.class_id == ref_cache.ledger_account_class_id(
-                    LedgerAccountClassEnum.EXPENSE,
-                ),
-            )
-            .scalar()
-        )
-        # Revert the seeding settle so only the residue remains -- through the
-        # ONE status door first (plan step X-bi-3a): a settle now writes a
-        # covering movement that carries the money, and only the seam's
-        # revert releases it; the primitive alone reconciles what is left.
-        status_seam.apply_status_change(
-            txn, ref_cache.status_id(StatusEnum.PROJECTED),
-        )
-        posting_service.sync_transaction_postings(txn)
-        db.session.flush()
-        assert ledger_id is not None
-        return ledger_id
-
-    @staticmethod
-    def _residue_entry(seed_user, linked_id, expense_id, *, amount, entry_date):
-        """Post one residue entry (purchase source, NULL link) at a civil date.
-
-        Two balanced legs (linked ``amount`` cash, expense ``-amount`` counter)
-        under a ``purchase`` source with ``transaction_entry_id`` NULL -- the
-        shape a hard delete leaves after SET-NULLing the FK.  ``entry_date`` is
-        set explicitly so the original and reversal can straddle a year
-        boundary.  It was a ``transaction`` source with ``transaction_id`` NULL
-        until plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845)
-        deleted both.
-        """
-        entry = JournalEntry(
-            user_id=seed_user["user"].id,
-            scenario_id=seed_user["scenario"].id,
-            pay_period_id=seed_user["bootstrap_period"].id,
-            entry_date=entry_date,
-            source_kind_id=ref_cache.posting_source_id(
-                PostingSourceEnum.PURCHASE,
-            ),
-            transaction_entry_id=None,
-            description="Residue entry",
-        )
-        _db.session.add(entry)
-        _db.session.flush()
-        expense_kind = ref_cache.posting_kind_id(PostingKindEnum.EXPENSE)
-        _db.session.add(Posting(
-            journal_entry_id=entry.id, ledger_account_id=linked_id,
-            amount=amount, posting_kind_id=expense_kind,
-        ))
-        _db.session.add(Posting(
-            journal_entry_id=entry.id, ledger_account_id=expense_id,
-            amount=-amount, posting_kind_id=expense_kind,
-        ))
-        _db.session.flush()
 
 
 # ---------------------------------------------------------------------------

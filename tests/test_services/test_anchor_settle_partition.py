@@ -26,22 +26,16 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
 from app.services import (
     anchor_service,
     balance_at,
     cash_ledger,
-    posting_service,
     reconcile_service,
 )
 from app.services.cash_flow_set import CashFlowSet
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
 from app.utils.dates import display_today, to_display_date
-from tests._stored_ledger import (
-    family_journal_filter,
-    linked_ledger_account,
-)
 from tests._test_helpers import (
     add_entry,
     add_txn,
@@ -79,25 +73,6 @@ def _current_period(user_id):
     return current_pay_period(
         user_id, as_of=display_today(),
     )
-
-
-def _linked_net_on(linked_ledger_id, scenario_id, day):
-    """Return the net posted on one linked ledger for ONE ``entry_date``.
-
-    Per-DATE rather than per-account, because the property under test is where
-    the effect LANDS: a reconcile that reverses a stale day and posts the
-    correct one leaves both dates present, one summing to zero.  An
-    account-total assertion cannot tell that apart from a no-op.
-    """
-    return _db.session.query(
-        _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0.00")),
-    ).join(
-        JournalEntry, Posting.journal_entry_id == JournalEntry.id,
-    ).filter(
-        Posting.ledger_account_id == linked_ledger_id,
-        JournalEntry.scenario_id == scenario_id,
-        JournalEntry.entry_date == day,
-    ).scalar()
 
 
 def _projected_end_balance(account, user_id, period):
@@ -561,133 +536,3 @@ class TestTheProjectionIgnoresTheOrderOfABookkeepingSession:
 
             assert order_a == Decimal("480.05")
             assert order_b == order_a
-
-
-class TestTheDeployResyncIsSafeToRunOnEveryDeploy:
-    """``posting_service.resync_all_cash_postings`` -- the untested deploy hook.
-
-    It re-posts every settled transaction and transfer in the database on every
-    deploy, and finding N-133 / F8 measured what its absence costs: on a
-    pristine production clone the read fold and the posted ledger disagreed on
-    **36 of 56 dates** for Checking without it, and on 0 of 56 with it.  Both of
-    its siblings (the loan backfill and the account-anchor backfill) carry
-    integration tests; this one carried none.
-
-    Two properties, and they are the two an operator relies on: running it
-    changes no rendered figure, and running it twice is the same as running it
-    once.
-    """
-
-    def test_a_second_pass_writes_nothing_and_moves_no_ledger_total(
-        self, app, db, seed_user, seed_periods_today,
-    ):
-        """Idempotent: the first pass is at target, so the second changes 0.
-
-        A settled $300.00 expense posted go-forward is ALREADY at target, so
-        even the first resync pass reports zero changes and the linked ledger's
-        total is untouched.  The counts are what the deploy log prints, and a
-        steady-state deploy printing anything but zeroes is the signal that
-        something re-dated (finding N-133 / F8).
-        """
-        with app.app_context():
-            user_id = seed_user["user"].id
-            period = _current_period(user_id)
-            account = seed_user["account"]
-            create_settled_cash_transaction(
-                seed_user, _db.session, period, Decimal("300.00"),
-                account=account, name="already posted",
-            )
-            _db.session.commit()
-
-            scenario_id = seed_user["scenario"].id
-            before = posting_service.account_posting_total(
-                account.id, scenario_id,
-            )
-
-            first = posting_service.resync_all_cash_postings()
-            _db.session.commit()
-            second = posting_service.resync_all_cash_postings()
-            _db.session.commit()
-
-            assert first == (0, 0)
-            assert second == (0, 0)
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
-            ) == before
-
-    def test_it_re_dates_an_entry_whose_stored_day_is_wrong_and_says_so(
-        self, app, db, seed_user, seed_periods_today,
-    ):
-        """A stale journal entry_date is re-posted onto the right day, and COUNTED.
-
-        This is the hook's whole reason to exist, reproduced: an entry whose
-        stored ``entry_date`` is a day off -- the shape every pre-R-DH (b) entry
-        carried, where a settle between midnight UTC and the user's midnight was
-        filed on the next day -- is walked back through the go-forward sync and
-        lands on the day the readers now derive.
-
-        The stale day is written directly, because that is the only way to
-        reproduce a row the CURRENT writer cannot produce.  What the hook does
-        with it is entirely production code.
-        """
-        with app.app_context():
-            user_id = seed_user["user"].id
-            period = _current_period(user_id)
-            account = seed_user["account"]
-            txn = create_settled_cash_transaction(
-                seed_user, _db.session, period, Decimal("300.00"),
-                account=account, name="mis-dated",
-            )
-            _db.session.commit()
-
-            posted_day = (
-                _db.session.query(JournalEntry)
-                .filter(family_journal_filter(txn))
-                .one()
-            ).entry_date
-            # Move the SOURCE's settle instant behind the ledger's back, so the
-            # day the writer would now derive differs from the day already
-            # stored -- exactly the state every pre-R-DH (b) entry was left in
-            # when the derivation moved zones.  Raw UPDATE because routing it
-            # through the service would re-post it, which is the thing under
-            # test.  The journal entry itself is append-only and is not touched.
-            # The row AND its covering movement (plan step X-bi-3a): the
-            # settle mirrored the day onto the movement that now carries the
-            # money, so the stale state under test is the family's, moved
-            # together as the seam would have moved it.
-            _db.session.execute(
-                _db.text(
-                    "UPDATE budget.transactions SET settled_on = :day "
-                    "WHERE id = :id"
-                ),
-                {"day": posted_day - timedelta(days=1), "id": txn.id},
-            )
-            _db.session.execute(
-                _db.text(
-                    "UPDATE budget.transaction_entries "
-                    "SET settled_on = :day, purchased_on = :day "
-                    "WHERE transaction_id = :id"
-                ),
-                {"day": posted_day - timedelta(days=1), "id": txn.id},
-            )
-            _db.session.commit()
-            correct_day = posted_day - timedelta(days=1)
-
-            changed_txns, changed_xfers = (
-                posting_service.resync_all_cash_postings()
-            )
-            _db.session.commit()
-
-            assert (changed_txns, changed_xfers) == (1, 0)
-            # The stale day is reversed to zero and the correct day carries the
-            # whole effect -- a reconcile over the UNION of both dates, not an
-            # UPDATE of the stored one, which is what makes a re-dated entry
-            # identical to a freshly posted one.
-            linked = linked_ledger_account(_db.session, account.id)
-            scenario_id = seed_user["scenario"].id
-            assert _linked_net_on(
-                linked.id, scenario_id, posted_day,
-            ) == Decimal("0.00")
-            assert _linked_net_on(
-                linked.id, scenario_id, correct_day,
-            ) == Decimal("-300.00")

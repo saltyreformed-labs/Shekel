@@ -49,10 +49,7 @@ attribution date coincide -- except the dedicated display-timezone case, which
 pins an 8:05pm-Eastern Dec-31 settle precisely to prove the two diverge as L9
 requires.
 
-An adversarial case proves the oracle is not vacuous: injecting one unbalanced
-leg pushes ``tie_out.ledger_net`` off zero and flips ``in_balance`` to False.
-Every other (balanced) fixture asserts the read's trial balance is zero and no
-stored entry is malformed (:func:`_assert_ledger_self_consistent`), so a lone-leg bug
-cannot slip past.  All money is ``Decimal`` from strings, with the arithmetic
+Every fixture asserts the read's trial balance is zero
+(:func:`_assert_ledger_self_consistent`).  All money is ``Decimal`` from strings, with the arithmetic
 shown per the testing standard.
 """

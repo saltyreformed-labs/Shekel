@@ -21,9 +21,7 @@ from app.models.transfer import Transfer
 from app.services.ledger_lines import ACCOUNT_COUNTER_KINDS, category_key
 from app.utils.balance_predicates import balance_excluded_status_ids, settled_status_ids
 from app.services import cash_ledger
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import account_net, scenario_lines, trial_balance
-from tests._stored_ledger import entries_violating_balance
 
 
 # ---------------------------------------------------------------------------
@@ -370,23 +368,14 @@ def _assert_side_counter_net(counter, record_id: int, net: Decimal) -> None:
     )
 
 
-def _assert_full_reconciliation(
-    scenario_id: int, known_parity_differences: tuple = (),
-) -> None:
-    """Assert the whole ledger reconciles: linked, counter, trial, per-entry, parity.
+def _assert_full_reconciliation(scenario_id: int) -> None:
+    """Assert the whole ledger reconciles: linked, counter and trial balance.
 
     The production-wide sweep a case runs after its mutations; not every
     case runs it (measured 2026-11-02: 13 of the 16 cash cases do).  Linked and
     counter reconciliation are scenario-scoped over the worked-out read; the trial
-    balance is its whole-ledger self-check.  Last, what grades the STORE, each of
-    which goes with it: its per-entry balance, and the worked-out ledger equal to
-    the stored one to the cent per (chart row, paycheck, day) (plan task
-    plan#2527).  A case whose fixture wrote a record past every writer names the
-    cells that leaves the store behind on in *known_parity_differences*
-    (``tests._ledger_parity.assert_ledger_parity``).
+    balance is its whole-ledger self-check.
     """
     _assert_linked_accounts_reconcile(scenario_id)
     _assert_counter_accounts_reconcile(scenario_id)
     assert trial_balance(_db.session) == Decimal("0")
-    assert entries_violating_balance() == []
-    assert_ledger_parity(_db.session, scenario_id, known_parity_differences)

@@ -15,7 +15,6 @@ from app.services import balance_at
 from app.services.balance_at import BalanceContext
 from app.services import transfer_service
 from app.utils.dates import display_today
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     net_posted_by_day,
     transfer_family_movement_ids,
@@ -52,7 +51,7 @@ class TestTransferSettleDayEditDoor:
         """Return a settled transfer whose money moved on *day*, ledger in step.
 
         Settled and then back-dated THROUGH the service, so the fixture's own
-        journal entry carries *day*.  A bare attribute write would leave the
+        movements carry *day*.  A bare attribute write would leave the
         ledger at today and let a "the ledger followed" assertion pass on a
         stale comparison instead of on the edit under test.  Back-dated as ONE
         day TYPED for both sides -- what the one-box popover wrote before plan
@@ -323,7 +322,6 @@ class TestTransferSettleDayEditDoor:
                 f"the whole $200.00 at {corrected} and nothing left at "
                 f"{original}"
             )
-            assert_ledger_parity(db.session, xfer.scenario_id)
 
     def test_reverting_to_projected_ignores_the_submitted_day(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -630,7 +628,6 @@ class TestTransferSettleDayEditDoor:
                 "the leg door moved the day without the ledger: "
                 f"{self._net_by_day(xfer.id)}"
             )
-            assert_ledger_parity(db.session, xfer.scenario_id)
 
     def test_the_LEG_door_drops_a_day_beside_a_revert(
         self, app, auth_client, seed_user, seed_periods_today,

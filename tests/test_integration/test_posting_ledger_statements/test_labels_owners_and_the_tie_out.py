@@ -8,12 +8,8 @@ from decimal import Decimal
 
 import pytest
 
-from app import ref_cache
-from app.enums import PostingKindEnum, PostingSourceEnum
-from app.extensions import db as _db
 from app.models.account import Account
 from app.models.category import Category
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.scenario import Scenario
 from app.services import ledger_report_service
 from app.services.ledger_lines import linked_key, worked_out_lines
@@ -21,7 +17,6 @@ from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 import sqlalchemy as sa
 
-from tests._stored_ledger import linked_ledger_account
 from tests._test_helpers import (
     capture_sql_statements,
     create_account_of_type,
@@ -282,12 +277,12 @@ class TestTheLabelsReadOneStatementPerTable:
 
 
 # ---------------------------------------------------------------------------
-# 10. Adversarial: the tie-out is not vacuous, and the store is not read
+# 10. Adversarial: the tie-out is not vacuous
 # ---------------------------------------------------------------------------
 
 
 class TestTieOutIsNotVacuous:
-    """An unbalanced line turns the tie-out red; an unbalanced stored leg does not."""
+    """An unbalanced line turns the tie-out red."""
 
     def test_an_unbalanced_line_flips_in_balance_false(
         self, app, db, seed_user, monkeypatch,
@@ -328,78 +323,3 @@ class TestTieOutIsNotVacuous:
             assert tampered.tie_out.assets == Decimal("1050.00")
             assert tampered.tie_out.liabilities_plus_equity == Decimal("1000.00")
             assert tampered.tie_out.in_balance is False
-
-    def test_an_unbalanced_stored_leg_moves_no_statement(
-        self, app, db, seed_user,
-    ):
-        """One raw +$50.00 stored leg on the opening entry: the same sheet.
-
-        Inserting one unmatched +$50.00 leg onto the seeded Checking opening
-        entry (raw SQL, flushed but never committed, so the DEFERRED per-entry
-        trigger never fires) unbalanced the store's ledger by $50.00, and the
-        statements read it until plan task plan#2771: this test then asserted
-        the tie-out flipped.  Worked out from the records, the leg is no line,
-        so the sheet is the same report it was, tie-out green.  The CONTROL:
-        the leg is really in the store, its entry's legs netting $50.00.
-        Rolled back so the leg never lands.
-        """
-        with app.app_context():
-            user_id = seed_user["user"].id
-            scenario_id = seed_user["scenario"].id
-            checking = seed_user["account"]
-            before = _reader_bs(user_id)
-            assert before.tie_out.in_balance is True
-
-            linked = linked_ledger_account(db.session, checking.id)
-            opening_source = ref_cache.posting_source_id(
-                PostingSourceEnum.ACCOUNT_OPENING,
-            )
-            # The LATEST opening entry, and named as a choice rather than
-            # taken as the only one.  Since plan step X-f3c-2b the seeded
-            # account's books are restated, and a restatement REVERSES the
-            # opening entry and re-posts it -- three opening-sourced entries
-            # where there used to be one, which is production's own shape
-            # after the same act.  Any of them carries a leg on this ledger,
-            # so the injection below is equally unbalanced whichever is
-            # picked; ``.scalar()`` over the set would simply raise.
-            entry_id = (
-                db.session.query(JournalEntry.id)
-                .join(Posting, Posting.journal_entry_id == JournalEntry.id)
-                .filter(
-                    Posting.ledger_account_id == linked.id,
-                    JournalEntry.scenario_id == scenario_id,
-                    JournalEntry.source_kind_id == opening_source,
-                )
-                .order_by(JournalEntry.id.desc())
-                .limit(1)
-                .scalar()
-            )
-            assert entry_id is not None, (
-                "no opening entry to inject into -- this class's whole name is "
-                "a promise that it is not vacuous, and a None here would "
-                "inject nothing and still pass"
-            )
-            db.session.execute(_db.text(
-                "INSERT INTO budget.account_postings "
-                "  (journal_entry_id, ledger_account_id, amount, "
-                "   posting_kind_id) "
-                "VALUES (:e, :l, :a, :k)"
-            ), {
-                "e": entry_id,
-                "l": linked.id,
-                "a": Decimal("50.00"),
-                "k": ref_cache.posting_kind_id(PostingKindEnum.OPENING),
-            })
-            db.session.flush()
-
-            assert _db.session.query(
-                sa.func.sum(Posting.amount),
-            ).filter(Posting.journal_entry_id == entry_id).scalar() == (
-                Decimal("50.00")
-            )
-
-            after = _reader_bs(user_id)
-            assert after == before
-            assert after.tie_out.in_balance is True
-
-            db.session.rollback()

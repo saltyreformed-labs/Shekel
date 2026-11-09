@@ -42,14 +42,15 @@ from app.models.statement_import import (
     StatementImport,
     StatementLineSighting,
 )
-from app.models.journal_entry import Posting
 from app.models.transaction import Transaction
 from app.services import account_service
 from app.services.statement_import import plan_statement, record_statement
 from app.services.statement_import._balance import bank_levels
 from app.models.ref import AccountType
+from app.services.ledger_lines import linked_key
 from app.services.row_valuation import settled_figure
 
+from tests._ledger_reads import nets_by_key_and_day
 from tests._test_helpers import create_settled_cash_transaction
 
 from . import _csv_builder as build
@@ -538,7 +539,8 @@ class TestItMovesNoMoney:
     counted zero rows in an empty table.  The guard the plan's separability
     argument rests on graded nothing.  They now settle a real transaction
     first, and snapshot the LEDGER as well as the rows -- because the balance
-    is walked from the postings, not from ``budget.transactions``.
+    is walked from the movements and assertions the ledger is worked out from,
+    not from ``budget.transactions`` alone.
     """
 
     @pytest.fixture()
@@ -568,13 +570,9 @@ class TestItMovesNoMoney:
             .order_by(Transaction.id).all()
         ]
 
-    def _ledger(self, db):
-        """Return the postings the balance is actually walked from."""
-        return [
-            (p.id, p.journal_entry_id, p.ledger_account_id, p.amount,
-             p.posting_kind_id)
-            for p in db.session.query(Posting).order_by(Posting.id).all()
-        ]
+    def _ledger(self, db, seed_user):
+        """Return the worked-out ledger's net per chart account and day."""
+        return nets_by_key_and_day(db.session, seed_user["scenario"].id)
 
     def test_no_transaction_row_is_touched(
         self, app, db, seed_user, money_on_the_books,
@@ -587,21 +585,26 @@ class TestItMovesNoMoney:
 
         assert self._rows(db) == before
 
-    def test_no_POSTING_is_touched(
+    def test_no_LEDGER_line_moves(
         self, app, db, seed_user, money_on_the_books,
     ):
         """The stronger claim: the balance's own inputs do not move.
 
-        Asserted on the double-entry postings rather than on a balance figure,
-        because a balance that happened not to move could still hide a posting
-        that did.
+        Asserted on the worked-out ledger's net per chart account and day
+        rather than on a balance figure, because a balance that happened not
+        to move could still hide a line that did.
         """
-        before = self._ledger(db)
-        assert before, "fixture must put postings on the ledger"
+        before = self._ledger(db, seed_user)
+        # The fixture's $125.00 Groceries row, settled 2026-03-03, books
+        # 0 - 125.00 = -125.00 on Checking's own line that day (money out of
+        # an asset, debit-positive), so the snapshot is not an empty one.
+        assert before[(linked_key(seed_user["account"]), date(2026, 3, 3))] == (
+            Decimal("-125.00")
+        )
 
         _record(seed_user, _file())
 
-        assert self._ledger(db) == before
+        assert self._ledger(db, seed_user) == before
 
     def test_no_clearing_link_is_written(
         self, app, db, seed_user, money_on_the_books,

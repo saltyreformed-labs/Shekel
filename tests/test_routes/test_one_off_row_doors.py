@@ -46,7 +46,6 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-import sqlalchemy as sa
 
 from app import ref_cache
 from app.enums import AmountSourceEnum, StatusEnum, TxnTypeEnum
@@ -57,7 +56,6 @@ from app.models.merchant_rule import MerchantRule
 from app.models.template_amount_version import TemplateAmountVersion
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
-from app.services import posting_service
 from app.services.amount_ownership import state_own_amount
 from app.services.one_off import OneOffToPlace, place_one_off, place_row_of
 from app.services.template_amount_service import amount_versions
@@ -65,7 +63,6 @@ from app.utils.dates import display_today
 from app.services.row_valuation import settled_figure
 from werkzeug.datastructures import MultiDict
 from tests._test_helpers import (
-    add_entry,
     derived_span,
     generate_row_of,
     make_expense_template,
@@ -1259,38 +1256,6 @@ class TestAFigureAndACategoryOnASiblingsCard:
             assert sibling.category_id == groceries
 
 
-def _purchase_legs(entry_id):
-    """Return ``(pay_period_id, category_id, net)`` per ledger account for one purchase's legs."""
-    rows = db.session.execute(sa.text(
-        "SELECT je.pay_period_id, la.category_id, SUM(p.amount) AS net "
-        "FROM budget.journal_entries je "
-        "JOIN budget.account_postings p ON p.journal_entry_id = je.id "
-        "JOIN budget.ledger_accounts la ON la.id = p.ledger_account_id "
-        "WHERE je.transaction_entry_id = :e "
-        "GROUP BY je.pay_period_id, la.id, la.category_id "
-        "HAVING SUM(p.amount) <> 0 "
-        "ORDER BY je.pay_period_id, la.id"
-    ), {"e": entry_id}).fetchall()
-    return [(r.pay_period_id, r.category_id, Decimal(r.net)) for r in rows]
-
-
-def _settled_envelope_with_a_posted_purchase(auth_client, seed_user, period, *, row=None):
-    """Return a Paid envelope in *period* holding one posted `$40.00` purchase."""
-    row = row if row is not None else _placed(seed_user, period, is_envelope=True)
-    add_entry(
-        db.session, seed_user, row, Decimal("40.00"),
-        period.start_date, settled_on=period.start_date,
-    )
-    posting_service.sync_transaction_postings(row)
-    db.session.commit()
-    resp = auth_client.post(f"/transactions/{row.id}/mark-done")
-    assert resp.status_code == 200, resp.data
-    db.session.expire_all()
-    row = db.session.get(Transaction, row.id)
-    assert row.status.is_settled is True
-    return row
-
-
 def _submit_only(auth_client, row, keep, **changes):
     """PATCH with only the *keep* controls off the card plus *changes* -- any HTTP client's payload."""
     rendered = form_fields(
@@ -1307,16 +1272,12 @@ class TestUnlockEditLock:
     A finalised row's item fields are locked and the definition's propagation
     rewrites Projected rows only, so a request that LIFTS the lock and edits
     in one PATCH applies the transition first, one that SETTLES and edits
-    applies the edit first, and the ledger is reconciled after the edits in
-    both orders (ruling **R-BAL58**: *unlock, edit, lock*).  Found by moving
-    the suite's one-off fixtures onto the producer: the posting-lifecycle
-    cases post revert + re-category in one request, and on a placed row the
-    definition took Rent while the row kept Groceries, so the next settle
-    posted to Groceries.  The cancelled and credit arms, and the purchase-leg
-    cases, are 7c-1's adversarial review's: a first build unlocked on the
-    settled band alone and reconciled the ledger BEFORE the edits, so a
-    revert + period move stranded an envelope's purchase legs in the old
-    paycheck.
+    applies the edit first (ruling **R-BAL58**: *unlock, edit, lock*).  Found
+    by moving the suite's one-off fixtures onto the producer: the
+    posting-lifecycle cases post revert + re-category in one request, and on a
+    placed row the definition took Rent while the row kept Groceries, so the
+    next settle posted to Groceries.  The cancelled and credit arms are 7c-1's
+    adversarial review's: a first build unlocked on the settled band alone.
     """
 
     def test_a_revert_and_a_re_category_in_one_request_reach_the_row(
@@ -1376,76 +1337,6 @@ class TestUnlockEditLock:
             assert row.status_id == ref_cache.status_id(StatusEnum.PROJECTED)
             assert row.template.category_id == other.id
             assert row.category_id == other.id
-
-    def test_a_minimal_revert_and_move_carries_the_purchase_legs_to_the_new_paycheck(
-        self, app, auth_client, seed_user, seed_periods_today,
-    ):
-        """A purchase's legs are keyed on the PARENT's paycheck (R-FM): the reconcile runs LAST.
-
-        The payload is the smallest any client can send -- no item fields, so
-        no propagation happens to reconcile the row -- and the legs move
-        because the handler reconciles after the edits in the unlock order.
-        """
-        with app.app_context():
-            row = _settled_envelope_with_a_posted_purchase(
-                auth_client, seed_user, seed_periods_today[0],
-            )
-            entry_id = row.entries[0].id
-            assert {p for p, _c, _n in _purchase_legs(entry_id)} == {
-                seed_periods_today[0].id,
-            }
-            resp = _submit_only(
-                auth_client, row, {"version_id", "template_version_id"},
-                status_id=str(ref_cache.status_id(StatusEnum.PROJECTED)),
-                pay_period_id=str(seed_periods_today[1].id),
-            )
-            assert resp.status_code == 200, resp.data
-            db.session.expire_all()
-            row = db.session.get(Transaction, row.id)
-            assert row.pay_period_id == seed_periods_today[1].id
-            assert row.status.is_settled is False
-            after = _purchase_legs(entry_id)
-            assert {p for p, _c, _n in after} == {seed_periods_today[1].id}, (
-                f"the purchase legs stayed in the OLD paycheck: {after}"
-            )
-
-    @pytest.mark.parametrize("edit", ["pay_period_id", "category_id"])
-    def test_a_recurring_envelopes_revert_and_edit_carry_its_purchase_legs(
-        self, app, auth_client, seed_user, seed_periods_today, edit,
-    ):
-        """THE CONTROL on a recurring definition's row, which no propagation touches."""
-        with app.app_context():
-            template = make_expense_template(
-                db.session, seed_user, amount="100.00", name="Groceries",
-                category_key="Groceries", is_envelope=True,
-            )
-            generated = generate_row_of(template, seed_periods_today[0])
-            db.session.commit()
-            assert generated.recurs is True
-            row = _settled_envelope_with_a_posted_purchase(
-                auth_client, seed_user, seed_periods_today[0], row=generated,
-            )
-            entry_id = row.entries[0].id
-            other = next(
-                cat for key, cat in seed_user["categories"].items()
-                if key != "Groceries"
-            )
-            target = (
-                str(seed_periods_today[1].id) if edit == "pay_period_id"
-                else str(other.id)
-            )
-            resp = _submit(
-                auth_client, row,
-                status_id=str(ref_cache.status_id(StatusEnum.PROJECTED)),
-                **{edit: target},
-            )
-            assert resp.status_code == 200, resp.data
-            db.session.expire_all()
-            after = _purchase_legs(entry_id)
-            if edit == "pay_period_id":
-                assert {p for p, _c, _n in after} == {seed_periods_today[1].id}, after
-            else:
-                assert {c for _p, c, _n in after if c is not None} == {other.id}, after
 
     def test_a_settle_and_an_untick_in_one_request_settle_on_the_rows_figure(
         self, app, auth_client, seed_user, seed_periods_today,

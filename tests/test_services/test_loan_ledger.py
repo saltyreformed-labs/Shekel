@@ -30,7 +30,6 @@ from app.models.loan_features import RateHistory
 from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.services.balance_at._fold import fold_loan_balances
 from app.services.rate_period_engine import period_for_date
-from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
     assert_fold_matches_postings_every_day,
     posted_loan_balance_at,
@@ -825,24 +824,22 @@ class TestTheSettledWalkChargesOncePerInstallment:
                 Decimal("0.06"), Decimal("0.06"),
             ]
 
-    def test_an_earlier_installment_arriving_later_REVERSES_the_posted_charge(
+    def test_an_earlier_installment_arriving_later_takes_the_charge_off_the_follower(
         self, app, db, seed_user, seed_periods,
     ):
-        """A payment that becomes a period FOLLOWER has its posted charge reversed.
+        """A payment that becomes a period FOLLOWER no longer carries its charge.
 
         The transition the cutover will actually exercise, and the one an
         incremental sync hides: whichever payment OPENS an accrual period carries
         its charge, and which payment that is can CHANGE when an earlier-due one
-        arrives afterwards.  The store's correction for the first payment must then
-        reverse the interest and escrow it already posted, at the
-        ``(period, entry_date)`` it posted them under, and its loan-linked leg must
-        move with them.
+        arrives afterwards.  The first payment's split must then drop the interest
+        and escrow it carried, and the loan's balance in the ledger must follow.
 
         Settled in this order, both satisfying February:
 
           1. due 2026-02-20 (period 3), $1,000.00.  It is the only payment, so it
              OPENS the period: charge 02-20 -> interest $500.00, escrow $100.00,
-             principal $400.00.  Those legs are POSTED.
+             principal $400.00.
           2. due 2026-02-01 (period 2), $1,000.00.  The charge is dated at the
              EARLIEST installment now, so it moves to 02-01 and the 02-01 payment
              clears it; the 02-20 payment becomes a follower and clears nothing.
@@ -850,12 +847,11 @@ class TestTheSettledWalkChargesOncePerInstallment:
         Final: (02-01) interest $500.00, escrow $100.00, principal $400.00;
         (02-20) interest $0.00, escrow $0.00, principal $1,000.00; owed
         $98,600.00.  The read's balance agreeing shows the follower carries no
-        charge; the read walks the records and holds no reversal.  That the store
-        reversed step 1's interest and escrow legs is the parity line's to grade.
+        charge; the read walks the records and holds no reversal.
 
         The sibling test above cannot reach this: settling in pay-period order
-        makes the opener arrive first, so its follower posts an EMPTY correction
-        the first time and never has to reverse one.
+        makes the opener arrive first, so its follower never carries a charge it
+        must then give up.
         """
         with app.app_context():
             loan = _make_loan(
@@ -866,7 +862,7 @@ class TestTheSettledWalkChargesOncePerInstallment:
                 due_date=date(2026, 2, 20),
             )
             db.session.commit()
-            # It opened the period on its own, and the charge WAS posted.
+            # It opened the period on its own, and carried the charge.
             (opener,) = loan_ledger.compute_loan_payment_splits(
                 loan.id, seed_user["scenario"].id,
             )
@@ -900,7 +896,6 @@ class TestTheSettledWalkChargesOncePerInstallment:
             assert posted_loan_balance_at(
                 loan.id, seed_user["scenario"].id, on,
             ) == Decimal("98600.00")
-            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
 
 

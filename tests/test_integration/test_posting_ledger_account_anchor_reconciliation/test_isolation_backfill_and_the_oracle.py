@@ -1,23 +1,19 @@
-"""Scenario and owner isolation, backfill against go-forward, and the oracle and the transfer
-attribution each shown not to be vacuous.
+"""Scenario and owner isolation, and the oracle and the transfer attribution each shown not
+to be vacuous.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
 
-from app import ref_cache
-from app.enums import LedgerAccountKindEnum, PostingKindEnum, PostingSourceEnum
+from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db as _db
-from app.models.account import AccountAnchorHistory
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
-from app.services import account_posting_service, posting_service, transfer_service
-from app.services.ledger_lines import account_counter_key, linked_key
+from app.services import transfer_service
 from tests import _ledger_reads
 from tests._ledger_reads import (
     account_net,
@@ -25,22 +21,11 @@ from tests._ledger_reads import (
     linked_key_of,
     trial_balance,
 )
-from tests._stored_ledger import (
-    ledger_account_of_kind,
-    linked_ledger_account,
-    stored_account_net,
-    stored_trial_balance,
-)
-from tests._ledger_parity import LedgerParityDifference
 from tests._test_helpers import (
     an_entered_day,
-    append_only_guard_lifted,
     create_account_of_type,
     create_settled_cash_transaction,
     create_settled_transfer,
-    governing_opening_row,
-    load_migration_module,
-    observed_day_of,
     on_both_sides,
     reassert_balance_on,
     restate_account_opening,
@@ -50,19 +35,6 @@ from ._helpers import (
     _latest_assertion,
     _independent_post_assertion_source_effect,
     _assert_account_anchors_reconcile,
-    _origin_instant,
-    _true_up_at,
-    _settle_expense,
-)
-
-
-# The Step-5 data-boundary migration, loaded once so its idempotent raw-SQL
-# teardown ``_remove_account_anchor_postings`` can reproduce the pre-C6
-# historical state (an account whose anchor was asserted before the go-forward
-# wiring, carrying no correction) for the backfill == go-forward test -- the
-# same pattern the C7 backfill suite uses.
-_BOUNDARY_MIGRATION = load_migration_module(
-    "c9f2e6a4b1d8_account_anchor_postings_data_boundary.py"
 )
 
 
@@ -99,15 +71,12 @@ class TestScenarioAndOwnerIsolation:
         Latent rather than live today -- production creates baseline scenarios
         only, and a baseline carries its corrections from account-create time
         -- so this is the guard for the scenario-clone feature that would
-        otherwise ship on top of it.
+        otherwise ship on top of it.  The defect was the store's self-heal;
+        since plan#2914 this grades the ledger worked out from the records,
+        which opens the fresh scenario's ledger from the opening record.
         """
         with app.app_context():
             checking = seed_user["account"]
-            # The day the baseline's opening is posted on: the seed's books,
-            # which the restatement below moves past every writer.
-            posted_opened_on = governing_opening_row(
-                db.session, checking,
-            ).opened_on
             opened = datetime(2026, 1, 2, 9, tzinfo=timezone.utc)
             reassert_balance_on(db.session, checking, opened)
             # **The BOOKS go back further than the restamp puts them** (plan
@@ -142,40 +111,7 @@ class TestScenarioAndOwnerIsolation:
                 _db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("1000.00")
             _assert_account_anchors_reconcile(whatif.id)
-            # ``restate_account_opening`` writes its row straight to the
-            # table, past the door that re-bases the postings
-            # (``opening_service.apply_opening_restatement``), so nothing
-            # re-posts the BASELINE's opening (the what-if's is minted by its
-            # first settle, on the new day): the store keeps the $1,000.00
-            # opening on the seed's day, where the records open the books on
-            # 2025-11-30.  Those are the four cells it leaves the stored
-            # baseline behind on (plan task plan#2527); the owner holds one
-            # paycheck, so both days file in it.
-            linked = linked_key(checking)
-            equity = account_counter_key(
-                LedgerAccountKindEnum.ANCHOR_EQUITY, checking.id,
-            )
-            rows = {
-                linked: (linked_ledger_account(db.session, checking.id).id,),
-                equity: (ledger_account_of_kind(
-                    db.session, checking.id,
-                    LedgerAccountKindEnum.ANCHOR_EQUITY,
-                ).id,),
-            }
-            paycheck = seed_user["bootstrap_period"].id
-            _assert_account_anchors_reconcile(seed_user["scenario"].id, tuple(
-                LedgerParityDifference(
-                    key=key, stored_row_ids=rows[key],
-                    pay_period_id=paycheck, entry_date=day,
-                    stored=Decimal(stored), worked_out=Decimal(worked_out),
-                )
-                for key, day, stored, worked_out in (
-                    (linked, posted_opened_on, "1000.00", "0.00"),
-                    (equity, posted_opened_on, "-1000.00", "0.00"),
-                    (linked, date(2025, 11, 30), "0.00", "1000.00"),
-                    (equity, date(2025, 11, 30), "0.00", "-1000.00"),
-                )
-            ))
+            _assert_account_anchors_reconcile(seed_user["scenario"].id)
 
     def test_a_settle_that_rides_on_top_does_not_rewalk_an_opened_ledger(
         self, app, db, seed_user, monkeypatch,
@@ -258,17 +194,11 @@ class TestScenarioAndOwnerIsolation:
 
         The seeded Checking's $1000.00 opening lives in the baseline.  A $40.00
         baseline expense and a $70.00 what-if expense (both settled at
-        server-now, the same UTC day as the account's origination, so the
-        effect-time self-heal posts Checking's opening into the what-if too) land
-        on it.  Scoped to the baseline the Checking ledger is 1000 - 40 = 960.00;
+        server-now, the same UTC day as the account's origination) land on it.
+        Scoped to the baseline the Checking ledger is 1000 - 40 = 960.00;
         scoped to the what-if it is 1000 - 70 = 930.00 -- never the
         cross-scenario 890.  Each scenario carries its OWN copy of the opening
         and its OWN sources, and reconciles independently.
-
-        Same accepted same-UTC-day caveat as the sibling cash oracle: the
-        what-if opening posts only because the settle's civil day is at or before
-        Checking's origination assertion, so the effect-time self-heal fires --
-        not a general multi-scenario guarantee (R8 owns that policy).
         """
         with app.app_context():
             baseline = seed_user["scenario"]
@@ -289,12 +219,6 @@ class TestScenarioAndOwnerIsolation:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                checking.id, baseline.id,
-            ) == Decimal("960.00")
-            assert posting_service.account_posting_total(
-                checking.id, whatif.id,
-            ) == Decimal("930.00")
             assert account_net(
                 _db.session, checking.id, baseline.id,
             ) == Decimal("960.00")
@@ -313,9 +237,7 @@ class TestScenarioAndOwnerIsolation:
 
         Owner 1 settles a $60.00 expense on a $400.00 Savings (ledger 340.00);
         owner 2 settles an $80.00 expense on a $900.00 Savings (ledger 820.00).
-        Each owner's sweep reconciles only their own accounts, and a ``Posting``
-        carries no ``user_id`` (ownership is reachable only through its journal
-        entry).
+        Each owner's sweep reconciles only their own accounts.
         """
         with app.app_context():
             scenario1 = seed_user["scenario"].id
@@ -346,87 +268,9 @@ class TestScenarioAndOwnerIsolation:
             assert account_net(
                 _db.session, savings2.id, scenario2,
             ) == Decimal("820.00")
-            # A Posting has no user_id; ownership is normalized onto the entry.
-            assert not hasattr(Posting, "user_id")
-            owner1_id = seed_user["user"].id
-            owner2_id = seed_second_user["user"].id
-            for posting in _db.session.query(Posting).all():
-                entry_owner = posting.journal_entry.user_id
-                assert entry_owner in (owner1_id, owner2_id)
-                assert posting.ledger_account.user_id == entry_owner
 
             _assert_account_anchors_reconcile(scenario1)
             _assert_account_anchors_reconcile(scenario2)
-
-
-# ---------------------------------------------------------------------------
-# 9. Backfill == go-forward (the historical sweep reproduces the wiring)
-# ---------------------------------------------------------------------------
-
-
-class TestBackfillEqualsGoForward:
-    """Clearing then backfilling reproduces the go-forward ledger exactly."""
-
-    @pytest.mark.server_clock
-    def test_backfill_restores_the_absolute_ledger(self, app, db, seed_user):
-        """A multi-anchor account's ledger is identical after clear + backfill.
-
-        A Savings anchored $500.00 with a pre-true-up spend ($200 at T+1h), a
-        true-up to $350.00 (T+2h), and a post-true-up spend ($100 at T+3h) posts
-        its opening + true-up go-forward, reaching linked ledger 250.00.  The
-        boundary migration's raw-SQL teardown clears every account correction +
-        equity twin (the pre-C6 historical state), leaving the ledger short by
-        the corrections; the deploy backfill re-derives them through the SAME
-        go-forward sync, restoring the exact 250.00 and re-minting the equity
-        twin.  The whole-DB sweep ties before AND after -- backfill ==
-        go-forward by construction.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Backfill Savings",
-                anchor_balance=Decimal("500.00"),
-            )
-            db.session.commit()
-            origin = _origin_instant(savings)
-            _settle_expense(
-                seed_user, savings, "200.00",
-                observed_day_of(origin + timedelta(days=1)),
-            )
-            _true_up_at(savings, "350.00", origin + timedelta(days=2))
-            _settle_expense(
-                seed_user, savings, "100.00",
-                observed_day_of(origin + timedelta(days=3)),
-            )
-            db.session.commit()
-            forward_total = posting_service.account_posting_total(
-                savings.id, scenario_id,
-            )
-            assert forward_total == Decimal("250.00")
-            _assert_account_anchors_reconcile(scenario_id)
-
-            # Reproduce the pre-C6 historical state: corrections + twins gone.
-            _BOUNDARY_MIGRATION._remove_account_anchor_postings(db.session)
-            db.session.commit()
-            assert ledger_account_of_kind(
-                db.session, savings.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
-            ) is None
-            # The ledger is now the bare source legs (no opening / true-up).
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
-            ) != forward_total
-
-            # The deploy backfill re-derives the corrections identically.
-            account_posting_service.backfill_all_account_anchor_postings()
-            db.session.commit()
-
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
-            ) == forward_total
-            assert ledger_account_of_kind(
-                db.session, savings.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
-            ) is not None
-            _assert_account_anchors_reconcile(scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -436,71 +280,6 @@ class TestBackfillEqualsGoForward:
 
 class TestOracleIsNotVacuous:
     """Prove the reconciliation and trial-balance checks catch real breakage."""
-
-    def test_tampered_latest_anchor_makes_the_sweep_fail(
-        self, app, db, seed_user,
-    ):
-        """Forcing the latest anchor off its posted value leaves the STORE behind.
-
-        A reconciled $500.00 Savings has stored linked ledger 500.00 and latest
-        anchor 500.00.  Forcing the anchor-history row's balance to 999 via raw
-        SQL leaves the stored ledger at 500.00 but pushes the invariant's RHS to
-        999 + 0.  A stale stored figure is the store's own state: the worked-out
-        read follows the record, so the anchor comparison holds at 999.00 and the
-        sweep's parity arm is what names the drift.  Driven through the REAL sweep
-        helper under ``pytest.raises``.  This goes with the store;
-        :meth:`test_the_anchor_sweep_catches_a_wrong_read` grades the anchor
-        comparison on the read.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Tamper Savings",
-                anchor_balance=Decimal("500.00"),
-            )
-            db.session.commit()
-            # Reconciled before tampering.
-            _assert_account_anchors_reconcile(scenario_id)
-
-            # Tamper the latest anchor balance; the posted ledger is
-            # unchanged.
-            #
-            # **The append-only refusal is lifted for that one statement**
-            # (plan step X-f3c-2c).  This comment used to read "history carries
-            # no balance trigger, so this commits", which stopped being true:
-            # ``budget.refuse_append_only_change`` refuses every UPDATE on the
-            # table.  Tampering is the point here -- the case exists to prove
-            # the sweep CAN fail -- and the only way to corrupt an append-only
-            # row is to reach past the guard that makes it one.
-            row_id = (
-                _db.session.query(AccountAnchorHistory.id)
-                .filter_by(account_id=savings.id)
-                .order_by(
-                    AccountAnchorHistory.created_at.desc(),
-                    AccountAnchorHistory.id.desc(),
-                )
-                .scalar()
-            )
-            with append_only_guard_lifted(
-                db.session, "budget.account_anchor_history",
-            ):
-                db.session.execute(_db.text(
-                    "UPDATE budget.account_anchor_history "
-                    "SET anchor_balance = 999 WHERE id = :i"
-                ), {"i": row_id})
-                db.session.commit()
-
-            # Stored ledger unchanged (500), but the anchor truth drifted (999).
-            # ``match`` pins the parity arm's message: the read and the anchor
-            # agree after this tamper, and only the store does not.
-            assert stored_account_net(savings.id, scenario_id) == Decimal("500.00")
-            assert account_net(
-                _db.session, savings.id, scenario_id,
-            ) == Decimal("999.00")
-            _, latest_anchor = _latest_assertion(savings.id)
-            assert latest_anchor == Decimal("999.00")
-            with pytest.raises(AssertionError, match="parts from the stored one"):
-                _assert_account_anchors_reconcile(scenario_id)
 
     def test_the_anchor_sweep_catches_a_wrong_read(
         self, app, db, seed_user, monkeypatch,
@@ -561,78 +340,6 @@ class TestOracleIsNotVacuous:
 
             assert trial_balance(db.session) == Decimal("1500.00")
 
-    def test_stored_trial_balance_catches_an_injected_leg(self, app, db, seed_user):
-        """Injecting one extra leg pushes the stored trial balance off zero.
-
-        A balanced book has trial balance 0.00.  A $500.00 Savings opening posts
-        a balanced +500 / -500 pair; inserting one unmatched +50 leg onto its
-        opening entry (raw SQL, flushed but never committed, so the DEFERRED
-        per-entry trigger never fires) makes the whole-ledger sum 0 + 50 =
-        50.00 -- so the trial-balance ``= 0`` assertion is a real check, not one
-        the per-entry trigger makes vacuously true.  Rolled back so the leg
-        never lands.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Inject Savings",
-                anchor_balance=Decimal("500.00"),
-            )
-            db.session.commit()
-            assert stored_trial_balance() == Decimal("0.00")
-
-            # Inject one extra, unmatched leg onto the opening entry (picked by
-            # its correction source).  Flush (not commit) makes it visible; the
-            # DEFERRED balanced trigger validates only at COMMIT, never reached.
-            linked = linked_ledger_account(_db.session, savings.id)
-            opening_source = ref_cache.posting_source_id(
-                PostingSourceEnum.ACCOUNT_OPENING,
-            )
-            # The LATEST opening entry, and named as a choice rather than
-            # taken as the only one.  Since plan step X-f3c-2b the factory
-            # restates an account's books, and a restatement REVERSES the
-            # opening entry and re-posts it -- three opening-sourced entries
-            # where there used to be one, which is production's own shape
-            # after the same act.  Any of them carries a leg on this ledger,
-            # so the injection below is equally unbalanced whichever is
-            # picked; ``.scalar()`` over the set would simply raise.
-            entry_id = (
-                _db.session.query(JournalEntry.id)
-                .join(Posting, Posting.journal_entry_id == JournalEntry.id)
-                .filter(
-                    Posting.ledger_account_id == linked.id,
-                    JournalEntry.scenario_id == scenario_id,
-                    JournalEntry.source_kind_id == opening_source,
-                )
-                .order_by(JournalEntry.id.desc())
-                .limit(1)
-                .scalar()
-            )
-            assert entry_id is not None, (
-                "no opening entry to inject into -- this class's whole name is "
-                "a promise that it is not vacuous, and a None here would "
-                "inject nothing and still pass"
-            )
-            _db.session.execute(_db.text(
-                "INSERT INTO budget.account_postings "
-                "  (journal_entry_id, ledger_account_id, amount, "
-                "   posting_kind_id) "
-                "VALUES (:e, :l, :a, :k)"
-            ), {
-                "e": entry_id,
-                "l": linked.id,
-                "a": Decimal("50.00"),
-                "k": ref_cache.posting_kind_id(PostingKindEnum.OPENING),
-            })
-            _db.session.flush()
-
-            assert stored_trial_balance() == Decimal("50.00")  # 0.00 + 50.00
-            assert stored_trial_balance() != Decimal("0.00")
-
-            # Discard the injected leg; the deferred trigger never fires.
-            _db.session.rollback()
-
-
 # ---------------------------------------------------------------------------
 # 11. F1: a settled transfer's attribution mutation stays reconciled
 # ---------------------------------------------------------------------------
@@ -663,13 +370,13 @@ class TestSettledTransferAttributionMutation:
         A $150.00 Checking -> Savings transfer settled in the bootstrap period
         (riding on top of both openings; Savings 200 + 150 = 350).  Moving it to
         a second period through ``update_transfer`` -- the settled-row period
-        edit the C6 review M2 flagged as unreconciled -- now fires the Step-2
-        reconcile because ``pay_period_id`` is in ``_POSTING_RELEVANT_FIELDS``:
+        edit the C6 review M2 flagged as unreconciled -- moves the cash with it:
         the Savings transfer cash nets to ZERO in the old period and +150.00 in
         the new one (R2), the account total is unchanged (350.00, no
-        double-count), and the absolute invariant still holds with NO manual
-        account-posting sync.  Before F1 the period edit skipped the reconcile,
-        stranding the cash in the old period.
+        double-count), and the absolute invariant still holds.  Before F1 the
+        period edit skipped the reconcile, stranding the STORED cash in the old
+        period; since plan#2914 this grades the worked-out read, which files
+        the cash in the record's period.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -722,19 +429,14 @@ class TestSettledTransferAttributionMutation:
         anchors (rides on top): Savings 200 + 150 = 350, Checking 1000 - 150 =
         850.  Moving its settle day to BEFORE the anchors (a 2024 day)
         through ``update_transfer`` makes the transfer PRE-assertion, so it must
-        be ABSORBED into the openings.  The move re-dates each side's leg -- a
-        reversal at the old day, the effect at 2024-01-05 -- and the cash
-        reconcile's effect-time self-heal, asked about that earlier day,
-        re-derives both endpoints' openings, so the absolute invariant still
-        holds with NO manual sync.  Post-move both accounts read their anchors
+        be ABSORBED into the openings.  The move re-dates each side's record to
+        2024-01-05, so both endpoints' openings absorb it and the absolute
+        invariant still holds.  Post-move both accounts read their anchors
         (Savings 200, Checking 1000): the transfer is absorbed, nothing rides
-        on top.  Before F1 the openings stayed at their ride-on-top values
-        (Savings 350) while the invariant's RHS dropped to 200 -- a silently
-        stale correction.  *F1 re-derived them through a direct resync of both
-        endpoints while a settle-day edit moved no leg; ruling plan#2574
-        deleted it once the leg carried the movement's day, and with the
-        self-heal also removed this case reads Savings 350 (measured at
-        plan#2559).*
+        on top.  Before F1 the STORED openings stayed at their ride-on-top
+        values (Savings 350) while the invariant's RHS dropped to 200 -- a
+        silently stale correction; since plan#2914 this grades the worked-out
+        read, which derives the openings from the records.
         """
         with app.app_context():
             user_id = seed_user["user"].id

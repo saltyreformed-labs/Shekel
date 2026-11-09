@@ -13,8 +13,8 @@ deleted at C6c).
 
 Two properties are new versus those readers and pinned here:
 
-* they fold the loan's SOURCE events, so a COLD posting cache still answers a real
-  figure where the reader returned ``None`` and hid the chip; and
+* they fold the loan's SOURCE events, never the posting cache those readers read
+  (which returned ``None`` for a loan it held no opening for, hiding the chip); and
 * they are TOTAL -- a configured loan that paid nothing in the year folds ``0.00``,
   never ``None`` -- so the loan-detail page (which renders only for a configured
   loan) always shows the real figure.
@@ -38,9 +38,7 @@ from app.extensions import db
 from app.models.scenario import Scenario
 from app.services import balance_at, transfer_service
 from app.services.balance_at import BalanceContext
-from tests._stored_ledger import stored_loan_balance_at
 from tests._test_helpers import (
-    clear_loan_ledger,
     create_loan_account,
     create_loan_with_trueup,
     create_settled_transfer,
@@ -348,42 +346,6 @@ class TestPaidInYearChips:
                 loan, whatif_ctx, 2026,
             ) == Decimal("500.00")
 
-    def test_cold_posting_cache_still_folds(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """With the posting cache cleared the chips still fold a real figure.
-
-        The improvement over the deleted posting readers, which returned ``None``
-        for a loan with no opening posting and hid the chip.  The chips fold the
-        loan's SOURCE events, so clearing the posted ledger (a cold cache) does not
-        change the answer -- the balance reader declines, but the chips do not.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _split_loan(seed_user)
-            _settle(
-                seed_user, loan, seed_periods[_P1], Decimal("1000.00"),
-                settled_on=date(2026, 3, 15),
-            )
-            db.session.commit()
-
-            clear_loan_ledger(loan.id)
-            db.session.commit()
-            # The sum-of-postings balance reader now declines -- the postings
-            # genuinely no longer answer for this loan (the test's teeth).
-            assert stored_loan_balance_at(
-                loan.id, scenario_id, date(2026, 12, 31),
-            ) is None
-
-            # ...but the fold-based chips answer the real figures from source.
-            ctx = BalanceContext.build(seed_user["user"].id)
-            assert balance_at.loan_interest_paid_in_year(
-                loan, ctx, 2026,
-            ) == Decimal("500.00")
-            assert balance_at.loan_principal_paid_in_year(
-                loan, ctx, 2026,
-            ) == Decimal("500.00")
-
     def test_configured_loan_with_no_payments_folds_zero_not_none(
         self, app, db, seed_user,
     ):
@@ -392,16 +354,13 @@ class TestPaidInYearChips:
         The deleted posting readers returned ``None`` for an un-backfilled loan;
         the fold producers are total, so a configured loan with no settled payment
         this year returns ``Decimal("0.00")`` -- and the loan-detail page shows the
-        chip rather than hiding it.  Even an EXPLICITLY cleared ledger folds zero
-        here (there are no settled payments to fold).
+        chip rather than hiding it.
         """
         with app.app_context():
             loan = create_loan_account(
                 seed_user, db.session, principal=_ORIGINATION_PRINCIPAL,
                 rate=_RATE, origination_date=_ORIGINATION_DATE,
             )
-            db.session.commit()
-            clear_loan_ledger(loan.id)
             db.session.commit()
             ctx = BalanceContext.build(seed_user["user"].id)
 

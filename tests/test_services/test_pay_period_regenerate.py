@@ -43,7 +43,6 @@ from app.models.transaction import Transaction
 from app.routes._period_population import populate_new_periods
 from app.services import (
     account_posting_service,
-    loan_posting_service,
     pay_period_admin,
     pay_period_write,
     pay_schedule_service,
@@ -57,10 +56,6 @@ from scripts.integrity_check import (
 from tests._ledger_reads import (
     owner_worked_out_lines,
     worked_out_totals,
-)
-from tests._ledger_parity import (
-    assert_ledger_parity,
-    ledger_parity_differences,
 )
 from tests._test_helpers import (
     rhythm_of,
@@ -594,12 +589,6 @@ class TestACorrectionLocksNothing:
             assert covering.id != old_id
             assert _filed() == {covering.id}
             assert worked_out_totals(db.session, user_id) == totals
-            # The stored copy is short until its next re-sync, and then equal.
-            assert ledger_parity_differences(db.session, scenario)
-            loan_posting_service.resync_user_loan_postings(user_id)
-            account_posting_service.resync_user_account_anchor_postings(user_id)
-            db.session.commit()
-            assert_ledger_parity(db.session, scenario)
             assert_pay_period_invariants(db.session, user_id)
 
 

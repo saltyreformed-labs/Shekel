@@ -142,15 +142,28 @@
     bill that lives on the card moves nothing. -#}
 {% set off_card_caption = takes_off_the_card is defined and takes_off_the_card %}
 {% set off_card_frees = withdraws_a_line and off_card_caption %}
+{#- **What Credit says before the press** (plan task plan#3056).  Credit is
+    offered on a Projected expense whose purchases are not tracked (each
+    purchase names its own account, so Credit is per purchase there).
+    `credit_cards` are the cards it could mean (`transaction_service.
+    credit_cards`, the producer the press asks when nothing is named): with
+    none the card asks the owner to add one, one is named, and two or more
+    are picked from.  `credit_frees`: the press moves a payment the row keeps
+    onto the card (`credit_moves_payment`), which withdraws every match
+    naming it, so the caption names those lines and the press posts them
+    (ruling R-CC127). -#}
+{% set credit_offered = txn.is_expense and txn.status_id == STATUS_PROJECTED
+   and not txn.tracks_purchases %}
+{% set credit_frees = withdraws_a_line and credit_offered and credit_moves_payment %}
 {#- What the card NAMED, the one value every press on it posts back as
-    `shown_lines`: the Save's hidden field, Paid / Received's and Undo CC's
-    `hx-vals` (the delete dialog names its own lines, below).  The two reads
+    `shown_lines`: the Save's hidden field, Paid / Received's, Credit's and
+    Undo CC's `hx-vals` (the delete dialog names its own lines, below).  The two reads
     never both name lines on one card: the payment captions draw only on a
     Projected or settled row (or beside a "Paid from" picker, drawn on those
     alone), and the payback's only on a Credit row, which is neither. -#}
 {% set named_lines = shown_line_ids(payment_withdraws)
    if paid_caption or estimate_caption or zero_caption or tender_caption
-      or off_card_frees
+      or off_card_frees or credit_frees
    else shown_line_ids(payback_withdraws) if payback_caption
    else '' %}
 {#- The card's root carries an id because a press refused as out of date
@@ -196,12 +209,20 @@
     </button>
     {% endif %}
 
-    {% if txn.is_expense and txn.status_id == STATUS_PROJECTED
-       and not txn.tracks_purchases %}
+    {#- Credit posts its day and card (`#credit-press-<id>`, below) and the
+        lines the card named; with no card in the app it is drawn disabled,
+        beside the sentence asking for one (plan task plan#3056). -#}
+    {% if credit_offered %}
     <button type="button" class="btn btn-xs btn-warning flex-grow-1"
             hx-post="{{ url_for('transactions.mark_credit', txn_id=txn.id) }}"
             hx-target="#txn-cell-{{ txn.id }}" hx-swap="innerHTML"
             hx-disabled-elt="this"
+            {%- if credit_cards %}
+            hx-include="#credit-press-{{ txn.id }}"
+            hx-vals='{"shown_lines": "{{ named_lines }}"}'
+            {%- else %}
+            disabled aria-describedby="credit-press-{{ txn.id }}"
+            {%- endif %}
             aria-label="Mark as credit card">
       <i class="bi bi-credit-card"></i> Credit
     </button>
@@ -242,6 +263,51 @@
     </button>
     {% endif %}
   </div>
+  {#- **The Credit press's day and card, said before the press** (plan task
+      plan#3056, the trace's S10: 15 of the 21 Credit rows on the 2026-11-04
+      dump were dated their paycheck's first day, not the day he bought it).
+      The "Money moved on" box, the name and bounds the settled row's own box
+      uses, shows the day the press puts the row on the card (`credit_on`,
+      `transaction_service.credit_day`) for him to correct; with two or more
+      cards he picks one, and none is preselected, so a press that picks none
+      is told to (the door's sentence).  With no card the press asks him to
+      add one.  Outside the form, so a Save does not post them. -#}
+  {%- if credit_offered %}
+  <div class="mb-2" id="credit-press-{{ txn.id }}">
+    {%- if credit_cards %}
+    <div class="row g-1">
+      {%- if credit_cards | length > 1 %}
+      <div class="col">
+        <label class="form-label mb-0 small" for="credit-card-{{ txn.id }}">Which card</label>
+        <select name="card_account_id" id="credit-card-{{ txn.id }}"
+                class="form-select form-select-sm">
+          <option value="" selected>Pick one</option>
+          {% for card in credit_cards %}
+          <option value="{{ card.id }}">{{ card.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {%- endif %}
+      <div class="col">
+        <label class="form-label mb-0 small" for="credit-on-{{ txn.id }}">Money moved on</label>
+        <input type="date" name="settled_on" id="credit-on-{{ txn.id }}"
+               value="{{ credit_on.isoformat() }}"
+               min="{{ settle_day_min.isoformat() }}"
+               max="{{ today.isoformat() }}"
+               class="form-control form-control-sm"
+               title="The day this went on the card. Change it to the day you bought it if that was another day.">
+      </div>
+    </div>
+    <div class="form-text" id="credit-says-{{ txn.id }}">
+      Credit puts this on {{ credit_cards[0].name if credit_cards | length == 1 else 'the card you pick' }} on the day shown{% if credit_frees %} and {{ frees_lines(payment_withdraws) }}{% endif %}.
+    </div>
+    {%- else %}
+    <div class="form-text">
+      Credit puts this on a credit card, and there is no card in the app yet: <a href="{{ url_for('accounts.new_account') }}">add your card</a>, then press Credit.
+    </div>
+    {%- endif %}
+  </div>
+  {%- endif %}
   {#- **What Paid WITHDRAWS on a reverted row whose payment it takes off**
       (plan step credit_card:CC-5-4a-3, rulings R-CC54 / R-CC56; the $0.00
       arm plan step CC-5-4a-5).  A reverted row keeps its payment un-dated

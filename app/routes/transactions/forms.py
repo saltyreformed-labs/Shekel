@@ -205,7 +205,12 @@ def render_full_edit(txn, *, page_refusal):
     # the refusal's merchant-rule arm and the dialog's pair sentence want the
     # same answer, and the delete verb threads it the same way.
     last_row_of_definition = definition_delete.is_last_row_of_its_definition(txn)
-    tender_accounts, tender_account_id = _tender_picker(txn)
+    # The OWNER's set (this door is owner-only, so ``txn.user_id`` is the
+    # requester), read once for its two readers: the "Paid from" picker and
+    # the cards a Credit press could mean (plan task plan#3056).
+    owner_set = resolve_owner_cash_flow_set(txn.user_id)
+    tender_accounts, tender_account_id = _tender_picker(txn, owner_set)
+    credit_cards = transaction_service.credit_cards(txn, owner_set)
     return render_template(
         "grid/_transaction_full_edit.html",
         card_id=full_edit_dom_id(txn.id),
@@ -263,6 +268,20 @@ def render_full_edit(txn, *, page_refusal):
         # inside one card.  ``PayPeriod.label`` is deleted with this step, so
         # the wrong source is unreachable rather than merely unused.
         period=calendar.require_period(FiledRow.for_row(txn)),
+        # **What the Credit press shows** (plan task plan#3056): the day it
+        # puts the row on the card, in its "Money moved on" box for the owner
+        # to correct (``credit_day``, reading this render's calendar); the
+        # cards it could mean, for the card it names, the picker it offers
+        # with two or more, or the ask to add one with none
+        # (``credit_cards``, the producer the press itself asks); and whether
+        # it moves a payment the row keeps onto the card
+        # (``credit_moves_payment``), so its caption names the bank lines
+        # ``payment_withdraws`` says that frees (ruling **R-CC127**).
+        credit_on=transaction_service.credit_day(txn, calendar),
+        credit_cards=credit_cards,
+        credit_moves_payment=transaction_service.credit_moves_payment(
+            txn, credit_cards,
+        ),
         # See ``get_quick_edit`` for why the Estimated field is primed with the
         # RESOLVED amount rather than the column, and why it is a MAP.
         #
@@ -423,7 +442,7 @@ def _payment_withdrawal(txn):
     return match_withdrawal.pending_for_movements([movement])
 
 
-def _tender_picker(txn):
+def _tender_picker(txn, owner_set):
     """Return ``(accounts, selected id)`` for the popover's "Paid from" picker.
 
     The accounts a payment under *txn* may NAME
@@ -444,11 +463,13 @@ def _tender_picker(txn):
 
     Args:
         txn: The row the popover is drawn for, with ``entries`` loaded.
+        owner_set: The row OWNER's cash-flow set with no override, read once
+            by :func:`render_full_edit` for this picker and the Credit press.
 
     Returns:
         The tuple to render, in picker order, and the id to preselect.
     """
-    accounts = purchase_accounts(resolve_owner_cash_flow_set(txn.user_id), txn)
+    accounts = purchase_accounts(owner_set, txn)
     recorded_id = status_seam.tender_account_id_of(txn)
     if recorded_id not in {account.id for account in accounts}:
         accounts = (*accounts, db.session.get(Account, recorded_id))

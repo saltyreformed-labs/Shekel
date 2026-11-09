@@ -59,7 +59,7 @@ from app.services.cash_flow_set import CashFlowSet, purchase_accounts
 from app.services.credit_workflow import get_active_payback, unmark_credit
 from app.services.match_press import Press
 from app.services.movement_account import admitted_movement_account_id
-from app.services.pay_calendar import FiledRow, calendar_for
+from app.services.pay_calendar import FiledRow, PayCalendar, calendar_for
 from app.services.settle_day import SettleDay
 from app.services.status_seam import covering_movement_of, settled_on_a_card
 from app.services.transaction_service._door import apply_requested_status
@@ -199,7 +199,7 @@ def undo_credit(txn: Transaction, *, press: Press | None = None) -> None:
     )
 
 
-def credit_day(txn: Transaction) -> date:
+def credit_day(txn: Transaction, calendar: PayCalendar | None = None) -> date:
     """Return the day a Credit press puts *txn* on the card.
 
     The row's own date, because the date decides the statement, the due date
@@ -214,17 +214,24 @@ def credit_day(txn: Transaction) -> date:
     The paycheck is read off the owner's one calendar after the row (the read
     order ``require_period`` asks its callers to state); no destructive pay
     period door can commit between the two reads, both following the
-    request's owner lock (plan step ``balance:X-bn``).
+    request's owner lock (plan step ``balance:X-bn``).  A caller that has
+    already derived it passes it in (the popover, which shows this day in its
+    "Money moved on" box, plan task plan#3056), so one request derives it
+    once.
 
     Args:
         txn: The row about to be put on the card.
+        calendar: The row OWNER's calendar, when the caller derived it after
+            reading the row; ``None`` derives it here.
 
     Returns:
         The civil day.
     """
     own = txn.due_date
     if own is None:
-        own = calendar_for(txn.user_id).require_period(FiledRow.for_row(txn)).start_date
+        if calendar is None:
+            calendar = calendar_for(txn.user_id)
+        own = calendar.require_period(FiledRow.for_row(txn)).start_date
     return min(own, display_today())
 
 

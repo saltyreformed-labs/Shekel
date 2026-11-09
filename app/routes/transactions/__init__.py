@@ -26,7 +26,7 @@ Module map:
 * :mod:`app.routes.transactions.forms` -- read-only GET HTMX partials.
 * :mod:`app.routes.transactions.create` -- create handlers.
 * :mod:`app.routes.transactions.mutations` -- PATCH/DELETE edit + the
-  mark-done / credit / cancel status workflow (co-located so their shared
+  mark-done / cancel status workflow (co-located so their shared
   apply / commit / error-tail parallel code stays intra-file).  The three
   branches where those routes landed on a transfer SHADOW row and
   re-expressed the request as a transfer update (``_shadow_mutations``,
@@ -34,6 +34,8 @@ Module map:
   the grid draws a transfer's leg off its parent and the leg's cell calls
   the transfer's own routes, and a shadow row is a 404 at
   :func:`~app.routes.transactions._helpers._get_owned_transaction`.
+* :mod:`app.routes.transactions.credit` -- the two Credit doors, Credit and
+  Undo CC (moved out of ``mutations`` at plan task plan#3056).
 * :mod:`app.routes.transactions.carry_forward` -- carry-forward routes.
 """
 
@@ -49,6 +51,7 @@ from app.routes.transactions._bp import transactions_bp
 from app.routes.transactions import forms  # noqa: F401, E402
 from app.routes.transactions import create  # noqa: F401, E402
 from app.routes.transactions import mutations  # noqa: F401, E402
+from app.routes.transactions import credit  # noqa: F401, E402
 from app.routes.transactions import carry_forward  # noqa: F401, E402
 
 

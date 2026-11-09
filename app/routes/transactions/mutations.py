@@ -3,7 +3,8 @@ Shekel Budget App -- Transaction route package: mutation handlers.
 
 Every state-changing transaction route on a single row: the PATCH inline
 edit save, the DELETE soft/hard delete, and the status workflow
-(mark-done, mark/unmark credit, cancel).  A transfer's LEG is not a row
+(mark-done, cancel).  The two Credit doors are :mod:`.credit` since plan task
+plan#3056.  A transfer's LEG is not a row
 these doors admit (leaf ``balance:X-bi-6-1``, ruling **R-BAL87**): the grid
 draws it off the parent and its cell calls the transfer's own routes, so the
 three shadow branches this package carried (``_shadow_mutations``, which
@@ -72,7 +73,6 @@ from app.routes.transactions._helpers import (
     _mark_done_success_response,
     _delete_dialog_schema,
     _stale_transaction_response,
-    _credit_press_schema,
     _update_schema_for,
     _verify_owned_fks_in_update,
 )
@@ -868,94 +868,13 @@ def mark_done(txn, target):
     )
 
 
-@transactions_bp.route("/transactions/<int:txn_id>/mark-credit", methods=["POST"])
-@require_owner
-def mark_credit(txn_id):
-    """Put a row on the credit card: settle it with its money moved on the card.
-
-    The HTTP shape of ``transaction_service.mark_as_credit`` (plan task
-    plan#2929, rulings plan#2887 / plan#2888), which writes no CC Payback row,
-    so the payback's unique-index backstop (commit C-19) has nothing left to
-    catch here.  Putting a reverted row's kept payment on the card takes it
-    out of a match naming it, and a press naming no line frees none (ruling
-    **R-CC127**; only Mark Paid's one-click is silent, **R-CC56**).  The door
-    is the owner's, so a companion's press is a 404.
-    Optimistic locking (commit C-18 / F-010): ``StaleDataError`` -> 409.
-    """
-    txn = _get_owned_transaction(txn_id)
-    if txn is None:
-        return "Not found", 404
-    errors = _credit_press_schema.validate(request.form)
-    if errors:
-        return _error_transaction_response(
-            txn_id, flatten_schema_errors(errors), status=422,
-        )
-    posted = read_posted(_credit_press_schema.load(request.form), absent=NOTHING_SHOWN)
-    try:
-        with Press(posted.shown) as one_save:
-            transaction_service.mark_as_credit(txn, press=one_save)
-        db.session.commit()
-    except StaleDataError:
-        logger.info("Stale-data conflict on mark_credit id=%d", txn_id)
-        return _stale_transaction_response(txn_id)
-    except IntegrityError:
-        return _error_transaction_response(txn_id, _INVALID_REFERENCE_MSG)
-    except (NotFoundError, ValidationError) as exc:
-        return _refused(txn_id, exc, posted)
-    response = render_transaction_cell(txn)
-    return response, 200, {"HX-Trigger": "gridRefresh"}
-
-
-@transactions_bp.route("/transactions/<int:txn_id>/unmark-credit", methods=["DELETE"])
-@require_owner
-def unmark_credit(txn_id):
-    """Undo CC: off the card (plan#3055), or an old Credit row's payback deleted.
-
-    ``transaction_service.undo_credit``.  Optimistic locking: see
-    :func:`mark_credit`.  The button posts the bank lines its caption named
-    (plan step ``credit_card:CC-5-4a-5``, rulings **R-CC80** / **R-CC127**),
-    and a card out of date is redrawn (**R-CC128**).
-    """
-    txn = _get_owned_transaction(txn_id)
-    if txn is None:
-        return "Not found", 404
-    errors = _credit_press_schema.validate(request.args)
-    if errors:
-        return _error_transaction_response(
-            txn_id, flatten_schema_errors(errors), status=422,
-        )
-    posted = read_posted(
-        _credit_press_schema.load(request.args), absent=NOTHING_SHOWN,
-    )
-
-    try:
-        with Press(posted.shown) as one_save:
-            transaction_service.undo_credit(txn, press=one_save)
-        db.session.commit()
-    except StaleDataError:
-        logger.info(
-            "Stale-data conflict on unmark_credit id=%d", txn_id,
-        )
-        return _stale_transaction_response(txn_id)
-    except NotFoundError as exc:
-        return str(exc), 404
-    except ValidationError as exc:
-        # Raised when the bespoke source-state guard or the
-        # state-machine verification in ``undo_credit`` rejects the
-        # request -- e.g. a Paid row on checking.  The fragment names
-        # the offending status so the user understands why; a card out of
-        # date is redrawn instead (ruling **R-CC128**).
-        return _refused(txn_id, exc, posted)
-    response = render_transaction_cell(txn)
-    return response, 200, {"HX-Trigger": "gridRefresh"}
-
-
 @transactions_bp.route("/transactions/<int:txn_id>/cancel", methods=["POST"])
 @require_owner
 def cancel_transaction(txn_id):
     """Set a transaction's status to 'cancelled'.
 
-    Optimistic locking: see :func:`mark_credit`.
+    Optimistic locking: see
+    :func:`~app.routes.transactions.credit.mark_credit`.
     """
     txn = _get_owned_transaction(txn_id)
     if txn is None:

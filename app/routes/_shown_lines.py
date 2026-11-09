@@ -2,8 +2,9 @@
 Shekel Budget App -- What a page NAMED before the press
 
 One translation, made identically by every door a page with ONE set of
-withdrawal captions posts to: the transaction popover's Save, Paid / Received,
-Delete and Undo CC (``routes/transactions/mutations.py``), the transfer
+withdrawal captions posts to: the transaction popover's Save, Paid / Received and
+Delete (``routes/transactions/mutations.py``), its Credit and Undo CC
+(``routes/transactions/credit.py``), the transfer
 popover's Save and Paid (``routes/transfers/mutations.py``), the purchase
 list's X and edit form (``routes/entries.py``), and carry-forward's Confirm,
 one set for its whole batch (``routes/transactions/carry_forward.py``, leaf

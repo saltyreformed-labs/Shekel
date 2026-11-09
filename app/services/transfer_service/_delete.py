@@ -13,7 +13,9 @@ SET-NULLs those links on its way out, and the anchor corrections are
 re-checked once the records are gone -- both inside the one removal act, which
 this hands every record the pair holds (ruling **plan#2564**); the
 loan-payment split links no row
-(ruling **R-BAL102**) and is re-derived AFTER the payment is gone; and a soft
+(ruling **R-BAL102**) and was re-derived AFTER the payment was gone, until
+plan task plan#3075 deleted that re-sync (the loan's walk reads its remaining
+payments as they stand); and a soft
 delete that took a settled transfer's payments off returns it to a plan only
 once it is hidden (ruling **R-BAL246**, through ``_status.return_to_plan``),
 because the books' revert refusal does not reach a hidden row (ruling
@@ -33,10 +35,6 @@ from app.services import (
     movement_removal,
     status_seam,
     transfer_legs,
-)
-from app.services.transfer_service._loan_posting import (
-    _pays_a_loan,
-    _resync_loan_after_payment_left,
 )
 from app.services.transfer_service._status import return_to_plan
 from app.services.transfer_service._validation import _get_transfer_or_raise
@@ -82,18 +80,6 @@ def delete_transfer(transfer_id, user_id, soft=False, *, press=None):
     # allow_deleted=True so that idempotent soft-delete and hard-delete
     # of already-soft-deleted transfers continue to work.
     xfer = _get_transfer_or_raise(transfer_id, user_id, allow_deleted=True)
-
-    # ── Loan coordinates, captured while the row exists ────────────
-    # The loan this payment leaves is re-reconciled AFTER the delete (below):
-    # its split correction links no row (ruling **R-BAL102**, plan step
-    # ``balance:X-bi-6-3``), so nothing about it needs a row to still
-    # exist, and the departed payment's key reverses as a posted key with no
-    # target.  Through that step the split was reversed HERE, first, by the
-    # income shadow's ``transaction_id`` the CASCADE was about to SET NULL.
-    # What still has to be read before the row goes is WHICH loan to re-sync.
-    is_loan_payment = _pays_a_loan(xfer)
-    loan_account_id = xfer.to_account_id
-    scenario_id = xfer.scenario_id
 
     # ── Statement matches (developer ruling 2026-08-25, bank_import:X-gb) ──
     # A payment a bank line was matched to stops existing when its transfer
@@ -185,11 +171,9 @@ def delete_transfer(transfer_id, user_id, soft=False, *, press=None):
         )
         result = None
 
-    # ── Downstream re-reconcile (posting ledger) ───────────────────
-    # After the payment is gone, re-reconcile the loan's genesis ledger: the
-    # LATER payments whose running balance the deletion changed AND any true-up
-    # whose owed_before it moved.  Idempotent and self-healing; skipped entirely
-    # for a non-loan transfer.
-    if is_loan_payment:
-        _resync_loan_after_payment_left(loan_account_id, scenario_id)
+    # The loan a deleted payment leaves owes it nothing: the loan's walk reads
+    # its payment set as the transfers INTO it, as they stand, so the later
+    # payments' splits and any true-up it moved are worked out again on the
+    # next read.  The stored ledger's re-sync of that loan stood here until
+    # plan task plan#3075.
     return result

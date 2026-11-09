@@ -454,52 +454,6 @@ class TestTheUpgradeRefuses:
                 "4 group(s) of ['transfer', 'transaction'] entries net nonzero",
             )
 
-    def test_a_pair_apart_only_by_its_movement_link(
-        self, app, seed_user, seed_periods,
-    ):
-        """An original carrying a movement link, its reversal not: four groups refused.
-
-        When the revision was written, the account walk's and the ledger
-        report's movement readers read any entry carrying
-        ``transaction_entry_id`` under that movement, at the movement's day,
-        whatever its kind, while the reversal, carrying no movement link, was
-        read apart from it (by the base's row loader at the row's day, as its
-        period's residue since); the account walk reads the records since
-        plan task plan#2525.  Wherever those days differ the delete would
-        move a figure, so the refusal keys on the
-        movement link itself rather than on whether they differ here.  The
-        first group named is the original's, on the lowest ledger: NULL sorts
-        last.
-        """
-        with app.app_context():
-            world = _world(seed_user, seed_periods)
-            movement = _db.session.execute(text(
-                "SELECT min(transaction_entry_id) FROM budget.journal_entries"
-            )).scalar_one()
-            assert movement is not None, (
-                "the world's settled transfer must post a movement entry"
-            )
-            legs = _legs(world, Decimal("40.00"))
-            planted = [
-                _plant(world, "transaction", legs,
-                       transaction_id=world["transaction"],
-                       transaction_entry_id=movement),
-                _plant(world, "transaction", _reversed(legs),
-                       transaction_id=world["transaction"]),
-            ]
-            _db.session.commit()
-            first_ledger = min(legs)
-            first_group = (
-                world["scenario"], first_ledger, world["periods"][0],
-                world["day"], "transaction", None, world["transaction"],
-                movement, legs[first_ledger], 1,
-            )
-            self._refused(
-                planted,
-                "4 group(s) of ['transfer', 'transaction'] entries net nonzero",
-                repr(first_group),
-            )
-
     def test_both_refusals_are_named_at_once_by_the_module_level_check(
         self, app, seed_user, seed_periods,
     ):

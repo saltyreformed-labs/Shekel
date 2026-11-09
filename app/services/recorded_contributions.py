@@ -8,7 +8,7 @@ developer ruling of 2026-08-12; pay-calendar plan step C2-f2c).  It lived in
 pushed that module past the 1000-line ceiling, and it moved rather than that
 module shaving: a feed with a valuation rule of its own lives beside the
 orchestration that assembles the engine's inputs, not inside it -- the same
-argument ``transfer_service._posting_sync`` was split out under.
+argument ``transfer_service._endpoints`` was split out of ``_update`` under.
 
 **The loan loaders' ONE partition since plan step balance:X-bi-6-4b**
 (ruling **R-BAL140**).  A contribution is the to-side leg of a transfer into

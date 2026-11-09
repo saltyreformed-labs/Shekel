@@ -9,7 +9,7 @@ from decimal import Decimal
 from app.extensions import db as _db
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.transaction_entry import TransactionEntry
-from app.services import ledger_account_service
+from app.services import ledger_account_service, posting_service
 from tests._ledger_reads import (
     family_movement_ids,
     period_nets_of_movements,
@@ -22,6 +22,7 @@ from tests._stored_ledger import (
     transit_ledger_account,
 )
 from tests._test_helpers import (
+    create_settled_transfer,
     figure_source_columns,
     transfer_side_record,
 )
@@ -30,6 +31,22 @@ from tests._test_helpers import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _settled_and_posted(seed_user, db_session, from_account, to_account, period, **kwargs):
+    """Settle a transfer through its door, then post it through the pair's writer.
+
+    :func:`tests._test_helpers.create_settled_transfer` with the writer this
+    package grades driven after it, as ``settle_cash_row`` drives it for a
+    row.  The settle posted the pair itself until plan task plan#3075 deleted
+    the transfer doors' syncs; the writer and these tests go together at
+    plan#3079.  Takes and returns what that builder does.
+    """
+    transfer = create_settled_transfer(
+        seed_user, db_session, from_account, to_account, period, **kwargs,
+    )
+    posting_service.sync_transfer_postings(transfer)
+    return transfer
 
 
 def _ledger_id(account):

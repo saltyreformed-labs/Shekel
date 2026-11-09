@@ -18,12 +18,12 @@ from tests._test_helpers import (
     add_txn,
     an_entered_day,
     create_envelope_txn,
-    create_settled_transfer,
     settlement_if_settling,
 )
 from app.services.settle_day import record_settle_day
 
 from ._helpers import (
+    _settled_and_posted,
     _ledger_id,
     _transit_ledger_id,
     _side_entries,
@@ -256,11 +256,12 @@ class TestPeriodAttribution:
     ):
         """The transfer reversal lands in the settle period, like a transaction.
 
-        Settle a $100 Checking -> Savings transfer in period P (auto-posted at
-        creation as two per-movement entries), then revert AND move it to F
-        in one PATCH through the transfer door -- the revert un-dates both
-        movements (ruling **R-BAL61**) and the door's reconcile reverses what
-        is posted: each side's reversal entry carries P, both real ledgers
+        Settle a $100 Checking -> Savings transfer in period P (posted as two
+        per-movement entries), then revert AND move it to F in one call
+        through the transfer door -- the revert un-dates both movements
+        (ruling **R-BAL61**) and the writer, driven after it where the door's
+        reconcile ran until plan task plan#3075, reverses what is posted: each
+        side's reversal entry carries P, both real ledgers
         and transit net to zero in P, and F holds nothing -- the transfer
         twin of the transaction case above.  Re-expressed at plan step
         ``balance:X-bi-6-3``: it moved the parent's period by hand and called
@@ -271,7 +272,7 @@ class TestPeriodAttribution:
             period = seed_periods[0]
             moved_to = seed_periods[5]
             checking = seed_user["account"]
-            transfer = create_settled_transfer(
+            transfer = _settled_and_posted(
                 seed_user, _db.session, checking, savings,
                 period, amount=Decimal("100.00"),
             )
@@ -285,6 +286,9 @@ class TestPeriodAttribution:
                 status_id=ref_cache.status_id(StatusEnum.PROJECTED),
                 pay_period_id=moved_to.id,
             )
+            # The writer, driven where the update's reconcile ran until plan
+            # task plan#3075.
+            posting_service.sync_transfer_postings(transfer)
             _db.session.commit()
 
             by_side = _side_entries(transfer.id)

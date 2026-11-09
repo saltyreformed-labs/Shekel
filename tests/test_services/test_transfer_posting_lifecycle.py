@@ -1,11 +1,13 @@
 """Lifecycle tests for the transfer -> posting-ledger wiring (Step 2, Commit 5).
 
-Commit 5 wires :func:`~app.services.posting_service.sync_transfer_postings`
+Commit 5 wired :func:`~app.services.posting_service.sync_transfer_postings`
 into the transfer service's mutation chokepoints (``update_transfer`` /
 ``delete_transfer`` / ``restore_transfer``), so settling, reverting,
-cancelling, deleting, and restoring a transfer keep the append-only
+cancelling, deleting, and restoring a transfer kept the append-only
 double-entry ledger in step WITHOUT any caller touching ``posting_service``
-directly.  These tests drive transfers END TO END through ``transfer_service``
+directly, until plan task plan#3075 deleted those syncs: the ledger these
+tests read is worked out from the records, so nothing follows a write.  These
+tests drive transfers END TO END through ``transfer_service``
 only (the way the mark-done / cancel / delete routes do) and assert the
 resulting ledger state, read from the ledger worked out from the records (the
 store's own entries are not graded here since plan step plan#2914).  **A
@@ -453,12 +455,13 @@ class TestZeroCorrectionWithdrawsTheLegs:
         """A settled $100 transfer corrected to $0.00 nets to zero everywhere.
 
         The status seam WITHDRAWS a covering movement a ``$0.00`` record lands
-        on (no movement can carry a zero figure), and reverses its leg first
+        on (no movement can carry a zero figure), and reversed its leg first
         through the one removal act's ``posting_service.reverse_leaving_movements``
         (``reverse_purchase_postings_before_delete`` until plan task plan#2557)
         -- the reversal that RETURNED for a shadow's movement through ruling
-        R-BAL45's interval and reaches it since plan step
-        ``balance:X-bi-6-3`` (ruling **R-BAL101**).  Arithmetic: settle +100
+        R-BAL45's interval and reached it from plan step
+        ``balance:X-bi-6-3`` (ruling **R-BAL101**) until plan task plan#3097
+        deleted the act's reversal.  Arithmetic: settle +100
         on Savings / -100 on Checking (via transit); the correction withdraws
         both movements; Savings back on its 100.00 opening, Checking on its
         1000.00, transit 0.00.

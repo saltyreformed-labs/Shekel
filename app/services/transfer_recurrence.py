@@ -319,7 +319,7 @@ def propagate_to_unruled_template(template, transfers) -> "list[int]":
     ``to_account_id`` on every edit re-grades ruling **R-C** against the
     destination loan's origination, so a rename would start failing on a
     legacy pre-origination row that
-    :func:`._loan_posting._reject_installment_move_before_loan` deliberately
+    ``transfer_service._validation._reject_installment_move_before_loan`` deliberately
     leaves editable in every other respect.
 
     Args:

@@ -48,9 +48,9 @@ import pytest
 from sqlalchemy import text
 
 from app import ref_cache
-from app.enums import LedgerAccountKindEnum, PostingKindEnum, PostingSourceEnum
+from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
+from app.models.journal_entry import JournalEntry
 from app.models.ledger_account import LedgerAccount
 from app.models.scenario import Scenario
 from app.services import (
@@ -60,10 +60,8 @@ from app.services import (
 )
 from tests._stored_ledger import (
     find_loan_ledger_account,
-    ledger_accounts_for_account,
     loan_correction_entries,
     stored_ledger_net,
-    transfer_family_journal_filter,
 )
 from tests._test_helpers import (
     create_account_of_type,
@@ -180,16 +178,6 @@ def _backfill():
     return posted
 
 
-def _interest_ledger_net(loan, scenario_id):
-    """Return the net of the loan's per-loan interest ledger (0 if not minted)."""
-    ledger = find_loan_ledger_account(
-        _db.session, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-    )
-    if ledger is None:
-        return Decimal("0")
-    return stored_ledger_net(_db.session, ledger.id, scenario_id)
-
-
 def _per_loan_ledger_count(loan):
     """Return how many per-loan ledger accounts exist.
 
@@ -216,159 +204,12 @@ def _entry_count_for_source(source_enum):
 
 
 # ---------------------------------------------------------------------------
-# The core: the backfill posts a correction absent from history
-# ---------------------------------------------------------------------------
-
-
-class TestBackfillPostsHistoricalCorrection:
-    """The backfill posts the real-split correction for a payment lacking one."""
-
-    def test_posts_correction_for_settled_payment_lacking_one(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A $1,000 payment with no correction backfills to Loan -500 / Interest +500.
-
-        Arithmetic: interest = round(100000 * 0.06 / 12) = 500.00; principal =
-        1000 - 500 = 500.00; no escrow / refund.  The backfill posts the payment
-        correction AND the opening (-250000) + true-up (+150000), so the
-        loan-linked ledger nets -250000 + 150000 + (1000 - 500) = -99500.00 ==
-        -(current balance 99500), the interest ledger holds +500, and Checking is
-        untouched by the loan sync (0.00: its $1000.00 Step-5 opening minus the
-        Step-2 cash).  The 500.00
-        interest also proves the walk seeds from the $100,000 trueup anchor
-        (origination $250,000 -> $1,250).
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            xfer = _settle(seed_user, loan, seed_periods[_P1])
-            db.session.commit()
-
-            # Reproduce the pre-Commit-5 historical state: settled, no correction.
-            _clear_corrections()
-            assert loan_correction_entries(db.session, xfer.id, loan.id) == []
-
-            posted = _backfill()
-
-            assert loan.id in posted
-            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
-            # Opening (-250000) + true-up (+150000) + principal (+500).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
-            ) == Decimal("-99500.00")
-            assert _interest_ledger_net(loan, scenario_id) == Decimal("500.00")
-            # The loan sync never moves Checking; only the Step-2 cash did
-            # (on top of the fixture's $1000.00 opening).
-            assert posting_service.account_posting_total(
-                seed_user["account"].id, scenario_id,
-            ) == Decimal("0.00")
-
-    def test_posts_full_multi_payment_set_with_running_balance(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Two payments backfill with interest on the REAL running balance.
-
-        Payment 1 ($1,000): interest round(100000 * 0.06 / 12) = 500.00,
-        principal 500.00, balance -> 99,500.  Payment 2 ($1,000): interest
-        round(99500 * 0.06 / 12) = round(497.50) = 497.50, principal 502.50.  The
-        two payments contribute 500.00 + 502.50 = 1,002.50 of principal (Step-2
-        cash 2,000 - interest 997.50); with the opening (-250000) + true-up
-        (+150000) the loan-linked ledger nets -250000 + 150000 + 1002.50 =
-        -98997.50 == -(final balance 98997.50), and the interest ledger holds
-        500.00 + 497.50 = 997.50 -- proving the backfill posts the FULL set with
-        the balance walked across payments.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            x1 = _settle(seed_user, loan, seed_periods[_P1])
-            x2 = _settle(seed_user, loan, seed_periods[_P2])
-            db.session.commit()
-
-            _clear_corrections()
-            _backfill()
-
-            assert len(loan_correction_entries(db.session, x1.id, loan.id)) == 1
-            assert len(loan_correction_entries(db.session, x2.id, loan.id)) == 1
-            # Opening (-250000) + true-up (+150000) + principal (+1002.50).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
-            ) == Decimal("-98997.50")
-            assert _interest_ledger_net(loan, scenario_id) == Decimal("997.50")
-
-    def test_posts_correction_with_escrow_leg_recreates_both_ledgers(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A payment with escrow backfills a 3-leg correction, minting two ledgers.
-
-        On a $1,200/yr escrow loan (monthly 100.00), a $1,000 payment splits to
-        interest round(100000 * 0.06 / 12) = 500.00, escrow 100.00, principal
-        1000 - 500 - 100 = 400.00.  Clearing corrections drops the per-loan
-        interest, escrow, AND opening-equity ledger accounts, so the backfill must
-        re-mint all three: afterward the interest ledger holds +500.00, the escrow
-        ledger +100.00, and with the opening (-250000) + true-up (+150000) the
-        loan-linked ledger nets -250000 + 150000 + 400 = -99600.00 == -(current
-        balance 99600).  Three per-loan ledger accounts exist -- interest, escrow,
-        opening-equity (no refund leg for an on-schedule payment).
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user, escrow_annual=Decimal("1200.00"))
-            xfer = _settle(seed_user, loan, seed_periods[_P1])
-            db.session.commit()
-
-            _clear_corrections()
-            _backfill()
-
-            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
-            # Opening (-250000) + true-up (+150000) + principal (+400).
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
-            ) == Decimal("-99600.00")
-            assert _interest_ledger_net(loan, scenario_id) == Decimal("500.00")
-            escrow_ledger = find_loan_ledger_account(
-                db.session, loan.id, LedgerAccountKindEnum.LOAN_ESCROW,
-            )
-            assert escrow_ledger is not None
-            assert stored_ledger_net(
-                db.session, escrow_ledger.id, scenario_id,
-            ) == Decimal("100.00")
-            # Interest, escrow, AND opening-equity per-loan ledgers.
-            assert _per_loan_ledger_count(loan) == 3
-
-
-# ---------------------------------------------------------------------------
 # Idempotency + no double-post against the go-forward correction
 # ---------------------------------------------------------------------------
 
 
 class TestBackfillIdempotentNoDoublePost:
     """The backfill never double-posts a go-forward correction and is idempotent."""
-
-    def test_no_double_post_after_goforward(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A payment already carrying a go-forward correction backfills to nothing new.
-
-        Settling posts the correction (and the opening / true-up) go-forward.  The
-        backfill reconcile-to-target sees everything already at target, so it writes
-        NO new journal entry -- the total entry count is unchanged and the loan-
-        linked ledger still nets -99500 (opening -250000 + true-up +150000 +
-        principal 500).
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            _settle(seed_user, loan, seed_periods[_P1])
-            db.session.commit()
-            entries_before = db.session.query(JournalEntry).count()
-
-            _backfill()
-
-            assert db.session.query(JournalEntry).count() == entries_before
-            assert posting_service.account_posting_total(
-                loan.id, scenario_id,
-            ) == Decimal("-99500.00")
 
     def test_backfill_twice_posts_once(
         self, app, db, seed_user, seed_periods,
@@ -656,77 +497,6 @@ class TestDowngradeReversible:
     the RESTRICT FKs did not jam).
     """
 
-    def test_downgrade_removes_loan_data_keeps_step2(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Teardown deletes loan_payment corrections + per-loan accounts only.
-
-        A settled loan payment posts BOTH a Step-2 cash entry (transfer_id set,
-        linked ledgers) and a Step-4 correction (per-loan interest ledger).  The
-        teardown deletes the correction and the per-loan interest ledger, while
-        leaving the Step-2 cash entry, the linked ledger accounts, and a separate
-        Savings transfer's cash entry intact -- the exact reverse of the backfill.
-        """
-        with app.app_context():
-            loan = _make_loan(seed_user)
-            xfer = _settle(seed_user, loan, seed_periods[_P1])
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Downgrade Savings",
-            )
-            db.session.commit()
-            cash_xfer = create_settled_transfer(
-                seed_user, db.session, seed_user["account"], savings,
-                seed_periods[_P1], amount=Decimal("100.00"),
-            )
-            db.session.commit()
-
-            # The go-forward wiring posted the correction + minted the interest ledger.
-            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
-            interest_ledger = find_loan_ledger_account(
-                db.session, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-            )
-            assert interest_ledger is not None
-            # Each transfer's cash is TWO per-movement entries since plan
-            # step ``balance:X-bi-6-3``.
-            loan_cash_entries = (
-                db.session.query(JournalEntry)
-                .filter(transfer_family_journal_filter(xfer.id)).count()
-            )
-            assert loan_cash_entries == 2
-            savings_cash_entries = (
-                db.session.query(JournalEntry)
-                .filter(transfer_family_journal_filter(cash_xfer.id)).count()
-            )
-            assert savings_cash_entries == 2
-            linked_before = len(
-                ledger_accounts_for_account(db.session, loan.id)
-            )
-
-            # The settle also posted the genesis opening / true-up.  The real
-            # downgrade removes those via the higher-revision genesis boundary
-            # migration (f3d6b1a8c2e4) BEFORE this Step-4 teardown, so run its
-            # teardown first -- otherwise the Step-4 teardown would strand the
-            # per-loan opening-equity legs on a deleted account.
-            _GENESIS_MIGRATION._remove_loan_genesis_postings(db.session)
-            _MIGRATION._remove_loan_payment_postings(db.session)
-            db.session.commit()
-
-            # Step-4 artifacts removed.
-            assert loan_correction_entries(db.session, xfer.id, loan.id) == []
-            assert _per_loan_ledger_count(loan) == 0
-            # The cash entries + linked ledger accounts survive.
-            assert (
-                db.session.query(JournalEntry)
-                .filter(transfer_family_journal_filter(xfer.id)).count()
-            ) == 2
-            assert (
-                db.session.query(JournalEntry)
-                .filter(transfer_family_journal_filter(cash_xfer.id)).count()
-            ) == 2
-            assert len(
-                ledger_accounts_for_account(db.session, loan.id)
-            ) == linked_before
-
     def test_downgrade_source_removes_entries_and_per_loan_accounts(self):
         """The downgrade source deletes loan_payment entries + per-loan accounts."""
         source = (_MIGRATIONS_DIR / _MIGRATION_FILENAME).read_text()
@@ -759,80 +529,6 @@ class TestGenesisBoundaryMigration:
         """revision / down_revision pin the migration as the head above Commit 1."""
         assert _GENESIS_MIGRATION.revision == "f3d6b1a8c2e4"
         assert _GENESIS_MIGRATION.down_revision == "d1b22f59ba5b"
-
-    def test_downgrade_removes_genesis_keeps_payment_and_cash(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Teardown deletes the opening / true-up entries + equity accounts only.
-
-        A settled loan payment posts the genesis opening + true-up (source
-        loan_opening / loan_trueup, onto a per-loan equity_opening account), the
-        Step-4 payment correction (loan_payment), and the Step-2 cash entry.  The
-        genesis teardown removes the two genesis entries and the equity_opening
-        account, while leaving the payment correction, the interest ledger, the
-        Step-2 cash entry, and the linked ledger intact -- the exact reverse of
-        the go-forward booking, so the Commit-1 ref-seed downgrade that follows can
-        drop the loan_opening / loan_trueup / equity_opening ref rows cleanly.
-        """
-        with app.app_context():
-            loan = _make_loan(seed_user)
-            xfer = _settle(seed_user, loan, seed_periods[_P1])
-            db.session.commit()
-
-            # Booked go-forward: genesis entries, equity account, payment correction.
-            assert _entry_count_for_source(PostingSourceEnum.LOAN_OPENING) == 1
-            assert _entry_count_for_source(PostingSourceEnum.LOAN_TRUEUP) == 1
-            assert find_loan_ledger_account(
-                db.session, loan.id, LedgerAccountKindEnum.EQUITY_OPENING,
-            ) is not None
-            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
-
-            _GENESIS_MIGRATION._remove_loan_genesis_postings(db.session)
-            db.session.commit()
-
-            # Genesis artifacts removed.
-            assert _entry_count_for_source(PostingSourceEnum.LOAN_OPENING) == 0
-            assert _entry_count_for_source(PostingSourceEnum.LOAN_TRUEUP) == 0
-            assert find_loan_ledger_account(
-                db.session, loan.id, LedgerAccountKindEnum.EQUITY_OPENING,
-            ) is None
-            # The RESTRICT-unblock (the reason this migration exists): with the
-            # genesis entries gone and their equity accounts dropped, EVERY
-            # reference to Commit-1's three ref rows is cleared, so its downgrade's
-            # RESTRICT deletes would succeed.  The sharpest reference is the
-            # posting KIND -- assert no account_postings leg carries the opening /
-            # true-up kind any more, EXCLUDING the Step-5 account corrections
-            # (source account_opening / account_trueup), which reuse the same
-            # two kinds by design and whose OWN boundary migration downgrades
-            # first in the linear chain.  This stays an executed check: it
-            # fails loud if any OTHER future change emits such a leg on a
-            # non-genesis entry (the one way the source-keyed teardown could
-            # leave a dangling kind ref).
-            account_correction_source_ids = [
-                ref_cache.posting_source_id(PostingSourceEnum.ACCOUNT_OPENING),
-                ref_cache.posting_source_id(PostingSourceEnum.ACCOUNT_TRUEUP),
-            ]
-            assert db.session.query(Posting).join(
-                JournalEntry, Posting.journal_entry_id == JournalEntry.id,
-            ).filter(
-                Posting.posting_kind_id.in_([
-                    ref_cache.posting_kind_id(PostingKindEnum.OPENING),
-                    ref_cache.posting_kind_id(PostingKindEnum.TRUEUP),
-                ]),
-                JournalEntry.source_kind_id.notin_(
-                    account_correction_source_ids,
-                ),
-            ).count() == 0
-            # Payment correction, interest ledger, the cash entries, linked
-            # ledger survive.
-            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
-            assert find_loan_ledger_account(
-                db.session, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-            ) is not None
-            assert (
-                db.session.query(JournalEntry)
-                .filter(transfer_family_journal_filter(xfer.id)).count()
-            ) == 2
 
     def test_downgrade_source_removes_genesis_entries_and_equity_accounts(self):
         """The downgrade source deletes genesis entries + equity_opening accounts."""

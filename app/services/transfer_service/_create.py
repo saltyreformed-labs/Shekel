@@ -34,9 +34,6 @@ from app.extensions import db
 from app.models.amount_ownership import AmountOwnership
 from app.models.ref import Status
 from app.models.transfer import Transfer
-from app.services.transfer_service._loan_posting import (
-    _reject_payment_before_origination,
-)
 from app.services.transfer_service._ownership import (
     _get_owned_account,
     _get_owned_category,
@@ -45,6 +42,7 @@ from app.services.transfer_service._ownership import (
     _get_owned_transfer_template,
 )
 from app.services.transfer_service._validation import (
+    _reject_payment_before_origination,
     _reject_unmodeled_source,
     _validate_positive_amount,
 )

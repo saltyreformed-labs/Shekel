@@ -18,10 +18,6 @@ Flask-isolated like the rest of the package: plain data in, ORM rows out, no
 import logging
 
 from app.extensions import db
-from app.services import posting_service
-from app.services.transfer_service._loan_posting import (
-    _sync_loan_postings_if_loan,
-)
 from app.services.transfer_service._validation import (
     _get_transfer_or_raise,
     assert_restorable,
@@ -99,23 +95,13 @@ def restore_transfer(transfer_id, user_id):
 
     xfer.is_deleted = False
 
+    # The door's own flush, kept when the stored ledger's re-syncs that
+    # followed it went (plan task plan#3075): the module flushes, so the
+    # un-delete's constraints raise inside this call rather than at whichever
+    # later statement or commit happens to flush it.  The worked-out ledger
+    # reads the restored transfer as it stands, a ``$0.00`` loan payment's
+    # charge included, so nothing follows.
     db.session.flush()
-
-    # ── Posting ledger reconcile (Build-Order Step 2) ──────────────
-    # Re-sync the ledger to what the restored transfer's movements say, AFTER
-    # the transfer is un-deleted (plan step
-    # ``balance:X-bi-6-3``, ruling **R-BAL101**: the door reads the
-    # movements, it is told no settled sense).  Since plan step
-    # ``balance:X-bi-6-4d-2`` a hidden transfer holds no movement (ruling
-    # **R-CC75**) and returns Projected, Cancelled or a ``$0.00`` close
-    # (ruling **R-BAL246**), so this posts nothing.
-    posting_service.sync_transfer_postings(xfer)
-    # Posting ledger: re-reconcile the loan's genesis ledger -- its split
-    # correction plus the opening / true-up corrections.  A restored
-    # ``$0.00`` close is a settled loan payment holding no cash (ruling
-    # **R-BAL140**), which moves the split; a restored plan, a restored
-    # Cancelled payment or a non-loan transfer moves nothing.
-    _sync_loan_postings_if_loan(xfer)
 
     log_event(
         logger, logging.INFO, EVT_TRANSFER_RESTORED, BUSINESS,

@@ -7,9 +7,11 @@ TRUE-UP as balanced anchor corrections.  Both derive from ONE chronological
 running-balance walk that seeds at origination and RESETS at each anchor, and
 both are reconciled by ONE loop (``sync_loan_postings``, since plan step
 ``balance:X-bi-6-3``, ruling **R-BAL102**: the split is a date-keyed
-correction with no row link, exactly as the anchors are).  The payment split is
+correction with no row link, exactly as the anchors are).  The payment split was
 wired into the transfer chokepoints (auto-posted on settle via
-``transfer_service``); the tests below drive the same one sync directly.  The
+``transfer_service``) until plan task plan#3075 deleted the transfer doors'
+syncs; the tests below drive the same one sync directly, after each door act
+too (``_sync_as_the_doors_did``).  The
 two single-half doors this module used to drive (``sync_loan_payment_postings``
 / ``sync_loan_anchor_corrections``) went with the split's row key -- a rule-5
 class (b) re-expression Josh confirmed 2026-09-21.  TWO pinned figures moved
@@ -69,7 +71,6 @@ from app.services import (
     transaction_service,
     transfer_service,
 )
-from app.services._posting_write import _emit_balanced_entry, _PostingLeg
 from app.services.ledger_lines import loan_key
 from tests._ledger_parity import assert_ledger_parity
 from tests._ledger_reads import (
@@ -89,7 +90,6 @@ from tests._stored_ledger import (
     ledger_accounts_for_account,
     loan_correction_entries,
     loan_correction_entries_at,
-    stored_ledger_net,
     stored_loan_balance_at,
     stored_loan_balance_map,
     transfer_family_journal_filter,
@@ -175,10 +175,14 @@ def _add_rate_change(loan, effective_date, rate):
 
 
 def _settle_payment(seed_user, loan, period, cash, actual=None, settled_on=None):
-    """Settle a Checking -> loan payment transfer; return the transfer.
+    """Settle a Checking -> loan payment transfer and post it; return the transfer.
 
-    Creates and settles the transfer through ``transfer_service`` (so the
-    Step-2 cash entry auto-posts) and returns it.  It returned the loan-side
+    Creates and settles the transfer through ``transfer_service``, then posts
+    its cash entries and the loan's split through the two writers this module
+    grades, as :func:`tests._test_helpers.settle_cash_row` does for a row.
+    The settle posted both itself until plan task plan#3075 deleted the
+    transfer doors' syncs; this suite is the writers', which go with them at
+    plan#3079, so it drives them where the door did.  It returned the loan-side
     income shadow beside it until plan step ``balance:X-bi-6-4d-2`` made a
     transfer one row (ruling R-BAL167 class 4): the transfer and the loan
     name the side the split books under now.
@@ -194,7 +198,23 @@ def _settle_payment(seed_user, loan, period, cash, actual=None, settled_on=None)
     xfer = create_settled_transfer(
         seed_user, _db.session, seed_user["account"], loan, period, **kwargs,
     )
+    _sync_as_the_doors_did(loan, xfer.scenario_id, xfer)
     return xfer
+
+
+def _sync_as_the_doors_did(loan, scenario_id, xfer=None):
+    """Post what a transfer door's act posted, through the two writers.
+
+    The pair's cash entries (when *xfer* still exists) and the loan's split
+    and anchor corrections in *scenario_id*.  The settle, the update and the
+    delete posted these themselves until plan task plan#3075 deleted the
+    transfer doors' syncs; this suite grades the writers, which go with
+    their own tests at plan#3079, so a case drives them where its door act
+    did.
+    """
+    if xfer is not None:
+        posting_service.sync_transfer_postings(xfer)
+    loan_posting_service.sync_loan_postings(loan.id, scenario_id)
 
 
 def _linked_ledger_id(account):
@@ -1254,38 +1274,6 @@ class TestSyncLoanPaymentPostings:
                 _db.session, loan.id, scenario_id,
             ) == Decimal("0.00")
 
-    def test_sync_never_touches_checking(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """The loan sync moves only loan ledgers -- Checking is unchanged.
-
-        The Step-2 cash entry already moved Checking (its $1000.00 Step-5
-        opening - 1000 = 0.00); the loan correction must not move it
-        further, so Checking's posted total is identical before and after
-        the sync.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            checking = seed_user["account"]
-            loan = _make_loan(seed_user)
-            _settle_payment(
-                seed_user, loan, seed_periods[_P1], Decimal("1000.00"),
-            )
-            db.session.commit()
-
-            checking_before = posting_service.account_posting_total(
-                checking.id, scenario_id,
-            )
-            loan_posting_service.sync_loan_postings(
-                loan.id, scenario_id,
-            )
-            db.session.commit()
-            checking_after = posting_service.account_posting_total(
-                checking.id, scenario_id,
-            )
-            assert checking_before == Decimal("0.00")
-            assert checking_after == checking_before
-
     def test_correction_is_invisible_to_the_cash_reader(
         self, app, db, seed_user, seed_periods,
     ):
@@ -1484,7 +1472,9 @@ class TestSyncLoanPaymentPostings:
         now, so an early payment for April would clear March's standing interest
         too (the fixture is restated so nothing is left unpaid, ruling R-R103).  So:
 
-        * the P2 correction exists AT SETTLE (no manual sync), legs
+        * the P2 correction exists once the settle is posted (the settle
+          posted it itself, no manual sync, until plan task plan#3075
+          deleted the door's sync; ``_settle_payment`` posts it now), legs
           Loan -497.50 / Interest +497.50, attributed to P2's period;
         * BOTH settled dates (01-20, 02-05) are on or before the frozen today, so
           the scalar reads the REAL 98997.50 -- never the raw cash
@@ -1508,8 +1498,9 @@ class TestSyncLoanPaymentPostings:
             # settle (2026-02-05) has -- an EARLY settle.
             assert seed_periods[_P2].start_date > frozen
 
-            # The correction posted at settle, through the transfer wiring --
-            # no manual sync call -- attributed to the payment's own period.
+            # The correction posted with the settle (``_settle_payment`` drives
+            # the writers the door drove until plan task plan#3075), attributed
+            # to the payment's own period.
             entries = _correction_entries(early_xfer, loan)
             assert len(entries) == 1
             assert entries[0].pay_period_id == seed_periods[_P2].id
@@ -1659,6 +1650,7 @@ class TestTheSplitIsADateKeyedCorrection:
                 seed_periods[_P1], amount=Decimal("800.00"), settled_on=day,
                 due_date=date(2026, 3, 1),
             )
+            _sync_as_the_doors_did(loan, scenario_id, second_xfer)
             db.session.commit()
             # One key: each payment's period off its transfer and its day off
             # its loan side's record.  Both were read off the income shadows
@@ -1735,6 +1727,7 @@ class TestTheSplitIsADateKeyedCorrection:
             transfer_service.update_transfer(
                 xfer.id, seed_user["user"].id, figure=typed(Decimal("0.00")),
             )
+            _sync_as_the_doors_did(loan, scenario_id, xfer)
             db.session.commit()
 
             assert transfer_side_record(db.session, xfer.id, loan.id) is None
@@ -1752,72 +1745,6 @@ class TestTheSplitIsADateKeyedCorrection:
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-100500.00")
             assert _interest_net(loan, scenario_id) == Decimal("500.00")
-
-    def test_residue_at_a_key_the_walk_does_not_price_self_heals(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A split posted at a key with no target is reversed by the next sync.
-
-        Under the shadow key a ``loan_payment`` entry whose row was hard-deleted
-        without the reversal-before was RESIDUE: its link SET NULL, no row to
-        key a reversal by, the statements dropping it and the assert refusing
-        the loan forever.  Under the date key every posted key is reconciled
-        on every sync, so the same entry -- planted here by hand at P2 on a
-        day the walk prices nothing -- is a posted key with no target and
-        reverses in one pass: the key nets to zero, the interest ledger back
-        to P1's 500.00, and the assert holds.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            xfer = _settle_payment(
-                seed_user, loan, seed_periods[_P1], Decimal("1000.00"),
-            )
-            db.session.commit()
-            interest_ledger = _find_loan_ledger(
-                loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-            )
-            stray_period = seed_periods[_P2]
-            stray_day = stray_period.start_date
-            stray = JournalEntry(
-                user_id=seed_user["user"].id,
-                scenario_id=scenario_id,
-                pay_period_id=stray_period.id,
-                entry_date=stray_day,
-                source_kind_id=ref_cache.posting_source_id(
-                    PostingSourceEnum.LOAN_PAYMENT,
-                ),
-                description="Loan payment split: stray",
-            )
-            _emit_balanced_entry(stray, [
-                _PostingLeg(
-                    _linked_ledger_id(loan), Decimal("-7.00"),
-                    ref_cache.posting_kind_id(PostingKindEnum.PRINCIPAL),
-                ),
-                _PostingLeg(
-                    interest_ledger.id, Decimal("7.00"),
-                    ref_cache.posting_kind_id(PostingKindEnum.INTEREST),
-                ),
-            ])
-            db.session.commit()
-            assert stored_ledger_net(
-                _db.session, interest_ledger.id, scenario_id,
-            ) == Decimal("507.00")
-
-            loan_posting_service.sync_loan_postings(loan.id, scenario_id)
-            db.session.commit()
-
-            at_key = loan_correction_entries_at(
-                _db.session, loan.id, scenario_id, stray_period.id, stray_day,
-            )
-            assert len(at_key) == 2
-            assert _entry_legs(at_key[-1].id)[interest_ledger.id][0] == (
-                Decimal("-7.00")
-            )
-            assert stored_ledger_net(
-                _db.session, interest_ledger.id, scenario_id,
-            ) == Decimal("500.00")
-            assert len(_correction_entries(xfer, loan)) == 1
 
 
 class TestReverseLoanPaymentPostings:
@@ -1844,8 +1771,10 @@ class TestReverseLoanPaymentPostings:
 
         The loan twin of the R2 attribution rule (the 2026-07-02 review's H1
         class): one ``update_transfer`` call reverts the payment to Projected
-        AND moves it to a later period -- the shadows carry the NEW period by
-        the time the loan wiring reconciles.  The stale correction must
+        AND moves it to a later period -- the transfer carries the NEW period
+        by the time the loan writer reconciles (driven after the update, as
+        the update's own sync did until plan task plan#3075).  The stale
+        correction must
         reverse into the period it was POSTED in (P1's), never the shadow's
         new one, so the correction pair nets P1's period to zero and the new
         period holds no loan_payment entries at all.  Arithmetic: the P1
@@ -1876,6 +1805,7 @@ class TestReverseLoanPaymentPostings:
                 status_id=ref_cache.status_id(StatusEnum.PROJECTED),
                 pay_period_id=moved_to.id,
             )
+            _sync_as_the_doors_did(loan, scenario_id, xfer)
             db.session.commit()
 
             entries = loan_correction_entries_at(
@@ -1914,9 +1844,9 @@ class TestReverseLoanPaymentPostings:
     ):
         """A hard-deleted payment's correction reverses at its key, leg for leg.
 
-        The delete door reverses the cash leg BEFORE the row goes (the
-        movement's link is what a hard delete severs) and re-syncs the loan
-        AFTER: the walk no longer prices the payment, its key ``(P1, the
+        The loan is re-synced AFTER the delete (by the delete door itself
+        until plan task plan#3075, by the case since): the walk no longer
+        prices the payment, its key ``(P1, the
         settle day)`` has no target, and the reconcile emits the reversal
         there -- Loan +500.00 / Interest -500.00 against the original's
         Loan -500.00 / Interest +500.00, so the key nets to zero.  Nothing
@@ -1926,9 +1856,9 @@ class TestReverseLoanPaymentPostings:
         from a direct call to the deleted ``reverse_loan_payment_postings_
         for_shadow``, which produced a state no door produces (the split
         reversed with the cash still posted) and pinned -99000.00 for it;
-        the figure is -100000.00 here because the delete door reverses the
-        cash leg too -- the second of the two changed figures this module's
-        docstring names.
+        the figure is -100000.00 here because the worked-out read drops the
+        deleted payment's cash leg too -- the second of the two changed figures
+        this module's docstring names.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -1953,6 +1883,7 @@ class TestReverseLoanPaymentPostings:
             transfer_service.delete_transfer(
                 xfer.id, seed_user["user"].id, soft=False,
             )
+            _sync_as_the_doors_did(loan, scenario_id)
             db.session.commit()
 
             entries = loan_correction_entries_at(
@@ -1978,8 +1909,9 @@ class TestReverseLoanPaymentPostings:
     ):
         """Deleting a payment that carries no posted correction writes nothing.
 
-        Commit 5 wires the split-posting into the transfer chokepoints, so a
-        SETTLED loan payment auto-posts its correction; a genuinely unposted
+        Commit 5 wired the split-posting into the transfer chokepoints (until
+        plan task plan#3075), so a SETTLED loan payment posts its correction
+        (``_settle_payment`` posts it now); a genuinely unposted
         payment is therefore a PROJECTED one (never settled -> never in the
         walk).  Deleting it must write no ``loan_payment`` entry at all: the
         loan's re-sync after the delete finds no posted key and no target.
@@ -2223,12 +2155,13 @@ class TestSyncLoanAnchorCorrections:
         and the per-loan opening-equity ledger holds their negatives, +100000.00.
         Settling P1 (due 02-01, PRE-trueup, cash 1000) splits it on the origination
         balance (interest round(250000 * 0.005) = 1250, principal -250) and grows
-        owed_before to 250250 -- and because the settle fires the UNIFIED sync
-        (:func:`sync_loan_postings`), the true-up re-bases to 250250 - 100000 =
+        owed_before to 250250 -- and because the settle's sync is the UNIFIED
+        one (:func:`sync_loan_postings`, driven by ``_settle_payment`` where the
+        door drove it until plan task plan#3075), the true-up re-bases to
+        250250 - 100000 =
         +150250 (a +250 linked delta) in the SAME transaction, so the linked ledger
         STAYS -100000.00 == -(verified $100,000), the pre-trueup payment fully
-        absorbed; the equity ledger re-bases to 250000 - 150250 = +99750.00.  No
-        stale window is ever observable through the go-forward path.
+        absorbed; the equity ledger re-bases to 250000 - 150250 = +99750.00.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -2640,7 +2573,7 @@ class TestPostedLoanBalanceSums:
         Trued up to $100,000, one post-anchor $1,000 payment splits to interest
         round(100000 * 0.005) = 500.00 and principal 500.00, so the reader reports
         100000 - 500 = 99500.00 (opening -250000 + true-up +150000 + Step-2 cash
-        +1000 + split -500, negated).  The settle wiring auto-posts all of it.
+        +1000 + split -500, negated).  The settle helper posts all of it.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -2882,7 +2815,7 @@ class TestPostedLoanBalanceSums:
     ):
         """The window isolates scenarios; a scenario with no payment reads its anchor.
 
-        A $1,000 payment settled in the baseline auto-posts the opening, true-up,
+        A $1,000 payment settled in the baseline posts the opening, true-up,
         and split there only (a what-if with no payment is neither in the payment
         set nor the baseline).  The baseline reads 99500.00.  The what-if holds
         no opening on the store, whose window reads ``None``, and the worked-out
@@ -3259,8 +3192,9 @@ class TestASettleDayEditReDatesThePostings:
                 date(2026, 1, 20)
             ] == Decimal("500.00")
 
-            # The pure settle-day edit -- no amount, status, or period change.
-            # update_transfer runs the (now date-aware) reconciles.
+            # The pure settle-day edit -- no amount, status, or period change --
+            # and the (date-aware) reconciles the update ran until plan task
+            # plan#3075, driven after it.
             transfer_service.update_transfer(
                 xfer.id, seed_user["user"].id,
                 side_days=on_both_sides(
@@ -3268,6 +3202,7 @@ class TestASettleDayEditReDatesThePostings:
                     an_entered_day(date(2026, 2, 5)),
                 ),
             )
+            _sync_as_the_doors_did(loan, scenario_id, xfer)
             db.session.commit()
 
             by_date = linked_net_by_date(_db.session, linked, scenario_id)
@@ -3311,6 +3246,7 @@ class TestASettleDayEditReDatesThePostings:
                     an_entered_day(date(2026, 1, 20)),
                 ),
             )
+            _sync_as_the_doors_did(loan, scenario_id, xfer)
             db.session.commit()
 
             by_date = linked_net_by_date(

@@ -41,7 +41,6 @@ from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db as _db
 from app.models.journal_entry import JournalEntry, Posting
-from app.models.scenario import Scenario
 from app.services import (
     account_posting_service,
     loan_posting_service,
@@ -50,16 +49,13 @@ from app.services import (
 from tests._stored_ledger import (
     find_loan_ledger_account,
     ledger_account_of_kind,
-    ledger_accounts_for_account,
     linked_ledger_account,
     stored_ledger_net,
-    transfer_family_journal_filter,
 )
 from tests._test_helpers import (
     add_anchor_history,
     create_account_of_type,
     create_loan_with_trueup,
-    create_settled_transfer,
     freeze_today,
     load_init_database_module,
     load_migration_module,
@@ -237,57 +233,6 @@ class TestBackfillPostsHistoricalCorrection:
             assert stored_ledger_net(
                 db.session, equity.id, scenario_id,
             ) == -_ANCHOR
-
-    def test_backfill_restores_opening_leaving_settled_cash_intact(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Clearing then backfilling restores the opening and never touches cash.
-
-        A settled Checking -> Savings transfer posts a Step-2 cash entry
-        (``transfer_id`` set) on the Savings linked ledger ALONGSIDE the opening
-        correction.  The boundary teardown removes ONLY the anchor correction
-        (source-scoped), so the cash entry survives and the linked total drops by
-        the opening; the backfill restores the opening exactly (backfill ==
-        go-forward) and leaves the cash entry untouched throughout.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Cash Savings",
-                anchor_balance=_ANCHOR,
-            )
-            db.session.commit()
-            xfer = create_settled_transfer(
-                seed_user, db.session, seed_user["account"], savings,
-                seed_periods[_P1], amount=_CASH_IN,
-            )
-            db.session.commit()
-            total_goforward = posting_service.account_posting_total(
-                savings.id, scenario_id,
-            )
-
-            _clear_account_corrections()
-
-            # The cash entries (the transfer's two per-movement entries, plan
-            # step ``balance:X-bi-6-3``) survive; the opening is gone, so the
-            # total dropped from the go-forward figure.
-            assert db.session.query(JournalEntry).filter(
-                transfer_family_journal_filter(xfer.id),
-            ).count() == 2
-            total_cleared = posting_service.account_posting_total(
-                savings.id, scenario_id,
-            )
-            assert total_cleared != total_goforward
-
-            _backfill()
-
-            # backfill == go-forward: the opening is restored exactly, cash intact.
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
-            ) == total_goforward
-            assert db.session.query(JournalEntry).filter(
-                transfer_family_journal_filter(xfer.id),
-            ).count() == 2
 
     def test_backfill_restores_opening_and_trueup_for_multi_anchor_account(
         self, app, db, seed_user,
@@ -501,49 +446,6 @@ class TestBackfillCoverage:
                 )
             ) == 1
 
-    def test_backfills_every_scenario(self, app, db, seed_user, seed_periods):
-        """An account live in two scenarios backfills its opening in BOTH.
-
-        A settled transfer into the account in a non-baseline scenario puts a
-        cash posting on the account's linked ledger there, so the account is
-        "live" in that scenario; the all-scenarios sweep the backfill delegates
-        to posts the opening in the baseline AND the what-if scenario.
-        """
-        with app.app_context():
-            baseline = seed_user["scenario"]
-            whatif = Scenario(
-                user_id=seed_user["user"].id, name="What-if", is_baseline=False,
-            )
-            db.session.add(whatif)
-            db.session.commit()
-
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Scenario Savings",
-                anchor_balance=_ANCHOR,
-            )
-            db.session.commit()
-            create_settled_transfer(
-                seed_user, db.session, seed_user["account"], savings,
-                seed_periods[_P1], amount=_CASH_IN, scenario=whatif,
-            )
-            db.session.commit()
-
-            _clear_account_corrections()
-            _backfill()
-
-            assert len(
-                _correction_entries(
-                    db.session, savings.id, baseline.id,
-                    PostingSourceEnum.ACCOUNT_OPENING,
-                )
-            ) == 1
-            assert len(
-                _correction_entries(
-                    db.session, savings.id, whatif.id,
-                    PostingSourceEnum.ACCOUNT_OPENING,
-                )
-            ) == 1
-
 
 # ---------------------------------------------------------------------------
 # The production deploy posts AND commits the backfill
@@ -632,54 +534,6 @@ class TestDowngradeReversible:
     it must remove.  The executable up/down round-trip is verified against the
     rebuilt template.
     """
-
-    def test_downgrade_removes_account_corrections_keeps_cash(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Teardown deletes account corrections + anchor_equity accounts only.
-
-        A settled transfer into a $500 Savings posts BOTH a Step-2 cash entry
-        (``transfer_id`` set, linked ledgers) and the opening correction (its
-        anchor_equity twin).  The teardown deletes the correction and the twin,
-        while leaving the Step-2 cash entry and the linked ledger intact -- the
-        exact reverse of the go-forward booking.
-        """
-        with app.app_context():
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Downgrade Savings",
-                anchor_balance=_ANCHOR,
-            )
-            db.session.commit()
-            xfer = create_settled_transfer(
-                seed_user, db.session, seed_user["account"], savings,
-                seed_periods[_P1], amount=_CASH_IN,
-            )
-            db.session.commit()
-
-            # Go-forward: opening correction + anchor_equity twin + the
-            # transfer's two cash entries (plan step ``balance:X-bi-6-3``).
-            assert _entry_count_for_source(PostingSourceEnum.ACCOUNT_OPENING) >= 1
-            assert _anchor_equity_account(db.session, savings.id) is not None
-            assert db.session.query(JournalEntry).filter(
-                transfer_family_journal_filter(xfer.id),
-            ).count() == 2
-            # Two ledger rows for the account: linked + anchor_equity.
-            assert len(ledger_accounts_for_account(db.session, savings.id)) == 2
-
-            _MIGRATION._remove_account_anchor_postings(db.session)
-            db.session.commit()
-
-            # Account corrections + anchor_equity accounts removed.
-            assert _entry_count_for_source(PostingSourceEnum.ACCOUNT_OPENING) == 0
-            assert _entry_count_for_source(PostingSourceEnum.ACCOUNT_TRUEUP) == 0
-            assert _anchor_equity_account(db.session, savings.id) is None
-            # Only the linked ledger row remains for the account.
-            assert len(ledger_accounts_for_account(db.session, savings.id)) == 1
-            assert linked_ledger_account(db.session, savings.id) is not None
-            # The transfer's two cash entries survive untouched.
-            assert db.session.query(JournalEntry).filter(
-                transfer_family_journal_filter(xfer.id),
-            ).count() == 2
 
     def test_downgrade_leaves_loan_genesis_intact(
         self, app, db, seed_user, monkeypatch,

@@ -72,7 +72,7 @@ def _get_owned_period(pay_period_id, user_id):
     **It returns a
     :class:`~app.services.pay_calendar.DerivedPeriod`, not a ``PayPeriod``**,
     and that is what lets its callers stop re-reading the row:
-    :func:`~._loan_posting._reject_payment_before_origination` took the id and
+    :func:`~._validation._reject_payment_before_origination` took the id and
     fetched the same row a second time in the same request, and now takes this
     value.
 

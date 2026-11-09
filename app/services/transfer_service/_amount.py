@@ -105,11 +105,12 @@ def grade_amount_ownership(updates: "dict[str, object]") -> None:
     docstring.
 
     **READ rather than POPPED, and a first revision of this step popped it.**
-    TWO things downstream read ``updates.keys()``: the posting reconcile's
-    ``_POSTING_RELEVANT_FIELDS`` test and the audit's ``fields_changed``.
-    Popping took the amount out of both, so a settled transfer's re-price
-    stopped reconciling its ledger and vanished from the audit trail. Nothing
-    here applies fields by name, so the key rides harmlessly.
+    The audit's ``fields_changed`` reads ``updates.keys()`` downstream, and so
+    did the posting reconcile's ``_POSTING_RELEVANT_FIELDS`` test until plan
+    task plan#3075 deleted it.  Popping took the amount out of both, so a
+    settled transfer's re-price stopped reconciling its ledger and vanished
+    from the audit trail. Nothing here applies fields by name, so the key
+    rides harmlessly.
 
     **Presence is the question, not a sentinel value.** A first revision used
     one, reasoning from ``AmountOwnership``'s own rule that ``None`` means

@@ -7,12 +7,10 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import PostingKindEnum, PostingSourceEnum, StatusEnum
+from app.enums import StatusEnum
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry
 from app.models.transaction_entry import TransactionEntry
 from app.services import posting_service
-from app.services._posting_write import _emit_balanced_entry, _PostingLeg
 from app.utils.dates import display_today
 from tests._ledger_reads import account_net
 from tests._test_helpers import (
@@ -20,94 +18,7 @@ from tests._test_helpers import (
     refused_by_database_rule,
 )
 
-from ._helpers import (
-    _ledger_id,
-    _entries_for_transfer,
-    _transit_ledger_id,
-    _covering_movement_of_side,
-    _scenario_id,
-)
-
-
-class TestAMovementReconcileReadsOnlyItsOwnSource:
-    """A transfer movement's reconcile reads only its own source kind.
-
-    The class's shadow case went at plan step ``balance:X-bi-6-4d-2``
-    (ruling **R-BAL388**): a transfer is one row there (ruling
-    **R-BAL258**), so the shadow the row door was handed, the income twin,
-    cannot be stored.  That refusal is graded by
-    ``test_the_declaration.py``'s
-    ``test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored`` and
-    four loan cases (``test_the_database_refuses_a_twin`` plants the expense
-    twin), and the teardown the case read is graded by
-    ``test_a_settled_transfer.py``'s ``TestSyncReversal``.
-    """
-
-    @pytest.mark.usefixtures("db")
-    def test_a_movement_reconcile_reads_only_its_own_source_kind(
-        self, app, seed_user, savings,
-    ):
-        """An entry linking the same movement under ANOTHER source is untouched.
-
-        The hazard rulings **R-BAL100** and **R-BAL101** arm together: a loan
-        payment's SPLIT correction links the loan-side movement's
-        ``transaction_entry_id`` under the ``loan_payment`` source, beside the
-        movement's own cash leg under ``transfer_movement``.  A reconcile that
-        read the posted side by LINK alone would sum the split's legs into the
-        cash leg's, compute a delta against the cash target, and REVERSE the
-        split.  Every typed reconcile filters on its source kind as well as its
-        link (``_posting_write.emit_typed_source_deltas``), so it must not.
-
-        Planted by hand -- a balanced ``loan_payment`` entry of $30.00 linked
-        to the to-side's record (off the transfer by its side link since plan
-        step balance:X-bi-6-4d-2, the income shadow's covering movement until
-        then; ruling R-BAL167 class 4), between the transit row and the
-        Savings row -- then the pair re-synced: the sync writes nothing
-        (the cash leg is at target and the split is not its concern) and the
-        family holds exactly the three entries planted.  Mutation, observed
-        to FIRE on 2026-09-21: with the kind term dropped from the filter the
-        sync emitted a fourth entry reversing the $30.00 (``== []`` failed).
-        The planted legs themselves are append-only and so never asserted --
-        a claim the ledger cannot falsify grades nothing.
-        """
-        with app.app_context():
-            transfer = create_settled_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
-                seed_user["bootstrap_period"], amount=Decimal("100.00"),
-            )
-            _db.session.commit()
-            movement = _covering_movement_of_side(transfer.id, savings.id)
-            savings_ledger = _ledger_id(savings)
-            transit_ledger = _transit_ledger_id(seed_user)
-            planted = JournalEntry(
-                user_id=seed_user["user"].id,
-                scenario_id=_scenario_id(seed_user),
-                pay_period_id=seed_user["bootstrap_period"].id,
-                entry_date=movement.settled_on,
-                source_kind_id=ref_cache.posting_source_id(
-                    PostingSourceEnum.LOAN_PAYMENT,
-                ),
-                transaction_entry_id=movement.id,
-                description="planted split beside the cash leg",
-            )
-            _emit_balanced_entry(planted, [
-                _PostingLeg(
-                    savings_ledger, Decimal("-30.00"),
-                    ref_cache.posting_kind_id(PostingKindEnum.PRINCIPAL),
-                ),
-                _PostingLeg(
-                    transit_ledger, Decimal("30.00"),
-                    ref_cache.posting_kind_id(PostingKindEnum.PRINCIPAL),
-                ),
-            ])
-            _db.session.commit()
-
-            assert posting_service.sync_transfer_postings(transfer) == []
-            _db.session.commit()
-
-            # The movement's own family: the cash leg, the planted entry, and
-            # nothing the sync added.
-            assert len(_entries_for_transfer(transfer.id)) == 3
+from ._helpers import _settled_and_posted, _scenario_id
 
 
 class TestTheWriterBooksATransferMovementUnderItsLeg:
@@ -211,7 +122,7 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
         with app.app_context():
             checking = seed_user["account"]
             scenario_id = _scenario_id(seed_user)
-            transfer = create_settled_transfer(
+            transfer = _settled_and_posted(
                 seed_user, _db.session, checking, savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
                 settled_on=display_today(),

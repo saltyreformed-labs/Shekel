@@ -36,8 +36,9 @@ class TestMovingATransferBetweenAccounts:
     definition states, and this door could write only four of them -- so a
     definition's account change reached its generated rows by DESTROYING and
     re-creating every one of them, and a NON-repeating transfer refused the same
-    edit outright because nothing could carry it.  The arm moves the transfer
-    and reconciles the ledger on both sides of the move.  Until plan step
+    edit outright because nothing could carry it.  The arm moves the transfer,
+    and the worked-out ledger follows it to both sides of the move (the arm
+    reconciled the stored ledger too until plan task plan#3075).  Until plan step
     ``balance:X-bi-6-4d-2`` its two legs were two shadow rows, which the arm
     re-pointed and re-named (that upkeep is deleted at the step's leaf 3b);
     each is derived from the transfer's endpoints now.  So a case that grades
@@ -49,7 +50,7 @@ class TestMovingATransferBetweenAccounts:
     ``TestBothSidesShowTheTransfer``, and each side's label, composed from
     the endpoints' current names, its ``TestALegsDisplayProjections``.  A
     ledger case that reads the transfer reads the session's row after the
-    update's own flush, as the reconcile inside the update does, and
+    update's own flush, as the reconcile inside the update did, and
     :meth:`test_moving_a_settled_payment_ONTO_a_loan_reconciles_that_loan`'s
     relationship read is the firing control for a move that assigns the
     foreign key and not the relationship, which a re-read row cannot be: it
@@ -248,7 +249,7 @@ class TestMovingATransferBetweenAccounts:
         ``_reject_installment_move_before_loan`` states the discipline against.
         It also made the vacated-SOURCE arm of ``_resync_vacated_loan``
         unreachable, so that function's stated reason for taking both endpoints
-        was false.
+        was false (plan task plan#3075 deleted the function).
 
         The legacy state is PLANTED, because the create door no longer produces
         it -- which is the point: the row exists on data written before the
@@ -285,9 +286,10 @@ class TestMovingATransferBetweenAccounts:
             assert row.to_account_id == elsewhere.id
 
             # And moving that source OFF the loan is the edit the narrowing
-            # makes reachable at all -- it is the vacated-SOURCE arm of
-            # ``_resync_vacated_loan``, whose stated reason for taking both
-            # endpoints was false while the guard refused every such row.
+            # makes reachable at all -- it was the vacated-SOURCE arm of
+            # ``_resync_vacated_loan`` (deleted at plan task plan#3075), whose
+            # stated reason for taking both endpoints was false while the
+            # guard refused every such row.
             transfer_service.update_transfer(
                 xfer.id, td["user"].id,
                 from_account_id=td["account"].id,
@@ -433,7 +435,8 @@ class TestMovingATransferBetweenAccounts:
         transfer's lines.  What this case pinned besides, the vacated loan's
         STORED re-sync after the move (``_loan_posting._resync_vacated_loan``),
         was graded by an idempotence oracle on the stored journal until plan
-        step plan#2914 took the store's grading off the suite.
+        step plan#2914 took the store's grading off the suite, and plan task
+        plan#3075 deleted the re-sync.
         """
         with app.app_context():
             td = transfer_data
@@ -485,8 +488,9 @@ class TestMovingATransferBetweenAccounts:
         """The loan a payment JOINS is re-derived, not just the one it left.
 
         **The firing control for assigning the RELATIONSHIP rather than the
-        foreign key.**  ``_sync_loan_postings_if_loan`` asks which account the
-        transfer's destination IS, and SQLAlchemy does not refresh
+        foreign key.**  The settle's auto-derived loan freeze asks which account
+        the transfer's destination IS (and ``_sync_loan_postings_if_loan`` did,
+        until plan task plan#3075 deleted it), and SQLAlchemy does not refresh
         ``Transfer.to_account`` when only ``to_account_id`` moves -- not even
         across the following flush.  Measured before the fix: after re-pointing
         a Mortgage payment at savings, ``xfer.to_account.name`` still answered
@@ -496,7 +500,8 @@ class TestMovingATransferBetweenAccounts:
 
         The relationship read below is the control.  The stored re-sync it led
         to was graded by an idempotence oracle on the stored journal until plan
-        step plan#2914 took the store's grading off the suite.
+        step plan#2914 took the store's grading off the suite, and plan task
+        plan#3075 deleted it.
         """
         with app.app_context():
             td = transfer_data

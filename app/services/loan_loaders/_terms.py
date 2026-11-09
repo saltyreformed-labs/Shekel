@@ -711,7 +711,7 @@ def installment_for(
 
     Extracted so a payment that does not EXIST yet can be keyed on the same rule
     as one that does.  The transfer write boundary
-    (:func:`app.services.transfer_service._loan_posting._reject_payment_before_origination`,
+    (:func:`app.services.transfer_service._validation._reject_payment_before_origination`,
     plan step C9b) must decide "which installment would this be?" before any row
     is written, and a guard keying on a rule of its own would refuse a different
     set of payments than the fold erases -- the boundary-predicate drift this
@@ -747,7 +747,7 @@ def precedes_origination(params: LoanParams, installment: date) -> bool:
     the fold -- it splits against a running balance of zero and the
     origination anchor resets over it -- while the cash side still debits the
     funding account.  The write door refuses it
-    (``transfer_service._loan_posting._reject_payment_before_origination``).
+    (``transfer_service._validation._reject_payment_before_origination``).
 
     **It is the post-anchor boundary applied to the loan's FIRST assertion,
     and is spelled through it** (ruling **R-R72**,
@@ -866,9 +866,10 @@ def loan_payment_due_date(
     (``loan_ledger.replay_loan_events``) orders on that date and applies its
     strict ``anchor_date < due_date`` post-anchor boundary against it, and the
     interval it falls in names the charge it clears -- so moving it moves the
-    POSTED balance.  Any writer of
-    ``due_date`` must therefore follow it with a posting reconcile --
-    ``transfer_service._POSTING_RELEVANT_FIELDS`` is what enforces that.
+    loan's balance, which every reader works out from it as it stands.  A
+    writer of ``due_date`` had to follow it with a posting reconcile, which
+    ``transfer_service._POSTING_RELEVANT_FIELDS`` enforced, until plan task
+    plan#3075 deleted the stored ledger's transfer doors.
 
     Its ``pay_period`` is read on EVERY call since the derivation moved into the
     shared :func:`installment_for` (previously only the no-``due_date`` branch

@@ -49,7 +49,6 @@ from decimal import Decimal
 
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.services import posting_service
 from app.services.cash_ledger import baseline_amount_basis
 from app.services.match_press import Press, Shown
 from app.services.pay_calendar import DerivedPeriod, FiledRow
@@ -527,12 +526,12 @@ def record_reconciliation(submission: ReconcileSubmission) -> int:
     transfer beneath them mean all six or none, so a commit between the arms
     would leave the part that failed invisible behind a rendered success.
 
-    **The anchor corrections are re-checked ONCE, at the act's close**
-    (:func:`app.services.posting_service.holding_the_anchor_re_check`, ruling
-    **plan#2574**): each settle's posting sync queues its re-check and the
-    close walks each account the act touched once, over the records as the
-    last arm leaves them, rather than once per tick.  Opened outside the
-    press, so a save the press refuses re-checks nothing.
+    **Nothing re-checks the anchor corrections at the act's close any more.**
+    The act held every settle's re-check of the stored ledger's anchor
+    corrections and ran it once at its close
+    (``posting_service.holding_the_anchor_re_check``, ruling **plan#2574**)
+    until plan task plan#3075 deleted the transfer doors' syncs, the last it
+    held: the worked-out ledger reads the records as the last arm leaves them.
 
     Args:
         submission: The :class:`ReconcileSubmission` -- one statement's worth of
@@ -559,7 +558,6 @@ def record_reconciliation(submission: ReconcileSubmission) -> int:
             match step, its purchase deleted in another tab, still refuses
             the save when its row's caption named a line, ledger row
             **BAL-597**).
-        PostingError: Propagated from a verb's ledger reconcile.  Fails loud.
         RuntimeError: A ticked row names a pay period the submission's calendar
             does not hold
             (:meth:`~app.services.pay_calendar.PayCalendar.require_period`, via
@@ -577,9 +575,7 @@ def record_reconciliation(submission: ReconcileSubmission) -> int:
     # named is refused (``_transfers._settle_one``).
     # PROMISED: a row's caption names what ITS tick frees, so a ticked row
     # whose save went another way refuses the save (ledger row BAL-597).
-    with posting_service.holding_the_anchor_re_check(
-        "reconcile_service.record_reconciliation",
-    ), Press(
+    with Press(
         Shown(submission.named.for_ticks(submission.transaction_ids)),
         promised=True,
     ) as press:

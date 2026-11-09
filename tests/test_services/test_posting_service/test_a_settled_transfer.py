@@ -24,6 +24,7 @@ from app.services.amount_ownership import state_own_amount
 from app.models.amount_ownership import AmountOwnership
 
 from ._helpers import (
+    _settled_and_posted,
     _ledger_id,
     _entries_for_transfer,
     _transit_ledger_id,
@@ -64,7 +65,7 @@ class TestSyncSettlePostsBalancedEntry:
         """
         with app.app_context():
             checking = seed_user["account"]
-            transfer = create_settled_transfer(
+            transfer = _settled_and_posted(
                 seed_user, _db.session, checking, savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
             )
@@ -73,8 +74,8 @@ class TestSyncSettlePostsBalancedEntry:
             savings_ledger = _ledger_id(savings)
             transit_ledger = _transit_ledger_id(seed_user)
 
-            # Commit-5 wiring: settling through the transfer service already
-            # auto-posted both entries; read them back (a re-sync would no-op).
+            # The settle posted both entries through the writer
+            # (``_settled_and_posted``); read them back (a re-sync would no-op).
             by_side = _side_entries(transfer.id)
             assert set(by_side) == {checking.id, savings.id}
             [from_entry] = by_side[checking.id]
@@ -149,7 +150,8 @@ class TestSyncSettlePostsBalancedEntry:
             )
             _db.session.commit()
 
-            # Commit-5 wiring: the mortgage pay-down auto-posted on settle.
+            # The worked-out lines the mortgage pay-down leaves (the settle
+            # posted them to the store too until plan task plan#3075).
             assert _period_nets_for_transfer(transfer.id, _scenario_id(seed_user)) == {
                 seed_user["bootstrap_period"].id: {
                     linked_key(seed_user["account"]): Decimal("-250.00"),
@@ -181,7 +183,8 @@ class TestSyncSettlePostsBalancedEntry:
             )
             _db.session.commit()
 
-            # Commit-5 wiring: the divergent settled figure auto-posted.
+            # The worked-out lines book the divergent settled figure (the
+            # settle posted it to the store too until plan task plan#3075).
             assert _period_nets_for_transfer(transfer.id, _scenario_id(seed_user)) == {
                 seed_user["bootstrap_period"].id: {
                     linked_key(seed_user["account"]): Decimal("-97.50"),
@@ -236,13 +239,14 @@ class TestSyncSettleEntryDate:
         months in its own future, which nothing had ever refused.
         """
         with app.app_context():
-            transfer = create_settled_transfer(
+            transfer = _settled_and_posted(
                 seed_user, _db.session, seed_user["account"], savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
                 settled_on=_A_RECORDED_SETTLE_DAY,
             )
             _db.session.commit()
-            # Commit-5 wiring: the settle auto-posted both sides; read them
+            # The settle posted both sides through the writer
+            # (``_settled_and_posted``); read them
             # back.  Each entry is dated by ITS movement's recorded day (plan
             # step ``balance:X-bi-6-3``); the helper presses Paid on the one
             # day, which both sides then borrow, so the two entries share it.
@@ -260,33 +264,6 @@ class TestSyncSettleEntryDate:
 
 class TestSyncIdempotency:
     """A repeat sync at the same target writes nothing."""
-
-    def test_repeat_settle_is_noop(self, app, db, seed_user, savings):
-        """Re-syncing an already-auto-posted settle returns [], no 2nd entry.
-
-        Arithmetic: ``create_settled_transfer`` auto-posted +100 to the Savings
-        ledger (Commit-5 wiring), so both manual re-syncs see current 100 ==
-        target 100, delta 0, and write nothing.  This is the double-mark-done
-        guard -- a repeated settle never double-posts.
-        """
-        with app.app_context():
-            transfer = create_settled_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
-                seed_user["bootstrap_period"], amount=Decimal("100.00"),
-            )
-            _db.session.commit()
-
-            # Both manual re-syncs are no-ops: create_settled_transfer already
-            # auto-posted the two per-movement entries, so current == target
-            # and delta == 0 on each (the door reads each movement's own
-            # state since plan step ``balance:X-bi-6-3``; there is no flag).
-            first = posting_service.sync_transfer_postings(transfer)
-            second = posting_service.sync_transfer_postings(transfer)
-            _db.session.commit()
-
-            assert first == []
-            assert second == []
-            assert len(_entries_for_transfer(transfer.id)) == 2
 
     def test_cancel_with_nothing_posted_is_noop(
         self, app, db, seed_user, savings,
@@ -354,7 +331,7 @@ class TestSyncReversal:
         """
         with app.app_context():
             checking = seed_user["account"]
-            transfer = create_settled_transfer(
+            transfer = _settled_and_posted(
                 seed_user, _db.session, checking, savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
             )
@@ -412,14 +389,14 @@ class TestSyncReversal:
         record -- so the Savings total is its $100.00 opening + 150 =
         250.00.  Six entries since plan step ``balance:X-bi-6-3``: two per
         act, one per side.  The revert UN-DATES both movements (ruling
-        **R-BAL61**), which is what the door's reconcile reads to reverse;
-        the manual syncs between the doors are no-ops that prove the doors
-        already left the ledger at target (they were told ``settled=`` until
-        that step deleted the flag).
+        **R-BAL61**), which is what the writer reads to reverse.  The doors
+        reconciled the pair themselves, and the manual syncs between them were
+        no-ops proving it, until plan task plan#3075 deleted the transfer
+        doors' syncs; the case drives the writer after each door act since.
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            transfer = create_settled_transfer(
+            transfer = _settled_and_posted(
                 seed_user, _db.session, seed_user["account"], savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
             )
@@ -428,13 +405,13 @@ class TestSyncReversal:
             assert posting_service.sync_transfer_postings(transfer) == []
             _db.session.commit()
 
-            # Revert to Projected: the door un-dates the movements and its
-            # reconcile reverses the pair; a manual sync then finds nothing.
+            # Revert to Projected: the door un-dates the movements, and the
+            # writer, driven where the door's reconcile ran, reverses the pair.
             transfer_service.update_transfer(
                 transfer.id, user_id,
                 status_id=ref_cache.status_id(StatusEnum.PROJECTED),
             )
-            assert posting_service.sync_transfer_postings(transfer) == []
+            posting_service.sync_transfer_postings(transfer)
             _db.session.commit()
 
             # Edit the amount while Projected, then re-settle and re-post.
@@ -445,7 +422,7 @@ class TestSyncReversal:
                 transfer.id, user_id,
                 status_id=ref_cache.status_id(StatusEnum.DONE),
             )
-            assert posting_service.sync_transfer_postings(transfer) == []
+            posting_service.sync_transfer_postings(transfer)
             _db.session.commit()
 
             scenario_id = _scenario_id(seed_user)
@@ -484,7 +461,7 @@ class TestReconciliationHelpers:
         on the transfer's contribution.
         """
         with app.app_context():
-            transfer = create_settled_transfer(
+            transfer = _settled_and_posted(
                 seed_user, _db.session, seed_user["account"], savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
             )
@@ -520,7 +497,7 @@ class TestReconciliationHelpers:
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            transfer = create_settled_transfer(
+            transfer = _settled_and_posted(
                 seed_user, _db.session, seed_user["account"], savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
             )
@@ -532,7 +509,9 @@ class TestReconciliationHelpers:
                 transfer.id, user_id,
                 status_id=ref_cache.status_id(StatusEnum.PROJECTED),
             )
-            assert posting_service.sync_transfer_postings(transfer) == []
+            # The writer, driven where the revert's own reconcile ran until
+            # plan task plan#3075.
+            posting_service.sync_transfer_postings(transfer)
             _db.session.commit()
 
             scenario_id = _scenario_id(seed_user)
@@ -557,7 +536,7 @@ class TestReconciliationHelpers:
         the Savings opening: 100 + 97.50 = 197.50.
         """
         with app.app_context():
-            transfer = create_settled_transfer(
+            transfer = _settled_and_posted(
                 seed_user, _db.session, seed_user["account"], savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
                 settled_amount=Decimal("97.50"),

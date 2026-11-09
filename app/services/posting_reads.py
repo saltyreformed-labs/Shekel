@@ -3,8 +3,9 @@ Shekel Budget App -- Posting Ledger Read-Side Helpers
 
 The read-side companions of :mod:`app.services.posting_service` (the ledger's
 sole writer), extracted when the writer crossed the module-size gate -- the
-same sibling-split the loan posting package and ``transfer_service._loan_posting``
-follow.  Three concerns live here:
+same sibling-split the loan posting package follows (and
+``transfer_service._loan_posting`` did, until plan task plan#3075 deleted it).
+Three concerns live here:
 
 * :class:`PostingError` -- the shared invariant-violation error both sides
   raise;

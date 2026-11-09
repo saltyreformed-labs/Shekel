@@ -24,8 +24,9 @@ against pylint's 1,000 cap (it was 805 before this step) -- and finding
 **N-152** records that shaving prose is not the answer to that: a package, one
 private leaf per responsibility, is.  The seam is the one the responsibility already
 draws: :mod:`._update` owns applying an arbitrary field bag and reconciling the
-ledger afterwards; which two accounts the pair sits on, and what a move between
-them is refused for, is one question and it is this module's.
+ledger afterwards (until plan task plan#3075 deleted the reconcile); which two
+accounts the pair sits on, and what a move between them is refused for, is one
+question and it is this module's.
 
 Flask-isolated like the rest of the package: plain data and ORM rows in,
 mutations applied in place, no ``request`` / ``session`` imports, no flush or
@@ -59,7 +60,7 @@ from app.utils.dates import display_today
 
 
 class _Endpoints(NamedTuple):
-    """The two accounts an update LEAVES a transfer on, and the ones it vacates.
+    """The two accounts an update LEAVES a transfer on, and whether it moves it.
 
     **A transfer's endpoints move together or not at all**, because
     ``ck_transfers_different_accounts`` is a rule about the PAIR and because
@@ -73,36 +74,20 @@ class _Endpoints(NamedTuple):
             lands -- the EXPENSE leg's account.  The transfer's current source
             when the update names none.
         to_account: The account it arrives at -- the INCOME leg's account.
-        vacated_source_id: The account the money used to LEAVE, when this
-            update moves it, else ``None``.
-        vacated_destination_id: The account it used to ARRIVE at, when this
-            update moves it, else ``None``.  Named apart from the source
-            because only the DESTINATION can be a loan, and a loan a payment
-            just left is re-reconciled after the move
-            (:func:`._loan_posting._resync_vacated_loan`).
+        moves: Whether this update moves the transfer off either account it
+            is on -- ``False`` for every update that names no account, or
+            names the ones it is already on.  It named the accounts vacated
+            (``vacated_source_id``, ``vacated_destination_id``) until plan
+            task plan#3075: the update's posting reconcile re-derived a
+            vacated DESTINATION loan's stored ledger, and that went with the
+            stored ledger's transfer doors, leaving one reader,
+            :func:`_apply_endpoint_move`, which asks only whether anything
+            moves.
     """
 
     from_account: Account
     to_account: Account
-    vacated_source_id: "int | None"
-    vacated_destination_id: "int | None"
-
-    @property
-    def vacated(self) -> "tuple[int, ...]":
-        """Return the account IDs this update moves the transfer OFF.
-
-        Empty when neither endpoint moves, which is every update that names no
-        account.  It is what the ledger tail re-derives afterwards, and it is
-        deliberately not a boolean: a reconcile has to NAME the accounts it
-        walks, and "did something move" cannot.
-        """
-        return tuple(
-            account_id
-            for account_id in (
-                self.vacated_source_id, self.vacated_destination_id,
-            )
-            if account_id is not None
-        )
+    moves: bool
 
 
 def _resolve_endpoints(
@@ -170,7 +155,7 @@ def _resolve_endpoints(
             if it MOVES the source onto an account no engine models a transfer
             OUT of (:func:`._validation._reject_unmodeled_source`, the ONE set
             both doors call): an amortizing loan -- a disbursement
-            (:func:`._loan_posting._reject_transfer_out_of_loan`) -- or, since
+            (:func:`._validation._reject_transfer_out_of_loan`) -- or, since
             plan step ``credit_card:CC-10``, a credit card -- a cash advance or
             balance transfer (:func:`._validation._reject_transfer_out_of_revolving`).
             A move that leaves the source where it is does not re-ask, for the
@@ -186,7 +171,7 @@ def _resolve_endpoints(
         transfer.to_account_id if to_id != transfer.to_account_id else None
     )
     if vacated_source is None and vacated_destination is None:
-        return _Endpoints(transfer.from_account, transfer.to_account, None, None)
+        return _Endpoints(transfer.from_account, transfer.to_account, False)
     if from_id == to_id:
         raise ValidationError(
             "Source and destination accounts must be different."
@@ -201,16 +186,13 @@ def _resolve_endpoints(
     # re-graded an arrangement the edit does not touch: a legacy transfer
     # whose source is an amortizing loan -- written before ``create_transfer``
     # guarded it -- could not move its DESTINATION either, which is the freezing
-    # :func:`._loan_posting._reject_installment_move_before_loan` states the
-    # discipline against three paragraphs down its own docstring.  It also made
-    # the vacated-source arm of :func:`._loan_posting._resync_vacated_loan`
-    # unreachable, so that function's stated reason for taking both endpoints
-    # was false.  Narrowing it restores both.
+    # :func:`._validation._reject_installment_move_before_loan` states the
+    # discipline against three paragraphs down its own docstring.  (It also
+    # made the vacated-source arm of the vacated-loan re-sync unreachable;
+    # plan task plan#3075 deleted that re-sync.)
     if vacated_source is not None:
         _reject_unmodeled_source(from_account)
-    return _Endpoints(
-        from_account, to_account, vacated_source, vacated_destination,
-    )
+    return _Endpoints(from_account, to_account, True)
 
 
 def _apply_endpoint_move(
@@ -252,14 +234,13 @@ def _apply_endpoint_move(
     every reader that asks the ACCOUNT rather than its id saw the account the
     transfer had before the move.  Measured: after re-pointing a Mortgage
     payment at savings, ``xfer.to_account.name`` still answered ``Mortgage``.
-    Two readers depend on it and each fails in a different direction:
-    ``_loan_posting._sync_loan_postings_if_loan`` re-derives the genesis of
-    whichever loan ``to_account`` names, so a move ONTO a loan would have left
-    the NEW loan's ledger unreconciled while a move OFF one reconciled the old
-    one by accident; and ``._settle.settle``'s auto-derived loan freeze asks the
-    same question, so a combined move-and-settle would have priced the payment
-    against the wrong loan.  Assigning the relationship writes both halves at
-    once and leaves nothing to remember.
+    ``._settle.settle``'s auto-derived loan freeze asks the account, so a
+    combined move-and-settle would price the payment against the wrong loan.
+    (The update's loan sync asked it too, and re-derived whichever loan's
+    stored ledger ``to_account`` named, until plan task plan#3075 deleted it:
+    a move ONTO a loan would have left the NEW loan's ledger unreconciled
+    while a move OFF one reconciled the old one by accident.)  Assigning the
+    relationship writes both halves at once and leaves nothing to remember.
 
     **A side's payment record moves with its side** (ruling **R-BAL168**, plan
     step ``balance:X-bi-6-4d-2``, design D5; the carry is rulings **R-BAL46** /
@@ -287,8 +268,8 @@ def _apply_endpoint_move(
 
     Args:
         transfer: The transfer.
-        endpoints: The resolved :class:`_Endpoints`; a no-op when its *vacated*
-            is empty, which is every update that names no account.
+        endpoints: The resolved :class:`_Endpoints`; a no-op when it
+            ``moves`` nothing, which is every update that names no account.
         press: The save's :class:`~app.services.match_press.Press`, or ``None``
             when its door named nothing (ruling **R-BAL229**).
 
@@ -297,7 +278,7 @@ def _apply_endpoint_move(
             press did not name, or its day is one the new account's books do
             not reach.
     """
-    if not endpoints.vacated:
+    if not endpoints.moves:
         return
     # Both sides' records in ONE statement (ruling plan#2136).
     moving = tuple(

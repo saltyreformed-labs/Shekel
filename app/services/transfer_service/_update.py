@@ -12,9 +12,11 @@ module and nowhere else, until plan step ``balance:X-bi-6-4d-2`` deleted the
 rows; that step's leaf 3b deleted the mirrors.  A shadow's status and day
 were no longer kept from ``X-bi-6-4d-2``: nothing read them.
 
-Its tail is the posting reconcile (:func:`_reconcile_postings_after_update`),
-which brings the double-entry ledger back in step after the kwargs land -- once
-the FINAL amount and status are in place rather than at the field that moved.
+Its tail was the posting reconcile (``_posting_sync._reconcile_postings_after_
+update``), which brought the stored double-entry ledger back in step after the
+kwargs landed, until plan task plan#3075 deleted it with the stored ledger's
+transfer doors: the worked-out ledger reads the transfer and its sides' records
+as they stand, so nothing follows a write.
 
 Flask-isolated like the rest of the package: plain data in, ORM rows out, no
 ``request`` / ``session`` imports.  Flushes; does NOT commit.
@@ -35,16 +37,9 @@ from app.services.transfer_service._endpoints import (
     _apply_endpoint_move,
     _resolve_endpoints,
 )
-from app.services.transfer_service._loan_posting import (
-    _POSTING_RELEVANT_INSTALLMENT_FIELDS,
-    _reject_installment_move_before_loan,
-)
 from app.services.transfer_service._placed import (
     re_place_and_grade_the_day,
     restate_definition_price,
-)
-from app.services.transfer_service._posting_sync import (
-    _reconcile_postings_after_update,
 )
 from app.services.transfer_service._ownership import (
     _get_owned_category,
@@ -67,7 +62,11 @@ from app.services.transfer_service._status import (
     apply_status_to_all_three,
     reject_stated_days_without_settle,
 )
-from app.services.transfer_service._validation import _get_transfer_or_raise
+from app.services.transfer_service._validation import (
+    _INSTALLMENT_RELEVANT_FIELDS,
+    _get_transfer_or_raise,
+    _reject_installment_move_before_loan,
+)
 from app.utils.balance_predicates import enters_settled_band
 from app.utils.log_events import (
     BUSINESS,
@@ -394,7 +393,7 @@ def _reject_unowned_references(
     cannot write across an ownership line.  **``pay_period_id`` is not here
     any more** (plan step ``balance:X-ci-1``): it was resolved off the owner's
     calendar HERE and, two gates earlier, inside
-    ``._loan_posting._reject_installment_move_before_loan`` -- the second walk
+    ``._validation._reject_installment_move_before_loan`` -- the second walk
     ``pay_calendar:C13-b`` measured and left -- and the re-placing rule that
     leaf adds needed the same paycheck a third time.  :func:`_apply_transfer_updates`
     resolves it ONCE now, ahead of every gate that reads it, and that
@@ -420,8 +419,8 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     **The body both public doors share** -- :func:`update_transfer`, which takes
     an arbitrary field bag, and :func:`settle_transfer`, which takes a settle.
     Keeping one body is what stops the named verb from becoming a second
-    implementation of the field application, the reconcile tail and the
-    telemetry: two doors, one act.
+    implementation of the field application and the telemetry: two doors,
+    one act.
 
     See :func:`update_transfer` for the accepted kwargs and the failure modes;
     they are that function's contract, stated once there.
@@ -480,7 +479,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
         _get_owned_period(
             updates.get("pay_period_id", transfer.pay_period_id), user_id,
         )
-        if _POSTING_RELEVANT_INSTALLMENT_FIELDS & updates.keys()
+        if _INSTALLMENT_RELEVANT_FIELDS & updates.keys()
         else None
     )
 
@@ -548,16 +547,10 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # ── from_account_id / to_account_id ────────────────────────────
     # A caller-stated fact like the flag above, and applied with it for the
     # same reason: the settle dispatch below reads which account the transfer
-    # is left pointing AT.  See :func:`_apply_endpoint_move`.
-    #
-    # A loan payment moved OFF a loan owes that loan a re-sync AFTER the move
-    # (:func:`_reconcile_postings_after_update`) and nothing before it: its
-    # split correction links no row and is keyed on the loan's own chart rows
-    # (ruling **R-BAL102**), so the vacated loan's walk finds the departed
-    # payment's key with no target and reverses it.  Through plan step
-    # ``balance:X-bi-6-3`` the split was reversed HERE, first, because it was
-    # keyed by the income shadow the move was about to hide from the loan's
-    # reconcile (the R10-b `-$4.17` that measured it).
+    # is left pointing AT.  See :func:`_apply_endpoint_move`.  A loan payment
+    # moved OFF a loan owes that loan nothing: the loan's walk reads its
+    # payment set as the transfers INTO it, as they stand.  (Its stored ledger
+    # was re-synced after the move until plan task plan#3075 deleted that.)
     _apply_endpoint_move(transfer, endpoints, press)
 
     # ── WHO OWNS the transfer's figure ─────────────────────────────
@@ -606,15 +599,12 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # record or day moved and the transfer did not -- is the status seam's
     # Transfer arm's (``status_seam._side``) since plan step
     # ``balance:X-bi-6-4d-2``: it compared the twin rows' counters here
-    # until then.
+    # until then.  **The flush is the door's own**, and it outlived the
+    # posting reconcile it once preceded (plan task plan#3075): the module's
+    # contract is that the update flushes, so its version check and its
+    # constraints raise inside this call rather than at whichever later
+    # statement or commit happens to flush it.
     db.session.flush()
-
-    # The ORIGINAL updates, not *remaining*: what the caller ASKED to change is
-    # what decides whether the ledger needs re-deriving, and a settle's
-    # ``status_id`` is precisely the field that says it does.
-    _reconcile_postings_after_update(
-        transfer, updates, endpoints.vacated_destination_id,
-    )
 
     log_event(
         logger, logging.INFO, EVT_TRANSFER_UPDATED, BUSINESS,
@@ -694,7 +684,6 @@ def settle_transfer(
             *user_id*, or is soft-deleted.
         ValidationError: On an illegal transition, an unresolvable
             derivation, or the seam's settle-day refusals.
-        PostingError: From the ledger reconcile, on a broken invariant.
     """
     updates = {"status_id": ref_cache.status_id(StatusEnum.DONE)}
     if submitted is not None:
@@ -759,7 +748,7 @@ def update_transfer(transfer_id, user_id, *, press=None, **kwargs):
         to_account_id  -- New DESTINATION for the transfer: its income side's
                           account, likewise.  Re-grades the payment
                           against the destination loan's origination (ruling
-                          R-C) and re-reconciles the loan it left.
+                          R-C).
         category_id    -- New category for the transfer.
         name           -- New display name for the transfer.
         notes          -- New notes for the transfer.

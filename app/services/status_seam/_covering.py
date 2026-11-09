@@ -156,10 +156,10 @@ A revert un-dates the mirror here, and the worked-out ledger reads an
 un-dated movement as posting nothing (``ledger_lines.purchase_posts`` needs a
 day).  A transaction's verb reconciled the stored ledger after the seam
 returned, reversing the movement's legs, until plan task plan#3097 deleted
-that with the stored ledger's transaction doors; a transfer's revert reaches
-the seam through ``transfer_service`` and the pair's own door
-(``posting_service.sync_transfer_postings``, which reads each movement's
-state since plan step ``balance:X-bi-6-3``).  Money is
+that with the stored ledger's transaction doors, and a transfer's update
+reconciled it through the pair's own door
+(``posting_service.sync_transfer_postings``) until plan task plan#3075
+deleted the transfer doors'.  Money is
 ``Decimal`` throughout, read off the
 :class:`~app.services.status_seam._record.Settlement` the seam was handed.
 """

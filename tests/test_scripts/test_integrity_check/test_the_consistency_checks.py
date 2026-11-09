@@ -12,13 +12,10 @@ from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from app.models.user import User
-from app.enums import StatusEnum
 from app.services.auth_service import hash_password
 from app.services import account_service
 from tests._test_helpers import (
     cover_bare_settled_row,
-    create_account_of_type,
-    create_settled_transfer,
     definition_firing_twice_in_a_paycheck,
     generate_row_of,
     make_expense_template,
@@ -522,71 +519,6 @@ class TestDataConsistency:
         dc09 = next(r for r in results if r.check_id == "DC-09")
         assert not dc09.passed
         assert dc09.detail_count == 1  # 1 deduction targeting another user's account
-
-    def test_dc10_names_a_transfer_sides_record_by_its_transfer(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A transfer side's un-dated record is reported under its TRANSFER, on both sides.
-
-        Plan step ``balance:X-bi-6-4d-2``: a side's record hangs off the
-        transfer (ruling **R-BAL88**), so its ``transaction_id`` is ``NULL``
-        and the finding names the transfer instead -- it named the record's
-        shadow row until then.  Planted around the doors and COMMITTED, so DC-10
-        reads a state the database stores: a paid transfer set back to
-        Projected with both sides' records un-dated in the same save (a revert's
-        shape, ruling **R-BAL61**) while their journal legs stay, which is
-        what a revert leaves when nothing reconciles the ledger after it.  Its
-        first plant un-dated the to-side alone under the PAID transfer and read
-        DC-10 before committing: a state the side-band rule refuses at COMMIT.
-        """
-        # pylint: disable=import-outside-toplevel  -- the module convention.
-        import sqlalchemy
-        from app import ref_cache
-        from app.models.transaction_entry import TransactionEntry
-
-        savings = create_account_of_type(
-            seed_user, db.session, "Savings", "DC-10 Savings",
-        )
-        db.session.commit()
-        transfer = create_settled_transfer(
-            seed_user, db.session, seed_user["account"], savings,
-            seed_periods[0], amount=Decimal("250.00"),
-        )
-        db.session.commit()
-        records = (
-            db.session.query(TransactionEntry)
-            .filter(sqlalchemy.or_(
-                TransactionEntry.expense_transfer_id == transfer.id,
-                TransactionEntry.income_transfer_id == transfer.id,
-            ))
-            .all()
-        )
-        assert len(records) == 2, "one record on each side"
-
-        def dc10():
-            return next(
-                r for r in check_data_consistency(db.session)
-                if r.check_id == "DC-10"
-            )
-
-        assert dc10().passed
-
-        db.session.execute(sqlalchemy.text(
-            "UPDATE budget.transfers SET status_id = :projected WHERE id = :id"
-        ), {"projected": ref_cache.status_id(StatusEnum.PROJECTED), "id": transfer.id})
-        db.session.execute(sqlalchemy.text(
-            "UPDATE budget.transaction_entries "
-            "SET settled_on = NULL, settled_day_basis_id = NULL, "
-            "reconciled_by_id = NULL "
-            "WHERE expense_transfer_id = :id OR income_transfer_id = :id"
-        ), {"id": transfer.id})
-        db.session.commit()
-        fired = dc10()
-        assert not fired.passed
-        assert {
-            (row["entry_id"], row["transaction_id"], row["transfer_id"])
-            for row in fired.details
-        } == {(record.id, None, transfer.id) for record in records}
 
     def test_dc11_detects_a_settled_row_the_fold_cannot_see(
         self, app, db, seed_user, seed_periods,

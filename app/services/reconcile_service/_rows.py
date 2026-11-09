@@ -897,7 +897,6 @@ def record_settled(
             page did not name for the rows ticked (``PageOutOfDate``, rulings
             **R-CC127** / **R-CC135**; :meth:`~._named.NamedLines.for_ticks`).
             A 400 at the route.
-        PostingError: Propagated from the verb's ledger reconcile.  Fails loud.
     """
     if not tick_ids:
         return 0

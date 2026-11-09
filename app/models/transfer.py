@@ -420,9 +420,11 @@ class Transfer(
     # re-deriving it from the pay period, which is wrong for a payment settled
     # late), and the genesis write walk orders payments by it and applies its
     # strict ``anchor_date < due_date`` post-anchor boundary against it.  Moving
-    # it therefore changes the POSTED balance, so ``due_date`` is in
-    # ``transfer_service._POSTING_RELEVANT_FIELDS`` and any other writer of this
-    # column MUST follow it with a posting reconcile.
+    # it therefore changes the loan's balance, which every reader works out
+    # from the column as it stands, so a writer of it owes nothing after.  (It
+    # was in ``transfer_service._POSTING_RELEVANT_FIELDS``, and a writer had to
+    # follow it with a posting reconcile, until plan task plan#3075 deleted
+    # the stored ledger's transfer doors.)
     due_date = db.Column(db.Date, nullable=True)
     # WHICH OCCURRENCE this transfer is.  A GENERATED transfer's is the date
     # its template's cadence named when the transfer recurrence engine wrote

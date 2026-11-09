@@ -282,7 +282,7 @@ def update_transfer(xfer_id):
     # ``pay_calendar:C13-b``, developer 2026-09-03).  This loop carried it,
     # duplicating ``transfer_service._ownership._get_owned_period``, which
     # ``update_transfer`` reaches whenever ``pay_period_id`` is submitted (its
-    # trigger, ``_loan_posting._POSTING_RELEVANT_INSTALLMENT_FIELDS``, names
+    # trigger, ``_validation._INSTALLMENT_RELEVANT_FIELDS``, names
     # the period with the due date and the to-account) and whose ``NotFoundError``
     # this route already turns into the identical ``"Not found", 404``.  The
     # duplicate was F-043's deliberate defence in depth, written when the two

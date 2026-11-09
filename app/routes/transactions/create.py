@@ -61,7 +61,7 @@ def _reject_transaction_on_loan(account: Account) -> tuple[str, int] | None:
     them.  So it is forbidden at the transaction-create chokepoint, exactly
     as a transfer OUT of a loan is forbidden at the transfer-create
     chokepoint
-    (:func:`app.services.transfer_service._loan_posting._reject_transfer_out_of_loan`,
+    (:func:`app.services.transfer_service._validation._reject_transfer_out_of_loan`,
     review R6).  The grid picker already refuses a loan account (step A1);
     this closes the ad-hoc and inline create endpoints the picker does not
     gate.

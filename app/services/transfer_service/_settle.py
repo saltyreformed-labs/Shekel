@@ -193,9 +193,10 @@ def settle(
     row's ``settled_basis_id`` through ``X-bi-4a``) leaves the freeze nothing to
     overwrite, and the column it was hiding in is gone.
 
-    Mutates in place.  Does NOT flush, commit, or reconcile the posted ledger
-    -- ``update_transfer``'s tail owns all three, so a settle and an ordinary
-    edit reconcile through one statement.
+    Mutates in place.  Does NOT flush or commit: ``update_transfer`` flushes
+    and its caller commits, so a settle and an ordinary edit land through one
+    statement.  (That tail reconciled the posted ledger too, until plan task
+    plan#3075 deleted the reconcile.)
 
     Args:
         transfer: The transfer, at its pre-settle status.  The figure and

@@ -31,10 +31,11 @@ case holds planned transfers since.
 by deleting that pre-load or fill (or, for a path that reads no record,
 adding a read) at plan#2090's commit, and for the planned sides and the
 per-side query at plan#2144's: the case then collects the sides the fixture
-puts in its path.  The last two classes hold the ruling's other halves: an
-act that reads no record fetches none (plan#2138), and a batch act fetches
-its transfers' records in one pre-load for all of them while its reader
-fetches none (finding L1).  :func:`_side_record_fetches` counts those.
+puts in its path.  The last three classes hold the ruling's other halves: an
+act that reads no record fetches none (plan#2138), one transfer's act fetches
+its pair's records once (finding plan#2147), and a batch act fetches its
+transfers' records in one pre-load for all of them while its reader fetches
+none (finding L1).  :func:`_side_record_fetches` counts those.
 """
 
 from contextlib import contextmanager
@@ -825,6 +826,74 @@ class TestAMoveThatReadsNoRecordFetchesNone:
             db.session.rollback()
 
 
+class TestAPaymentActFetchesItsTransfersRecordsOnce:
+    """Ruling plan#2136's "one query for all of them" for one transfer's act (finding plan#2147)."""
+
+    def test_mark_paid_fetches_the_pairs_records_in_one_statement(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """Mark Paid on a grid leg fetches both sides' records once, in one statement.
+
+        The seam pass builds the pair through ``transfer_legs.transfer_sides``,
+        whose pre-load names both sides, and nothing after it fetches them
+        again.  The stored ledger's pair door
+        (``posting_service.sync_transfer_postings``) fetched them again after
+        the settle, walking ``transfer_legs.transfer_family_movements`` and
+        then the anchor re-check's records, until plan task plan#3075 deleted
+        the door's call: 3 statements at its base ``8c6454559`` (2 at
+        ``e7bcb07c0``, finding **plan#2147**).
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+            planned = create_transfer(
+                seed_user, db.session, checking, _a_savings_account(seed_user),
+                seed_periods_today[4], amount=Decimal("120.00"),
+            )
+            db.session.commit()
+            db.session.expire_all()
+
+            with _side_record_fetches() as fetches:
+                response = auth_client.post(
+                    f"/transfers/instance/{planned.id}/mark-done",
+                    data={"leg_account_id": checking.id},
+                    headers=_HTMX,
+                )
+
+            assert response.status_code == 200
+            assert db.session.get(Transfer, planned.id).status.is_settled
+            assert fetches == [{False, True}]
+
+    def test_moving_a_paid_transfers_endpoint_fetches_its_records_in_one_statement(
+        self, app, seed_user, seed_periods_today,
+    ):
+        """Moving a Paid transfer's to-side fetches both sides' records once, in one statement.
+
+        The endpoint move (``transfer_service._endpoints``) builds the pair
+        through ``transfer_legs.transfer_sides`` and carries each side's
+        record; nothing after it fetches them again.  The update's posting
+        reconcile fetched them again until plan task plan#3075 deleted it: 4
+        statements at its base ``8c6454559`` (2 at ``e7bcb07c0``, finding
+        **plan#2147**).
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+            third = _a_savings_account(seed_user)
+            paid = _paid(
+                seed_user, checking, _savings(seed_user, "Second"),
+                seed_periods_today[3], "120.00",
+            )
+            db.session.commit()
+            db.session.expire_all()
+
+            with _side_record_fetches() as fetches:
+                transfer_service.update_transfer(
+                    paid.id, seed_user["user"].id, to_account_id=third.id,
+                )
+
+            assert db.session.get(Transfer, paid.id).to_account_id == third.id
+            assert fetches == [{False, True}]
+
+
 class TestAReconcileFetchesItsTransfersRecordsOnce:
     """Ruling plan#2136's "one query for all of them" for a batch act, and none for its reader."""
 
@@ -853,21 +922,14 @@ class TestAReconcileFetchesItsTransfersRecordsOnce:
         ids, ``reconcile_service._transfers``) pre-loads every ticked
         transfer's records in ONE statement, so each settle's pair
         (``transfer_legs.transfer_sides``) finds both lists loaded and
-        fetches nothing.  The act's other side-record fetches are each
+        fetches nothing, and nothing after the settles fetches them again.
+        Until plan task plan#3075 the stored ledger fetched them again: each
         settle's posting walk (``transfer_legs.transfer_family_movements``),
-        one per transfer, which re-fetches what the pre-load loaded (finding
-        **plan#2147**), and the act's ONE anchor re-check at its close
-        (``posting_service.holding_the_anchor_re_check``, ruling
-        **plan#2574**), whose walk of an account's records
-        (``cash_ledger.settled_cash_facts``) fetches its transfers' records
-        in one statement: Savings alone, whose opening is asserted on the
-        settles' own day, while Checking's latest assertion (2024-01-05)
-        sits before them, so its corrections cannot move and the re-check
-        skips it.  So ``1 + 3 + 1``.  Without the pre-load each settle
-        fetches its own pair, ``3 + 3 + 1``; without the hold each settle
-        re-checks for itself, and the endpoint resync plan#2574 deleted
-        walked both endpoints again, ``1 + 3 + 3 * 3`` (measured at
-        plan#2559 before the fix).
+        one per transfer (finding **plan#2147**), and the act's one anchor
+        re-check at its close (``posting_service.holding_the_anchor_re_check``,
+        ruling **plan#2574**), which walked Savings' records, so
+        ``1 + 3 + 1``.  Without the pre-load each settle fetches its own
+        pair, ``3``.
         """
         with app.app_context():
             ticked = self._three_planned(seed_user, seed_periods_today)
@@ -886,9 +948,8 @@ class TestAReconcileFetchesItsTransfersRecordsOnce:
                 for xfer_id in ticked
             )
             assert alone == []
-            # The pre-load, one posting walk per settle, and the close's one
-            # re-check walk (Savings).
-            assert len(fetches) == 1 + len(ticked) + 1
+            # The pre-load alone, naming both sides of all three transfers.
+            assert fetches == [{False, True}]
 
     def test_the_reconcile_panel_fetches_no_record_of_the_transfers_it_offers(
         self, app, seed_user, seed_periods_today,

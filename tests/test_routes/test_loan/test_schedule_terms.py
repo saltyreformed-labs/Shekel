@@ -87,7 +87,8 @@ class TestTheClosingBoundIsNeverWrittenByARoute:
         """Settling a loan payment moves the payoff and writes nothing (settle path).
 
         The transfer settle chokepoint (``_loan_posting._sync_loan_postings_if_loan``)
-        used to re-sync ``end_date``; it reconciles the loan's ledger only now.
+        used to re-sync ``end_date``, then reconciled the loan's stored ledger
+        only, until plan task plan#3075 deleted it: a settle writes no loan state.
         """
         acct = _create_mortgage(seed_user, db.session)
         tpl, rule = _create_transfer_template(seed_user, db.session, acct)

@@ -22,7 +22,13 @@ from tests._test_helpers import (
     refused_by_database_rule,
 )
 
-from ._helpers import _ledger_id, _transit_ledger_id, _legs_by_ledger, _scenario_id
+from ._helpers import (
+    _ledger_id,
+    _legs_by_ledger,
+    _scenario_id,
+    _settled_and_posted,
+    _transit_ledger_id,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +124,7 @@ class TestFailLoud:
         """
         with app.app_context():
             checking = seed_user["account"]
-            transfer = create_settled_transfer(
+            transfer = _settled_and_posted(
                 seed_user, _db.session, checking, savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
             )

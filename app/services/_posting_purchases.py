@@ -76,10 +76,9 @@ def posted_purchase_exists_clause():
     a query, as a correlated ``EXISTS`` over ``budget.transaction_entries``.  It
     is the same two narrowings that predicate makes about the purchase itself --
     a recorded posting day, and a DEBIT -- and deliberately not the third: what
-    the PARENT contributes is the caller's own filter, because the two callers
-    want opposite answers.  ``resync_all_cash_postings`` wants every row that
-    could hold a leg; a bulk archive wants the rows it is about to stop
-    contributing.
+    the PARENT contributes is the caller's own filter, because its callers
+    wanted opposite answers: the deploy resync every row that could hold a
+    leg, a bulk archive the rows it was about to stop contributing.
 
     **It exists because the clause was written twice** (caught by pylint's
     ``duplicate-code`` at plan step X-f3b, which is what that checker is for):
@@ -89,8 +88,10 @@ def posted_purchase_exists_clause():
 
     The template restore's reader
     (``definition_delete.rows_holding_purchase_postings``) went at plan task
-    plan#3097 with the transaction doors' syncs, so the deploy resync is its
-    one caller in ``app/``.
+    plan#3097 with the transaction doors' syncs, and the deploy resync at plan
+    task plan#3077 with the deploy's hooks, so it has no caller in ``app/``:
+    ``tests/_worked_out_ledger.py``'s ``_walked_parents``, in the parity
+    comparison that goes with the writers, is its one caller.
 
     Returns:
         A SQLAlchemy ``EXISTS`` clause, correlated to ``Transaction``, for use

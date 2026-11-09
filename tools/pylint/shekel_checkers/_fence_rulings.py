@@ -666,7 +666,6 @@ _FENCED_MODULE_RULINGS = {
             "sync_loan_postings",
             "sync_loan_postings_all_scenarios",
             "sync_all_scenarios_or_duplicate",
-            "backfill_all_loan_postings",
             "resync_user_loan_postings",
         }),
     ),

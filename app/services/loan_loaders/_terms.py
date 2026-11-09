@@ -571,44 +571,13 @@ def load_loans_params(account_ids: Collection[int]) -> dict[int, LoanParams]:
     }
 
 
-def load_all_loan_account_ids() -> list[int]:
-    """Return every configured loan account's id, ascending (all owners).
-
-    The account id of every :class:`LoanParams` row -- one per amortizing loan,
-    across all owners.  A loan can carry a Build-Order Step 4 split correction
-    only once it has a :class:`LoanParams` row (:func:`load_loan_params`;
-    :func:`app.services.loan_ledger.compute_loan_payment_splits` returns
-    ``[]`` otherwise), so this is exactly the set the one-time historical backfill
-    (:func:`app.services.loan_posting_service.backfill_all_loan_postings`)
-    iterates.  Deliberately NOT user-scoped: it is a system / deploy-time sweep
-    over every owner's loans -- like the Step-2 / Step-3 settled-row backfills --
-    and each posted correction still carries its own owner (its loan
-    account's, resolved per loan by ``_posting_reconcile.filing_calendar_for``;
-    a payment split's per-loan ledgers are its transfer's owner's, read
-    through its leg, which ``fk_transfers_owner_to_account`` holds equal), so
-    no row is mis-attributed.
-
-    Returns:
-        The loan account ids, ascending (``account_id`` is unique per
-        :class:`LoanParams`, so already distinct); empty on a loan-free database.
-    """
-    rows = (
-        db.session.query(LoanParams.account_id)
-        .order_by(LoanParams.account_id)
-        .all()
-    )
-    return [account_id for (account_id,) in rows]
-
-
 def load_loan_account_ids_for_user(user_id: int) -> list[int]:
     """Return the given user's configured loan account ids, ascending.
 
-    The per-OWNER counterpart to :func:`load_all_loan_account_ids`: every
-    :class:`LoanParams` row whose account belongs to *user_id*, joined through
-    :class:`~app.models.account.Account`.  Where the all-owners sweep backs the
-    system / deploy-time backfill
-    (:func:`app.services.loan_posting_service.backfill_all_loan_postings`), this
-    scoped set backs a PER-USER re-sync
+    Every :class:`LoanParams` row whose account belongs to *user_id*, joined
+    through :class:`~app.models.account.Account`.  Its all-owners counterpart
+    backed the deploy-time backfill until plan task plan#3077 deleted both;
+    this scoped set backs a PER-USER re-sync
     (:func:`app.services.loan_posting_service.resync_user_loan_postings`), which
     ``pay_period_admin._refile_ledger`` called until plan task plan#3076 to
     rebuild only one user's loan genesis postings after a reset's wipe or a

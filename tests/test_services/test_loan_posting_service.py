@@ -2976,8 +2976,8 @@ class TestPostedLoanBalanceFuturePeriods:
 class TestUserScopedResync:
     """``resync_user_loan_postings`` + its enumerator reconcile ONE owner's loans.
 
-    The per-user counterpart to the deploy-wide ``backfill_all_loan_postings``,
-    called by ``pay_period_admin.reset_pay_periods`` to re-post a reset user's
+    The per-user counterpart to the deploy-wide loan backfill (deleted at plan
+    task plan#3077), called by ``pay_period_admin.reset_pay_periods`` to re-post a reset user's
     loan genesis entries the period wipe cascades -- scoped to that one user so a
     single-user reset never reconciles another owner's loans inside its
     transaction (review M2 / R7).
@@ -2994,8 +2994,9 @@ class TestUserScopedResync:
         """load_loan_account_ids_for_user filters LoanParams by owner, ascending.
 
         Two loans on the first user and one on the second: each owner's scoped
-        enumeration returns exactly its own loan ids, and the all-owners sweep
-        returns their union -- proving the join is owner-scoped, not global.
+        enumeration returns exactly its own loan ids -- proving the join is
+        owner-scoped, not global.  (The all-owners sweep they partitioned went
+        at plan task plan#3077 with the deploy's loan backfill.)
         """
         with app.app_context():
             loan_a = _make_loan(seed_user, name="Loan A")
@@ -3009,10 +3010,6 @@ class TestUserScopedResync:
             assert loan_loaders.load_loan_account_ids_for_user(
                 seed_second_user["user"].id,
             ) == [loan_c.id]
-            # The scoped sets partition the global sweep.
-            assert loan_loaders.load_all_loan_account_ids() == sorted(
-                [loan_a.id, loan_b.id, loan_c.id],
-            )
 
     def test_resync_posts_only_the_users_genesis(
         self, app, db, seed_user, seed_second_user, seed_periods,

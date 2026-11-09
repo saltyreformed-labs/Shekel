@@ -75,9 +75,10 @@ it reads any of the owner's data** (:mod:`app.db_transaction`, ruling
 no lock of its own.  That is not every transaction that reaches this module:
 registration takes none (``account_service.create_account`` stages the
 origination for a user who is not committed yet, so no other transaction can
-see it), and a script that writes an existing owner's data must take that
-owner's lock at its own start, as the deploy reconciles do
-(:func:`app.services.user_write_lock.lock_every_user_writes`).
+see it), and a script that writes an existing owner's data takes none
+(:mod:`app.services.user_write_lock` names the four operator scripts that
+write such rows; the deploy's reconciles took every owner's at their start
+until plan task plan#3077 deleted them).
 
 **An assertion is refused only when it CHANGES NOTHING, and that rule is this
 module's** (ruling **R-EQ**, plan step X-f1c4b).  Both doors, under the owner's

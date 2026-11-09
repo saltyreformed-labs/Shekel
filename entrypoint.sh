@@ -262,9 +262,9 @@ echo "Role ready."
 # DML only.
 #
 # ONE transaction, committed once (plan step balance:X-cv): the fresh
-# build or the migrations, the reference-data seed, the three deploy
-# hooks and the audit-trigger check commit together or not at all
-# (rulings R-BAL105, R-BAL122).  That seed and that check were steps 4
+# build or the migrations, the reference-data seed and the audit-trigger
+# check commit together or not at all (rulings R-BAL105, R-BAL122; three
+# ledger hooks ran inside it too until plan task plan#3077).  That seed and that check were steps 4
 # and 7, run after this commit; the numbers below are kept.  (Step 6
 # copied the tax law into every user's rows until plan step
 # salary:X-at-1 gave the law one home in the code, app/tax_law/, which

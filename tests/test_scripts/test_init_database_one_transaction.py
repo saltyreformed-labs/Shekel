@@ -1,9 +1,9 @@
 """Entrypoint step 3 is ONE transaction, committed once (plan step balance:X-cv).
 
 ``scripts/init_database.py`` used to commit the migrations in
-``migrations/env.py``'s own transaction BEFORE the three deploy hooks ran, so a
-hook that refused left a stamp the previous image could not resolve and
-``deploy/shekel-deploy.sh`` refused to re-pin it -- a manual dump restore
+``migrations/env.py``'s own transaction BEFORE the deploy's three ledger hooks
+ran, so a hook that refused left a stamp the previous image could not resolve
+and ``deploy/shekel-deploy.sh`` refused to re-pin it -- a manual dump restore
 (ruling **R-BAL105**).  Now ``initialise_database`` opens a connection and a
 transaction of its own, runs the migrations on it and everything else through a
 session JOINED to it, and its commit is the only one (rulings **R-BAL113**,
@@ -19,10 +19,13 @@ that creates ``budget.xcv_probe``, and points the one migration runner's
 Alembic config at it (:mod:`app.migration_runner`, ruling **R-BAL114**) -- so
 the stamp and a DDL change are really pending when the deploy runs.
 
-**A real hook write.**  A settled loan payment whose corrections were cleared
-(the loan backfill suite's own recipe) makes the SECOND hook post a
-correction, so "every hook write unmoved" is asserted of a write a real hook
-made, not of one the test forged.
+**A real session write.**  The deploy's session steps are the reference seed
+and ``ref_cache``'s load since plan task plan#3077 deleted the three ledger
+hooks, whose loan correction these tests watched until then.  The
+``unseeded_ref_row`` fixture deletes, committed, one ref row the per-test
+database does not reference, so the real seed must INSERT it again: "every
+write unmoved" is asserted of a write the seed made, not of one the test
+forged.
 """
 from __future__ import annotations
 
@@ -30,8 +33,6 @@ import logging
 import pathlib
 import re
 import textwrap
-from datetime import date
-from decimal import Decimal
 
 import pytest
 from alembic.config import Config
@@ -44,34 +45,18 @@ from app.audit_infrastructure import (
     EXPECTED_TRIGGER_COUNT,
     require_audit_triggers,
 )
-from app.enums import PostingKindEnum, PostingSourceEnum, StatementSourceEnum
+from app.enums import StatementSourceEnum
 from app.models.category import Category
 from app.ref_seeds import ACCT_TYPE_SEEDS
-from app.services.posting_reads import PostingError
 from scripts.build_test_db_image import template_checks
-from tests._stored_ledger import ledger_accounts_for_account
 from tests._test_helpers import (
-    create_loan_with_trueup,
-    create_settled_transfer,
-    freeze_today,
     load_init_database_module,
-    load_migration_module,
     refused_by_database_rule,
-    transfer_side_record,
 )
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _VERSIONS_DIR = _REPO_ROOT / "migrations" / "versions"
 _INIT_DB = load_init_database_module()
-
-# The loan backfill suite's teardown pair, run in real downgrade-chain order to
-# reproduce a payment settled before the go-forward wiring (no correction).
-_GENESIS_MIGRATION = load_migration_module(
-    "f3d6b1a8c2e4_loan_genesis_postings_data_boundary.py",
-)
-_PAYMENT_MIGRATION = load_migration_module(
-    "e2a9f1c7b4d6_backfill_loan_payment_split_postings.py",
-)
 
 _PROBE_REVISION = "xcvprobe0001"
 _PROBE_MIGRATION = textwrap.dedent('''\
@@ -85,19 +70,33 @@ _PROBE_MIGRATION = textwrap.dedent('''\
 
 
     def upgrade():
-        """Create the probe table."""
+        """Create the probe table, then run the statements a test adds."""
         op.execute("CREATE TABLE budget.xcv_probe (id integer)")
+        for statement in {statements!r}:
+            op.execute(statement)
 
 
     def downgrade():
-        """Drop the probe table."""
+        """Drop the probe table and the refusing rule's function."""
         op.execute("DROP TABLE budget.xcv_probe")
+        op.execute("DROP FUNCTION IF EXISTS budget.xcv_probe_refuse()")
 ''')
 
-# The loan the hook writes for: a $1,000 payment on a $100,000 6% loan (the
-# backfill suite's fixture), settled in period 1 with today frozen after it.
-_TODAY = date(2026, 5, 15)
-_P1 = 1
+#: A rule the probe installs and then breaks: a DEFERRED constraint trigger on
+#: the probe table that refuses every row, so the refusal is raised BY the
+#: deploy's one commit, after every step has run, rather than by any statement
+#: before it -- the shape of a migration's data write that a deferred rule of
+#: the schema refuses (the books-boundary, side-band and deleted-row rules are
+#: all deferred).
+_REFUSED_AT_COMMIT = (
+    "CREATE FUNCTION budget.xcv_probe_refuse() RETURNS trigger "
+    "LANGUAGE plpgsql AS $$ BEGIN "
+    "RAISE EXCEPTION 'xcv probe: refused at commit'; END $$",
+    "CREATE CONSTRAINT TRIGGER xcv_probe_refuse AFTER INSERT "
+    "ON budget.xcv_probe DEFERRABLE INITIALLY DEFERRED "
+    "FOR EACH ROW EXECUTE FUNCTION budget.xcv_probe_refuse()",
+    "INSERT INTO budget.xcv_probe VALUES (1)",
+)
 
 
 def _real_head() -> str:
@@ -107,8 +106,7 @@ def _real_head() -> str:
     return ScriptDirectory.from_config(config).get_current_head()
 
 
-@pytest.fixture(name="pending_migration")
-def _pending_migration(tmp_path, monkeypatch) -> str:
+def _install_probe(tmp_path, monkeypatch, statements: tuple[str, ...]) -> str:
     """Put one real, pending migration on top of the head; return that head.
 
     Every real version file is symlinked into a temporary directory beside a
@@ -116,6 +114,11 @@ def _pending_migration(tmp_path, monkeypatch) -> str:
     runner's ``Config`` is wrapped so its ``version_locations`` reads that
     directory.  Everything else about the config -- ``alembic.ini``,
     ``env.py``, the shared connection -- is the runner's own.
+
+    Args:
+        tmp_path: pytest's per-test directory.
+        monkeypatch: pytest's monkeypatch fixture.
+        statements: SQL the probe's upgrade runs after creating its table.
     """
     head = _real_head()
     versions = tmp_path / "versions"
@@ -124,7 +127,7 @@ def _pending_migration(tmp_path, monkeypatch) -> str:
         (versions / migration.name).symlink_to(migration)
     (versions / f"{_PROBE_REVISION}_probe.py").write_text(
         _PROBE_MIGRATION.format(
-            revision=_PROBE_REVISION, down_revision=head,
+            revision=_PROBE_REVISION, down_revision=head, statements=statements,
         ),
         encoding="utf-8",
     )
@@ -140,217 +143,20 @@ def _pending_migration(tmp_path, monkeypatch) -> str:
     return head
 
 
-@pytest.fixture(name="uncorrected_payment")
-def _uncorrected_payment(app, db, seed_user, seed_periods, monkeypatch) -> dict:
-    """Commit a settled loan payment with its corrections cleared.
-
-    The loan backfill -- the deploy's SECOND hook -- restores exactly one
-    correction for it, which is the hook write these tests watch.
-
-    Returns:
-        The correction's key, as plain values a separate connection can query:
-        ``source`` (the ``loan_payment`` source id), ``scenario``, ``period``
-        and ``day``.  Read off the TRANSFER and the day off its loan side's
-        RECORD since plan step ``balance:X-bi-6-4d-2``; it read the loan-side
-        income shadow until then, whose day is no longer kept (ruling
-        R-BAL167 class 4).
-    """
-    freeze_today(monkeypatch, _TODAY)
-    loan = create_loan_with_trueup(
-        seed_user, db.session,
-        origination_principal=Decimal("250000.00"),
-        anchor_balance=Decimal("100000.00"), anchor_date=date(2026, 1, 10),
-        rate=Decimal("0.06000"), origination_date=date(2025, 1, 1),
-        name="X-cv Loan",
-    )
-    xfer = create_settled_transfer(
-        seed_user, db.session, seed_user["account"], loan, seed_periods[_P1],
-        amount=Decimal("1000.00"),
-    )
-    db.session.commit()
-    key = {
-        "source": ref_cache.posting_source_id(PostingSourceEnum.LOAN_PAYMENT),
-        "scenario": xfer.scenario_id,
-        "period": xfer.pay_period_id,
-        "day": transfer_side_record(db.session, xfer.id, loan.id).settled_on,
-    }
-    _GENESIS_MIGRATION._remove_loan_genesis_postings(db.session)
-    _PAYMENT_MIGRATION._remove_loan_payment_postings(db.session)
-    db.session.commit()
-    return key
+@pytest.fixture(name="pending_migration")
+def _pending_migration(tmp_path, monkeypatch) -> str:
+    """Put one real, pending migration on top of the head; return that head."""
+    return _install_probe(tmp_path, monkeypatch, ())
 
 
-def _committed(db, payment: dict) -> dict:
-    """Read what is COMMITTED, over a connection of its own.
-
-    Args:
-        db: The Flask-SQLAlchemy handle.
-        payment: The correction key :func:`_uncorrected_payment` returned.
-
-    Returns:
-        ``stamp`` (the ``alembic_version`` row), ``probe`` (whether the probe
-        migration's table exists) and ``corrections`` (how many loan-payment
-        corrections sit at the payment's key).
-    """
-    with db.engine.connect() as conn:
-        return {
-            "stamp": conn.execute(text(
-                "SELECT version_num FROM public.alembic_version"
-            )).scalar_one(),
-            "probe": conn.execute(text(
-                "SELECT to_regclass('budget.xcv_probe') IS NOT NULL"
-            )).scalar_one(),
-            "corrections": conn.execute(text(
-                "SELECT count(*) FROM budget.journal_entries "
-                "WHERE source_kind_id = :source AND scenario_id = :scenario "
-                "  AND pay_period_id = :period AND entry_date = :day"
-            ), payment).scalar_one(),
-        }
+@pytest.fixture(name="migration_refused_at_commit")
+def _migration_refused_at_commit(tmp_path, monkeypatch) -> str:
+    """A pending migration whose write a deferred rule refuses at COMMIT; return the head."""
+    return _install_probe(tmp_path, monkeypatch, _REFUSED_AT_COMMIT)
 
 
-class TestARefusalCommitsNothing:
-    """A hook that refuses leaves the stamp AND every hook write where they were."""
-
-    def test_a_hook_refusal_leaves_the_stamp_and_every_hook_write_unmoved(
-        self, app, db, pending_migration, uncorrected_payment, monkeypatch,
-    ):
-        """The third hook refuses after the second has written: nothing commits.
-
-        Before X-cv the probe migration and its stamp would already be
-        committed here -- the case ``shekel-deploy`` cannot re-pin -- and the
-        loan correction with them (the hook committed on its own).
-        """
-        def _refuse():
-            """Stand in for an anchor walk that refuses an account."""
-            raise PostingError("forged refusal: the third deploy hook")
-
-        monkeypatch.setattr(
-            _INIT_DB.account_posting_service,
-            "backfill_all_account_anchor_postings", _refuse,
-        )
-        with pytest.raises(PostingError, match="forged refusal"):
-            _INIT_DB.initialise_database()
-
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": pending_migration, "probe": False, "corrections": 0,
-        }
-        db.session.rollback()
-
-    def test_an_unbalanced_entry_rolls_the_migration_back_at_the_one_commit(
-        self, app, db, seed_user, pending_migration, uncorrected_payment,
-        monkeypatch, capsys,
-    ):
-        """The deferred balanced-journal trigger still fires, now at the ONE commit.
-
-        The third hook's place writes a one-legged entry.  The trigger is
-        DEFERRED, so nothing refuses until COMMIT -- which is now the commit
-        that also carries the migration, so PostgreSQL rolls the migration, its
-        stamp and the second hook's correction back with the bad entry.
-        """
-        # Plain ids read up front: the fixtures' ORM rows belong to the test's
-        # own session, which the deploy sets aside while it runs, so a reload
-        # inside the hook would run outside the deploy's transaction.
-        entry_key = {
-            "u": seed_user["user"].id,
-            "s": uncorrected_payment["scenario"],
-            "p": uncorrected_payment["period"],
-            "d": uncorrected_payment["day"],
-            "src": ref_cache.posting_source_id(
-                PostingSourceEnum.TRANSFER_MOVEMENT,
-            ),
-        }
-        checking_ledger = ledger_accounts_for_account(
-            db.session, seed_user["account"].id,
-        )[0].id
-
-        def _write_one_leg():
-            """Stage a journal entry with a single $1.00 leg; return no ids."""
-            entry_id = db.session.execute(text(
-                "INSERT INTO budget.journal_entries "
-                "  (user_id, scenario_id, pay_period_id, entry_date, "
-                "   source_kind_id, description) "
-                "VALUES (:u, :s, :p, :d, :src, 'X-cv one leg') RETURNING id"
-            ), entry_key).scalar_one()
-            db.session.execute(text(
-                "INSERT INTO budget.account_postings "
-                "  (journal_entry_id, ledger_account_id, amount, "
-                "   posting_kind_id) "
-                "VALUES (:e, :l, :a, :k)"
-            ), {
-                "e": entry_id, "l": checking_ledger, "a": Decimal("1.00"),
-                "k": ref_cache.posting_kind_id(PostingKindEnum.TRANSFER),
-            })
-            return []
-
-        monkeypatch.setattr(
-            _INIT_DB.account_posting_service,
-            "backfill_all_account_anchor_postings", _write_one_leg,
-        )
-        with refused_by_database_rule(r"has 1 posting\(s\); >= 2 required"):
-            _INIT_DB.initialise_database()
-        db.session.rollback()
-        # Raised BY the one commit: the line printed after it never ran, and
-        # the hook sequence before it did.
-        printed = capsys.readouterr().out
-        assert "Backfilling historical account anchor ledger" in printed
-        assert "Database initialised" not in printed
-
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": pending_migration, "probe": False, "corrections": 0,
-        }
-
-
-class TestACleanRunCommitsOnce:
-    """With no refusal, the migration and every hook write commit together."""
-
-    def test_the_migration_and_every_hook_write_commit_together(
-        self, app, db, pending_migration, uncorrected_payment,
-    ):
-        """The stamp moves to the probe, its table exists, the correction is posted."""
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": pending_migration, "probe": False, "corrections": 0,
-        }
-
-        _INIT_DB.initialise_database()
-
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": _PROBE_REVISION, "probe": True, "corrections": 1,
-        }
-
-    def test_a_write_the_last_hook_left_unflushed_is_committed(
-        self, app, db, seed_user, pending_migration, monkeypatch,
-    ):
-        """The deploy flushes the session before committing its connection.
-
-        The deploy commits the CONNECTION, never the session, so the implicit
-        flush a session ``commit()`` performs is not there: a row a hook only
-        ``add()``-ed would be discarded when the session closes, silently.  The
-        last hook here adds one and returns without flushing.
-        """
-        user_id = seed_user["user"].id
-
-        def _add_without_flushing():
-            """Stage one category row and return, leaving it unflushed."""
-            db.session.add(Category(
-                user_id=user_id, group_name="X-cv", item_name="Unflushed",
-            ))
-            return []
-
-        monkeypatch.setattr(
-            _INIT_DB.account_posting_service,
-            "backfill_all_account_anchor_postings", _add_without_flushing,
-        )
-
-        _INIT_DB.initialise_database()
-
-        with db.engine.connect() as conn:
-            assert conn.execute(text(
-                "SELECT count(*) FROM budget.categories "
-                "WHERE user_id = :u AND item_name = 'Unflushed'"
-            ), {"u": user_id}).scalar_one() == 1
-
-
-def _delete_the_unreferenced_ref_row(db) -> None:
+@pytest.fixture(name="unseeded_ref_row")
+def _unseeded_ref_row(app, db) -> None:
     """Delete, committed, one ref row nothing in the per-test database references.
 
     ``ref.statement_sources`` 'secu_checking_csv' backs an enum member
@@ -365,29 +171,108 @@ def _delete_the_unreferenced_ref_row(db) -> None:
     db.session.commit()
 
 
-def _seeded(db, user_id: int) -> dict:
-    """Read, over a connection of its own, what the deploy's seed COMMITTED.
+def _committed(db) -> dict:
+    """Read what is COMMITTED, over a connection of its own.
 
     Args:
         db: The Flask-SQLAlchemy handle.
-        user_id: The user whose FICA rows are counted: the deploy copied the
-            tax law into them until plan step salary:X-at-1 deleted that seed.
 
     Returns:
-        ``ref_row`` (whether the deleted ref row is back) and ``fica`` (how
-        many FICA configurations the user holds; ``seed_user`` makes none, and
-        the deploy adds none).
+        ``stamp`` (the ``alembic_version`` row), ``probe`` (whether the probe
+        migration's table exists) and ``ref_row`` (how many copies of the row
+        ``unseeded_ref_row`` deletes are there: the seed's write, ``1`` once
+        it is committed).
     """
     with db.engine.connect() as conn:
         return {
+            "stamp": conn.execute(text(
+                "SELECT version_num FROM public.alembic_version"
+            )).scalar_one(),
+            "probe": conn.execute(text(
+                "SELECT to_regclass('budget.xcv_probe') IS NOT NULL"
+            )).scalar_one(),
             "ref_row": conn.execute(text(
                 "SELECT count(*) FROM ref.statement_sources "
                 "WHERE name = 'secu_checking_csv'"
             )).scalar_one(),
-            "fica": conn.execute(text(
-                "SELECT count(*) FROM salary.fica_configs WHERE user_id = :u"
-            ), {"u": user_id}).scalar_one(),
         }
+
+
+def _committed_fica_rows(db, user_id: int) -> int:
+    """Count, over a connection of its own, the user's COMMITTED FICA configurations.
+
+    The deploy copied the tax law into them until plan step salary:X-at-1
+    deleted that seed; ``seed_user`` makes none, and the deploy adds none.
+    """
+    with db.engine.connect() as conn:
+        return conn.execute(text(
+            "SELECT count(*) FROM salary.fica_configs WHERE user_id = :u"
+        ), {"u": user_id}).scalar_one()
+
+
+class TestARefusalCommitsNothing:
+    """A refusal raised by the one commit leaves the stamp AND every write where they were."""
+
+    def test_a_refusal_at_the_one_commit_rolls_everything_back(
+        self, app, db, migration_refused_at_commit, unseeded_ref_row, capsys,
+    ):
+        """A deferred rule refuses the migration's write at COMMIT: nothing commits.
+
+        The rule is DEFERRED, so nothing refuses until COMMIT -- which is the
+        commit that also carries the migration's stamp and the seed's row, so
+        PostgreSQL rolls all three back with the refused write.  It was the
+        balanced-journal trigger refusing a ledger hook's one-legged entry
+        until plan task plan#3077 deleted the hooks.
+        """
+        with refused_by_database_rule(r"xcv probe: refused at commit"):
+            _INIT_DB.initialise_database()
+        db.session.rollback()
+        # Raised BY the one commit: the line printed after it never ran, and
+        # the sequence before it did.
+        printed = capsys.readouterr().out
+        assert "Audit trigger health OK" in printed
+        assert "Database initialised" not in printed
+
+        assert _committed(db) == {
+            "stamp": migration_refused_at_commit, "probe": False, "ref_row": 0,
+        }
+
+
+class TestACleanRunCommitsOnce:
+    """With no refusal, everything the deploy wrote commits together."""
+
+    def test_a_write_the_last_session_step_left_unflushed_is_committed(
+        self, app, db, seed_user, pending_migration, monkeypatch,
+    ):
+        """The deploy flushes the session before committing its connection.
+
+        The deploy commits the CONNECTION, never the session, so the implicit
+        flush a session ``commit()`` performs is not there: a row a step only
+        ``add()``-ed would be discarded when the session closes, silently.  The
+        last session step, ``ref_cache``'s load, adds one here after its own
+        reads and returns without flushing; nothing after it reads through the
+        session (the audit-trigger count runs on the connection), so no
+        autoflush saves it either.
+        """
+        user_id = seed_user["user"].id
+        real_init = ref_cache.init
+
+        def _load_then_add_without_flushing(session):
+            """Load the cache, then stage one category row, leaving it unflushed."""
+            real_init(session)
+            db.session.add(Category(
+                user_id=user_id, group_name="X-cv", item_name="Unflushed",
+            ))
+
+        monkeypatch.setattr(ref_cache, "init", _load_then_add_without_flushing)
+
+        _INIT_DB.initialise_database()
+
+        with db.engine.connect() as conn:
+            assert conn.execute(text(
+                "SELECT count(*) FROM budget.categories "
+                "WHERE user_id = :u AND item_name = 'Unflushed'"
+            ), {"u": user_id}).scalar_one() == 1
 
 
 class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
@@ -402,7 +287,7 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
     """
 
     def test_a_clean_run_commits_the_seed_with_the_migration(
-        self, app, db, seed_user, pending_migration, uncorrected_payment,
+        self, app, db, seed_user, pending_migration, unseeded_ref_row,
     ):
         """The deleted ref row commits with the stamp, and no tax row is copied.
 
@@ -410,16 +295,18 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
         row is missing when the deploy starts, so a cache read before the seed
         would refuse ``StatementSource.SECU_CHECKING_CSV`` and fail the deploy.
         """
-        _delete_the_unreferenced_ref_row(db)
         user_id = seed_user["user"].id
-        assert _seeded(db, user_id) == {"ref_row": 0, "fica": 0}
+        assert _committed(db) == {
+            "stamp": pending_migration, "probe": False, "ref_row": 0,
+        }
+        assert _committed_fica_rows(db, user_id) == 0
 
         _INIT_DB.initialise_database()
 
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": _PROBE_REVISION, "probe": True, "corrections": 1,
+        assert _committed(db) == {
+            "stamp": _PROBE_REVISION, "probe": True, "ref_row": 1,
         }
-        assert _seeded(db, user_id) == {"ref_row": 1, "fica": 0}
+        assert _committed_fica_rows(db, user_id) == 0
         # The deploy loaded ref_cache itself, from the seeded rows: the
         # re-inserted row has a NEW id, which only a load after the seed can
         # know (conftest's per-test load read the deleted row's id).
@@ -433,15 +320,13 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
         ) == new_id
 
     def test_a_missing_audit_trigger_rolls_everything_back(
-        self, app, db, seed_user, pending_migration, uncorrected_payment,
+        self, app, db, seed_user, pending_migration, unseeded_ref_row,
     ):
         """One audit trigger is gone: the check refuses and nothing commits.
 
-        Not the migration, not the hook's correction, and not the seed's rows:
-        before X-cv's leaf 2 this check was entrypoint step 7, run after step 3
-        had committed all of them.
+        Not the migration and not the seed's rows: before X-cv's leaf 2 this
+        check was entrypoint step 7, run after step 3 had committed both.
         """
-        _delete_the_unreferenced_ref_row(db)
         db.session.execute(text(
             "DROP TRIGGER audit_transactions ON budget.transactions"
         ))
@@ -458,13 +343,13 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
             _INIT_DB.initialise_database()
         db.session.rollback()
 
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": pending_migration, "probe": False, "corrections": 0,
+        assert _committed(db) == {
+            "stamp": pending_migration, "probe": False, "ref_row": 0,
         }
-        assert _seeded(db, user_id) == {"ref_row": 0, "fica": 0}
+        assert _committed_fica_rows(db, user_id) == 0
 
     def test_a_surplus_audit_trigger_is_not_refused(
-        self, app, db, pending_migration, uncorrected_payment,
+        self, app, db, pending_migration, unseeded_ref_row,
     ):
         """AT LEAST the expected count, as step 7 asked: an extra trigger passes.
 
@@ -480,8 +365,8 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
 
         _INIT_DB.initialise_database()
 
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": _PROBE_REVISION, "probe": True, "corrections": 1,
+        assert _committed(db) == {
+            "stamp": _PROBE_REVISION, "probe": True, "ref_row": 1,
         }
 
     def test_the_refusal_names_each_missing_table_and_re_creates_it(
@@ -545,39 +430,39 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
             ]
 
 
-def _with_stray_calls(monkeypatch, db, hook, *, before=None, after=None):
+
+def _with_stray_calls(monkeypatch, db, step, *, before=None, after=None):
     """Run a real step of the deploy between stray session calls.
 
     Args:
         monkeypatch: pytest's monkeypatch fixture.
-        db: The Flask-SQLAlchemy handle whose session the hooks use.
-        hook: ``(module, function name)`` of the step's real function: the
-            loan backfill is the SECOND deploy hook (more follow it), and the
-            anchor-posting backfill, the THIRD, the LAST step that uses the
-            session (ruling R-BAL122's order, less the tax seed plan step
-            salary:X-at-1 deleted; only the audit-trigger count, on the
-            connection, follows).
+        db: The Flask-SQLAlchemy handle whose session the steps use.
+        step: ``(module, function name)`` of the step's real function: the
+            reference seed, which ``ref_cache``'s load follows on the session,
+            or that load, the LAST step that uses the session (ruling
+            R-BAL122's order; only the audit-trigger count, on the connection,
+            follows).
         before: ``"commit"`` or ``"rollback"``, called on ``db.session`` before
-            the real service runs; ``None`` for no call.
+            the real step runs; ``None`` for no call.
         after: The same, called after it.
     """
-    module, name = hook
-    real_service = getattr(module, name)
+    module, name = step
+    real_step = getattr(module, name)
 
-    def _stray_calls_around_the_service():
-        """Call the stray session method(s) around the real service."""
+    def _stray_calls_around_the_step(*args, **kwargs):
+        """Call the stray session method(s) around the real step."""
         if before is not None:
             getattr(db.session, before)()
-        posted = real_service()
+        result = real_step(*args, **kwargs)
         if after is not None:
             getattr(db.session, after)()
-        return posted
+        return result
 
-    monkeypatch.setattr(module, name, _stray_calls_around_the_service)
+    monkeypatch.setattr(module, name, _stray_calls_around_the_step)
 
 
-_SECOND_HOOK = (_INIT_DB.loan_posting_service, "backfill_all_loan_postings")
-_LAST_SESSION_STEP = (_INIT_DB, "backfill_all_account_anchor_postings_after_migration")
+_THE_SEED = (_INIT_DB, "seed_reference_data")
+_LAST_SESSION_STEP = (ref_cache, "init")
 
 
 class TestNothingInsideTheSequenceCanCommit:
@@ -588,104 +473,104 @@ class TestNothingInsideTheSequenceCanCommit:
     that one transaction, so a stray call is followed by a refusal, never by a
     transaction of the session's own).  Before X-cv's leaf 1b a stray COMMIT
     here committed the migrations on the spot, and a rollback followed by a
-    commit committed the hooks' later writes WITHOUT the migrations.
+    commit committed the later steps' writes WITHOUT the migrations.  The
+    stray calls sat around the ledger hooks until plan task plan#3077 deleted
+    them; the seed and ``ref_cache``'s load are the session's steps since.
     """
 
     def test_a_stray_rollback_saves_nothing(
-        self, app, db, pending_migration, uncorrected_payment, monkeypatch,
+        self, app, db, pending_migration, unseeded_ref_row, monkeypatch,
     ):
-        """The second hook rolls back first: its first query refuses.
+        """The seed rolls back first: its first query refuses.
 
         ``ref_cache`` rolls back on a missing ref table, and a rollback ends the
         deploy's transaction, the migration with it.  The session may not then
-        begin a transaction of its own for the backfill to write into.
+        begin a transaction of its own for the seed to write into.
         """
-        _with_stray_calls(monkeypatch, db, _SECOND_HOOK, before="rollback")
+        _with_stray_calls(monkeypatch, db, _THE_SEED, before="rollback")
         with pytest.raises(InvalidRequestError) as refused:
             _INIT_DB.initialise_database()
 
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": pending_migration, "probe": False, "corrections": 0,
+        assert _committed(db) == {
+            "stamp": pending_migration, "probe": False, "ref_row": 0,
         }
         assert "Autobegin is disabled" in str(refused.value)
         db.session.rollback()
 
     def test_a_stray_commit_mid_sequence_saves_nothing(
-        self, app, db, pending_migration, uncorrected_payment, monkeypatch,
+        self, app, db, pending_migration, unseeded_ref_row, monkeypatch,
     ):
-        """The second hook commits its correction: the third hook's first query refuses.
+        """The seed commits its rows: ``ref_cache``'s first query refuses.
 
         The commit is not passed to the deploy's transaction, so neither the
-        migration nor the correction it flushed is committed by it, and the
+        migration nor the row the seed flushed is committed by it, and the
         deploy then fails with nothing saved.
         """
-        _with_stray_calls(monkeypatch, db, _SECOND_HOOK, after="commit")
+        _with_stray_calls(monkeypatch, db, _THE_SEED, after="commit")
         with pytest.raises(InvalidRequestError) as refused:
             _INIT_DB.initialise_database()
 
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": pending_migration, "probe": False, "corrections": 0,
+        assert _committed(db) == {
+            "stamp": pending_migration, "probe": False, "ref_row": 0,
         }
         assert "Autobegin is disabled" in str(refused.value)
         db.session.rollback()
 
     def test_a_rollback_then_a_commit_saves_nothing(
-        self, app, db, pending_migration, uncorrected_payment, monkeypatch,
+        self, app, db, pending_migration, unseeded_ref_row, monkeypatch,
     ):
         """The escape ruling R-BAL118 closed: roll back, write, commit.
 
         Measured before the ruling: a session allowed to begin a transaction of
-        its own after the rollback wrote the correction into it and the commit
-        saved it, WITHOUT the migration the rollback undid.
+        its own after the rollback wrote a ledger hook's correction into it and
+        the commit saved it, WITHOUT the migration the rollback undid.
         """
         _with_stray_calls(
-            monkeypatch, db, _SECOND_HOOK, before="rollback", after="commit",
+            monkeypatch, db, _THE_SEED, before="rollback", after="commit",
         )
         with pytest.raises(InvalidRequestError) as refused:
             _INIT_DB.initialise_database()
 
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": pending_migration, "probe": False, "corrections": 0,
+        assert _committed(db) == {
+            "stamp": pending_migration, "probe": False, "ref_row": 0,
         }
         assert "Autobegin is disabled" in str(refused.value)
         db.session.rollback()
 
     def test_a_rollback_after_the_last_statement_fails_the_one_commit(
-        self, app, db, pending_migration, uncorrected_payment, monkeypatch,
+        self, app, db, pending_migration, unseeded_ref_row, monkeypatch,
     ):
         """The last session step rolls back after its work: the deploy's commit refuses.
 
-        That step is the third hook: it was before ruling R-BAL122 put the
-        seeds and the audit-trigger check after the hooks, the tax seed from
-        then, and the third hook again since plan step salary:X-at-1 deleted
-        the tax seed (re-expressed with the developer's confirmation, rule 5,
-        both times).
+        That step is ``ref_cache``'s load since plan task plan#3077 deleted the
+        three ledger hooks (ruling plan#2516, option A), the third of which it
+        was until then; between ruling R-BAL122 and plan step salary:X-at-1 it
+        was the tax seed.  Each move re-expressed the case on the new last
+        step, the claim unchanged.
         """
         _with_stray_calls(monkeypatch, db, _LAST_SESSION_STEP, after="rollback")
         with pytest.raises(InvalidRequestError) as refused:
             _INIT_DB.initialise_database()
 
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": pending_migration, "probe": False, "corrections": 0,
+        assert _committed(db) == {
+            "stamp": pending_migration, "probe": False, "ref_row": 0,
         }
         assert "transaction is inactive" in str(refused.value)
         db.session.rollback()
 
     def test_a_commit_after_the_last_statement_is_harmless(
-        self, app, db, pending_migration, uncorrected_payment, monkeypatch,
+        self, app, db, pending_migration, unseeded_ref_row, monkeypatch,
     ):
         """The last session step commits after its work: everything commits, once.
 
-        The third hook, as it was before ruling R-BAL122 and is again since
-        plan step salary:X-at-1 deleted the tax seed between them (re-expressed
-        with the developer's confirmation, rule 5, both times).
+        ``ref_cache``'s load, as in the case above.
         """
         _with_stray_calls(monkeypatch, db, _LAST_SESSION_STEP, after="commit")
 
         _INIT_DB.initialise_database()
 
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": _PROBE_REVISION, "probe": True, "corrections": 1,
+        assert _committed(db) == {
+            "stamp": _PROBE_REVISION, "probe": True, "ref_row": 1,
         }
 
 
@@ -693,7 +578,7 @@ class TestTheRunnerCommitsNothing:
     """``app.migration_runner`` never commits, whatever connection it is handed."""
 
     def test_a_connection_outside_a_transaction_is_not_committed(
-        self, app, db, pending_migration, uncorrected_payment,
+        self, app, db, pending_migration, unseeded_ref_row,
     ):
         """Handed a connection with no transaction, the runner opens one it never commits.
 
@@ -705,8 +590,8 @@ class TestTheRunnerCommitsNothing:
         with db.engine.connect() as connection:
             migration_runner.upgrade_to_head(connection)
 
-        assert _committed(db, uncorrected_payment) == {
-            "stamp": pending_migration, "probe": False, "corrections": 0,
+        assert _committed(db) == {
+            "stamp": pending_migration, "probe": False, "ref_row": 0,
         }
 
 
@@ -740,19 +625,20 @@ class TestTheDeployPutsTheCallersSessionBack:
 
 
 class TestEveryStatementRunsOnTheDeploysConnection:
-    """The migrations, ``ref_cache`` and the three hooks share ONE connection."""
+    """The migrations, the reference seed and ``ref_cache`` share ONE connection."""
 
-    def test_one_backend_serves_the_migration_and_the_hooks(
-        self, app, db, pending_migration, uncorrected_payment,
+    def test_one_backend_serves_the_migration_and_the_session_steps(
+        self, app, db, pending_migration, unseeded_ref_row,
     ):
         """Every statement the deploy issues reaches the same PostgreSQL backend.
 
         Flask-SQLAlchemy's session ignores a session-level bind, so a deploy
-        that only configured one would run the hooks on a pooled connection of
-        their own, outside the transaction the migration ran in.  The backend
-        of every statement is recorded, and the record must hold the probe
-        migration's DDL and the loan hook's write, so it cannot pass by having
-        seen neither.
+        that only configured one would run the seed and the cache on a pooled
+        connection of their own, outside the transaction the migration ran in.
+        The backend of every statement is recorded, and the record must hold
+        the probe migration's DDL and the seed's write, so it cannot pass by
+        having seen neither.  The write watched was a ledger hook's until plan
+        task plan#3077 deleted the hooks.
         """
         statements = []
 
@@ -770,11 +656,11 @@ class TestEveryStatementRunsOnTheDeploysConnection:
 
         assert any("xcv_probe" in sql for _pid, sql in statements)
         assert any(
-            sql.lstrip().upper().startswith("INSERT INTO BUDGET.JOURNAL_ENTRIES")
+            sql.lstrip().upper().startswith("INSERT INTO REF.STATEMENT_SOURCES")
             for _pid, sql in statements
         )
         assert len({pid for pid, _sql in statements}) == 1
-        assert _committed(db, uncorrected_payment)["corrections"] == 1
+        assert _committed(db)["ref_row"] == 1
 
 
 def _empty_the_database(db) -> None:
@@ -928,7 +814,8 @@ class TestTheDeployKeepsTheAppsLogging:
         ``fileConfig`` disables every logger that exists when it runs, so before
         X-cv every ``app.*`` logger in the deploy host went silent once the
         migrations had run -- the cash resync's skipped-transfer warning among
-        them.  The root logger's handlers are asserted too: ``fileConfig``
+        them, until plan task plan#3077 deleted that resync.  The root logger's
+        handlers are asserted too: ``fileConfig``
         replaces them with alembic.ini's WARNING console.
         """
         app_logger = logging.getLogger("app.services.xcv_probe")

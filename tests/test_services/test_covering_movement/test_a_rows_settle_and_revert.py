@@ -484,10 +484,12 @@ class TestARevertUnDatesAndAReSettleReDates:
 class TestTheBareSeamUnDatesAndKeeps:
     """What the SEAM alone guarantees on a revert, apart from any door.
 
-    ``status_seam.apply_status_change`` un-dates the movement and keeps it;
-    the ledger is the door's (``_covering``'s module docstring), so this
-    class asserts nothing about postings -- ``test_integrity_check``'s DC-10
-    case is where the state a caller of the bare seam would leave is graded.
+    ``status_seam.apply_status_change`` un-dates the movement and keeps it,
+    so this class asserts nothing about postings: the ledger every reader
+    reads is worked out from the movements, where an un-dated one books
+    nothing (``ledger_lines.purchase_posts``).  Integrity check DC-10 graded
+    the stored legs a caller of the bare seam could leave until plan task
+    plan#3077 deleted it with the deploy's ledger hooks.
     """
 
     def test_the_seam_alone_un_dates_the_movement_and_keeps_it(

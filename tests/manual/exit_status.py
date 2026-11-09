@@ -1,8 +1,10 @@
 """A measurement on a production copy that measured nothing exits 2, never Python's own 1.
 
-Five production-dump measurements read one exit status, each arming this module: the three
-runners ``run_*_on_dump.py``, and ``verify_worked_out_ledger.py`` and
-``measure_worked_out_read.py``, which they run.  It is 0 clean, 1 figures part (a difference it
+Three production-dump measurements read one exit status, each arming this module: the two
+runners ``run_*_on_dump.py``, and ``measure_worked_out_read.py``, which they run (a third
+runner, ``run_worked_out_ledger_on_dump.py``, and the harness it ran,
+``verify_worked_out_ledger.py``, went at plan task plan#3077 with the deploy's cash resync
+that harness checked).  It is 0 clean, 1 figures part (a difference it
 measured, a question for the developer), 2 nothing measured.  The figure baselines and the render
 probe a runner also runs do not read it: any non-zero of theirs is nothing measured to the runner
 (``_dump_runs.run_pinned_on``).  Python ends any uncaught exception with status 1, so however

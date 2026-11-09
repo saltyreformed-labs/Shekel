@@ -56,7 +56,8 @@ keep working unchanged:
   three correction kinds, one delta loop (``reconcile_loan_corrections``).
 * :mod:`._sync` -- the UNIFIED per-scenario sync (``sync_loan_postings``: one walk,
   one reconcile), the loan-GLOBAL all-scenarios sync, the duplicate translation,
-  and the historical backfill.
+  and the per-user re-sync (the historical backfill went with the deploy's
+  hooks at plan task plan#3077).
 * :mod:`._display` -- the loan-detail page's two surfaces, both read off the
   walk.  This package answers no balance: the two sum-of-postings balance
   readers it once held (``confirmed_loan_balance_at`` /
@@ -119,7 +120,6 @@ from ._display import (
     loan_balance_anchor_history,
 )
 from ._sync import (
-    backfill_all_loan_postings,
     resync_user_loan_postings,
     scenarios_with_loan_payments,
     sync_all_scenarios_or_duplicate,
@@ -130,7 +130,6 @@ from ._sync import (
 __all__ = [
     "LoanAnchorDrift",
     "LoanPaymentHistoryRow",
-    "backfill_all_loan_postings",
     "confirmed_loan_payment_history",
     "loan_balance_anchor_history",
     "resync_user_loan_postings",

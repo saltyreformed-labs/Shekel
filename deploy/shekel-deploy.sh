@@ -69,10 +69,11 @@
 #     the last 10 releases were pure digest reverts.
 #
 # Since plan step balance:X-cv, entrypoint step 3 is ONE transaction: the
-# migrations, the reference seed, the three deploy hooks and the audit-trigger
-# check in `scripts/init_database.py` commit together or not at all.  So a
-# failure INSIDE step 3 -- a migration that errors, a hook that refuses, a
-# missing audit trigger -- leaves the stamp where it was, and this
+# migrations, the reference seed and the audit-trigger check in
+# `scripts/init_database.py` commit together or not at all (three ledger
+# hooks ran inside it too until plan task plan#3077).  So a failure INSIDE
+# step 3 -- a migration that errors, a seed that fails, a missing audit
+# trigger -- leaves the stamp where it was, and this
 # script re-pins the previous image even for a migration-bearing release.
 # Only a failure AFTER step 3 has committed (a later entrypoint step, or the
 # health check) leaves the new stamp, and that is the case the refusal still
@@ -924,8 +925,8 @@ preflight_migrations "$old_digest" "$new_digest"
 if [ -n "$ADDED_REVISIONS" ]; then
     log "MIGRATION-BEARING release: the target adds these revisions --"
     printf '%s\n' "$ADDED_REVISIONS" | sed 's/^/    /'
-    log "  Entrypoint step 3 runs them, the seeds, the deploy hooks and the"
-    log "  audit-trigger check in ONE transaction, so a failure there leaves the"
+    log "  Entrypoint step 3 runs them, the seeds and the audit-trigger check"
+    log "  in ONE transaction, so a failure there leaves the"
     log "  stamp where ${old_short} can resolve it and the rollback applies."
     log "  If step 3 COMMITS and a later step or the health check then fails,"
     log "  re-pinning ${old_short} will NOT work.  This script re-reads the stamp"

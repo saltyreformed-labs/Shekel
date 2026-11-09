@@ -5717,9 +5717,9 @@ def open_books_before_the_first_assertion(
     # that entry on a day the books no longer open -- the stale-key-plus-
     # reversal shape ``tests/conftest.py``'s own factory comment warns about.
     # The reconcile is idempotent and self-healing, and re-running it is what
-    # PRODUCTION does after the same restatement (the deploy's
-    # ``backfill_all_account_anchor_postings``), so the fixture takes the same
-    # path rather than a shortcut.
+    # PRODUCTION's deploy did after the same restatement (its account
+    # backfill, until plan task plan#3077 deleted the deploy's hooks), so the
+    # fixture takes the same path rather than a shortcut.
     account_posting_service.sync_account_anchor_postings_all_scenarios(
         account.id,
     )

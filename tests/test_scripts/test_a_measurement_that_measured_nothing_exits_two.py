@@ -13,38 +13,31 @@ database, as ``test_seed_ref_tables`` points its child.
 """
 from __future__ import annotations
 
-import io
 import pathlib
 import subprocess
 import sys
-from datetime import datetime
-from decimal import Decimal
-from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 from sqlalchemy import text
 
-from tests._test_helpers import create_settled_cash_transaction
 from tests.manual import exit_status
 from tests.manual import run_deploy_rewrites_on_dump as deploy_rewrites
-from tests.manual import run_worked_out_ledger_on_dump as worked_out_ledger
-from tests.manual import verify_worked_out_ledger as harness
 from tests.test_scripts._production_child import production_env
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _MANUAL = _REPO_ROOT / "tests" / "manual"
 _PROBE = _MANUAL / "measure_worked_out_read.py"
-_HARNESS = _MANUAL / "verify_worked_out_ledger.py"
-_READING_A_COPY = (_PROBE, _HARNESS)
+# ``verify_worked_out_ledger.py`` read a copy too, and
+# ``run_worked_out_ledger_on_dump.py`` ran it, until plan task plan#3077 deleted
+# both: the harness checked the store the deploy's cash resync had just
+# brought to target, and the resync went with the deploy's hooks.
+_READING_A_COPY = (_PROBE,)
 _EVERY_MEASUREMENT = (
     *_READING_A_COPY,
     _MANUAL / "run_deploy_rewrites_on_dump.py",
     _MANUAL / "run_statements_on_dump.py",
-    _MANUAL / "run_worked_out_ledger_on_dump.py",
 )
-# What the harness's report says when it reached its own verdict of nothing.
-_ITS_OWN_VERDICT = "this run measured nothing"
 # Where Python's own printing of an uncaught exception opens.
 _A_CRASH = "Traceback (most recent call last)"
 # No child reads this: each that is handed it ends before it connects.
@@ -72,21 +65,6 @@ def _by_name(path):
     return path.stem
 
 
-def _no_pay_schedule(db, owner_id):
-    """Delete *owner_id*'s pay schedule, leaving a calendar nothing can derive.
-
-    Triggers and foreign keys are off for the delete: the owner's pay periods
-    reference the row, and they are not what the refusal needs gone.
-    """
-    db.session.execute(text("SET session_replication_role = replica"))
-    db.session.execute(
-        text("DELETE FROM budget.pay_schedule WHERE user_id = :owner"),
-        {"owner": owner_id},
-    )
-    db.session.execute(text("SET session_replication_role = DEFAULT"))
-    db.session.commit()
-
-
 class TestACopyThatCannotBeRead:
     """A copy the run cannot read is nothing measured, whichever way it fails."""
 
@@ -112,7 +90,7 @@ class TestACopyThatCannotBeRead:
 
     @pytest.mark.parametrize("script", _READING_A_COPY, ids=_by_name)
     def test_a_crash_part_way_exits_two(self, script, db, tmp_path):
-        """A table gone once the app is up exits 2, with its report opened and no verdict.
+        """A table gone once the app is up exits 2, with its report opened.
 
         ``create_app`` reads no scenario, so the run starts and its report opens, which is
         what parts this failure from the one above; every run reads the scenarios.
@@ -128,7 +106,7 @@ class TestACopyThatCannotBeRead:
         assert result.returncode == 2, result.stdout + result.stderr
         assert _A_CRASH in result.stderr
         assert "budget.scenarios" in result.stderr
-        assert _ITS_OWN_VERDICT not in report.read_text(encoding="utf-8")
+        assert report.exists()
 
     @pytest.mark.parametrize("script", _READING_A_COPY, ids=_by_name)
     def test_a_report_already_there_cannot_start(self, script, db, tmp_path):
@@ -155,62 +133,6 @@ class TestACopyThatCanBeRead:
         assert result.returncode == 0, result.stdout + result.stderr
         assert _A_CRASH not in result.stderr
         assert report.exists()
-
-    def test_the_harness_on_a_copy_with_no_owner_says_so_itself(self, db, tmp_path):
-        """With nothing planted it starts and reaches its OWN exit 2: no control ran."""
-        report = tmp_path / "report.txt"
-
-        result = _read_copy(_HARNESS, db, report)
-
-        assert result.returncode == 2, result.stdout + result.stderr
-        assert _A_CRASH not in result.stderr
-        assert _ITS_OWN_VERDICT in report.read_text(encoding="utf-8")
-
-
-class TestAnOwnerTheReadRefuses:
-    """An owner the worked-out read refuses is not a figure that moved."""
-
-    def test_the_harness_exits_two_naming_the_owner(self, seed_user, db, tmp_path):
-        """An owner with no pay schedule: REFUSED in the report, its own exit 2, no crash."""
-        owner_id = seed_user["user"].id
-        _no_pay_schedule(db, owner_id)
-        report = tmp_path / "report.txt"
-
-        result = _read_copy(_HARNESS, db, report)
-
-        written = report.read_text(encoding="utf-8")
-        assert result.returncode == 2, written + result.stdout + result.stderr
-        assert _A_CRASH not in result.stderr
-        assert f"owner {owner_id}, scenario" in written
-        assert "the worked-out read REFUSED" in written
-        assert _ITS_OWN_VERDICT in written
-
-    def test_beside_an_owner_whose_controls_fired_it_is_still_two(
-        self, app, db, seed_user, seed_periods, seed_second_user,
-    ):
-        """One owner refused and another's controls fired: 2, where it counted as exit 1.
-
-        The refusal counted as one UNEXPLAINED before.  The other owner holds a stored entry,
-        so its controls run; they are stubbed as fired, their plants needing four kinds of
-        record this fold does not read.  That they ran is asserted: with no control run the
-        run is 2 for that reason alone, whatever a refusal counts as.
-        """
-        with app.app_context():
-            create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("40.00"),
-            )
-            db.session.commit()
-            _no_pay_schedule(db, seed_second_user["user"].id)
-            report = io.StringIO()
-
-            with mock.patch.object(
-                harness, "run_controls", return_value=(["   stubbed"], True),
-            ) as controls:
-                status = harness.measure(report)
-
-        controls.assert_called_once()
-        assert status == 2, report.getvalue()
-        assert "the worked-out read REFUSED" in report.getvalue()
 
 
 class TestEveryMeasurementIsArmedBeforeItsImports:
@@ -322,14 +244,3 @@ class TestWhatARunnerTakesFromAMeasurement:
             )
 
         assert folded == status
-
-    @pytest.mark.parametrize("returncode, status", ((0, 0), (1, 1), (2, 2), (-9, 2)))
-    def test_the_worked_out_ledger_run_takes_its_harness(self, returncode, status, tmp_path):
-        """A verdict passes as it is, and a harness killed is nothing measured."""
-        finished = subprocess.CompletedProcess([], returncode, stderr="")
-        with mock.patch.object(worked_out_ledger.bench, "run", return_value=finished):
-            taken = worked_out_ledger._measure(
-                SimpleNamespace(worktree=tmp_path), {}, datetime(2026, 11, 4, 12), tmp_path,
-            )
-
-        assert taken == status

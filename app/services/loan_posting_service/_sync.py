@@ -1,4 +1,4 @@
-"""Loan posting orchestration: unified per-scenario sync, all-scenarios, backfill.
+"""Loan posting orchestration: unified per-scenario sync, all-scenarios, per-user.
 
 The entry points that drive a loan's FULL genesis reconcile -- the opening /
 true-up anchor corrections and the per-payment split corrections, ONE
@@ -15,8 +15,9 @@ the balance interest accrued on and no chokepoint walks the loan twice:
   anchor corrections in every scenario at once.
 * :func:`sync_all_scenarios_or_duplicate` -- the same, wrapped for the two
   chokepoints that append a unique-constrained row and translate its duplicate.
-* :func:`backfill_all_loan_postings` -- the one-time historical sweep, reusing
-  the identical go-forward sync so backfill == go-forward by construction.
+* :func:`resync_user_loan_postings` -- every loan one user owns.  Its
+  deploy-wide twin over every owner's loans went with the deploy's hooks at
+  plan task plan#3077.
 
 Flushes but never commits -- the caller owns the transaction boundary.
 """
@@ -28,7 +29,6 @@ from app.models.transfer import Transfer
 from app.services import loan_loaders
 from app.services._posting_reconcile import account_owner_id
 from app.services.scenario_resolver import get_baseline_scenario
-from app.services.user_write_lock import lock_every_user_writes
 from app.utils.db_errors import is_unique_violation
 
 from app.services.loan_ledger import walk_loan_ledger
@@ -113,10 +113,11 @@ def sync_loan_postings(loan_account_id: int, scenario_id: int) -> None:
     **Runs under the owner's write lock, which every caller already holds**:
     a signed-in request's command transaction takes it before its view reads
     anything of the owner's (plan step ``balance:X-bn``,
-    :mod:`app.db_transaction`), and the deploy reconciles take every owner's
-    at their start; plan step X-f1c3c took it here, before the walk, until
-    then.  Registration never reaches this: it creates no loan.  Both
-    reconciles below are read-modify-writes -- read what is posted, subtract
+    :mod:`app.db_transaction`), and the deploy reconciles took every
+    owner's at their start until plan task plan#3077 deleted them; plan step
+    X-f1c3c took it here, before the walk, until ``balance:X-bn``.
+    Registration never reaches this: it creates no loan.  Both reconciles
+    below are read-modify-writes -- read what is posted, subtract
     it from what the walk says, write the difference -- and two of them
     interleaved both compute their delta against the same posted state.
     The loan half never had even the accidental serialisation the cash half
@@ -251,14 +252,12 @@ def sync_all_scenarios_or_duplicate(
 def _reconcile_loan_account_ids(loan_account_ids: list[int]) -> list[int]:
     """Reconcile the given loan accounts across all their scenarios; return them.
 
-    The shared body of the deploy-wide backfill
-    (:func:`backfill_all_loan_postings`) and the per-user reset re-sync
-    (:func:`resync_user_loan_postings`): each id is reconciled through
-    :func:`sync_loan_postings_all_scenarios`, the identical go-forward sync (so a
-    reconciled correction is identical to a go-forward one by construction --
-    there is no second implementation that could drift).  The two public
-    functions differ ONLY in their enumerator (all loans vs one user's), which
-    stays with each of them; this holds the loop itself in one place.
+    The body of the per-user re-sync (:func:`resync_user_loan_postings`):
+    each id is reconciled through :func:`sync_loan_postings_all_scenarios`,
+    the identical go-forward sync (so a reconciled correction is identical to
+    a go-forward one by construction -- there is no second implementation that
+    could drift).  The deploy-wide backfill shared it until plan task
+    plan#3077 deleted it.
 
     Flushes but does NOT commit -- the caller owns the transaction boundary.
 
@@ -273,53 +272,10 @@ def _reconcile_loan_account_ids(loan_account_ids: list[int]) -> list[int]:
     return loan_account_ids
 
 
-def backfill_all_loan_postings() -> list[int]:
-    """Reconcile every loan's full genesis ledger across all scenarios (backfill).
-
-    The one-time, production-wide historical backfill: for every configured loan
-    account, across all owners
-    (:func:`app.services.loan_loaders.load_all_loan_account_ids`),
-    reconcile its opening, true-up, and confirmed-payment corrections via
-    :func:`sync_loan_postings_all_scenarios`.  This posts the corrections for any
-    loan / payment settled BEFORE the go-forward wiring shipped (which therefore
-    carries none), so the ledger is complete on real historical data.
-
-    Reuses the SAME per-loan sync the go-forward chokepoints call, so a
-    backfilled correction is identical to the go-forward one by construction --
-    there is no second implementation that could drift.  Idempotent and
-    self-healing via reconcile-to-target: a loan already carrying its go-forward
-    corrections is already at target, so nothing is re-posted -- the backfill
-    never double-posts, and a re-run at the same state writes nothing.
-
-    Flushes but does NOT commit -- the caller owns the transaction boundary: the
-    deploy (``scripts.init_database.initialise_database``, whose ONE commit
-    covers the migrations and all three deploy hooks, and which initialises
-    ``ref_cache`` first because the migration host does not; plan step
-    ``balance:X-cv``), the backfill suite, or the reconciliation oracle.
-
-    **One of the two transactions in the app that reconcile more than one
-    OWNER** (the cash twin ``backfill_all_account_anchor_postings`` is the
-    other), so it takes every per-user write lock up front, ascending by user id
-    (:func:`app.services.user_write_lock.lock_every_user_writes`), before the
-    first loan is visited.  The loop below walks loans ascending by ACCOUNT id,
-    which visits owners in no particular order; pre-taking the locks makes the
-    acquisition order a property of this function rather than of the loan
-    table's contents, so two concurrent sweeps cannot take the same two keys in
-    opposite orders.
-
-    Returns:
-        The loan account ids reconciled, ascending -- for the deploy log and
-        test introspection (empty on a loan-free database).
-    """
-    lock_every_user_writes()
-    return _reconcile_loan_account_ids(loan_loaders.load_all_loan_account_ids())
-
-
 def resync_user_loan_postings(user_id: int) -> list[int]:
     """Reconcile every loan a SINGLE user owns across all its scenarios.
 
-    The per-user counterpart to :func:`backfill_all_loan_postings`: iterates only
-    *user_id*'s configured loans
+    Iterates only *user_id*'s configured loans
     (:func:`app.services.loan_loaders.load_loan_account_ids_for_user`) and
     reconciles each through :func:`sync_loan_postings_all_scenarios`, reusing the
     identical go-forward sync so a re-synced correction is identical to a
@@ -339,9 +295,8 @@ def resync_user_loan_postings(user_id: int) -> list[int]:
     true-up :class:`~app.models.loan_anchor_event.LoanAnchorEvent` rows carry
     no ``pay_period_id`` -- so this re-derives and re-posts the genesis
     corrections onto the schedule that stands, attributed to its periods.
-    Scoped to the one user because both are single-user operations: unlike
-    the deploy backfill neither may reconcile other owners' loans inside its
-    transaction.
+    Scoped to the one user because both are single-user operations: neither
+    may reconcile other owners' loans inside its transaction.
 
     Idempotent and self-healing via reconcile-to-target.  Flushes but does NOT
     commit -- the caller owns the transaction boundary (the route's commit).

@@ -68,36 +68,24 @@ side's record holds no figure, and ``cash_ledger.movement_cash_leg`` is the
 one producer of each side's signed cash.
 """
 
-import logging
-
-from sqlalchemy.orm import selectinload
-
-from app.extensions import db
 from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.services import posting_reads
 from app.services.ledger_lines import purchase_posts
-from app.services.posting_reads import PostingError
 from app.services.transfer_legs import (
     movement_parent,
     transfer_family_movements,
 )
-from app.services.user_write_lock import lock_every_user_writes
-from app.services._posting_purchases import (
-    emit_purchase_deltas,
-    posted_purchase_exists_clause,
-)
-from app.utils.balance_predicates import settled_status_ids
-
-logger = logging.getLogger(__name__)
+from app.services._posting_purchases import emit_purchase_deltas
 
 # Re-exported read-side API.  The reconciliation readers moved to
 # :mod:`app.services.posting_reads` when this module crossed the size gate
 # (the sibling-split convention); the ledger's one public surface stays HERE,
 # so the oracles and the loan posting package keep reading them off the
-# writer module.  ``PostingError`` above is a re-export of the same kind (this
-# module also uses it itself); ``_ledger_account_for`` is one too, stated
+# writer module.  ``PostingError`` is a re-export of the same kind (this
+# module caught it itself until plan task plan#3077 deleted the deploy
+# resync, its last use here); ``_ledger_account_for`` is one too, stated
 # here since plan step ``balance:X-bi-6-3`` deleted this module's own last
 # reader of it (the transfer target builds inside the movement writer now),
 # and so are the balanced-write primitives imported from the
@@ -108,6 +96,7 @@ logger = logging.getLogger(__name__)
 # is this module's public surface and the loan package reads it here.
 # pylint: disable-next=protected-access
 _ledger_account_for = posting_reads._ledger_account_for
+PostingError = posting_reads.PostingError
 account_posting_total = posting_reads.account_posting_total
 settled_transfer_effect = posting_reads.settled_transfer_effect
 posted_purchase_effect = posting_reads.posted_purchase_effect
@@ -125,9 +114,10 @@ def _self_heal_account_anchor_corrections(
     :func:`sync_transfer_postings` and :func:`sync_transaction_postings`
     (which every settle and revert path routes through), and called ONCE per
     scenario after a batch by :func:`re_check_held_anchor_corrections` --
-    after :func:`resync_all_cash_postings`' whole loop with every entry that
-    loop emitted (ruling **R-BAL103**), after the one removal act's
-    deletes with every reversal it emitted (ruling **plan#2564**).  It
+    after the one removal act's deletes with every reversal it emitted
+    (ruling **plan#2564**), and after the deploy resync's whole loop with
+    every entry that loop emitted (ruling **R-BAL103**) until plan task
+    plan#3077 deleted the resync.  It
     QUEUED onto an act's hold rather than walking, and the act's close ran
     it once (``holding_the_anchor_re_check``, ruling **plan#2574**), until
     plan task plan#3075 deleted the hold with its last caller, the
@@ -242,9 +232,10 @@ def sync_transfer_postings(xfer: Transfer) -> list[JournalEntry]:
 def _rebook_transfer_family(xfer: Transfer) -> "list[JournalEntry]":
     """Bring *xfer*'s family to target; re-check no anchor correction.
 
-    :func:`sync_transfer_postings`' first half.  The deploy resync runs it
-    for every transfer and re-checks the anchors ONCE after its loop (ruling
-    **R-BAL103**; :func:`resync_all_cash_postings` says why).  Returns the
+    :func:`sync_transfer_postings`' first half, split off so the deploy
+    resync could run it for every transfer and re-check the anchors ONCE
+    after its loop (ruling **R-BAL103**), until plan task plan#3077 deleted
+    the resync.  Returns the
     emitted deltas, ``[]`` at target.  The family and each movement's LEG
     are
     :func:`~app.services.transfer_legs.transfer_family_movements`' (leaf
@@ -376,8 +367,9 @@ def _rebook_transaction_family(txn: Transaction) -> "list[JournalEntry]":
     """Bring *txn*'s family to target; re-check no anchor correction.
 
     :func:`sync_transaction_postings`' first half, run by the deploy resync
-    for every row before its one anchor re-check (ruling **R-BAL103**).
-    Returns the emitted deltas, ``[]`` at target.
+    for every row before its one anchor re-check (ruling **R-BAL103**) until
+    plan task plan#3077 deleted the resync.  Returns the emitted deltas,
+    ``[]`` at target.
     """
     entries: list[JournalEntry] = []
     for purchase in txn.entries:
@@ -453,13 +445,14 @@ def re_check_held_anchor_corrections(
 ) -> None:
     """Run a batch's held anchor re-check: once per scenario, scenarios ascending.
 
-    The ONE re-check after a batch, shared by the deploy resync (ruling
-    **R-BAL103**: after every source is re-booked), the one removal act
-    (ruling **plan#2564**: after its deletes have flushed,
+    The ONE re-check after a batch: the one removal act's (ruling
+    **plan#2564**: after its deletes have flushed,
     :func:`reverse_leaving_movements` held it), so the walk reads the
     records as the batch leaves them.  The close of an act's hold
     (``holding_the_anchor_re_check``, ruling **plan#2574**) ran it too until
-    plan task plan#3075 deleted the hold.  A no-op when *held* is empty.
+    plan task plan#3075 deleted the hold, and the deploy resync (ruling
+    **R-BAL103**: after every source is re-booked) until plan task plan#3077
+    deleted that.  A no-op when *held* is empty.
 
     Args:
         held: A scenario id -> the entries emitted there, as
@@ -485,321 +478,3 @@ def _hold_for_the_re_check(
     re-checks are read off those entries' legs (plan task plan#2613).
     """
     held.setdefault(scenario_id, []).extend(entries)
-
-
-def _skip_reasons(skipped: "dict[int, str]") -> str:
-    """Return the resync's skipped transfers and each one's reason, as one line.
-
-    The skip warning's reason clause.  *skipped* maps a transfer id to the
-    ``PostingError`` message its family raised, and is never empty here: the
-    warning is logged only when the pass skipped something.  It was shared
-    with ruling **R-BAL104**'s refusal, which could fire with nothing skipped,
-    until plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845)
-    deleted the refusal with the legacy entries it asked about.
-    """
-    return "Why: " + "; ".join(
-        f"transfer {transfer_id}: {reason.rstrip('.')}"
-        for transfer_id, reason in skipped.items()
-    ) + "."
-
-
-def resync_all_cash_postings() -> tuple[int, int]:
-    """Re-reconcile every settled cash source's postings (deploy resync).
-
-    The transaction / transfer twin of
-    :func:`app.services.loan_posting_service.backfill_all_loan_postings` and
-    :func:`app.services.account_posting_service.backfill_all_account_anchor_postings`,
-    and the third of the three deploy-time reconciles that between them cover
-    every journal entry the app writes.  It exists because those two do NOT
-    reach an ordinary transaction or a NON-loan transfer: the loan package's
-    staleness detector was scoped to one loan's linked ledger (its lineage
-    pass, deleted with the checked-projection assert at plan task plan#3093)
-    and the anchor
-    backfill reconciles only the corrections, so a checking-to-savings transfer
-    and every ordinary settled row were maintained per-mutation and by nothing
-    else.
-
-    **What it is FOR, and why it is a permanent hook rather than a one-off**
-    (ruling R-DH (b), ``docs/audits/balance_architecture/archive/anchor_settle_partition.md``).
-    ``journal_entries.entry_date`` is the movement's own ``settled_on`` for
-    every movement-sourced entry (``_posting_purchases.emit_purchase_deltas``;
-    a transfer's two since plan step ``balance:X-bi-6-3``), a day that moved
-    from the UTC civil day to the user's on 2026-07-31.  Every entry written before that
-    carries the old day, so the STORED ledger and the two folds that now read
-    the new one disagree for any settle recorded between midnight UTC and the
-    user's midnight -- on production, one ``$1,910.95`` mortgage payment
-    stamped 2026-07-02 00:38:53 UTC that belongs to the evening of 2026-07-01.
-    This walks every source back through the SAME go-forward sync, so a
-    re-dated entry is identical to a freshly posted one by construction; there
-    is no second implementation of the rule and no SQL restatement of it,
-    which is the property this whole arc exists to hold.  **It is also how
-    two source shapes were retired**: the first deploy after plan step
-    ``balance:X-bi-4a`` reversed the TRANSACTION source to zero (ruling
-    **R-BAL80**: a plan row posts nothing of its own), and the first after
-    ``balance:X-bi-6-3`` RE-BOOKED every settled transfer into its ruled shape
-    (rulings **R-BAL45**, **R-BAL98**: the one-entry ``transfer`` source
-    reversed to zero, the two per-movement entries posted against the owner's
-    transit account, 19 transfers on the 2026-09-22 17:06 production dump) --
-    each through the code every settle runs, so no SQL restated it.  Plan
-    step ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted both
-    retired arms, and its migration every entry they had reversed (ruling
-    plan#1867).
-
-    **It re-books EVERY source first and re-checks the anchor corrections
-    ONCE, after both arms** (ruling **R-BAL103**, developer 2026-09-22).  The
-    per-source doors re-check at once, right for one settle and, while the
-    walk read what was posted, wrong for a batch: a source not yet reached
-    still held what it posted before this pass, so a walk inside the loop
-    booked a true-up for money only waiting its turn and that source's own
-    re-check reversed it -- both permanent in an append-only ledger, 40 of
-    the 97 entries the first 6-3 deploy wrote on its
-    rehearsal over the 2026-09-22 production dump, where the waiting money
-    was the legacy one-entry transfer postings.  So both arms run the doors'
-    re-book halves
-    (:func:`_rebook_transaction_family`, :func:`_rebook_transfer_family`) and
-    the one re-check per scenario (one owner's; the self-heal takes no lock,
-    and this function took every owner's at its start) reads the finished
-    ledger.  The union's earliest day can only make the re-check run where
-    one source alone would skip it.  **Since plan task plan#2525 the waiting
-    money cannot mislead a walk at all**: the account walk reads the RECORDS
-    rather than what is posted, so a re-check inside the loop would book the
-    same corrections this one does.  The hold stays because one walk per
-    scenario is cheaper than one per source, and a re-check still writes
-    wherever a re-booked source's RECORD moved across an assertion.
-
-    **From plan step ``balance:X-bi-6-3`` it REFUSED to finish while any
-    transfer still held a nonzero legacy net** (ruling **R-BAL104**, amended
-    by **R-BAL105**): a family it skipped kept its legacy posting, which the
-    account walk could not see, so a later true-up would have booked a wrong
-    correction.  Plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845)
-    deleted the refusal: its migration deleted every legacy entry, each pair
-    at zero on its own key, so there is no money left the walk cannot see
-    (ruling plan#1867).
-
-    It stays wired on every deploy rather than being deleted after one run, for
-    the same reason its two siblings are: reconcile-to-target makes it a no-op
-    at target, so it costs one pass and converts any future drift -- a rule
-    change, a hand-edited row, a half-applied migration -- into a self-heal
-    instead of a silent divergence.
-
-    Idempotent and self-healing.  A settled row already at target posts nothing;
-    a row whose target DATE moved gets its old-date legs reversed and its new
-    -date legs posted in one balanced pair by the re-book halves of
-    :func:`sync_transaction_postings` / :func:`sync_transfer_postings`, which
-    reconcile over the ``(period, entry_date)`` keys already in the ledger
-    unioned with the target (plan step E1a's per-date attribution) -- so a
-    moved date is an ordinary reconcile, not a special case this function has to
-    know about.
-
-    Loan payment transfers are re-synced here too and that is deliberate
-    duplication of effort, not of RULE: the loan package would reach the same
-    ones through its own detector, and both paths reach this module's
-    :func:`_rebook_transfer_family`, so whichever runs first leaves the other at
-    target.  **Its transfer half is total over the family the ledger holds
-    for the same reason its transaction half is** (below): it walks every
-    live transfer that is settled -- a side's record is dated, and so posts,
-    only while its transfer is (the status-band rule) -- and hands each to
-    the pair's door, which reads each movement's own state.
-
-    Flushes but does NOT commit -- the caller owns the transaction boundary
-    (``scripts.init_database.initialise_database``, whose ONE commit covers the
-    migrations and all three deploy hooks, and which initialises ``ref_cache``
-    first because the migration host does not).
-
-    **The counts are sources CHANGED, not sources walked** (finding N-133 / F8).
-    A hook that rewrites the whole production ledger on every deploy and reports
-    the same number whether it moved every date or nothing at all tells the
-    operator only that it ran.  Both sync functions return the journal entries
-    they emitted -- empty when already at target -- so "changed" is observable
-    without a second query, and a healthy deploy logs ``0, 0``.  The FIRST
-    deploy after a dating rule moves is the one that logs a non-zero count, and
-    that line is the only evidence the one-time re-date happened.
-
-    **The re-date is ONE-WAY, and that is a stated risk rather than a
-    discovered one.**  ``entrypoint.sh`` runs ``set -eEuo pipefail`` and calls
-    ``scripts/init_database.py``, so a failure here aborts the container
-    before anything commits -- the release's migrations included, since plan
-    step ``balance:X-cv`` runs them and the three deploy hooks in ONE
-    transaction -- so the stamp is unmoved and ``deploy/shekel-deploy.sh``
-    re-pins the previous image.  And if the healthcheck
-    fails AFTER this commits, the rolled-back image reads a display-dated
-    ledger with the previous image's UTC rules, and only the entries whose two
-    days differ are affected (on production at the cutover: one payment, one
-    day).  Rolling back ACROSS a re-date or a re-book therefore follows
-    ``deploy/shekel-deploy.sh``'s rollback instructions; for a
-    migration-bearing release that is the pre-deploy dump it names.
-
-    **It is the THIRD multi-owner transaction, and it takes every per-user
-    write lock up front** (plan step X-f1c3c, finding N-193).  It iterates every
-    owner's settled rows in ID order, and each one reached the anchor
-    self-heal and so, until plan step ``balance:X-bn`` deleted the per-service
-    acquisitions, that owner's lock -- an unordered multi-key acquisition,
-    which is exactly what two concurrent sweeps deadlock on.  "Up front" is
-    this FUNCTION's start, not the transaction's: the deploy runs the release's
-    migrations and reference seed earlier in the same transaction
-    (``scripts/init_database.py``), before any owner's lock is held.  Taking
-    every owner's lock ascending here is what now covers every write this
-    reconcile makes, since no service below takes one.  A
-    first version of the lock's docstring called the two backfill functions
-    "the only multi-owner transactions" and missed this one, which is the FIRST
-    of the three deploy hooks to run.
-
-    **Its transaction half is no longer settled-only** (ruling **R-FM**, plan
-    step X-f3b): it walks every non-transfer row that is settled OR carries a
-    purchase with a recorded bank posting day, and passes each row its own
-    settled truth.  That is what makes the hook total over the family the ledger
-    now holds -- a purchase against a still-Projected envelope is real cash that
-    left the bank -- and it is what moves the existing rows onto the new split
-    without a backfill: the first deploy after migration ``b7c3d9e1f204``
-    reverses the part of each envelope's cash leg its posted purchases now own
-    and posts those purchases at their own days, in one balanced pass per row.
-
-    Returns:
-        ``(transactions_changed, transfers_changed)`` -- how many sources this
-        pass actually re-posted, for the deploy log.
-
-    Raises:
-        PostingError: If a ROW's family cannot post (the transaction arm
-            does not skip), or if the one anchor re-check
-            refuses an account (a correction to book and no linked ledger to
-            book it on, refused at the reconcile's emit step; the walk read
-            posted nets it could also refuse until plan task plan#2525).  In
-            every case the caller's transaction must not commit.
-    """
-    lock_every_user_writes()
-    settled_ids = settled_status_ids()
-    transactions = (
-        db.session.query(Transaction)
-        .options(
-            selectinload(Transaction.entries),
-            # **``joinedload(Transaction.pay_period)`` is GONE, and both readers
-            # it was added for went first** (plan step ``pay_calendar:C13-b``).
-            # It was here for finding N-133 / F9 -- 122 extra SELECTs on
-            # production's settled set -- because the row's own entry date
-            # read the period's ``start_date`` as a NULL fallback and the
-            # row's own target read ``pay_period.user_id``.  Plan step X-f1
-            # deleted the first when ``settled_on`` replaced ``paid_at``;
-            # C13-b moved the second onto ``txn.user_id``; plan step
-            # ``balance:X-bi-4a`` deleted both readers with the row's own
-            # leg.  The comment outlived the first two and named live
-            # dereferences that no longer existed, which is what an
-            # adversarial review caught.
-            # **Measured 2026-09-03 rather than deduced**: with the option this
-            # walk hydrates ONE ``PayPeriod``, without it ZERO -- so nothing
-            # lazy-loads in its place and no autoflush moves into the loop.
-            # The whole walk is enumerable here because no row can name a
-            # transfer (the table has no column for one since plan step
-            # ``balance:X-bi-6-5``), so the transfer arm that made
-            # ``reconcile_service._rows``' twin undecidable does not apply.
-        )
-        .filter(
-            Transaction.is_deleted.is_(False),
-            # SETTLED, or carrying a purchase that has posted a leg of its own
-            # (ruling **R-FM**, plan step X-f3b).  The second arm is what makes
-            # this hook TOTAL over the family the ledger now holds: a purchase
-            # against a still-PROJECTED envelope is real cash that left the bank,
-            # and without it that envelope's legs would be maintained by
-            # per-mutation calls and by nothing else -- the exact gap this
-            # function exists to close for transactions.  The first arm
-            # reached every row the TRANSACTION source ever posted for (a row
-            # posted its own leg only while settled), so the resync after plan
-            # step ``balance:X-bi-4a`` brought that source to zero; plan#1845
-            # deleted that source, and the arm still walks every settled
-            # row's family.  It is an EXISTS rather than a join so a row with
-            # several posted purchases is walked once.
-            db.or_(
-                Transaction.status_id.in_(settled_ids),
-                posted_purchase_exists_clause(),
-            ),
-        )
-        .order_by(Transaction.id)
-        .all()
-    )
-    # Every source's re-book is HELD for the one anchor re-check after both
-    # arms (ruling **R-BAL103**): scenario -> entries emitted there.
-    held: dict[int, list[JournalEntry]] = {}
-    transactions_changed = 0
-    for txn in transactions:
-        entries = _rebook_transaction_family(txn)
-        if entries:
-            transactions_changed += 1
-            _hold_for_the_re_check(held, txn.scenario_id, entries)
-
-    transfers = (
-        db.session.query(Transfer)
-        .filter(
-            # LIVE and SETTLED (plan step ``balance:X-bi-6-3``, ruling
-            # **R-BAL101**) -- the transaction arm's totality argument: this
-            # reaches every transfer that could hold a leg today, since a
-            # side's record posts only while dated
-            # (``ledger_lines.purchase_posts``) and is dated only while
-            # its transfer is settled (the status-band rule,
-            # ``app.side_band_infrastructure``).  It reached a live transfer
-            # holding a dated record on either side too, whatever its
-            # status, until plan step ``balance:X-bi-6-5``'s third leaf
-            # deleted that disjunct, which the band rule left reaching
-            # nothing more.  Another reached every transfer, live or not,
-            # the legacy one-entry source ever posted for, until plan#1845
-            # deleted that source and its entries.
-            Transfer.is_deleted.is_(False),
-            Transfer.status_id.in_(settled_ids),
-        )
-        .order_by(Transfer.id)
-        .all()
-    )
-    # **A broken FAMILY is skipped and reported, not allowed to abort the
-    # batch** (developer ruling, 2026-08-17).  The pair's door raises
-    # ``PostingError`` -- correctly -- for a movement whose account has no
-    # linked ledger account, a broken chart-of-accounts pairing.
-    #
-    # That refusal is right for a SINGLE write path, where a caller asking about
-    # one transfer must not get a fabricated posting.  It is wrong for a batch
-    # self-heal that walks every row in the database and runs at container start
-    # (``scripts/init_database.py``): one repairable row would make the app
-    # unbootable for every user, and the operator could not even reach the
-    # screen that shows which row it was.  Skipping keeps the failure loud in
-    # the log and bounded to the family that caused it.
-    #
-    # **Skipped WHOLE, under a SAVEPOINT** (the leaf-1 adversarial review of
-    # plan step ``balance:X-bi-6-3``, finding 1).  The pair's door writes in
-    # sequence -- one side, then the other -- and a refusal on the second side
-    # would otherwise leave the first side committed by the deploy: the
-    # from-account debited into transit
-    # with nothing arriving, a trial balance that still closes, and no reader
-    # to trip.  The one-entry door resolved every input before its first
-    # write, so its skip was clean by construction; a per-movement door has no
-    # such moment, and the savepoint gives the batch the atomicity the door
-    # cannot.
-    transfers_changed = 0
-    # Transfer id -> why its family could not post: the door's own message
-    # (which names the account whose pairing is broken) is the operator's
-    # only pointer to the repair, so it is carried to the log.
-    skipped: dict[int, str] = {}
-    for xfer in transfers:
-        try:
-            with db.session.begin_nested():
-                entries = _rebook_transfer_family(xfer)
-        except PostingError as exc:
-            skipped[xfer.id] = str(exc)
-            continue
-        if entries:
-            transfers_changed += 1
-            _hold_for_the_re_check(held, xfer.scenario_id, entries)
-    # The ONE anchor re-check, after every source is re-booked (ruling
-    # **R-BAL103**; the docstring says why).  Outside the per-transfer
-    # SAVEPOINT on purpose: the re-check refuses only for the ACCOUNT (a
-    # correction to book and no linked ledger to book it on), never for one
-    # transfer's re-book, and the deploy's third
-    # hook walks every non-loan account with no skip
-    # (``account_posting_service.backfill_all_account_anchor_postings``), so
-    # such an account aborts the deploy there regardless.
-    re_check_held_anchor_corrections(held)
-    if skipped:
-        logger.warning(
-            "Cash posting resync skipped %d transfer(s) whose family could not "
-            "be posted: %s.  %s  Each is a broken chart-of-accounts pairing on "
-            "a movement's account -- repair it, then re-run the resync.",
-            len(skipped), list(skipped), _skip_reasons(skipped),
-        )
-
-    return transactions_changed, transfers_changed

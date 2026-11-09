@@ -1,8 +1,9 @@
 """The worked-out ledger against the stored one, per owner and scenario, at every grain.
 
 The comparison X-ew's first leaf's production run reports (plan step plan#2513, plan task
-plan#2528); ``tests/manual/verify_worked_out_ledger.py`` runs it over a production copy, plants
-its controls and says what it found.  Per owner and scenario, :func:`compare` reports:
+plan#2528); ``tests/manual/verify_worked_out_ledger.py`` ran it over a production copy, planted
+its controls and said what it found, until plan task plan#3077 deleted it.  Per owner and
+scenario, :func:`compare` reports:
 
 * **Every (chart row, paycheck, day) net on each side**, and every cell where they differ: the
   suite's own comparison (``tests._ledger_parity.ledger_parity_differences``).  The run reads
@@ -339,9 +340,10 @@ def movement_parents(movement_ids):
 
 
 def _walked_parents(scenario_id):
-    """Return the parents the cash resync walks in *scenario_id*.
+    """Return the parents the cash resync walked in *scenario_id*.
 
-    Its two filters (``posting_service.resync_all_cash_postings``): a live
+    Its two filters (``posting_service.resync_all_cash_postings``, deleted at
+    plan task plan#3077 with the deploy's hooks): a live
     transaction that is settled or holds a posted purchase, and a live
     settled transfer -- built from the same two clauses it filters by.
 
@@ -380,7 +382,7 @@ def _walked_parents(scenario_id):
 def moved_source_cells(before, after):
     """Return every source cell whose net moved between two reads, either side.
 
-    What a control's plant changed (``tests/manual/verify_worked_out_ledger``):
+    What a control's plant changed (``tests/manual/verify_worked_out_ledger``, until plan#3077):
     the cells it must come out UNEXPLAINED at.
 
     Args:

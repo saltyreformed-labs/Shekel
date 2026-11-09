@@ -1,7 +1,6 @@
 """The DC-* checks: a self transfer, an active template on an inactive account, two rows answering
 one occurrence, a user with no settings or no baseline scenario, a deduction aimed at another
-user's account, an un-dated movement under a live leg, and a settled row whose money the cash
-fold cannot see.
+user's account, and a settled row whose money the cash fold cannot see.
 """
 
 from decimal import Decimal
@@ -48,10 +47,12 @@ class TestDataConsistency:
         ``balance:X-bi-6-3`` with the one the posting writer stopped raising
         (Transfer Invariant 1, a pair missing a shadow) and went at
         ``balance:X-bi-6-4d-2`` with the twin rows it counted (rulings
-        **R-BAL166**, **R-BAL258**).
+        **R-BAL166**, **R-BAL258**).  DC-10 (an un-dated movement holding a
+        live journal leg) went at plan task plan#3077 with the deploy's
+        ledger hooks: no reader reads the stored legs it graded.
         """
         results = check_data_consistency(db.session)
-        assert len(results) == 10
+        assert len(results) == 9
         # Critical checks must pass on clean data.
         critical_results = [r for r in results if r.severity == "critical"]
         assert all(r.passed for r in critical_results), (

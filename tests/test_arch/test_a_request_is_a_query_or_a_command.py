@@ -20,15 +20,19 @@ Why the WRITE half matters at least as much
 -------------------------------------------
 
 **A command may not be given one snapshot, and this file is where that is
-pinned.**  The posting-ledger reconciles are read-modify-write under an
-advisory lock (:func:`app.services.user_write_lock.lock_user_writes`): take the
-lock, re-read what is posted, write the difference.  The waiter's re-read is
-REQUIRED to see the winner's just-committed postings, and only ``READ
-COMMITTED`` shows them.  Under one snapshot the waiter re-reads its own
-pre-lock picture and reconciles to a stale target -- the divergence ruling
-**R-EN** measured at ``$4,000.00`` asserted against ``$1,000.00`` settled, with
-the trial balance still ``$0.00`` because the anchor-equity leg mirrors the
-error, so nothing fails loudly.
+pinned.**  The writes the owner's advisory lock serialises
+(:mod:`app.services.user_write_lock`, taken where each command transaction
+begins) read and then write: the anchor doors read the assertion that governs
+and append only when the submission differs (ruling **R-EQ**), and the
+pay-period mutations count the owner's periods and then append or delete
+against that count.  The waiter's read is REQUIRED to see the winner's
+just-committed rows, and only ``READ COMMITTED`` shows them.  Under one
+snapshot the waiter reads its own pre-lock picture and acts on a stale one.
+The case measured was the posting-ledger reconciles' (read what is posted,
+write the difference): the divergence ruling **R-EN** measured at
+``$4,000.00`` asserted against ``$1,000.00`` settled, with the trial balance
+still ``$0.00`` because the anchor-equity leg mirrors the error, so nothing
+failed loudly.  No door runs those reconciles since plan step plan#2914.
 
 So "make everything REPEATABLE READ, it is strictly safer" is a plausible,
 wrong change, and :func:`test_a_command_stays_read_committed` is the control
@@ -152,11 +156,11 @@ class TestTheModeIsBoundByTheDispatch:
     ):
         """A POST keeps the default, and this is the money-critical half.
 
-        ``user_write_lock``'s lock-then-reread is only correct at ``READ
+        ``user_write_lock``'s lock-then-read is only correct at ``READ
         COMMITTED``: the waiting transaction must see the winner's committed
-        postings.  If a future change binds one snapshot here, the reconciles
-        silently double-count.  See this module's docstring for what that was
-        measured at.
+        rows.  If a future change binds one snapshot here, a waiter acts on
+        the picture it had before the lock.  See this module's docstring for
+        what that was measured at.
         """
         observed_modes.clear()
         auth_client.post("/settings", data={"grid_default_periods": "7"})
@@ -169,7 +173,7 @@ class TestTheModeIsBoundByTheDispatch:
     def test_a_caller_with_no_dispatched_request_is_untouched(
         self, app, db, seed_user, observed_modes,
     ):
-        """A CLI script, a deploy reconcile and Alembic keep what they had.
+        """A CLI script, the deploy and Alembic keep what they had.
 
         ``pytest-flask`` pushes a synthetic ``test_request_context`` around
         every test in this suite -- method ``GET``, never dispatched -- so this

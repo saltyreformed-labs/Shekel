@@ -14,8 +14,8 @@ measure there.  What they share is here, once:
   tree's code measured twice;
 * **a pair's comparison** (:func:`parted`), byte for byte.
 
-``run_worked_out_ledger_on_dump.py`` measures one side with no pair, and takes only that side's
-environment from here (:func:`side_environment`).
+``run_worked_out_ledger_on_dump.py`` measured one side with no pair, taking only that side's
+environment from here (:func:`side_environment`), until plan task plan#3077 deleted it.
 """
 
 import argparse

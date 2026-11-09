@@ -189,13 +189,13 @@ committed, so no other transaction can touch it.  **Sign-in takes the
 signing-in person's owner lock** right after finding the account and before
 reading its codes or failed-attempt count (ruling **R-CC121**,
 :func:`bind_sign_in_owner`): it writes a committed user's rows before anyone
-is signed in, which no hook above can see.  A CLI script, a deploy reconcile
-and Alembic hold no request, so nothing here locks for them: the three deploy
-reconciles lock every owner at their own start
-(:func:`app.services.user_write_lock.lock_every_user_writes`), and a script
-that writes an existing owner's data must take that owner's lock at its own
-start in the same way -- four operator scripts do not yet
-(:mod:`app.services.user_write_lock` names them).
+is signed in, which no hook above can see.  A CLI script, the deploy and
+Alembic hold no request, so nothing here locks for them.  The deploy needs
+none: ``entrypoint.sh`` runs it before gunicorn serves, and its three ledger
+reconciles, which took every owner's lock at their own start, went at plan
+task plan#3077.  A script that writes an existing owner's data takes none
+either: :mod:`app.services.user_write_lock` names the four operator scripts
+that write such rows.
 
 **What this module does NOT do**, said here because the boundary is worth
 knowing rather than discovering: a COMMAND's own re-render still reads at

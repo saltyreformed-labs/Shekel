@@ -53,7 +53,7 @@ from functools import partial
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so ``app`` and ``tests`` are not importable without this; the
-# same bootstrap as ``verify_worked_out_ledger``.
+# same bootstrap ``verify_worked_out_ledger`` had until plan task plan#3077.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 # Pylint: ``wrong-import-position`` -- these must follow the path bootstrap

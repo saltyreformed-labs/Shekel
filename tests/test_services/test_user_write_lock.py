@@ -46,12 +46,11 @@ door production uses, and the same five properties survive the move:
    a save, and the same save completes when the key is free.  The only
    property that grades PostgreSQL's behaviour rather than our SQL.
 5. **It is keyed on the OWNER**: one distinct key per request however much it
-   writes, a companion's request takes its linked owner's key, and the
-   deploy's every-owner form acquires ascending.  **That is NOT "deadlock is
-   structurally impossible on every path"**: the deploy transaction takes the
-   owners' keys after its migrations' table locks, which is safe only because
-   the entrypoint runs it before gunicorn serves (the module docstring of
-   :mod:`app.services.user_write_lock`).
+   writes, and a companion's request takes its linked owner's key.  The
+   deploy's every-owner form, graded here for acquiring ascending, went at
+   plan task plan#3077 with the deploy's ledger reconciles, its only callers,
+   and with it the one transaction that took the lock twice, which a case
+   here graded as re-entrant.
 """
 
 from __future__ import annotations
@@ -60,17 +59,12 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from app.extensions import db
 from app.models.account import Account, AccountAnchorHistory
 from app.models.ref import AccountType
 from app.services import account_service, cash_ledger
-from app.services.user_write_lock import (
-    lock_every_user_writes,
-    take_owner_write_lock,
-)
 from app.utils.dates import display_today
 from tests._test_helpers import (
     HeldOwnerKey,
@@ -577,57 +571,3 @@ class TestTheKeyIsTheOwner:
 
         assert response.status_code == 200, response.status_code
         assert set(advisory_lock_keys(statements)) == {owner_lock_key(owner_id)}
-
-    def test_lock_every_user_acquires_ascending(
-        self, app, seed_user, seed_second_user,
-    ):
-        """The deploy reconciles' every-owner form acquires ascending by user id.
-
-        They are the only transactions that reconcile more than one owner, so
-        the only ones that hold more than one key; taking them in one global
-        order is what keeps two concurrent sweeps from taking the same two keys
-        in opposite orders.  TWO users, or the order cannot be graded: with
-        one, a reversed loop passed (neutral review of cp4, 2026-09-29).
-        """
-        with app.app_context():
-            locked, statements = capture_sql_statements(lock_every_user_writes)
-            # The ACQUISITION order, read off the emitted binds -- not the
-            # returned list, which is sorted by its own ``ORDER BY`` and would
-            # stay sorted even if the loop acquired in reverse.
-            acquired = [key for _ns, key in advisory_lock_keys(statements)]
-            assert acquired, "no lock was taken at all"
-            assert acquired == sorted(acquired), (
-                f"locks were ACQUIRED out of order: {acquired}"
-            )
-            assert acquired == locked, (
-                f"the returned ids {locked} disagree with what was locked "
-                f"{acquired}"
-            )
-            assert {
-                seed_user["user"].id, seed_second_user["user"].id,
-            } <= set(acquired) and len(acquired) >= 2, acquired
-            db.session.rollback()
-
-    def test_the_lock_is_re_entrant_within_one_transaction(self, app, seed_user):
-        """Taking the same key twice in one transaction is harmless.
-
-        ``scripts/init_database.py`` relies on it: it runs the three deploy
-        reconciles in ONE transaction, and each takes every owner's key again.
-        A non-re-entrant lock would self-deadlock on the second acquisition,
-        which the short bound turns into a failure here.
-        """
-        with app.app_context():
-            user_id = seed_user["user"].id
-            db.session.execute(text("SELECT 1"))
-            bound_lock_waits()
-            connection = db.session.connection()
-            _result, statements = capture_sql_statements(
-                lambda: [
-                    take_owner_write_lock(connection, user_id),
-                    take_owner_write_lock(connection, user_id),
-                ],
-            )
-            assert advisory_lock_keys(statements) == [
-                owner_lock_key(user_id), owner_lock_key(user_id),
-            ]
-            db.session.rollback()

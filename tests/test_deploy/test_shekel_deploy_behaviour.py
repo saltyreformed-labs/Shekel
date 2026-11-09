@@ -513,17 +513,23 @@ _DOWNGRADE = {
     "stamped": "0003",
 }
 #: A migration-bearing release whose entrypoint step 3 ROLLED BACK (plan step
-#: balance:X-cv): the target adds revisions, but its migrations and deploy
-#: hooks are one transaction, so a refusal there leaves the stamp unmoved.
+#: balance:X-cv): the target adds revisions, but its migrations, seed and
+#: audit-trigger check are one transaction, so a refusal there leaves the
+#: stamp unmoved.
 _STEP_3_ROLLED_BACK = {
     "old_migrations": "0001_a.py\n",
     "new_migrations": "0001_a.py\n0002_b.py\n",
     "stamped": "0001",
     "stamped_after": "0001",
 }
-#: What ``init_database.py`` prints when a hook refuses: the operator's pointer
-#: to the repair, which only the failed container's log carries.
-_REFUSAL_LINE = "Cash posting resync refused (ruling R-BAL104): transfer(s) [7]"
+#: What ``init_database.py`` prints when step 3 refuses: the operator's pointer
+#: to the repair, which only the failed container's log carries.  The
+#: audit-trigger check's refusal (``app.audit_infrastructure``); it was a
+#: ledger hook's until plan task plan#3077 deleted the hooks.
+_REFUSAL_LINE = (
+    "RuntimeError: Audit trigger check failed: 63 audit trigger(s), at least "
+    "64 expected"
+)
 
 
 class TestTheHarnessInheritsNoTarget:
@@ -928,7 +934,7 @@ class TestAStep3RefusalRollsBack:
     """Plan step balance:X-cv: a step-3 refusal re-pins, and its log is kept.
 
     Entrypoint step 3 is one transaction, so a migration-bearing release whose
-    deploy hook refuses leaves the stamp where the previous image can resolve
+    step 3 refuses leaves the stamp where the previous image can resolve
     it.  The script's direction-free question then answers "re-pin" with no
     change of its own -- and re-pinning RECREATES the container, so the failed
     run's log, which names what to repair, is saved beside the dump first.

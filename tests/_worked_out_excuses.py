@@ -1,7 +1,8 @@
 """The grains the worked-out ledger and the stored one part at, and the one home of an excuse.
 
 Half of X-ew's first leaf's production run (plan step plan#2513, plan task plan#2528), which
-:mod:`tests._worked_out_ledger` compares and ``tests/manual/verify_worked_out_ledger.py`` runs:
+:mod:`tests._worked_out_ledger` compares and ``tests/manual/verify_worked_out_ledger.py`` ran
+until plan task plan#3077:
 what a difference is judged at -- a stored posting's or a worked-out line's :data:`Contribution`,
 netted per cell -- and which differences the leaf's spec expects ("The proof", item 2), each
 counted in a census of the stored entries of its kind (:func:`take_census`).
@@ -26,7 +27,8 @@ other difference is a defect"), so every excused source cell maps to an entry th
 
 A rule that excuses too little fails loudly -- an expected difference comes out UNEXPLAINED and
 the run exits 1.  That none excuses too much is shown by the run's planted controls, one just
-outside each condition a plant can reach (``tests/manual/verify_worked_out_ledger.py``).  One
+outside each condition a plant can reach (``tests/manual/verify_worked_out_ledger.py``, until
+plan#3077).  One
 condition no plant here reaches is graded by construction only: a skipped family's census entry
 (no fixture could build a family the store holds nothing of, since a projected transfer holds no
 movement and settling one posts it).

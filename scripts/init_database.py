@@ -13,29 +13,31 @@ Detects fresh vs. existing databases and initializes accordingly:
   check (:func:`app.audit_infrastructure.require_audit_triggers`) would
   refuse the deploy.  See audit finding F-028 and remediation Commit C-13.
 
-- Existing DB: runs incremental Alembic migrations, then the three
-  deploy hooks that reconcile the posted ledger.  An existing DB
+- Existing DB: runs incremental Alembic migrations.  An existing DB
   that pre-dates Commit C-13 picks up the rebuild migration on the
   next ``flask db upgrade`` and the GRANT block inside the migration
   applies once the ``shekel_app`` role has been provisioned by
   ``scripts/init_db.sql``.
 
 Both paths then run the same sequence (ruling R-BAL122): the reference
-rows are seeded, ``ref_cache`` is loaded from them, the hooks run (an
-existing database only), and the audit triggers are counted -- the work
-entrypoint steps 4 and 7 used to do after this script had committed
-(:func:`_bring_to_release`).  The same sequence seeded every user's missing
-tax rows (its step 5; entrypoint step 6 before plan step balance:X-cv) until
-plan step salary:X-at-1 gave the tax law one home in the code
-(:mod:`app.tax_law`), which no deploy copies.
+rows are seeded, ``ref_cache`` is loaded from them, and the audit triggers
+are counted -- the work entrypoint steps 4 and 7 used to do after this
+script had committed (:func:`_bring_to_release`).  The same sequence seeded
+every user's missing tax rows (its step 5; entrypoint step 6 before plan
+step balance:X-cv) until plan step salary:X-at-1 gave the tax law one home
+in the code (:mod:`app.tax_law`), which no deploy copies.  On an existing
+database it also ran three hooks that re-synced the stored ledger
+(``budget.journal_entries``) to the records, until plan task plan#3077
+deleted them with the store's doors (plan step plan#2914): no reader reads
+that ledger, so there is nothing left for a deploy to bring to target.
 
 **All of it is ONE transaction, committed once** (plan step
 balance:X-cv, ruling R-BAL105).  The deploy opens that transaction on a
 connection of its own and commits it once, itself: the
 migrations run on that connection (:mod:`app.migration_runner`), and
 the app's session JOINS the transaction for everything else (rulings
-R-BAL113, R-BAL118), so a hook that refuses, a migration that fails, a
-seed that errors or a missing audit trigger leaves every row where the
+R-BAL113, R-BAL118), so a migration that fails, a seed that errors or a
+missing audit trigger leaves every row where the
 deploy found it, ``alembic_version`` included (sequence counters, which
 PostgreSQL does not roll back, still advance).  That stamp is what
 ``deploy/shekel-deploy.sh`` reads
@@ -123,11 +125,6 @@ from app.posting_infrastructure import (
     apply_posting_infrastructure,
 )
 from app.ref_seeds import seed_reference_data
-from app.services import (
-    account_posting_service,
-    loan_posting_service,
-    posting_service,
-)
 # pylint: enable=wrong-import-position
 
 
@@ -327,169 +324,8 @@ def migrate_existing_database(connection):
     print("Migrations applied (they commit with the rest of this deploy).")
 
 
-def resync_all_cash_postings_after_migration():
-    """Re-date or re-book every settled cash source's postings after the chain is at head.
-
-    Ruling **R-DH (b)** (2026-07-31,
-    ``docs/audits/balance_architecture/archive/anchor_settle_partition.md``).  A journal
-    entry's ``entry_date`` is derived by
-    ``balance_predicates.settled_day``, which moved from the UTC civil day
-    to the USER's on that date, together with both folds that read it.  Every
-    entry written before then carries the old day, so the STORED ledger and the
-    readers disagree for any settle recorded between midnight UTC and the user's
-    midnight -- on production, one ``$1,910.95`` mortgage payment stamped
-    2026-07-02 00:38:53 UTC that belongs to the evening of 2026-07-01.
-
-    Like its two siblings below this cannot run inside an Alembic migration: it
-    needs ``ref_cache`` and the service layer, and this migration host builds the
-    app with ``init_ref_cache=False`` (the pre-migration bootstrap window; see
-    the ``3104f87`` deploy fix).  And like them it must NOT be a raw-SQL
-    restatement of the dating rule -- one statement of "which civil day did this
-    settle on" is the property the whole balance arc exists to hold, so it drives
-    the go-forward sync instead
-    (:func:`app.services.posting_service.resync_all_cash_postings`).
-
-    **It runs FIRST of the three, and since plan task plan#2525 the order is no
-    longer a dependency.**  The anchor walk computed each correction's
-    ``ledger_before`` from the source postings on the account's linked ledger,
-    so the sources were brought to target before the corrections that sat on
-    top of them were reconciled.  It walks the account's settled records now
-    (:func:`app.services.ledger_lines.walk_account_ledger`), which no hook
-    writes, so each correction's target is the same whichever hook runs first;
-    the order is kept as the one every deploy has run.
-
-    Runs only on the existing-database path (a fresh database has no settled
-    sources).  Idempotent and self-healing via reconcile-to-target, so it is safe
-    on every deploy: a source already at target posts nothing.  Commits nothing
-    itself: its re-posts commit with the migrations and the other two hooks in
-    the deploy's ONE transaction (plan step balance:X-cv), where the deferred
-    balanced-journal trigger validates every entry, so an unbalanced re-post
-    aborts the deploy loud.  From plan step ``X-bi-6-3`` until
-    ``X-bi-6-5``'s second leaf (card plan#1845) the resync itself also
-    refused while any transfer still held a nonzero legacy one-entry posting
-    (ruling **R-BAL104**); that leaf's migration deleted every such entry, and
-    the refusal went with them (ruling plan#1867).  Any refusal here rolls the
-    migrations back with it since X-cv, so the stamp stays where the previous
-    image can resolve it and ``deploy/shekel-deploy.sh`` re-pins that image on
-    its own.
-
-    Returns:
-        str: The line the deploy log prints once the one commit has landed --
-        the count of sources CHANGED, not walked (finding N-133 / F8).  A
-        steady-state deploy prints zeroes; a non-zero line is the operator's
-        only evidence that a one-time re-date or re-book actually happened,
-        and the one worth reading in the deploy log.
-    """
-    print("Resyncing settled cash postings (transactions + transfers)...")
-    transactions, transfers = posting_service.resync_all_cash_postings()
-    if transactions or transfers:
-        return (
-            f"Cash posting resync complete: RE-POSTED {transactions} "
-            f"transaction(s) and {transfers} transfer(s); their journal "
-            "entries were re-dated or re-booked.  To roll back past this "
-            "deploy, follow deploy/shekel-deploy.sh's rollback instructions; "
-            "it logs the pre-deploy dump it took."
-        )
-    return "Cash posting resync complete: already at target (0 changed)."
-
-
-def backfill_loan_payment_postings_after_migration():
-    """Post the historical loan genesis ledger after the chain is at head.
-
-    Build-Order Step 4 + the read switch.  Posts every loan's opening, true-up,
-    and confirmed-payment corrections.  This backfill cannot run inside an
-    Alembic migration: it needs the ``ref_cache`` / service layer, and this
-    migration host builds the app with ``init_ref_cache=False`` (the
-    pre-migration bootstrap window; see the ``3104f87`` deploy fix), so
-    ``ref_cache`` is off while migrations run.  Unlike the Step-2 / Step-3 cash
-    backfills, the loan split is a running-balance walk over rate periods and
-    effective-dated escrow -- not a one-line SQL formula -- so it cannot be
-    reproduced in raw SQL without duplicating the money-critical split engine.
-    So it runs HERE, once the chain has reached head and every ref row (the
-    posting kinds / sources, the ledger-account kinds) and schema object the
-    service needs exists -- on the ``ref_cache`` :func:`_bring_to_release`
-    loaded after the reference seed, inside the same transaction, so it sees the
-    ref rows the migrations and the seed wrote -- delegating to the idempotent
-    :func:`app.services.loan_posting_service.backfill_all_loan_postings`.
-
-    Runs only on the existing-database path (the fresh-database branch stamps
-    Alembic without running migrations and has no loan payments to post).
-    Idempotent and self-healing (reconcile-to-target), so it is safe on every
-    deploy -- a payment already carrying a go-forward correction is at target
-    and nothing is re-posted.  Commits nothing itself: the corrections commit in the deploy's
-    ONE transaction (plan step balance:X-cv), where the deferred
-    balanced-journal trigger validates every entry, so an unbalanced correction
-    aborts the deploy loud.
-
-    Returns:
-        str: The line the deploy log prints once the one commit has landed.
-    """
-    print("Backfilling historical loan genesis ledger (opening/true-up/splits)...")
-    posted = loan_posting_service.backfill_all_loan_postings()
-    return f"Loan genesis-ledger backfill complete ({len(posted)} loan(s) reconciled)."
-
-
-def backfill_all_account_anchor_postings_after_migration():
-    """Post every non-loan account's anchor genesis ledger after the chain is at head.
-
-    Build-Order Step 5, C7.  Posts every NON-loan account's opening and
-    true-up anchor corrections (the equity counter-leg of each
-    ``AccountAnchorHistory`` assertion), so after this the trial balance closes
-    app-wide: every non-loan linked ledger sums to an ABSOLUTE balance.  Like
-    the loan genesis backfill this cannot run inside an Alembic migration -- it
-    needs the ``ref_cache`` / service layer, and this migration host builds the
-    app with ``init_ref_cache=False`` (the pre-migration bootstrap window; see
-    the ``3104f87`` deploy fix) so ``ref_cache`` is off while migrations run.
-    Unlike the Step-2 / Step-3 cash backfills, an anchor correction is a
-    day-granular walk over the account's assertions against its settled
-    records, not a one-line SQL formula, so it cannot be reproduced in raw SQL
-    without duplicating that walk.  So it runs HERE, once the chain has reached
-    head and every ref row (the ``account_opening`` / ``account_trueup``
-    sources, and the ``anchor_equity`` / ``interest_income`` /
-    ``unrealized_change`` ledger-account kinds with the ``Unrealized`` class
-    ruling R-FO's dispatch books into) exists: it re-uses the ``ref_cache``
-    :func:`_bring_to_release` loaded for all three hooks, then delegates to
-    the idempotent
-    :func:`app.services.account_posting_service.backfill_all_account_anchor_postings`.
-
-    Runs only on the existing-database path (the fresh-database branch stamps
-    Alembic without running migrations and has no accounts to post).
-    Idempotent and self-healing (reconcile-to-target), so it is safe on every
-    deploy -- an account already carrying its go-forward
-    corrections is at target and nothing is re-posted.  Commits nothing itself:
-    the corrections commit in the deploy's ONE transaction (plan step
-    balance:X-cv), where the deferred balanced-journal trigger validates every
-    entry, so an unbalanced correction aborts the deploy loud.
-
-    Returns:
-        str: The line the deploy log prints once the one commit has landed.
-    """
-    print("Backfilling historical account anchor ledger (opening/true-up)...")
-    posted = account_posting_service.backfill_all_account_anchor_postings()
-    return (
-        f"Account anchor-ledger backfill complete "
-        f"({len(posted)} account(s) reconciled)."
-    )
-
-
-def _reconcile_the_ledger():
-    """Run the three deploy hooks, uncommitted, in the order the cash resync explains.
-
-    They share the ONE ``ref_cache`` :func:`_bring_to_release` loaded.  Each
-    hook used to roll back and re-load it on a fresh transaction of its own,
-    which is what one transaction removes.
-
-    Returns:
-        list[str]: Each hook's line for the deploy log, in run order.
-    """
-    completed = [resync_all_cash_postings_after_migration()]
-    completed.append(backfill_loan_payment_postings_after_migration())
-    completed.append(backfill_all_account_anchor_postings_after_migration())
-    return completed
-
-
 def _bring_to_release(connection):
-    """Bring the database to this release, uncommitted: schema, seeds, ledger, check.
+    """Bring the database to this release, uncommitted: schema, seeds, check.
 
     Ruling **R-BAL122** ("Seed first, one order"): a new database and an
     existing one run the same sequence, and only its first step differs.
@@ -500,10 +336,12 @@ def _bring_to_release(connection):
        row this release names that the database lacks is inserted, and the
        built-in account types' flags are brought to this release's values.
     3. ``ref_cache``, loaded ONCE, from those rows.
-    4. The three deploy hooks (:func:`_reconcile_the_ledger`), on an existing
-       database only: a new one has no ledger to reconcile.
-    5. The audit-trigger check
+    4. The audit-trigger check
        (:func:`app.audit_infrastructure.require_audit_triggers`).
+
+    An existing database ran three ledger hooks between steps 3 and 4 until
+    plan task plan#3077 deleted them (the module docstring says why); the
+    cache they shared is the one step 3 still loads.
 
     **Why the seed precedes the cache.**  ``ref_cache.init`` refuses a ref
     table that EXISTS without a row for one of its enum members.  A first
@@ -521,8 +359,8 @@ def _bring_to_release(connection):
     (SELECT ...)`` that finds nothing) would quietly do nothing there and in a
     deploy alike; no gate sees that case.
 
-    Steps 2 and 5 were entrypoint steps 4 and 7 (the tax seed, entrypoint
-    step 6 and then this sequence's step 5, was deleted at plan step
+    Steps 2 and 4 were entrypoint steps 4 and 7 (the tax seed, entrypoint
+    step 6 and then a step of this sequence, was deleted at plan step
     salary:X-at-1), each run after step 3 had
     committed, so a failure in one left the release's stamp behind a dead
     container: the case ``deploy/shekel-deploy.sh`` cannot re-pin.  Here a
@@ -534,34 +372,27 @@ def _bring_to_release(connection):
 
     Args:
         connection: The deploy's connection, inside its one open transaction.
-
-    Returns:
-        list[str]: The hooks' lines for the deploy log (none on a first boot),
-        printed by :func:`initialise_database` only once they have committed.
     """
-    fresh = is_fresh_database()
-    if fresh:
+    if is_fresh_database():
         init_fresh_database(connection)
     else:
         migrate_existing_database(connection)
     print("Seeding reference data...")
     seed_reference_data(db.session, verbose=True)
     ref_cache.init(db.session)
-    completed = [] if fresh else _reconcile_the_ledger()
     found = require_audit_triggers(connection)
     print(
         f"Audit trigger health OK: {found} triggers "
         f"(expected >= {EXPECTED_TRIGGER_COUNT})."
     )
-    return completed
 
 
 @contextlib.contextmanager
 def _session_joined_to(connection):
     """Make ``db.session`` a session JOINED to the deploy's transaction, for the block.
 
-    Rulings **R-BAL113** and **R-BAL118**.  The hooks, ``ref_cache`` and
-    :func:`is_fresh_database` all use the global ``db.session``.  For the deploy
+    Rulings **R-BAL113** and **R-BAL118**.  The reference seed, ``ref_cache``
+    and :func:`is_fresh_database` all use the global ``db.session``.  For the deploy
     that name must mean a session whose every statement runs on *connection*,
     inside the transaction :func:`initialise_database` opened on it, and which
     cannot end that transaction.
@@ -572,7 +403,8 @@ def _session_joined_to(connection):
     every query on a pooled connection of its own, outside the deploy's
     transaction.  So this puts a plain SQLAlchemy ``Session`` in the scoped
     session's slot for the current app context (``scoped_session.registry``)
-    and takes it out again afterwards; the hooks' code is unchanged.  What the
+    and takes it out again afterwards; the seed's and the cache's code is
+    unchanged.  What the
     plain class lacks is Flask-SQLAlchemy's bind-key routing (this app has one
     database) and its ``Query`` subclass's ``*_or_404`` / ``paginate`` (request
     helpers no service calls).  The app's one session listener
@@ -589,8 +421,9 @@ def _session_joined_to(connection):
     ``Autobegin is disabled on this Session``.  With autobegin on, that
     statement would instead begin a transaction of the session's own on the
     connection, and a later ``commit()`` after a rollback WOULD commit it:
-    the hooks' writes landing without the migrations the rollback undid
-    (measured 2026-09-23 on a throwaway database, before ruling R-BAL118).
+    a later step's writes landing without the migrations the rollback undid
+    (measured 2026-09-23 on a throwaway database, before ruling R-BAL118,
+    with the ledger hooks' writes that plan task plan#3077 deleted).
 
     The block BORROWS the app context's session slot.  Whatever session the
     context held is put back untouched when the block exits, so a caller's
@@ -624,15 +457,15 @@ def initialise_database():
     """Run entrypoint step 3 as ONE transaction and commit it once (plan step balance:X-cv).
 
     Ruling **R-BAL105**'s future step.  Before it the migrations committed in
-    ``migrations/env.py``'s own transaction BEFORE the three deploy hooks ran,
-    so a hook that refused (ruling **R-BAL104**'s legacy-net refusal, the loan
-    sync's checked-projection assert, an unbalanced entry at a hook's commit,
-    the anchor walk's refusals)
-    left a stamp the previous image could not resolve, and
+    ``migrations/env.py``'s own transaction BEFORE the three ledger hooks ran
+    (deleted at plan task plan#3077), so a hook that refused (ruling
+    **R-BAL104**'s legacy-net refusal, the loan sync's checked-projection
+    assert, an unbalanced entry at a hook's commit, the anchor walk's
+    refusals) left a stamp the previous image could not resolve, and
     ``deploy/shekel-deploy.sh`` refused to re-pin it: a manual dump restore.
     Now the deploy opens a connection and a transaction of its OWN, and the
     fresh-database build or the migrations, the reference seed,
-    ``ref_cache``, the three hooks and the audit-trigger check
+    ``ref_cache`` and the audit-trigger check
     (:func:`_bring_to_release`) all run inside it: Alembic on the connection,
     everything else through a session joined to it
     (:func:`_session_joined_to`).  The deploy's
@@ -662,28 +495,28 @@ def initialise_database():
     2026-09-23, again at salary:S11-a's merge, and 2026-09-24 at salary:X-at-1,
     which added ``ref.filing_statuses`` to the cache: its 29 tables are the
     seed's 29), so a missing table fails the seed first; the cache's
-    rollback is unreachable from the deploy while that holds.  None of the
-    three hooks' services, and not the seed, commits or rolls back (census
-    re-run 2026-09-23: the two
-    ``rollback()`` calls a hook's module holds --
-    ``loan_posting_service._sync.sync_all_scenarios_or_duplicate`` and
-    ``ref_cache._state._load_rows`` -- are the rate-history door's and the
-    missing-table path; their SAVEPOINTs are ``begin_nested`` blocks, which
-    never end the deploy's transaction; the seed's only commit is its
-    script's own wrapper, which the deploy does not call).
+    rollback is unreachable from the deploy while that holds.  Nothing else
+    the deploy runs commits or rolls back (census re-run 2026-11-09 at plan
+    task plan#3077, over ``app/ref_seeds.py``, ``app/ref_cache/``,
+    ``app/migration_runner.py``, the ``app/*_infrastructure`` modules and
+    ``migrations/versions/``: ``ref_cache._state._load_rows``' is the one
+    ``rollback()``, and none holds a ``commit()`` or a ``begin_nested``; the
+    seed's only commit is its script's own wrapper, which the deploy does not
+    call).
 
     **What neither can see is a second CONNECTION, a CONNECTION-level commit,
-    or a raw ``COMMIT``.**  A hook that opened a connection of its own
+    or a raw ``COMMIT``.**  A step that opened a connection of its own
     (``db.engine.connect()``) would run outside the deploy's transaction
     altogether; ``db.session.connection().commit()`` or a migration's
     ``op.get_bind().commit()`` would commit the deploy's transaction in place;
     and a ``COMMIT`` sent as SQL would end it at the server without SQLAlchemy
-    knowing.  The census (2026-09-23, re-run at salary:S11-a's merge, over
-    ``app/`` and ``migrations/versions/``, which run inside the transaction,
-    and over ``scripts/seed_tax_brackets.py`` until plan step salary:X-at-1
-    deleted it) finds none of the three: no
-    ``db.engine``, ``create_engine`` or ``engine.connect``, no ``.commit()`` on
-    a connection or bind, and no ``COMMIT`` / ``ROLLBACK`` statement text.
+    knowing.  The census (2026-09-23, re-run at salary:S11-a's merge and on
+    2026-11-09 at plan task plan#3077, over ``app/`` and
+    ``migrations/versions/``, which run inside the transaction, and over
+    ``scripts/seed_tax_brackets.py`` until plan step salary:X-at-1 deleted it)
+    finds none of the three: no ``db.engine``, ``create_engine`` or
+    ``engine.connect``, no ``.commit()`` on a connection or bind, and no
+    ``COMMIT`` / ``ROLLBACK`` statement text.
 
     The session is FLUSHED before the commit, never committed: its pending ORM
     state reaches the connection, and the deploy commits the connection.
@@ -691,12 +524,10 @@ def initialise_database():
     with db.engine.connect() as connection:
         deploy = connection.begin()
         with _session_joined_to(connection):
-            completed = _bring_to_release(connection)
+            _bring_to_release(connection)
             db.session.flush()
         deploy.commit()
     print("Database initialised: ONE transaction, committed.")
-    for line in completed:
-        print(line)
 
 
 if __name__ == "__main__":

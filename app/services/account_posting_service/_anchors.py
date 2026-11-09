@@ -108,10 +108,10 @@ def reconcile_account_anchor_corrections(
     touches, so an account whose true-ups are posted against ``anchor_equity``
     while the dispatch now names ``unrealized_change`` produces exactly one
     balanced delta per key -- reversing the equity leg, posting the new one --
-    and the linked leg's delta is zero and is dropped.  The deploy runs this
-    for every non-loan account
-    (``account_posting_service.backfill_all_account_anchor_postings``), so the
-    move lands in the same deploy as the migration that seeds the ref rows.
+    and the linked leg's delta is zero and is dropped.  The deploy ran this
+    for every non-loan account (the account backfill, deleted at plan task
+    plan#3077 with the deploy's hooks), so the move landed in the same deploy
+    as the migration that seeded the ref rows.
 
     **It takes the ACCOUNT, not its id**, since ruling R-FO gave the counter
     leg a dispatch over the account's projection kind: the caller

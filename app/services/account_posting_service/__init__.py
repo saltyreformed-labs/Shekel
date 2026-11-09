@@ -64,16 +64,13 @@ an account is re-typed), the pay-period reset
 ``posting_service`` sync tails (:func:`self_heal_anchor_corrections`), the
 ``create_baseline`` recovery path, and the account-type boundary changes
 (the crud/type routes re-sync an allowed crossing; the validation guard
-refuses one across the loan boundary on an account holding a line).  C7 adds
-the deploy-wide historical
-backfill (:func:`backfill_all_account_anchor_postings`), reusing the
-identical go-forward sync so a backfilled correction is identical to a
-go-forward one.
+refuses one across the loan boundary on an account holding a line).  C7
+added a deploy-wide historical backfill over the identical go-forward sync,
+which plan task plan#3077 deleted with the deploy's hooks.
 """
 
 from ._anchors import reconcile_account_anchor_corrections
 from ._sync import (
-    backfill_all_account_anchor_postings,
     resync_user_account_anchor_postings,
     self_heal_anchor_corrections,
     sync_account_anchor_postings,
@@ -81,7 +78,6 @@ from ._sync import (
 )
 
 __all__ = [
-    "backfill_all_account_anchor_postings",
     "reconcile_account_anchor_corrections",
     "resync_user_account_anchor_postings",
     "self_heal_anchor_corrections",

@@ -210,18 +210,18 @@ class TestEscrow:
     def test_merge_preserves_settled_payment_split(
         self, auth_client, seed_user, db, seed_periods,
     ):
-        """A settled payment's posted split survives merging its escrow line.
+        """A settled payment's split survives merging its escrow line.
 
-        The proof that a merge moves no settled split even though it now reconciles
-        like every escrow write (E1b): a payment settled in period 0 (2026-01-02,
-        before the 2026-03-01 boundary) posts a split whose escrow leg is "Old Tax"
-        $6,000/yr = $500.00/mo.  Merging "Old Tax" into "New Tax" preserves
-        escrow-per-date, so the sync the route now runs re-derives the SAME
-        principal / interest / escrow -- byte-identical, the E1a assert passing --
-        and a later reconcile re-derives it again.
+        The proof that a merge moves no settled split: a payment settled in
+        period 0 (2026-01-02, before the 2026-03-01 boundary) splits with an
+        escrow leg of "Old Tax" $6,000/yr = $500.00/mo.  Merging "Old Tax" into
+        "New Tax" preserves escrow-per-date, so the split the history reads
+        off the walk after the merge -- derived from the merged line -- is the
+        SAME principal / interest / escrow.  A deploy backfill re-posted the
+        stored split before and after the merge until plan task plan#3077
+        deleted it; the history reads the walk, never that store.
         """
         from app.services.loan_posting_service import (  # pylint: disable=import-outside-toplevel
-            backfill_all_loan_postings,
             confirmed_loan_payment_history,
         )
         acct = _create_mortgage(seed_user, db.session)
@@ -232,8 +232,6 @@ class TestEscrow:
             seed_periods[0], amount=Decimal("2000.00"),
             settled_on=seed_periods[0].start_date,
         )
-        db.session.commit()
-        backfill_all_loan_postings()
         db.session.commit()
 
         before = confirmed_loan_payment_history(acct.id, scenario_id, date.today())
@@ -246,19 +244,12 @@ class TestEscrow:
         )
         assert resp.status_code == 200
 
-        # The posted split is byte-identical -- the merge's E1b reconcile
-        # re-derives the SAME split, escrow-per-date being preserved ...
+        # The split is identical, derived from the merged line, escrow-per-date
+        # being preserved.
         after = confirmed_loan_payment_history(acct.id, scenario_id, date.today())
         assert after[0].escrow == before[0].escrow
         assert after[0].principal == before[0].principal
         assert after[0].interest == before[0].interest
-        # ... and a later reconcile re-derives the SAME split from the merged line.
-        backfill_all_loan_postings()
-        db.session.commit()
-        reconciled = confirmed_loan_payment_history(acct.id, scenario_id, date.today())
-        assert reconciled[0].escrow == before[0].escrow
-        assert reconciled[0].principal == before[0].principal
-        assert reconciled[0].interest == before[0].interest
 
     def test_escrow_add_duplicate_name(self, auth_client, seed_user, db, seed_periods):
         """Duplicate ACTIVE line name returns 400."""

@@ -123,5 +123,7 @@ class TestRunAllChecks:
         # posting writer stopped raising), and to 34 at balance:X-bi-6-4c-4
         # (FK-14..16, FK-05..07's transfer twins, ruling R-BAL160).  It fell
         # to 33 at balance:X-bi-6-4d-2, which deleted DC-12 with the twin
-        # rows it counted (rulings R-BAL166, R-BAL258).
-        assert len(results) == 33
+        # rows it counted (rulings R-BAL166, R-BAL258), and to 32 at plan
+        # task plan#3077, which deleted DC-10 with the deploy's ledger hooks
+        # (plan step plan#2914).
+        assert len(results) == 32

@@ -3,21 +3,25 @@ Shekel Budget App -- The per-user write lock
 
 ONE transaction-scoped PostgreSQL advisory lock, keyed on the owning user, so
 two writes of one user's data that both take it never overlap (the writers
-that take none are named below).  **Since plan step
-``balance:X-bn`` it is taken from exactly two modules** (rulings **R-CC106**,
-**R-CC114**, **R-CC115**, **R-CC121**): :mod:`app.db_transaction`, at the
-start of every command transaction a signed-in request opens -- before it
-reads any of the owner's data; the signed-in user's own row and the role row
-joined to it, read to sign the request in, are the only rows read first, and
-the user's row is re-read under the lock -- and at a sign-in right after the
-account is found; and this module's :func:`lock_every_user_writes`, at the
-start of each deploy reconcile.  No service takes it for itself any more, and
-``tests/test_arch/test_the_owner_lock_has_one_home.py`` refuses one that
-tries.  **The writers that take none, each named so it is not mistaken for
-covered**: registration (``/register`` and ``scripts/seed_user.py``) writes a
-user that is not committed, so no other transaction can reach it; and every
-script that writes an EXISTING user's rows holds no request, so nothing takes
-the lock for it.  The deploy reconciles take every owner's at their own start.
+that take none are named below).  **Since plan task plan#3077 it is taken
+from exactly one module** (rulings **R-CC106**, **R-CC114**, **R-CC115**,
+**R-CC121**): :mod:`app.db_transaction`, at the start of every command
+transaction a signed-in request opens -- before it reads any of the owner's
+data; the signed-in user's own row and the role row joined to it, read to
+sign the request in, are the only rows read first, and the user's row is
+re-read under the lock -- and at a sign-in right after the account is found.
+*From plan step ``balance:X-bn`` until that task this module's
+``lock_every_user_writes`` took every owner's too, at the start of each of the
+deploy's three ledger reconciles, its only callers, which went with the
+stored ledger's writes (plan step plan#2914).*  No service takes it for
+itself, and ``tests/test_arch/test_the_owner_lock_has_one_home.py`` refuses
+one that tries.  **The writers that take none, each named so it is not
+mistaken for covered**: registration (``/register`` and
+``scripts/seed_user.py``) writes a user that is not committed, so no other
+transaction can reach it; the deploy (``scripts/init_database.py``) runs
+before ``entrypoint.sh`` hands over to gunicorn, so no request is there to
+race it; and every script that writes an EXISTING user's rows holds no
+request, so nothing takes the lock for it.
 Four operator scripts write rows the lock covers and take none --
 ``scripts/reset_mfa.py`` (``mfa_configs``), ``scripts/rotate_totp_key.py``
 (every ``totp_secret_encrypted``), ``scripts/rotate_sessions.py`` (every
@@ -86,16 +90,12 @@ request -- the popover's Save, a purchase's edit and delete, carry-forward and
 the reconcile tick among them.*  **It is now structural on every request
 path**: the lock is taken where each command transaction a signed-in request
 opens begins (:mod:`app.db_transaction`), so the only earlier statement is
-the signed-in user's own row, and no row lock rides on it.  **The deploy is the
-one place it is not first, and what keeps that safe is an ORDER, not this
-module**: the deploy reconciles take every owner's lock, ascending, at the
-start of each reconcile FUNCTION, but ``scripts/init_database.py`` runs them
-in the one transaction that has already run the migrations and the
-infrastructure DDL, with their table locks.  That is safe because
-``entrypoint.sh`` runs ``init_database.py`` before it hands over to gunicorn,
-so no request can hold an owner's lock while the deploy waits.  If that
-order ever changes, a request could take owner A's lock, block on a migrated
-table, and deadlock against the deploy waiting on A.
+the signed-in user's own row, and no row lock rides on it.  *The deploy was
+the one place it was not first until plan task plan#3077*: its ledger
+reconciles took every owner's lock in the transaction that had already run
+the migrations and the infrastructure DDL, with their table locks, safe only
+because ``entrypoint.sh`` runs ``init_database.py`` before gunicorn serves.
+The deploy takes no owner's lock since that task deleted those reconciles.
 
 Shipping the lock with a detected-and-rolled-back deadlock was strictly better
 than shipping the silent ledger divergence it replaced; shipping it with a
@@ -127,11 +127,11 @@ ruling R-EN cited it as the precedent to copy.
 
 Transaction-scoped: PostgreSQL releases the lock at COMMIT or ROLLBACK, so it
 cannot leak -- and a request that commits and goes on writing takes it again
-in its next transaction (:mod:`app.db_transaction`).  Re-entrant, and one
-caller relies on that: ``scripts/init_database.py`` runs the three deploy
-reconciles in ONE transaction, and each takes every owner's lock again.  A
-request's transaction takes it once: at its start, or, at a sign-in, right
-after the account is found.
+in its next transaction (:mod:`app.db_transaction`).  A request's transaction
+takes it once: at its start, or, at a sign-in, right after the account is
+found.  *The deploy's three reconciles each took every owner's lock again in
+its one transaction, relying on the lock being re-entrant, until plan task
+plan#3077 deleted them; nothing takes it twice in one transaction since.*
 
 Flask-isolated -- takes and returns plain data, never imports ``request`` /
 ``session``.  Takes no transaction of its own: the caller owns the boundary,
@@ -139,9 +139,6 @@ and the lock lives exactly as long as that transaction.
 """
 
 from sqlalchemy import Connection, func, select
-
-from app.extensions import db
-from app.models.user import User
 
 # Advisory-lock namespace for the per-user write lock.  The two-argument
 # ``pg_advisory_xact_lock(namespace, user_id)`` form keys the lock on
@@ -165,11 +162,11 @@ _USER_WRITE_LOCK_NAMESPACE = 0x53484B4C  # 1397246796
 def take_owner_write_lock(connection: Connection, owner_id: int) -> None:
     """Take *owner_id*'s write lock on *connection* for the rest of its transaction.
 
-    The one statement of the lock, taken by exactly two callers:
-    :mod:`app.db_transaction` at the start of every command transaction a
-    signed-in request opens and at a sign-in, and
-    :func:`lock_every_user_writes` for the deploy reconciles (the module
-    docstring).  Blocks until any other transaction
+    The one statement of the lock, taken by one caller:
+    :mod:`app.db_transaction`, at the start of every command transaction a
+    signed-in request opens and at a sign-in (the module docstring; the
+    deploy's every-owner form called it too until plan task plan#3077).
+    Blocks until any other transaction
     holding the same key commits or rolls back; PostgreSQL releases it
     automatically at this transaction's end.
 
@@ -196,40 +193,3 @@ def take_owner_write_lock(connection: Connection, owner_id: int) -> None:
     connection.execute(
         select(func.pg_advisory_xact_lock(_USER_WRITE_LOCK_NAMESPACE, owner_id))
     )
-
-
-def lock_every_user_writes() -> list[int]:
-    """Take EVERY user's write lock, ascending by user id, for this transaction.
-
-    The all-owners form, for the THREE deploy-time reconciles that between them
-    touch every owner:
-    :func:`app.services.account_posting_service.backfill_all_account_anchor_postings`,
-    its loan twin, and
-    :func:`app.services.posting_service.resync_all_cash_postings`.  Those are
-    the only transactions in the app that reconcile more than one owner's
-    ledger.  Without it they would take their per-user locks in whatever order
-    their id-ordered enumeration happens to visit owners, and two such
-    transactions running at once could deadlock on that alone.
-
-    *An earlier version of this docstring said "the two backfills" and missed
-    ``resync_all_cash_postings``, which is the FIRST of the three to run at
-    deploy.  A neutral adversarial review found it.*
-
-    Acquiring ascending by user id in PYTHON, one statement per user, is
-    deliberate: ``SELECT pg_advisory_xact_lock(ns, id) FROM users ORDER BY id``
-    would order the RESULT, not the evaluation, so the locks could still be
-    taken in scan order.  The user count is small and this runs once per
-    deploy.
-
-    Returns:
-        The user ids locked, ascending -- for the deploy log and for tests to
-        assert the acquisition order without re-deriving it.
-    """
-    user_ids = [
-        user_id
-        for (user_id,) in db.session.query(User.id).order_by(User.id).all()
-    ]
-    connection = db.session.connection()
-    for user_id in user_ids:
-        take_owner_write_lock(connection, user_id)
-    return user_ids

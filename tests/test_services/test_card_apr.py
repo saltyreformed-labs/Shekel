@@ -305,7 +305,6 @@ class TestACardBornACardIsInNoLoanAccountSet:
         ))
         db.session.commit()
 
-        assert card.id not in loan_loaders.load_all_loan_account_ids()
         assert card.id not in loan_loaders.load_loan_account_ids_for_user(
             seed_user["user"].id,
         )

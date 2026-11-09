@@ -12,9 +12,10 @@ lives here rather than in either route module; a typo on any one key
 would silently break the flow, which is why the key names are
 centralised at all.  :func:`_browser_standing` (and :func:`_known_device`)
 is the one read, per request, of what the browser's cookie is worth
-(plan#2772), :func:`_names_a_known_browser` the one question ``/login`` asks of
-it before any lock, and :func:`_spend_a_try` the one spending of a door's tries
-from it, at the code form and at re-confirm.
+(plan#2772), :func:`_users_knowing_this_browser` the one question ``/login``
+asks of every cookie the browser sent, before the account is found, and
+:func:`_spend_a_try` the one spending of a door's tries from it, at the code
+form and at re-confirm.
 :func:`_complete_sign_in` is the ONE completion of a sign-in, whichever proof
 finished it: a password with no second factor, a password and a code, or a
 password on a trusted device (plan#2173), so the three cannot drift on what a
@@ -46,7 +47,7 @@ from app.models.known_device import KnownDevice
 from app.models.user import User
 from app.services import auth_service, known_device_service, mfa_service
 from app.services.known_device_service import BrowserStanding
-from app.utils.device_cookie import device_token, set_device_cookie
+from app.utils.device_cookie import device_token, device_tokens, set_device_cookie
 from app.utils.log_events import (
     AUTH,
     EVT_TOTP_REPLAY_REJECTED,
@@ -112,7 +113,7 @@ def _browser_standing(user) -> BrowserStanding | None:
 
     Read once per request, under the owner's lock, by every door with a
     password or code to check: ``/login`` right after it takes the lock for a
-    browser :func:`_names_a_known_browser` found known, ``/mfa/verify`` right
+    browser :func:`_users_knowing_this_browser` found known, ``/mfa/verify`` right
     after it takes it, and the signed-in doors (``/reauth``,
     ``/change-password``, ``/mfa/disable``), whose request took it at its
     boundary.  So everything in the request that turns on the browser judges
@@ -138,26 +139,26 @@ def _browser_standing(user) -> BrowserStanding | None:
     return known_device_service.find_browser(user.id, device_token(user.id))
 
 
-def _names_a_known_browser(user) -> bool:
-    """Return whether this browser's cookie names a browser known to *user*, before any lock.
+def _users_knowing_this_browser() -> frozenset[int]:
+    """Return the users this browser is known to, asked before the account is found.
 
-    ``/login``'s question, asked before it takes the owner's lock, of whether
-    to take it before the password check: a known browser checks under it, a
-    stranger with none held (ruling plan#3110).  So a made-up cookie never
-    makes a stranger take the lock.  It loads no record
-    (:func:`~app.services.known_device_service.is_known`), and the answer
-    decides nothing else: under the lock :func:`_browser_standing` reads the
-    browser again, and a record its own guesses deleted meanwhile is a
-    stranger's.
-
-    Args:
-        user: The :class:`~app.models.user.User` signing in, whose owner's
-            lock is not held.
+    ``/login``'s first question, which decides whether to take the owner's
+    lock before the password check: a browser known to the account typed
+    checks under it, a stranger with none held (ruling plan#3110).  So a
+    made-up cookie never makes a stranger take the lock.  It asks of every
+    device cookie the browser sent (:func:`~app.utils.device_cookie.device_tokens`)
+    and never of the email, so a real email and an email no account has cost
+    the same work given the same cookies (ruling plan#3130).  It loads no
+    record (:func:`~app.services.known_device_service.known_to`), and the
+    answer decides nothing else: under the lock :func:`_browser_standing`
+    reads the browser again, and a record its own guesses deleted meanwhile
+    is a stranger's.
 
     Returns:
-        True when the cookie names a live record of *user*.
+        The ids of the users whose live record one of the browser's cookies
+        names.
     """
-    return known_device_service.is_known(user.id, device_token(user.id))
+    return known_device_service.known_to(device_tokens())
 
 
 def _known_device(user) -> KnownDevice | None:

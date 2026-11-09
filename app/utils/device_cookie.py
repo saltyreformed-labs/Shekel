@@ -12,9 +12,16 @@ browser's standing is; this cookie only names which record the browser means.
 (``shekel_device_<id>``), so two people who sign in on one browser each keep
 their own.  A single name would let the second person's sign-in overwrite the
 first one's cookie, leaving the first one's record named by nothing and the two
-of them typing codes in turn.  It is read for that user alone, once the account
-is found: what it is worth is that account's record's to say, and it signs
-nobody in.
+of them typing codes in turn.  What a cookie is worth is its user's record's to
+say, and it signs nobody in.  A door reads the one cookie of the account it
+serves (:func:`device_token`).  The exception is ``/login``'s first question,
+asked before the account is found: which users is this browser known to?  It
+reads every device cookie the browser sends (:func:`device_tokens`), so the
+email typed never decides which cookies are looked up, and a made-up cookie
+named for an account costs a real email no more work than an email no account
+has (ruling plan#3130).  A name counts only as the app writes it, its id with
+no sign, no leading zero and no more than an ``id`` column holds, so no two
+names read as one user's.
 
 **Its flags.**  HttpOnly, so no script reads it.  SameSite=Strict, so only
 this app's own pages send it, the sign-in form among them.  Path=/, and as
@@ -30,12 +37,25 @@ from flask import current_app, request
 from werkzeug.wrappers import Response
 
 from app.models.known_device import KNOWN_LIFETIME
+from app.utils.digit_strings import parse_row_id
 
 #: The cookie's name before its user's id and any prefix.
 _NAME = "shekel_device"
 
 #: The prefix a browser pins to one origin, for a Secure cookie on Path=/.
 _HOST_PREFIX = "__Host-"
+
+def _name_before_the_id() -> str:
+    """Return what every device cookie's name holds before its user's id, in this configuration.
+
+    Returns:
+        ``__Host-shekel_device_`` where the session cookie is Secure, else
+        ``shekel_device_``.
+    """
+    name = f"{_NAME}_"
+    if current_app.config["SESSION_COOKIE_SECURE"]:
+        return f"{_HOST_PREFIX}{name}"
+    return name
 
 
 def _cookie_name(user_id: int) -> str:
@@ -48,10 +68,7 @@ def _cookie_name(user_id: int) -> str:
         ``__Host-shekel_device_<id>`` where the session cookie is Secure,
         else ``shekel_device_<id>``.
     """
-    name = f"{_NAME}_{user_id}"
-    if current_app.config["SESSION_COOKIE_SECURE"]:
-        return f"{_HOST_PREFIX}{name}"
-    return name
+    return f"{_name_before_the_id()}{user_id}"
 
 
 def device_token(user_id: int) -> str | None:
@@ -64,6 +81,31 @@ def device_token(user_id: int) -> str | None:
         The cookie's value, or ``None`` when the browser sent none.
     """
     return request.cookies.get(_cookie_name(user_id))
+
+
+def device_tokens() -> dict[int, str]:
+    """Return every device cookie this request's browser sent, by its user's id.
+
+    A cookie is one only under a name :func:`_cookie_name` writes: the
+    configuration's name before the id, then an id as the app writes one,
+    which :func:`~app.utils.digit_strings.parse_row_id` reads.  So each user
+    has one name, and an id no ``id`` column holds never reaches the query,
+    whose bind cast would raise on it.  Each user's token is the one
+    :func:`device_token` reads for them.
+
+    Returns:
+        Each user id a device cookie is named for, and its value; empty when
+        the browser sent none.
+    """
+    before = _name_before_the_id()
+    tokens: dict[int, str] = {}
+    for name, token in request.cookies.items():
+        if not name.startswith(before):
+            continue
+        user_id = parse_row_id(name[len(before):])
+        if user_id is not None:
+            tokens[user_id] = token
+    return tokens
 
 
 def set_device_cookie(response: Response, user_id: int, token: str) -> None:

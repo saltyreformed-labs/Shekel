@@ -49,13 +49,12 @@ from sqlalchemy.exc import OperationalError
 from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
-from app.models.known_device import KnownDevice
 from app.models.transaction import Transaction
 from app.models.user import MfaConfig
 from app.services import mfa_service
 from app.services.user_write_lock import _USER_WRITE_LOCK_NAMESPACE
 from tests._guess_records import count_of
-from tests._sign_in import make_known
+from tests._sign_in import browser_count, make_known
 from tests._test_helpers import (
     HeldOwnerKey,
     advisory_lock_keys,
@@ -118,19 +117,6 @@ def _enable_mfa(user_id):
     db.session.commit()
 
 
-def _browser_count(user_id):
-    """The wrong guesses counted on *user_id*'s one known browser, read fresh.
-
-    Args:
-        user_id: The user, who has signed in on one browser.
-
-    Returns:
-        That browser record's count.
-    """
-    db.session.expire_all()
-    return db.session.query(KnownDevice).filter_by(user_id=user_id).one().failed_login_count
-
-
 def _post_login(client, password=SEED_USER_PASSWORD, email=SEED_USER_EMAIL):
     """POST the sign-in form as a browser does.
 
@@ -185,7 +171,7 @@ class TestSignInLocksBeforeItChecks:
         assert None not in (read_at, count_at), (read_at, count_at)
         assert lookup_at < lock_at < read_at < count_at
         assert advisory_lock_keys(statements)[0] == owner_lock_key(user_id)
-        assert _browser_count(user_id) == 1
+        assert browser_count(user_id) == 1
 
     def test_a_backup_code_locks_before_it_reads_the_codes(self, client, seed_user):
         """The code step takes the lock before its first read of the codes.
@@ -466,7 +452,7 @@ class TestTheCheckReadsWhatTheLockProtects:
             )
 
         assert response.status_code == 200, "the refusal re-renders the form"
-        assert _browser_count(user_id) == 4
+        assert browser_count(user_id) == 4
         assert count_of(SEED_USER_EMAIL) == 0
 
 

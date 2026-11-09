@@ -12,7 +12,9 @@ confirming under it that the hash checked is still the account's.
 
 * :class:`TestEveryRefusalSendsTheSameStatements` -- an email no account has,
   a wrong password, and a locked account's wrong and right passwords send one
-  sequence of statements, the same text in the same order.
+  sequence of statements, the same text in the same order, with or without
+  made-up device cookies named for the accounts (ruling plan#3130); and a
+  browser known to one account is a stranger at another's email.
 * :class:`TestNoRefusalTakesTheKey` -- with the owner's key held elsewhere,
   every refusal still answers, a made-up cookie for the account included; a
   known browser's waits, which is the control.
@@ -42,8 +44,9 @@ from app.extensions import db
 from app.models.user import User
 from app.services import auth_service, known_device_service
 from app.services.guess_record_service import email_digest
+from app.utils.digit_strings import MAX_INTEGER_COLUMN
 from tests._guess_records import count_of, set_record
-from tests._sign_in import make_known
+from tests._sign_in import browser_count, make_known
 from tests._test_helpers import (
     HeldOwnerKey,
     advisory_lock_keys,
@@ -139,21 +142,39 @@ def _lock_the_second_user():
     db.session.commit()
 
 
-@pytest.mark.usefixtures("seed_user", "seed_second_user")
+def _send_made_up_cookies(client, user_ids):
+    """Give the browser a device cookie named for each of *user_ids*, naming no record."""
+    for user_id in user_ids:
+        client.set_cookie(f"shekel_device_{user_id}", "made-up-token")
+
+
 class TestEveryRefusalSendsTheSameStatements:
     """What a stranger is refused for cannot be read off what the refusal sends."""
 
-    def test_four_refusals_send_one_sequence(self, client):
+    @pytest.mark.parametrize("cookies", ["none", "made-up", "past-the-column"])
+    def test_four_refusals_send_one_sequence(
+        self, client, seed_user, seed_second_user, cookies,
+    ):
         """No account, a wrong password, and a locked account's wrong and right one.
 
         Each sends the account's lookup, the guess record's one statement
         (an insert that judges the email's record where it has one), the
         clean-up's read and delete, and one commit: the same text in the same
-        order, whichever it was.  The counts show each was judged: 1 on each
-        email tried once with a wrong password, 0 on the locked one, whose
-        tries the lock refused.
+        order, whichever it was.  With made-up cookies named for both
+        accounts, each first asks once which users the browser is known to,
+        whatever email was typed (ruling plan#3130); before, only a real
+        email's try asked, of its own cookie.  A cookie named for an id no
+        ``id`` column holds is no device cookie, so it asks nothing and
+        raises nothing.  The counts show each was judged: 1 on each email
+        tried once with a wrong password, 0 on the locked one, whose tries
+        the lock refused.
         """
         _lock_the_second_user()
+        _send_made_up_cookies(client, {
+            "none": [],
+            "made-up": [seed_user["user"].id, seed_second_user["user"].id],
+            "past-the-column": [MAX_INTEGER_COLUMN + 1],
+        }[cookies])
         tries = {
             "no account": (_NO_ACCOUNT, _WRONG),
             "a wrong password": (SEED_USER_EMAIL, _WRONG),
@@ -169,7 +190,12 @@ class TestEveryRefusalSendsTheSameStatements:
             assert _refused(response), name
             sent[name] = [sql for sql, _params in events]
 
-        baseline = sent["no account"]
+        for name, statements in sent.items():
+            assert statements == sent["no account"], name
+        baseline = list(sent["no account"])
+        if cookies == "made-up":
+            assert "FROM auth.known_devices" in baseline.pop(0)
+        assert not any("known_devices" in sql for sql in baseline)
         assert len(baseline) == 5, baseline
         assert "FROM auth.users" in baseline[0]
         assert baseline[1].lstrip().startswith("INSERT INTO auth.guess_records")
@@ -177,13 +203,35 @@ class TestEveryRefusalSendsTheSameStatements:
         assert baseline[2].lstrip().startswith("SELECT auth.users.email")
         assert baseline[3].lstrip().startswith("DELETE FROM auth.guess_records")
         assert baseline[4] == _COMMIT
-        for name, statements in sent.items():
-            assert statements == baseline, name
         assert not any("pg_advisory" in sql for sql in baseline)
 
         assert count_of(_NO_ACCOUNT) == 1
         assert count_of(SEED_USER_EMAIL) == 1
         assert count_of(_SECOND_EMAIL) == 0
+
+    @pytest.mark.usefixtures("seed_second_user")
+    def test_a_browser_known_to_one_account_is_a_stranger_at_another(
+        self, client, seed_user,
+    ):
+        """Known to the seed user, the browser types the second user's email and a wrong password.
+
+        The question finds the seed user alone, so the try is a stranger's:
+        the statements an email no account has sends from the same browser,
+        the question first, no owner lock, and 1 counted on the second
+        user's email.
+        """
+        make_known(client)
+        _response, unknown = _capture(lambda: _post_login(client, _NO_ACCOUNT, _WRONG))
+        response, other = _capture(lambda: _post_login(client, _SECOND_EMAIL, _WRONG))
+
+        assert _refused(response)
+        statements = [sql for sql, _params in other]
+        assert statements == [sql for sql, _params in unknown]
+        assert "FROM auth.known_devices" in statements[0]
+        assert not any("pg_advisory" in sql for sql in statements)
+        assert count_of(_SECOND_EMAIL) == 1
+        assert count_of(SEED_USER_EMAIL) == 0
+        assert browser_count(seed_user["user"].id) == 0
 
 
 class TestNoRefusalTakesTheKey:
@@ -323,7 +371,7 @@ class TestABrowserMadeAStrangerMeanwhile:
         user_id = seed_user["user"].id
         client.set_cookie(f"shekel_device_{user_id}", "a-record-gone-since")
         monkeypatch.setattr(
-            known_device_service, "is_known", lambda _user_id, _token: True,
+            known_device_service, "known_to", lambda _tokens: frozenset({user_id}),
         )
 
         response = _post_login(client, password=SEED_USER_PASSWORD if right else _WRONG)

@@ -2,9 +2,10 @@
 
 Plan#2173, ruling **plan#2406**; plan#2772, ruling **plan#2994**.  A trusted
 device skips only the two-factor code, and
-:mod:`app.services.known_device_service` holds the record's acts.  Every boundary here is exact, to the second, because the predicate is
-the whole of revocation: a device is live while it was trusted less than
-thirty days ago AND not before its user's ``session_invalidated_at``.
+:mod:`app.services.known_device_service` holds the record's acts.  Every
+boundary here is exact, to the second, because the predicate is the whole of
+revocation: a device is live while it was trusted less than thirty days ago
+AND not before its user's ``session_invalidated_at``.
 
 **The clock is frozen, not approximated.**  The service reads
 ``datetime.now(timezone.utc)`` once per act, and this directory's autouse
@@ -25,7 +26,7 @@ import sqlalchemy
 from app.exceptions import NotFoundError
 from app.models.known_device import KnownDevice
 from app.services import known_device_service
-from tests._test_helpers import freeze_today
+from tests._test_helpers import capture_sql_statements, freeze_today
 
 #: The moment the first trust in each case is made.  Fixed, so no case
 #: depends on the day the suite runs; the service never reads the calendar.
@@ -87,6 +88,11 @@ class _Acts:
         """Forget *device_id* for *user_id* at *moment*."""
         self._at(moment)
         known_device_service.forget_trust(user_id, device_id)
+
+    def known(self, moment, tokens):
+        """Ask at *moment* which users *tokens* name known records of."""
+        self._at(moment)
+        return known_device_service.known_to(tokens)
 
 
 @pytest.fixture(name="acts")
@@ -345,6 +351,69 @@ class TestTheToken:
         token = acts.trust(_T0, user_id)
 
         assert acts.find(_T0, user_id, _device_of(db, token).token_hash) is None
+
+
+class TestWhoTheBrowserIsKnownTo:
+    """``/login``'s first question: every cookie the browser sent, in one statement.
+
+    Ruling plan#3130.  Each cookie is judged as :func:`find_browser` judges
+    one, so a user is in the answer only when the cookie named for them
+    carries a token of their live record.  A known browser's thirty days run
+    from its last sign-in (ruling plan#2995), which :meth:`_Acts.trust` makes.
+    """
+
+    def test_a_live_cookie_answers_and_a_made_up_one_does_not(
+        self, app, db, acts, seed_user, seed_second_user,
+    ):
+        """The first user's live cookie and a made-up one for the second: the first alone."""
+        user_id = seed_user["user"].id
+        other_id = seed_second_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        assert acts.known(_T0, {user_id: token, other_id: "made-up"}) == {user_id}
+
+    def test_another_users_token_answers_nobody(
+        self, app, db, acts, seed_user, seed_second_user,
+    ):
+        """The first user's token, in a cookie named for the second user: nobody."""
+        user_id = seed_user["user"].id
+        other_id = seed_second_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        assert acts.known(_T0, {other_id: token}) == frozenset()
+
+    def test_thirty_days_after_the_sign_in_it_answers_nobody(
+        self, app, db, acts, seed_user,
+    ):
+        """Known a second short of thirty days after the sign-in; nobody at thirty."""
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        assert acts.known(_T0 + _THIRTY_DAYS - _ONE_SECOND, {user_id: token}) == {user_id}
+        assert acts.known(_T0 + _THIRTY_DAYS, {user_id: token}) == frozenset()
+
+    def test_two_live_cookies_answer_both_from_one_statement(
+        self, app, db, acts, seed_user, seed_second_user,
+    ):
+        """A browser two people sign in on: both of them, from one statement."""
+        user_id = seed_user["user"].id
+        other_id = seed_second_user["user"].id
+        tokens = {
+            user_id: acts.trust(_T0, user_id),
+            other_id: acts.trust(_T0, other_id),
+        }
+
+        answer, statements = capture_sql_statements(lambda: acts.known(_T0, tokens))
+
+        assert answer == {user_id, other_id}
+        assert len(statements) == 1, statements
+
+    def test_no_cookie_sends_no_statement(self, app, db, acts):
+        """A browser that sent no device cookie: nobody, and nothing asked."""
+        answer, statements = capture_sql_statements(lambda: acts.known(_T0, {}))
+
+        assert answer == frozenset()
+        assert statements == []
 
 
 class TestTheList:

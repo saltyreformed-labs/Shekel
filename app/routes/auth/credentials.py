@@ -42,7 +42,7 @@ from app.routes.auth._helpers import (
     _complete_sign_in,
     _first_validation_message,
     _is_safe_redirect,
-    _names_a_known_browser,
+    _users_knowing_this_browser,
 )
 from app.utils.log_events import (
     AUTH,
@@ -93,14 +93,17 @@ def _check_the_password(
     * **A browser known to the account** checks its password under the
       account's owner lock, taken first (ruling **R-CC121**, "Lock, then
       check"): its wrong guesses count on its own record, and the lock keeps
-      two of them from counting once.  Whether it is known is asked first
-      with no lock held and no record loaded (:func:`_names_a_known_browser`),
-      then read again under the lock (:func:`_browser_standing`), so a
-      made-up cookie never makes a stranger take the lock.  A browser whose
-      record its own guesses deleted between the two reads goes on as a
-      stranger, with the lock it already took still held through its check:
-      it held a live cookie for this account a moment ago, so its wait is no
-      clue to whether the email has one.
+      two of them from counting once.  Whether it is known is asked first,
+      before the account is found, of every device cookie the browser sent,
+      with no lock held and no record loaded
+      (:func:`_users_knowing_this_browser`), so the email typed never changes
+      that question's work (ruling plan#3130); then the browser is read again
+      under the lock (:func:`_browser_standing`), so a made-up cookie never
+      makes a stranger take the lock.  A browser whose record its own
+      guesses deleted between the two reads goes on as a stranger, with the
+      lock it already took still held through its check: it held a live
+      cookie for this account a moment ago, so its wait is no clue to
+      whether the email has one.
     * **Every other try is a stranger's** and runs the same steps whatever the
       email and the answer, with no lock held (ruling plan#3110): the
       password check, the guess record's one statement and a commit
@@ -124,8 +127,9 @@ def _check_the_password(
         AuthError: The password does not sign in, for any of the reasons the
             two flows refuse it.
     """
+    known_to = _users_knowing_this_browser()
     user = auth_service.find_sign_in_user(email)
-    if user is not None and _names_a_known_browser(user):
+    if user is not None and user.id in known_to:
         bind_sign_in_owner(user.id, user.data_owner_id)
         standing = _browser_standing(user)
         if standing is not None:

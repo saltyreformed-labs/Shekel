@@ -724,10 +724,10 @@ def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") ->
     The only rows that transaction has read before the lock are *user_id*'s
     own, loaded to sign the request in or to find the account, and the role
     row joined to it (``User.role``, ``lazy="joined"``: the same statement);
-    at ``/login``, also whether the browser's cookie names a known record of
-    that user, read as an id alone
-    (:func:`app.services.known_device_service.is_known`), so no record of it
-    is loaded.  A sign-in whose check committed holds no open transaction
+    at ``/login``, also which users the browser's cookies name known records
+    of, read as user ids alone
+    (:func:`app.services.known_device_service.known_to`), so no record is
+    loaded.  A sign-in whose check committed holds no open transaction
     here, so the lock is the next one's first act and nothing precedes it.
     The password, MFA and settings doors write the user's row, so it is
     EXPIRED once the lock is held, and its next use reloads it under the lock:

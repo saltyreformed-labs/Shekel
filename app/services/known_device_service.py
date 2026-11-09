@@ -5,9 +5,9 @@ One browser, one record, one cookie (plan#2772, ruling plan#2994).  A finished
 sign-in writes the record; a trust is one fact on it, and skips only the
 two-factor code, never the password (plan#2173, ruling plan#2406).  This module
 owns the record's acts: read what a browser's token is worth (or, before any
-lock, only whether it names a known browser), record a finished sign-in or
-re-confirm (each gives the browser a new token and clears its count), count a
-wrong guess, list a user's trusted devices, and forget one.
+lock, only which users its tokens name known records of), record a finished
+sign-in or re-confirm (each gives the browser a new token and clears its
+count), count a wrong guess, list a user's trusted devices, and forget one.
 Beside them, :func:`device_named_by` picks a browser's device out of a list
 already read, so the token's hash is spelled in this module alone.
 
@@ -41,6 +41,7 @@ Architecture:
 
 import hashlib
 import secrets
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import NamedTuple
 
@@ -148,7 +149,9 @@ def _the_known_browser(now: datetime, user_id: int, token: str) -> ColumnElement
 
     The record holding *token*'s hash, of *user_id*, and known at *now*
     (:func:`_known`): so a token no record holds, another user's token and a
-    browser past its lifetime all match nothing.
+    browser past its lifetime all match nothing.  The standing read under the
+    lock (:func:`_standing_at`) and ``/login``'s question before it
+    (:func:`known_to`) both judge a cookie by it.
 
     Args:
         now: The moment to judge at.
@@ -190,32 +193,41 @@ def _standing_at(
     return BrowserStanding(device=row[0], trusted=row[1] is True)
 
 
-def is_known(user_id: int, token: str | None) -> bool:
-    """Return whether *token* names a browser known to *user_id*, loading no record.
+def known_to(tokens: Mapping[int, str]) -> frozenset[int]:
+    """Return the users this browser is known to, loading no record.
 
-    ``/login``'s question before it takes any lock: a known browser checks
-    its password under the owner's lock, and a stranger checks with none held
-    (ruling plan#3110), so a made-up cookie never makes a stranger take the
-    lock.  The answer is a bool, never the record: the record the sign-in
-    acts on is read under the lock, by :func:`find_browser`, because one read
-    before it holds the count as it stood before the lock, and a guess
-    counted on that copy would write back over one counted meanwhile.
+    ``/login``'s first question, asked before the account is found and before
+    any lock: a browser known to the account typed checks its password under
+    the owner's lock, and a stranger checks with none held (ruling plan#3110),
+    so a made-up cookie never makes a stranger take the lock.  It asks of
+    every device cookie the browser sent, in one statement that takes no
+    email, so the email typed never changes the work it does (ruling
+    plan#3130).  Each cookie is judged by the clause :func:`find_browser`
+    judges one by (:func:`_the_known_browser`).
+
+    The answer is user ids, never a record: the record the sign-in acts on is
+    read under the lock, by :func:`find_browser`, because one read before it
+    holds the count as it stood before the lock, and a guess counted on that
+    copy would write back over one counted meanwhile.
 
     Args:
-        user_id: The ``auth.users.id`` signing in.
-        token: The token the browser's cookie carries, or ``None`` when it
-            sent none.
+        tokens: Each user id a device cookie is named for, and its token, as
+            the browser sent them.
 
     Returns:
-        True when :func:`find_browser` would, at this moment, answer a
-        standing.
+        Each user for whom :func:`find_browser` would, at this moment, answer
+        a standing to the token *tokens* holds for them.  Empty, and no
+        statement sent, when *tokens* is empty.
     """
-    if token is None:
-        return False
+    if not tokens:
+        return frozenset()
     now = datetime.now(timezone.utc)
-    return db.session.execute(
-        select(KnownDevice.id).where(_the_known_browser(now, user_id, token))
-    ).first() is not None
+    return frozenset(db.session.execute(
+        select(KnownDevice.user_id).where(or_(*(
+            _the_known_browser(now, user_id, token)
+            for user_id, token in tokens.items()
+        )))
+    ).scalars())
 
 
 def find_browser(user_id: int, token: str | None) -> BrowserStanding | None:

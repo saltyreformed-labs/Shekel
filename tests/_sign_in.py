@@ -1,4 +1,4 @@
-"""A stranger's sign-in password, as a service test runs it outside a request; and a known browser.
+"""A stranger's sign-in, as a service test runs it outside a request; a known browser, its count.
 
 ``/login`` checks a stranger's password in two halves, with the account's
 owner lock taken between them on the way to signing in (ruling plan#3110):
@@ -12,6 +12,8 @@ order is graded on the route (``tests/test_routes/test_xbn_sign_in_lock.py``).
 
 from urllib.parse import urlsplit
 
+from app.extensions import db
+from app.models.known_device import KnownDevice
 from app.models.user import User
 from app.services import auth_service
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
@@ -51,3 +53,16 @@ def make_known(client) -> None:
     assert response.status_code == 302
     assert urlsplit(response.headers["Location"]).path not in ("/login", "/mfa/verify")
     client.post("/logout")
+
+
+def browser_count(user_id) -> int:
+    """The wrong guesses counted on *user_id*'s one known browser, read fresh.
+
+    Args:
+        user_id: The user, who has signed in on one browser.
+
+    Returns:
+        That browser record's count.
+    """
+    db.session.expire_all()
+    return db.session.query(KnownDevice).filter_by(user_id=user_id).one().failed_login_count

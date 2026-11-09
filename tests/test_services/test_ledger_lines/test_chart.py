@@ -10,9 +10,11 @@ written out by hand.  Until plan step plan#2914 they also graded the key
 against the row the store's writer (``ledger_account_service``) kept for the
 same thing; that grade went with the store.
 
-Then the ruled difference (a rename relabels a worked-out line, where a stored
-snapshot kept its minted name), the deleted category no key names, and the
-refusals the constructors and the label rule raise.
+Then the ruled difference (a rename relabels a worked-out line, where the
+store's rows kept the name they were minted with), the deleted category no key
+names, the refusals the constructors and the label rule raise, and ruling R-FO's
+dispatch of what a true-up's difference was, which moved here from the chart
+writer's own tests when the writer went (plan#2914).
 """
 
 import pytest
@@ -22,7 +24,8 @@ from app.extensions import db as _db
 from app.models.account import Account
 from app.models.category import Category
 from app.models.transaction import Transaction
-from app.services import ledger_account_service
+from app.services import ledger_lines
+from app.services.account_projection import AccountProjectionKind
 from app.services.ledger_lines import (
     ChartKey,
     account_counter_key,
@@ -186,38 +189,27 @@ class TestEveryKindIsClassedAndLabelledByHand:
 class TestLabelsAreTodaysNames:
     """Ruling plan#2518: "Statements show current names"."""
 
-    def test_a_rename_relabels_counter_and_loan_lines_the_store_kept(
+    def test_a_rename_relabels_counter_and_loan_lines(
         self, app, db, seed_user,
     ):
         """A renamed account's counter and loan lines read the new name.
 
-        The stored counter and loan rows snapshotted the name they were minted
-        with and keep it; the worked-out label follows the rename.  This is
+        The store's counter and loan rows snapshotted the name they were minted
+        with and kept it; the worked-out label follows the rename.  This is
         the one difference the ruling chose, shown on both families.
         """
         with app.app_context():
-            user_id = seed_user["user"].id
             account = create_account_of_type(
                 seed_user, _db.session, "Checking", "Old Checking",
             )
             loan = create_account_of_type(
                 seed_user, _db.session, "Mortgage", "Old Loan",
             )
-            counter_row = (
-                ledger_account_service.get_or_create_account_counter_account(
-                    user_id, account.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
-                )
-            )
-            loan_row = ledger_account_service.get_or_create_loan_ledger_account(
-                user_id, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-            )
 
             account.name = "New Checking"
             loan.name = "New Loan"
             _db.session.flush()
 
-            assert counter_row.name == "Old Checking -- Opening"
-            assert loan_row.name == "Old Loan -- Interest"
             assert chart_label(
                 account_counter_key(
                     LedgerAccountKindEnum.ANCHOR_EQUITY, account.id,
@@ -231,29 +223,25 @@ class TestLabelsAreTodaysNames:
     def test_a_long_category_label_is_not_clipped(self, app, db, seed_user):
         """The label is the whole ``"Group: Item"``, as a statement shows today.
 
-        The stored snapshot is clipped to its 100-character column; the
+        The store's snapshot was clipped to its 100-character column; the
         worked-out label has no column, and is the live ``"Group: Item"`` a
         statement shows.
         """
         with app.app_context():
-            user_id = seed_user["user"].id
             long_category = Category(
-                user_id=user_id, group_name="G" * 100, item_name="I" * 100,
+                user_id=seed_user["user"].id,
+                group_name="G" * 100, item_name="I" * 100,
             )
             _db.session.add(long_category)
             _db.session.flush()
-            stored = ledger_account_service.get_or_create_category_ledger_account(
-                user_id, long_category.id, LedgerAccountClassEnum.EXPENSE,
-            )
 
             label = chart_label(
                 category_key(long_category.id, LedgerAccountClassEnum.EXPENSE),
                 long_category,
             )
 
-            # 100 + len(": ") + 100 = 202, against the snapshot's 100.
+            # 100 + len(": ") + 100 = 202 characters, none clipped.
             assert label == "G" * 100 + ": " + "I" * 100
-            assert len(stored.name) == 100
 
 
 class TestADeletedCategoryIsNamedByNoKey:
@@ -435,3 +423,91 @@ class TestEachKeyNamesOneTypeOfRecord:
                 LedgerAccountClassEnum.EXPENSE,
                 None,
             ))
+
+
+class TestTrueUpCounterKindIsTotal:
+    """``anchor_correction_counter_kind`` -- ruling R-FO's dispatch, TOTAL.
+
+    The rule the whole step turns on: what a balance assertion's difference
+    MEANS is a property of the ACCOUNT.  These cases pin both halves of it --
+    the per-kind answers, and the totality that makes "a new projection kind
+    silently books its return to equity" impossible.
+    """
+
+    @pytest.mark.parametrize("projection_kind,expected", [
+        (AccountProjectionKind.PLAIN, LedgerAccountKindEnum.ANCHOR_EQUITY),
+        (AccountProjectionKind.INTEREST, LedgerAccountKindEnum.INTEREST_INCOME),
+        (AccountProjectionKind.INVESTMENT, LedgerAccountKindEnum.UNREALIZED_CHANGE),
+        (AccountProjectionKind.APPRECIATING,
+         LedgerAccountKindEnum.UNREALIZED_CHANGE),
+    ])
+    def test_a_true_up_names_what_the_difference_was(
+        self, projection_kind, expected,
+    ):
+        """Each non-loan kind's true-up books to the counter R-FO names.
+
+        Pinned by hand, one row per kind, because these four values ARE the
+        ruling: an ``INVESTMENT`` true-up that resolved to ``ANCHOR_EQUITY``
+        would tie out, pass every balance assertion, and leave ``$10,623.66`` of
+        measured investment return off the income statement -- which is the
+        defect this step exists to close.
+        """
+        assert ledger_lines.anchor_correction_counter_kind(
+            projection_kind, is_opening=False,
+        ) is expected
+
+    @pytest.mark.parametrize("projection_kind", list(AccountProjectionKind))
+    def test_an_opening_always_books_to_equity(self, projection_kind):
+        """An OPENING books to the equity row for EVERY kind, loans included.
+
+        An opening is capital brought onto the books, not something earned: a
+        Property's $350,000.00 opening as a "change in value" would say the house
+        appreciated by its whole value on the day it was recorded.  Parametrized
+        over the WHOLE enum -- ``AMORTIZING`` included -- because the opening
+        arm answers before the dispatch is consulted, and that is exactly the
+        property worth pinning.
+        """
+        assert ledger_lines.anchor_correction_counter_kind(
+            projection_kind, is_opening=True,
+        ) is LedgerAccountKindEnum.ANCHOR_EQUITY
+
+    def test_a_true_up_refuses_the_kind_that_books_elsewhere(self):
+        """``AMORTIZING`` has no true-up rule here and says so loudly.
+
+        A loan's corrections are the loan rules' entirely
+        (:func:`app.services.ledger_lines.loan_correction_targets`), so there
+        is no honest answer to give -- and returning a default would put a
+        loan's balance on two equity accounts.
+        """
+        with pytest.raises(ValueError, match="no true-up counter rule"):
+            ledger_lines.anchor_correction_counter_kind(
+                AccountProjectionKind.AMORTIZING, is_opening=False,
+            )
+
+    def test_the_dispatch_covers_every_kind_the_classifier_returns(self):
+        """No projection kind is left without an answer or a refusal.
+
+        THE totality guard.  ``classify_account`` returns one of five members;
+        this asserts each is either dispatched or explicitly refused, so adding
+        a sixth kind to the enum fails HERE -- at a named test -- instead of
+        booking that kind's return to equity in silence.  A dict lookup cannot
+        be made exhaustive by the language, so it is made exhaustive by a test.
+        """
+        answered, refused = [], []
+        for projection_kind in AccountProjectionKind:
+            try:
+                ledger_lines.anchor_correction_counter_kind(
+                    projection_kind, is_opening=False,
+                )
+            except ValueError:
+                refused.append(projection_kind)
+            else:
+                answered.append(projection_kind)
+
+        # The loop above puts every member in exactly one list, so asserting
+        # their union is the enum would be a tautology; the refusal set is the
+        # guard, and a kind added without a rule lands in it.
+        assert refused == [AccountProjectionKind.AMORTIZING], (
+            "every non-loan projection kind must name what its true-up WAS; "
+            f"unruled kinds: {refused}"
+        )

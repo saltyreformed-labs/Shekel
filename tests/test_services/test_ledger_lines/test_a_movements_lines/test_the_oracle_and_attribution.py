@@ -1,5 +1,5 @@
-"""The movement-effect oracle agrees with the posting total, and a reversal carries the period and
-date of the postings it reverses.
+"""The movement-effect oracle agrees with the read, and a revert-and-move leaves the old paycheck
+with no line and books the re-settle into the new one.
 """
 
 from __future__ import annotations
@@ -22,12 +22,9 @@ from tests._test_helpers import (
 )
 from app.services.settle_day import record_settle_day
 
+from tests._test_helpers import create_settled_transfer
+
 from ._helpers import (
-    _settled_and_posted,
-    _ledger_id,
-    _transit_ledger_id,
-    _side_entries,
-    _legs_by_ledger,
     _scenario_id,
     _period_nets_for_transaction,
     _period_nets_for_transfer,
@@ -36,7 +33,7 @@ from ._helpers import (
 
 
 class TestPostedPurchaseEffect:
-    """The movement-effect oracle agrees with the posting total.
+    """The movement-effect oracle agrees with the worked-out read.
 
     ``settled_transaction_effect``, the transaction source's oracle, went at
     plan step ``balance:X-bi-4a`` with the row's own leg (ruling **R-BAL80**):
@@ -48,7 +45,7 @@ class TestPostedPurchaseEffect:
     a card purchase by the movement's own flag, one row at a time.
     """
 
-    def test_effect_matches_posting_total(self, app, db, seed_user):
+    def test_effect_matches_the_worked_out_net(self, app, db, seed_user):
         """The signed movement effect rides on top of the opening.
 
         Arithmetic: a $50 Paid expense (-50) and a $2000 Received income
@@ -63,19 +60,16 @@ class TestPostedPurchaseEffect:
         """
         with app.app_context():
             period = seed_user["bootstrap_period"]
-            expense = add_txn(
+            add_txn(
                 _db.session, seed_user, period, "Groceries", "50.00",
                 status_enum=StatusEnum.DONE, category_key="Groceries",
                 settled_on=display_today(),
             )
-            income = add_txn(
+            add_txn(
                 _db.session, seed_user, period, "Salary", "2000.00",
                 status_enum=StatusEnum.RECEIVED, is_income=True,
                 category_key="Salary", settled_on=display_today(),
             )
-            _db.session.commit()
-            posting_service.sync_transaction_postings(expense)
-            posting_service.sync_transaction_postings(income)
             _db.session.commit()
 
             scenario_id = _scenario_id(seed_user)
@@ -94,8 +88,8 @@ class TestPostedPurchaseEffect:
         Arithmetic: a settled envelope with $60 + $50 debit purchases, both
         dated, and a $40 card purchase.  The two debit movements are -110.00
         of expense; the card purchase leaves through its CC Payback and is
-        excluded by its own ``is_credit`` flag, exactly as the go-forward
-        ``purchase_posts`` leaves it out of the ledger.
+        excluded by its own ``is_credit`` flag, exactly as
+        ``purchase_posts`` leaves it out of the read.
         """
         with app.app_context():
             period = seed_user["bootstrap_period"]
@@ -146,39 +140,36 @@ class TestPostedPurchaseEffect:
 
 
 # ---------------------------------------------------------------------------
-# Period attribution: corrections land in the period they correct (review R2)
+# Period attribution: a line is filed where its movement records it (review R2)
 # ---------------------------------------------------------------------------
 
 
 class TestPeriodAttribution:
-    """A reversal carries the period and date of the postings it reverses.
+    """A revert-and-move leaves the settle's paycheck with no line.
 
     The 2026-07-02 adversarial review's R2 rule (fixing H1): the supported
-    revert-and-move PATCH applies the new ``pay_period_id`` BEFORE the
-    end-of-handler reconcile (and, since ruling **R-BAL58**, the revert's own
-    reconcile runs before the move and the handler reconciles again after
-    it), so a reversal stamped with the source row's CURRENT period would
-    land in the NEW period -- leaving the original entry
-    and its reversal straddling two periods, where a later truncate of the new
-    period CASCADE-deletes one half and permanently strands the other
-    (its link SET NULL, unhealable).  The reconcile instead reads
-    the posted side back per period, so the reversal nets the ORIGINAL period
-    to zero and inherits the latest entry date it reverses.
+    revert-and-move PATCH applies the new ``pay_period_id`` together with the
+    revert, so the stored ledger's reversal, stamped with the row's CURRENT
+    period, would have landed in the NEW paycheck and left the original entry
+    and its reversal straddling two -- where a later truncate of the new
+    paycheck CASCADE-deleted one half and stranded the other.  The store's
+    writer read the posted side back per period to avoid it; the read has no
+    reversal to file, because an un-dated movement books nothing, so the old
+    paycheck simply holds no line and the re-settle books into the new one.
     """
 
     def test_revert_and_move_reverses_into_the_original_period(
         self, app, db, seed_user, seed_periods,
     ):
-        """The reversal lands in the settle period, dated by the settle date.
+        """The settle's paycheck holds nothing after the move; the re-settle books into F.
 
-        Settle a $100 expense in period P (paid 2026-01-05, so the settle
-        entry is dated 2026-01-05 in P).  Simulate the revert-and-move PATCH
-        exactly as the handler applies it -- ``pay_period_id`` moved to F and
-        the settle day cleared BEFORE the reconcile -- then reconcile with
-        ``settled=False``.  The reversal entry must carry period P (never F)
-        and the inherited 2026-01-05 date (never F's start or today), so P
-        nets to zero per ledger account and F holds nothing.  A later
-        re-settle posts into F alone.
+        Settle a $100 expense in period P (paid 2026-01-05).  Apply the
+        revert-and-move PATCH exactly as the handler applies it --
+        ``pay_period_id`` moved to F and the status set back through the seam,
+        which clears the settle day.  P and F then hold no line.  A later
+        re-settle books into F alone, dated the day the user re-settled it on
+        -- the seam's stamp: the row's budget period and its cash day are
+        allowed to disagree.
         """
         with app.app_context():
             period = seed_periods[0]
@@ -189,17 +180,24 @@ class TestPeriodAttribution:
                 settled_on=date(2026, 1, 5),
             )
             _db.session.commit()
-            cash_ledger = _ledger_id(seed_user["account"])
-
-            [settle_entry] = posting_service.sync_transaction_postings(txn)
-            _db.session.commit()
-            assert settle_entry.pay_period_id == period.id
-            assert settle_entry.entry_date == date(2026, 1, 5)
+            groceries = category_key(
+                seed_user["categories"]["Groceries"].id,
+                LedgerAccountClassEnum.EXPENSE,
+            )
+            # The settle books into P.
+            assert _period_nets_for_transaction(
+                txn.id, seed_user["scenario"].id,
+            ) == {
+                period.id: {
+                    linked_key(seed_user["account"]): Decimal("-100.00"),
+                    groceries: Decimal("100.00"),
+                },
+            }
 
             # The revert-and-move PATCH, exactly as ``_apply_regular_update``
             # applies it: the new period lands, and the status goes through the
             # SEAM -- which is what clears the settle day, since plan step X-f1
-            # made the two one write.  Both land BEFORE the reconcile.
+            # made the two one write.
             txn.pay_period_id = moved_to.id
             status_seam.apply_status_change(
                 txn, ref_cache.status_id(StatusEnum.PROJECTED),
@@ -207,103 +205,59 @@ class TestPeriodAttribution:
             )
             _db.session.flush()
             assert txn.settled_on is None
-            [reversal] = posting_service.sync_transaction_postings(txn)
-            _db.session.commit()
 
-            # The R2 rule: the reversal carries the ORIGINAL period and the
-            # settle entry's date -- the pre-fix code stamped it with the NEW
-            # period (moved_to) and the reversal-time fallback date.
-            assert reversal.pay_period_id == period.id
-            assert reversal.entry_date == date(2026, 1, 5)
-            legs = _legs_by_ledger(reversal.id)
-            assert legs[cash_ledger] == Decimal("100.00")
-
-            # P holds $0.00 on every key and F holds nothing: the read holds no
-            # $0.00 line, so neither paycheck is here.
+            # Neither paycheck holds a line.
             assert _period_nets_for_transaction(
                 txn.id, seed_user["scenario"].id,
             ) == {}
 
-            # A later re-settle posts into the NEW period alone, dated the day
-            # the user re-settled it on -- the seam's stamp.  It dated at the
-            # period's ``start_date`` until plan step X-f1, because the cleared
-            # instant fell back to it; a re-settle records a real day now, and
-            # the row's budget period and its cash day are allowed to disagree.
+            # A later re-settle books into the NEW period alone, on the seam's
+            # stamp.
             status_seam.apply_status_change(
                 txn, ref_cache.status_id(StatusEnum.DONE),
                 settlement=settlement_if_settling(txn, ref_cache.status_id(StatusEnum.DONE)),
             )
-            _db.session.flush()
-            [resettle] = posting_service.sync_transaction_postings(txn)
             _db.session.commit()
-            assert resettle.pay_period_id == moved_to.id
-            assert resettle.entry_date == display_today()
-            # P still at $0.00, so absent; F carries the re-settle.
+            assert txn.settled_on == display_today()
             assert _period_nets_for_transaction(
                 txn.id, seed_user["scenario"].id,
             ) == {
                 moved_to.id: {
                     linked_key(seed_user["account"]): Decimal("-100.00"),
-                    category_key(
-                        seed_user["categories"]["Groceries"].id,
-                        LedgerAccountClassEnum.EXPENSE,
-                    ): Decimal("100.00"),
+                    groceries: Decimal("100.00"),
                 },
             }
 
     def test_transfer_revert_and_move_reverses_into_the_original_period(
         self, app, db, seed_user, seed_periods, savings,
     ):
-        """The transfer reversal lands in the settle period, like a transaction.
+        """A transfer's revert-and-move leaves the settle's paycheck with no line, like a row's.
 
-        Settle a $100 Checking -> Savings transfer in period P (posted as two
-        per-movement entries), then revert AND move it to F in one call
-        through the transfer door -- the revert un-dates both movements
-        (ruling **R-BAL61**) and the writer, driven after it where the door's
-        reconcile ran until plan task plan#3075, reverses what is posted: each
-        side's reversal entry carries P, both real ledgers
-        and transit net to zero in P, and F holds nothing -- the transfer
-        twin of the transaction case above.  Re-expressed at plan step
-        ``balance:X-bi-6-3``: it moved the parent's period by hand and called
-        the sync with ``settled=False``; the door reads the movements now, so
-        the revert-and-move is made the way the PATCH makes it.
+        Settle a $100 Checking -> Savings transfer in period P, then revert AND
+        move it to F in one call through the transfer door: the revert
+        un-dates both records (ruling **R-BAL61**), so neither P nor F holds a
+        line -- the transfer twin of the transaction case above.
         """
         with app.app_context():
             period = seed_periods[0]
             moved_to = seed_periods[5]
-            checking = seed_user["account"]
-            transfer = _settled_and_posted(
-                seed_user, _db.session, checking, savings,
+            transfer = create_settled_transfer(
+                seed_user, _db.session, seed_user["account"], savings,
                 period, amount=Decimal("100.00"),
             )
             _db.session.commit()
-            checking_ledger = _ledger_id(checking)
-            savings_ledger = _ledger_id(savings)
-            transit_ledger = _transit_ledger_id(seed_user)
+            # The settle books into P.
+            assert set(_period_nets_for_transfer(
+                transfer.id, seed_user["scenario"].id,
+            )) == {period.id}
 
             transfer_service.update_transfer(
                 transfer.id, seed_user["user"].id,
                 status_id=ref_cache.status_id(StatusEnum.PROJECTED),
                 pay_period_id=moved_to.id,
             )
-            # The writer, driven where the update's reconcile ran until plan
-            # task plan#3075.
-            posting_service.sync_transfer_postings(transfer)
             _db.session.commit()
 
-            by_side = _side_entries(transfer.id)
-            [_, from_reversal] = by_side[checking.id]
-            [_, to_reversal] = by_side[savings.id]
-            assert from_reversal.pay_period_id == period.id
-            assert to_reversal.pay_period_id == period.id
-            assert _legs_by_ledger(to_reversal.id) == {
-                savings_ledger: Decimal("-100.00"),
-                transit_ledger: Decimal("100.00"),
-            }
-            assert _legs_by_ledger(from_reversal.id) == {
-                checking_ledger: Decimal("100.00"),
-                transit_ledger: Decimal("-100.00"),
-            }
             # P holds $0.00 on both real keys and transit, and F holds nothing:
             # the read holds no $0.00 line, so neither paycheck is here.
             assert _period_nets_for_transfer(

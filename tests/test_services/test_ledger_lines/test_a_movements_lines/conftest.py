@@ -1,7 +1,4 @@
-"""The fixtures every part of this package shares: the module-level fixtures of
-``tests/test_services/test_posting_service.py``, moved verbatim by ``tools/split``.  A fixture
-here reaches exactly the tests that module held, at the scope it declared.
-"""
+"""The fixture every part of this package shares: a second account for a transfer to land on."""
 
 from __future__ import annotations
 
@@ -17,7 +14,8 @@ def savings(app, db, seed_user):  # pylint: disable=unused-argument
 
     Created in the ``db`` fixture's app context (no nested context) so the
     returned account stays bound to the live session, the same pattern
-    ``seed_user`` uses.
+    ``seed_user`` uses.  Its opening is the ``$100.00`` every case's Savings
+    net starts from.
     """
     acct = create_account_of_type(
         seed_user, _db.session, "Savings", "Posting Savings",

@@ -1,4 +1,4 @@
-"""A transfer's movements post through the one movement writer, booked under the transfer's leg."""
+"""A transfer's movements are read under the transfer's leg, never a side of their own."""
 
 from __future__ import annotations
 
@@ -18,17 +18,17 @@ from tests._test_helpers import (
     refused_by_database_rule,
 )
 
-from ._helpers import _settled_and_posted, _scenario_id
+from ._helpers import _scenario_id
 
 
-class TestTheWriterBooksATransferMovementUnderItsLeg:
+class TestATransferMovementIsReadUnderItsLeg:
     """Leaf ``balance:X-bi-6-4a``: a transfer movement's parent is its LEG, never its shadow.
 
-    Every door hands the writer the parent
-    ``transfer_legs.movement_parent`` resolves, so a transfer movement's
-    period, contributing gate and owner are its TRANSFER's -- the ones the
-    cash fold has read since the leaf's first half (ruling **R-BAL106**).
-    Each case wrote a drift around the service and asked the pair's door.
+    A transfer movement's period, contributing gate and owner are its
+    TRANSFER's (``transfer_legs.movement_parent``) -- the ones the cash fold
+    has read since the leaf's first half (ruling **R-BAL106**), and the ones
+    the store's writer read until plan step plan#2914 deleted it.  Each case
+    wrote a drift around the service and asked the pair's door.
     Since plan step ``balance:X-bi-6-4d-2`` the transfer drifts are refused
     at COMMIT and asked inside the save (ruling **R-BAL167** class 2), and a
     transfer is one row (ruling **R-BAL258**), so the cases that staged a
@@ -42,8 +42,7 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
     a hidden twin by ``test_c21_state_machine_integration.py``'s
     ``test_a_hidden_twin_is_refused`` (ruling **R-BAL398**); the money each
     read is the settle's, graded by ``test_a_settled_transfer.py``'s
-    ``TestSyncSettlePostsBalancedEntry``, and the re-sync at target by its
-    ``TestSyncIdempotency``.
+    ``TestASettledTransferBooksEachSideAgainstTransit``.
     """
 
     @pytest.mark.usefixtures("db")
@@ -99,11 +98,11 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
     def test_the_oracle_counts_a_dated_leg_whatever_the_transfers_status(
         self, app, seed_user, savings,
     ):
-        """The oracle states the writer's rule: a dated leg of a contributing transfer.
+        """The oracle states the read's rule: a dated leg of a contributing transfer.
 
         ``$100.00`` Checking -> Savings settled; the TRANSFER's status alone
         is rewritten to Projected by SQL (a status drift: both movements stay
-        dated).  The writer keeps both legs posted -- a movement posts iff it
+        dated).  The read keeps both legs booked -- a movement books iff it
         is dated under a contributing parent (ruling **R-BAL101**) -- and
         ``settled_transfer_effect`` agrees on both accounts: Checking
         ``900.00`` = ``1,000.00`` + ``-100.00``, Savings ``200.00`` =
@@ -115,14 +114,14 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
         ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 2, the shape of
         :meth:`test_a_transfer_deleted_around_the_service_holds_nothing`): a
         record is dated only while its transfer is settled (the band rule),
-        so the status rewrite is refused at COMMIT.  The writer and the
+        so the status rewrite is refused at COMMIT.  The read and the
         oracle are asked inside the save, the commit is then refused, and
         the transfer stays Paid with both records dated.
         """
         with app.app_context():
             checking = seed_user["account"]
             scenario_id = _scenario_id(seed_user)
-            transfer = _settled_and_posted(
+            transfer = create_settled_transfer(
                 seed_user, _db.session, checking, savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
                 settled_on=display_today(),
@@ -135,8 +134,6 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
                 {"s": ref_cache.status_id(StatusEnum.PROJECTED), "id": transfer.id},
             )
             _db.session.expire_all()
-
-            assert posting_service.sync_transfer_postings(transfer) == []
 
             for account, opening, effect in (
                 (checking, Decimal("1000.00"), Decimal("-100.00")),

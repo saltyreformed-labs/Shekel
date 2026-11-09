@@ -38,7 +38,7 @@ from app.services import (
 from app.services import pay_schedule_service, pay_stub_service
 from app.services.balance_at import BalanceContext
 from app.services.obligations_aggregator import todays_price
-from app.services.pay_calendar import PayCadence, calendar_for
+from app.services.pay_calendar import PayCadence
 from app.services.payroll_basis import PayrollBasis
 from app.services.recurrence import RecurrenceSpec, author_rule
 from app.schemas.validation import SalaryPayEntryFixSchema
@@ -493,6 +493,12 @@ def update_profile(profile_id):
         )
         return redirect(url_for("salary.edit_profile", profile_id=profile_id))
 
+    # ONE read pass for the POST (task plan#3106): the calendar the pay-period
+    # pair is checked against below and the regeneration after the edits are
+    # one value.  It reads only the calendar before the edits, which they do
+    # not move, so the regeneration may take it.
+    ctx = BalanceContext.build(current_user.id)
+
     # The pay-period pair (plan#3048, ruling plan#3096), turned into the gap
     # BEFORE anything is staged, so a refusal leaves the profile as it was.
     # Neither posted leaves the stored gap alone; one alone is refused.
@@ -500,7 +506,7 @@ def update_profile(profile_id):
         try:
             profile.period_end_days_before_payday = (
                 salary_pay_period.days_before_payday(
-                    calendar_for(current_user.id),
+                    ctx.calendar(),
                     data.get("stub_pay_date"), data.get("stub_period_end"),
                 )
             )
@@ -528,7 +534,7 @@ def update_profile(profile_id):
     # IntegrityError branch -- a profile edit has no expected unique
     # collision).
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(ctx, profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="update_profile",
@@ -593,10 +599,14 @@ def fix_pay_entry(entry_id):
         flash(stale_message, "warning")
         return redirect(url_for("salary.edit_profile", profile_id=profile.id))
 
+    # ONE read pass for the POST (task plan#3106): the calendar a changed
+    # payday is checked against and the regeneration after the Fix are one
+    # value.  ``fix_entry`` reads only the calendar off it, which a Fix does
+    # not move, so the regeneration may take it.
+    ctx = BalanceContext.build(current_user.id)
     try:
         pay_list_service.fix_entry(
-            entry, BalanceContext.build(current_user.id),
-            data["amount"], data["payday"], display_today(),
+            entry, ctx, data["amount"], data["payday"], display_today(),
         )
     except ValidationError as refused:
         db.session.rollback()
@@ -604,7 +614,7 @@ def fix_pay_entry(entry_id):
         return redirect(url_for("salary.edit_profile", profile_id=profile.id))
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(ctx, profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="fix_pay_entry",
@@ -760,7 +770,7 @@ def reactivate_profile(profile_id):
         profile.template.is_active = True
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="reactivate_profile",

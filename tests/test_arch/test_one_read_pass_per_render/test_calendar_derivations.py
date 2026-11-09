@@ -1,5 +1,6 @@
-"""What one render derives: the owner's pay calendar, exactly once."""
+"""What one render, or one salary write, derives: the owner's pay calendar, exactly once."""
 
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -7,12 +8,71 @@ import pytest
 from app import ref_cache
 from app.enums import TxnTypeEnum
 from app.models.ref import FilingStatus
+from app.models.salary_pay_entry import SalaryPayEntry
 from app.models.salary_profile import SalaryProfile
 from app.services import pay_schedule_service
 from tests._stub_period import stub_period_on
-from tests._test_helpers import counting_calls, make_investment_account
+from tests._test_helpers import (
+    counting_calls,
+    freeze_today,
+    make_investment_account,
+    rendered_form_controls,
+)
 
 from ._helpers import _CALENDAR_DOOR, _seed_projecting_account, _seed_dashboard_owner
+
+#: The regeneration's engine call, as ``(module path, attribute)``.  Counted
+#: beside the calendar so a salary write's case proves the regeneration it
+#: grades ran inside the window (task plan#3106): a profile with no template,
+#: or an owner with no baseline scenario, returns before this call and derives
+#: no calendar there, so a count of one would be true of a regeneration that
+#: never ran.
+_REGENERATION_DOOR = ("app.services.recurrence_engine", "regenerate_for_template")
+
+
+def _create_form(db, seed_periods):
+    """Return the create form's fields for a job paid $2,884.62 from the first saved payday.
+
+    Read inside an app context: the filing status is looked up by its row.
+
+    Args:
+        db: The ``db`` fixture.
+        seed_periods: The ``seed_periods`` fixture; its first payday, 01-02,
+            is the pay's payday and the stub's Pay Date, six days after its
+            Period End (``stub_period_on``).
+    """
+    filing_status = db.session.query(FilingStatus).filter_by(name="single").one()
+    first_payday = seed_periods[0].start_date.isoformat()
+    return {
+        "name": "Arch Job",
+        "pay_amount": "2884.62",  # $75,000.00 a year / 26
+        "pay_payday": first_payday,
+        **stub_period_on(first_payday),
+        "filing_status_id": filing_status.id,
+        "state_code": "NC",
+    }
+
+
+def _created_profile_id(app, db, auth_client, seed_user, seed_periods):
+    """Create the job through POST /salary, outside any counting window, and return its id.
+
+    Through the create door rather than a builder, because a salary write's
+    regeneration needs the paycheck template only that door links.
+
+    Args:
+        app: The ``app`` fixture.
+        db: The ``db`` fixture.
+        auth_client: The signed-in owner's client.
+        seed_user: The ``seed_user`` fixture.
+        seed_periods: The ``seed_periods`` fixture.
+    """
+    with app.app_context():
+        form = _create_form(db, seed_periods)
+    assert auth_client.post("/salary", data=form).status_code == 302
+    with app.app_context():
+        return db.session.query(SalaryProfile).filter_by(
+            user_id=seed_user["user"].id, name="Arch Job",
+        ).one().id
 
 
 class TestOneCalendarDerivationPerRender:
@@ -304,15 +364,16 @@ class TestOneCalendarDerivationPerRender:
     ):
         """POST /salary derives the owner's pay calendar exactly once.
 
-        **The only WRITE in this class, and it is here because a write path
+        **The first WRITE in this class, and it is here because a write path
         answers the same question a render does.**  ``create_profile`` asks the
-        schedule three things -- the opening payday its every-paycheck rule
-        starts on, the paycheck count its annual salary is divided by, and the
-        reference period the net-pay recompute prices -- and before
-        pay-calendar plan step C2-f3c it derived TWO calendars to do it: one in
-        ``_paycheck_template`` and one inside the ``GenerationSchedule`` it
-        built afterwards.  Two reads of one owner's schedule inside one POST,
-        which a concurrent schedule write can separate.
+        schedule several things -- today whether the stub's Pay Date and the
+        first pay entry's payday are paydays, the opening payday its
+        every-paycheck rule starts on, and the periods its generate pass writes
+        into -- and before pay-calendar plan step C2-f3c it derived TWO
+        calendars for what it asked then: one in ``_paycheck_template`` and one
+        inside the ``GenerationSchedule`` it built afterwards.  Two reads of
+        one owner's schedule inside one POST, which a concurrent schedule write
+        can separate.  The update and Fix doors joined it at task plan#3106.
 
         An adversarial review of that step found the fix ungraded: this class
         covered only GETs, so nothing would have noticed it coming back.
@@ -324,21 +385,10 @@ class TestOneCalendarDerivationPerRender:
         not tell that from a POST deriving twice.
         """
         with app.app_context():
-            filing_status = (
-                db.session.query(FilingStatus).filter_by(name="single").one()
-            )
-            status_id = filing_status.id
-            first_payday = seed_periods[0].start_date.isoformat()
+            form = _create_form(db, seed_periods)
 
         with counting_calls(_CALENDAR_DOOR) as counts:
-            resp = auth_client.post("/salary", data={
-                "name": "Arch Job",
-                "pay_amount": "2884.62",  # $75,000.00 a year / 26
-                "pay_payday": first_payday,
-                **stub_period_on(first_payday),
-                "filing_status_id": status_id,
-                "state_code": "NC",
-            })
+            resp = auth_client.post("/salary", data=form)
 
         assert resp.status_code == 302
         with app.app_context():
@@ -357,8 +407,8 @@ class TestOneCalendarDerivationPerRender:
             )
         assert counts["derive_periods"] == 1, (
             f"POST /salary derived the pay calendar {counts['derive_periods']} "
-            f"times; the route derives one and threads it into the template's "
-            f"opening bound, its per-paycheck amount and the generate pass"
+            f"times; the route derives one and threads it into the two payday "
+            f"checks, the template's opening bound and the generate pass"
         )
 
         with counting_calls(_CALENDAR_DOOR) as page_counts:
@@ -372,6 +422,107 @@ class TestOneCalendarDerivationPerRender:
             f"the salary edit page derived the pay calendar "
             f"{page_counts['derive_periods']} times; it derives one, for the "
             f"pay list it prices"
+        )
+
+    def test_the_salary_update_POST_derives_the_calendar_once(
+        self, app, db, auth_client, seed_user, seed_periods, monkeypatch,
+    ):
+        """POST /salary/<id> with a stub's two dates derives the pay calendar once.
+
+        Task plan#3106.  ``update_profile`` turns a posted Pay Date and Period
+        End into the days the job's pay period ends before payday (plan#3048's
+        task plan#3099), asking the owner's calendar whether the Pay Date is a
+        payday, and the regeneration after it walks the same calendar.  The
+        door derived its own and the regeneration's pass a second: measured at
+        **2** on this case before the task.  The door builds one pass and hands
+        it to both.
+
+        The POST is the edit form as the page renders it, with a new Period
+        End, so the half of the door that reads the calendar runs.  The gap
+        moving from 6 to 3, and the regeneration being reached once inside the
+        window, are asserted beside the count: a door that refused, or a
+        regeneration that returned early, derives one calendar too.
+        """
+        freeze_today(monkeypatch, date(2026, 3, 20))
+        profile_id = _created_profile_id(app, db, auth_client, seed_user, seed_periods)
+        page = auth_client.get(f"/salary/{profile_id}/edit")
+        controls = rendered_form_controls(
+            page.get_data(as_text=True), f"/salary/{profile_id}",
+        )
+        # On 03-20 the form shows back the 03-13 payday and its Period End,
+        # 03-07; 03-13 - 03-10 = a gap of 3.
+        assert controls["stub_pay_date"] == ["2026-03-13"]
+        controls["stub_period_end"] = ["2026-03-10"]
+
+        with counting_calls(_CALENDAR_DOOR, _REGENERATION_DOOR) as counts:
+            resp = auth_client.post(f"/salary/{profile_id}", data=controls)
+
+        assert resp.status_code == 302
+        with app.app_context():
+            db.session.expire_all()
+            assert db.session.get(
+                SalaryProfile, profile_id,
+            ).period_end_days_before_payday == 3, (
+                "the posted pair did not become the gap, so the door refused "
+                "before the half of it this counts"
+            )
+        assert counts["regenerate_for_template"] == 1, (
+            "the regeneration did not run inside the window, so this count "
+            "never saw the second pass it would build"
+        )
+        assert counts["derive_periods"] == 1, (
+            f"POST /salary/<id> derived the pay calendar "
+            f"{counts['derive_periods']} times; the door builds one read pass "
+            f"and hands it to the gap's payday check and the regeneration"
+        )
+
+    def test_the_pay_entry_Fix_POST_derives_the_calendar_once(
+        self, app, db, auth_client, seed_user, seed_periods, monkeypatch,
+    ):
+        """POST /salary/pay/<id>/fix moving an entry's payday derives the calendar once.
+
+        Task plan#3106, the update door's shape at the Fix door (plan step
+        salary:X-av-3a): ``fix_entry`` asks the owner's calendar whether a
+        CHANGED payday is a payday, and the regeneration after it walks the
+        same calendar.  Measured at **2** on this case before the task, one
+        pass for ``fix_entry`` and one inside the regeneration; the door builds
+        one and hands it to both.
+
+        The payday is moved, from 01-02 to 01-16, because an unchanged payday
+        is not asked again (ruling R-SAL53's shape) and a Fix of the amount
+        alone derives only the regeneration's calendar.  The entry moving and
+        the regeneration being reached once are asserted beside the count.
+        """
+        freeze_today(monkeypatch, date(2026, 3, 20))
+        profile_id = _created_profile_id(app, db, auth_client, seed_user, seed_periods)
+        with app.app_context():
+            entry = db.session.get(SalaryProfile, profile_id).pay_entries[0]
+            entry_id = entry.id
+            assert entry.payday == date(2026, 1, 2)
+        page = auth_client.get(f"/salary/{profile_id}/edit")
+        controls = rendered_form_controls(
+            page.get_data(as_text=True), f"/salary/pay/{entry_id}/fix",
+        )
+        controls["payday"] = ["2026-01-16"]
+
+        with counting_calls(_CALENDAR_DOOR, _REGENERATION_DOOR) as counts:
+            resp = auth_client.post(f"/salary/pay/{entry_id}/fix", data=controls)
+
+        assert resp.status_code == 302
+        with app.app_context():
+            db.session.expire_all()
+            assert db.session.get(SalaryPayEntry, entry_id).payday == date(2026, 1, 16), (
+                "the entry did not move, so the door refused before the half "
+                "of it this counts"
+            )
+        assert counts["regenerate_for_template"] == 1, (
+            "the regeneration did not run inside the window, so this count "
+            "never saw the second pass it would build"
+        )
+        assert counts["derive_periods"] == 1, (
+            f"POST /salary/pay/<id>/fix derived the pay calendar "
+            f"{counts['derive_periods']} times; the door builds one read pass "
+            f"and hands it to the payday check and the regeneration"
         )
 
     def test_the_count_grows_with_the_account_set_when_a_producer_derives(

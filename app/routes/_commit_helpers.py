@@ -292,7 +292,8 @@ def regenerate_and_commit_or_stale(
     Args:
         regenerate: Zero-argument callable performing the
             in-transaction regeneration (e.g.
-            ``lambda: _regenerate_salary_transactions(profile)``).  Runs
+            ``lambda: _regenerate_salary_transactions(read_pass, profile)``,
+            the pass being the door's).  Runs
             before the commit, inside the stale-race guard.
         ctx: The :class:`StaleConflictContext` forwarded to
             :func:`handle_stale_conflict` on a conflict.

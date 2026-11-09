@@ -121,7 +121,7 @@ def add_raise(profile_id):
     user_id = current_user.id
 
     try:
-        _regenerate_salary_transactions(profile)
+        _regenerate_salary_transactions(BalanceContext.build(user_id), profile)
         db.session.commit()
     except IntegrityError as exc:
         # Duplicate-raise double-submit (F-051 / C-23): the composite
@@ -197,7 +197,7 @@ def delete_raise(raise_id):
     db.session.delete(salary_raise)
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="delete_raise",
@@ -287,7 +287,7 @@ def update_raise(raise_id):
             setattr(salary_raise, field_name, value)
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="update_raise",
@@ -484,8 +484,9 @@ def add_line(profile_id):
 
     # ONE read pass for the pre-write side (the 2026-08-16 ruling: a route
     # builds it, producers below take it): the calendar the line's rule is
-    # derived from and authored against.  Regeneration afterwards builds its
-    # own, as a writer must.
+    # derived from and authored against.  The regeneration afterwards is
+    # handed a second, built after the write; whether it may take this one
+    # is finding plan#1589's.
     ctx = BalanceContext.build(current_user.id)
     _settle_line_cadence(data, ctx, stored=None)
     spec = recurrence_spec_for_create(
@@ -535,7 +536,7 @@ def add_line(profile_id):
         )
         if isinstance(authored, Response):
             return authored
-        _regenerate_salary_transactions(profile)
+        _regenerate_salary_transactions(BalanceContext.build(user_id), profile)
         db.session.commit()
     except IntegrityError as exc:
         # Duplicate-deduction double-submit (F-052 / C-23): the
@@ -630,7 +631,7 @@ def delete_line(line_id):
     db.session.delete(deduction)
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="delete_line",
@@ -753,9 +754,9 @@ def update_line(line_id):
     # (:func:`~app.routes._recurrence_form_helpers.resolve_recurrence_rule_for_update`)
     # once the derived facts are settled in (:func:`_settle_line_cadence`).
     # The pass is the PRE-WRITE one its refusals read (plan step R7d-f) and
-    # the calendar the re-author resolves against; regeneration below builds
-    # its own after the write.  The dispatcher pops every recurrence key, so
-    # the field loop below sees none.
+    # the calendar the re-author resolves against; the regeneration below is
+    # handed a second, built after the write (finding plan#1589).  The
+    # dispatcher pops every recurrence key, so the field loop below sees none.
     ctx = BalanceContext.build(current_user.id)
     _settle_line_cadence(data, ctx, stored=deduction.recurrence_rule)
     refusal = resolve_recurrence_rule_for_update(
@@ -784,7 +785,7 @@ def update_line(line_id):
             setattr(deduction, field_name, value)
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="update_line",

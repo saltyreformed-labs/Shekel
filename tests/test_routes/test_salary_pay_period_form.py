@@ -201,3 +201,57 @@ class TestTheEditForm:
             b"Period End 2026-03-14 is after the Pay Date 2026-03-13." in response.data
         )
         assert _profile(seed_user["user"].id, "Day Job").period_end_days_before_payday == 6
+
+    def test_a_new_pair_that_loses_a_version_race_is_reported_not_a_500(
+        self, auth_client, seed_user, profile,
+    ):
+        """Another tab's save lands after the pair is read: the stale-conflict flash, nothing saved.
+
+        The race the form's version pin cannot see: the pre-check passes, then
+        the profile's version moves before its UPDATE runs, so the UPDATE
+        matches no row and raises ``StaleDataError`` at the regeneration's
+        first flush, which must reach the route's guard as itself.  Since
+        task plan#3106 the door hands the regeneration the pass it read the
+        pair's calendar from, so that flush runs inside the regeneration's
+        ``try``, whose handler read ``profile.id`` off the rolled-back session
+        and raised ``PendingRollbackError`` instead, which the route reported
+        as its generic failure.  Planted by bumping the version, with autoflush
+        held off, right after the door turns the pair into a gap.
+        """
+        # pylint: disable=import-outside-toplevel  -- the one patch target here.
+        from unittest.mock import patch
+
+        import sqlalchemy
+
+        from app.services import salary_pay_period
+
+        controls = rendered_form_controls(self._page(auth_client, profile), f"/salary/{profile.id}")
+        controls["stub_period_end"] = ["2026-03-10"]
+        controls["name"] = ["Renamed Job"]
+        profile_id = profile.id
+        real_gap = salary_pay_period.days_before_payday
+
+        def gap_then_lose_the_race(*args, **kwargs):
+            gap = real_gap(*args, **kwargs)
+            with db.session.no_autoflush:
+                db.session.execute(sqlalchemy.text(
+                    "UPDATE salary.salary_profiles SET version_id = version_id + 1 "
+                    "WHERE id = :id"
+                ), {"id": profile_id})
+            return gap
+
+        with patch.object(
+            salary_pay_period, "days_before_payday", side_effect=gap_then_lose_the_race,
+        ):
+            response = auth_client.post(
+                f"/salary/{profile_id}", data=controls, follow_redirects=True,
+            )
+
+        assert response.status_code == 200
+        assert (
+            b"This salary profile was changed by another action while you were "
+            b"editing.  Please reload and try again."
+        ) in response.data
+        assert b"Failed to update salary profile" not in response.data
+        assert _profile(seed_user["user"].id, "Renamed Job") is None
+        assert _profile(seed_user["user"].id, "Day Job").period_end_days_before_payday == 6

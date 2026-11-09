@@ -681,7 +681,7 @@ class TestReactivate:
             from app.routes.salary import profiles as profiles_mod  # pylint: disable=import-outside-toplevel
             from sqlalchemy.orm.exc import StaleDataError  # pylint: disable=import-outside-toplevel
 
-            def _raise_stale(_profile):
+            def _raise_stale(_ctx, _profile):
                 raise StaleDataError("simulated concurrent edit")
 
             monkeypatch.setattr(

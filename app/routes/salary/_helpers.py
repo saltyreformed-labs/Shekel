@@ -15,7 +15,6 @@ from datetime import date
 
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask.typing import ResponseReturnValue
-from flask_login import current_user
 
 from app.utils.auth_helpers import get_or_404, log_refused_lookup
 from app.extensions import db
@@ -157,29 +156,40 @@ def _get_owned_profile_and_period(profile_id, period_id, calendar):
     return profile, period
 
 
-def _regenerate_salary_transactions(profile):
-    """Regenerate the profile's paycheck rows and tell the owner what was kept.
+def _regenerate_salary_transactions(
+    ctx: BalanceContext, profile: SalaryProfile,
+) -> None:
+    """Regenerate the profile's paycheck rows in the door's pass, and tell the owner what was kept.
 
     The salary package's adapter over
     :func:`~app.services.salary_regeneration.regenerate_salary_transactions`,
     the ONE walk every salary write is followed by (plan step salary:S3-f-3,
     ruling **R-SAL24** -- the walk moved below the route layer so the
     ``/retirement`` rail's end-year Save could reach it too).  What is left
-    here is the Flask half the service cannot carry: this route package opens
-    the read pass for the requester, and it FLASHES the rows the pass
-    declined to touch.  The name and the signature are the pre-move ones, so
-    every call site across this package -- and the tests that patch this
-    name to simulate a stale race -- is untouched.  One thing did move: the
-    pass is built before the service's own template guard runs, one scenario
-    query for a profile without a template, a state ``create_profile`` never
-    produces.
+    here is the Flask half the service cannot carry: it FLASHES the rows the
+    pass declined to touch.
+
+    **It takes the door's read pass, and opens none, since task plan#3106.**
+    It built its own from ``current_user`` until then, so the profile update
+    door, which asks the owner's calendar whether a stub's Pay Date is a
+    payday, and the Fix door, which asks whether a changed payday is one,
+    each derived the calendar twice in one POST.  A route builds the one pass
+    and what it calls takes it as a required argument, never an optional one
+    built when absent (ruling of 2026-08-16, plan step pay_calendar:C2-f2d-1).
+    Every other door builds its pass at this call, after its write is
+    staged, which is when this adapter built it.  The two line doors and the
+    stub doors hold a pre-write pass beside that one, which is finding
+    plan#1589's.
 
     Args:
+        ctx: The door's :class:`~app.services.balance_at.BalanceContext`.
+            Its calendar, scenario and day are what the regeneration reads,
+            with the template's own placements; it prices nothing (plan step
+            X-bp), so a pass the door read its calendar from before the write
+            serves it unchanged.
         profile: The :class:`SalaryProfile` whose template prices the rows.
     """
-    retained = salary_regeneration.regenerate_salary_transactions(
-        BalanceContext.build(current_user.id), profile,
-    )
+    retained = salary_regeneration.regenerate_salary_transactions(ctx, profile)
     # **A RETAINED row is the owner's business, not just the log's** (plan
     # step R10-a, adversarial review): the service returns the ids rather
     # than dropping them, and this is where the salary page says so.

@@ -28,9 +28,10 @@ form, calls it and renders.
 (plan step salary:S11-c-2c, its review's finding M3): since that step a
 switched-on stub prices the taxes of the paychecks on or after its payday until
 a later one takes over (rulings **R-SAL42**, **R-SAL54**), so recording,
-editing or switching one can move today's paycheck -- the amount the salary
-template stores -- and the rows the regeneration rebuilds, as the calibration
-doors it replaced did.  The regeneration's pass is built
+editing or switching one can move today's paycheck and the rows the
+regeneration rebuilds, as the calibration doors it replaced did (the salary
+template stored today's paycheck until plan step X-bp).  The regeneration's
+pass is built
 AFTER the write, and the profile's ``pay_stubs`` -- a view-only collection
 the write cannot append to -- is expired first (:func:`_reprice_after`).
 """
@@ -333,20 +334,20 @@ def _reprice_after(profile: SalaryProfile) -> None:
 
     A switched-on stub prices the taxes of the paychecks on or after its
     payday until a later one takes over (plan step salary:S11-c-2c; rulings
-    R-SAL42, R-SAL54), so each of this module's writes can change today's
-    paycheck, the one amount the salary template stores.  ``pay_stubs`` is a
+    R-SAL42, R-SAL54), so each of this module's writes can change what the
+    profile's paychecks are priced at.  ``pay_stubs`` is a
     view-only collection: a recorded stub is not appended to it and an edited
     payday does not re-sort it, so it is expired here and the pricer reloads
-    it.  :func:`~app.routes.salary._helpers._regenerate_salary_transactions`
-    builds its own read pass, after the write, as the regeneration requires
-    (a pass that priced the profile before the write would answer the old
-    figures).
+    it.  The regeneration's read pass is built here, after the write, rather
+    than taken from the door, whose pass priced the profile before it.  The
+    regeneration prices nothing since plan step X-bp, so whether it may take
+    the door's pass is finding plan#1589's question.
 
     Args:
         profile: The stub's :class:`SalaryProfile`, its write staged.
     """
     db.session.expire(profile, ["pay_stubs"])
-    _regenerate_salary_transactions(profile)
+    _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile)
 
 
 def _owned_stub(stub_id: int) -> PayStub:

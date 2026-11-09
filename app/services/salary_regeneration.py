@@ -49,10 +49,12 @@ declined to touch.  This takes the pass the route already opened
 those row ids, so each route reports them in its own voice --
 ``flash_retained_notice`` for both today.  The day the regeneration runs from
 is the pass's pinned ``as_of`` (ledger row **SAL-572**, plan step
-salary:X-av-3a).  The one reordering: the adapter builds the pass BEFORE the
-template guard below runs, where the route-tier original guarded first -- one
-scenario query for a profile without a template, a state ``create_profile``
-never produces.
+salary:X-av-3a).  The one reordering: the pass is built BEFORE the template
+guard below runs, where the route-tier original guarded first -- one scenario
+query for a profile without a template, a state ``create_profile`` never
+produces.  The route package's adapter built it until task plan#3106; each
+door builds it now and the adapter takes it, so a door that read the
+calendar before its write hands that same pass here.
 
 **It prices nothing since plan step X-bp**, so the pass is read for its
 owner's schedule, its baseline scenario and its day; the requirement it once
@@ -114,6 +116,19 @@ def regenerate_salary_transactions(
     if ctx.scenario is None:
         return []
 
+    # The id the failure log names is read BEFORE the walk.  A flush that
+    # fails inside it -- the write this walk follows losing a version race --
+    # rolls the session back and expires the profile, and reading
+    # ``profile.id`` in the handler below then raised ``PendingRollbackError``
+    # in place of the error it was logging, so the route reported its generic
+    # failure rather than the stale conflict.  A door whose pass is built
+    # after its write flushes in that pass's scenario query, before this walk,
+    # and never met it.  The ``/retirement`` rail's Save builds its pass
+    # first, and a lost race there answered its designed 500 instead of its
+    # 409 (measured 2026-11-09, task plan#3106); since that task the salary
+    # update and Fix doors hand over a pass built before their writes too.
+    profile_id = profile.id
+
     # The regeneration runs from the PASS's pinned day, read once (ledger row
     # SAL-572, plan step salary:X-av-3a).
     try:
@@ -138,7 +153,7 @@ def regenerate_salary_transactions(
         # exceptions still propagate to the caller without this
         # extra log line; the caller's logger.exception then
         # records the user-id + profile-id context.
-        logger.exception("Failed to regenerate salary transactions for profile %d", profile.id)
+        logger.exception("Failed to regenerate salary transactions for profile %d", profile_id)
         raise
     return []
 

@@ -127,14 +127,30 @@
     only for a Credit row. -#}
 {% set payback_caption = payback_withdraws is defined and payback_withdraws
    and payback_withdraws.frees_a_line and txn.status_id == STATUS_CREDIT %}
+{#- **The card's sixth caption: what Undo CC does to a row put on the card**
+    (plan task plan#3055, ruling plan#3104: "the popover says so before you
+    press").  Undo CC, and a Save setting Status back to Projected -- the
+    unlock the settled row's notice below points to -- move its payment off
+    the card onto the row's own account, so a later Paid takes it from that
+    account and a later Credit puts it back on the card; said on EVERY such
+    row, matched or not, since the revert-to-edit case is where the owner
+    would otherwise press Paid unwarned.  Where a match names the payment on
+    the card it is withdrawn too, and the caption names those lines
+    (`off_card_frees`, the lines `payment_withdraws` names).
+    `takes_off_the_card` is the route's answer to whether the revert moves it
+    (`status_seam.revert_moves_payment_home`, the seam's own question); a
+    bill that lives on the card moves nothing. -#}
+{% set off_card_caption = takes_off_the_card is defined and takes_off_the_card %}
+{% set off_card_frees = withdraws_a_line and off_card_caption %}
 {#- What the card NAMED, the one value every press on it posts back as
     `shown_lines`: the Save's hidden field, Paid / Received's and Undo CC's
     `hx-vals` (the delete dialog names its own lines, below).  The two reads
-    never both name lines on one card: the four payment captions draw only
-    on a Projected or settled row (or beside a "Paid from" picker, drawn on
-    those alone), and the payback's only on a Credit row, which is neither. -#}
+    never both name lines on one card: the payment captions draw only on a
+    Projected or settled row (or beside a "Paid from" picker, drawn on those
+    alone), and the payback's only on a Credit row, which is neither. -#}
 {% set named_lines = shown_line_ids(payment_withdraws)
    if paid_caption or estimate_caption or zero_caption or tender_caption
+      or off_card_frees
    else shown_line_ids(payback_withdraws) if payback_caption
    else '' %}
 {#- The card's root carries an id because a press refused as out of date
@@ -190,9 +206,9 @@
       <i class="bi bi-credit-card"></i> Credit
     </button>
     {#- Undo CC on a row DRAWN as Credit: an old Credit row, whose press
-        deletes its payback, and a row put on the card (plan task plan#3054),
-        whose press `transactions.unmark_credit` still refuses until plan
-        task plan#3055 makes it take the row off the card. -#}
+        deletes its payback, and a row on the card (plan task plan#3054),
+        whose press sets it back to Projected with its payment on the row's
+        own account (plan task plan#3055). -#}
     {% elif drawn and drawn.id == STATUS_CREDIT %}
     <button type="button" class="btn btn-xs btn-outline-warning flex-grow-1"
             hx-delete="{{ url_for('transactions.unmark_credit', txn_id=txn.id) }}"
@@ -249,6 +265,11 @@
   {%- if payback_caption %}
   <div class="form-text mb-2" id="payback-withdraws-{{ txn.id }}">
     Undo CC, or setting Status back to Projected, deletes this row's CC payback and {{ frees_lines(payback_withdraws) }}.
+  </div>
+  {%- endif %}
+  {%- if off_card_caption %}
+  <div class="form-text mb-2" id="off-card-{{ txn.id }}">
+    Undo CC, or setting Status back to Projected, takes this off the card{% if off_card_frees %} and {{ frees_lines(payment_withdraws) }}{% endif %}. After that, Paid takes it from {{ txn.account.name }}, and Credit puts it back on the card.
   </div>
   {%- endif %}
 
@@ -424,8 +445,9 @@
          disabled on a finalised row.  Preselected from what the row RECORDS
          (`tender_account_id`: the kept payment's account, else the row's own
          -- the seam's one default, ruling R-CC42), so an untouched Save posts
-         an echo the door drops, and a bill reverted out of a card-tendered
-         settle shows the card.  On a Projected row the value rides the Paid /
+         an echo the door drops, and a bill reverted out of a settle from
+         another account shows that account (one put on the card is home
+         again, plan#3104).  On a Projected row the value rides the Paid /
          Received buttons (`hx-include`) and a Save that sets Status to Paid;
          on a settled row a different pick re-points the payment.  The render
          predicate is `tender_picker`, stated once at the top of this card. #}

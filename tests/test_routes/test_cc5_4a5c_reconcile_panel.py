@@ -22,6 +22,15 @@ Three rulings, graded through the panel's own route as a browser drives it
   1 accepted match, so 1 bank line is unexplained again on your statement
   screen: ..."*.
 
+**Ruling plan#3104 (developer 2026-11-09) re-expressed the bill paid
+elsewhere** under CLAUDE.md rule 5, its option text as picked: a revert of a
+row put on the card now takes its payment home, so "48 tests in 9 files that
+set that state up move to a second checking or savings account, where it
+still works".  A bill reopened with its payment on another account is now
+planned on SAVINGS and paid from CHECKING (:func:`tests._cards.add_savings`): Savings' list
+leaves it out where Checking's did, and Checking's offers it where the card's
+did.
+
 Every figure and bank line here is a made-up example.
 """
 
@@ -37,6 +46,7 @@ from werkzeug.datastructures import MultiDict
 from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
+from app.models.account import Account
 from app.models.statement_match import StatementMatch
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
@@ -44,6 +54,7 @@ from app.services import entry_service, statement_match, transaction_service
 from app.services.statement_match import accept_match
 from app.services.transaction_service import settle_transaction
 from app.utils.log_events import EVT_STATEMENT_MATCH_WITHDRAWN
+from tests._cards import add_savings
 from tests._test_helpers import (
     create_account_of_type,
     create_transfer,
@@ -129,11 +140,11 @@ def _card(seed_user):
     )
 
 
-def _row(seed_user, period, name, amount, *, is_envelope=False):
-    """The engine's one row of a new every-paycheck definition on checking, in *period*."""
+def _row(seed_user, period, name, amount, *, is_envelope=False, account=None):
+    """The engine's row in *period* of a new every-paycheck definition on checking or *account*."""
     template = make_expense_template(
         db.session, seed_user, amount=amount, name=name,
-        category_key="Groceries", is_envelope=is_envelope,
+        category_key="Groceries", is_envelope=is_envelope, account=account,
     )
     row = generate_row_of(template, period)
     db.session.commit()
@@ -400,42 +411,51 @@ class TestAZeroDepositIsRefusedAsADeposit:
             )
 
 
-class TestTheCheckingListLeavesOutACardPayment:
-    """R-CC126: a bill whose payment moved on the card is offered by the card alone."""
+class TestTheRowsOwnListLeavesOutAPaymentElsewhere:
+    """R-CC126: a bill whose payment moved on another account is offered by that account alone."""
 
-    def test_the_checking_panel_omits_it_and_a_forged_tick_moves_nothing(
+    def test_the_rows_own_panel_omits_it_and_a_forged_tick_moves_nothing(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """Groceries paid from the card, matched there, reopened: Checking neither offers nor moves it."""
+        """Paid from Checking, matched there, reopened: Savings neither offers nor moves it.
+
+        Re-expressed by ruling plan#3104 (module docstring): planned on
+        Savings and paid from Checking, where it was planned on Checking and
+        paid from the card.
+        """
         with app.app_context():
-            checking_id = seed_user["account"].id
-            card = _card(seed_user)
-            card_id = card.id
-            groceries = _row(seed_user, seed_periods_today[0], "Groceries", "120.00")
-            settle_transaction(groceries, tender_account_id=card_id)
+            checking = seed_user["account"]
+            checking_id = checking.id
+            savings_id = add_savings(seed_user).id
+            groceries = _row(
+                seed_user, seed_periods_today[0], "Groceries", "120.00",
+                account=db.session.get(Account, savings_id),
+            )
+            settle_transaction(groceries, tender_account_id=checking_id)
             db.session.commit()
             _line, match_id = _match(
-                seed_user, groceries, "-120.00", "GROCERIES", account=card,
+                seed_user, groceries, "-120.00", "GROCERIES", account=checking,
             )
             _revert(groceries)
             groceries_id = groceries.id
+            _true_up(auth_client, savings_id)
             _true_up(auth_client, checking_id)
 
-            body = _panel(auth_client, checking_id)
+            body = _panel(auth_client, savings_id)
             assert f'name="transaction_ids" value="{groceries_id}"' not in body
             assert (
                 f'name="transaction_ids" value="{groceries_id}"'
-                in _panel(auth_client, card_id)
+                in _panel(auth_client, checking_id)
             )
 
-            response = _post(auth_client, checking_id, MultiDict([
+            response = _post(auth_client, savings_id, MultiDict([
                 ("transaction_ids", str(groceries_id)),
             ]))
 
             assert response.status_code == 200
             assert _status(groceries_id) == ref_cache.status_id(StatusEnum.PROJECTED)
             (payment,) = db.session.get(Transaction, groceries_id).covering_movements
-            assert payment.account_id == card_id
+            assert payment.account_id == checking_id
             assert payment.settled_on is None
             assert db.session.get(StatementMatch, match_id) is not None
 
@@ -586,33 +606,36 @@ class TestTheEnvelopeCloseNamesWhatItFrees:
             assert db.session.get(StatementMatch, groceries_match) is None
             assert db.session.get(StatementMatch, dining_match) is None
 
-    def test_a_close_on_checking_names_the_cards_line_its_kept_payment_frees(
+    def test_a_close_on_its_own_account_names_the_line_its_kept_payment_frees_elsewhere(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """An envelope closed from the card, matched there, reopened, given a purchase: Checking names the CARD's line.
+        """Closed from Checking, matched, reopened, given a purchase: Savings names the line.
 
-        R-CC126 keeps it on Checking's list -- "A bill paid by its own
+        R-CC126 keeps it on its own account's list -- "A bill paid by its own
         purchases stays on its own list" -- because its tick settles FROM the
         purchase and names no tender.  That ``purchases`` record takes the
-        card's kept payment, so the caption on Checking's panel names the
-        card's line, and the act grades it on the card's account (the
-        movement it takes is there).
+        kept payment on the other account, so the caption on the envelope's
+        own panel names that account's line, and the act grades it on that
+        account (the movement it takes is there).  Re-expressed by ruling
+        plan#3104 (module docstring): the envelope is planned on Savings and
+        closed from Checking, where it was planned on Checking and closed
+        from the card.
         """
         with app.app_context():
-            checking_id = seed_user["account"].id
-            card = _card(seed_user)
-            card_id = card.id
+            checking = seed_user["account"]
+            checking_id = checking.id
+            savings_id = add_savings(seed_user).id
             envelope = _row(
                 seed_user, seed_periods_today[0], "Groceries", "300.00",
-                is_envelope=True,
+                is_envelope=True, account=db.session.get(Account, savings_id),
             )
             settle_transaction(
                 envelope, submitted=typed(Decimal("120.00")),
-                tender_account_id=card_id,
+                tender_account_id=checking_id,
             )
             db.session.commit()
             line, match_id = _match(
-                seed_user, envelope, "-120.00", "GROCERIES", account=card,
+                seed_user, envelope, "-120.00", "GROCERIES", account=checking,
             )
             _revert(envelope)
             entry_service.create_entry(
@@ -624,14 +647,14 @@ class TestTheEnvelopeCloseNamesWhatItFrees:
             )
             db.session.commit()
             envelope_id, line_id = envelope.id, line.id
-            assert line.account_id == card_id
-            _true_up(auth_client, checking_id)
+            assert line.account_id == checking_id
+            _true_up(auth_client, savings_id)
 
-            body = _panel(auth_client, checking_id)
+            body = _panel(auth_client, savings_id)
             assert "Closing it from its purchases withdraws 1 accepted match" in body
             assert f'name="shown_lines-{envelope_id}" value="{line_id}"' in body
 
-            response = _post(auth_client, checking_id, _payload(
+            response = _post(auth_client, savings_id, _payload(
                 body, {("transaction_ids", str(envelope_id))},
             ))
 
@@ -667,10 +690,10 @@ class TestTheEnvelopeCloseNamesWhatItFrees:
 class TestEachListBooksOnTheStatementsAccount:
     """R-CC15's outcome, held by construction since R-CC126: a tick books where that statement's money moved."""
 
-    def test_ticks_on_checking_book_on_checking_and_the_cards_on_the_card(
+    def test_ticks_on_each_list_book_on_the_statements_account(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """A fresh bill and a bill reopened over its checking payment, on Checking; a card-paid bill, on the card.
+        """A fresh bill, one reopened over its payment, a Checking-paid Savings bill: on Checking.
 
         Ruling R-CC15: a statement-driven settle books on the statement's own
         account.  The panel named that account as the tender until plan step
@@ -678,21 +701,26 @@ class TestEachListBooksOnTheStatementsAccount:
         tick books (``_transactions._settle_one`` says why), so the leaf
         deleted it -- the coordinator's application, 2026-10-04 -- and this
         pins the outcome it used to force for Checking's own list (a fresh
-        bill, and a bill reopened over its checking payment) and the card's
-        "Paid from this account" list (a bill planned on Checking, paid from
-        the card).
+        bill, and a bill reopened over its checking payment) and the "Paid
+        from this account" list (a bill planned on Checking, paid from the
+        card).  Re-expressed by ruling plan#3104 (module docstring): the
+        second list's bill is planned on Savings and paid from Checking, so
+        both lists are Checking's, each ticked in a press of its own, and the
+        Savings bill books on Checking, not on Savings, its own account.
         """
         with app.app_context():
             checking_id = seed_user["account"].id
-            card = _card(seed_user)
-            card_id = card.id
+            savings_id = add_savings(seed_user).id
             water_id = _row(seed_user, seed_periods_today[0], "Water", "45.00").id
             hotel = _row(seed_user, seed_periods_today[0], "Hotel", "120.00")
             settle_transaction(hotel)
             db.session.commit()
             _revert(hotel)
-            groceries = _row(seed_user, seed_periods_today[0], "Groceries", "80.00")
-            settle_transaction(groceries, tender_account_id=card_id)
+            groceries = _row(
+                seed_user, seed_periods_today[0], "Groceries", "80.00",
+                account=db.session.get(Account, savings_id),
+            )
+            settle_transaction(groceries, tender_account_id=checking_id)
             db.session.commit()
             _revert(groceries)
             hotel_id, groceries_id = hotel.id, groceries.id
@@ -703,15 +731,16 @@ class TestEachListBooksOnTheStatementsAccount:
                 checking_body,
                 {("transaction_ids", str(water_id)), ("transaction_ids", str(hotel_id))},
             )).status_code == 200
-            card_body = _panel(auth_client, card_id)
-            assert _post(auth_client, card_id, _payload(
-                card_body, {("transaction_ids", str(groceries_id))},
+            paid_from_body = _panel(auth_client, checking_id)
+            assert "Paid from this account" in paid_from_body
+            assert _post(auth_client, checking_id, _payload(
+                paid_from_body, {("transaction_ids", str(groceries_id))},
             )).status_code == 200
 
             db.session.expire_all()
             for txn_id, account_id in (
                 (water_id, checking_id), (hotel_id, checking_id),
-                (groceries_id, card_id),
+                (groceries_id, checking_id),
             ):
                 row = db.session.get(Transaction, txn_id)
                 assert row.status_id == ref_cache.status_id(StatusEnum.DONE)

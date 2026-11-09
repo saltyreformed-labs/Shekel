@@ -106,6 +106,7 @@ from app.services.status_seam._record import (
     honoured_correction,
     honoured_figure,
     recorded_settlement,
+    revert_moves_payment_home,
     settled_on_a_card,
     tender_account_id_of,
 )
@@ -163,6 +164,7 @@ __all__ = [
     "honoured_correction",
     "honoured_figure",
     "recorded_settlement",
+    "revert_moves_payment_home",
     "settled_on_a_card",
     "tender_account_id_of",
     "deleted_row_payment_refusal",

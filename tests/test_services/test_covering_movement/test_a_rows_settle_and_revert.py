@@ -310,9 +310,10 @@ class TestARevertUnDatesAndAReSettleReDates:
         record when its definition's account moves (R-CC36's clause that
         STANDS), so the row can sit on Second Checking while its un-dated
         record still names Checking.  Under R-CC42 the same columns cannot
-        tell that row from a bill the owner charged to the card and reverted
-        to edit, and the one-click re-settle of the latter must not move its
-        money back onto checking -- so a re-settle naming no tender keeps the
+        tell that row from a bill the owner paid from another account and
+        reverted to edit, and the one-click re-settle of the latter must not
+        move its money back onto its own account -- so a re-settle naming no
+        tender keeps the
         SAME movement (its id survives, as ``X-bi-3e-2`` pinned) on Checking,
         and the fold reads `-148.32` there and nothing on Second Checking;
         a re-settle NAMING Second Checking is what moves it.  The row's

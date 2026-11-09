@@ -22,18 +22,26 @@ every balance predicate reads, so the card's fold drops the purchase and
 reads $800 short (review B, ``cash_ledger._cash_leg``), and teaching those
 predicates a fourth settled status would state the fact twice.
 
+**Undo CC takes the row off the card** (plan task plan#3055, ruling
+plan#2887: "Paid means paid"): :func:`undo_credit` sets it back to Projected
+through the one status door Status -> Projected takes, and the status seam
+moves its kept payment onto the row's own account as it reverts, so a later
+Paid leaves checking and a later Credit puts it back on the card.
+
 **Old Credit rows keep the old path** until plan#1034's re-plan: a row in
 status Credit holds its live CC Payback, and Undo CC on it still deletes that
 payback (``credit_workflow.unmark_credit``).  A press on one changes nothing.
 
 Architecture: no Flask imports; reads the row, the owner's cash-flow set and
-the pay calendar; mutates through the settle verb only; does not commit.
+the pay calendar; mutates through the settle verb and the status door only;
+does not commit.
 """
 
 import logging
 from datetime import date
 
-from app.enums import SettledDayBasisEnum
+from app import ref_cache
+from app.enums import SettledDayBasisEnum, StatusEnum
 from app.exceptions import ValidationError
 from app.extensions import db
 from app.models.account import Account
@@ -41,12 +49,13 @@ from app.models.transaction import Transaction
 from app.services.account_projection import is_revolving
 from app.services.account_resolver import resolve_owner_cash_flow_set
 from app.services.cash_flow_set import purchase_accounts
-from app.services.credit_workflow import get_active_payback
+from app.services.credit_workflow import get_active_payback, unmark_credit
 from app.services.match_press import Press
 from app.services.movement_account import admitted_movement_account_id
 from app.services.pay_calendar import FiledRow, calendar_for
 from app.services.settle_day import SettleDay
 from app.services.status_seam import covering_movement_of, settled_on_a_card
+from app.services.transaction_service._door import apply_requested_status
 from app.services.transaction_service._settle import settle_transaction
 from app.utils.balance_predicates import is_credit, is_projected
 from app.utils.dates import display_today
@@ -124,6 +133,42 @@ def mark_as_credit(
         card_account_id=card.id,
         settled_on=txn.settled_on.isoformat(),
         amount=str(covering_movement_of(txn).amount),
+    )
+
+
+def undo_credit(txn: Transaction, *, press: Press | None = None) -> None:
+    """Undo CC: set *txn* back to Projected, off the card it was put on.
+
+    **A row put on the card** (:func:`mark_as_credit`, drawn Credit) goes
+    back through ``apply_requested_status``, the door the popover's Status
+    -> Projected takes, so the two are one act: the status seam releases its
+    day and moves its kept payment onto the row's own account
+    (``status_seam._covering._move_home``), out of every match naming it on
+    the card, under *press*.  The figure stays with the payment, as every
+    revert keeps it (ruling **R-BAL61**), so a later Paid leaves checking at
+    that figure and a later Credit puts it back on the card.  The seam logs
+    the move (``credit_unmarked``), so the dropdown's door logs it too.  A
+    bill that lives on the card keeps its payment there and logs nothing.
+
+    **Every other row takes the old path** (``credit_workflow.unmark_credit``):
+    an old Credit row's payback is deleted, and a row that is not drawn
+    Credit is refused there in words.
+
+    Args:
+        txn: The row pressed, already proven the caller's by the door.
+        press: The save's :class:`~app.services.match_press.Press`, over the
+            bank lines the card's caption named.
+
+    Raises:
+        ValidationError: When *txn* is not drawn Credit, when the books hold
+            the revert (ruling **R-PC97**), or when the press would free
+            other lines than its page named (ruling **R-CC127**).
+    """
+    if not settled_on_a_card(txn):
+        unmark_credit(txn.id, txn.user_id, press=press)
+        return
+    apply_requested_status(
+        txn, ref_cache.status_id(StatusEnum.PROJECTED), press=press,
     )
 
 

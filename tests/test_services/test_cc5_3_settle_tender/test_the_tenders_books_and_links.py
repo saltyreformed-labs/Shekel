@@ -24,6 +24,9 @@ from app.services import (
 from app.services.cash_ledger import account_opening_fact
 from app.services.settle_day import SettleDay
 from app.services.transaction_service import settle_transaction
+from tests._test_helpers import generate_row_of, make_income_template
+
+from tests._cards import add_savings
 
 from ._helpers import (
     _ONE_DAY,
@@ -162,20 +165,27 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
             assert txn.reconciled_by_id == anchor_id
             assert _movement(txn).reconciled_by_id is None
 
-    def test_a_re_settle_does_not_copy_the_rows_link_onto_a_card_movement(
+    def test_a_re_settle_does_not_copy_the_rows_link_onto_a_movement_elsewhere(
         self, app, seed_user, seed_periods,
     ):
-        """The mirror's differing-day arm, on a kept card movement re-dated by a re-settle."""
+        """The mirror's differing-day arm, on a kept movement elsewhere re-dated by a re-settle.
+
+        Re-expressed by ruling plan#3104 (developer 2026-11-09, CLAUDE.md rule
+        5), whose option text moves these tests "to a second checking or
+        savings account, where it still works": a revert takes a payment off
+        the card now, so the kept movement on another account is a Savings
+        bill's, paid from Checking, where it was a Checking bill's on the card.
+        """
         with app.app_context():
-            card = _card(seed_user)
-            txn = _hotel_bill(seed_user, seed_periods[0])
-            settle_transaction(txn, tender_account_id=card.id)
+            checking = seed_user["account"]
+            txn = _hotel_bill(seed_user, seed_periods[0], account=add_savings(seed_user))
+            settle_transaction(txn, tender_account_id=checking.id)
             db.session.commit()
             _revert(txn)
             settle_transaction(txn)
             db.session.commit()
             movement = _movement(txn)
-            assert movement.account_id == card.id
+            assert movement.account_id == checking.id
             assert movement.settled_on == txn.settled_on
             assert movement.reconciled_by_id is None
 
@@ -216,26 +226,31 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
             assert movement.settled_day_basis_id == observed
             assert movement.reconciled_by_id is None
 
-    def test_a_revert_withdraws_a_card_movements_own_link(
+    def test_a_revert_withdraws_a_tender_movements_own_link(
         self, app, seed_user, seed_periods,
     ):
         """A day move withdraws the movement's observation whichever account it is on.
 
-        The card's statement will write a card movement's own link (leaf
+        The tender's statement writes a movement's own link (leaf
         ``CC-5-4``); this leaf built the gate that keeps the ROW's link off
         it, and the first cut gated the RELEASE with the copy -- so a revert
         would have un-dated the movement with its link standing, which
         ``ck_transaction_entries_cleared_needs_settle_day`` refuses at the
         flush (the review of this leaf).  The link is planted here as that
-        writer will plant it, on the card's own assertion.
+        writer plants it, on the tender's own assertion.  Re-expressed by
+        ruling plan#3104, as
+        :meth:`test_a_re_settle_does_not_copy_the_rows_link_onto_a_movement_elsewhere`
+        is: a Savings bill paid from Checking, where it was a Checking bill
+        paid from the card.  The card's own case, whose revert also moves
+        the payment home, is ``test_undo_cc_takes_the_row_off_the_card``'s.
         """
         with app.app_context():
-            card = _card(seed_user)
-            txn = _hotel_bill(seed_user, seed_periods[0])
-            settle_transaction(txn, tender_account_id=card.id)
+            checking = seed_user["account"]
+            txn = _hotel_bill(seed_user, seed_periods[0], account=add_savings(seed_user))
+            settle_transaction(txn, tender_account_id=checking.id)
             db.session.commit()
             movement = _movement(txn)
-            movement.reconciled_by_id = _latest_anchor(card.id).id
+            movement.reconciled_by_id = _latest_anchor(checking.id).id
             db.session.commit()
             assert _movement(txn).reconciled_by_id is not None
 
@@ -244,7 +259,7 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
             kept = _movement(txn)
             assert kept.settled_on is None
             assert kept.reconciled_by_id is None
-            assert kept.account_id == card.id
+            assert kept.account_id == checking.id
 
     def test_an_echo_of_a_since_archived_tender_is_not_gated(
         self, app, seed_user, seed_periods,
@@ -258,14 +273,27 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
         (ruling **R-CC42**: where the money moved is retained).  The first
         cut gated it and refused a tender nobody changed (the review of this
         leaf).  Naming the archived card for a row that does NOT record it is
-        still refused.
+        still refused.  Re-expressed by ruling plan#3104: a revert of a
+        Checking bill paid from the card takes its payment home now, so the
+        reverted row that records the card is a REFUND received into it -- a
+        Received row is not drawn Credit, and its revert keeps the money where
+        it moved -- and the echo is its Received button's.
         """
         with app.app_context():
             card = _card(seed_user)
-            txn = _hotel_bill(seed_user, seed_periods[0])
+            txn = generate_row_of(
+                make_income_template(
+                    db.session, seed_user, amount=str(_HOTEL), name="Hotel refund",
+                ),
+                seed_periods[0],
+            )
+            db.session.commit()
             settle_transaction(txn, tender_account_id=card.id)
             db.session.commit()
             _revert(txn)
+            assert (txn.account_id, _movement(txn).account_id) == (
+                seed_user["account"].id, card.id,
+            ), "precondition: a Checking refund whose kept payment is on the card"
             card.is_active = False
             db.session.commit()
 
@@ -277,10 +305,10 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
             with pytest.raises(ValidationError, match=r"archived, so a payment"):
                 settle_transaction(other, tender_account_id=card.id)
 
-    def test_the_matcher_never_moves_a_card_payment(
+    def test_the_matcher_never_moves_a_kept_payment(
         self, app, seed_user,
     ):
-        """A bill reverted out of a card settle: checking's screen withholds it, the card's matches it.
+        """Reverted out of a settle elsewhere: its own screen withholds it, the tender's matches.
 
         Rewritten under ruling **R-CC137** (developer 2026-10-04, "Only Paid
         from, say why"; plan step ``credit_card:CC-5-4a-5``, leaf 5c-2a), the
@@ -295,7 +323,13 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
         pinned the matcher's transaction arm naming the pass's account as the
         tender (ruling **R-CC15**) and re-pointing the kept card movement onto
         checking.  Same staging: the bill settled from the card, reverted, a
-        checking line and now a card line beside it.
+        checking line and now a card line beside it.  Re-expressed again by
+        ruling plan#3104 (developer 2026-11-09), whose option text moves these
+        tests "to a second checking or savings account, where it still
+        works": a revert takes a payment off the card now, so the bill is
+        planned on Savings and settled from Checking, a Savings line and a
+        Checking line beside it -- Savings' screen withholds it, Checking's
+        matches it, and Checking is `$120.00` lower.
         """
         # Pylint: ``import-outside-toplevel`` -- the matcher's own builders,
         # imported where used, as this module's other matcher case does.
@@ -306,68 +340,70 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
         )
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            savings = add_savings(seed_user)
             db.session.commit()
             bank_day = seed_user["bootstrap_period"].start_date
-            checking_line = a_bank_line(
-                seed_user, an_import(seed_user), amount="-120.00",
+            savings_line = a_bank_line(
+                seed_user, an_import(seed_user, savings), amount="-120.00",
                 posted_on=bank_day,
             )
-            card_line = a_bank_line(
-                seed_user, an_import(seed_user, card), amount="-120.00",
+            checking_line = a_bank_line(
+                seed_user, an_import(seed_user), amount="-120.00",
                 posted_on=bank_day, description="HOTEL",
             )
-            txn = a_transaction(seed_user, name="Hotel", amount="120.00")
+            txn = a_transaction(
+                seed_user, name="Hotel", amount="120.00", account=savings,
+            )
             db.session.commit()
-            settle_transaction(txn, tender_account_id=card.id)
+            settle_transaction(txn, tender_account_id=checking.id)
             db.session.commit()
             _revert(txn)
-            assert _movement(txn).account_id == card.id
+            assert _movement(txn).account_id == checking.id
 
-            on_checking = a_scope(seed_user)
+            on_savings = a_scope(seed_user, savings)
             assert [
-                row for row in on_checking.candidates.rows
+                row for row in on_savings.candidates.rows
                 if row.transaction_id == txn.id
             ] == []
-            (held,) = on_checking.candidates.held_elsewhere
+            (held,) = on_savings.candidates.held_elsewhere
             assert (held.name, held.figure, held.recorded_on, held.is_income) == (
-                "Hotel", _HOTEL, card.name, False,
+                "Hotel", _HOTEL, checking.name, False,
             )
             with pytest.raises(ValidationError, match="no longer available"):
                 statement_match.accept_match(
                     a_submission(
-                        on_checking, lines=[checking_line], transactions=[txn],
+                        on_savings, lines=[savings_line], transactions=[txn],
                     ),
-                    on_checking,
+                    on_savings,
                 )
             db.session.rollback()
             movement = _movement(txn)
-            assert movement.account_id == card.id
+            assert movement.account_id == checking.id
             assert movement.settled_on is None
             scenario_id = seed_user["scenario"].id
-            assert bank_day not in _per_day(card.id, scenario_id)
+            assert bank_day not in _per_day(checking.id, scenario_id)
 
-            on_card = a_scope(seed_user, card)
+            on_checking = a_scope(seed_user)
             accepted = statement_match.accept_match(
-                a_submission(on_card, lines=[card_line], transactions=[txn]),
-                on_card,
+                a_submission(on_checking, lines=[checking_line], transactions=[txn]),
+                on_checking,
             )
             db.session.commit()
 
             assert accepted.settled_count == 1
             movement = _movement(txn)
-            assert movement.account_id == card.id
+            assert movement.account_id == checking.id
             assert movement.settled_on == bank_day
             assert txn.settled_on == bank_day
-            # "the Visa owes $120.00 more": the card's fold carries the
-            # payment on the bank's day, and Checking's carries nothing.
-            assert _per_day(card.id, scenario_id).get(bank_day) == -_HOTEL
-            assert _per_day(checking.id, scenario_id) == {}
+            # Checking is "$120.00" lower: its fold carries the payment on
+            # the bank's day, and Savings' carries nothing.
+            assert _per_day(checking.id, scenario_id).get(bank_day) == -_HOTEL
+            assert _per_day(savings.id, scenario_id) == {}
 
-    def test_the_checking_panel_no_longer_moves_a_card_payment(
+    def test_the_rows_own_panel_never_moves_a_kept_payment(
         self, app, seed_user, seed_periods,
     ):
-        """A bill reverted out of a card settle, ticked on CHECKING's panel: nothing lands, nothing moves.
+        """Reverted out of a settle elsewhere, ticked on its OWN account's panel: nothing moves.
 
         Ruling **R-CC126** (developer 2026-09-30, "Only the card offers it"):
         *"Checking's list leaves it out ... Each list offers only money that
@@ -378,21 +414,23 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
         match on it unannounced (finding **CC-378**); the developer ruled
         that behaviour changed.  The row is the card's "Paid from this
         account" offer now, and a tick there books it where it is
-        (``test_reconcile_settlements``).
+        (``test_reconcile_settlements``).  Re-expressed by ruling plan#3104, as
+        :meth:`test_the_matcher_never_moves_a_kept_payment` is: a Savings
+        bill settled from Checking and reverted, ticked on Savings' panel.
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
-            txn = _hotel_bill(seed_user, seed_periods[0])
-            settle_transaction(txn, tender_account_id=card.id)
+            savings = add_savings(seed_user)
+            txn = _hotel_bill(seed_user, seed_periods[0], account=savings)
+            settle_transaction(txn, tender_account_id=checking.id)
             db.session.commit()
             _revert(txn)
-            assert _movement(txn).account_id == card.id
+            assert _movement(txn).account_id == checking.id
 
             observed_on = seed_periods[0].start_date + timedelta(days=3)
             statement = reconcile_service.Statement(
-                pay_calendar.calendar_for(seed_user["user"].id), checking.id,
-                replace(cash_ledger.governing_anchor(checking.id), observed_on=observed_on),
+                pay_calendar.calendar_for(seed_user["user"].id), savings.id,
+                replace(cash_ledger.governing_anchor(savings.id), observed_on=observed_on),
             )
             settled = reconcile_service.record_reconciliation(
                 reconcile_service.ReconcileSubmission(
@@ -404,7 +442,7 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
             db.session.commit()
             assert settled == 0
             movement = _movement(txn)
-            assert movement.account_id == card.id
+            assert movement.account_id == checking.id
             assert movement.settled_on is None
             assert movement.reconciled_by_id is None
             assert txn.status_id == ref_cache.status_id(StatusEnum.PROJECTED)

@@ -458,13 +458,24 @@ def tender_account_id_of(row: Transaction) -> int:
     ``credit_card:CC-5-3``, ruling **R-CC42**, developer 2026-09-21), exactly
     as a stated figure is (:meth:`Settlement.from_settle`): a row holding a
     kept record answers that record's account, so the one-click re-settle of
-    a reverted card-tendered bill keeps its ``$120`` on the card; a row
-    holding none answers its own account -- where it is EXPECTED to be paid
-    from (ruling **R-CC16**).  This AMENDS ruling **R-CC36**'s re-point
-    clause: a Projected row whose definition moved accounts keeps its kept
-    record where the money moved, and only a NAMED tender moves it (the
-    refused alternative booked the reverted card bill on checking silently,
-    the card ``$120`` low and checking ``$120`` high).
+    a reverted bill planned on Savings and paid from Checking keeps its
+    ``$120`` on Checking; a row holding none answers its own account -- where
+    it is EXPECTED to be paid from (ruling **R-CC16**).  This AMENDS ruling
+    **R-CC36**'s re-point clause: a Projected row whose definition moved
+    accounts keeps its kept record where the money moved, and only a NAMED
+    tender moves it (the refused alternative booked the reverted bill on its
+    own account silently, the tender ``$120`` high and the row's account
+    ``$120`` low).  R-CC42's own example was a Checking bill paid from the
+    card; that one moves home now (below).
+
+    **Except off the card** (plan task plan#3055, ruling plan#2887: "Paid
+    means paid"; it amends R-CC42 here).  A row put on the card is drawn
+    Credit, and a revert of one -- Undo CC, or Status set back to Projected
+    -- says its money did not go on the card, so the seam moves the kept
+    payment onto the row's own account as it reverts
+    (``_covering._move_home``), and this reads it there: the one-click Paid
+    after Undo CC books on checking.  The rule is unchanged, only the record
+    it reads moved; a bill that lives on the card keeps its payment there.
 
     Args:
         row: The transaction about to settle, re-settle or be drawn.
@@ -510,6 +521,34 @@ def settled_on_a_card(row: Transaction) -> bool:
         return False
     movement = covering_movement_of(row)
     return movement is not None and is_revolving(movement.account)
+
+
+def revert_moves_payment_home(row: Transaction) -> bool:
+    """Return whether setting *row* back to Projected moves its payment off a card.
+
+    **The one answer to "does Undo CC take this off the card"** (plan task
+    plan#3055, ruling plan#2887), asked by the status seam as it reverts
+    (``_seam.apply_status_change``, which then moves the payment through
+    ``_covering._move_home``) and by the full-edit popover for the caption
+    that names the bank lines the move frees, so the caption and the act
+    cannot part.  True for a row put on the card from another account; a
+    bill that lives on the card is drawn Credit too, and its payment is
+    already on its own account, so nothing moves.
+
+    Args:
+        row: The transaction, with ``entries`` loaded or loadable, before
+            its status moves.
+
+    Returns:
+        ``True`` when *row* is on a card (:func:`settled_on_a_card`) and its
+        covering movement is not on the row's own account.
+
+    Raises:
+        ValueError: From :func:`covering_movement_of`, on a row holding two.
+    """
+    if not settled_on_a_card(row):
+        return False
+    return covering_movement_of(row).account_id != row.account_id
 
 
 def drawn_status_id(row: Transaction) -> int:

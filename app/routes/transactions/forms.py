@@ -237,6 +237,13 @@ def render_full_edit(txn, *, page_refusal):
             credit_workflow.pending_for_credit_revert(txn)
             if is_credit(txn) else None
         ),
+        # **Whether Undo CC takes the row's payment OFF THE CARD** (plan task
+        # plan#3055): a row put on the card from another account, whose
+        # revert moves its payment home and out of every match naming it on
+        # the card -- the lines ``payment_withdraws`` names, so the card's
+        # Undo CC caption reads them.  The seam asks the same predicate as
+        # it reverts.  ``False`` for a bill that lives on the card.
+        takes_off_the_card=status_seam.revert_moves_payment_home(txn),
         # **Whether Paid / Received would record $0.00** (plan step
         # ``credit_card:CC-5-4a-5``): such a settle takes a kept payment off
         # the books exactly as a typed $0.00 does, so Paid's caption names
@@ -341,7 +348,8 @@ def render_full_edit(txn, *, page_refusal):
         # RECORDS as its tender (the kept payment's account, else the row's
         # own; ``status_seam.tender_account_id_of``, the seam's one default),
         # so an untouched Save posts an echo the door drops and a reverted
-        # card-tendered bill shows the card (ruling **R-CC42**).  The card
+        # bill paid from another account shows that account (ruling
+        # **R-CC42**; one put on the card is home again, plan#3104).  The card
         # renders it only when there is a choice (ruling **R-CC34**).
         # Resolved for the OWNER (``txn.user_id``; this door is owner-only,
         # so the two coincide) with no override, as every picker is.

@@ -24,6 +24,8 @@ from tests._test_helpers import (
     typed,
 )
 
+from tests._cards import add_savings
+
 from ._helpers import (
     _HOTEL,
     _card,
@@ -225,59 +227,74 @@ class TestTheTenderGate:
 class TestTheTenderIsRetainedAcrossARevert:
     """Ruling **R-CC42**: where the money moved survives a revert as a stated figure does."""
 
-    def test_a_reverted_card_bill_re_settles_on_the_card_when_nothing_is_named(
+    def test_a_reverted_bill_re_settles_on_its_tender_when_nothing_is_named(
         self, app, seed_user, seed_periods,
     ):
-        """The developer's case: revert, then the one-click checkmark: still on the card.
+        """The developer's case: revert, then the one-click checkmark: still where it was paid.
 
         Refused alternative (R-CC36's letter): the re-settle would have booked
-        the `$120` on Checking -- the card `$120` low, checking `$120` high,
-        and the card's statement line with nothing to match.
+        the `$120` on the row's own account -- the tender `$120` high, the
+        row's account `$120` low, and the tender's statement line with
+        nothing to match.  Re-expressed by ruling plan#3104 (developer
+        2026-11-09, CLAUDE.md rule 5): the developer's case was a Checking
+        bill paid from the CARD, and a revert of a row put on the card now
+        takes its payment home (``tests/test_services/
+        test_undo_cc_takes_the_row_off_the_card.py``), so R-CC42 is graded
+        where it still holds, "a second checking or savings account": a
+        Savings bill paid from Checking.
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
-            txn = _hotel_bill(seed_user, seed_periods[0])
-            settle_transaction(txn, tender_account_id=card.id)
+            savings = add_savings(seed_user)
+            txn = _hotel_bill(seed_user, seed_periods[0], account=savings)
+            settle_transaction(txn, tender_account_id=checking.id)
             db.session.commit()
             first_id = _movement(txn).id
 
             _revert(txn)
             kept = _movement(txn)
             assert kept.settled_on is None
-            assert kept.account_id == card.id
-            assert status_seam.tender_account_id_of(txn) == card.id
+            assert kept.account_id == checking.id
+            assert status_seam.tender_account_id_of(txn) == checking.id
 
             settle_transaction(txn)
-            db.session.commit()
-            movement = _movement(txn)
-            assert movement.id == first_id
-            assert movement.account_id == card.id
-            scenario_id = txn.scenario_id
-            assert _per_day(card.id, scenario_id)[txn.settled_on] == -_HOTEL
-            assert txn.settled_on not in _per_day(checking.id, scenario_id)
-
-    def test_naming_a_tender_at_the_re_settle_moves_the_kept_movement(
-        self, app, seed_user, seed_periods,
-    ):
-        """Only a NAMED tender moves it: the same movement, re-pointed onto checking."""
-        with app.app_context():
-            checking = seed_user["account"]
-            card = _card(seed_user)
-            txn = _hotel_bill(seed_user, seed_periods[0])
-            settle_transaction(txn, tender_account_id=card.id)
-            db.session.commit()
-            first_id = _movement(txn).id
-            _revert(txn)
-
-            settle_transaction(txn, tender_account_id=checking.id)
             db.session.commit()
             movement = _movement(txn)
             assert movement.id == first_id
             assert movement.account_id == checking.id
             scenario_id = txn.scenario_id
             assert _per_day(checking.id, scenario_id)[txn.settled_on] == -_HOTEL
-            assert txn.settled_on not in _per_day(card.id, scenario_id)
+            assert txn.settled_on not in _per_day(savings.id, scenario_id)
+
+    def test_naming_a_tender_at_the_re_settle_moves_the_kept_movement(
+        self, app, seed_user, seed_periods,
+    ):
+        """Only a NAMED tender moves it: the same movement, re-pointed onto the row's account.
+
+        Re-expressed by ruling plan#3104, for the reason
+        :meth:`test_a_reverted_bill_re_settles_on_its_tender_when_nothing_is_named`
+        gives: a Savings bill paid from Checking, the re-settle naming
+        Savings.  Left on the card, the revert would already have moved the
+        payment home and this would grade nothing.
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+            savings = add_savings(seed_user)
+            txn = _hotel_bill(seed_user, seed_periods[0], account=savings)
+            settle_transaction(txn, tender_account_id=checking.id)
+            db.session.commit()
+            first_id = _movement(txn).id
+            _revert(txn)
+            assert _movement(txn).account_id == checking.id, "precondition: kept on Checking"
+
+            settle_transaction(txn, tender_account_id=savings.id)
+            db.session.commit()
+            movement = _movement(txn)
+            assert movement.id == first_id
+            assert movement.account_id == savings.id
+            scenario_id = txn.scenario_id
+            assert _per_day(savings.id, scenario_id)[txn.settled_on] == -_HOTEL
+            assert txn.settled_on not in _per_day(checking.id, scenario_id)
 
     def test_a_row_holding_no_record_defaults_to_its_own_account(
         self, app, seed_user, seed_periods,

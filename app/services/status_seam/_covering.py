@@ -173,6 +173,8 @@ DC-10 grades the state a caller of the bare seam would leave.  Money is
 
 from __future__ import annotations
 
+import logging
+from functools import partial
 from typing import Optional
 
 from sqlalchemy.orm.attributes import flag_modified
@@ -197,6 +199,9 @@ from app.services.status_seam._record import (
     covering_movement_of,
     tender_account_id_of,
 )
+from app.utils.log_events import BUSINESS, EVT_CREDIT_UNMARKED, log_event
+
+logger = logging.getLogger(__name__)
 
 
 def _mirror_assertion(row: Transaction, movement: TransactionEntry) -> None:
@@ -531,9 +536,12 @@ def _cover(
     unconditionally (ruling **R-CC36**'s re-point clause, for a Projected row
     whose definition moved accounts while it held a kept record); R-CC42
     amends that clause, because under a tender the same columns cannot tell
-    that case from a bill the owner charged to the card and reverted to edit,
-    and the one-click re-settle of the latter must not move its ``$120`` back
-    onto checking.  Assigned BEFORE the record is written, so
+    that case from a bill the owner paid from another account and reverted
+    to edit, and the one-click re-settle of the latter must not move its
+    ``$120`` back onto the row's own account.  (A bill put on the CARD and
+    reverted no longer reaches here with its payment on the card: the
+    revert takes it home, :func:`_move_home`, ruling plan#3104.)  Assigned
+    BEFORE the record is written, so
     ``record_settle_day``'s books boundary (read under ``no_autoflush`` off
     the column) grades the day against the account the record will book on.
     The lazy ``account`` relationship is not loaded here and is not assigned:
@@ -730,6 +738,7 @@ def sync_covering_movement(
     now_settled: bool,
     settlement: Optional[Settlement],
     press: Press | None = None,
+    off_the_card: bool = False,
 ) -> None:
     """Keep *row*'s covering movement in step with the record the seam wrote.
 
@@ -749,7 +758,8 @@ def sync_covering_movement(
     * **otherwise the mirror follows the row's assertion** -- a revert
       (the row's pair and link were released, so the movement's are:
       ``_follow_assertion``, plan step ``X-bi-3e-2``), an identity re-submit
-      or a settle-day correction.
+      or a settle-day correction.  **A revert OFF THE CARD also moves the
+      kept payment home** (plan task plan#3055; :func:`_move_home`).
 
     **The seam does not call it for a row in the band neither before nor
     after the act**: its assertion did not change, so a movement a revert
@@ -783,6 +793,9 @@ def sync_covering_movement(
             **R-CC127**).  Defaults to ``None`` -- *nothing shown* -- as
             ``apply_status_change`` does, so a caller that says nothing is
             refused if the record would free a line.
+        off_the_card: Whether this act is a revert that takes the row's
+            payment off a card (``status_seam.revert_moves_payment_home``),
+            which the seam reads before it assigns the status.
     """
     if now_settled and settlement is not None:
         # A record that STATES a figure names who wrote it (``Settlement``
@@ -794,3 +807,49 @@ def sync_covering_movement(
             _withdraw(row, press)
         return
     _follow_assertion(row)
+    if off_the_card:
+        _move_home(row, press)
+
+
+def _move_home(row: Transaction, press: Press | None) -> None:
+    """Re-point *row*'s kept payment onto the row's own account: it left the card.
+
+    The revert arm of plan task plan#3055 (ruling plan#2887, "Paid means
+    paid"): Undo CC, or Status set back to Projected, on a row put on the
+    card says its money did not go on the card.  The revert keeps the payment
+    (its figure, its source and its id, ruling **R-BAL61**) and this moves it
+    to the account the row is paid from, so the next Paid books it there and
+    a Credit press moves it back.  It AMENDS ruling **R-CC42** for this one
+    state: where the money moved survives every other revert.
+
+    Through :func:`_re_point`, the one write of a movement's account: every
+    match naming it on the card is withdrawn under *press* (the card's
+    caption names those lines before the press) and the card statement's
+    link is released.  Run after :func:`_follow_assertion` has un-dated it,
+    so no day is graded against the row's account.  The seam asks it only
+    where the payment is on a card and not the row's own account
+    (``_record.revert_moves_payment_home``): a bill that lives on the card
+    keeps its payment there.
+
+    **The move is logged here** (``credit_unmarked``, naming the card), the
+    one place both doors reach -- Undo CC and Status set back to Projected --
+    as an old Credit row's payback deletion is logged where both doors reach
+    it (``credit_workflow.delete_payback_on_credit_revert``).  Owed to the
+    *press*, which logs it only once the save is not refused.
+    """
+    movement = covering_movement_of(row)
+    card_account_id = movement.account_id
+    if not _re_point(row, movement, row.account_id, press):
+        return
+    _record_moved(row)
+    taken_off = partial(
+        log_event, logger, logging.INFO, EVT_CREDIT_UNMARKED, BUSINESS,
+        "Transaction taken off a credit card",
+        user_id=row.user_id,
+        transaction_id=row.id,
+        card_account_id=card_account_id,
+    )
+    if press is None:
+        taken_off()
+    else:
+        press.owe_event(taken_off)

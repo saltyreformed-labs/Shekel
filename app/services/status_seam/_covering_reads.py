@@ -72,8 +72,9 @@ def payment_recorded_elsewhere_clause(account_id: int):
 
     A row holding no purchase (:func:`holds_no_purchase_clause`) whose
     covering movement -- its payment, dated or kept un-dated by a revert --
-    sits on an account other than *account_id*: a bill planned on Checking,
-    marked paid from the card and reopened.  Such a row settles from its
+    sits on an account other than *account_id*: a bill planned on Savings,
+    marked paid from Checking and reopened (one put on the card and reopened
+    takes its payment home, ruling plan#3104).  Such a row settles from its
     figure, and a settle naming *account_id* as the tender would move that
     payment onto it (``_covering._re_point``).
 

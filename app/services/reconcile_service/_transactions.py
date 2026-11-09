@@ -17,9 +17,12 @@ NULL``), what one is WORTH, and what a tick MEANS for it.
 account relation** (ruling **R-CC44**).  :data:`ARM` offers the rows ON this
 account.  :data:`SETTLEMENT_ARM` offers a row planned on ANOTHER account whose
 payment was recorded on this one and then reopened -- a bill planned on
-Checking, marked paid from the card, reopened to edit, its payment KEPT on the
-card with no date (rulings **R-CC42**, **R-BAL61**) -- under the panel's "Paid
-from this account" section (ruling **R-CC111**).  They share this module
+Savings, marked paid from Checking, reopened to edit, its payment KEPT on
+Checking with no date (rulings **R-CC42**, **R-BAL61**) -- under the panel's
+"Paid from this account" section (ruling **R-CC111**).  A bill put on the card
+and reopened takes its payment home (ruling plan#3104), so a card lists a BILL
+only by finding plan#3105's way -- one planned on the card, reopened, its
+definition moved to Checking -- and a refund received into it as before.  They share this module
 because the package cuts by SETTLE VERB and they have one: the same row kind,
 ticked through the same :func:`_settle_one`, priced by the same
 ``settle_amount``, with the same amount box (ruling **R-CC110**) and the same

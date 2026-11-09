@@ -62,7 +62,8 @@ SIX leaves, cut by what each DECIDES rather than by size:
 * :mod:`._door` -- what a DOOR's requested status means, which is a settle for
   one direction and the mechanics alone for every other;
 * :mod:`._credit` -- what pressing CREDIT means: a settle with the card as its
-  tender, on the row's own day (plan task plan#2929);
+  tender, on the row's own day (plan task plan#2929); and Undo CC, the revert
+  that takes it off the card (plan task plan#3055);
 * :mod:`._delete` -- what REMOVING a row means: the four-step sequence and its
   order, which existed twice until plan step ``bank_import:X-gb`` gave the
   delete route and ``statement_match``'s undo one verb to share.
@@ -70,7 +71,11 @@ SIX leaves, cut by what each DECIDES rather than by size:
 **The public surface is this module and ``__all__`` is it.**
 """
 
-from app.services.transaction_service._credit import credit_day, mark_as_credit
+from app.services.transaction_service._credit import (
+    credit_day,
+    mark_as_credit,
+    undo_credit,
+)
 from app.services.transaction_service._delete import (
     RowDeletion,
     delete_transaction,
@@ -131,4 +136,5 @@ __all__ = [
     "repays_card_spend",
     "repays_tracked_purchases",
     "settles_from_entries",
+    "undo_credit",
 ]

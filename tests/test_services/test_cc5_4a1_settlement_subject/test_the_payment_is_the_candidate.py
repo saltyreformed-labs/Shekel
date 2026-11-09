@@ -40,7 +40,15 @@ from ._helpers import (
     _per_day,
     _accept,
     _members_of,
+    _savings,
 )
+
+#: Why the tests that reopen a bill paid elsewhere moved off the card.
+_RE_EXPRESSED = """Re-expressed by ruling plan#3104 (developer 2026-11-09, CLAUDE.md rule 5),
+whose option text moves these tests "to a second checking or savings account,
+where it still works": a revert of a row put on the card now takes its payment
+home, so the bill reopened with its payment elsewhere is planned on Savings and
+paid from Checking, where it was a Checking bill paid from the card."""
 
 
 class TestThePaymentIsTheCardScreensCandidate:
@@ -248,23 +256,28 @@ class TestThePaymentIsTheCardScreensCandidate:
     def test_the_register_reads_it_as_the_bill_and_stops_holding_on_a_revert(
         self, app, seed_user,
     ):
-        """The accepted list on the card: the bill's name, its figure; a revert reads 0."""
+        """The accepted list on the tender: the bill's name, its figure; a revert reads 0.
+
+        See :data:`_RE_EXPRESSED`: the list is Checking's, where it was the card's.
+        """
         with app.app_context():
-            card = _card(seed_user)
-            txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
+            checking = seed_user["account"]
+            txn = _hotel_bill(
+                seed_user, seed_user["bootstrap_period"], account=_savings(seed_user),
+            )
             bank_day = _first_day(seed_user)
             settle_transaction(
-                txn, settle_day=_entered(bank_day), tender_account_id=card.id,
+                txn, settle_day=_entered(bank_day), tender_account_id=checking.id,
             )
             db.session.commit()
             line = a_bank_line(
-                seed_user, an_import(seed_user, card), amount="-120.00",
+                seed_user, an_import(seed_user, checking), amount="-120.00",
                 posted_on=bank_day,
             )
             db.session.commit()
-            _accept(seed_user, card, [line], [txn])
+            _accept(seed_user, checking, [line], [txn])
 
-            (group,) = accepted_acts(seed_user, card)
+            (group,) = accepted_acts(seed_user, checking)
             (row,) = group.rows
             assert row.label == "Hotel"
             assert row.cash_amount == -_HOTEL
@@ -274,7 +287,7 @@ class TestThePaymentIsTheCardScreensCandidate:
 
             _revert(txn)
 
-            (group,) = accepted_acts(seed_user, card)
+            (group,) = accepted_acts(seed_user, checking)
             (row,) = group.rows
             assert row.cash_amount == Decimal("0")
             assert row.settled_on is None
@@ -282,12 +295,12 @@ class TestThePaymentIsTheCardScreensCandidate:
 
 
 class TestAProjectedRowIsOfferedOnceAndItsKeptPaymentWhereTheRowIsNot:
-    """The two arms partition on one predicate; the reverted card bill is the case."""
+    """The two arms partition on one predicate; a bill reopened, paid elsewhere, is the case."""
 
-    def test_the_reverted_card_bill_is_named_on_checking_and_offered_on_the_card(
+    def test_the_reopened_bill_is_named_on_its_own_screen_and_offered_on_the_tenders(
         self, app, seed_user,
     ):
-        """Checking withholds the Projected row and names it; the card offers its kept payment.
+        """Savings withholds the Projected row and names it; Checking offers its kept payment.
 
         Rewritten under ruling **R-CC137** (developer 2026-10-04, "Only Paid
         from, say why", amending R-CC43): *"Checking's statement screen does
@@ -297,42 +310,44 @@ class TestAProjectedRowIsOfferedOnceAndItsKeptPaymentWhereTheRowIsNot:
         ``test_the_reverted_card_bill_is_offered_on_both_screens_as_two_subjects``,
         which pinned Checking offering the row as a TRANSACTION beside the
         card's SETTLEMENT.  Developer confirmation 2026-10-04 (rule 5, ruling
-        **R-CC138**): "Make the tests match the code".
+        **R-CC138**): "Make the tests match the code".  Then see
+        :data:`_RE_EXPRESSED`: Savings withholds it, where Checking did, and
+        Checking offers it, where the card did.
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
-            txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
+            savings = _savings(seed_user)
+            txn = _hotel_bill(seed_user, seed_user["bootstrap_period"], account=savings)
             settle_transaction(
                 txn, settle_day=_entered(_first_day(seed_user)),
-                tender_account_id=card.id,
+                tender_account_id=checking.id,
             )
             db.session.commit()
             _revert(txn)
             movement = _movement(txn)
-            assert movement.settled_on is None and movement.account_id == card.id
+            assert movement.settled_on is None and movement.account_id == checking.id
 
-            assert _offered_for(seed_user, checking, txn) == []
-            (held,) = a_scope(seed_user, checking).candidates.held_elsewhere
+            assert _offered_for(seed_user, savings, txn) == []
+            (held,) = a_scope(seed_user, savings).candidates.held_elsewhere
             assert held.said == (
                 f"Hotel $120.00 is not listed here because the app has it as "
-                f"paid from {card.name}. To change that, edit Hotel on the grid."
+                f"paid from {checking.name}. To change that, edit Hotel on the grid."
             )
 
-            (on_card,) = _offered_for(seed_user, card, txn)
-            assert on_card.kind is RowKind.SETTLEMENT
-            assert on_card.row_id == movement.id
-            assert on_card.cash_amount == -_HOTEL
-            assert on_card.is_settled is False
-            assert on_card.settled_on is None
+            (on_checking,) = _offered_for(seed_user, checking, txn)
+            assert on_checking.kind is RowKind.SETTLEMENT
+            assert on_checking.row_id == movement.id
+            assert on_checking.cash_amount == -_HOTEL
+            assert on_checking.is_settled is False
+            assert on_checking.settled_on is None
             calendar = pay_calendar.calendar_for(seed_user["user"].id)
             period = calendar.period_by_id(txn.pay_period_id)
-            assert on_card.expected_window == (period.start_date, period.end_date)
+            assert on_checking.expected_window == (period.start_date, period.end_date)
 
-    def test_a_checking_page_drawn_before_the_card_paid_it_is_refused(
+    def test_a_page_drawn_before_another_account_paid_it_is_refused(
         self, app, seed_user,
     ):
-        """Drawn while plain Projected, posted after a card-pay and revert: nothing moves.
+        """Drawn while Projected, posted after a pay from elsewhere and a revert: nothing moves.
 
         Rewritten under ruling **R-CC137** (developer 2026-10-04, "Only Paid
         from, say why", amending R-CC43): *"A bill's payment then changes
@@ -355,36 +370,38 @@ class TestAProjectedRowIsOfferedOnceAndItsKeptPaymentWhereTheRowIsNot:
         is DELETED under the same confirmation: Checking never offers the
         reverted bill, so two screens cannot both offer it, and its card-side
         assertions live in ``test_cc5_3_settle_tender``'s
-        ``test_the_matcher_never_moves_a_card_payment``.
+        ``test_the_matcher_never_moves_a_kept_payment``.  Then see
+        :data:`_RE_EXPRESSED`: the stale page is Savings', where it was
+        Checking's, and the pay is from Checking, where it was the card.
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            savings = _savings(seed_user)
             bank_day = _first_day(seed_user)
-            txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
-            checking_line = a_bank_line(
-                seed_user, an_import(seed_user, checking), amount="-120.00",
+            txn = _hotel_bill(seed_user, seed_user["bootstrap_period"], account=savings)
+            savings_line = a_bank_line(
+                seed_user, an_import(seed_user, savings), amount="-120.00",
                 posted_on=bank_day,
             )
             db.session.commit()
-            # Checking's page, drawn while the bill was Projected with no
+            # Savings' page, drawn while the bill was Projected with no
             # payment anywhere: it offers the row.
             stale = a_submission(
-                a_scope(seed_user, checking), lines=[checking_line],
+                a_scope(seed_user, savings), lines=[savings_line],
                 transactions=[txn],
             )
             assert {row.kind for row in stale.rows} == {RowKind.TRANSACTION}
             settle_transaction(
-                txn, settle_day=_entered(bank_day), tender_account_id=card.id,
+                txn, settle_day=_entered(bank_day), tender_account_id=checking.id,
             )
             db.session.commit()
             _revert(txn)
             kept = _movement(txn)
             before = (kept.id, kept.account_id, kept.settled_on, kept.version_id)
-            assert kept.account_id == card.id and kept.settled_on is None
+            assert kept.account_id == checking.id and kept.settled_on is None
 
             with pytest.raises(ValidationError, match="no longer available"):
-                accept_match(stale, a_scope(seed_user, checking))
+                accept_match(stale, a_scope(seed_user, savings))
             db.session.rollback()
 
             assert db.session.query(StatementMatch).count() == 0
@@ -393,18 +410,23 @@ class TestAProjectedRowIsOfferedOnceAndItsKeptPaymentWhereTheRowIsNot:
                 kept.id, kept.account_id, kept.settled_on, kept.version_id,
             ) == before
             assert txn.status_id == ref_cache.status_id(StatusEnum.PROJECTED)
-            assert matched_subjects(checking.id).lines == set()
+            assert matched_subjects(savings.id).lines == set()
 
     def test_a_kept_payment_is_priced_at_what_its_re_settle_books(
         self, app, seed_user,
     ):
-        """The un-dated arm reads the ROW's price, not the movement's stale column."""
+        """The un-dated arm reads the ROW's price, not the movement's stale column.
+
+        See :data:`_RE_EXPRESSED`: offered on Checking, where it was the card.
+        """
         with app.app_context():
-            card = _card(seed_user)
-            txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
+            checking = seed_user["account"]
+            txn = _hotel_bill(
+                seed_user, seed_user["bootstrap_period"], account=_savings(seed_user),
+            )
             settle_transaction(
                 txn, settle_day=_entered(_first_day(seed_user)),
-                tender_account_id=card.id,
+                tender_account_id=checking.id,
             )
             db.session.commit()
             _revert(txn)
@@ -415,9 +437,9 @@ class TestAProjectedRowIsOfferedOnceAndItsKeptPaymentWhereTheRowIsNot:
             state_template_price(txn.template, Decimal("160.00"))
             db.session.commit()
 
-            (on_card,) = _offered_for(seed_user, card, txn)
+            (on_checking,) = _offered_for(seed_user, checking, txn)
 
-            assert on_card.cash_amount == Decimal("-160.00")
+            assert on_checking.cash_amount == Decimal("-160.00")
             basis = derived_amount_basis(seed_user["user"].id, seed_user["scenario"].id)
             assert _valuation.settlement_price(movement, basis) == Decimal("-160.00")
             assert movement.amount == _HOTEL, "the column is the stale figure"
@@ -425,22 +447,27 @@ class TestAProjectedRowIsOfferedOnceAndItsKeptPaymentWhereTheRowIsNot:
     def test_a_kept_payments_form_is_stale_once_its_row_is_renamed(
         self, app, seed_user,
     ):
-        """The row's counter rides the settlement's revision (the review's L2)."""
+        """The row's counter rides the settlement's revision (the review's L2).
+
+        See :data:`_RE_EXPRESSED`: the form is Checking's, where it was the card's.
+        """
         with app.app_context():
-            card = _card(seed_user)
+            checking = seed_user["account"]
             bank_day = _first_day(seed_user)
-            txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
+            txn = _hotel_bill(
+                seed_user, seed_user["bootstrap_period"], account=_savings(seed_user),
+            )
             settle_transaction(
-                txn, settle_day=_entered(bank_day), tender_account_id=card.id,
+                txn, settle_day=_entered(bank_day), tender_account_id=checking.id,
             )
             db.session.commit()
             _revert(txn)
             line = a_bank_line(
-                seed_user, an_import(seed_user, card), amount="-120.00",
+                seed_user, an_import(seed_user, checking), amount="-120.00",
                 posted_on=bank_day,
             )
             db.session.commit()
-            scope = a_scope(seed_user, card)
+            scope = a_scope(seed_user, checking)
             stale = a_submission(scope, lines=[line], transactions=[txn])
             assert {row.kind for row in stale.rows} == {RowKind.SETTLEMENT}
             movement_version = _movement(txn).version_id
@@ -452,30 +479,35 @@ class TestAProjectedRowIsOfferedOnceAndItsKeptPaymentWhereTheRowIsNot:
                 "the rename touched the row alone; the movement did not move"
             )
             with pytest.raises(ValidationError, match="reviewed against different"):
-                accept_match(stale, a_scope(seed_user, card))
+                accept_match(stale, a_scope(seed_user, checking))
             db.session.rollback()
             assert db.session.query(StatementMatch).count() == 0
 
     def test_a_kept_STATED_payment_is_priced_at_the_honoured_figure(
         self, app, seed_user,
     ):
-        """A typed figure survives the revert (R-BAL61) and the offer honours it."""
+        """A typed figure survives the revert (R-BAL61) and the offer honours it.
+
+        See :data:`_RE_EXPRESSED`: offered on Checking, where it was the card.
+        """
         with app.app_context():
-            card = _card(seed_user)
-            txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
+            checking = seed_user["account"]
+            txn = _hotel_bill(
+                seed_user, seed_user["bootstrap_period"], account=_savings(seed_user),
+            )
             settle_transaction(
                 txn, submitted=typed(Decimal("130.00")),
                 settle_day=_entered(_first_day(seed_user)),
-                tender_account_id=card.id,
+                tender_account_id=checking.id,
             )
             db.session.commit()
             _revert(txn)
             state_template_price(txn.template, Decimal("160.00"))
             db.session.commit()
 
-            (on_card,) = _offered_for(seed_user, card, txn)
+            (on_checking,) = _offered_for(seed_user, checking, txn)
 
-            assert on_card.cash_amount == Decimal("-130.00")
+            assert on_checking.cash_amount == Decimal("-130.00")
 
     def test_a_settled_row_on_its_own_screen_is_offered_as_its_payment_only(
         self, app, seed_user,

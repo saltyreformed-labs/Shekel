@@ -342,7 +342,8 @@ EVT_CREDIT_MARKED = _register(
 )
 EVT_CREDIT_UNMARKED = _register(
     "credit_unmarked", BUSINESS,
-    "Credit-marked transaction reverted to Projected; payback deleted.",
+    "Credit undone: an old Credit row's payback deleted, or a row's payment "
+    "taken off the card onto its own account.",
 )
 EVT_PAYBACK_DELETED_WITH_SOURCE = _register(
     "payback_deleted_with_source", BUSINESS,

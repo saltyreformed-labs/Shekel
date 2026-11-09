@@ -15,6 +15,7 @@ from app.services import match_press, match_withdrawal, transaction_service
 from app.services.cash_ledger import settled_cash_facts
 from app.services.settle_day import SettleDay
 from app.services.statement_match import accept_match
+from tests._cards import add_savings
 from tests._test_helpers import create_account_of_type, generate_row_of, make_expense_template
 from tests.test_services.test_statement_match._builders import a_scope, a_submission
 
@@ -35,6 +36,11 @@ def _card(seed_user, name="Rewards Card"):
         anchor_balance=Decimal("-500.00"),
         observed_on=seed_user["bootstrap_period"].start_date,
     )
+
+
+def _savings(seed_user):
+    """``tests._cards.add_savings``, asserted on the bootstrap's first day as :func:`_card` is."""
+    return add_savings(seed_user, observed_on=seed_user["bootstrap_period"].start_date)
 
 
 def _hotel_bill(seed_user, period, *, account=None):

@@ -8,6 +8,10 @@ from decimal import Decimal
 
 from dataclasses import replace
 
+import pytest
+
+from app import ref_cache
+from app.enums import StatusEnum
 from app.utils.dates import display_today
 from app.models.transaction import Transaction
 from app.services import (
@@ -31,7 +35,7 @@ from app.utils.log_events import (
     EVT_ENTRY_UPDATED,
     EVT_TRANSACTION_SETTLED_FROM_ENTRIES,
 )
-from tests._test_helpers import typed
+from tests._test_helpers import add_txn, typed
 
 from ._helpers import _LogCapture
 from tests._cards import add_card
@@ -61,6 +65,56 @@ class TestCreditWorkflowLogging:
             assert record.card_account_id == card.id
             assert record.settled_on == row.settled_on.isoformat()
             assert record.amount == "50.00"
+
+    @pytest.mark.parametrize("door", ["undo_cc", "status_projected"])
+    def test_taking_a_row_off_the_card_emits_event(
+        self, app, db, seed_user, _projected_expense, door,
+    ):
+        """Undo CC, or Status set back to Projected, logs ``credit_unmarked`` naming the card.
+
+        Plan task plan#3055: the two doors are one act, so the seam logs the
+        move where both reach it (``status_seam._covering._move_home``); the
+        row goes back to Projected with its payment on checking, and the
+        event names the card it left.
+        """
+        with app.app_context():
+            card = add_card(seed_user)
+            row = db.session.get(Transaction, _projected_expense.id)
+            transaction_service.mark_as_credit(row)
+            db.session.commit()
+            with _LogCapture("app.services.status_seam._covering") as cap:
+                if door == "undo_cc":
+                    transaction_service.undo_credit(row)
+                else:
+                    transaction_service.apply_requested_status(
+                        row, ref_cache.status_id(StatusEnum.PROJECTED),
+                    )
+
+            record = cap.find(EVT_CREDIT_UNMARKED)
+            assert record is not None
+            assert record.category == BUSINESS
+            assert record.user_id == seed_user["user"].id
+            assert record.transaction_id == _projected_expense.id
+            assert record.card_account_id == card.id
+
+    def test_undo_cc_on_a_bill_that_lives_on_the_card_emits_nothing(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """A bill on the card, Paid there and Undo CC'd: its payment stays, so nothing is logged."""
+        with app.app_context():
+            card = add_card(seed_user)
+            row = add_txn(
+                db.session, seed_user, seed_periods[0], "Claude Max",
+                Decimal("100.00"), account=card,
+            )
+            db.session.commit()
+            transaction_service.settle_transaction(row)
+            db.session.commit()
+            with _LogCapture("app.services.status_seam._covering") as cap:
+                transaction_service.undo_credit(row)
+
+            assert cap.find(EVT_CREDIT_UNMARKED) is None
+            assert [m.account_id for m in row.entries] == [card.id]
 
     def test_unmark_credit_emits_event(self, app, db, seed_user, _projected_expense):
         """unmark_credit emits ``credit_unmarked`` with deleted_payback_id."""

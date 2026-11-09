@@ -42,7 +42,10 @@ from app.services.settle_day import (
 )
 from app.services.state_machine import verify_transition
 from app.services.stated_figure import StatedFigure
-from app.services.status_seam._record import Settlement
+from app.services.status_seam._record import (
+    Settlement,
+    revert_moves_payment_home,
+)
 from app.services.status_seam._covering import sync_covering_movement
 from app.services.status_seam._refusals import (
     StatusBearingRow,
@@ -385,9 +388,11 @@ def apply_status_change(
     before it is deleted (``_covering._withdraw`` through
     ``movement_removal.remove_movements``, plan step
     ``credit_card:CC-5-4a-3``), because those legs and members must go while
-    the rows they link still exist; and a re-pointed payment leaves its
-    matches before its account moves (``_covering._re_point``), because the
-    member's composite key would refuse the account change while it stands.
+    the rows they link still exist; and a re-pointed payment -- a named
+    tender's, or a revert's that takes a row off the card (plan task
+    plan#3055) -- leaves its matches before its account moves
+    (``_covering._re_point``), because the member's composite key would
+    refuse the account change while it stands.
 
     Args:
         row: The :class:`~app.models.transaction.Transaction` or
@@ -617,6 +622,17 @@ def apply_status_change(
     # row's entries are not read: the one predicate the transfer's arm and
     # status writer ask (plan#2139).
     touches_band = touches_settled_band(row, new_status_id)
+    # Read BEFORE the assignment too, and for the same reason: whether this
+    # revert takes a row OFF THE CARD is a question about the status it is
+    # leaving (plan task plan#3055).  A row put on the card is stored Paid
+    # with its payment on the card and drawn Credit, and leaving that state
+    # is Undo CC whichever door asks for it, so the covering arm below moves
+    # its kept payment home (``revert_moves_payment_home``).
+    off_the_card = (
+        isinstance(row, Transaction)
+        and new_status_id not in settled_status_ids()
+        and revert_moves_payment_home(row)
+    )
     row.status_id = new_status_id
 
     # Settle-day maintenance -- the day AND the basis that says how it is known,
@@ -738,6 +754,7 @@ def apply_status_change(
                 now_settled=new_status_id in settled_status_ids(),
                 settlement=settlement,
                 press=press,
+                off_the_card=off_the_card,
             )
 
     db.session.expire(row, ["status"])

@@ -41,6 +41,7 @@ from ._helpers import (
     _first_day,
     _offered_for,
     _accept,
+    _savings,
 )
 
 
@@ -152,10 +153,10 @@ class TestTheClaimsSeeARowThroughItsPayment:
                 if row.transaction_id == txn.id
             ] != [], "the scope still holds it; the claims are what narrow"
 
-    def test_a_row_whose_payment_the_CARDS_act_names_is_named_on_checking_and_freed_on_the_card(
+    def test_a_row_whose_payment_the_TENDERS_act_names_is_named_on_its_own_screen_and_freed_there(
         self, app, seed_user,
     ):
-        """Checking withholds and names it before and after the Undo, which frees it on the card.
+        """Its own screen names it before and after the Undo, which frees it on the tender.
 
         Rewritten under ruling **R-CC137** (developer 2026-10-04, "Only Paid
         from, say why", amending R-CC43): *"Checking's statement screen does
@@ -169,66 +170,71 @@ class TestTheClaimsSeeARowThroughItsPayment:
         register still carries the act as no longer holding, with its Undo,
         and the Undo frees the payment on the card's screen only.  Developer
         confirmation 2026-10-04 (rule 5, ruling **R-CC138**): "Make the
-        tests match the code".
+        tests match the code".  Re-expressed again by ruling plan#3104
+        (developer 2026-11-09), whose option text moves these tests "to a
+        second checking or savings account, where it still works": a revert
+        of a row put on the card takes its payment home now, so the bill is
+        planned on Savings and paid from Checking -- Savings withholds it,
+        where Checking did, and Checking's act and Undo are the card's.
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            savings = _savings(seed_user)
             bank_day = _first_day(seed_user)
-            txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
+            txn = _hotel_bill(seed_user, seed_user["bootstrap_period"], account=savings)
             settle_transaction(
-                txn, settle_day=_entered(bank_day), tender_account_id=card.id,
+                txn, settle_day=_entered(bank_day), tender_account_id=checking.id,
             )
             db.session.commit()
-            card_line = a_bank_line(
-                seed_user, an_import(seed_user, card), amount="-120.00",
-                posted_on=bank_day,
-            )
             checking_line = a_bank_line(
                 seed_user, an_import(seed_user, checking), amount="-120.00",
                 posted_on=bank_day,
             )
+            savings_line = a_bank_line(
+                seed_user, an_import(seed_user, savings), amount="-120.00",
+                posted_on=bank_day,
+            )
             db.session.commit()
-            accepted = _accept(seed_user, card, [card_line], [txn])
+            accepted = _accept(seed_user, checking, [checking_line], [txn])
             _revert(txn)
 
-            scope = a_scope(seed_user, checking)
-            assert _offered_for(seed_user, checking, txn) == []
+            scope = a_scope(seed_user, savings)
+            assert _offered_for(seed_user, savings, txn) == []
             (held,) = scope.candidates.held_elsewhere
-            assert (held.name, held.recorded_on) == ("Hotel", card.name)
-            stale = a_submission(scope, lines=[checking_line], transactions=[txn])
+            assert (held.name, held.recorded_on) == ("Hotel", checking.name)
+            stale = a_submission(scope, lines=[savings_line], transactions=[txn])
             with pytest.raises(ValidationError, match="no longer available"):
-                accept_match(stale, a_scope(seed_user, checking))
+                accept_match(stale, a_scope(seed_user, savings))
             db.session.rollback()
             assert db.session.query(StatementMatch).count() == 1
-            assert _movement(txn).account_id == card.id
-            (group,) = accepted_acts(seed_user, card)
+            assert _movement(txn).account_id == checking.id
+            (group,) = accepted_acts(seed_user, checking)
             assert group.agrees is False
-            # The card's act still names the kept payment, so the card's own
+            # Checking's act still names the kept payment, so Checking's own
             # screen does not offer it again until the Undo.
             assert [
                 row for row in unmatched_rows(
-                    a_scope(seed_user, card).candidates,
-                    matched_subjects(card.id),
+                    a_scope(seed_user, checking).candidates,
+                    matched_subjects(checking.id),
                 )
                 if row.transaction_id == txn.id
             ] == []
 
-            release_match(accepted.match_id, seed_user["user"].id, card.id)
+            release_match(accepted.match_id, seed_user["user"].id, checking.id)
             db.session.commit()
 
             (offered,) = [
                 row for row in unmatched_rows(
-                    a_scope(seed_user, card).candidates,
-                    matched_subjects(card.id),
+                    a_scope(seed_user, checking).candidates,
+                    matched_subjects(checking.id),
                 )
                 if row.transaction_id == txn.id
             ]
             assert offered.kind is RowKind.SETTLEMENT
             assert offered.row_id == _movement(txn).id
-            assert _offered_for(seed_user, checking, txn) == []
-            (held,) = a_scope(seed_user, checking).candidates.held_elsewhere
-            assert (held.name, held.recorded_on) == ("Hotel", card.name)
+            assert _offered_for(seed_user, savings, txn) == []
+            (held,) = a_scope(seed_user, savings).candidates.held_elsewhere
+            assert (held.name, held.recorded_on) == ("Hotel", checking.name)
 
     def test_a_payment_re_pointed_since_the_screen_offered_it_is_refused_not_written(
         self, app, seed_user,

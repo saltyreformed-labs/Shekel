@@ -14,7 +14,14 @@ envelope, or matching a purchase it already holds, counts that `$30.00` once.
 Both states the review's probe measured, because the owner-wide claims scan
 refused them through two different accounts: the lump paid from the VISA and
 matched on the Visa's screen, and the lump paid from CHECKING and matched on
-Checking's own.
+Checking's own.  **Ruling plan#3104 (developer 2026-11-09) re-expressed the
+first** under CLAUDE.md rule 5, its option text as picked: a revert of a row
+put on the card now takes its payment home, so "48 tests in 9 files that set
+that state up move to a second checking or savings account, where it still
+works".  The lump paid from another account than the envelope's is now
+Groceries planned on SAVINGS, its lump paid from Checking and matched on
+Checking's screen, and the `$30.00` is Savings' line: every figure stands but
+the accounts that carry it.
 """
 
 from datetime import timedelta
@@ -33,11 +40,11 @@ from app.utils.dates import display_today
 from tests._test_helpers import generate_row_of, make_expense_template, typed
 from tests.test_services.test_cc5_4a1_settlement_subject._helpers import (
     _accept,
-    _card,
     _entered,
     _first_day,
     _movement,
     _revert,
+    _savings,
 )
 from tests.test_services.test_statement_match._builders import (
     a_bank_line,
@@ -48,8 +55,8 @@ from tests.test_services.test_statement_match._builders import (
 )
 
 
-def _reopened_lump(seed_user, tender):
-    """Groceries closed as one `$120.00` lump from *tender*, matched there, reopened.
+def _reopened_lump(seed_user, home, tender):
+    """Groceries on *home*, closed as one `$120.00` lump from *tender*, matched there, reopened.
 
     Returns:
         ``(envelope, match_id)``: the Projected envelope, and the act on
@@ -59,7 +66,7 @@ def _reopened_lump(seed_user, tender):
     envelope = generate_row_of(
         make_expense_template(
             db.session, seed_user, amount="120.00", name="Groceries",
-            category_key="Groceries", is_envelope=True,
+            category_key="Groceries", is_envelope=True, account=home,
         ),
         seed_user["bootstrap_period"],
     )
@@ -94,8 +101,8 @@ def _settled_cash(seed_user, account):
     )
 
 
-def _projected(seed_user):
-    """Return Checking's balance a week from today, every planned row landed.
+def _projected(seed_user, home):
+    """Return *home*'s balance a week from today, every planned row landed.
 
     Read as of today, so the envelope -- filed in a past period, overdue --
     lands the day after (ruling R-G) and its unspent remainder is inside the
@@ -106,41 +113,39 @@ def _projected(seed_user):
         user_id=seed_user["user"].id, scenario=seed_user["scenario"],
         as_of=today,
     )
-    return balance_at.balance_at(
-        seed_user["account"], ctx, today + timedelta(days=7),
-    )
+    return balance_at.balance_at(home, ctx, today + timedelta(days=7))
 
 
-def _before(seed_user, tender):
+def _before(seed_user, home, tender):
     """Return what :func:`_assert_counted_once` compares against, read before the act."""
     return (
-        _settled_cash(seed_user, seed_user["account"]),
+        _settled_cash(seed_user, home),
         _settled_cash(seed_user, tender),
-        _projected(seed_user),
+        _projected(seed_user, home),
     )
 
 
-def _assert_counted_once(seed_user, tender, before):
+def _assert_counted_once(seed_user, home, tender, before):
     """The `$30.00` counts once: as cash moved, and inside Groceries' `$120.00` plan.
 
-    Ruling R-CC143's "Checking goes down $30.00" is Checking's ACTUAL cash
-    (its dated movements); the lump's account moves by nothing, its kept
-    payment being un-dated.  And the balance once every planned row has
-    landed does not move at all: the purchase is spent out of the
-    envelope's `$120.00`, so the projection holds `$90.00` where it held
-    `$120.00` -- neither the `$30.00` again beside the plan, nor the plan
-    dropped.
+    Ruling R-CC143's "Checking goes down $30.00" is the envelope's account's
+    ACTUAL cash (its dated movements); the lump's account, where it is
+    another, moves by nothing, its kept payment being un-dated.  And the
+    balance once every planned row has landed does not move at all: the
+    purchase is spent out of the envelope's `$120.00`, so the projection
+    holds `$90.00` where it held `$120.00` -- neither the `$30.00` again
+    beside the plan, nor the plan dropped.
 
     Args:
         seed_user: The seeded user bundle.
+        home: The account Groceries is planned on.
         tender: The account the lump was paid from.
         before: :func:`_before`, read before the act.
     """
-    checking = seed_user["account"]
-    assert _settled_cash(seed_user, checking) - before[0] == Decimal("-30.00")
-    if tender.id != checking.id:
+    assert _settled_cash(seed_user, home) - before[0] == Decimal("-30.00")
+    if tender.id != home.id:
         assert _settled_cash(seed_user, tender) - before[1] == Decimal("0")
-    assert _projected(seed_user) == before[2]
+    assert _projected(seed_user, home) == before[2]
 
 
 def _names_the_kept_payment(envelope, match_id):
@@ -150,35 +155,41 @@ def _names_the_kept_payment(envelope, match_id):
     ).one_or_none() is not None
 
 
-@pytest.fixture(name="tender")
-def _tender(request, seed_user):
-    """The account the lump was paid from and matched on: the Visa, or Checking."""
-    if request.param == "visa":
-        card = _card(seed_user)
+@pytest.fixture(name="accounts")
+def _accounts(request, seed_user):
+    """``(home, tender)``: where Groceries is planned, and where its lump was paid and matched.
+
+    ``elsewhere`` is Savings and Checking (it was Checking and the Visa until
+    ruling plan#3104, the module docstring); ``checking`` is Checking twice.
+    """
+    checking = seed_user["account"]
+    if request.param == "elsewhere":
+        savings = _savings(seed_user)
         db.session.commit()
-        return card
-    return seed_user["account"]
+        return savings, checking
+    return checking, checking
 
 
-@pytest.mark.parametrize("tender", ["visa", "checking"], indirect=True)
-def test_a_bank_line_files_into_the_reopened_envelope(app, seed_user, tender):
-    """WALMART `-$30.00` files into Groceries on Checking's screen, once.
+@pytest.mark.parametrize("accounts", ["elsewhere", "checking"], indirect=True)
+def test_a_bank_line_files_into_the_reopened_envelope(app, seed_user, accounts):
+    """WALMART `-$30.00` files into Groceries on its own account's screen, once.
 
     The envelope is offered as a place the line can go, the filing lands as
-    a `$30.00` purchase dated the bank's day, Checking's actual cash falls
-    `$30.00` (the lump's account's by nothing), and the act naming the kept
-    `$120.00` payment stands untouched: closing Groceries from its purchases
-    later is what takes that payment, and its match, off the books.
+    a `$30.00` purchase dated the bank's day, the envelope's account's actual
+    cash falls `$30.00` (the lump's account's by nothing), and the act naming
+    the kept `$120.00` payment stands untouched: closing Groceries from its
+    purchases later is what takes that payment, and its match, off the books.
     """
+    home, tender = accounts
     with app.app_context():
-        envelope, match_id = _reopened_lump(seed_user, tender)
-        before = _before(seed_user, tender)
+        envelope, match_id = _reopened_lump(seed_user, home, tender)
+        before = _before(seed_user, home, tender)
         walmart = a_bank_line(
-            seed_user, an_import(seed_user), amount="-30.00",
+            seed_user, an_import(seed_user, home), amount="-30.00",
             posted_on=_first_day(seed_user), description="WALMART",
         )
         db.session.commit()
-        scope = a_scope(seed_user)
+        scope = a_scope(seed_user, home)
         assert envelope.id in {
             destination.transaction_id for destination in scope.destinations
         }
@@ -190,25 +201,26 @@ def test_a_bank_line_files_into_the_reopened_envelope(app, seed_user, tender):
         assert purchase.settled_on == walmart.posted_on
         assert _movement(envelope).settled_on is None
         assert _names_the_kept_payment(envelope, match_id)
-        _assert_counted_once(seed_user, tender, before)
+        _assert_counted_once(seed_user, home, tender, before)
 
 
-@pytest.mark.parametrize("tender", ["visa", "checking"], indirect=True)
-def test_a_purchase_under_the_reopened_envelope_matches(app, seed_user, tender):
+@pytest.mark.parametrize("accounts", ["elsewhere", "checking"], indirect=True)
+def test_a_purchase_under_the_reopened_envelope_matches(app, seed_user, accounts):
     """A `$30.00` Kroger purchase already under Groceries matches KROGER `-$30.00`.
 
     The kept `$120.00` payment counts nothing while it is un-dated, so the
     purchase's line is the only line explaining the purchase's money: it
-    matches at its own figure and takes the bank's day, Checking's actual
-    cash falls `$30.00` (the lump's account's by nothing), and the act naming
-    the kept payment stands untouched.
+    matches at its own figure and takes the bank's day, the envelope's
+    account's actual cash falls `$30.00` (the lump's account's by nothing),
+    and the act naming the kept payment stands untouched.
     """
+    home, tender = accounts
     with app.app_context():
-        envelope, match_id = _reopened_lump(seed_user, tender)
+        envelope, match_id = _reopened_lump(seed_user, home, tender)
         # Read before the purchase exists, so the projection is graded across
         # adding it AND matching it: a `$30.00` counted beside the plan would
         # already be inside a reading taken after the add.
-        before = _before(seed_user, tender)
+        before = _before(seed_user, home, tender)
         entry_service.create_entry(
             envelope.id, seed_user["user"].id,
             entry_service.EntryDetails(
@@ -219,11 +231,11 @@ def test_a_purchase_under_the_reopened_envelope_matches(app, seed_user, tender):
         db.session.commit()
         (purchase,) = envelope.purchases
         kroger = a_bank_line(
-            seed_user, an_import(seed_user), amount="-30.00",
+            seed_user, an_import(seed_user, home), amount="-30.00",
             posted_on=_first_day(seed_user), description="KROGER",
         )
         db.session.commit()
-        scope = a_scope(seed_user)
+        scope = a_scope(seed_user, home)
         accept_match(
             a_submission(scope, lines=[kroger], entries=[purchase]), scope,
         )
@@ -232,4 +244,4 @@ def test_a_purchase_under_the_reopened_envelope_matches(app, seed_user, tender):
         assert purchase.settled_on == kroger.posted_on
         assert _movement(envelope).settled_on is None
         assert _names_the_kept_payment(envelope, match_id)
-        _assert_counted_once(seed_user, tender, before)
+        _assert_counted_once(seed_user, home, tender, before)

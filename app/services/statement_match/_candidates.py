@@ -80,8 +80,8 @@ the movement's too: a side is a LEG while its transfer is Projected, and its
 DATED movement is the subject once the transfer has settled (ruling
 **R-BAL80**).  (The leg arm asked the movement as well, ruling **R-BAL79**,
 until plan step ``balance:X-bi-6-5``'s third leaf.)  Where the row arms offer
-an un-dated kept movement (a row reverted after a card-tendered settle, ruling
-**R-CC42**), the leg arms offer none: under a Paid or Received transfer that
+an un-dated kept movement (a row reverted after a settle from another
+account, ruling **R-CC42**), the leg arms offer none: under a Paid or Received transfer that
 record is a state the database refuses, and an Apply of it would date it on
 the wrong day (:func:`~._valuation.leg_settlement_candidate`).
 

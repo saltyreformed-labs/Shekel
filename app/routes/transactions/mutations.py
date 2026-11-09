@@ -909,11 +909,12 @@ def mark_credit(txn_id):
 @transactions_bp.route("/transactions/<int:txn_id>/unmark-credit", methods=["DELETE"])
 @require_owner
 def unmark_credit(txn_id):
-    """Revert credit status and delete the auto-generated payback.
+    """Undo CC: off the card (plan#3055), or an old Credit row's payback deleted.
 
-    Optimistic locking: see :func:`mark_credit`.  The button posts the bank
-    lines its caption named (plan step ``credit_card:CC-5-4a-5``, rulings
-    **R-CC80** / **R-CC127**), and a card out of date is redrawn (**R-CC128**).
+    ``transaction_service.undo_credit``.  Optimistic locking: see
+    :func:`mark_credit`.  The button posts the bank lines its caption named
+    (plan step ``credit_card:CC-5-4a-5``, rulings **R-CC80** / **R-CC127**),
+    and a card out of date is redrawn (**R-CC128**).
     """
     txn = _get_owned_transaction(txn_id)
     if txn is None:
@@ -929,9 +930,7 @@ def unmark_credit(txn_id):
 
     try:
         with Press(posted.shown) as one_save:
-            credit_workflow.unmark_credit(
-                txn_id, current_user.id, press=one_save,
-            )
+            transaction_service.undo_credit(txn, press=one_save)
         db.session.commit()
     except StaleDataError:
         logger.info(
@@ -942,9 +941,8 @@ def unmark_credit(txn_id):
         return str(exc), 404
     except ValidationError as exc:
         # Raised when the bespoke source-state guard or the
-        # state-machine verification in
-        # ``credit_workflow.unmark_credit`` rejects the request --
-        # e.g. attempting to unmark a Paid row.  The fragment names
+        # state-machine verification in ``undo_credit`` rejects the
+        # request -- e.g. a Paid row on checking.  The fragment names
         # the offending status so the user understands why; a card out of
         # date is redrawn instead (ruling **R-CC128**).
         return _refused(txn_id, exc, posted)

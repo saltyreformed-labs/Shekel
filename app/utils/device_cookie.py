@@ -45,6 +45,7 @@ _NAME = "shekel_device"
 #: The prefix a browser pins to one origin, for a Secure cookie on Path=/.
 _HOST_PREFIX = "__Host-"
 
+
 def _name_before_the_id() -> str:
     """Return what every device cookie's name holds before its user's id, in this configuration.
 
@@ -71,18 +72,6 @@ def _cookie_name(user_id: int) -> str:
     return f"{_name_before_the_id()}{user_id}"
 
 
-def device_token(user_id: int) -> str | None:
-    """Return the token this request's browser holds for *user_id*, or ``None``.
-
-    Args:
-        user_id: The ``auth.users.id`` signing in or signed in.
-
-    Returns:
-        The cookie's value, or ``None`` when the browser sent none.
-    """
-    return request.cookies.get(_cookie_name(user_id))
-
-
 def device_tokens() -> dict[int, str]:
     """Return every device cookie this request's browser sent, by its user's id.
 
@@ -90,8 +79,8 @@ def device_tokens() -> dict[int, str]:
     configuration's name before the id, then an id as the app writes one,
     which :func:`~app.utils.digit_strings.parse_row_id` reads.  So each user
     has one name, and an id no ``id`` column holds never reaches the query,
-    whose bind cast would raise on it.  Each user's token is the one
-    :func:`device_token` reads for them.
+    whose bind cast would raise on it.  A name sent twice counts with its
+    first value, as Werkzeug's ``request.cookies`` reads one.
 
     Returns:
         Each user id a device cookie is named for, and its value; empty when
@@ -106,6 +95,21 @@ def device_tokens() -> dict[int, str]:
         if user_id is not None:
             tokens[user_id] = token
     return tokens
+
+
+def device_token(user_id: int) -> str | None:
+    """Return the token this request's browser holds for *user_id*, or ``None``.
+
+    The one of :func:`device_tokens` named for *user_id*, so a door that reads
+    one user's cookie and ``/login``'s question of every cookie read one token.
+
+    Args:
+        user_id: The ``auth.users.id`` signing in or signed in.
+
+    Returns:
+        The cookie's value, or ``None`` when the browser sent none.
+    """
+    return device_tokens().get(user_id)
 
 
 def set_device_cookie(response: Response, user_id: int, token: str) -> None:

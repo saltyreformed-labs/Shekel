@@ -421,14 +421,16 @@ class PasswordProof(NamedTuple):
 def find_sign_in_user(email):
     """Return the user who signs in with *email*, or ``None``: sign-in's read before any lock.
 
-    The first act of sign-in, split from the password check at plan step
-    ``balance:X-bn`` so the route can choose, between the two, whether and
-    when to take the account's owner lock
+    Sign-in's look-up of the account, split from the password check at plan
+    step ``balance:X-bn`` so the route can choose, between the two, whether
+    and when to take the account's owner lock
     (:func:`app.db_transaction.bind_sign_in_owner`): a browser known to the
     account takes it before its check (:func:`authenticate_known_browser`),
     and a stranger only after its check has committed, on the way to signing
-    in (:func:`check_strangers_password`, ruling plan#3110).  This layer takes
-    no lock itself (the lock's home is :mod:`app.db_transaction`).
+    in (:func:`check_strangers_password`, ruling plan#3110).  At ``/login``
+    only the question of which users the browser is known to comes before it,
+    and that one takes no email (ruling plan#3130).  This layer takes no lock
+    itself (the lock's home is :mod:`app.db_transaction`).
 
     Args:
         email: The address typed at the login form.

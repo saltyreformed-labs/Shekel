@@ -716,10 +716,11 @@ def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") ->
     """Take *owner_id*'s lock on the command transaction open now, and arm every later one.
 
     The half :func:`_bind_transaction_mode` cannot do: the transaction open now
-    began before the owner was known -- finding the user is what opened it --
-    so the listener never saw an owner for it.  It is locked here directly, and
-    ``g`` is armed LAST, so the listener takes the lock on every transaction
-    that begins after this one and never on this one twice.
+    began before the owner was known -- finding the user opened it, or at
+    ``/login`` the question before it of which users the browser is known to
+    -- so the listener never saw an owner for it.  It is locked here directly,
+    and ``g`` is armed LAST, so the listener takes the lock on every
+    transaction that begins after this one and never on this one twice.
 
     The only rows that transaction has read before the lock are *user_id*'s
     own, loaded to sign the request in or to find the account, and the role

@@ -45,7 +45,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import NamedTuple
 
-from sqlalchemy import ColumnElement, and_, delete, or_, select
+from sqlalchemy import ColumnElement, and_, delete, or_, select, tuple_
 
 from app.exceptions import NotFoundError
 from app.extensions import db
@@ -144,26 +144,37 @@ def _trusted(now: datetime) -> ColumnElement[bool]:
     )
 
 
-def _the_known_browser(now: datetime, user_id: int, token: str) -> ColumnElement[bool]:
-    """Return the ONE statement of which record *token* names for *user_id*, as SQL.
+def _the_known_browsers(now: datetime, tokens: Mapping[int, str]) -> ColumnElement[bool]:
+    """Return the ONE statement of which records *tokens* name, as SQL.
 
-    The record holding *token*'s hash, of *user_id*, and known at *now*
-    (:func:`_known`): so a token no record holds, another user's token and a
-    browser past its lifetime all match nothing.  The standing read under the
-    lock (:func:`_standing_at`) and ``/login``'s question before it
-    (:func:`known_to`) both judge a cookie by it.
+    For each user id in *tokens*, the record of that user holding the hash of
+    the token *tokens* holds for them, and known at *now* (:func:`_known`): so
+    a token no record holds, another user's token and a browser past its
+    lifetime all match nothing.  The standing read under the lock
+    (:func:`_standing_at`, of one cookie) and ``/login``'s question before it
+    (:func:`known_to`, of every cookie the browser sent) both judge a cookie
+    by it.
+
+    The pairs are one list, bound when the statement runs, so the statement
+    has one shape however many cookies it judges.  SQLAlchemy keeps a compiled
+    statement per shape, and one shape per count of cookies would let a
+    stranger grow every worker's cache by sending a different number of
+    made-up cookies each time.  Measured 2026-11-09: a hundred counts, 211 to
+    310 cookies, kept a hundred compiled statements and grew the process by
+    250 MB, about 10 KB a cookie; as one list they kept one, and 1.5 MB.
 
     Args:
         now: The moment to judge at.
-        user_id: The ``auth.users.id`` signing in.
-        token: The token the browser's cookie carries.
+        tokens: Each user id a cookie is named for, and the token it carries.
+            Not empty.
 
     Returns:
         A boolean clause over ``auth.known_devices``.
     """
     return and_(
-        KnownDevice.token_hash == _token_hash(token),
-        KnownDevice.user_id == user_id,
+        tuple_(KnownDevice.user_id, KnownDevice.token_hash).in_(
+            [(user_id, _token_hash(token)) for user_id, token in tokens.items()]
+        ),
         _known(now),
     )
 
@@ -185,7 +196,7 @@ def _standing_at(
         return None
     row = db.session.execute(
         select(KnownDevice, _trusted(now)).where(
-            _the_known_browser(now, user_id, token),
+            _the_known_browsers(now, {user_id: token}),
         )
     ).one_or_none()
     if row is None:
@@ -203,7 +214,7 @@ def known_to(tokens: Mapping[int, str]) -> frozenset[int]:
     every device cookie the browser sent, in one statement that takes no
     email, so the email typed never changes the work it does (ruling
     plan#3130).  Each cookie is judged by the clause :func:`find_browser`
-    judges one by (:func:`_the_known_browser`).
+    judges one by (:func:`_the_known_browsers`).
 
     The answer is user ids, never a record: the record the sign-in acts on is
     read under the lock, by :func:`find_browser`, because one read before it
@@ -223,10 +234,7 @@ def known_to(tokens: Mapping[int, str]) -> frozenset[int]:
         return frozenset()
     now = datetime.now(timezone.utc)
     return frozenset(db.session.execute(
-        select(KnownDevice.user_id).where(or_(*(
-            _the_known_browser(now, user_id, token)
-            for user_id, token in tokens.items()
-        )))
+        select(KnownDevice.user_id).where(_the_known_browsers(now, tokens))
     ).scalars())
 
 

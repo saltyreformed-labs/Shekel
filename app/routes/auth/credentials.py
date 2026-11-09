@@ -96,10 +96,10 @@ def _check_the_password(
       two of them from counting once.  Whether it is known is asked first,
       before the account is found, of every device cookie the browser sent,
       with no lock held and no record loaded
-      (:func:`_users_knowing_this_browser`), so the email typed never changes
-      that question's work (ruling plan#3130); then the browser is read again
-      under the lock (:func:`_browser_standing`), so a made-up cookie never
-      makes a stranger take the lock.  A browser whose record its own
+      (:func:`_users_knowing_this_browser`): so a made-up cookie never makes
+      a stranger take the lock, and the email typed never changes that
+      question's work (ruling plan#3130).  Under the lock the browser is read
+      again (:func:`_browser_standing`), and a browser whose record its own
       guesses deleted between the two reads goes on as a stranger, with the
       lock it already took still held through its check: it held a live
       cookie for this account a moment ago, so its wait is no clue to

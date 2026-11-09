@@ -460,6 +460,28 @@ class TestPastTheStrangersLock:
 
         assert _lock_state(user_id) == lock_before
 
+    def test_over_https_a_known_browser_signs_in_past_the_lock(
+        self, app, seed_user, monkeypatch,
+    ):
+        """Production's cookie, Secure and ``__Host-``: read at ``/login`` by the name written.
+
+        ``/login`` asks of every device cookie by the name the configuration
+        writes (ruling plan#3130), so one that read the other name would make
+        every browser in production a stranger, locked out with the rest.
+        """
+        user_id = seed_user["user"].id
+        monkeypatch.setitem(app.config, "SESSION_COOKIE_SECURE", True)
+        https = {"base_url": "https://localhost"}
+        browser = app.test_client()
+        assert _signed_in(_password(browser, **https))
+        browser.post("/logout", **https)
+        assert browser.get_cookie(f"__Host-shekel_device_{user_id}") is not None
+        lock_before = _strangers_lock(app, user_id)
+
+        assert _signed_in(_password(browser, **https))
+
+        assert _lock_state(user_id) == lock_before
+
     def test_a_trusted_browser_signs_in_with_two_factor(self, app, seed_user):
         """A browser trusted with a code skips it, locked or not, and the lock stays."""
         user_id = seed_user["user"].id

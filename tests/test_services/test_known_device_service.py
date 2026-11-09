@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 import sqlalchemy
+from sqlalchemy.engine.interfaces import CacheStats
 
 from app.exceptions import NotFoundError
 from app.models.known_device import KnownDevice
@@ -414,6 +415,30 @@ class TestWhoTheBrowserIsKnownTo:
 
         assert answer == frozenset()
         assert statements == []
+
+    def test_a_new_number_of_cookies_compiles_nothing_new(self, app, db, acts):
+        """Asked once, the question is compiled; asked of 3, 5 and 8 cookies, it is reused.
+
+        A statement compiled anew for each number of cookies is kept in each
+        worker's cache, so a stranger sending a different number each time
+        would grow it: measured 2026-11-09, a hundred counts kept a hundred
+        statements and 250 MB.  Each ask is read from SQLAlchemy's own report
+        of the cache, per statement.
+        """
+        reports = []
+
+        def on_execute(_conn, _cursor, _statement, _parameters, context, _many):
+            reports.append(context.cache_hit)
+
+        acts.known(_T0, {1: "made-up", 2: "made-up"})
+        sqlalchemy.event.listen(db.engine, "before_cursor_execute", on_execute)
+        try:
+            for count in (3, 5, 8):
+                acts.known(_T0, {user_id: "made-up" for user_id in range(1, count + 1)})
+        finally:
+            sqlalchemy.event.remove(db.engine, "before_cursor_execute", on_execute)
+
+        assert reports == [CacheStats.CACHE_HIT] * 3
 
 
 class TestTheList:

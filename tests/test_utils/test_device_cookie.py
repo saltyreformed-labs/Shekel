@@ -65,8 +65,9 @@ class TestTheNames:
 
         assert _tokens(app, "__Host-shekel_device_7=a; shekel_device_8=b") == {7: "a"}
 
-    def test_each_token_is_the_one_device_token_reads(self, app):
-        """A name sent twice: both readers take the same one of its values."""
+    def test_a_name_sent_twice_counts_with_its_first_value(self, app):
+        """Both readers take the first of a name's two values."""
         header = "shekel_device_7=first; shekel_device_7=second"
         with app.test_request_context(headers={"Cookie": header}):
-            assert device_tokens() == {7: device_token(7)}
+            assert device_tokens() == {7: "first"}
+            assert device_token(7) == "first"

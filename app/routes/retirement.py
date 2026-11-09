@@ -663,7 +663,7 @@ def _resolve_end_year_saves(
             log_refused_lookup("SalaryRaise", raise_id)
             abort(404)
         try:
-            writes.append((row, end_year_of(mode, year, row.effective_year)))
+            writes.append((row, end_year_of(mode, year, row.effective_date.year)))
         except EndYearError as exc:
             refusals[raise_id] = (exc.field, exc.message)
     return writes, _refused_probes_by_control(refusals)

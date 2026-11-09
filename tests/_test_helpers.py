@@ -3531,7 +3531,7 @@ def make_salary_profile(
 
 
 def make_recurring_raise(
-    profile_id, db_session, *, effective_year, effective_month=1,
+    profile_id, db_session, *, effective_date,
     percentage=None, terminal_year=None,
 ):
     """Build and add ONE recurring percentage raise on a profile (uncommitted).
@@ -3545,8 +3545,8 @@ def make_recurring_raise(
     Args:
         profile_id: The :class:`~app.models.salary_profile.SalaryProfile` id.
         db_session: The test ``db.session``.
-        effective_year: The year the raise first applies.
-        effective_month: The month within that year (default January).
+        effective_date: The day the raise starts, which it repeats on every
+            later year it is believed.
         percentage: The fractional raise (Decimal); defaults to
             ``Decimal("0.0500")``, a 5% merit raise.
         terminal_year: The last year it is believed, ``None`` for no end.
@@ -3563,8 +3563,7 @@ def make_recurring_raise(
     row = SalaryRaise(
         salary_profile_id=profile_id,
         raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
-        effective_month=effective_month,
-        effective_year=effective_year,
+        effective_date=effective_date,
         percentage=Decimal("0.0500") if percentage is None else percentage,
         is_recurring=True,
         terminal_year=terminal_year,

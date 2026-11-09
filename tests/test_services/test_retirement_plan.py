@@ -480,8 +480,7 @@ def _seed_believed_plan(db, seed_user, *, effective_year, effective_month=1):
         .one()
     )
     raise_row = make_recurring_raise(
-        profile.id, db.session, effective_year=effective_year,
-        effective_month=effective_month,
+        profile.id, db.session, effective_date=date(effective_year, effective_month, 1),
     )
     params = (
         db.session.query(InvestmentParams)
@@ -537,7 +536,7 @@ class TestThePointBelievesARaiseSet:
             one_time = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.COLA),
-                effective_month=6, effective_year=year,
+                effective_date=date(year, 6, 1),
                 flat_amount=Decimal("1500.00"), is_recurring=False,
             )
             db.session.add(one_time)
@@ -857,7 +856,7 @@ class TestThePointBelievesARaiseSet:
             start_test_pay_list(foreign_profile, Decimal("2500.00"))
             db.session.flush()
             foreign = make_recurring_raise(
-                foreign_profile.id, db.session, effective_year=year + 2,
+                foreign_profile.id, db.session, effective_date=date(year + 2, 1, 1),
             )
             db.session.commit()
             inputs = load_retirement_inputs(

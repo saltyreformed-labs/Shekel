@@ -68,7 +68,7 @@ _PROFILE_UPDATE_FIELDS = {
     "stub_gross_includes_after_tax",
 }
 _RAISE_UPDATE_FIELDS = {
-    "raise_type_id", "effective_month", "effective_year",
+    "raise_type_id", "effective_date",
     "percentage", "flat_amount", "is_recurring", "terminal_year", "notes",
 }
 # ``deductions_per_year`` left this set at plan step salary:R15-b: a
@@ -85,9 +85,10 @@ _LINE_UPDATE_FIELDS = {
 # Each literal mirrors the model declaration in
 # ``app/models/salary_raise.py`` and
 # ``app/models/paycheck_line.py`` and the migration revision
-# ``a3b9c2d40e15``; renaming a constraint requires a coordinated
+# ``a3b9c2d40e15`` (the raise's, renamed with its key by ``6740ce13e174``
+# when the start became a date); renaming a constraint requires a coordinated
 # edit across all three sites.
-_SALARY_RAISES_UNIQUE_CONSTRAINT = "uq_salary_raises_profile_type_year_month"
+_SALARY_RAISES_UNIQUE_CONSTRAINT = "uq_salary_raises_profile_type_date"
 _PAYCHECK_LINES_UNIQUE_CONSTRAINT = "uq_paycheck_lines_profile_name"
 
 _create_schema = SalaryProfileCreateSchema()
@@ -194,7 +195,6 @@ def _render_raises_partial(profile):
         "salary/_raises_section.html",
         profile=profile,
         raise_types=raise_types,
-        now_year=date.today().year,
     )
 
 

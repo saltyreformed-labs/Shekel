@@ -414,11 +414,8 @@ function _populateRaiseForm(editBtn) {
     var sel = form.querySelector('[name=raise_type_id]');
     if (sel) sel.value = editBtn.dataset.raiseTypeId;
 
-    var month = form.querySelector('[name=effective_month]');
-    if (month) month.value = editBtn.dataset.raiseMonth;
-
-    var year = form.querySelector('[name=effective_year]');
-    if (year) year.value = editBtn.dataset.raiseYear;
+    var starts = form.querySelector('[name=effective_date]');
+    if (starts) starts.value = editBtn.dataset.raiseDate;
 
     var pct = form.querySelector('[name=percentage]');
     var flat = form.querySelector('[name=flat_amount]');

@@ -125,7 +125,7 @@ def add_raise(profile_id):
         db.session.commit()
     except IntegrityError as exc:
         # Duplicate-raise double-submit (F-051 / C-23): the composite
-        # unique ``uq_salary_raises_profile_type_year_month`` rejects
+        # unique ``uq_salary_raises_profile_type_date`` rejects
         # the second INSERT when the user clicks Save twice in a row,
         # the browser retries on a flaky network, or the back button
         # is used to re-submit the form.  Roll back and treat as
@@ -306,7 +306,7 @@ def update_raise(raise_id):
             redirect=_edit_page(profile.id),
         ),
         # Duplicate-key collision on update (F-051 / C-23): the user edited
-        # this raise's (type, year, month) tuple onto one another active
+        # this raise's (type, start date) pair onto one another active
         # raise on the same profile already holds -- a recoverable warning,
         # not a 500.  Any other IntegrityError falls through to error_ctx.
         on_integrity=UniqueViolationContext(

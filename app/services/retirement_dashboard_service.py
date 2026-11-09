@@ -510,8 +510,8 @@ def recurring_raises(salary_profiles: list[SalaryProfile]) -> list[SalaryRaise]:
 
     Returns:
         The recurring :class:`~app.models.salary_raise.SalaryRaise` rows, in
-        profile then row order (the relationship's ``effective_year,
-        effective_month`` ordering).
+        profile then row order (the relationship's ``effective_date``
+        ordering).
     """
     return [
         raise_obj
@@ -538,7 +538,7 @@ def resolve_recurring_raise_assumptions(
     contributes no row.  **Each row is a PROBE since plan step salary:S3-f-2b**:
     the rail renders the salary form's own end-year pair (a mode and a year,
     ruling **R-SAL13**) pre-filled from the row, and every readiness refresh
-    carries them, so the ``effective_year`` here is the floor the year input
+    carries them, so the start's year here is the floor the year input
     states and the ``raise_id`` is what names the probe's parameters.
 
     Args:
@@ -560,7 +560,7 @@ def resolve_recurring_raise_assumptions(
         One dict per recurring raise, in profile then row order, carrying
         ``raise_id``, ``profile_id``, ``profile_name``, ``raise_type`` (the
         type's DISPLAY name, off the row's own property), ``percentage``,
-        ``flat_amount``, ``effective_month``, ``effective_year`` and
+        ``flat_amount``, ``effective_date`` (the day it starts) and
         ``terminal_year`` (the last year it is believed, ``None`` for
         indefinitely).
     """
@@ -575,8 +575,7 @@ def resolve_recurring_raise_assumptions(
             "raise_type": raise_obj.raise_type_name,
             "percentage": raise_obj.percentage,
             "flat_amount": raise_obj.flat_amount,
-            "effective_month": raise_obj.effective_month,
-            "effective_year": raise_obj.effective_year,
+            "effective_date": raise_obj.effective_date,
             "terminal_year": raise_obj.terminal_year,
         }
         for raise_obj in recurring_raises(salary_profiles)

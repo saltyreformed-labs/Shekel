@@ -437,7 +437,11 @@ def _raise_probe(inputs):
         for raise_obj in profile.raises
         if raise_obj.id == raise_id
     )
-    return {raise_id: ("year", row.effective_year)}
+    # The start's year: a DATE since plan step salary plan#3048, a year column
+    # before it -- read whichever this tree's row carries, so the harness runs
+    # on both sides of that step.
+    starts = getattr(row, "effective_date", None)
+    return {raise_id: ("year", starts.year if starts else row.effective_year)}
 
 
 def _whatif_at(inputs):

@@ -169,8 +169,7 @@ class TestRaiseDoubleSubmit:
 
             data = {
                 "raise_type_id": raise_type.id,
-                "effective_month": "7",
-                "effective_year": "2026",
+                "effective_date": "2026-07-01",
                 "percentage": "3",
             }
 

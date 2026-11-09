@@ -36,12 +36,13 @@ class FakeRaise:
     """Minimal stand-in for a SalaryRaise ORM object."""
 
     def __init__(self, percentage=None, flat_amount=None,
-                 effective_month=3, effective_year=2026,
+                 effective_date=date(2026, 3, 1),
                  is_recurring=False, terminal_year=None):
         self.percentage = Decimal(str(percentage)) if percentage else None
         self.flat_amount = Decimal(str(flat_amount)) if flat_amount else None
-        self.effective_month = effective_month
-        self.effective_year = effective_year
+        # The day the raise starts (plan step salary plan#3048, ruling
+        # plan#3090); a year and a month, landed on the 1st, until then.
+        self.effective_date = effective_date
         self.is_recurring = is_recurring
         # The last year the raise is believed to happen, None for
         # indefinitely.  REQUIRED on the stand-in since plan step

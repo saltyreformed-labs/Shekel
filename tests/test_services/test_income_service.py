@@ -109,8 +109,7 @@ def _add_one_time_raise(
     salary_raise = SalaryRaise(
         salary_profile_id=profile.id,
         raise_type_id=merit.id,
-        effective_month=effective_month,
-        effective_year=effective_year,
+        effective_date=date(effective_year, effective_month, 1),
         percentage=Decimal(percentage),
         is_recurring=False,
     )
@@ -1579,7 +1578,7 @@ class TestThePricerIsKeyedOnTheRaiseSet:
         merit = db.session.query(RaiseType).filter_by(name="merit").one()
         row = SalaryRaise(
             salary_profile_id=profile.id, raise_type_id=merit.id,
-            effective_month=3, effective_year=2026,
+            effective_date=date(2026, 3, 1),
             percentage=Decimal("0.0500"), is_recurring=True,
             terminal_year=None,
         )
@@ -1717,7 +1716,7 @@ class TestThePricerIsKeyedOnTheRaiseSet:
                     raise_type_id=ref_cache.raise_type_id(
                         RaiseTypeEnum.CUSTOM,
                     ),
-                    effective_month=2, effective_year=first.start_date.year,
+                    effective_date=date(first.start_date.year, 2, 1),
                     flat_amount=Decimal("26000.00"), percentage=None,
                     is_recurring=False, terminal_year=None,
                 )

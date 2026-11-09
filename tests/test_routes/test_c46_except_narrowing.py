@@ -184,8 +184,7 @@ class TestSalaryNarrowCatch:
                     f"/salary/{profile.id}/raises",
                     data={
                         "raise_type_id": raise_type.id,
-                        "effective_month": "7",
-                        "effective_year": "2026",
+                        "effective_date": "2026-07-01",
                         "percentage": "3",
                     },
                     follow_redirects=False,
@@ -214,8 +213,7 @@ class TestSalaryNarrowCatch:
             salary_raise = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=6,
-                effective_year=2026,
+                effective_date=date(2026, 6, 1),
                 percentage=Decimal("0.0300"),
             )
             db.session.add(salary_raise)
@@ -254,8 +252,7 @@ class TestSalaryNarrowCatch:
             salary_raise = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=6,
-                effective_year=2026,
+                effective_date=date(2026, 6, 1),
                 percentage=Decimal("0.0300"),
             )
             db.session.add(salary_raise)
@@ -270,8 +267,7 @@ class TestSalaryNarrowCatch:
                     f"/salary/raises/{raise_id}/edit",
                     data={
                         "raise_type_id": cola_type.id,
-                        "effective_month": "7",
-                        "effective_year": "2026",
+                        "effective_date": "2026-07-01",
                         "percentage": "5",
                     },
                     follow_redirects=False,

@@ -686,7 +686,7 @@ class TestLoadPayrollFeeds:
             db.session.add(SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
-                effective_month=7, effective_year=2026,
+                effective_date=date(2026, 7, 1),
                 percentage=Decimal("0.0300"), is_recurring=True,
                 terminal_year=None,
             ))
@@ -1520,7 +1520,7 @@ class TestTheFeedIsBuiltOverTheWiring:
         row = SalaryRaise(
             salary_profile_id=profile.id,
             raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
-            effective_month=7, effective_year=2026,
+            effective_date=date(2026, 7, 1),
             percentage=Decimal("0.0500"), is_recurring=True,
             terminal_year=None,
         )

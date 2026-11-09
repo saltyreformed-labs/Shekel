@@ -182,7 +182,7 @@ class SalaryProfile(
     raises = db.relationship(
         "SalaryRaise", back_populates="salary_profile",
         cascade="all, delete-orphan", lazy="select",
-        order_by="SalaryRaise.effective_year, SalaryRaise.effective_month",
+        order_by="SalaryRaise.effective_date",
     )
     # The pay list (plan step salary:X-av-3a), in payday order: the engine
     # reads it as an attribute the caller loaded, as it reads ``raises`` and

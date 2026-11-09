@@ -98,7 +98,7 @@ def _biweekly_then_weekly():
 def _percent(year, month, pct, *, recurring=False):
     """A merit raise of *pct* (a string) landing on the 1st of *month*."""
     return RaiseTerms(
-        effective_year=year, effective_month=month, is_recurring=recurring,
+        effective_date=date(year, month, 1), is_recurring=recurring,
         percentage=Decimal(pct), flat_amount=None, terminal_year=None,
         raise_type_name="merit",
     )
@@ -107,7 +107,7 @@ def _percent(year, month, pct, *, recurring=False):
 def _flat(year, month, dollars_a_year):
     """A one-time flat raise of *dollars_a_year* landing on the 1st of *month*."""
     return RaiseTerms(
-        effective_year=year, effective_month=month, is_recurring=False,
+        effective_date=date(year, month, 1), is_recurring=False,
         percentage=None, flat_amount=Decimal(dollars_a_year), terminal_year=None,
         raise_type_name="custom",
     )

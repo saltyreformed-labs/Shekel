@@ -928,8 +928,7 @@ class TestRaiseCreateSchema:
         """Valid raise with percentage loads successfully."""
         data = RaiseCreateSchema().load({
             "raise_type_id": "1",
-            "effective_month": "3",
-            "effective_year": "2026",
+            "effective_date": "2026-03-01",
             "percentage": "3.50",
         })
         assert data["percentage"] == Decimal("3.50")
@@ -938,8 +937,7 @@ class TestRaiseCreateSchema:
         """Valid raise with flat_amount loads successfully."""
         data = RaiseCreateSchema().load({
             "raise_type_id": "1",
-            "effective_month": "1",
-            "effective_year": "2026",
+            "effective_date": "2026-01-01",
             "flat_amount": "5000.00",
         })
         assert data["flat_amount"] == Decimal("5000.00")
@@ -949,8 +947,7 @@ class TestRaiseCreateSchema:
         with pytest.raises(ValidationError) as exc:
             RaiseCreateSchema().load({
                 "raise_type_id": "1",
-                "effective_month": "3",
-                "effective_year": "2026",
+                "effective_date": "2026-03-01",
                 "percentage": "3",
                 "flat_amount": "5000.00",
             })
@@ -961,31 +958,28 @@ class TestRaiseCreateSchema:
         with pytest.raises(ValidationError) as exc:
             RaiseCreateSchema().load({
                 "raise_type_id": "1",
-                "effective_month": "3",
-                "effective_year": "2026",
+                "effective_date": "2026-03-01",
             })
         assert "_schema" in exc.value.messages
 
-    def test_missing_effective_year_rejected(self):
-        """Raise without effective_year is rejected."""
+    def test_missing_start_date_rejected(self):
+        """A raise without its start date is rejected (ruling plan#3090)."""
         with pytest.raises(ValidationError) as exc:
             RaiseCreateSchema().load({
                 "raise_type_id": "1",
-                "effective_month": "3",
                 "percentage": "3",
             })
-        assert "effective_year" in exc.value.messages
+        assert "effective_date" in exc.value.messages
 
-    def test_month_out_of_range(self):
-        """effective_month=13 fails Range(1-12) validation."""
+    def test_an_impossible_date_is_rejected(self):
+        """February 30 is no day, so it is no start date."""
         with pytest.raises(ValidationError) as exc:
             RaiseCreateSchema().load({
                 "raise_type_id": "1",
-                "effective_month": "13",
-                "effective_year": "2026",
+                "effective_date": "2026-02-30",
                 "percentage": "3",
             })
-        assert "effective_month" in exc.value.messages
+        assert "effective_date" in exc.value.messages
 
 
 # ── PaycheckLineCreateSchema ────────────────────────────────────────────
@@ -1678,28 +1672,51 @@ class TestRaiseRangeValidation:
 
     def _base(self, **overrides):
         data = {
-            "raise_type_id": "1", "effective_month": "7",
-            "effective_year": "2026", "percentage": "3.00",
+            "raise_type_id": "1", "effective_date": "2026-07-01", "percentage": "3.00",
         }
         data.update(overrides)
         return data
 
-    def test_year_zero_rejected(self):
-        """effective_year=0 is rejected (min=2000)."""
+    def test_a_start_before_2000_is_rejected(self):
+        """The last day of 1999 is outside the window (min 2000-01-01)."""
         with pytest.raises(ValidationError) as exc:
-            RaiseCreateSchema().load(self._base(effective_year="0"))
-        assert "effective_year" in exc.value.messages
+            RaiseCreateSchema().load(self._base(effective_date="1999-12-31"))
+        assert "effective_date" in exc.value.messages
 
-    def test_year_far_future_rejected(self):
-        """effective_year=999999 is rejected (max=2100)."""
+    def test_a_start_after_2100_is_rejected(self):
+        """The first day of 2101 is outside the window (max 2100-12-31)."""
         with pytest.raises(ValidationError) as exc:
-            RaiseCreateSchema().load(self._base(effective_year="999999"))
-        assert "effective_year" in exc.value.messages
+            RaiseCreateSchema().load(self._base(effective_date="2101-01-01"))
+        assert "effective_date" in exc.value.messages
 
-    def test_valid_year_accepted(self):
-        """effective_year=2026 passes."""
-        data = RaiseCreateSchema().load(self._base())
-        assert data["effective_year"] == 2026
+    def test_both_ends_of_the_window_are_accepted(self):
+        """2000-01-01 and 2100-12-31 are the window's own ends."""
+        for day in ("2000-01-01", "2100-12-31"):
+            data = RaiseCreateSchema().load(self._base(effective_date=day))
+            assert data["effective_date"] == date.fromisoformat(day)
+
+    def test_valid_start_accepted(self):
+        """A mid-month start keeps its day (ruling plan#3090)."""
+        data = RaiseCreateSchema().load(self._base(effective_date="2026-07-15"))
+        assert data["effective_date"] == date(2026, 7, 15)
+
+    def test_a_recurring_raise_may_not_start_on_february_29(self):
+        """It repeats on its month and day, which three years in four lack."""
+        with pytest.raises(ValidationError) as exc:
+            RaiseCreateSchema().load(self._base(
+                effective_date="2028-02-29", is_recurring="on",
+                raise_end_mode="none",
+            ))
+        assert exc.value.messages["effective_date"] == [
+            "A raise that repeats every year can't start on February 29, "
+            "because most years don't have one. Start it on February 28 "
+            "or March 1."
+        ]
+
+    def test_a_one_time_raise_may_start_on_february_29(self):
+        """A raise that happens once needs its day only once."""
+        data = RaiseCreateSchema().load(self._base(effective_date="2028-02-29"))
+        assert data["effective_date"] == date(2028, 2, 29)
 
 
 class TestContributionPerPeriodRange:
@@ -1761,8 +1778,7 @@ class TestRaiseCreateSchemaEndYearAttribution:
     @staticmethod
     def _recurring(**overrides):
         data = {
-            "raise_type_id": "1", "effective_month": "1",
-            "effective_year": "2027", "percentage": "5",
+            "raise_type_id": "1", "effective_date": "2027-01-01", "percentage": "5",
             "is_recurring": "on",
         }
         data.update(overrides)

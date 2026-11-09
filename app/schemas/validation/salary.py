@@ -22,6 +22,7 @@ from app.schemas.validation._helpers import (
     RowId,
     _NON_NEGATIVE_MONETARY,
     _PERCENT_INPUT_RANGE,
+    _RAISE_DATE_RANGE,
     _RAISE_YEAR_RANGE,
     _normalize_empty_inputs,
 )
@@ -49,6 +50,8 @@ _PAY_AMOUNT_RANGE = validate.Range(
 )
 #: The window a pay entry's payday may be typed in: the calendar's own.
 _PAYDAY_RANGE = validate.Range(min=CALENDAR_DATE_MIN, max=CALENDAR_DATE_MAX)
+#: ``(month, day)`` of the one date a yearly repeat cannot land on every year.
+_LEAP_DAY = (2, 29)
 
 
 def _require_supported_state(value: str) -> None:
@@ -209,10 +212,10 @@ class RaiseCreateSchema(BaseSchema):
         return _normalize_empty_inputs(self, data)
 
     raise_type_id = RowId(required=True)
-    effective_month = fields.Integer(
-        required=True, validate=validate.Range(min=1, max=12)
-    )
-    effective_year = fields.Integer(required=True, validate=_RAISE_YEAR_RANGE)
+    # The day the raise starts (plan step salary plan#3048, ruling plan#3090):
+    # the window is ``ck_salary_raises_valid_effective_date``'s, built from the
+    # one home of its years (``salary_raises.RAISE_YEAR_MIN`` / ``_MAX``).
+    effective_date = fields.Date(required=True, validate=_RAISE_DATE_RANGE)
     # F-011 / C-24: Tightened from Range(-100, 1000) to a positive,
     # column-fitting bound.  The user enters percent (e.g. "3" for a
     # 3% raise); the route divides by 100 before persistence into
@@ -314,12 +317,12 @@ class RaiseCreateSchema(BaseSchema):
                 )
             return
 
-        # ``effective_year`` is required and this hook is skipped on field
+        # ``effective_date`` is required and this hook is skipped on field
         # errors (marshmallow's ``skip_on_field_errors`` default), so it is
         # present here.
         try:
             end_year_of(
-                data.get("raise_end_mode"), year, data["effective_year"],
+                data.get("raise_end_mode"), year, data["effective_date"].year,
             )
         except EndYearError as exc:
             raise ValidationError(
@@ -368,10 +371,33 @@ class RaiseCreateSchema(BaseSchema):
         mode = data.pop("raise_end_mode", None)
         if data.get("is_recurring", False):
             data["terminal_year"] = end_year_of(
-                mode, data.get("terminal_year"), data["effective_year"],
+                mode, data.get("terminal_year"), data["effective_date"].year,
             )
         data.setdefault("terminal_year", None)
         return data
+
+    @validates_schema
+    def validate_recurring_start_day(self, data, **kwargs):
+        """Refuse a RECURRING raise that starts on February 29.
+
+        A recurring raise repeats on its start's month and day every year it
+        is believed (ruling **plan#3090**), and three years in four have no
+        February 29 to repeat on.  The form refuses it here, in words, before
+        ``ck_salary_raises_recurring_not_on_february_29`` could.
+
+        Raises:
+            ValidationError: On a recurring raise dated February 29.
+        """
+        starts = data.get("effective_date")
+        if starts is None or not data.get("is_recurring", False):
+            return
+        if (starts.month, starts.day) == _LEAP_DAY:
+            raise ValidationError(
+                "A raise that repeats every year can't start on February 29, "
+                "because most years don't have one. Start it on February 28 "
+                "or March 1.",
+                field_name="effective_date",
+            )
 
     @validates_schema
     def validate_one_method(self, data, **kwargs):

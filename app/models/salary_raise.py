@@ -1,8 +1,8 @@
 """
 Shekel Budget App -- Salary Raise Model (salary schema)
 
-Tracks scheduled salary raises (merit, COLA, custom) that apply at
-a specific month/year to adjust the pay for paycheck calculation.
+Tracks scheduled salary raises (merit, COLA, custom) that start on a
+stated date to adjust the pay for paycheck calculation.
 """
 
 from app import ref_cache
@@ -23,27 +23,34 @@ class SalaryRaise(SalaryProfileScopedMixin, OptimisticLockMixin, CreatedAtMixin,
     surfaces a flash + redirect.  See commit C-18 of the 2026-04-15
     security remediation plan.
 
+    **A raise starts on a DATE since plan step salary plan#3048** (rulings
+    **plan#3090** and **plan#3094**, migration ``6740ce13e174``).  It stated
+    a month and a year until then, which the engine landed on the month's
+    1st; the developer's employer pays each weekday at the pay in force that
+    day (ruling **plan#3089**), so the day moves a straddling paycheck's
+    money, and the pair could not state it.  A RECURRING raise repeats on its
+    own month and day every year it is believed, which is why it may not
+    start on February 29 (``ck_salary_raises_recurring_not_on_february_29``):
+    three years in four have no such day to repeat on.
+
     Duplicate prevention (F-051 / C-23): the composite unique
-    constraint ``uq_salary_raises_profile_type_year_month`` on
-    ``(salary_profile_id, raise_type_id, effective_year,
-    effective_month)`` rejects a second raise with the same shape
-    on the same salary profile.  Without it a double-submit of the
-    raise form -- network retry, double-click, browser back-and-
-    resubmit -- creates two rows with identical effective dates;
-    the paycheck calculator then applies the raise twice
-    (``salary * 1.03 * 1.03`` instead of ``salary * 1.03``),
-    silently overstating projected gross pay until the user notices
-    the drift.  ``effective_year`` is required (NOT NULL), so every
-    raise -- one-time or recurring -- anchors to a concrete start
-    year; DH-#57 retired the never-UI-reachable NULL-year recurring
-    raise (and the constraint's former ``NULLS NOT DISTINCT`` modifier)
-    that the C-24 backfill ``b4c5d6e7f8a9`` had already eliminated from
-    the data.  ``is_recurring`` is intentionally NOT part of the
-    key: a recurring raise on (profile, type, year, month) already
-    covers that exact period, so adding a one-time raise with the
-    same key compounds the recurring effect on the targeted year
-    and is the same class of double-application bug F-051
-    documents.
+    constraint ``uq_salary_raises_profile_type_date`` on
+    ``(salary_profile_id, raise_type_id, effective_date)`` rejects a
+    second raise with the same shape on the same salary profile.
+    Without it a double-submit of the raise form -- network retry,
+    double-click, browser back-and-resubmit -- creates two rows with
+    identical start dates; the paycheck calculator then applies the
+    raise twice (``salary * 1.03 * 1.03`` instead of ``salary *
+    1.03``), silently overstating projected gross pay until the user
+    notices the drift.  It keyed on the month until the date replaced
+    the pair, and a double submit posts the same date, so the narrower
+    key guards the same failure; two raises of one type on two days of
+    one month are two stated facts under it.  ``is_recurring`` is
+    intentionally NOT part of the key: a recurring raise on (profile,
+    type, date) already covers that exact day, so adding a one-time
+    raise with the same key compounds the recurring effect on the
+    targeted year and is the same class of double-application bug
+    F-051 documents.
     """
 
     __tablename__ = "salary_raises"
@@ -53,32 +60,37 @@ class SalaryRaise(SalaryProfileScopedMixin, OptimisticLockMixin, CreatedAtMixin,
             "(percentage IS NULL AND flat_amount IS NOT NULL)",
             name="ck_salary_raises_one_method",
         ),
+        # The 2000-2100 window the create/update schema's date ``Range``
+        # enforces (``RAISE_YEAR_MIN`` / ``RAISE_YEAR_MAX``), as a window of
+        # days: the year CHECK's (F-077 / C-24 / DH-#57) carried onto the
+        # date that replaced the year (plan step plan#3048).
         db.CheckConstraint(
-            "effective_month >= 1 AND effective_month <= 12",
-            name="ck_salary_raises_valid_month",
-        ),
-        # F-077 / C-24 / DH-#57: ``effective_year`` is required (NOT
-        # NULL) -- every raise anchors to a concrete year, so the CHECK
-        # bounds it to the same 2000-2100 window the create/update
-        # schema's ``Range`` enforces.  The prior ``IS NULL OR`` clause
-        # admitted the never-UI-reachable NULL-year recurring raise the
-        # C-24 backfill (b4c5d6e7f8a9) had already eliminated.
-        db.CheckConstraint(
-            "effective_year >= 2000 AND effective_year <= 2100",
-            name="ck_salary_raises_valid_effective_year",
+            "effective_date >= DATE '2000-01-01' AND effective_date <= DATE '2100-12-31'",
+            name="ck_salary_raises_valid_effective_date",
         ),
         # salary:S3-b / R-SAL11: a raise cannot end before it starts.  The
         # rule the column exists to make unbreakable -- under the global
         # horizon it replaces, a raise dated past the cutoff was storable
         # and silently never applied (measured 2026-09-05: a one-time
         # $8,000 promotion recorded for 2035 under a 2031 cutoff left the
-        # $91,675.00 base untouched at 2040).
+        # $91,675.00 base untouched at 2040).  Against the start DATE's year
+        # since plan step plan#3048.
         db.CheckConstraint(
-            "terminal_year IS NULL OR terminal_year >= effective_year",
+            "terminal_year IS NULL OR "
+            "terminal_year >= EXTRACT(YEAR FROM effective_date)",
             name="ck_salary_raises_terminal_year_not_before_effective",
         ),
-        # The same 2000-2100 window ``ck_salary_raises_valid_effective_year``
-        # holds the start year to.  The lower bound is DERIVED -- it follows
+        # A recurring raise repeats on its own month and day each year it is
+        # believed (ruling plan#3090), so a February 29 start has no day to
+        # repeat on in three years of four.  The schema refuses it first, in
+        # words (``RaiseCreateSchema.validate_recurring_start_day``).
+        db.CheckConstraint(
+            "NOT (is_recurring AND EXTRACT(MONTH FROM effective_date) = 2 "
+            "AND EXTRACT(DAY FROM effective_date) = 29)",
+            name="ck_salary_raises_recurring_not_on_february_29",
+        ),
+        # The same 2000-2100 window ``ck_salary_raises_valid_effective_date``
+        # holds the start to.  The lower bound is DERIVED -- it follows
         # from the ordering CHECK above plus that sibling -- so dropping the
         # sibling silently unbounds this column below, which is a dependency
         # worth naming since nothing else states it.
@@ -87,7 +99,7 @@ class SalaryRaise(SalaryProfileScopedMixin, OptimisticLockMixin, CreatedAtMixin,
             name="ck_salary_raises_valid_terminal_year",
         ),
         # An end year on a ONE-TIME raise is inert: ``_applications`` gates a
-        # one-time raise on ``eff_year <= terminal_year``, which the ordering
+        # one-time raise on its start year being ``<= terminal_year``, which the ordering
         # CHECK already guarantees, so no value can move a figure.  The end
         # year asks how long a FORECAST is believed; a one-time raise is a
         # recorded fact that happens once.  Developer ruling 2026-09-05,
@@ -111,9 +123,8 @@ class SalaryRaise(SalaryProfileScopedMixin, OptimisticLockMixin, CreatedAtMixin,
             name="ck_salary_raises_version_id_positive",
         ),
         db.UniqueConstraint(
-            "salary_profile_id", "raise_type_id",
-            "effective_year", "effective_month",
-            name="uq_salary_raises_profile_type_year_month",
+            "salary_profile_id", "raise_type_id", "effective_date",
+            name="uq_salary_raises_profile_type_date",
         ),
         # F-071 / F-079 / C-42: child-FK index restored after the
         # 22b3dd9d9ed3 migration dropped it without restoration.  The
@@ -140,8 +151,10 @@ class SalaryRaise(SalaryProfileScopedMixin, OptimisticLockMixin, CreatedAtMixin,
         ),
         nullable=False,
     )
-    effective_month = db.Column(db.Integer, nullable=False)
-    effective_year = db.Column(db.Integer, nullable=False)
+    #: The day the raise starts: its first application, and for a recurring
+    #: raise the month and day it repeats on each later year it is believed
+    #: (rulings plan#3090 and plan#3094).
+    effective_date = db.Column(db.Date, nullable=False)
     percentage = db.Column(db.Numeric(5, 4))
     flat_amount = db.Column(db.Numeric(12, 2))
     is_recurring = db.Column(
@@ -216,4 +229,4 @@ class SalaryRaise(SalaryProfileScopedMixin, OptimisticLockMixin, CreatedAtMixin,
 
     def __repr__(self):
         amt = f"{self.percentage}%" if self.percentage else f"${self.flat_amount}"
-        return f"<SalaryRaise {amt} effective {self.effective_month}/{self.effective_year}>"
+        return f"<SalaryRaise {amt} effective {self.effective_date}>"

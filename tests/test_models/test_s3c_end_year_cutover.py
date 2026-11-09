@@ -103,8 +103,7 @@ def _raise(profile, *, raise_type=RaiseTypeEnum.MERIT, effective_year=2027,
     row = SalaryRaise(
         salary_profile_id=profile.id,
         raise_type_id=ref_cache.raise_type_id(raise_type),
-        effective_year=effective_year,
-        effective_month=1,
+        effective_date=date(effective_year, 1, 1),
         percentage=Decimal("0.0250"),
         is_recurring=recurring,
         terminal_year=terminal_year,
@@ -139,9 +138,29 @@ def _restore_the_deleted_setting(user_id, horizon):
     )
 
 
+def _restore_the_raise_year():
+    """Put ``salary_raises.effective_year`` back, filled from each raise's start date.
+
+    The statement under test reads ``r.effective_year``, a column migration
+    ``6740ce13e174`` (plan step salary plan#3048) later replaced with
+    ``effective_date`` -- the same reason :func:`_restore_the_deleted_setting`
+    exists, one revision on.  Each raise's year is its start date's, which is
+    exactly what the column held before the date replaced it.  Restoring is
+    idempotent, because a case runs the statement twice.
+    """
+    db.session.execute(text(
+        "ALTER TABLE salary.salary_raises ADD COLUMN IF NOT EXISTS effective_year INTEGER"
+    ))
+    db.session.execute(text(
+        "UPDATE salary.salary_raises "
+        "SET effective_year = EXTRACT(YEAR FROM effective_date)::INT"
+    ))
+
+
 def _run_backfill(base_year=BASE_YEAR):
     """Execute the migration module's own backfill statement."""
     module = load_migration_module(MIGRATION)
+    _restore_the_raise_year()
     db.session.execute(
         module._BACKFILL.bindparams(  # pylint: disable=protected-access
             base_year=base_year,

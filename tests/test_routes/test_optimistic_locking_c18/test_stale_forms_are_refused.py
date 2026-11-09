@@ -569,8 +569,7 @@ class TestSalaryRaiseStaleFormPrevention:
                 f"/salary/raises/{raise_id}/edit",
                 data={
                     "raise_type_id": str(raise_type),
-                    "effective_month": "6",
-                    "effective_year": "2027",
+                    "effective_date": "2027-06-01",
                     "percentage": "10",
                     "version_id": str(stale),
                 },

@@ -5,6 +5,7 @@ Split from ``tests/test_routes/test_salary.py`` by ``tools/split`` (ruling R-BAL
 """
 
 import re
+from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
@@ -72,8 +73,7 @@ class TestSalaryNegativePaths:
                 f"/salary/{other_profile.id}/raises",
                 data={
                     "raise_type_id": raise_type.id,
-                    "effective_month": "7",
-                    "effective_year": "2026",
+                    "effective_date": "2026-07-01",
                     "percentage": "3",
                 },
                 follow_redirects=True,
@@ -126,8 +126,7 @@ class TestSalaryNegativePaths:
             salary_raise = SalaryRaise(
                 salary_profile_id=other_profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=7,
-                effective_year=2026,
+                effective_date=date(2026, 7, 1),
                 percentage=Decimal("0.0300"),
             )
             db.session.add(salary_raise)

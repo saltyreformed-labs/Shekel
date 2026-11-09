@@ -3,6 +3,7 @@
 Split from ``tests/test_routes/test_salary.py`` by ``tools/split`` (ruling R-BAL301).
 """
 
+from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
@@ -28,8 +29,7 @@ class TestRaises:
                 f"/salary/{profile.id}/raises",
                 data={
                     "raise_type_id": raise_type.id,
-                    "effective_month": "7",
-                    "effective_year": "2026",
+                    "effective_date": "2026-07-01",
                     "percentage": "3",
                 },
                 follow_redirects=True,
@@ -48,8 +48,7 @@ class TestRaises:
                 f"/salary/{profile.id}/raises",
                 data={
                     "raise_type_id": raise_type.id,
-                    "effective_month": "1",
-                    "effective_year": "2027",
+                    "effective_date": "2027-01-01",
                     "flat_amount": "2000.00",
                 },
                 headers={"HX-Request": "true"},
@@ -75,8 +74,7 @@ class TestRaises:
                 f"/salary/{profile.id}/raises",
                 data={
                     "raise_type_id": raise_type.id,
-                    "effective_month": "6",
-                    "effective_year": "2027",
+                    "effective_date": "2027-06-01",
                     "percentage": "3",
                 },
                 headers={"HX-Request": "true"},
@@ -96,8 +94,7 @@ class TestRaises:
             salary_raise = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=3,
-                effective_year=2026,
+                effective_date=date(2026, 3, 1),
                 percentage=Decimal("0.0200"),
             )
             db.session.add(salary_raise)
@@ -121,8 +118,7 @@ class TestRaises:
             salary_raise = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=3,
-                effective_year=2026,
+                effective_date=date(2026, 3, 1),
                 percentage=Decimal("0.0300"),
             )
             db.session.add(salary_raise)
@@ -132,8 +128,7 @@ class TestRaises:
                 f"/salary/raises/{salary_raise.id}/edit",
                 data={
                     "raise_type_id": cola_type.id,
-                    "effective_month": "6",
-                    "effective_year": "2027",
+                    "effective_date": "2027-06-01",
                     "percentage": "4.50",
                 },
                 follow_redirects=True,
@@ -144,8 +139,7 @@ class TestRaises:
 
             db.session.refresh(salary_raise)
             assert salary_raise.raise_type_id == cola_type.id
-            assert salary_raise.effective_month == 6
-            assert salary_raise.effective_year == 2027
+            assert salary_raise.effective_date == date(2027, 6, 1)
             assert salary_raise.percentage == Decimal("0.0450")
 
     def test_update_raise_htmx_returns_partial(
@@ -159,8 +153,7 @@ class TestRaises:
             salary_raise = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=1,
-                effective_year=2026,
+                effective_date=date(2026, 1, 1),
                 flat_amount=Decimal("5000.00"),
             )
             db.session.add(salary_raise)
@@ -170,8 +163,7 @@ class TestRaises:
                 f"/salary/raises/{salary_raise.id}/edit",
                 data={
                     "raise_type_id": raise_type.id,
-                    "effective_month": "1",
-                    "effective_year": "2026",
+                    "effective_date": "2026-01-01",
                     "flat_amount": "6000.00",
                 },
                 headers={"HX-Request": "true"},
@@ -193,8 +185,7 @@ class TestRaises:
             other_raise = SalaryRaise(
                 salary_profile_id=other["profile"].id,
                 raise_type_id=raise_type.id,
-                effective_month=6,
-                effective_year=2026,
+                effective_date=date(2026, 6, 1),
                 percentage=Decimal("0.0300"),
             )
             db.session.add(other_raise)
@@ -205,8 +196,7 @@ class TestRaises:
                 f"/salary/raises/{other_raise.id}/edit",
                 data={
                     "raise_type_id": raise_type.id,
-                    "effective_month": "6",
-                    "effective_year": "2026",
+                    "effective_date": "2026-06-01",
                     "percentage": "10.00",
                 },
             )
@@ -230,8 +220,7 @@ class TestRaises:
             salary_raise = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=7,
-                effective_year=2026,
+                effective_date=date(2026, 7, 1),
                 percentage=Decimal("0.0300"),
             )
             db.session.add(salary_raise)
@@ -256,7 +245,7 @@ class TestRaises:
                 f"/salary/{profile.id}/raises",
                 data={
                     "raise_type_id": raise_type.id,
-                    "effective_month": "7",
+                    "effective_date": "2026-07-01",
                 },
                 follow_redirects=True,
             )
@@ -264,8 +253,10 @@ class TestRaises:
             assert response.status_code == 200
             assert b"Please correct the highlighted errors" in response.data
 
-    def test_add_raise_without_year_rejected(self, app, auth_client, seed_user, seed_periods):
-        """POST /salary/<id>/raises without effective_year is rejected."""
+    def test_add_raise_without_start_date_rejected(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """POST /salary/<id>/raises without a start date is rejected (plan#3090)."""
         with app.app_context():
             profile = _create_profile(seed_user)
             raise_type = db.session.query(RaiseType).filter_by(name="merit").one()
@@ -274,7 +265,6 @@ class TestRaises:
                 f"/salary/{profile.id}/raises",
                 data={
                     "raise_type_id": raise_type.id,
-                    "effective_month": "7",
                     "percentage": "3",
                     "is_recurring": "on",
                 },
@@ -289,7 +279,7 @@ class TestRaises:
         with app.app_context():
             response = auth_client.post(
                 "/salary/999999/raises",
-                data={"raise_type_id": "1", "effective_month": "1"},
+                data={"raise_type_id": "1", "effective_date": "2026-01-01"},
                 follow_redirects=True,
             )
 
@@ -306,8 +296,7 @@ class TestRaises:
             salary_raise = SalaryRaise(
                 salary_profile_id=other["profile"].id,
                 raise_type_id=raise_type.id,
-                effective_month=7,
-                effective_year=2026,
+                effective_date=date(2026, 7, 1),
                 percentage=Decimal("0.0300"),
             )
             db.session.add(salary_raise)
@@ -349,8 +338,7 @@ class TestARaisesEndYearIsWrittenHere:
         """POST the add-raise form with *fields* over the required minimum."""
         data = {
             "raise_type_id": raise_type_id,
-            "effective_month": "1",
-            "effective_year": "2027",
+            "effective_date": "2027-01-01",
             "percentage": "2.5",
         }
         data.update(fields)
@@ -475,7 +463,7 @@ class TestARaisesEndYearIsWrittenHere:
             response = self._post_add(
                 auth_client, profile.id, merit.id,
                 is_recurring="on", raise_end_mode="year",
-                effective_year="2030", terminal_year="2029",
+                effective_date="2030-01-01", terminal_year="2029",
             )
 
             assert response.status_code == 200
@@ -555,8 +543,7 @@ class TestARaisesEndYearIsWrittenHere:
             row = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=merit.id,
-                effective_month=1,
-                effective_year=2027,
+                effective_date=date(2027, 1, 1),
                 percentage=Decimal("0.0250"),
                 is_recurring=True,
                 terminal_year=2031,
@@ -568,8 +555,7 @@ class TestARaisesEndYearIsWrittenHere:
                 f"/salary/raises/{row.id}/edit",
                 data={
                     "raise_type_id": merit.id,
-                    "effective_month": "1",
-                    "effective_year": "2027",
+                    "effective_date": "2027-01-01",
                     "percentage": "2.5",
                     "is_recurring": "on",
                     "raise_end_mode": "none",
@@ -604,8 +590,7 @@ class TestARaisesEndYearIsWrittenHere:
             row = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=merit.id,
-                effective_month=1,
-                effective_year=2027,
+                effective_date=date(2027, 1, 1),
                 percentage=Decimal("0.0250"),
                 is_recurring=True,
             )
@@ -616,8 +601,7 @@ class TestARaisesEndYearIsWrittenHere:
                 f"/salary/raises/{row.id}/edit",
                 data={
                     "raise_type_id": merit.id,
-                    "effective_month": "1",
-                    "effective_year": "2027",
+                    "effective_date": "2027-01-01",
                     "percentage": "2.5",
                     "is_recurring": "on",
                     "raise_end_mode": "year",
@@ -647,8 +631,7 @@ class TestARaisesEndYearIsWrittenHere:
             db.session.add(SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=merit.id,
-                effective_month=1,
-                effective_year=2027,
+                effective_date=date(2027, 1, 1),
                 percentage=Decimal("0.0250"),
                 is_recurring=True,
                 terminal_year=2031,

@@ -746,8 +746,7 @@ class TestTheRecurringSalaryRow:
             )
             make_recurring_raise(
                 template.salary_profiles[0].id, db.session,
-                effective_year=raise_from.year,
-                effective_month=raise_from.month,
+                effective_date=date(raise_from.year, raise_from.month, 1),
                 percentage=Decimal("0.10"),
             )
             db.session.commit()

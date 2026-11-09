@@ -155,7 +155,6 @@ def new_profile():
         calc_methods=[],
         paychecks_per_year=paychecks_per_year,
         current_payday=current_payday,
-        now_year=ctx.as_of.year,
     )
 
 
@@ -436,7 +435,6 @@ def edit_profile(profile_id):
         investment_accounts=investment_accounts,
         inactive_profiles=inactive_profiles,
         paychecks_per_year=_paychecks_per_year(),
-        now_year=ctx.as_of.year,
         pay_rows=pay_list_service.pay_rows(basis),
         rhythm_changes=basis.rhythm_changes_without_pay(),
         stub_summaries=pay_stub_service.stub_summaries(profile),

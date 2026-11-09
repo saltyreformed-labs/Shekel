@@ -1573,7 +1573,7 @@ class TestOnePaycheckProjectionPerProfilePerRender:
         )
         effective = display_today().year + 1
         row = make_recurring_raise(
-            profile.id, db.session, effective_year=effective,
+            profile.id, db.session, effective_date=date(effective, 1, 1),
         )
         db.session.commit()
         return row.id, effective

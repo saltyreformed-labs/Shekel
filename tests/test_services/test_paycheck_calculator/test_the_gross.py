@@ -169,7 +169,7 @@ class TestTheGrossIsARateAndNotAShareOfAYear:
             raises=[
                 FakeRaise(
                     percentage="0.10",
-                    effective_month=7, effective_year=2026,
+                    effective_date=date(2026, 7, 1),
                     is_recurring=False,
                 ),
             ],
@@ -309,8 +309,8 @@ class TestGrossPerPaycheck:
         """
         profile = FakeProfile(
             pay=Decimal("2000.10"), pay_from=_WALK_OPENS,
-            raises=[FakeRaise(percentage="0.05", effective_month=1,
-                              effective_year=2026)],
+            raises=[FakeRaise(percentage="0.05", effective_date=date(2026, 1, 1),
+                              )],
         )
         assert _walked_pay(profile, date(2026, 1, 2)) == Decimal("2100.11")
 

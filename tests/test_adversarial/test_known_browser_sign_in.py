@@ -47,6 +47,7 @@ from app.services import auth_service, known_device_service
 from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
 from app.utils.session_helpers import SESSION_SIGNED_IN_AT_KEY
 from tests._guess_records import count_of, locked_until_of
+from tests._sign_in import make_a_stranger
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -798,7 +799,7 @@ def _signed_in_with_a_code(app, secret):
 
 
 class TestAReConfirmReplacesTheCookie:
-    """A finished re-confirm renews a known browser's cookie and nothing else (ruling plan#3070)."""
+    """A finished re-confirm renews a known browser's cookie and no more (ruling plan#3070)."""
 
     def test_the_old_cookie_is_a_strangers_and_the_new_one_known(
         self, app, seed_user,
@@ -871,8 +872,7 @@ class TestAReConfirmReplacesTheCookie:
         user_id = seed_user["user"].id
         browser = app.test_client()
         assert _signed_in(_password(browser))
-        db.session.query(KnownDevice).filter_by(user_id=user_id).delete()
-        db.session.commit()
+        make_a_stranger(user_id)
         _strangers_guess(app, 4)
 
         response = browser.post("/reauth", data={"password": SEED_USER_PASSWORD})

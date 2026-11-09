@@ -45,7 +45,9 @@ from app.enums import RoleEnum
 from app.extensions import db, limiter
 from app.models.known_device import KnownDevice
 from app.models.user import User
-from app.services import auth_service, known_device_service, mfa_service
+from app.services import (
+    auth_service, guess_record_service, known_device_service, mfa_service,
+)
 from app.services.known_device_service import BrowserStanding
 from app.utils.device_cookie import device_token, device_tokens, set_device_cookie
 from app.utils.log_events import (
@@ -257,7 +259,8 @@ def _spend_a_try(user: User, device: KnownDevice | None) -> None:
 
 
 def _complete_sign_in(
-    user, next_page: str | None, *, known: bool, trust: bool = False,
+    user, next_page: str | None, *,
+    checked: guess_record_service.Held | None, trust: bool = False,
 ) -> Response:
     """Sign *user* in and return the redirect to where they land.
 
@@ -266,7 +269,8 @@ def _complete_sign_in(
     the ``/login`` password on a trusted device (plan#2173).  It clears any
     pending code state (a completed sign-in leaves none behind), clears the
     account's wrong-guess count now that every check has passed (ruling
-    plan#3007) unless the browser is *known*, records the browser (plan#2772,
+    plan#3007) if the record still holds what the checks saw, *checked*,
+    records the browser (plan#2772,
     ruling plan#2994) so a password alone never makes one known on an account
     with a code, calls ``login_user``, stamps the user and every lifecycle key
     from the instant the record was renewed at, so the idle and fresh-login
@@ -278,7 +282,9 @@ def _complete_sign_in(
 
     A known browser's sign-in writes nothing to the account's count or lock,
     so no sign-in refills a stranger's guesses; the browser's own count clears
-    in its record.
+    in its record.  A stranger's wrong guess judged after this sign-in's
+    checks takes no owner lock (ruling plan#3110), so the clear leaves a
+    record that has counted one since (:func:`auth_service.clear_failed_attempts`).
 
     The record is committed before its cookie rides the response, so a browser
     never holds a token whose record a failed commit lost.
@@ -287,8 +293,14 @@ def _complete_sign_in(
         user: The :class:`~app.models.user.User` whose proof was accepted.
         next_page: Where the sign-in was asked for from, or ``None``.
             Validated here, at redirect time, whatever validated it before.
-        known: Whether this request's :func:`_browser_standing` found the
-            browser known.
+        checked: What the strangers' record of the account's email held when
+            this sign-in's checks were judged: the ``/login`` judgment's
+            (:attr:`~app.services.auth_service.PasswordProof.held`) or the
+            code form's read of the lock
+            (:func:`~app.services.auth_service.read_the_lock`).  ``None`` for
+            a known browser, whose sign-in leaves the strangers' record alone,
+            and for a stranger whose checks found no record.  Keyword-only
+            with no default, so no caller can forget it.
         trust: Whether the user typed a code and asked to trust this browser.
 
     Returns:
@@ -297,8 +309,7 @@ def _complete_sign_in(
         dashboard.
     """
     _clear_mfa_pending_state()
-    if not known:
-        auth_service.clear_failed_attempts(user)
+    auth_service.clear_failed_attempts(checked)
     # One instant for the record and the session's stamps: a session ends
     # KNOWN_LIFETIME after its sign-in stamp (ruling plan#3069), and one read
     # a moment after the record's would outlive the browser's standing.

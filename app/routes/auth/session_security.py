@@ -232,7 +232,9 @@ def reauth():
 
     Success clears the count the guesses went to (ruling plan#3007): every
     check this account faces has passed.  A stranger's re-confirm clears the
-    account's count and lock, and gets no cookie: it has no record.  A known
+    account's count and lock if the record still holds what the read of the
+    lock found, so a stranger's guess judged during these checks stands, and
+    gets no cookie: it has no record.  A known
     browser's renews its record
     (:func:`~app.services.known_device_service.record_re_confirm`): a new
     cookie and its own count cleared, so a stolen copy of the old cookie
@@ -279,7 +281,11 @@ def reauth():
     # raises, and the 429 handler answers before anything is checked.
     _spend_a_try(current_user, device)
     try:
-        auth_service.check_signed_in_password(
+        # What the strangers' record held when the lock was read: a stranger's
+        # success clears it only if it still holds that, since a stranger's
+        # guess judged during these checks takes no owner lock (ruling
+        # plan#3110).
+        checked = auth_service.check_signed_in_password(
             current_user, reauth_data["password"], "Invalid password.",
             device=device,
         )
@@ -319,7 +325,7 @@ def reauth():
     # cookie may have deleted its row since, so it is never read again here.
     token = None
     if device is None:
-        auth_service.clear_failed_attempts(current_user)
+        auth_service.clear_failed_attempts(checked)
     else:
         token = known_device_service.record_re_confirm(
             current_user.id, device_token(current_user.id),

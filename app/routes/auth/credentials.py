@@ -12,6 +12,7 @@ completion, the open-redirect guard and the form-error flattener come from
 
 import logging
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from flask import (
     abort,
@@ -34,6 +35,7 @@ from app.extensions import db, limiter
 from app.models.user import MfaConfig, User
 from app.schemas.validation import LoginSchema, RegisterSchema
 from app.services import auth_service, registration_service
+from app.services.guess_record_service import Held
 from app.services.known_device_service import BrowserStanding
 from app.exceptions import AuthError, ConflictError, ValidationError
 from app.routes.auth._bp import auth_bp
@@ -82,10 +84,25 @@ def _render_register_form():
     return render_template("auth/register.html")
 
 
-def _check_the_password(
-    email: str, password: str,
-) -> tuple[User, BrowserStanding | None]:
-    """Check the password typed at ``/login``; return the account and this browser's standing.
+class _PasswordChecked(NamedTuple):
+    """What ``/login``'s password check decided, for the rest of the sign-in.
+
+    Attributes:
+        user: The account the password signs in to.
+        standing: This browser's standing for it, or ``None`` for a stranger.
+        checked: For a stranger, the record of the email as its try's
+            judgment left it, which a sign-in this password finishes clears
+            if it still holds it; ``None`` for a known browser, which never
+            reads the strangers' record.
+    """
+
+    user: User
+    standing: BrowserStanding | None
+    checked: Held | None
+
+
+def _check_the_password(email: str, password: str) -> _PasswordChecked:
+    """Check the password typed at ``/login``; return the account, the browser, and what to clear.
 
     Two flows, chosen by what this browser's cookie is worth for the account
     typed (plan#2772):
@@ -120,8 +137,7 @@ def _check_the_password(
         password: The password typed.
 
     Returns:
-        The account the password signs in to, and this browser's standing
-        for it, or ``None`` for a stranger.
+        The :class:`_PasswordChecked`.
 
     Raises:
         AuthError: The password does not sign in, for any of the reasons the
@@ -133,12 +149,17 @@ def _check_the_password(
         bind_sign_in_owner(user.id, user.data_owner_id)
         standing = _browser_standing(user)
         if standing is not None:
-            return auth_service.authenticate_known_browser(
-                user, password, device=standing.device,
-            ), standing
+            return _PasswordChecked(
+                auth_service.authenticate_known_browser(
+                    user, password, device=standing.device,
+                ),
+                standing, None,
+            )
     proof = auth_service.check_strangers_password(email, user, password)
     bind_sign_in_owner(proof.user_id, proof.owner_id)
-    return auth_service.confirm_strangers_password(user, proof), None
+    return _PasswordChecked(
+        auth_service.confirm_strangers_password(user, proof), None, proof.held,
+    )
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -177,7 +198,9 @@ def login():
             # What this browser's cookie is worth for the account is read
             # once, and the count and the code's skip below turn on it
             # (plan#2772).
-            user, standing = _check_the_password(email, login_data["password"])
+            user, standing, checked = _check_the_password(
+                email, login_data["password"],
+            )
 
             # Check if MFA is enabled for this user.
             mfa_config = (
@@ -191,7 +214,7 @@ def login():
                 if standing is not None and standing.trusted:
                     device_id = standing.device.id
                     response = _complete_sign_in(
-                        user, request.args.get("next"), known=True,
+                        user, request.args.get("next"), checked=None,
                     )
                     log_event(
                         logger, logging.INFO, EVT_TRUSTED_DEVICE_SIGN_IN, AUTH,
@@ -218,9 +241,12 @@ def login():
 
             # No MFA -- complete login immediately, through the one
             # completion every sign-in shares (it stamps the lifecycle
-            # keys and validates ``next``).
+            # keys and validates ``next``).  A stranger's clear compares
+            # against what its try's judgment left; a known browser's clears
+            # nothing.  With a code, the code form reads the lock again and
+            # clears against that instead.
             response = _complete_sign_in(
-                user, request.args.get("next"), known=standing is not None,
+                user, request.args.get("next"), checked=checked,
             )
             log_event(logger, logging.INFO, EVT_LOGIN_SUCCESS, AUTH,
                       "User logged in", user_id=user.id, email=email)

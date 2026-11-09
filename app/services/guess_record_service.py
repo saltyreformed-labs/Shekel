@@ -26,6 +26,14 @@ and :func:`_judged` (what one try leaves on a record), which the judgment
 applies both to the record an email has and to the empty one its first try
 starts from.
 
+**A finished sign-in clears only what its checks saw** (:func:`clear`).  A
+stranger's try takes no owner lock (ruling plan#3110), so a wrong guess can be
+judged after a sign-in's checks and before its clear.  The clear therefore
+deletes the record only while it still holds exactly what it held when the
+checks were judged (:class:`Held`): the same record, count and lock end.  A
+guess counted since, or a lock opened since, leaves it standing, so every
+wrong guess still counts (ruling plan#3007).
+
 **The clean-up is in the same write** (:func:`_delete_quiet_records`), as a
 finished sign-in's purge of the user's dead browsers is: each judgment deletes
 the records quiet for the lock's length that no account's email names, or that
@@ -69,6 +77,36 @@ _DIGEST_KEY_LABEL = b"shekel guess record email digest"
 _BEFORE = GuessRecord.__table__.alias("old")
 
 
+class Held(NamedTuple):
+    """What an email's record held at one moment: what a finished sign-in may clear.
+
+    Read where a sign-in's checks are judged: from the judgment of its
+    password at ``/login`` (:attr:`TryOutcome.left`), or from the read of the
+    lock at the code form and at re-confirm (:attr:`LockReading.held`).
+    :func:`clear` deletes the record only while it still holds all three.
+
+    Every counted try changes the count or the lock end: a wrong try adds one,
+    and the one that opens a lock zeroes the count and moves the lock's end
+    later than any it had, since the lock was not open.  Neither alone is
+    enough: from a count of 0, the threshold's run of wrong tries ends at 0
+    again, so only the lock's end tells it, and that is every sign-in on an
+    account with no failure history.  A try that changed only the stamp, a
+    refused one or a right one, changed nothing to keep, so the stamp is not
+    here.  The id is: a record deleted since, by another sign-in's clear, and
+    written again by new wrong tries is another record, whatever count and
+    lock it reached.
+
+    Attributes:
+        record_id: The record's id.
+        count: The wrong tries it counted.
+        locked_until: Its lock's end, or ``None``.
+    """
+
+    record_id: int
+    count: int
+    locked_until: datetime | None
+
+
 class TryOutcome(NamedTuple):
     """What :func:`judge_try` decided about one try.
 
@@ -76,10 +114,29 @@ class TryOutcome(NamedTuple):
         refused: The lock was open, so the try was refused and not counted.
         opened_lock_until: When this try opened the lock, the moment the lock
             ends; else ``None``.
+        left: The record as this try left it.
     """
 
     refused: bool
     opened_lock_until: datetime | None
+    left: Held
+
+
+class LockReading(NamedTuple):
+    """An email's record as one read found it: whether its lock is open, and what it held.
+
+    Attributes:
+        locked: The lock was open (:func:`_lock_open`).
+        held: What the record held, or ``None`` when the email had none.
+    """
+
+    locked: bool
+    held: Held | None
+
+
+#: What :func:`read` finds of an email with no record: no lock, and nothing a
+#: finished sign-in could clear, since any record there now was written after.
+NO_RECORD = LockReading(locked=False, held=None)
 
 
 def _digest_key() -> bytes:
@@ -151,25 +208,38 @@ def _lock_open(
     return and_(locked_until.is_not(None), locked_until > now)
 
 
-def is_locked(email: str) -> bool:
-    """Return True while the lock on *email*'s record is open.
+def read(email: str) -> LockReading:
+    """Read *email*'s record: whether its lock is open, and what it holds.
 
-    A plain read, with no lock: a signed-in door and the code form ask it
+    A plain read, with no lock: a signed-in door and the code form read it
     before their check so that a locked attempt is refused without one, and
     :func:`judge_try` judges again, under the record's row lock, when the try
-    is counted.
+    is counted.  What it held is what a finished re-confirm or code-form
+    sign-in clears (:func:`clear`), from the same read, so the clear compares
+    against the moment the lock was judged.
 
     Args:
         email: The email whose record to read, as :func:`email_digest` takes
             it.
 
     Returns:
-        True when the record exists and :func:`_lock_open` says its lock is.
+        The :class:`LockReading`; :data:`NO_RECORD` when the email has none.
     """
-    return db.session.execute(
-        select(_lock_open(GuessRecord.locked_until, datetime.now(timezone.utc)))
+    row = db.session.execute(
+        select(
+            GuessRecord.id, GuessRecord.failed_login_count,
+            GuessRecord.locked_until,
+            _lock_open(GuessRecord.locked_until, datetime.now(timezone.utc)),
+        )
         .where(GuessRecord.email_digest == email_digest(email))
-    ).scalar_one_or_none() is True
+    ).one_or_none()
+    if row is None:
+        return NO_RECORD
+    record_id, count, locked_until, locked = row
+    return LockReading(
+        locked=locked,
+        held=Held(record_id=record_id, count=count, locked_until=locked_until),
+    )
 
 
 class _Holding(NamedTuple):
@@ -190,7 +260,7 @@ _THE_RECORD = _Holding(GuessRecord.failed_login_count, GuessRecord.locked_until)
 
 #: What an email with no record holds: no count and no lock, the empty record
 #: its first try is judged from.
-_NO_RECORD = _Holding(literal(0), literal(None, GuessRecord.locked_until.type))
+_EMPTY_RECORD = _Holding(literal(0), literal(None, GuessRecord.locked_until.type))
 
 
 def _judged(
@@ -213,7 +283,7 @@ def _judged(
 
     Args:
         holding: What the record holds before the try: :data:`_THE_RECORD`
-            or :data:`_NO_RECORD`.
+            or :data:`_EMPTY_RECORD`.
         now: The try's instant.
         wrong: Whether the password or code was wrong.
         threshold: How many wrong tries in a row open the lock.
@@ -255,9 +325,12 @@ def judge_try(
     The statement returns what was decided from the record before and after
     the try (:data:`_BEFORE`): the try was refused when the lock was open
     before it, and it opened the lock when the lock's end moved, which only
-    the opening of a lock does.
+    the opening of a lock does.  It also returns the record as the try left
+    it, which a sign-in this try's right password finishes clears if it still
+    holds it (:func:`clear`).
 
-    Then the quiet records are deleted (:func:`_delete_quiet_records`).
+    Then the quiet records are deleted (:func:`_delete_quiet_records`).  The
+    record this try judged is never among them: its stamp is now.
 
     Args:
         email: The email the try named, as :func:`email_digest` takes it.
@@ -273,7 +346,7 @@ def judge_try(
     first = insert(GuessRecord).values(
         email_digest=email_digest(email),
         **_judged(
-            _NO_RECORD, now, wrong=wrong, threshold=threshold, duration=duration,
+            _EMPTY_RECORD, now, wrong=wrong, threshold=threshold, duration=duration,
         ),
     )
     statement = first.on_conflict_do_update(
@@ -289,10 +362,18 @@ def judge_try(
                 GuessRecord.locked_until,
             ),
         ),
+        GuessRecord.id,
+        GuessRecord.failed_login_count,
+        GuessRecord.locked_until,
     )
-    refused, opened_lock_until = db.session.execute(statement).one()
+    refused, opened_lock_until, record_id, count, locked_until = (
+        db.session.execute(statement).one()
+    )
     _delete_quiet_records(now, duration)
-    return TryOutcome(refused=refused, opened_lock_until=opened_lock_until)
+    return TryOutcome(
+        refused=refused, opened_lock_until=opened_lock_until,
+        left=Held(record_id=record_id, count=count, locked_until=locked_until),
+    )
 
 
 def _delete_quiet_records(now: datetime, duration: timedelta) -> None:
@@ -336,21 +417,33 @@ def _delete_quiet_records(now: datetime, duration: timedelta) -> None:
     )
 
 
-def clear(email: str) -> bool:
-    """Delete *email*'s record, once every check its account faces has passed.
+def clear(held: Held) -> bool:
+    """Delete the record *held* names, if it still holds that, once every check has passed.
 
     No record is the same as one with no count and no open lock, so the clear
-    is a delete.
+    is a delete.  It deletes only while the record holds exactly what the
+    sign-in's checks saw (:class:`Held`): a stranger's try takes no owner
+    lock (ruling plan#3110), so a wrong guess judged after the checks and
+    before this clear would otherwise be deleted with the run before it.
+    Such a guess changed the count or the lock end, so the record is left as
+    it stands: that guess and the run before it count, and the owner, signed
+    in and known, does not meet the strangers' lock.  The delete waits on a
+    try that holds the record's row and judges what it left, so a try in
+    flight is never lost either.
 
     Args:
-        email: The account's email, as :func:`email_digest` takes it.
+        held: What the record held when the sign-in's checks were judged.
 
     Returns:
-        True when there was a record to delete.
+        True when the record still held it and was deleted.
     """
     result = db.session.execute(
         delete(GuessRecord)
-        .where(GuessRecord.email_digest == email_digest(email))
+        .where(
+            GuessRecord.id == held.record_id,
+            GuessRecord.failed_login_count == held.count,
+            GuessRecord.locked_until.is_not_distinct_from(held.locked_until),
+        )
         .execution_options(synchronize_session="fetch")
     )
     return result.rowcount > 0

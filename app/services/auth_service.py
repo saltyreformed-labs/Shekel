@@ -410,12 +410,18 @@ class PasswordProof(NamedTuple):
             the sign-in takes: ``None`` for a companion with no linked owner,
             who takes none.
         password_hash: The hash the password was checked against.
+        held: The record of *email* as the try's judgment left it, which a
+            sign-in this password finishes clears if it still holds it
+            (:func:`clear_failed_attempts`).  An account with a second factor
+            finishes at the code form, which clears what its own read of the
+            lock found instead.
     """
 
     email: str
     user_id: int
     owner_id: int | None
     password_hash: str
+    held: guess_record_service.Held
 
 
 def find_sign_in_user(email):
@@ -442,15 +448,24 @@ def find_sign_in_user(email):
     return db.session.query(User).filter_by(email=email).first()
 
 
-def is_locked_out(user: User, *, device: KnownDevice | None) -> bool:
-    """Return True while the lock refuses this attempt on *user*.
+def read_the_lock(
+    user: User, *, device: KnownDevice | None,
+) -> guess_record_service.LockReading:
+    """Read the lock this attempt on *user* meets, and what a finished attempt may clear.
 
     The lock is the one on the record of the account's email (ruling
-    plan#3110, :func:`~app.services.guess_record_service.is_locked`), and it
+    plan#3110, :func:`~app.services.guess_record_service.read`), and it
     refuses only strangers (plan#2772): a known browser, *device*, passes it,
     so no one who knows the email can keep the owner out of a browser they
     have signed in on.  A known browser's own wrong guesses count on its
-    record instead (:func:`record_failed_attempt`).
+    record instead (:func:`record_failed_attempt`), so its reading is
+    :data:`~app.services.guess_record_service.NO_RECORD` without a read: no
+    lock to meet, and nothing of the strangers' for its success to clear.
+
+    A stranger's reading holds what the record held at this read, which the
+    attempt's success clears if the record still holds it
+    (:func:`clear_failed_attempts`): one read, so the clear compares against
+    the moment the lock was judged.
 
     The record's ``locked_until`` is an exclusive upper bound: at the instant
     it equals ``now`` the lock is over, and a value in the past is the same as
@@ -466,10 +481,13 @@ def is_locked_out(user: User, *, device: KnownDevice | None) -> bool:
             known browser as a stranger.
 
     Returns:
-        True while the account's lock window is open and the attempt is a
+        The :class:`~app.services.guess_record_service.LockReading`: locked
+        while the account's lock window is open and the attempt is a
         stranger's.
     """
-    return device is None and guess_record_service.is_locked(user.email)
+    if device is not None:
+        return guess_record_service.NO_RECORD
+    return guess_record_service.read(user.email)
 
 
 def record_failed_attempt(user: User, *, device: KnownDevice | None) -> None:
@@ -486,8 +504,9 @@ def record_failed_attempt(user: User, *, device: KnownDevice | None) -> None:
 
     * A stranger's guess counts on the record of the account's email
       (:func:`_judge_strangers_try`).  A guess the lock refuses is not
-      counted: every door that calls this asks :func:`is_locked_out` first,
-      so that is a guess that met a lock another try opened since.
+      counted: every door that calls this reads the lock first
+      (:func:`read_the_lock`), so that is a guess that met a lock another try
+      opened since.
     * A known browser's guess counts on its own record, *device*, and never on
       the account.  At the threshold the record is deleted, so the browser is
       a stranger again and the user's other browsers are untouched (ruling
@@ -510,8 +529,10 @@ def record_failed_attempt(user: User, *, device: KnownDevice | None) -> None:
     db.session.commit()
 
 
-def _judge_strangers_try(email: str, user_id: int | None, *, wrong: bool) -> bool:
-    """Judge one stranger's try at *email* on its record; return whether the lock refused it.
+def _judge_strangers_try(
+    email: str, user_id: int | None, *, wrong: bool,
+) -> guess_record_service.TryOutcome:
+    """Judge one stranger's try at *email* on its record; return what was decided.
 
     The ONE home of a stranger's count and trip, whichever door the try came
     to (:func:`~app.services.guess_record_service.judge_try`, ruling
@@ -529,8 +550,9 @@ def _judge_strangers_try(email: str, user_id: int | None, *, wrong: bool) -> boo
         wrong: Whether the password or code was wrong.
 
     Returns:
-        True when the record's lock was open, so the try was refused and not
-        counted.
+        The :class:`~app.services.guess_record_service.TryOutcome`: whether
+        the record's lock was open, so the try was refused and not counted,
+        and the record as the try left it.
     """
     outcome = guess_record_service.judge_try(
         email, wrong=wrong,
@@ -542,7 +564,7 @@ def _judge_strangers_try(email: str, user_id: int | None, *, wrong: bool) -> boo
             "Account locked after consecutive wrong passwords or codes",
             user_id=user_id, lockout_until=outcome.opened_lock_until.isoformat(),
         )
-    return outcome.refused
+    return outcome
 
 
 def _count_on_the_browser(user: User, device: KnownDevice) -> None:
@@ -561,7 +583,7 @@ def _count_on_the_browser(user: User, device: KnownDevice) -> None:
         )
 
 
-def clear_failed_attempts(user: User) -> None:
+def clear_failed_attempts(checked: guess_record_service.Held | None) -> None:
     """Clear the account's count and any lock, once a stranger's checks have all passed.
 
     Called at a stranger's finished sign-in and finished re-confirm, and
@@ -575,27 +597,37 @@ def clear_failed_attempts(user: User) -> None:
     renewed with a new token, at a finished sign-in
     (:func:`~app.services.known_device_service.record_sign_in`) or re-confirm
     (:func:`~app.services.known_device_service.record_re_confirm`).  So this
-    takes no browser: the two completions that call it are the stranger's
-    side of a choice they each make once.
+    takes no browser: what a known browser's checks saw of the strangers'
+    record is nothing (:func:`read_the_lock`), and nothing is cleared.
 
-    The clear deletes the record of the account's email
-    (:func:`~app.services.guess_record_service.clear`).  Commits only when
-    there was a record: a stranger's sign-in finds the one its own try's
-    judgment wrote (ruling plan#3110), unless another finished sign-in
-    cleared it since, while a re-confirm on an account with no failure
-    history finds none, and the commit would write nothing.
+    The clear deletes the record of the account's email only while it still
+    holds what the checks saw, *checked*
+    (:func:`~app.services.guess_record_service.clear`): a stranger's wrong
+    guess takes no owner lock (ruling plan#3110), so one judged after these
+    checks and before this clear stands, and so does the run before it.
+    Commits only when it deleted, which a guess counted since the checks, or
+    another finished sign-in's clear, prevents.  A stranger's ``/login``
+    sign-in names the record its own try's judgment left, and a code-form
+    sign-in the one it read, which the ``/login`` judgment of its password
+    wrote unless another finished sign-in has cleared it since.  A re-confirm
+    on an account with no failure history names none, and the commit would
+    write nothing.
 
     Args:
-        user: The account whose checks have all passed.
+        checked: What the record held when this sign-in's or re-confirm's
+            checks were judged: the ``/login`` judgment's
+            (:attr:`PasswordProof.held`), or the code form's or re-confirm's
+            read of the lock (:func:`read_the_lock`).  ``None`` when that read
+            found no record, or the browser is known: nothing to clear.
     """
-    if guess_record_service.clear(user.email):
+    if checked is not None and guess_record_service.clear(checked):
         db.session.commit()
 
 
 def check_signed_in_password(
     user: User, password: str, wrong_password_message: str,
     *, device: KnownDevice | None,
-) -> None:
+) -> guess_record_service.Held | None:
     """Check a signed-in door's password, counting a wrong one toward the lock.
 
     The one password check of ``/reauth``, ``/change-password`` and
@@ -620,16 +652,25 @@ def check_signed_in_password(
             :func:`~app.services.known_device_service.find_browser` read it
             under the owner's lock, or ``None`` for a stranger.
 
+    Returns:
+        What the strangers' record held when the lock was read
+        (:func:`read_the_lock`), which a finished re-confirm clears if it
+        still holds it (:func:`clear_failed_attempts`); ``None`` for a known
+        browser, or when the account's email had no record.  The other two
+        doors clear nothing (ruling plan#3007).
+
     Raises:
         AuthError: With :data:`LOCKED_OUT_MESSAGE` while the lock refuses
             this attempt, else with *wrong_password_message* when the password
             is wrong.
     """
-    if is_locked_out(user, device=device):
+    reading = read_the_lock(user, device=device)
+    if reading.locked:
         raise AuthError(LOCKED_OUT_MESSAGE)
     if not verify_password(password, user.password_hash):
         record_failed_attempt(user, device=device)
         raise AuthError(wrong_password_message)
+    return reading.held
 
 
 def check_strangers_password(
@@ -692,18 +733,17 @@ def check_strangers_password(
         raise AuthError(INVALID_SIGN_IN_MESSAGE)
     password_hash = _DUMMY_PASSWORD_HASH if user is None else user.password_hash
     right = verify_password(password, password_hash)
-    proof = None if user is None else PasswordProof(
-        email=email, user_id=user.id, owner_id=user.data_owner_id,
-        password_hash=password_hash,
-    )
-    refused = _judge_strangers_try(
-        email, None if proof is None else proof.user_id,
-        wrong=proof is None or not right,
-    )
+    # Read before the commit expires the account's row, so taking the owner's
+    # lock afterwards reads nothing first (:class:`PasswordProof`).
+    user_id, owner_id = (None, None) if user is None else (user.id, user.data_owner_id)
+    outcome = _judge_strangers_try(email, user_id, wrong=user is None or not right)
     db.session.commit()
-    if proof is None or refused or not right:
+    if user_id is None or outcome.refused or not right:
         raise AuthError(INVALID_SIGN_IN_MESSAGE)
-    return proof
+    return PasswordProof(
+        email=email, user_id=user_id, owner_id=owner_id,
+        password_hash=password_hash, held=outcome.left,
+    )
 
 
 def confirm_strangers_password(user: User, proof: PasswordProof) -> User:

@@ -22,6 +22,7 @@ from app.extensions import db
 from app.models.guess_record import GuessRecord
 from app.services import guess_record_service
 from tests._guess_records import count_of, locked_until_of, record_of
+from tests._lock_waits import act_past_a_held_row
 from tests._test_helpers import freeze_today
 from tests.conftest import SEED_USER_EMAIL
 
@@ -141,7 +142,7 @@ class TestTheJudgment:
             _judge(SEED_USER_EMAIL)
         at(_T0 + _DURATION)
 
-        assert not guess_record_service.is_locked(SEED_USER_EMAIL)
+        assert not guess_record_service.read(SEED_USER_EMAIL).locked
         assert not _judge(SEED_USER_EMAIL).refused
         assert count_of(SEED_USER_EMAIL) == 1
 
@@ -171,7 +172,7 @@ class TestTheJudgment:
             _judge(SEED_USER_EMAIL)
         at(_T0 + _DURATION - _ONE_SECOND)
 
-        assert guess_record_service.is_locked(SEED_USER_EMAIL)
+        assert guess_record_service.read(SEED_USER_EMAIL).locked
 
     def test_a_right_try_counts_nothing(self, app, db, seed_user, at):
         """Two wrong, then a right one: still 2, not refused, the record stamped."""
@@ -187,7 +188,7 @@ class TestTheJudgment:
 
     def test_no_record_is_no_lock(self, app, db, seed_user):
         """An email never tried is not locked."""
-        assert not guess_record_service.is_locked(SEED_USER_EMAIL)
+        assert not guess_record_service.read(SEED_USER_EMAIL).locked
 
 
 class TestTheCleanUp:
@@ -225,17 +226,171 @@ class TestTheCleanUp:
         assert record_of(_NO_ACCOUNT) is not None
 
 
-class TestTheClear:
-    """The clear deletes the record, and says whether there was one."""
+class TestWhatTheChecksSaw:
+    """The judgment and the read each name the record as it stood: what a clear compares to."""
 
-    def test_it_deletes_and_says_so(self, app, db, seed_user):
-        """A record: True and gone.  None: False."""
+    def test_the_judgment_names_the_record_it_left(self, app, db, seed_user, at):
+        """Two wrong tries: the second names the record holding 2 and no lock, as the read does."""
+        at(_T0)
         _judge(SEED_USER_EMAIL)
 
-        assert guess_record_service.clear(SEED_USER_EMAIL) is True
+        left = _judge(SEED_USER_EMAIL).left
+
+        assert left == guess_record_service.Held(
+            record_id=record_of(SEED_USER_EMAIL).id, count=2, locked_until=None,
+        )
+        assert guess_record_service.read(SEED_USER_EMAIL) == (
+            guess_record_service.LockReading(locked=False, held=left)
+        )
+
+    def test_the_trip_names_the_lock_it_opened(self, app, db, seed_user, at):
+        """The third wrong try leaves 0 and a lock ending 15 minutes on; the read finds it open."""
+        at(_T0)
+        outcomes = [_judge(SEED_USER_EMAIL) for _ in range(_THRESHOLD)]
+
+        assert outcomes[-1].left == guess_record_service.Held(
+            record_id=record_of(SEED_USER_EMAIL).id, count=0,
+            locked_until=_T0 + _DURATION,
+        )
+        assert guess_record_service.read(SEED_USER_EMAIL) == (
+            guess_record_service.LockReading(locked=True, held=outcomes[-1].left)
+        )
+
+    def test_an_email_never_tried_reads_as_nothing_to_clear(self, app, db, seed_user):
+        """No record: no lock, and nothing a finished sign-in could clear."""
+        assert guess_record_service.read(SEED_USER_EMAIL) == guess_record_service.LockReading(
+            locked=False, held=None,
+        )
+
+
+class TestTheClear:
+    """A finished sign-in's clear deletes the record only while it holds what the checks saw.
+
+    A stranger's try takes no owner lock (ruling plan#3110), so a wrong guess
+    can be judged between a sign-in's checks and its clear (plan#3120).
+    Every wrong guess still counts (ruling plan#3007), so such a guess, and the
+    run before it, stand.
+    """
+
+    def test_it_deletes_what_the_read_found_and_says_so(self, app, db, seed_user, at):
+        """Read holding 1: True and gone.  The same again: False, nothing to delete."""
+        at(_T0)
+        _judge(SEED_USER_EMAIL)
+        held = guess_record_service.read(SEED_USER_EMAIL).held
+
+        assert guess_record_service.clear(held) is True
         db.session.commit()
         assert record_of(SEED_USER_EMAIL) is None
-        assert guess_record_service.clear(SEED_USER_EMAIL) is False
+        assert guess_record_service.clear(held) is False
+
+    def test_a_right_try_since_changed_nothing_to_keep(self, app, db, seed_user, at):
+        """Read holding 1, then a right try a second later stamps the record alone: cleared."""
+        at(_T0)
+        _judge(SEED_USER_EMAIL)
+        held = guess_record_service.read(SEED_USER_EMAIL).held
+        at(_T0 + _ONE_SECOND)
+        _judge(SEED_USER_EMAIL, wrong=False)
+
+        assert guess_record_service.clear(held) is True
+        db.session.commit()
+        assert record_of(SEED_USER_EMAIL) is None
+
+    def test_a_wrong_try_since_stands(self, app, db, seed_user, at):
+        """Read holding 1, then a wrong try counts 2: nothing deleted, and 1 + 1 = 2 stands."""
+        at(_T0)
+        _judge(SEED_USER_EMAIL)
+        held = guess_record_service.read(SEED_USER_EMAIL).held
+        _judge(SEED_USER_EMAIL)
+
+        assert guess_record_service.clear(held) is False
+        db.session.commit()
+        assert count_of(SEED_USER_EMAIL) == 2
+
+    def test_a_lock_opened_since_stands(self, app, db, seed_user, at):
+        """Read holding 2, then the third wrong try opens the lock: nothing deleted, it stands."""
+        at(_T0)
+        _judge(SEED_USER_EMAIL)
+        _judge(SEED_USER_EMAIL)
+        held = guess_record_service.read(SEED_USER_EMAIL).held
+        _judge(SEED_USER_EMAIL)
+
+        assert guess_record_service.clear(held) is False
+        db.session.commit()
+        assert locked_until_of(SEED_USER_EMAIL) == _T0 + _DURATION
+        assert guess_record_service.read(SEED_USER_EMAIL).locked
+
+    def test_a_lock_opened_since_from_no_count_stands(self, app, db, seed_user, at):
+        """Read holding 0 and no lock, then three wrong tries open one: 0 again, the lock stands.
+
+        The count is back where the read found it, so only the lock's end
+        tells the record from the one the checks saw: every sign-in on an
+        account with no failure history reads 0.
+        """
+        at(_T0)
+        _judge(SEED_USER_EMAIL, wrong=False)
+        held = guess_record_service.read(SEED_USER_EMAIL).held
+        for _ in range(_THRESHOLD):
+            _judge(SEED_USER_EMAIL)
+        record = record_of(SEED_USER_EMAIL)
+        assert (record.id, record.failed_login_count) == (held.record_id, held.count)
+
+        assert guess_record_service.clear(held) is False
+        db.session.commit()
+        assert locked_until_of(SEED_USER_EMAIL) == _T0 + _DURATION
+
+    def test_a_record_written_again_since_is_another_record(self, app, db, seed_user, at):
+        """Read holding 1; another sign-in clears it; a new wrong try writes 1 again: it stands.
+
+        The new record holds the same count and lock the read found, so only
+        its id tells it from the one the checks saw.
+        """
+        at(_T0)
+        _judge(SEED_USER_EMAIL)
+        held = guess_record_service.read(SEED_USER_EMAIL).held
+        assert guess_record_service.clear(held) is True
+        db.session.commit()
+        _judge(SEED_USER_EMAIL)
+        again = record_of(SEED_USER_EMAIL)
+        assert (again.failed_login_count, again.locked_until) == (held.count, held.locked_until)
+        assert again.id != held.record_id
+
+        assert guess_record_service.clear(held) is False
+        db.session.commit()
+        assert count_of(SEED_USER_EMAIL) == 1
+
+    def test_a_try_in_flight_is_waited_for_and_stands(self, app, db, seed_user):
+        """Another transaction counts a second guess and holds the row; the clear waits, keeps 2.
+
+        The clear compares and deletes in one statement, which waits on the
+        row and judges the record the holder left.  A clear that read the
+        record first would have seen 1 (the holder had not committed), and
+        then deleted the 2.
+        """
+        _judge(SEED_USER_EMAIL)
+        held = guess_record_service.read(SEED_USER_EMAIL).held
+        db.session.commit()
+        holder = db.engine.connect()
+        try:
+            holder.execute(
+                text(
+                    "UPDATE auth.guess_records"
+                    " SET failed_login_count = failed_login_count + 1 WHERE id = :id"
+                ),
+                {"id": held.record_id},
+            )
+
+            def clear_and_commit():
+                """The clear and its caller's commit."""
+                deleted = guess_record_service.clear(held)
+                db.session.commit()
+                return deleted
+
+            deleted = act_past_a_held_row(app, holder, clear_and_commit)
+        finally:
+            holder.close()
+
+        assert deleted is False
+        assert count_of(SEED_USER_EMAIL) == 2
 
 
 def _audit_rows() -> list[tuple[str, str]]:

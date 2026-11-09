@@ -247,11 +247,16 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         _clear_mfa_pending_state()
         return redirect(url_for("auth.login"))
 
-    if auth_service.is_locked_out(user, device=device):
-        # Read under the owner's lock taken above.  This person has the
-        # password, so naming the lock tells them nothing a stranger could
-        # use.  Back to /login, where the lock refuses them until it ends.
-        # A known browser is never here: the lock refuses only strangers.
+    # Read once, under the owner's lock taken above: whether the lock refuses
+    # this attempt, and what a finished sign-in clears if the record still
+    # holds it, since a stranger's guess judged during the code check takes
+    # no owner lock (ruling plan#3110).
+    reading = auth_service.read_the_lock(user, device=device)
+    if reading.locked:
+        # This person has the password, so naming the lock tells them
+        # nothing a stranger could use.  Back to /login, where the lock
+        # refuses them until it ends.  A known browser is never here: the
+        # lock refuses only strangers.
         log_event(
             logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
             "Login failed: account locked at the code form",
@@ -311,7 +316,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     trust = verify_data["trust_device"] and not used_backup_code
     response = _complete_sign_in(
         user, flask_session.get("_mfa_pending_next"),
-        known=device is not None, trust=trust,
+        checked=reading.held, trust=trust,
     )
 
     if used_backup_code:

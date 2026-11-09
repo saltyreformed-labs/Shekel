@@ -3,10 +3,11 @@ Shekel Budget App -- Every password and code guess counts toward the one lock.
 
 The doors: the code form at sign-in, ``/reauth``, ``/change-password`` and
 ``/mfa/disable``.  Each counts a wrong answer on the record of the account's
-email (ruling plan#3110) through the one function that also trips the lock, each refuses even a right
-answer while locked, and only a finished sign-in or re-confirm clears the count
-(ruling plan#3007).  The code form also has a limit of its own by the pending
-account, so moving between addresses buys no more guesses.
+email (ruling plan#3110) through the one function that also trips the lock,
+each refuses even a right answer while locked, and only a finished sign-in or
+re-confirm clears the count (ruling plan#3007).  The code form also has a
+limit of its own by the pending account, so moving between addresses buys no
+more guesses.
 
 Every test here is a stranger's, whose guesses count on the account.  A
 browser that finished a sign-in is known instead, and counts on its own record
@@ -27,7 +28,6 @@ import pyotp
 import pytest
 
 from app.extensions import db
-from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig, User
 from app.routes.auth._helpers import _MFA_PENDING_MAX_AGE
 from app.services import auth_service, mfa_service
@@ -38,6 +38,7 @@ from app.utils.log_events import (
 )
 from tests._guess_records import count_of, locked_until_of, set_record
 from tests._limited_app import limited_app, through_nginx
+from tests._sign_in import make_a_stranger
 
 _EMAIL = "test@shekel.local"
 _PASSWORD = "testpass"
@@ -371,8 +372,7 @@ def _stranger_client(auth_client, seed_user):
     Returns:
         *auth_client*, its account holding no record.
     """
-    db.session.query(KnownDevice).filter_by(user_id=seed_user["user"].id).delete()
-    db.session.commit()
+    make_a_stranger(seed_user["user"].id)
     return auth_client
 
 

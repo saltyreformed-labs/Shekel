@@ -260,9 +260,36 @@ class TestAccountLockoutBehaviour:
         user_id = seed_user["user"].id
         with app.app_context():
             user = db.session.get(User, user_id)
+            checked = auth_service.read_the_lock(user, device=None).held
             with patch.object(auth_service.db.session, "commit") as commit:
-                auth_service.clear_failed_attempts(user)
+                auth_service.clear_failed_attempts(checked)
             commit.assert_not_called()
+
+    def test_the_clear_writes_nothing_once_a_guess_counted_since(
+        self, app, db, seed_user,
+    ):
+        """The checks read 3, a stranger's wrong guess then counts 4: nothing deleted or committed.
+
+        A stranger's guess takes no owner lock (ruling plan#3110), so one can
+        be judged between a sign-in's checks and its clear (plan#3120).
+        """
+        user_id = seed_user["user"].id
+        with app.app_context():
+            set_record(
+                _EMAIL, count=3, locked_until=None,
+                last_attempt_at=datetime.now(timezone.utc),
+            )
+            db.session.commit()
+            user = db.session.get(User, user_id)
+            checked = auth_service.read_the_lock(user, device=None).held
+            auth_service.record_failed_attempt(user, device=None)
+
+            with patch.object(auth_service.db.session, "commit") as commit:
+                auth_service.clear_failed_attempts(checked)
+
+            commit.assert_not_called()
+            db.session.rollback()
+            assert count_of(_EMAIL) == 4
 
     @pytest.mark.parametrize(
         "count, locked_for",
@@ -274,7 +301,7 @@ class TestAccountLockoutBehaviour:
     def test_the_clear_clears_and_commits(
         self, app, db, seed_user, count, locked_for,
     ):
-        """Whatever is on the record is cleared, and the clear survives a rollback."""
+        """What the read of the lock found on the record is cleared, and survives a rollback."""
         user_id = seed_user["user"].id
         with app.app_context():
             now = datetime.now(timezone.utc)
@@ -285,7 +312,10 @@ class TestAccountLockoutBehaviour:
             )
             db.session.commit()
 
-            auth_service.clear_failed_attempts(db.session.get(User, user_id))
+            checked = auth_service.read_the_lock(
+                db.session.get(User, user_id), device=None,
+            ).held
+            auth_service.clear_failed_attempts(checked)
             db.session.rollback()
 
             assert count_of(_EMAIL) == 0

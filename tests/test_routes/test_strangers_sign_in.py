@@ -31,8 +31,6 @@ What a reply COSTS is measured on the real app and never here: this suite's
 cluster runs with fsync off, so a commit costs it nothing.
 """
 
-import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
@@ -46,6 +44,7 @@ from app.services import auth_service, known_device_service
 from app.services.guess_record_service import email_digest
 from app.utils.digit_strings import MAX_INTEGER_COLUMN
 from tests._guess_records import count_of, set_record
+from tests._lock_waits import act_past_a_held_row
 from tests._sign_in import browser_count, make_known
 from tests._test_helpers import (
     HeldOwnerKey,
@@ -64,12 +63,6 @@ _REFUSED = b"Invalid email or password."
 
 #: Where :func:`_capture` marks a commit among the statements.
 _COMMIT = "COMMIT"
-
-#: How long a thread is given to reach a lock and wait on it, and to finish
-#: once the holder lets go.  Generous: the arm polls and moves on the moment
-#: the wait is visible, so the figure only bounds a failure.
-_THREAD_DEADLINE_S = 20.0
-
 
 def _post_login(client, email=SEED_USER_EMAIL, password=SEED_USER_PASSWORD):
     """POST the sign-in form as a browser does; return the response."""
@@ -384,40 +377,6 @@ class TestABrowserMadeAStrangerMeanwhile:
             assert count_of(SEED_USER_EMAIL) == 1
 
 
-def _wait_until_a_statement_waits_on_a_lock(pending):
-    """Block until a statement in THIS database waits on a lock.
-
-    Read from ``pg_stat_activity`` on a connection of its own, scoped to this
-    test's database: every xdist worker's clone is a database of its own.
-
-    Args:
-        pending: The request's future; one that finishes without waiting is
-            reported with its own outcome at once.
-
-    Raises:
-        AssertionError: When the request finished without waiting, or no
-            wait appears within the deadline -- either way the arm would
-            grade nothing.
-    """
-    deadline = time.monotonic() + _THREAD_DEADLINE_S
-    with db.engine.connect() as watcher:
-        while time.monotonic() < deadline:
-            if pending.done():
-                raise AssertionError(
-                    f"the request finished without waiting: {pending.result()!r}"
-                )
-            waiting = watcher.execute(text(
-                "SELECT count(*) FROM pg_stat_activity"
-                " WHERE datname = current_database()"
-                " AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()"
-            )).scalar()
-            watcher.rollback()
-            if waiting:
-                return
-            time.sleep(0.02)
-    raise AssertionError("the request never waited on a lock")
-
-
 class TestTheRecordSerialisesTheCount:
     """With no owner lock, the record's own row lock keeps two counts from counting once."""
 
@@ -440,23 +399,9 @@ class TestTheRecordSerialisesTheCount:
                 ),
                 {"digest": email_digest(SEED_USER_EMAIL)},
             )
-
-            def run():
-                """The request, in an app context of its own, as production's is."""
-                with app.app_context():
-                    return _post_login(client, password=_WRONG)
-
-            with ThreadPoolExecutor(max_workers=1) as worker:
-                pending = worker.submit(run)
-                try:
-                    _wait_until_a_statement_waits_on_a_lock(pending)
-                    holder.commit()
-                finally:
-                    # Released BEFORE the pool's exit joins the thread, which
-                    # would otherwise wait on the row for ever.  A no-op after
-                    # the commit.
-                    holder.rollback()
-                response = pending.result(timeout=_THREAD_DEADLINE_S)
+            response = act_past_a_held_row(
+                app, holder, lambda: _post_login(client, password=_WRONG),
+            )
         finally:
             holder.close()
 

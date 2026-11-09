@@ -66,3 +66,17 @@ def browser_count(user_id) -> int:
     """
     db.session.expire_all()
     return db.session.query(KnownDevice).filter_by(user_id=user_id).one().failed_login_count
+
+
+def make_a_stranger(user_id) -> None:
+    """Delete *user_id*'s browser records, so a browser signed in to it is a stranger.
+
+    A signed-in browser stays known only while its record lives; one whose
+    record aged out, or was deleted by its own ten wrong guesses, is a stranger
+    at every door (ruling plan#3034) and counts on the account.
+
+    Args:
+        user_id: The user.
+    """
+    db.session.query(KnownDevice).filter_by(user_id=user_id).delete()
+    db.session.commit()

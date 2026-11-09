@@ -17,13 +17,16 @@ from app.models.mixins import (
 
 #: How many days a pay period may end before the payday payroll scheduled for
 #: it (``period_end_days_before_payday``, ruling plan#3096).  ZERO is a period
-#: paid on the day it ends; below zero would be a period paid before it ends,
-#: which one gap cannot state for every paycheck (a month-anchored period paid
-#: on the 25th), so the job's form refuses a Period End after its Pay Date.  A
+#: that ends on its scheduled payday; below zero would be a period scheduled to
+#: be paid before it ends, which one gap cannot state for every paycheck (a
+#: month-anchored period paid on the 25th), so the job's form refuses a Period
+#: End after the payday its paycheck was scheduled for.  Not after the day it was PAID: a
+#: payday convention that pays early, by more days than the gap, pays before
+#: the period ends, and that stub is the job's to copy (task plan#3124).  A
 #: YEAR is the top: no payroll pays a period that ended over a year before,
 #: and the bound turns a mistyped year on a stub's date into a refusal rather
 #: than a stored fact.  ``ck_salary_profiles_period_end_days_range`` is built
-#: from these two, and the form's refusal quotes them.
+#: from these two, and the form's mistyped-year refusal quotes the top.
 PERIOD_END_DAYS_BEFORE_PAYDAY_MIN = 0
 PERIOD_END_DAYS_BEFORE_PAYDAY_MAX = 365
 

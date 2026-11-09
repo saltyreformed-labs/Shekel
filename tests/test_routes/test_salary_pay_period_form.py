@@ -12,18 +12,34 @@ over ``seed_periods`` (every 14 days from Friday 2026-01-02, ten paydays to
 * :class:`TestTheEditForm` -- the edit form shows the gap back as the latest
   payday (03-13) and its period end, lists the next paychecks with their days,
   re-saves to the same gap as rendered, takes a new pair, and refuses one date
-  alone or a Period End after its Pay Date, staging nothing.
+  alone or a Period End after its Pay Date, staging nothing;
+* :class:`TestAPaydayPaidEarly` -- an owner paid a day early on every payday
+  (task plan#3124): a job whose periods end on their scheduled payday is made
+  from a stub whose Period End is after its Pay Date, is shown back as such a
+  pair, saves as rendered, and refuses a Period End after the scheduled
+  payday in the moved wording;
+* :func:`test_an_owner_with_no_paydays_is_refused_in_words` -- the create form
+  for an owner with no payday makes no job, in words.
 """
 
 import re
 from datetime import date
+from unittest.mock import patch
 
 import pytest
+import sqlalchemy
 
+from app.enums import BusinessDayShiftEnum
 from app.extensions import db
 from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
-from tests._test_helpers import freeze_today, rendered_form_controls
+from app.services import salary_pay_period
+from tests._test_helpers import (
+    freeze_today,
+    rebuild_calendar_on,
+    rendered_form_controls,
+    rhythm_of,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +70,16 @@ def _profile(user_id, name):
     ).one_or_none()
 
 
+def _edit_page(client, profile):
+    """The job's edit page, rendered."""
+    return client.get(f"/salary/{profile.id}/edit").data.decode()
+
+
+def _edit_controls(client, profile):
+    """What the job's edit form posts as rendered: every control it emits, by name."""
+    return rendered_form_controls(_edit_page(client, profile), f"/salary/{profile.id}")
+
+
 def _input_tag(page, control_id):
     """The rendered ``<input>`` tag whose id is *control_id*, whitespace collapsed."""
     start = page.index(f'<input type="date" id="{control_id}"')
@@ -82,8 +108,12 @@ class TestTheCreateForm:
             '<input type="date" id="stub_period_end" name="stub_period_end" '
             'class="form-control" required value="">'
         )
-        assert '<label for="stub_pay_date" class="form-label">Pay Date on a pay stub</label>' in page
-        assert '<label for="stub_period_end" class="form-label">Period End on that stub</label>' in page
+        assert (
+            '<label for="stub_pay_date" class="form-label">Pay Date on a pay stub</label>'
+        ) in page
+        assert (
+            '<label for="stub_period_end" class="form-label">Period End on that stub</label>'
+        ) in page
         assert 'id="upcoming_pay_periods"' not in page
 
     def test_the_two_dates_become_the_gap(self, auth_client, seed_user):
@@ -127,19 +157,15 @@ class TestTheEditForm:
         assert _create(auth_client, "Day Job", "2026-01-16", "2026-01-10").status_code == 302
         return _profile(seed_user["user"].id, "Day Job")
 
-    def _page(self, client, profile):
-        """The job's edit page, rendered."""
-        return client.get(f"/salary/{profile.id}/edit").data.decode()
-
     def test_it_shows_the_latest_payday_and_its_period_end(self, auth_client, profile):
         """On 03-20 the latest payday is 03-13, and 6 days before it is 03-07."""
-        controls = rendered_form_controls(self._page(auth_client, profile), f"/salary/{profile.id}")
+        controls = _edit_controls(auth_client, profile)
         assert controls["stub_pay_date"] == ["2026-03-13"]
         assert controls["stub_period_end"] == ["2026-03-07"]
 
     def test_the_boxes_are_not_required_on_the_edit_form(self, auth_client, profile):
         """Blank together leaves the stored gap alone, so the browser may post them blank."""
-        page = self._page(auth_client, profile)
+        page = _edit_page(auth_client, profile)
         assert " required " not in _input_tag(page, "stub_pay_date")
         assert " required " not in _input_tag(page, "stub_period_end")
 
@@ -148,7 +174,7 @@ class TestTheEditForm:
 
         03-27 - 6 = Sat 03-21, from the day after 03-13 - 6 = 03-07.
         """
-        assert _upcoming_lines(self._page(auth_client, profile)) == [
+        assert _upcoming_lines(_edit_page(auth_client, profile)) == [
             "Your Mar 27 paycheck pays Sun Mar 8 through Sat Mar 21",
             "Your Apr 10 paycheck pays Sun Mar 22 through Sat Apr 4",
             "Your Apr 24 paycheck pays Sun Apr 5 through Sat Apr 18",
@@ -156,17 +182,17 @@ class TestTheEditForm:
 
     def test_posted_as_rendered_it_keeps_the_gap(self, auth_client, seed_user, profile):
         """The shown-back pair re-saves to 6."""
-        controls = rendered_form_controls(self._page(auth_client, profile), f"/salary/{profile.id}")
+        controls = _edit_controls(auth_client, profile)
         assert auth_client.post(f"/salary/{profile.id}", data=controls).status_code == 302
         assert _profile(seed_user["user"].id, "Day Job").period_end_days_before_payday == 6
 
     def test_a_new_pair_stores_a_new_gap(self, auth_client, seed_user, profile):
         """03-13 and 03-10 store 3, and the list moves with it."""
-        controls = rendered_form_controls(self._page(auth_client, profile), f"/salary/{profile.id}")
+        controls = _edit_controls(auth_client, profile)
         controls["stub_period_end"] = ["2026-03-10"]
         assert auth_client.post(f"/salary/{profile.id}", data=controls).status_code == 302
         assert _profile(seed_user["user"].id, "Day Job").period_end_days_before_payday == 3
-        assert _upcoming_lines(self._page(auth_client, profile))[0] == (
+        assert _upcoming_lines(_edit_page(auth_client, profile))[0] == (
             "Your Mar 27 paycheck pays Wed Mar 11 through Tue Mar 24"
         )
 
@@ -180,7 +206,7 @@ class TestTheEditForm:
 
     def test_one_date_alone_is_refused_and_nothing_saves(self, auth_client, seed_user, profile):
         """The Period End cleared: refused in words; the rename beside it is not saved."""
-        controls = rendered_form_controls(self._page(auth_client, profile), f"/salary/{profile.id}")
+        controls = _edit_controls(auth_client, profile)
         controls["stub_period_end"] = [""]
         controls["name"] = ["Renamed Job"]
         response = auth_client.post(
@@ -192,7 +218,7 @@ class TestTheEditForm:
 
     def test_a_period_end_after_the_pay_date_is_refused(self, auth_client, seed_user, profile):
         """Period End 03-14 after Pay Date 03-13: refused in words, the gap kept."""
-        controls = rendered_form_controls(self._page(auth_client, profile), f"/salary/{profile.id}")
+        controls = _edit_controls(auth_client, profile)
         controls["stub_period_end"] = ["2026-03-14"]
         response = auth_client.post(
             f"/salary/{profile.id}", data=controls, follow_redirects=True,
@@ -205,7 +231,7 @@ class TestTheEditForm:
     def test_a_new_pair_that_loses_a_version_race_is_reported_not_a_500(
         self, auth_client, seed_user, profile,
     ):
-        """Another tab's save lands after the pair is read: the stale-conflict flash, nothing saved.
+        """Another tab's save lands after the pair is read: the stale-conflict flash, no save.
 
         The race the form's version pin cannot see: the pre-check passes, then
         the profile's version moves before its UPDATE runs, so the UPDATE
@@ -218,14 +244,7 @@ class TestTheEditForm:
         as its generic failure.  Planted by bumping the version, with autoflush
         held off, right after the door turns the pair into a gap.
         """
-        # pylint: disable=import-outside-toplevel  -- the one patch target here.
-        from unittest.mock import patch
-
-        import sqlalchemy
-
-        from app.services import salary_pay_period
-
-        controls = rendered_form_controls(self._page(auth_client, profile), f"/salary/{profile.id}")
+        controls = _edit_controls(auth_client, profile)
         controls["stub_period_end"] = ["2026-03-10"]
         controls["name"] = ["Renamed Job"]
         profile_id = profile.id
@@ -255,3 +274,89 @@ class TestTheEditForm:
         assert b"Failed to update salary profile" not in response.data
         assert _profile(seed_user["user"].id, "Renamed Job") is None
         assert _profile(seed_user["user"].id, "Day Job").period_end_days_before_payday == 6
+
+
+@pytest.fixture()
+def paid_early(seed_user):
+    """The seeded owner's paydays every other Saturday from 01-03, each paid the Friday before.
+
+    The ``prior`` convention moves every Saturday payday to its Friday, so on
+    03-20 the latest payday is Friday 03-13, scheduled for Saturday 03-14,
+    and the next is Friday 03-27.
+    """
+    return rebuild_calendar_on(
+        seed_user["user"].id, date(2026, 1, 3), 10,
+        rhythm_of(14, BusinessDayShiftEnum.PRIOR),
+    )
+
+
+@pytest.mark.usefixtures("paid_early")
+class TestAPaydayPaidEarly:
+    """A job whose periods end on their scheduled payday, paid a day early (task plan#3124).
+
+    Its stubs print a Period End the day after the Pay Date: a gap of 0 from
+    the scheduled Saturday.  The form refused that pair as a Period End after
+    its Pay Date, and the edit form shows it back whenever such a payday is
+    the latest, so every save of the job was refused until the next payday.
+    """
+
+    @pytest.fixture()
+    def profile(self, auth_client, seed_user):
+        """A job created from the Friday 01-16 stub, Period End Saturday 01-17: a gap of 0."""
+        _create(auth_client, "Day Job", "2026-01-16", "2026-01-17")
+        return _profile(seed_user["user"].id, "Day Job")
+
+    def test_the_stub_of_a_payday_paid_early_makes_the_job(self, auth_client, seed_user):
+        """Period End 01-17, after the 01-16 Pay Date, is its scheduled payday: 17 - 17 = 0."""
+        response = _create(auth_client, "Day Job", "2026-01-16", "2026-01-17", follow=True)
+        assert b"Salary profile &#39;Day Job&#39; created." in response.data
+        assert _profile(seed_user["user"].id, "Day Job").period_end_days_before_payday == 0
+
+    def test_it_shows_a_period_end_after_its_pay_date(self, auth_client, profile):
+        """On 03-20 the latest payday is Friday 03-13, and 0 days before its Saturday is 03-14."""
+        controls = _edit_controls(auth_client, profile)
+        assert controls["stub_pay_date"] == ["2026-03-13"]
+        assert controls["stub_period_end"] == ["2026-03-14"]
+
+    def test_posted_as_rendered_a_rename_saves_and_keeps_the_gap(
+        self, auth_client, seed_user, profile,
+    ):
+        """The shown-back pair beside a new name: the rename lands and the gap stays 0."""
+        controls = _edit_controls(auth_client, profile)
+        controls["name"] = ["Renamed Job"]
+        response = auth_client.post(
+            f"/salary/{profile.id}", data=controls, follow_redirects=True,
+        )
+        assert b"Salary profile &#39;Renamed Job&#39; updated." in response.data
+        assert _profile(seed_user["user"].id, "Renamed Job").period_end_days_before_payday == 0
+
+    def test_a_period_end_after_the_scheduled_payday_is_refused(
+        self, auth_client, seed_user, profile,
+    ):
+        """Period End Sun 03-15, after the Sat 03-14 the 03-13 paycheck was scheduled for."""
+        controls = _edit_controls(auth_client, profile)
+        controls["stub_period_end"] = ["2026-03-15"]
+        response = auth_client.post(
+            f"/salary/{profile.id}", data=controls, follow_redirects=True,
+        )
+        assert (
+            b"Period End 2026-03-15 is after 2026-03-14, the day your 2026-03-13 "
+            b"paycheck was scheduled for before it moved to a business day.  Copy "
+            b"both dates from one pay stub."
+        ) in response.data
+        assert _profile(seed_user["user"].id, "Day Job").period_end_days_before_payday == 0
+
+
+def test_an_owner_with_no_paydays_is_refused_in_words(bare_auth_client, bare_user):
+    """No payday, so no paycheck to copy a stub of: the create form makes no job, in words.
+
+    An owner with no payday holds no account (``create_account`` refuses one)
+    and, never having registered a schedule, no baseline scenario, so the
+    door's first guard answers before the pay-period pair is read.  The
+    pair's own refusal of a calendar with no payday is the service's case
+    (``test_salary_pay_period.TestTheRefusals.test_a_calendar_with_no_payday``).
+    """
+    response = _create(bare_auth_client, "Day Job", "2026-01-16", "2026-01-10", follow=True)
+    assert response.status_code == 200
+    assert b"No baseline scenario found." in response.data
+    assert _profile(bare_user["user"].id, "Day Job") is None

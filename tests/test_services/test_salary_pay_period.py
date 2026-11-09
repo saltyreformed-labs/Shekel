@@ -8,11 +8,14 @@ period ends before the payday payroll SCHEDULED.  These cases grade
 
 * :class:`TestTwoDatesBecomeTheGap` -- the developer's 07-16 stub gives 6, and
   so does a stub of a payday paid early for a holiday, where counting from
-  the paid day would give 5;
-* :class:`TestTheRefusals` -- each refusal, pinned whole, and the range's two
-  ends;
+  the paid day would give 5; a payday paid early by more days than the gap
+  prints a Period End after its Pay Date, and its stub is taken (task
+  plan#3124);
+* :class:`TestTheRefusals` -- each refusal, pinned whole, both wordings of a
+  Period End after the scheduled payday, and the range's two ends;
 * :class:`TestTheSettingShownBack` -- the latest payday and its period end,
-  which re-save to the same gap, and the next paychecks with their days.
+  which re-save to the same gap, an early-paid one after its Pay Date
+  included, and the next paychecks with their days.
 
 **No date here is read from a clock.**
 """
@@ -68,6 +71,18 @@ class TestTwoDatesBecomeTheGap:
             THANKSGIVING - timedelta(days=1), date(2030, 11, 22),
         ) == 6
 
+    def test_a_period_end_after_a_pay_date_paid_early_is_taken(self):
+        """Paid Wed 11-27 for Thanksgiving, Period End Thu 11-28: 28 - 28 = 0.
+
+        A job whose periods end on their scheduled payday, paid a day early:
+        its stub prints a Period End after the Pay Date, and the gap it states
+        is the range's floor (task plan#3124).
+        """
+        assert days_before_payday(
+            _thanksgiving(BusinessDayShiftEnum.PRIOR),
+            THANKSGIVING - timedelta(days=1), THANKSGIVING,
+        ) == 0
+
     def test_a_period_ending_on_its_payday_is_zero(self):
         """Period End on the Pay Date is the range's floor."""
         assert days_before_payday(DEVELOPER, date(2026, 7, 16), date(2026, 7, 16)) == 0
@@ -91,6 +106,23 @@ class TestTheRefusals:
             "Copy both the Pay Date and the Period End from one pay stub."
         )
 
+    def test_a_stub_from_before_the_pay_record(self):
+        """03-12, on the grid a fortnight before the 03-26 opening: no paycheck the app holds."""
+        with pytest.raises(ValidationError) as refused:
+            days_before_payday(DEVELOPER, date(2026, 3, 12), date(2026, 3, 6))
+        assert str(refused.value) == (
+            "The app holds no paycheck on 2026-03-12: your pay record starts 2026-03-26."
+        )
+
+    def test_a_calendar_with_no_payday(self):
+        """An owner with no payday has no paycheck to copy a stub of: refused in words."""
+        empty = PayCalendar.from_paydays(
+            [], (DEVELOPER_ERA,), user_id=1, history_opens_on=None,
+        )
+        with pytest.raises(ValidationError) as refused:
+            days_before_payday(empty, date(2026, 7, 16), date(2026, 7, 10))
+        assert str(refused.value) == "2026-07-16 is not one of your paydays."
+
     def test_a_day_that_is_not_a_payday(self):
         """07-17 is the day after a payday: the salary doors' one rule and its words."""
         with pytest.raises(ValidationError) as refused:
@@ -98,7 +130,11 @@ class TestTheRefusals:
         assert str(refused.value) == "2026-07-17 is not one of your paydays."
 
     def test_a_period_end_after_the_pay_date(self):
-        """Period End 07-17 after Pay Date 07-16: one gap cannot state that period."""
+        """Period End 07-17 after Pay Date 07-16, a payday nothing moved: the unmoved wording.
+
+        07-16 is its own scheduled payday, so 07-17 is after it: a gap of
+        minus one, a period scheduled to be paid before it ends.
+        """
         with pytest.raises(ValidationError) as refused:
             days_before_payday(DEVELOPER, date(2026, 7, 16), date(2026, 7, 17))
         assert str(refused.value) == (
@@ -110,14 +146,31 @@ class TestTheRefusals:
     def test_a_period_end_after_the_payday_a_late_payment_was_scheduled_for(self):
         """Under ``next`` Thanksgiving is paid Fri 11-29; a Period End of 11-29 is after 11-28.
 
-        Not after the Pay Date, so the first refusal does not fire; stored, it
-        would be a gap of minus one.
+        On the Pay Date, not after it, and still a gap of minus one from the
+        scheduled payday: the moved wording names that day.
         """
         paid = THANKSGIVING + timedelta(days=1)
         with pytest.raises(ValidationError) as refused:
             days_before_payday(_thanksgiving(BusinessDayShiftEnum.NEXT), paid, paid)
         assert str(refused.value) == (
             "Period End 2030-11-29 is after 2030-11-28, the day your 2030-11-29 "
+            "paycheck was scheduled for before it moved to a business day.  Copy "
+            "both dates from one pay stub."
+        )
+
+    def test_a_period_end_after_the_payday_an_early_payment_was_scheduled_for(self):
+        """Under ``prior`` Thanksgiving is paid Wed 11-27; Period End Fri 11-29 is after 11-28.
+
+        After the Pay Date by two days where the move was one: a gap of minus
+        one from the scheduled payday, refused in the moved wording.
+        """
+        with pytest.raises(ValidationError) as refused:
+            days_before_payday(
+                _thanksgiving(BusinessDayShiftEnum.PRIOR),
+                THANKSGIVING - timedelta(days=1), THANKSGIVING + timedelta(days=1),
+            )
+        assert str(refused.value) == (
+            "Period End 2030-11-29 is after 2030-11-28, the day your 2030-11-27 "
             "paycheck was scheduled for before it moved to a business day.  Copy "
             "both dates from one pay stub."
         )
@@ -174,6 +227,18 @@ class TestTheSettingShownBack:
         view = pay_period_view(calendar, 6, date(2030, 12, 1))
         assert (view.pay_date, view.period_end) == (date(2030, 11, 27), date(2030, 11, 22))
         assert days_before_payday(calendar, view.pay_date, view.period_end) == 6
+
+    def test_a_gap_smaller_than_an_early_move_re_saves_to_the_same_gap(self):
+        """On 12-01-2030 at a gap of 0: Wed 11-27 and Thu 11-28, a Period End after its Pay Date.
+
+        11-28 - 0 = 11-28, the scheduled Thursday the holiday paid a day
+        early; the pair re-saves to 0, where the form once refused it and
+        with it every save of the job until the next payday (task plan#3124).
+        """
+        calendar = _thanksgiving(BusinessDayShiftEnum.PRIOR)
+        view = pay_period_view(calendar, 0, date(2030, 12, 1))
+        assert (view.pay_date, view.period_end) == (date(2030, 11, 27), date(2030, 11, 28))
+        assert days_before_payday(calendar, view.pay_date, view.period_end) == 0
 
     def test_a_calendar_with_no_payday_shows_nothing(self):
         """No payday, no dates to show and no paycheck to list."""

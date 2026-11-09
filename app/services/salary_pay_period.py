@@ -2,9 +2,10 @@
 
 Plan step **salary plan#3048** (task plan#3099), ruling **plan#3096**: a job
 learns its pay periods from one stub's Pay Date and Period End.  The owner
-copies the two dates off any one stub; the job keeps one fact,
-``salary.salary_profiles.period_end_days_before_payday``, how many days each
-period ends before the payday payroll SCHEDULED.  This module is the form's
+copies the two dates off the stub of any paycheck the app holds; the job
+keeps one fact, ``salary.salary_profiles.period_end_days_before_payday``, how
+many days each period ends before the payday payroll SCHEDULED.  This module
+is the form's
 two directions over that fact:
 
 * :func:`days_before_payday` turns the two dates INTO it, through the
@@ -49,20 +50,34 @@ def days_before_payday(
     Both dates are needed: the edit form leaves the stored gap alone when
     neither is posted, and one without the other states no gap.  The Pay Date
     must be a payday of the owner's calendar (the salary doors'
-    one rule, :func:`~app.services.salary_paydays.not_a_payday`).  The Period
-    End may not be after the Pay Date: one gap cannot state a period paid
-    before it ends (a month-anchored period paid on the 25th).  Nor after the
-    payday the paycheck was SCHEDULED for, which is later than the Pay Date
-    only when a payday convention moved the payday later; and it may not be
-    more than :data:`~app.models.salary_profile.PERIOD_END_DAYS_BEFORE_PAYDAY_MAX`
-    days before it, which is a mistyped year.
+    one rule, :func:`~app.services.salary_paydays.not_a_payday`), so a stub
+    of a paycheck the app does not hold, one dated before the pay record
+    starts among them, is refused in words.  The Period End may not be after
+    the payday the paycheck was SCHEDULED for: that would be a gap below
+    zero, a period scheduled to be paid before it ends, which one gap cannot
+    state for every paycheck (a month-anchored period paid on the 25th).  The
+    wording names the scheduled payday only where a convention moved it.
+    And it may not be more than
+    :data:`~app.models.salary_profile.PERIOD_END_DAYS_BEFORE_PAYDAY_MAX` days
+    before it, which is a mistyped year.
+
+    **The Period End MAY be after the Pay Date** (task plan#3124): a payday
+    convention that paid the payday EARLY, by more days than the job's gap,
+    paid it before its period ended, and its stub prints exactly that.  The
+    edit form shows such a payday back as that pair whenever it is the
+    latest payday (:func:`pay_period_view`) and posts it with every save, so
+    refusing it refused every save of the job from its form, a rename
+    included, until the next payday.
 
     Worked example (the developer's 07-16 stub): Pay Date 2026-07-16, a
     scheduled Thursday nothing moved, and Period End 2026-07-10 give
     ``16 - 10 = 6``.  The Thanksgiving 2030 stub, Pay Date Wednesday 11-27
     (paid early for the holiday, scheduled Thursday 11-28) and Period End
     Friday 11-22, gives ``28 - 22 = 6`` too, where counting from the paid day
-    would give 5 and shift every other paycheck's period by a day.
+    would give 5 and shift every other paycheck's period by a day.  And a job
+    paid on its period's last day, whose 15th falls on a Saturday that the
+    ``prior`` convention pays on Friday the 14th: Pay Date the 14th and Period
+    End the 15th give ``15 - 15 = 0``, its gap on every paycheck.
 
     Args:
         calendar: The owner's calendar.
@@ -82,14 +97,14 @@ def days_before_payday(
     refusal = not_a_payday(calendar, pay_date)
     if refusal is not None:
         raise ValidationError(refusal)
-    if period_end > pay_date:
-        raise ValidationError(
-            f"Period End {period_end.isoformat()} is after the Pay Date "
-            f"{pay_date.isoformat()}.  Copy both dates from one pay stub: a "
-            f"paycheck pays for days that have ended by its payday."
-        )
     scheduled = scheduled_payday(calendar, pay_date)
     if period_end > scheduled:
+        if scheduled == pay_date:
+            raise ValidationError(
+                f"Period End {period_end.isoformat()} is after the Pay Date "
+                f"{pay_date.isoformat()}.  Copy both dates from one pay stub: "
+                f"a paycheck pays for days that have ended by its payday."
+            )
         raise ValidationError(
             f"Period End {period_end.isoformat()} is after "
             f"{scheduled.isoformat()}, the day your {pay_date.isoformat()} "

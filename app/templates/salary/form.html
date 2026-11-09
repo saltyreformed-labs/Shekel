@@ -150,11 +150,13 @@
           </div>
 
           {# The job's pay periods (plan#3048, ruling plan#3096): two dates
-             copied off any one pay stub, which the app keeps as how many days
-             each period ends before its scheduled payday.  The edit form
-             shows that back as the latest payday and its period end, which
-             re-save to the same answer, and lists the next paychecks with the
-             days each pays for. #}
+             copied off the stub of any paycheck the app holds, which the app
+             keeps as how many days each period ends before its scheduled
+             payday.  The edit form shows that back as the latest payday and
+             its period end, which re-save to the same answer, a Period End
+             after its Pay Date included when the payday was paid early
+             (task plan#3124), and lists the next paychecks with the days each
+             pays for. #}
           <div class="row mt-3">
             <div class="col-md-6">
               <label for="stub_pay_date" class="form-label">Pay Date on a pay stub</label>
@@ -170,7 +172,7 @@
             </div>
           </div>
           <div class="form-text">
-            Copy both from any one pay stub. They tell the app which days each paycheck pays for.
+            Copy both from the pay stub of any paycheck the app holds. They tell the app which days each paycheck pays for.
           </div>
           {% if pay_period and pay_period.upcoming %}
           <ul class="list-unstyled small mt-2 mb-0" id="upcoming_pay_periods">

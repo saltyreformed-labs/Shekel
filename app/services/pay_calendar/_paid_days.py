@@ -34,8 +34,9 @@ and "Add earlier paychecks" stand on.
 
 **One kind of pay period it cannot state**, said so a caller does not assume
 it: a period anchored to the MONTH and paid before it ends (monthly pay on the
-25th for the whole month) has no fixed gap before its payday.  The job's form
-refuses a Period End after its Pay Date for that reason.
+25th for the whole month) has no fixed gap before its payday.  For that
+reason the job's form refuses a Period End after the payday its paycheck was
+scheduled for (:func:`~app.services.salary_pay_period.days_before_payday`).
 
 Placed after :mod:`._calendar` in the package's one-way chain, beside
 :mod:`._walks`, because it takes a whole calendar.  Pure: no session, no

@@ -54,13 +54,11 @@ from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import (
     pay_calendar,
-    posting_service,
     reconcile_service,
     statement_match,
     transfer_service,
 )
 from app.services.cash_ledger import settled_cash_facts
-from app.services.loan_posting_service import sync_loan_postings
 from app.services.statement_match import RowKind, accepted_register
 from app.services.statement_match._valuation import repriced
 from app.services.transfer_legs import preload_side_records, transfer_side_leg
@@ -460,31 +458,6 @@ class TestNoReaderReadsASideAlone:
             assert facts
             assert alone == []
 
-    def test_the_loan_posting_probe_reads_the_payments_records_together(
-        self, app, seed_user, seed_periods,
-    ):
-        """The loan's posting probe reads each settled payment's record, loaded in one statement.
-
-        The fixture of the loan page's case.  ``sync_loan_postings`` walks
-        the same ``loan_loaders.settled_income_legs``; without its pre-load
-        the probe reads the loan side of each payment alone.
-        """
-        with app.app_context():
-            loan = _loan(seed_user)
-            for index in (3, 4, 5):
-                period = seed_periods[index]
-                _paid(
-                    seed_user, seed_user["account"], loan, period, "1000.00",
-                    settled_on=period.start_date,
-                )
-            db.session.commit()
-            db.session.expire_all()
-
-            with _sides_read_alone() as alone:
-                sync_loan_postings(loan.id, seed_user["scenario"].id)
-
-            assert alone == []
-
     def test_the_statement_match_candidates_read_their_legs_records_together(
         self, app, seed_user, seed_periods_today,
     ):
@@ -595,32 +568,6 @@ class TestNoReaderReadsASideAlone:
                 )
 
             assert register
-            assert alone == []
-
-    def test_the_posting_writer_reads_no_record_off_a_side(
-        self, app, seed_user, seed_periods_today,
-    ):
-        """The posting writer books a Paid transfer's records and reads none off its sides.
-
-        ``posting_service.sync_transfer_postings`` walks the records
-        ``transfer_legs.transfer_family_movements`` finds, each with the leg
-        ``movement_parent`` builds from it (filling its list), and reads no
-        side's record off its list.  No pre-load or fill guards it, so this
-        control fires when the writer is made to read a side's record off a
-        list it did not fill.
-        """
-        with app.app_context():
-            paid = _paid(
-                seed_user, seed_user["account"], _a_savings_account(seed_user),
-                seed_periods_today[3], "120.00",
-            )
-            db.session.commit()
-            db.session.expire_all()
-            xfer = db.session.get(Transfer, paid.id)
-
-            with _sides_read_alone() as alone:
-                posting_service.sync_transfer_postings(xfer)
-
             assert alone == []
 
 

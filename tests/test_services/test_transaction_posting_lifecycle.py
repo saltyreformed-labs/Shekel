@@ -49,12 +49,7 @@ from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services.balance_at import BalanceContext
-from app.services import (
-    carry_forward_service,
-    credit_workflow,
-    entry_service,
-    posting_service,
-)
+from app.services import carry_forward_service, credit_workflow, entry_service
 from app.services.entry_service import EntryDetails
 from app.services.ledger_lines import category_key, linked_key
 from tests._ledger_reads import (
@@ -64,6 +59,7 @@ from tests._ledger_reads import (
     period_nets_of_movements,
     scenario_lines,
 )
+from tests._records_oracle import posted_purchase_effect, settled_transfer_effect
 from tests._test_helpers import (
     add_txn,
     an_entered_day,
@@ -164,8 +160,8 @@ def _assert_reconciles(scenario_id, *accounts):
     for account in accounts:
         posted = account_net(db.session, account.id, scenario_id)
         effect = (
-            posting_service.settled_transfer_effect(account.id, scenario_id)
-            + posting_service.posted_purchase_effect(account.id, scenario_id)
+            settled_transfer_effect(account.id, scenario_id)
+            + posted_purchase_effect(account.id, scenario_id)
         )
         opening = Decimal(str(cash_ledger.resolve_anchor(account).balance))
         assert posted == opening + effect, (

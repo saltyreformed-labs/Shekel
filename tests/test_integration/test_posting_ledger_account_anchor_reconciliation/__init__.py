@@ -56,14 +56,16 @@ cash oracle is (the ``test_posting_ledger_cash_reconciliation`` package):
     the transfers' side records with
     independently-written Python / SQL, so asserting the two reconcile checks
     what the read BOOKS against the transaction source of truth;
-  * **the production service helpers** -- ``settled_transfer_effect`` /
-    ``settled_transaction_effect`` must match the hand-computed literals too.
+  * **the records oracle** -- ``tests/_records_oracle.py``'s
+    ``settled_transfer_effect`` / ``posted_purchase_effect`` must match the
+    hand-computed literals too (they were ``posting_service``'s until plan
+    task plan#3132).
 
 Every account and every settle is produced through the REAL go-forward
-primitives -- ``create_account`` (fires the C6 opening sync),
-``create_settled_cash_transaction`` / ``create_settled_transfer`` (the status
-seam + posting builder), ``apply_anchor_true_up`` (the true-up chokepoint) --
-so every reconciled row was produced exactly as production produces it.  The one
+primitives -- ``create_account``, ``create_settled_cash_transaction`` /
+``create_settled_transfer`` (the status seam), ``apply_anchor_true_up`` (the
+true-up chokepoint) -- so every record the read works out from was produced
+exactly as production produces it.  The one
 non-production affordance is pinning an anchor row's ``created_at`` (via
 :func:`_assert_balance_at`) so the civil-day partition under test is deterministic
 regardless of the test clock or timezone -- the same technique the C5 unit suite

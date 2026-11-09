@@ -41,12 +41,7 @@ from app.enums import PostingSourceEnum, StatusEnum
 from app.models.pay_period import PayPeriod
 from app.models.transaction import Transaction
 from app.routes._period_population import populate_new_periods
-from app.services import (
-    account_posting_service,
-    pay_period_admin,
-    pay_period_write,
-    pay_schedule_service,
-)
+from app.services import pay_period_admin, pay_period_write, pay_schedule_service
 from app.services.ledger_lines import linked_key
 from app.services.pay_rhythm import FixedDays
 from scripts.integrity_check import (
@@ -548,9 +543,6 @@ class TestACorrectionLocksNothing:
                 seed_user, db.session, "Savings", Decimal("500.00"),
             )
             restate_account_opening(db.session, savings, day)
-            account_posting_service.sync_account_anchor_postings_all_scenarios(
-                savings.id,
-            )
             loan = create_loan_account(
                 seed_user, db.session, name="Car Loan",
                 principal=Decimal("20000.00"), rate=Decimal("0.05"),

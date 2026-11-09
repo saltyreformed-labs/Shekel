@@ -566,8 +566,6 @@ class TestLoanBalanceAnchorHistory:
                 seed_user, db.session, principal=_ORIGINATION_PRINCIPAL,
                 rate=_RATE, origination_date=_ORIGINATION_DATE,
             )
-            loan_posting_service.sync_loan_postings_all_scenarios(loan.id)
-            db.session.commit()
 
             assert loan_posting_service.loan_balance_anchor_history(
                 loan.id, scenario_id, _AS_OF,

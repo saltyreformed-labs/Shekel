@@ -40,13 +40,7 @@ from app.enums import AcctTypeEnum
 from app.extensions import db
 from app.models.loan_payment_settings import LoanPaymentSettings
 from app.models.transfer_template import TransferTemplate
-from app.services import (
-    balance_at,
-    loan_loaders,
-    loan_payment_service,
-    loan_posting_service,
-    loan_resolver,
-)
+from app.services import balance_at, loan_loaders, loan_payment_service, loan_resolver
 from app.utils.dates import add_months, months_between
 from app.utils.money import round_money
 from app.services.balance_at import BalanceContext
@@ -140,9 +134,8 @@ def _create_arm_loan(seed_user, period, *, name="C17 ARM"):
 
     The shared factory carries no ARM knobs, so the ARM columns are set the way
     production's own ARM edit does (``loan.update_params``): assign the params,
-    then re-sync the genesis ledger for every scenario before committing, so the
-    postings and the params land in one transaction and the loan is never left
-    on the no-ledger fallback.
+    then commit.  (Both the door and this helper re-synced the stored ledger's
+    genesis postings before the commit until plan tasks plan#3076 and plan#3132.)
 
     It originates :data:`ARM_STARTS_MONTHS_AGO` months before the first of TODAY's
     month, on the seam's own clock (``date.today()``, the default
@@ -167,7 +160,6 @@ def _create_arm_loan(seed_user, period, *, name="C17 ARM"):
     loan_params.is_arm = True
     loan_params.arm_first_adjustment_months = ARM_WINDOW
     loan_params.arm_adjustment_interval_months = 12
-    loan_posting_service.sync_loan_postings_all_scenarios(account.id)
     db.session.commit()
     return account, loan_params
 

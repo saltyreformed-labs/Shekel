@@ -13,7 +13,6 @@ from app.services import (
     loan_ledger,
     loan_loaders,
     loan_payment_service,
-    loan_posting_service,
     loan_resolver,
     pay_period_write,
 )
@@ -291,8 +290,6 @@ class TestReaderParallelRunAgainstResolver:
             # re-deriving one from the other is the defect that class pins.
             # On the transfer -- see ``_settle_late``.
             early.due_date = date(2026, 3, 1)
-            db.session.flush()
-            loan_posting_service.sync_loan_postings_all_scenarios(loan.id)
             db.session.commit()
             # The premise: the money HAS moved (its day is at or before today)
             # and the installment it paid is NOT yet due -- an early settle.

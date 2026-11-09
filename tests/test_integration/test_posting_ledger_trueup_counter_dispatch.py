@@ -41,7 +41,7 @@ from app.enums import (
 )
 from app.extensions import db as _db
 from app.models.account import Account
-from app.services import account_posting_service, ledger_report_service
+from app.services import ledger_report_service
 from app.services.ledger_report_service import StatementWindow
 from app.utils.dates import display_today
 from app.services.pay_calendar import calendar_for
@@ -104,14 +104,16 @@ def _true_up_day() -> date:
 
 
 def _true_up(account, balance, days_after_opening=None):
-    """Assert a later balance on *account* and drive the reconcile.
+    """Assert a later balance on *account*.
 
     Appends the ``AccountAnchorHistory`` row the true-up door would stage,
     observed *days_after_opening* days after the opening's own day (defaulting
-    to :data:`_TRUE_UP_DAYS_AFTER_OPENING`), then runs the SAME all-scenarios
-    sync the chokepoint calls.  A case asserting TWICE passes an explicit
-    offset for the second, so the two land on different civil days and
-    therefore in different correction keys.
+    to :data:`_TRUE_UP_DAYS_AFTER_OPENING`); the worked-out ledger books its
+    correction from that row when read.  (It also ran the stored ledger's
+    all-scenarios sync, as the chokepoint did, until plan task plan#3132; the
+    chokepoint's went at plan task plan#3076.)  A case asserting TWICE passes
+    an explicit offset for the second, so the two land on different civil
+    days and therefore in different correction keys.
 
     **The day comes off the opening's ``observed_on``, not its ``created_at``.**
     An account's opening is RECORDED now and observed three days back, so
@@ -151,9 +153,6 @@ def _true_up(account, balance, days_after_opening=None):
         ),
     ))
     _db.session.flush()
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        account.id,
-    )
 
 
 def account_asset_class_name(account):
@@ -186,14 +185,16 @@ def _fund_before_the_opening(seed_user, account, amount):
 
 
 def _retype(account, type_name):
-    """Re-type *account* in place and drive the sync the route drives.
+    """Re-type *account* in place, as the route does.
 
     The state every production modelled account is in the moment this code
-    deploys, reproduced without a migration: the true-up is already posted
-    against equity, and the dispatch now names a different counter row for it.
-    ``routes.accounts.crud.update_account`` does exactly this pair -- assign the
-    type, then ``sync_account_anchor_postings_all_scenarios`` -- inside one
-    request.
+    deploys, reproduced without a migration: the true-up is already booked,
+    and the dispatch now names a different counter row for it.
+    ``routes.accounts.crud.update_account`` assigns the type inside one
+    request, and the worked-out ledger re-reads every true-up under the new
+    type (ruling plan#2880).  (Both the route and this helper then ran
+    ``sync_account_anchor_postings_all_scenarios`` on the stored ledger, until
+    plan tasks plan#3076 and plan#3132.)
     """
     # Pylint: ``import-outside-toplevel`` -- lazy app import, as above.
     # pylint: disable=import-outside-toplevel
@@ -204,9 +205,6 @@ def _retype(account, type_name):
     )
     _db.session.flush()
     _db.session.expire(account)
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        account.id,
-    )
 
 
 
@@ -326,9 +324,6 @@ class TestTheTrueUpCounterLegNamesTheDifference:
                 seed_user, "Roth IRA", "Explained Opening", "1000.00",
             )
             _fund_before_the_opening(seed_user, account, "1000.00")
-            account_posting_service.sync_account_anchor_postings_all_scenarios(
-                account.id,
-            )
             # The opening books the account's STORED equity, whatever the
             # records happen to explain -- which is the premise that replaced
             # "the opening books nothing" and the reason no delta-keyed rule

@@ -1,4 +1,4 @@
-"""Migration ``e6b4a2d8c713``'s DOWNGRADE, executed against real posted rows.
+"""Migration ``e6b4a2d8c713``'s DOWNGRADE, executed against planted posted rows.
 
 The upgrade seeds three reference rows and moves nothing; the downgrade is
 where the data work is, and it is the direction that can destroy a ledger in
@@ -20,7 +20,9 @@ The shapes it is run over are the ones the step actually produces: a natively
 modelled account whose true-up books straight to its counter row, a RE-POINTED
 account carrying the counter-only delta entry (the shape with no linked leg,
 which is what makes the move non-trivial), and an account whose ``anchor_equity``
-row does not exist, which is the only arm with nothing to move onto.
+row does not exist, which is the only arm with nothing to move onto.  The rows
+are planted by SQL in those shapes (:func:`_chart_row`, :func:`_book`); the
+stored ledger's writers posted them until plan task plan#3132.
 """
 
 from __future__ import annotations
@@ -35,9 +37,8 @@ from app.enums import LedgerAccountKindEnum
 from app.extensions import db
 from app.models.account import AccountAnchorHistory
 from app.models.ref import AccountType
-from app.services import account_posting_service
 from app.utils.dates import display_today
-from tests._stored_ledger import ledger_account_of_kind
+from tests._stored_ledger import chart_row_or_plant, ledger_account_of_kind
 from tests._test_helpers import (
     create_account_of_type,
     load_migration_module,
@@ -113,17 +114,87 @@ def _run_downgrade():
     db.session.flush()
 
 
+#: Each chart-row kind these cases plant: its ledger class and the label its
+#: display name snapshots (``None`` for the account's own row, which renders
+#: the account's name).  The three test account types are all assets.
+_CHART_ROWS = {
+    "linked": ("Asset", None),
+    "anchor_equity": ("Equity", "Opening"),
+    "interest_income": ("Income", "Interest Income"),
+    "unrealized_change": ("Unrealized", "Change in Value"),
+}
+
+
+def _chart_row(account, kind):
+    """Return *account*'s chart row of *kind*, planting it by SQL when absent.
+
+    Through :func:`tests._stored_ledger.chart_row_or_plant`, with the class and
+    label :data:`_CHART_ROWS` names.  The stored ledger's writers minted these
+    rows until plan task plan#3132, when the cases started planting them, as a
+    migration test plants what its revision reads.
+    """
+    class_name, label = _CHART_ROWS[kind]
+    return chart_row_or_plant(
+        db.session, account, kind, class_name,
+        None if label is None else f"{account.name} -- {label}",
+    )
+
+
+def _book(seed_user, source, day, legs):
+    """Plant one balanced *source*-kind entry with *legs* ``{ledger id: amount}``.
+
+    Filed in the seed bootstrap period: the downgrade reads no entry's period
+    or day, only its legs and the chart rows they name.  The legs carry the
+    posting kind the writers gave an anchor correction's, ``opening`` or
+    ``trueup``.  Flushed, not committed; the deferred balanced trigger reads
+    the entry at the test's end.
+    """
+    entry_id = db.session.execute(text(
+        "INSERT INTO budget.journal_entries (user_id, scenario_id, "
+        "pay_period_id, entry_date, source_kind_id, description) "
+        "SELECT :u, :s, :p, :d, id, 'planted correction' "
+        "FROM ref.posting_sources WHERE name = :source RETURNING id"
+    ), {
+        "u": seed_user["user"].id, "s": seed_user["scenario"].id,
+        "p": seed_user["bootstrap_period"].id, "d": day, "source": source,
+    }).scalar_one()
+    posting_kind = "opening" if source == "account_opening" else "trueup"
+    for ledger_id, amount in legs.items():
+        db.session.execute(text(
+            "INSERT INTO budget.account_postings (journal_entry_id, "
+            "ledger_account_id, amount, posting_kind_id) "
+            "SELECT :e, :l, :a, id FROM ref.posting_kinds WHERE name = :k"
+        ), {"e": entry_id, "l": ledger_id, "a": amount, "k": posting_kind})
+    db.session.flush()
+
+
 def _opened(seed_user, type_name, name, opening):
-    """Create an account of *type_name* opened three days ago at *opening*."""
-    return create_account_of_type(
+    """Create an account of *type_name* opened three days ago at *opening*.
+
+    Its opening correction is planted beside it, the account's own row
+    against its equity twin, which is what the writers posted for it.
+    """
+    account = create_account_of_type(
         seed_user, db.session, type_name, name,
         anchor_balance=Decimal(str(opening)),
         observed_on=display_today() - timedelta(days=3),
     )
+    amount = Decimal(str(opening))
+    _book(seed_user, "account_opening", display_today() - timedelta(days=3), {
+        _chart_row(account, "linked"): amount,
+        _chart_row(account, "anchor_equity"): -amount,
+    })
+    return account
 
 
-def _true_up(account, balance):
-    """Assert a later balance on *account* and drive the reconcile."""
+def _true_up(seed_user, account, balance, counter):
+    """Assert a later balance on *account* and plant its true-up correction.
+
+    Appends the ``AccountAnchorHistory`` row a day after the opening and books
+    the difference (the fixtures settle nothing, so it is the new balance
+    less the opening) on the account's own row against its *counter* row, the
+    kind ruling R-FO's dispatch names for the account's type.
+    """
     opening = (
         db.session.query(AccountAnchorHistory)
         .filter_by(account_id=account.id)
@@ -140,21 +211,30 @@ def _true_up(account, balance):
         recorded_on=opening.observed_on + timedelta(days=1),
     ))
     db.session.flush()
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        account.id,
-    )
+    delta = Decimal(str(balance)) - opening.anchor_balance
+    _book(seed_user, "account_trueup", opening.observed_on + timedelta(days=1), {
+        _chart_row(account, "linked"): delta,
+        _chart_row(account, counter): -delta,
+    })
 
 
-def _retype(account, type_name):
-    """Re-type *account* in place and re-sync, producing a re-point delta."""
+def _retype(seed_user, account, type_name, amount, counter):
+    """Re-type *account* in place and plant the re-point delta it produced.
+
+    A true-up booked on equity before the re-type moves onto the new type's
+    *counter* row: an entry of two counter legs and no linked leg, equity
+    ``+amount`` against the counter ``-amount``.  That is the shape the move
+    is non-trivial for.
+    """
     account.account_type_id = (
         db.session.query(AccountType).filter_by(name=type_name).one().id
     )
     db.session.flush()
     db.session.expire(account)
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        account.id,
-    )
+    _book(seed_user, "account_trueup", display_today() - timedelta(days=2), {
+        _chart_row(account, "anchor_equity"): Decimal(str(amount)),
+        _chart_row(account, counter): -Decimal(str(amount)),
+    })
 
 
 class TestTheDowngradeReturnsEveryCounterLegToEquity:
@@ -181,16 +261,16 @@ class TestTheDowngradeReturnsEveryCounterLegToEquity:
             native_interest = _opened(
                 seed_user, "Money Market", "Native MM", "1000.00",
             )
-            _true_up(native_interest, "1015.01")
+            _true_up(seed_user, native_interest, "1015.01", "interest_income")
             native_change = _opened(
                 seed_user, "Roth IRA", "Native Roth", "1000.00",
             )
-            _true_up(native_change, "1150.00")
+            _true_up(seed_user, native_change, "1150.00", "unrealized_change")
             re_pointed = _opened(
                 seed_user, "Checking", "Re-pointed", "1000.00",
             )
-            _true_up(re_pointed, "1150.00")
-            _retype(re_pointed, "Roth IRA")
+            _true_up(seed_user, re_pointed, "1150.00", "anchor_equity")
+            _retype(seed_user, re_pointed, "Roth IRA", "150.00", "unrealized_change")
 
             assert _counter_row_count() == 3
             before_sums = _entry_sums()
@@ -218,11 +298,11 @@ class TestTheDowngradeReturnsEveryCounterLegToEquity:
         """
         with app.app_context():
             roth = _opened(seed_user, "Roth IRA", "Destination Roth", "1000.00")
-            _true_up(roth, "1150.00")
+            _true_up(seed_user, roth, "1150.00", "unrealized_change")
             other = _opened(
                 seed_user, "Money Market", "Destination MM", "2000.00",
             )
-            _true_up(other, "2015.01")
+            _true_up(seed_user, other, "2015.01", "interest_income")
 
             _run_downgrade()
 
@@ -248,7 +328,7 @@ class TestTheDowngradeReturnsEveryCounterLegToEquity:
         """
         with app.app_context():
             account = _opened(seed_user, "Roth IRA", "No Equity Row", "1000.00")
-            _true_up(account, "1150.00")
+            _true_up(seed_user, account, "1150.00", "unrealized_change")
             equity = ledger_account_of_kind(
                 db.session, account.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
             )
@@ -290,7 +370,7 @@ class TestTheDowngradeReturnsEveryCounterLegToEquity:
         """
         with app.app_context():
             account = _opened(seed_user, "Roth IRA", "Ref Rows", "1000.00")
-            _true_up(account, "1150.00")
+            _true_up(seed_user, account, "1150.00", "unrealized_change")
             kinds_before = db.session.execute(text(
                 "SELECT count(*) FROM ref.ledger_account_kinds"
             )).scalar()

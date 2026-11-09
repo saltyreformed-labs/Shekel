@@ -89,12 +89,12 @@ so neither the read nor the source-side query counts it).
     (``_independent_combined_source_effect`` / ``_signed_cash_effect``) reads the
     ``transactions`` and ``transaction_entries`` tables by its own SQL; asserting
     the two equal reconciles what the read BOOKS against the source of truth;
-  * **the production service helpers** -- ``settled_transfer_effect`` and
-    ``posted_purchase_effect``, reads of the records, must match the
-    hand-computed literals too.
+  * **the records oracle** -- ``tests/_records_oracle.py``'s
+    ``settled_transfer_effect`` and ``posted_purchase_effect``, reads of the
+    records, must match the hand-computed literals too.
 
 Cash transactions are settled through the real go-forward primitives -- the
-status seam plus the posting builder -- via
+status seam -- via
 ``create_settled_cash_transaction`` (the cash analog of the Step-2
 ``create_settled_transfer``), so every reconciled row was produced exactly as the
 mark-done route produces it.  All money is ``Decimal`` from strings, with the

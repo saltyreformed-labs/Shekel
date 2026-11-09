@@ -19,7 +19,7 @@ from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.services import posting_service, transaction_service
+from app.services import transaction_service
 from app.services.ledger_lines import category_key
 from app.utils.balance_predicates import settled_status_ids
 from tests._ledger_reads import (
@@ -29,6 +29,7 @@ from tests._ledger_reads import (
     period_nets_of_movements,
     trial_balance,
 )
+from tests._records_oracle import posted_purchase_effect, settled_transfer_effect
 from tests._test_helpers import (
     create_account_of_type,
     create_envelope_txn,
@@ -104,7 +105,7 @@ class TestPerLinkedAccountReconciliation:
         account-walk opening, and it carries no LoanParams so no loan genesis
         either), leaving its ledger at the bare +250.00.  All three
         independent computations -- the hand-computed literal, the
-        independent cross-table query, and the production service helpers --
+        independent cross-table query, and the records oracle --
         must agree on every account.
         """
         with app.app_context():
@@ -151,21 +152,21 @@ class TestPerLinkedAccountReconciliation:
                 assert _independent_combined_source_effect(
                     account_id, scenario_id,
                 ) == want_effect
-                # (c) the production service helpers agree too.
+                # (c) the records oracle agrees too.
                 assert (
-                    posting_service.settled_transfer_effect(
+                    settled_transfer_effect(
                         account_id, scenario_id,
                     )
-                    + posting_service.posted_purchase_effect(
+                    + posted_purchase_effect(
                         account_id, scenario_id,
                     )
                 ) == want_effect
 
             # Checking's split is exactly transfers -350 + transactions +1950.
-            assert posting_service.settled_transfer_effect(
+            assert settled_transfer_effect(
                 checking.id, scenario_id,
             ) == Decimal("-350.00")
-            assert posting_service.posted_purchase_effect(
+            assert posted_purchase_effect(
                 checking.id, scenario_id,
             ) == Decimal("1950.00")
 

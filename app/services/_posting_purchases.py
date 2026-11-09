@@ -89,9 +89,9 @@ def posted_purchase_exists_clause():
     The template restore's reader
     (``definition_delete.rows_holding_purchase_postings``) went at plan task
     plan#3097 with the transaction doors' syncs, and the deploy resync at plan
-    task plan#3077 with the deploy's hooks, so it has no caller in ``app/``:
-    ``tests/_worked_out_ledger.py``'s ``_walked_parents``, in the parity
-    comparison that goes with the writers, is its one caller.
+    task plan#3077 with the deploy's hooks, so it has no caller in ``app/``,
+    and none at all since plan task plan#3132 gave
+    ``tests/_worked_out_ledger.py``'s ``_walked_parents`` its own spelling.
 
     Returns:
         A SQLAlchemy ``EXISTS`` clause, correlated to ``Transaction``, for use

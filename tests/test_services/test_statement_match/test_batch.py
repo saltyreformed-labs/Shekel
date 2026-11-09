@@ -16,8 +16,8 @@ wrote a row.  This module is about what changed and what must not have.
    handed a row or an envelope an EARLIER item in the same pass has claimed.
    That is what :func:`~app.services.statement_match.matched_subjects` being
    re-read per act buys, and it is the arm a snapshot would silently break.
-3. **Failing loud.**  A ``PostingError`` is a broken ledger invariant rather
-   than one item's refusal, so it takes the whole request down.
+3. **Failing loud.**  A broken ledger invariant (a ``RuntimeError``) is not
+   one item's refusal, so it takes the whole request down.
 
 **What the collision cases here fix in place is a REAL case**: on the
 developer's own statement some envelopes are both named by a proposal and
@@ -43,7 +43,6 @@ from app.services import (
     transaction_service,
 )
 from app.services.ledger_lines import account_counter_key
-from app.services.posting_reads import PostingError
 from app.services.row_valuation import settled_figure
 from app.services.statement_match import (
     IncomeCreation,
@@ -954,10 +953,16 @@ class TestWhatIsNOTCaughtPerItem:
     only thing the loop catches.
     """
 
-    def test_a_PostingError_fails_the_whole_pass(
+    def test_a_broken_invariant_fails_the_whole_pass(
         self, app, db, seed_user, monkeypatch,
     ):
-        """A broken invariant is a fact about the account, not about an item."""
+        """A broken invariant is a fact about the account, not about an item.
+
+        Raised as the ``RuntimeError`` the walks raise on one (``cash_ledger``'s
+        readers, for instance).  It was a ``PostingError`` until plan task
+        plan#3132, the stored ledger's error, which no door can raise once its
+        writers are not called.
+        """
         with app.app_context():
             statement = an_import(seed_user)
             day = seed_user["bootstrap_period"].start_date
@@ -969,13 +974,13 @@ class TestWhatIsNOTCaughtPerItem:
             )
 
             def _boom(*_args, **_kwargs):
-                raise PostingError("the ledger does not balance")
+                raise RuntimeError("the ledger does not balance")
 
             monkeypatch.setattr(
                 statement_match._batch, "accept_match", _boom,
             )
 
-            with pytest.raises(PostingError):
+            with pytest.raises(RuntimeError, match="the ledger does not balance"):
                 _batch(seed_user, matches=[
                     _match(seed_user, lines=[line], transactions=[row]),
                 ])

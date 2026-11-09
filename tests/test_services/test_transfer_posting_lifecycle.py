@@ -51,7 +51,7 @@ from app.enums import StatusEnum
 from app.extensions import db as _db
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-from app.services import posting_service, transfer_service
+from app.services import transfer_service
 from app.services.ledger_lines import linked_key, transit_key
 from tests._ledger_reads import (
     account_net,
@@ -59,6 +59,7 @@ from tests._ledger_reads import (
     period_nets_of_movements,
     transfer_family_movement_ids,
 )
+from tests._records_oracle import settled_transfer_effect
 from tests._test_helpers import (
     create_account_of_type,
     typed,
@@ -134,7 +135,7 @@ def _assert_reconciles(scenario_id, *accounts):
     """
     for account in accounts:
         posted = account_net(_db.session, account.id, scenario_id)
-        effect = posting_service.settled_transfer_effect(account.id, scenario_id)
+        effect = settled_transfer_effect(account.id, scenario_id)
         opening = cash_ledger.resolve_anchor(account).balance
         assert posted == opening + effect, (
             f"account {account.id}: ledger {posted} != opening {opening} "

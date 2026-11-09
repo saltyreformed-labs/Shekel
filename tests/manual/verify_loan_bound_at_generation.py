@@ -145,7 +145,6 @@ from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.routes._period_population import populate_new_periods
 from app.services import (
-    loan_posting_service,
     pay_period_admin,
     recurrence_engine,
     template_amount_service,
@@ -346,8 +345,10 @@ with app.app_context():
     db.session.rollback()
 
     # --- DOOR 3: the maintain pass after the payoff moved EARLIER ---------
-    # A true-up appended and reconciled the way the production door records
-    # one, minus the chokepoint's column sync: the loan now folds to zero
+    # A true-up appended the way the production door records one, minus the
+    # chokepoint's column sync (it was also re-synced into the stored ledger
+    # until plan task plan#3132, as the door did until plan task plan#3076):
+    # the loan now folds to zero
     # sooner than the column says, and the maintain pass is the one that can
     # RETIRE the projected installments past the new payoff.
     db.session.begin_nested()
@@ -361,7 +362,6 @@ with app.app_context():
             LoanAnchorSourceEnum.USER_TRUEUP,
         ),
     ))
-    loan_posting_service.sync_loan_postings_all_scenarios(van.to_account_id)
     db.session.flush()
     print(f"# DOOR 3 true-up: balance {TRUEUP_BALANCE} on {TRUEUP_DATE}, "
           f"column left at {van.recurrence_rule.end_date}")

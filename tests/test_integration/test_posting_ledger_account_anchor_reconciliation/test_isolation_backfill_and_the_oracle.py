@@ -80,12 +80,11 @@ class TestScenarioAndOwnerIsolation:
             opened = datetime(2026, 1, 2, 9, tzinfo=timezone.utc)
             reassert_balance_on(db.session, checking, opened)
             # **The BOOKS go back further than the restamp puts them** (plan
-            # step X-f3c-2b, ruling **R-HG**).  The second settle below is
-            # dated 2025-12-01 on purpose -- BEFORE the assertion, which is
-            # what makes the staleness arm fire -- and ``restamp_opening_
-            # assertion`` would open the books one day before the assertion,
-            # which is after it.  Before the ASSERTION and after the BOOKS is
-            # exactly the span this case needs, and is the production shape.
+            # step X-f3c-2b, ruling **R-HG**), the production shape.  This
+            # comment named a second settle between the books and the
+            # assertion, which this case never had; the sibling that had one
+            # went at plan task plan#3132.  This case's one settle, after the
+            # assertion, needs only the books open before it.
             restate_account_opening(db.session, checking, date(2025, 11, 30))
             db.session.commit()
 
@@ -112,82 +111,6 @@ class TestScenarioAndOwnerIsolation:
             ) == Decimal("1000.00")
             _assert_account_anchors_reconcile(whatif.id)
             _assert_account_anchors_reconcile(seed_user["scenario"].id)
-
-    def test_a_settle_that_rides_on_top_does_not_rewalk_an_opened_ledger(
-        self, app, db, seed_user, monkeypatch,
-    ):
-        """The skip survives: an ordinary settle re-derives nothing.
-
-        The non-vacuity twin of the test above.  The fix widened the
-        self-heal's fire condition, so this pins that it did not widen it to
-        "always": a settle in a scenario that already carries its corrections,
-        dated after every assertion, must not walk the account at all.
-
-        **It counts the CALL, not the effect, and it has to.**  The reconcile
-        is idempotent -- running it here writes nothing either way -- so an
-        assertion about entries cannot tell a skipped walk from a performed
-        one, and a test that claimed to pin the skip while asserting entry
-        counts would pass with the skip deleted.  The spy delegates, so the
-        ledger still reconciles and the sibling assertions below are real.
-        """
-        # pylint: disable=import-outside-toplevel
-        from app.services.account_posting_service import _sync
-
-        with app.app_context():
-            checking = seed_user["account"]
-            opened = datetime(2026, 1, 2, 9, tzinfo=timezone.utc)
-            reassert_balance_on(db.session, checking, opened)
-            # **The BOOKS go back further than the restamp puts them** (plan
-            # step X-f3c-2b, ruling **R-HG**).  The second settle below is
-            # dated 2025-12-01 on purpose -- BEFORE the assertion, which is
-            # what makes the staleness arm fire -- and ``restamp_opening_
-            # assertion`` would open the books one day before the assertion,
-            # which is after it.  Before the ASSERTION and after the BOOKS is
-            # exactly the span this case needs, and is the production shape.
-            restate_account_opening(db.session, checking, date(2025, 11, 30))
-            db.session.commit()
-            scenario_id = seed_user["scenario"].id
-
-            # First settle: the scenario is already open (the baseline carries
-            # its corrections from account-create time), so this must skip.
-            real = _sync.sync_account_anchor_postings
-            calls: list[tuple[int, int]] = []
-
-            def _spy(account_id, sync_scenario_id):
-                calls.append((account_id, sync_scenario_id))
-                real(account_id, sync_scenario_id)
-
-            monkeypatch.setattr(
-                _sync, "sync_account_anchor_postings", _spy,
-            )
-            create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
-                Decimal("40.00"), account=checking,
-                settled_on=date(2026, 3, 3),
-            )
-            db.session.commit()
-
-            assert calls == [], (
-                "an on-top settle in an already-opened scenario walked the "
-                f"account anyway: {calls}"
-            )
-            # ...and a settle dated BEFORE the assertion still fires, so the
-            # staleness arm is not what was disabled.
-            create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
-                Decimal("25.00"), account=checking,
-                settled_on=date(2025, 12, 1),
-            )
-            db.session.commit()
-            assert (checking.id, scenario_id) in calls
-
-            # The opening ABSORBS the pre-assertion settle (nothing rides on
-            # top of it) while the on-top one reduces the balance:
-            # 1000 - 40 = $960.00.
-            assert account_net(
-                _db.session, checking.id, scenario_id,
-            ) == Decimal("960.00")
-            _assert_account_anchors_reconcile(scenario_id)
 
     def test_scenarios_reconcile_independently(self, app, db, seed_user):
         """Checking's opening + sources reconcile per scenario, never bleeding.

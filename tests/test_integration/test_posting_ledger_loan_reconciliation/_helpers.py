@@ -14,7 +14,7 @@ from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-from app.services import loan_ledger, loan_loaders, loan_resolver, posting_service
+from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.services import amortization_engine
 from app.services.ledger_lines import LOAN_KINDS
 from app.services.loan_resolver._periods import _replay_from_anchor
@@ -30,6 +30,7 @@ from tests._ledger_reads import (
     scenario_lines,
     trial_balance,
 )
+from tests._records_oracle import settled_transfer_effect
 from tests._test_helpers import (
     create_loan_with_trueup,
     create_settled_transfer,
@@ -472,7 +473,7 @@ def _assert_loan_reconciles(loan, scenario_id: int) -> None:
     linked_read = account_net(_db.session, loan_id, scenario_id)
     per_loan = _per_loan_correction_net(loan_id, scenario_id)
     income_independent = _independent_settled_income_cash(loan_id, scenario_id)
-    income_reader = posting_service.settled_transfer_effect(loan_id, scenario_id)
+    income_reader = settled_transfer_effect(loan_id, scenario_id)
 
     # (a) superseding invariant, on the read and the independent source query.
     assert linked_read == income_independent - per_loan, (

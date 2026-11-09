@@ -1894,10 +1894,11 @@ def build_seed_user(db):
             # passed only while the OPENING carried a partition exception
             # (finding N-133 / F1); this is N-132's shape one layer up.
             #
-            # Supplied to the factory rather than re-stamped afterwards,
-            # because ``create_account`` posts the opening's anchor correction
-            # keyed on this day: a later re-stamp would leave the ledger
-            # holding a stale key plus its reversal in every seeded database.
+            # Supplied to the factory rather than re-stamped afterwards, as a
+            # door supplies it.  (Until plan task plan#3076 ``create_account``
+            # also posted the opening's anchor correction keyed on this day,
+            # so a later re-stamp left the stored ledger holding a stale key
+            # plus its reversal in every seeded database.)
             observed_on=bootstrap_period.start_date,
         ),
     )

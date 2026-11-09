@@ -10,10 +10,11 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import LedgerAccountClassEnum, StatusEnum
 from app.extensions import db as _db
-from app.services import posting_service, status_seam, transfer_service
+from app.services import status_seam, transfer_service
 from app.services.ledger_lines import category_key, linked_key
 from app.utils.dates import display_today
 from tests._ledger_reads import account_net
+from tests._records_oracle import posted_purchase_effect
 from tests._test_helpers import (
     add_txn,
     an_entered_day,
@@ -75,7 +76,7 @@ class TestPostedPurchaseEffect:
             scenario_id = _scenario_id(seed_user)
             account_id = seed_user["account"].id
             # -50 (expense) + 2000 (income) = 1950; ledger 1000 + 1950.
-            assert posting_service.posted_purchase_effect(
+            assert posted_purchase_effect(
                 account_id, scenario_id,
             ) == Decimal("1950.00")
             assert account_net(
@@ -108,7 +109,7 @@ class TestPostedPurchaseEffect:
             )
             _db.session.commit()
 
-            assert posting_service.posted_purchase_effect(
+            assert posted_purchase_effect(
                 seed_user["account"].id, _scenario_id(seed_user),
             ) == Decimal("-110.00")
 
@@ -134,7 +135,7 @@ class TestPostedPurchaseEffect:
             )
             _db.session.commit()
 
-            assert posting_service.posted_purchase_effect(
+            assert posted_purchase_effect(
                 seed_user["account"].id, _scenario_id(seed_user),
             ) == Decimal("-80.00")
 

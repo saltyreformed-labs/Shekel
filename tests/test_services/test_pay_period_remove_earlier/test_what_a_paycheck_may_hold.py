@@ -16,13 +16,7 @@ from app.extensions import db as _db
 from app.models.pay_stub import PayStub
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
-from app.services import (
-    account_posting_service,
-    loan_posting_service,
-    pay_period_admin,
-    status_seam,
-    transfer_service,
-)
+from app.services import pay_period_admin, status_seam, transfer_service
 from app.services.ledger_lines import linked_key
 from app.models.amount_ownership import AmountOwnership
 from tests._ledger_reads import (
@@ -371,11 +365,10 @@ class TestAnOpeningIsReFiled:
     def test_an_account_opening_filed_in_an_added_paycheck_goes_back(
         self, app, db, seed_user, seed_periods,
     ):
-        """Review 1's first probe: a re-sync after the add, then the removal."""
+        """Review 1's first probe: the add, then the removal."""
         with app.app_context():
             user_id = seed_user["user"].id
             head = _added_head(user_id, 2)
-            account_posting_service.resync_user_account_anchor_postings(user_id)
             db.session.commit()
             scenario = seed_user["scenario"].id
             nets = _source_nets_by_period(
@@ -400,7 +393,7 @@ class TestAnOpeningIsReFiled:
     def test_a_loans_opening_filed_in_an_added_paycheck_goes_back(
         self, app, db, seed_user, seed_periods,
     ):
-        """Review 1's second probe: a loan from 2020, the loan re-sync after the add."""
+        """Review 1's second probe: a loan from 2020, then the add and the removal."""
         with app.app_context():
             user_id = seed_user["user"].id
             loan = create_loan_account(
@@ -410,7 +403,6 @@ class TestAnOpeningIsReFiled:
             )
             db.session.commit()
             head = _added_head(user_id, 2)
-            loan_posting_service.resync_user_loan_postings(user_id)
             db.session.commit()
             scenario = seed_user["scenario"].id
             nets = _source_nets_by_period(scenario, loan, PostingSourceEnum.LOAN_OPENING)
@@ -461,8 +453,6 @@ class TestNoWorkedOutTotalMoves:
             db.session.commit()
             head = _added_head(user_id, 3)
             held = {period.id for period in head}
-            loan_posting_service.resync_user_loan_postings(user_id)
-            account_posting_service.resync_user_account_anchor_postings(user_id)
             db.session.commit()
             assert _db.session.query(Transfer).filter(
                 Transfer.pay_period_id.in_(held),

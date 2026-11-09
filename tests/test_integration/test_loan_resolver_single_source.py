@@ -30,17 +30,13 @@ import re
 from datetime import date
 from decimal import Decimal
 
-from app import ref_cache
-from app.enums import AcctTypeEnum, StatusEnum, TxnTypeEnum
+from app.enums import AcctTypeEnum
 from app.extensions import db
-from app.models.transaction import Transaction
 from app.services import (
     loan_loaders,
     loan_payment_service,
-    loan_posting_service,
     loan_resolver,
     savings_dashboard_service,
-    transfer_service,
 )
 from app.services.balance_at import BalanceContext
 from tests._test_helpers import (
@@ -125,9 +121,8 @@ def _create_arm_loan(seed_user, period):
 
     The shared factory carries no ARM knobs, so the ARM columns are set the way
     production's own ARM edit does (``loan.update_params``): assign the params,
-    then re-sync the genesis ledger for every scenario before committing, so the
-    postings and the params land in one transaction and the loan is never left
-    on the no-ledger fallback.
+    then commit.  (Both the door and this helper re-synced the stored ledger's
+    genesis postings before the commit until plan tasks plan#3076 and plan#3132.)
 
     Args:
         seed_user: The ``seed_user`` fixture dict.
@@ -143,7 +138,6 @@ def _create_arm_loan(seed_user, period):
     loan_params.is_arm = True
     loan_params.arm_first_adjustment_months = ARM_WINDOW
     loan_params.arm_adjustment_interval_months = 12
-    loan_posting_service.sync_loan_postings_all_scenarios(account.id)
     db.session.commit()
     return account, loan_params
 

@@ -11,7 +11,7 @@ from typing import NamedTuple
 from app.enums import LedgerAccountClassEnum
 from app.extensions import db as _db
 from app.models.account import Account, AccountAnchorHistory
-from app.services import account_posting_service, ledger_report_service
+from app.services import ledger_report_service
 
 from tests._ledger_reads import scenario_lines, trial_balance
 from tests._test_helpers import observed_day_of
@@ -250,25 +250,25 @@ def _origin_instant(account) -> datetime:
 
 
 def _true_up_at(account, balance, created_at) -> None:
-    """Assert a controlled true-up and reconcile it (the chokepoint's two steps).
+    """Assert a controlled true-up at a pinned instant.
 
     The deterministic stand-in for ``anchor_service.apply_anchor_true_up``: it
-    appends the ``AccountAnchorHistory`` row + ``current_anchor_balance`` cache at
-    a PINNED ``created_at`` and drives the SAME all-scenarios reconcile the
-    true-up chokepoint calls.  Pinning the instant is what makes the moment
-    partition exact -- ``apply_anchor_true_up`` stamps ``created_at = now()``,
-    which cannot be placed between two synthetic settles; the C5/C8 suites use
-    the same affordance for the same reason.  The corrections themselves are
-    graded on the worked-out read in
+    appends the ``AccountAnchorHistory`` row at a PINNED ``created_at``, and the
+    worked-out ledger books the true-up from that row when read.  Pinning the
+    instant is what makes the moment partition exact --
+    ``apply_anchor_true_up`` stamps ``created_at = now()``, which cannot be
+    placed between two synthetic settles; the C5/C8 suites use the same
+    affordance for the same reason.  The corrections themselves are graded on
+    the worked-out read in
     ``tests/test_services/test_ledger_lines/test_an_accounts_corrections/``;
     this oracle validates the resulting statements against an independent
-    second opinion.
+    second opinion.  *It also drove the stored ledger's all-scenarios
+    reconcile, as the chokepoint did, until plan task plan#3132 (the
+    chokepoint's went at plan task plan#3076).*
 
-    The account is re-fetched into the CURRENT session first: the ``seed_user``
-    fixture object is attached to the fixture-setup session, so mutating its
-    ``current_anchor_balance`` cache on the fixture reference alone would not
-    persist (the test body runs under a fresh app-context session).  Re-fetching
-    keeps the cache write faithful to how production stages a true-up.
+    The account is re-fetched into the CURRENT session first, a habit from the
+    ``current_anchor_balance`` cache this once wrote (deleted at plan step
+    X-f1c3c); only its id is read now.
     """
     account = _db.session.get(Account, account.id)
     row = AccountAnchorHistory(
@@ -285,9 +285,6 @@ def _true_up_at(account, balance, created_at) -> None:
     )
     _db.session.add(row)
     _db.session.flush()
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        account.id,
-    )
 
 
 def _find_line(lines, label):

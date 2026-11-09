@@ -60,11 +60,6 @@ from app.models.ledger_account import LedgerAccount
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-# Pylint: ``shekel-private-module-import`` -- the clause the cash resync
-# filters its walked rows by, named rather than restated: a harness that
-# restated it would grade its own copy.
-# pylint: disable-next=shekel-private-module-import
-from app.services._posting_purchases import posted_purchase_exists_clause
 from app.services.ledger_lines import (
     ACCOUNT_COUNTER_KINDS,
     LOAN_KINDS,
@@ -339,6 +334,32 @@ def movement_parents(movement_ids):
     return found
 
 
+def _holds_a_dated_debit_movement():
+    """Return the SQL ``EXISTS`` "this transaction holds a dated debit movement".
+
+    The cash resync's second filter on a transaction, a posted purchase: a
+    recorded posting day, and a debit, correlated to ``Transaction``.  This
+    harness named the resync's own clause
+    (``app.services._posting_purchases.posted_purchase_exists_clause``) so it
+    could not grade a copy of its own; the resync went at plan task plan#3077
+    and left the clause no reader in ``app/``, so plan task plan#3132 gave this
+    comparison its own spelling, the one that stays once the app's goes with
+    the writers.
+
+    Returns:
+        A SQLAlchemy ``EXISTS`` clause, correlated to ``Transaction``.
+    """
+    return (
+        db.session.query(TransactionEntry.id)
+        .filter(
+            TransactionEntry.transaction_id == Transaction.id,
+            TransactionEntry.settled_on.isnot(None),
+            TransactionEntry.is_credit.is_(False),
+        )
+        .exists()
+    )
+
+
 def _walked_parents(scenario_id):
     """Return the parents the cash resync walked in *scenario_id*.
 
@@ -361,7 +382,7 @@ def _walked_parents(scenario_id):
             Transaction.is_deleted.is_(False),
             or_(
                 Transaction.status_id.in_(settled),
-                posted_purchase_exists_clause(),
+                _holds_a_dated_debit_movement(),
             ),
         )
     )

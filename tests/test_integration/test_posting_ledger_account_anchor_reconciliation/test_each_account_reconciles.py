@@ -12,7 +12,7 @@ import pytest
 from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
-from app.services import account_posting_service, posting_service, status_seam
+from app.services import status_seam
 from app.services.ledger_lines import account_counter_key
 from tests._ledger_reads import (
     account_net,
@@ -22,6 +22,7 @@ from tests._ledger_reads import (
     source_lines,
     source_net,
 )
+from tests._records_oracle import posted_purchase_effect, settled_transfer_effect
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
@@ -34,7 +35,6 @@ from ._helpers import (
     _assert_account_anchors_reconcile,
     _origin_instant,
     _assert_balance_at,
-    _true_up_at,
     _settle_expense,
 )
 
@@ -108,7 +108,7 @@ class TestAbsoluteInvariantPerAccount:
                 seed_user, savings, "200.00",
                 observed_day_of(origin + timedelta(days=1)),
             )
-            _true_up_at(savings, "350.00", origin + timedelta(days=2))
+            _assert_balance_at(savings, "350.00", origin + timedelta(days=2))
             _settle_expense(
                 seed_user, savings, "100.00",
                 observed_day_of(origin + timedelta(days=3)),
@@ -127,8 +127,8 @@ class TestAbsoluteInvariantPerAccount:
             assert _independent_post_assertion_source_effect(
                 savings.id, scenario_id, latest_asserted_day,
             ) == Decimal("-100.00")
-            # (c) the production service helper agrees too.
-            assert posting_service.posted_purchase_effect(
+            # (c) the records oracle agrees too.
+            assert posted_purchase_effect(
                 savings.id, scenario_id,
             ) == Decimal("-300.00")  # both spends' movements, the ledger-native cash effect
 
@@ -174,7 +174,7 @@ class TestAbsoluteInvariantPerAccount:
             _settle_expense(
                 seed_user, savings, "75.00", observed_day_of(instant),
             )
-            _true_up_at(savings, "425.00", instant)
+            _assert_balance_at(savings, "425.00", instant)
             db.session.commit()
 
             assert account_net(
@@ -257,7 +257,7 @@ class TestTransferSourceRidesOnTop:
             assert _independent_post_assertion_source_effect(
                 checking.id, scenario_id, checking_asserted_at,
             ) == Decimal("-150.00")
-            assert posting_service.settled_transfer_effect(
+            assert settled_transfer_effect(
                 checking.id, scenario_id,
             ) == Decimal("-150.00")
 
@@ -312,9 +312,6 @@ class TestLedgerThroughEachAssertionDay:
                 observed_day_of(origin + timedelta(days=5)),
             )
             _assert_balance_at(savings, "350.00", origin + timedelta(days=10))
-            account_posting_service.sync_account_anchor_postings_all_scenarios(
-                savings.id,
-            )
             _settle_expense(
                 seed_user, savings, "100.00",
                 observed_day_of(origin + timedelta(days=15)),
@@ -378,7 +375,7 @@ class TestRevertAfterTrueupSelfHeals:
                 seed_user, savings, "200.00",
                 observed_day_of(origin + timedelta(days=1)),
             )
-            _true_up_at(savings, "350.00", origin + timedelta(days=2))
+            _assert_balance_at(savings, "350.00", origin + timedelta(days=2))
             _settle_expense(
                 seed_user, savings, "100.00",
                 observed_day_of(origin + timedelta(days=3)),
@@ -386,9 +383,8 @@ class TestRevertAfterTrueupSelfHeals:
             db.session.commit()
             _assert_account_anchors_reconcile(scenario_id)
 
-            # Revert the pre-true-up spend through the ONE status door, then
-            # reconcile via the real posting primitive; the tail self-heal
-            # re-bases the true-up in the same transaction.
+            # Revert the pre-true-up spend through the ONE status door; the
+            # worked-out read re-bases the true-up from the records.
             #
             # **The revert goes through the seam since plan step X-bi-3a.**
             # This case drove the posting primitive alone with

@@ -74,8 +74,6 @@ class TestLatePaidPaymentDating:
         # shadow's copy beside it until plan step balance:X-bi-6-4d-2 made a
         # transfer one row (ruling R-BAL167 class 1).
         payment.due_date = date(2026, 2, 1)
-        db.session.flush()
-        loan_posting_service.sync_loan_postings_all_scenarios(loan.id)
         db.session.commit()
         return payment
 
@@ -227,8 +225,6 @@ class TestLatePaidPaymentDating:
             # made a transfer one row (ruling R-BAL167 class 1), a copy no
             # reader asked after X-bi-6-4b.
             late.due_date = date(2026, 5, 5)
-            db.session.flush()
-            loan_posting_service.sync_loan_postings_all_scenarios(loan.id)
             db.session.commit()
 
             # The pre-fix derivation dates the late payment in the FUTURE, and

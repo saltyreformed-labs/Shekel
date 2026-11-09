@@ -15,7 +15,6 @@ from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-from app.services import account_posting_service
 from app.utils.balance_predicates import settled_status_ids
 from tests._ledger_reads import account_net, trial_balance
 from tests._test_helpers import create_settled_cash_transaction, observed_day_of
@@ -315,13 +314,14 @@ def _origin_instant(account) -> datetime:
 def _assert_balance_at(account, balance, created_at) -> AccountAnchorHistory:
     """Append a true-up ``AccountAnchorHistory`` row at a controlled instant.
 
-    Mirrors ``anchor_service.stage_anchor_true_up`` (the history row plus the
-    ``current_anchor_balance`` cache write) but pins ``created_at`` explicitly
-    so the civil-day partition under test is exact -- the one non-production
-    affordance, the same the C5 unit suite uses.  Anchors against the account's
-    current anchor period; flushes.  The caller drives the reconcile
-    (``sync_account_anchor_postings_all_scenarios``) afterward, exactly as the
-    true-up chokepoint does.
+    Mirrors ``anchor_service.stage_anchor_true_up`` (the history row) but pins
+    ``created_at`` explicitly so the civil-day partition under test is exact --
+    the one non-production affordance, the same the C5 unit suite uses.
+    Flushes.  The row is the whole of the act: the worked-out ledger books the
+    true-up from it when read.  *Until plan task plan#3132 a caller then drove
+    the stored ledger's reconcile
+    (``sync_account_anchor_postings_all_scenarios``), here or through the
+    ``_true_up_at`` helper that paired the two.*
     """
     row = AccountAnchorHistory(
         account_id=account.id,
@@ -338,27 +338,6 @@ def _assert_balance_at(account, balance, created_at) -> AccountAnchorHistory:
     _db.session.add(row)
     _db.session.flush()
     return row
-
-
-def _true_up_at(account, balance, created_at) -> None:
-    """Assert a controlled true-up and reconcile it (the chokepoint's two steps).
-
-    The deterministic stand-in for ``anchor_service.apply_anchor_true_up``: it
-    stages the history row + cache (:func:`_assert_balance_at`) at a PINNED
-    ``created_at`` and then drives the SAME all-scenarios reconcile the true-up
-    chokepoint calls.  Pinning the instant is what makes the civil-day partition
-    exact -- ``apply_anchor_true_up`` stamps ``created_at = now()``, which cannot
-    be placed between two synthetic settles; the C5 unit suite uses the same
-    affordance for the same reason.  The corrections themselves are graded on
-    the worked-out read in
-    ``tests/test_services/test_ledger_lines/test_an_accounts_corrections/``;
-    this oracle validates the resulting ledger against an independent second
-    opinion.
-    """
-    _assert_balance_at(account, balance, created_at)
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        account.id,
-    )
 
 
 def _settle_expense(seed_user, account, amount, settled_on):

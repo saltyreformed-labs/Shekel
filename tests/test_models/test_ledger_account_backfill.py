@@ -225,7 +225,12 @@ class TestBackfill:
         Two accounts of different categories are unpaired, then backfilled
         together; each ends with exactly one correctly-classed row.  The
         seed_user Checking (still paired) is skipped by the NOT EXISTS
-        guard, proving the backfill is additive, not a wipe-and-replace.
+        guard, proving the backfill is additive, not a wipe-and-replace: its
+        rows keep their ids.  *It counted two rows there until plan task
+        plan#3132, the second the anchor-equity twin the seed fixture's
+        account sync minted; with that sync gone it holds its linked row
+        alone, which a count cannot tell from a re-created one, so the case
+        grades the ids.*
         """
         with app.app_context():
             # $0 anchors -- same rationale as test_backfill_pairs_asset_account.
@@ -239,6 +244,12 @@ class TestBackfill:
             )
             _drop_ledger_account_for(asset_acct.id)
             _drop_ledger_account_for(liab_acct.id)
+            checking_rows = sorted(
+                row.id for row in ledger_accounts_for_account(
+                    _db.session, seed_user["account"].id,
+                )
+            )
+            assert checking_rows, "the seed Checking must hold a row to keep"
 
             _run_backfill()
 
@@ -252,11 +263,13 @@ class TestBackfill:
             assert liab_rows[0].class_id == ref_cache.ledger_account_class_id(
                 LedgerAccountClassEnum.LIABILITY,
             )
-            # The seed_user Checking keeps its never-dropped rows (the linked
-            # pairing plus the anchor-equity twin its $1000 opening minted).
-            assert len(ledger_accounts_for_account(
-                _db.session, seed_user["account"].id,
-            )) == 2
+            # The seed_user Checking keeps its never-dropped rows, the same
+            # rows and not re-created ones.
+            assert sorted(
+                row.id for row in ledger_accounts_for_account(
+                    _db.session, seed_user["account"].id,
+                )
+            ) == checking_rows
 
 
 # ---------------------------------------------------------------------------

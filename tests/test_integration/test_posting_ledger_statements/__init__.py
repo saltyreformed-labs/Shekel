@@ -36,11 +36,11 @@ other posting-ledger oracles are:
     period-vs-calendar agreement on an aligned fixture.
 
 Every account and settle is produced through the REAL go-forward primitives --
-``create_account`` (the C6 opening sync), ``create_settled_cash_transaction`` /
-``create_settled_transfer`` (the status seam + posting builder),
-``create_loan_with_trueup`` + a settled payment (the Step-4 loan split),
-``_true_up_at`` (the anchor-true-up chokepoint's two steps) -- so every
-reconciled statement was posted exactly as production posts it.  The one
+``create_account``, ``create_settled_cash_transaction`` /
+``create_settled_transfer`` (the status seam), ``create_loan_with_trueup`` + a
+settled payment, ``_true_up_at`` (the anchor-true-up chokepoint's row) -- so
+every statement is worked out from records production writes.  (Until plan
+task plan#3132 they also posted the stored ledger as the doors once did.)  The one
 non-production affordance is pinning an anchor row's ``created_at`` (via
 :func:`_true_up_at`, the C8 technique) so a true-up's civil-day partition is
 deterministic regardless of the test clock.  Sources are pinned to noon-UTC

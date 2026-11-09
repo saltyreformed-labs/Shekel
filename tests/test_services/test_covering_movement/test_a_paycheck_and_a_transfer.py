@@ -20,7 +20,6 @@ from app.models.transaction_entry import TransactionEntry
 from app.services import (
     balance_at,
     cash_ledger,
-    posting_service,
     row_valuation,
     status_seam,
     transfer_service,
@@ -36,6 +35,7 @@ from tests._ledger_reads import (
     posted_loan_balance_at,
     scenario_lines,
 )
+from tests._records_oracle import posted_purchase_effect, settled_transfer_effect
 from tests._test_helpers import (
     create_loan_account,
     create_savings_account,
@@ -314,8 +314,8 @@ class TestATransferIsCoveredOnBothLegs:
                 opening = Decimal(str(cash_ledger.resolve_anchor(account).balance))
                 assert account_net(db.session, account.id, scenario_id) == (
                     opening
-                    + posting_service.settled_transfer_effect(account.id, scenario_id)
-                    + posting_service.posted_purchase_effect(account.id, scenario_id)
+                    + settled_transfer_effect(account.id, scenario_id)
+                    + posted_purchase_effect(account.id, scenario_id)
                 )
 
     def test_a_revert_un_dates_both_movements_and_the_ledger_reverses_the_pair(

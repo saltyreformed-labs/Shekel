@@ -9,7 +9,6 @@ kept balance history, which it was never for.  What these cases hold the door to
   loan, and each statement stays in balance without its lines (the ruling's own
   worked figures: a sheet loses the account's assets and equity, an income
   statement its change in value);
-* a **loan's** per-loan chart rows, whose RESTRICT key would refuse the delete, go first;
 * an account whose settled transfer was hard-deleted holds only its opening, and goes.
 """
 
@@ -24,16 +23,10 @@ from app.enums import (
 )
 from app.extensions import db as _db
 from app.models.account import Account, AccountAnchorHistory
-from app.models.ledger_account import LedgerAccount
 from app.models.loan_params import LoanParams
 from app.models.statement_import import StatementImport
 from app.models.transfer import Transfer
-from app.services import (
-    anchor_service,
-    ledger_report_service,
-    loan_posting_service,
-    transfer_service,
-)
+from app.services import anchor_service, ledger_report_service, transfer_service
 from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 from app.utils.dates import display_today
@@ -232,7 +225,12 @@ class TestItDeletesAnAccountHoldingOnlyBalanceRecords:
 
 
 class TestItDeletesALoan:
-    """A loan's per-loan chart rows go first, or their RESTRICT key refuses it."""
+    """A loan holding only its balance records, or a hidden payment, is deleted.
+
+    Its per-loan chart rows, whose RESTRICT key would refuse the delete, were
+    the stored ledger's, which the loan sync minted here until plan task
+    plan#3132; no case builds one since, as no door does.
+    """
 
     def test_a_loan_holding_its_opening_and_a_true_up_is_deleted(
         self, app, auth_client, seed_user,
@@ -240,8 +238,7 @@ class TestItDeletesALoan:
         """$250,000.00 originated, trued up to $100,000.00: the sheet loses both.
 
         Before: Liabilities ``100,000.00``, the true-up's ``250,000.00 - 150,000.00``.
-        After: none, and the seeded Checking's ``1,000.00`` alone on each side.  The
-        loan holds an ``equity_opening`` row, which ``loan_account_id`` names.
+        After: none, and the seeded Checking's ``1,000.00`` alone on each side.
         """
         with app.app_context():
             loan = create_loan_with_trueup(
@@ -252,12 +249,8 @@ class TestItDeletesALoan:
                 rate=Decimal("0.06000"),
                 origination_date=date(2025, 1, 1), name="Trued Loan",
             )
-            loan_posting_service.sync_loan_postings_all_scenarios(loan.id)
             _db.session.commit()
             loan_id = loan.id
-            assert _db.session.query(LedgerAccount).filter_by(
-                loan_account_id=loan_id,
-            ).count() > 0
             assert _sheet(seed_user).liabilities.total == Decimal("100000.00")
 
             response = auth_client.post(

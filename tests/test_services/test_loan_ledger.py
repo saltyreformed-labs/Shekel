@@ -207,13 +207,13 @@ class TestFoldIsTotal:
         and never tripped it.  Pay-calendar plan step C2-d deleted the loader,
         and poisoning its successor properly is what exposed that.
 
-        **Three bindings, and the ORDER is now load-bearing.**
-        ``calendar_for`` is imported by name in ``_posting_reconcile``, so
-        patching the defining module alone would leave the binding both anchor
-        writers actually call.  Those writers legitimately DO consult the
-        calendar -- filing an anchor correction is what C2-d pointed at it --
-        so the loan is built FIRST and the poison installed afterwards, around
-        the fold alone.  A poison installed before setup grades the fixture.
+        **Two bindings, and the ORDER is load-bearing.**  The loan is built
+        FIRST and the poison installed afterwards, around the fold alone: a
+        poison installed before setup grades the fixture.  *A third binding,
+        ``_posting_reconcile``'s by-name import that the stored ledger's anchor
+        writers called to file a correction, went at plan task plan#3132 with
+        the suite's last writer call; nothing the fold can reach imports that
+        module.*
 
         This is not every route to a calendar: ``recurrence._authoring``'s own
         ``calendar_for`` and ``pay_period_service.get_all_periods`` are two
@@ -230,7 +230,6 @@ class TestFoldIsTotal:
             for binding in (
                 "app.services.pay_calendar.calendar_for",
                 "app.services.pay_calendar._loader.calendar_for",
-                "app.services._posting_reconcile.calendar_for",
             ):
                 monkeypatch.setattr(binding, _must_not_call)
             # Trued up to $100,000 as of 2026-01-05; a later date holds it flat.

@@ -16,13 +16,7 @@ from app.exceptions import PayPeriodRemovalRefused, PayPeriodUnresolved
 from app.extensions import db as _db
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
-from app.services import (
-    account_posting_service,
-    loan_posting_service,
-    pay_period_admin,
-    pay_period_write,
-    pay_schedule_service,
-)
+from app.services import pay_period_admin, pay_period_write, pay_schedule_service
 from app.services.pay_rhythm import Monthly, Rhythm
 from tests._ledger_reads import linked_key_of, worked_out_totals
 from tests._test_helpers import (
@@ -254,7 +248,7 @@ class TestTheEarliestRhythmKeepsAPaycheck:
         """R-PC110 refuses before the writer's first statement, so no savepoint is owed.
 
         A head the gate lets go, holding template rows and the books' opening
-        re-synced into it, and the later rhythm's first paycheck chosen: only
+        (its line files by its day), and the later rhythm's first paycheck chosen: only
         R-PC110 can refuse.  Read after a COMMIT and a fresh session
         (``_unchanged``'s reason), with nothing rolled back here, so a delete
         staged ahead of the refusal shows in the paydays, the rows or the
@@ -265,7 +259,6 @@ class TestTheEarliestRhythmKeepsAPaycheck:
             _monthly_bill_from(seed_user, date(2025, 11, 24))
             db.session.commit()
             head = {period.id for period in _added_head(user_id, 3)}
-            account_posting_service.resync_user_account_anchor_postings(user_id)
             db.session.commit()
             # 05-08, the fortnight's last, plus the three weeks R-PC110's
             # worked owner leaves between its rhythms.
@@ -379,22 +372,23 @@ def _rows_by_period(user_id):
 
 
 class TestAnAddUndoneLeavesNothingBehind:
-    """C18-b's door and this one, in turn, with the ledger re-synced between.
+    """C18-b's door and this one, in turn.
 
     The seeded owner (10 fortnightly paychecks from 2026-01-02, books open
     2024-01-04) with a monthly bill and a monthly transfer from 2025-11-24,
     both populated -- so the paychecks "Add earlier" records receive template
     rows and a recurring transfer, which the removal must take with them
-    (R-PC109's "template rows go").  Between the add and the
-    removal the ledger is re-synced, as any loan or balance door does, which
-    files the books' opening (dated 2024-01-04, before every paycheck) in the
-    earliest paycheck -- an added one (R-PC114's case).
+    (R-PC109's "template rows go").  Between the add and the removal the
+    worked-out ledger files the books' opening (dated 2024-01-04, before every
+    paycheck) in the earliest paycheck -- an added one (R-PC114's case).  (The
+    stored ledger was re-synced between them, as the loan and balance doors
+    did, until plan task plan#3132.)
     """
 
     def test_paydays_eras_rows_and_the_posted_ledger_come_back(
         self, app, db, seed_user, seed_periods,
     ):
-        """Add 3, re-sync, remove them.
+        """Add 3, remove them.
 
         Compared: the paydays, the stored eras, every row's period, id,
         name, status and delete flag, every transfer's period, id, status
@@ -434,8 +428,6 @@ class TestAnAddUndoneLeavesNothingBehind:
 
             head = _added_head(user_id, 3)
             added = {period.id for period in head}
-            loan_posting_service.resync_user_loan_postings(user_id)
-            account_posting_service.resync_user_account_anchor_postings(user_id)
             db.session.commit()
             assert _db.session.query(Transfer).filter(
                 Transfer.pay_period_id.in_(added),

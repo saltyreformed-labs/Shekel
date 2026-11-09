@@ -24,12 +24,7 @@ from app.enums import LoanAnchorSourceEnum
 from app.extensions import db as _db
 from app.models.loan_anchor_event import LoanAnchorEvent
 from app.models.loan_params import LoanParams
-from app.services import (
-    loan_ledger,
-    loan_loaders,
-    loan_posting_service,
-    loan_resolver,
-)
+from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.utils.dates import anchor_chronology_key
 from tests._ledger_reads import posted_loan_balance_at
 from tests._test_helpers import (
@@ -384,9 +379,6 @@ class TestTheOneAnchorChronology:
                     source_id=trueup_source_id,
                     created_at=shared_instant,
                 ))
-            # Write through to the posted ledger, as every production anchor
-            # writer does in the same transaction as the row.
-            loan_posting_service.sync_loan_postings_all_scenarios(loan.id)
             db.session.commit()
 
             facts = loan_loaders.load_loan_anchor_facts(_params(loan))

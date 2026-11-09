@@ -18,27 +18,16 @@ Underscore-prefixed module name keeps pytest from collecting it.
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import (
-    LedgerAccountClassEnum,
-    LedgerAccountKindEnum,
-    PostingKindEnum,
-    PostingSourceEnum,
-)
+from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
 from app.extensions import db
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
-from app.models.transfer import Transfer
-from app.services._posting_reconcile import account_chart_row_ids
 from app.services.ledger_lines import ChartKey
-from app.services.pay_calendar import calendar_for
-from app.services.posting_reads import _ledger_account_for
-from app.utils.money import round_money
 from tests._ledger_reads import (
     family_movement_ids,
     transfer_family_movement_ids,
     transfer_side_movement_ids,
 )
-from tests._test_helpers import transfer_side_record
 
 
 def ledger_accounts_for_account(db_session, account_id):
@@ -66,6 +55,48 @@ def ledger_accounts_for_account(db_session, account_id):
         .filter_by(account_id=account_id)
         .all()
     )
+
+
+def chart_row_or_plant(db_session, account, kind, class_name, name=None):
+    """Return the id of *account*'s chart row of *kind*, planting it by SQL when absent.
+
+    For the store's model and migration tests, which outlive the writers that
+    minted these rows and plant what their cases read, as a migration test
+    plants its revision's rows.  The shape every per-account row shares
+    (``account_id`` set, no category, no loan, not an owner bucket) under its
+    natural key ``uq_ledger_accounts_account_kind``, so a get-or-plant is
+    safe: an account holds at most one row of a kind.  It finds the linked row
+    ``account_service.create_account`` still pairs until plan task plan#3133
+    deletes that call, and plants it after.
+
+    Args:
+        db_session: The test ``db.session``.
+        account: The :class:`~app.models.account.Account` the row belongs to.
+        kind: The ``ref.ledger_account_kinds`` name, e.g. ``"linked"``.
+        class_name: The ``ref.ledger_account_classes`` name, e.g. ``"Asset"``.
+        name: The display name the row snapshots, or ``None`` (a linked row
+            renders its account's name).
+
+    Returns:
+        The row's id.
+    """
+    existing = db_session.execute(db.text(
+        "SELECT la.id FROM budget.ledger_accounts la "
+        "JOIN ref.ledger_account_kinds k ON k.id = la.kind_id "
+        "WHERE la.account_id = :a AND k.name = :kind"
+    ), {"a": account.id, "kind": kind}).scalar()
+    if existing is not None:
+        return existing
+    return db_session.execute(db.text(
+        "INSERT INTO budget.ledger_accounts "
+        "(user_id, class_id, kind_id, account_id, is_owner_bucket, name) "
+        "SELECT :u, c.id, k.id, :a, FALSE, :name "
+        "FROM ref.ledger_account_classes c, ref.ledger_account_kinds k "
+        "WHERE c.name = :class AND k.name = :kind RETURNING id"
+    ), {
+        "u": account.user_id, "a": account.id, "class": class_name,
+        "kind": kind, "name": name,
+    }).scalar_one()
 
 
 def ledger_account_of_kind(db_session, account_id, kind_enum):
@@ -209,118 +240,6 @@ def linked_ledger_account(db_session, account_id):
     )
 
 
-def loan_correction_entries(db_session, transfer_id, loan_account_id):
-    """Return the loan_payment corrections booked at a payment's KEY.
-
-    The ``budget.journal_entries`` rows the loan posting package books for one
-    settled payment's split, ordered by id.  **Re-expressed at plan step
-    ``balance:X-bi-6-3`` (ruling R-BAL102, a rule-5 class (a) re-expression
-    Josh confirmed 2026-09-21):** the split is a DERIVATION keyed
-    ``(loan_payment kind, the payment's pay period, its visible day)`` on the
-    loan's own chart rows and links NO row, so "the corrections under this
-    shadow" is now "the corrections at this payment's key" -- selected by
-    source kind, the payment's pay period, its settled day and a leg on the
-    loan's chart rows.  Through that step the split carried the shadow's
-    ``transaction_id`` and this read it by that link.  **The key is read off
-    the TRANSFER and the loan side's RECORD since plan step
-    ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 4): the record hangs
-    off the transfer there and the twins' status and day are no longer kept,
-    so the shadow it was passed named only which transfer and which side; it
-    read the shadow's own period, scenario and day until then (the loan walk
-    has read the record's day since ``X-bi-6-4b``).  **It is keyed by the
-    transfer and the loan account since plan step ``balance:X-bi-6-4d-2``**
-    (ruling **R-BAL167** class 4): a transfer is one row there and no
-    shadow exists to name the side.  A side with no dated record
-    has no key and is REFUSED rather than answered ``[]`` (the leaf-2
-    adversarial review: an empty answer for a reverted payment would let
-    "after the revert the split is gone" pass without reading the ledger);
-    a test that holds a reverted or deleted payment reads
-    :func:`loan_correction_entries_at` with the key it captured before the
-    act.  Shared by the split-service, wiring, backfill and reconciliation
-    suites so all read a payment's corrections the same way.
-
-    Args:
-        db_session: The test ``db.session``.
-        transfer_id: The payment's ``budget.transfers`` id.
-        loan_account_id: The loan (to-)account whose side holds the record
-            and whose chart rows scope the read.
-
-    Returns:
-        list[:class:`~app.models.journal_entry.JournalEntry`] -- the correction
-        entries at the payment's key, ascending by id (empty when none).
-
-    Raises:
-        ValueError: If the loan side holds no dated record (it has no key).
-    """
-    record = transfer_side_record(db_session, transfer_id, loan_account_id)
-    if record is None or record.settled_on is None:
-        raise ValueError(
-            f"loan_correction_entries: transfer {transfer_id}'s side "
-            f"on account {loan_account_id} holds no dated record and so no "
-            f"split key; read loan_correction_entries_at with the key "
-            f"captured before the act that released the day."
-        )
-    transfer = db_session.get(Transfer, transfer_id)
-    return loan_correction_entries_at(
-        db_session, loan_account_id, transfer.scenario_id,
-        transfer.pay_period_id, record.settled_on,
-    )
-
-
-def loan_correction_entries_at(
-    db_session, loan_account_id, scenario_id, period_id, day,
-):
-    """Return the loan_payment corrections at ONE key on a loan's chart rows.
-
-    The key form of :func:`loan_correction_entries`, for a test that holds a
-    key's period and day but no dated loan-side record to read the key off --
-    after a revert (the side keeps its record with its day
-    released, and the correction and the reversal the next reconcile posts
-    both sit at the old key), after a hard delete (the transfer is gone, its
-    sides' records taken off before it), after a ``$0.00`` close or a
-    correction to ``$0.00`` (the side holds no record, and the split is dated
-    by the installment the payment skips, ruling **R-BAL139**), or at a key
-    the walk prices nothing (a residue planted there).  The ``loan_payment``
-    journal entries in *period_id* dated *day* with a leg on any of the loan's
-    own chart rows
-    (:func:`app.services._posting_reconcile.account_chart_row_ids`: its linked
-    row and its per-loan interest / escrow / refund / opening-equity rows) in
-    *scenario_id* (postings are scenario-scoped, and a loan paid in two
-    scenarios holds one split per scenario at the same key), ascending by id.
-
-    Args:
-        db_session: The test ``db.session``.
-        loan_account_id: The loan whose chart rows scope the read.
-        scenario_id: The budget scenario the split was posted in.
-        period_id: The key's ``pay_period_id``.
-        day: The key's ``entry_date``.
-
-    Returns:
-        list[:class:`~app.models.journal_entry.JournalEntry`], ascending by id
-        (empty when nothing is posted at the key).
-    """
-    on_loan_rows = (
-        db_session.query(Posting.journal_entry_id)
-        .filter(Posting.ledger_account_id.in_(
-            account_chart_row_ids(loan_account_id),
-        ))
-    )
-    return (
-        db_session.query(JournalEntry)
-        .filter(
-            JournalEntry.source_kind_id == ref_cache.posting_source_id(
-                PostingSourceEnum.LOAN_PAYMENT
-            ),
-            JournalEntry.scenario_id == scenario_id,
-            JournalEntry.pay_period_id == period_id,
-            JournalEntry.entry_date == day,
-            JournalEntry.id.in_(on_loan_rows),
-        )
-        .order_by(JournalEntry.id)
-        .all()
-    )
-
-
 def stored_ledger_net(db_session, ledger_account_id, scenario_id):
     """Return the net of every posting leg on a ledger account in a scenario.
 
@@ -445,190 +364,6 @@ def entries_violating_balance():
     ]
 
 
-def _posted_loan_linked_ledger(loan_account_id, scenario_id):
-    """Return a loan's linked ledger row, or None when it has no OPENING posting.
-
-    The entry guard the posting window rests on, held in one place so the
-    scalar and the per-period form cannot disagree about which loans the ledger
-    can answer for.  A loan gets exactly one OPENING-kind leg on its linked
-    ledger per scenario (the origination anchor correction, whose linked leg is
-    ``-original_principal``), so its absence means the loan is not configured in
-    this scenario -- an unconfigured loan, or a what-if the opening was never
-    posted into.
-
-    Args:
-        loan_account_id: The loan account whose linked ledger to resolve.
-        scenario_id: The budget scenario to scope to.
-
-    Returns:
-        The linked :class:`~app.models.ledger_account.LedgerAccount`, or ``None``
-        when no OPENING leg is posted on it in *scenario_id*.
-
-    Raises:
-        PostingError: If the loan account has no linked ledger account at all (a
-            broken chart-of-accounts pairing).
-    """
-    linked = _ledger_account_for(loan_account_id)
-    has_opening = db.session.query(
-        db.session.query(Posting.id)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            Posting.ledger_account_id == linked.id,
-            Posting.posting_kind_id == ref_cache.posting_kind_id(
-                PostingKindEnum.OPENING,
-            ),
-            JournalEntry.scenario_id == scenario_id,
-        )
-        .exists()
-    ).scalar()
-    return linked if has_opening else None
-
-
-def stored_loan_balance_at(loan_account_id, scenario_id, as_of):
-    """Return what the POSTED ledger says a loan owed on a date, or None.
-
-    ``owed(as_of) = round_money(-(sum of the loan's linked-ledger postings,
-    scenario-scoped, whose ``entry_date`` is on or before *as_of*))`` -- the
-    opening (``-original_principal``), every settled payment's net principal (the
-    Step-2 cash leg plus the Step-4 split correction), and every true-up.
-
-    **This is the test suite's own window onto the general ledger, and that is
-    deliberate.**  Plan step E1e deleted the production readers this replaces
-    (``loan_posting_service.confirmed_loan_balance_at`` / ``_map``): the balance
-    seam answers a loan from the event FOLD (steps C3b1 / C3b3 / E1d-b) and the
-    balance sheet reads the postings through
-    :mod:`app.services.ledger_report_service`, so the sum-of-postings
-    balance-at-T had no production caller left.  An oracle's window belongs on the
-    oracle's side: a window living here cannot be re-exported into a screen.  Since
-    plan#2913 the fold and the resolver are graded against the worked-out window,
-    :func:`tests._ledger_reads.posted_loan_balance_at`, and this answers only for
-    the store's own machinery.
-
-    Two deliberate differences from the deleted reader, both stated so a caller is
-    not surprised:
-
-    * it answers ANY date, where the reader raised for ``as_of > today``.  That
-      raise was a DOMAIN guard forcing production callers to route a future date
-      to the projection; there are no such callers now.  A future date sums the
-      same postings (every posted entry is dated today or earlier), so it carries
-      the confirmed balance FLAT -- which is exactly what the deleted per-period
-      reader did, and what the early-settle parallel run reads at period ends
-      beyond today.
-    * the per-period form (:func:`stored_loan_balance_map`) is a plain
-      per-period call, not a prefix-sum over one grouped load.  The batching
-      existed for production read cost; an oracle wants the simplest derivation
-      that can be checked by eye.
-
-    Args:
-        loan_account_id: The loan account whose posted balance to read.
-        scenario_id: The budget scenario to scope to (postings are
-            scenario-scoped via ``journal_entries.scenario_id``).
-        as_of: The evaluation date.  Only postings whose ``entry_date`` is on or
-            before it are summed.
-
-    Returns:
-        The posted balance owed as a cent-quantized ``Decimal``, or ``None`` when
-        the loan has no OPENING posting in the scenario.
-    """
-    linked = _posted_loan_linked_ledger(loan_account_id, scenario_id)
-    if linked is None:
-        return None
-    net = (
-        db.session.query(
-            db.func.coalesce(db.func.sum(Posting.amount), Decimal("0.00"))
-        )
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            Posting.ledger_account_id == linked.id,
-            JournalEntry.scenario_id == scenario_id,
-            JournalEntry.entry_date <= as_of,
-        )
-        .scalar()
-    )
-    # Debit-positive ledger: the linked net is -(owed).  Written ``0 - net``
-    # rather than ``-net`` so a zero net (a loan read before its opening's date)
-    # yields ``0.00``, never ``-0.00``.
-    return round_money(Decimal("0.00") - net)
-
-
-def stored_loan_balance_map(loan_account_id, scenario_id, periods):
-    """Return each period's posted loan balance, keyed by period id, or None.
-
-    The per-period form of :func:`stored_loan_balance_at`, evaluated at each
-    period's END date.  A posting can fall mid-period under the one clock (step
-    C2), so a payment settled during period P must count in P's balance, which
-    ``entry_date <= <the period's last covered day>`` selects.
-
-    **It DERIVES that day rather than reading it off the row** (plan step
-    ``pay_calendar:C4-c``, which dropped the column it used to read).  The
-    owner's calendar is resolved once and each requested period's derived twin
-    supplies the bound, which is :func:`period_window`'s shape and it is here
-    for the same reason: a period's end is the day before the NEXT payday, so
-    it is a property of the whole payday set rather than of one row.
-
-    **It is the scalar per period, not an independent derivation.**  Comparing
-    this against :func:`stored_loan_balance_at` at the same date is therefore
-    ``f(x) == f(x)`` -- pin a VALUE, never that identity.  Nor is it directly
-    comparable to the production map
-    (:func:`app.services.balance_at.positions_period_map`) except over ELAPSED
-    periods: that map clamps a BEGUN period to ``min(period.end, ctx.as_of)``
-    and answers a FUTURE period from the forward plan, where this window carries
-    the confirmed sum flat.  The keys line up; the values only do in the past.
-
-    Returns ``None`` -- not a map of zeros -- when the loan has no OPENING
-    posting in the scenario, so a caller can tell "the ledger cannot answer for
-    this loan" from "the ledger says zero".
-
-    Args:
-        loan_account_id: The loan account whose per-period balances to read.
-        scenario_id: The budget scenario to scope to.
-        periods: The ``PayPeriod`` rows to key by, in any order and all
-            belonging to one user.  Must be non-empty -- an empty request has
-            no owner to resolve a calendar for.  The result keys by
-            ``period.id`` in PAYDAY order, which is the calendar's.  Postings
-            in periods outside this list are still counted -- each period's
-            value is a cumulative, not a slice.
-
-    Returns:
-        A ``{period.id: Decimal}`` mapping, or ``None`` when the loan has no
-        OPENING posting in the scenario.
-    """
-
-    if _posted_loan_linked_ledger(loan_account_id, scenario_id) is None:
-        return None
-    # Materialised once: the owner is read off the first row and the id set off
-    # all of them, so a generator argument would be half consumed by the time
-    # the owner is asked for.  Every caller passes a list today; this is what
-    # keeps that from being a precondition nobody states.
-    rows = tuple(periods)
-    assert rows, "stored_loan_balance_map needs at least one period to key by"
-    owners = {period.user_id for period in rows}
-    assert len(owners) == 1, (
-        f"stored_loan_balance_map resolves ONE owner's calendar and was given "
-        f"periods from {sorted(owners)}; the rest would be silently dropped"
-    )
-    wanted = {period.id for period in rows}
-    calendar = calendar_for(rows[0].user_id)
-    answer = {
-        period.period_id: stored_loan_balance_at(
-            loan_account_id, scenario_id, period.end_date,
-        )
-        for period in calendar.saved()
-        if period.period_id in wanted
-    }
-    # **One key per REQUESTED period, which is the contract the stored-column
-    # version had for free.**  Selecting from the calendar means a period the
-    # calendar does not hold -- unflushed, or another owner's -- would simply
-    # vanish from the result, and only two of this helper's callers assert the
-    # length.  A short map is a caller reading a KeyError several lines later
-    # about a period it did pass in.
-    assert set(answer) == wanted, (
-        f"periods {sorted(wanted - set(answer))} are not in the owner's saved "
-        f"calendar, so they were never flushed or belong to someone else"
-    )
-    return answer
-
-
 def find_loan_ledger_account(db_session, loan_account_id, kind):
     """Return the per-loan ledger account of *kind*, or None if not created.
 
@@ -655,48 +390,6 @@ def find_loan_ledger_account(db_session, loan_account_id, kind):
         )
         .one_or_none()
     )
-
-
-def stored_linked_ledger_total(account_id):
-    """Return the summed posting amount on one account's LINKED ledger account.
-
-    The account's ledger-native balance as the double-entry ledger holds it:
-    the anchor reconcile's whole job is to keep this equal to the account's
-    resolved balance assertion plus the settled movements recorded after it.
-    Two concurrent reconciles that both computed their delta against the same
-    posted state leave the two permanently apart, and this is the left-hand
-    side of the assertion that catches it.
-
-    **NOT scenario-scoped, and its one caller depends on that being harmless.**
-    It sums every posting on the linked ledger across ALL scenarios, so the
-    invariant "linked ledger total == resolved assertion" holds only while the
-    database has a single scenario -- which is true today (production creates
-    baselines only) and stops being true the moment scenario clone ships.  Said
-    here rather than discovered later, because the failure would look like a
-    concurrency regression and would not be one.
-
-    Args:
-        account_id: The account whose linked ledger to total.
-
-    Returns:
-        The sum of every posting on that ledger account as a
-        :class:`~decimal.Decimal` (``Decimal("0.00")`` when nothing is posted).
-
-    Raises:
-        PostingError: When the account has no linked ledger account.
-    """
-
-    # ``_ledger_account_for`` RAISES ``PostingError`` for an unpaired account;
-    # it never returns ``None``.  An earlier version of this helper guarded for
-    # ``None`` and returned ``$0.00``, which was dead code that would also have
-    # reported "nothing posted" for a broken chart of accounts.
-    linked = _ledger_account_for(account_id)
-    rows = (
-        db.session.query(Posting.amount)
-        .filter(Posting.ledger_account_id == linked.id)
-        .all()
-    )
-    return sum((amount for (amount,) in rows), Decimal("0.00"))
 
 
 def family_journal_filter(txn):

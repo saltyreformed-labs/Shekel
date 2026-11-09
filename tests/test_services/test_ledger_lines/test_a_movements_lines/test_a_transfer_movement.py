@@ -10,9 +10,9 @@ from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db as _db
 from app.models.transaction_entry import TransactionEntry
-from app.services import posting_service
 from app.utils.dates import display_today
 from tests._ledger_reads import account_net
+from tests._records_oracle import settled_transfer_effect
 from tests._test_helpers import (
     create_settled_transfer,
     refused_by_database_rule,
@@ -139,7 +139,7 @@ class TestATransferMovementIsReadUnderItsLeg:
                 (checking, Decimal("1000.00"), Decimal("-100.00")),
                 (savings, Decimal("100.00"), Decimal("100.00")),
             ):
-                assert posting_service.settled_transfer_effect(
+                assert settled_transfer_effect(
                     account.id, scenario_id,
                 ) == effect
                 assert account_net(

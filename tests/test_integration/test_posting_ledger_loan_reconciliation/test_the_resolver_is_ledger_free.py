@@ -7,11 +7,10 @@ from __future__ import annotations
 import ast
 import inspect
 import os
-from decimal import Decimal
 
 import app.services
 
-from ._helpers import _P1, _AS_OF, _make_loan, _settle, _resolver_balance
+from ._helpers import _resolver_balance
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +323,12 @@ class TestResolverIsLedgerFree:
 
     **The VALUE control that perturbed the stored ledger went at plan#2914**
     with the suite's grading of the store (the block above
-    :data:`_RESOLVER_REFERENCE_ROOTS` says what it covered).
+    :data:`_RESOLVER_REFERENCE_ROOTS` says what it covered).  The runtime
+    backstop beside it, which fenced the posted-ledger readers off by
+    patching them on ``posting_service`` and re-read the resolver, went at
+    plan task plan#3132: of its three readers two read the records and moved
+    into the tests (``tests/_records_oracle.py``), where the resolver cannot
+    call them, and the third read the store, which no door writes.
 
     The static checks are deliberately narrow: the
     reference reaches no ledger SEAM (the question the production W9908 fence
@@ -469,60 +473,3 @@ class TestResolverIsLedgerFree:
             f"the closure holds {len(closure)} of {len(sources)} modules -- it "
             f"has collapsed through a re-export hub and grades nothing"
         )
-
-    def test_resolver_balance_reads_no_ledger_at_runtime(
-        self, app, db, seed_user, seed_periods, monkeypatch,
-    ):
-        """``_resolver_balance`` produces its value with the ledger readers forbidden.
-
-        A defense-in-depth regression backstop that complements the static import
-        fence -- NOT the primary guarantee.  Captures the resolver balance with the
-        readers intact, monkeypatches the posted-ledger readers on the service
-        module objects the code calls them through to raise, and asserts
-        ``_resolver_balance`` returns the SAME value.
-
-        Scope, stated honestly (2026-07-02 follow-up review M-3): because the
-        resolver is ledger-free TODAY it never calls these readers, so passing gives
-        no signal on the CURRENT code -- the static fence is what proves that.  As a
-        regression guard this catches only a MODULE-QUALIFIED call
-        (``posting_service.account_posting_total(...)``) to one of the listed
-        symbols through the patched module object; a name-import binding
-        (``from ... import account_posting_total``) or a reader not in the list would
-        NOT fire here.  Those shapes are the STATIC fence's job
-        (:meth:`test_resolver_stack_imports_no_ledger_module`, now path-complete over
-        the resolver reference including ``loan_payment_service``), which is why this
-        runtime check is a backstop rather than the load-bearing guard.
-
-        The list shrank by two at plan step E1e: the loan balance readers
-        ``confirmed_loan_balance_at`` / ``confirmed_loan_balance_map`` were DELETED
-        from ``loan_posting_service``, so there is no attribute left to patch.  That
-        is a strictly stronger state than fencing them -- the resolver cannot call a
-        function that does not exist -- and the remaining three are the whole set of
-        posted-ledger reads a resolver could still reach.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            _settle(seed_user, loan, seed_periods[_P1], amount=Decimal("1000.00"))
-            db.session.commit()
-
-            # The honest resolver balance, read with the ledger readers intact.
-            expected = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            assert expected is not None
-
-            def _forbid_ledger_read(*_args, **_kwargs):
-                raise AssertionError(
-                    "the resolver read the posted ledger -- the parallel run "
-                    "would be a tautology (review M4)"
-                )
-
-            for target in (
-                "app.services.posting_service.account_posting_total",
-                "app.services.posting_service.settled_transfer_effect",
-                "app.services.posting_service.posted_purchase_effect",
-            ):
-                monkeypatch.setattr(target, _forbid_ledger_read)
-
-            # The same value, now with every ledger reader fenced off -> the
-            # resolver derived it without reading the ledger.
-            assert _resolver_balance(loan.id, scenario_id, _AS_OF) == expected

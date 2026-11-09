@@ -11,7 +11,7 @@ import pytest
 
 from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db as _db
-from app.services import account_posting_service, anchor_service, cash_ledger
+from app.services import anchor_service, cash_ledger
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.utils.dates import display_today
 from app.services.ledger_lines import account_counter_key, linked_key
@@ -136,9 +136,6 @@ class TestSameDayAnchorMerge:
 
             _assert_balance_at(savings, "600.00", day)
             _assert_balance_at(savings, "550.00", day + timedelta(hours=1))
-            account_posting_service.sync_account_anchor_postings_all_scenarios(
-                savings.id,
-            )
             db.session.commit()
 
             assert account_net(

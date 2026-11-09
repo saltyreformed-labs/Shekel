@@ -818,162 +818,6 @@ def insert_origination_rate(loan_params, interest_rate):
     return row
 
 
-def _sync_loan_ledger(loan_account_id):
-    """Reconcile a loan's genesis ledger, as every production door did.
-
-    The shared write-through step of the three loan fixtures below
-    (:func:`create_loan_account`, :func:`insert_trueup_event`,
-    :func:`insert_tracking_start_event`).  *No production door writes the
-    stored ledger since plan task plan#3076; this keeps the writers' own suite
-    in the state the doors left until plan task plan#3079 deletes both.*  Every
-    production path that created or re-based a loan's anchors reconciled the
-    genesis postings in the SAME transaction as the source row:
-
-    * ``loan.create_params`` / ``loan.update_params`` call
-      :func:`~app.services.loan_posting_service.sync_loan_postings_all_scenarios`
-      (``app/routes/loan/params.py:125`` and ``:177``).
-    * The balance true-up and the tracking-start opening both route through
-      :func:`app.services.loan_anchor_service._append_loan_anchor_and_commit`, which
-      appends the event, re-syncs, and commits (``anchor_service.py:390``).
-
-    The property that matters, and the one this helper reproduces, is that the
-    event and its postings land in the SAME transaction -- never an event alone.
-    This helper flushes rather than commits, keeping the existing fixture contract
-    (the caller owns the transaction and commits with the rest of its setup).
-
-    Without this, a fixture-built loan carries anchor rows but NO opening
-    posting -- a state production cannot produce, and the one every loan built
-    through these helpers used to be in (so it exercised the no-ledger fallback
-    while production always took the ledger path).
-
-    **Scope, stated plainly so nobody over-trusts it.**  This reaches only loans
-    built through :func:`create_loan_account` / :func:`create_loan_with_trueup` /
-    :func:`insert_trueup_event` / :func:`insert_tracking_start_event`.  Roughly
-    twenty test modules still hand-roll a loan (a bare ``LoanParams(...)`` insert;
-    e.g. ``tests/test_services/test_balance_at/_helpers.py::_make_mortgage``, a near-copy of
-    :func:`create_loan_account`).  Such a loan gets a ledger only if one of the
-    anchor helpers above happens to be called on it afterwards, and otherwise has
-    none at all -- ``test_year_end_summary_service.py``'s hand-built loan is in
-    exactly that state.  That coupling is invisible at the call site and is a real
-    trap; routing the hand-rolled builders through this factory is a follow-up
-    (and a prerequisite for the fail-loud read seam, which turns a ledger-less loan
-    into a raise).
-
-    Deliberately calls the PLAIN sync rather than production's
-    :func:`~app.services.loan_posting_service.sync_all_scenarios_or_duplicate`:
-    the duplicate-translating wrapper exists to turn a user's double-click into
-    idempotent success, and it does so by ROLLING BACK.  In a fixture that would
-    silently discard the test's setup; a duplicate anchor written by a fixture is
-    a bug in the fixture and must fail loud.
-
-    Flushes but does NOT commit -- the caller owns the transaction boundary, the
-    same contract the production chokepoints keep.
-
-    **No future-anchor guard, because there is nothing left to guard.**  This
-    helper used to assert that no user-asserted anchor was dated after the sync's
-    as-of, because the walk DROPPED such an anchor and left the loan half-opened
-    (opening present, true-up missing) -- a state that looked ledger-backed and
-    was not.  The walk no longer reads a clock: it records every anchor the loan
-    carries, whatever its date, and the readers decide what has happened
-    (``loan_ledger.walk_loan_ledger``).  So a fixture's anchor
-    posts whatever its date, and a fixture can no longer build the half-opened
-    loan by accident.
-
-    Args:
-        loan_account_id: The loan whose genesis ledger to reconcile.
-    """
-    # Pylint: ``import-outside-toplevel`` -- same circular-dep avoidance as every
-    # other helper in this module: the services package must not load at
-    # tests/_test_helpers import time.
-    # pylint: disable=import-outside-toplevel
-    from app.extensions import db
-    from app.services import loan_posting_service
-
-    loan_posting_service.sync_loan_postings_all_scenarios(loan_account_id)
-    db.session.flush()
-
-
-def clear_loan_ledger(loan_account_id):
-    """Delete a loan's genesis postings -- the BROKEN state production cannot make.
-
-    The exact inverse of :func:`_sync_loan_ledger`: removes the journal entries
-    the loan sync produces (``loan_opening``, ``loan_trueup``, and the
-    ``loan_payment`` split corrections) on any of the loan's own ledger accounts,
-    leaving the Step-2/3 CASH entries untouched.  The posting ledger is
-    append-only (the ORM blocks deletes on ``budget.journal_entries`` /
-    ``budget.account_postings``), so it clears them via raw SQL.
-
-    A configured loan with no opening posting is NOT a legitimate state: the
-    opening is written in the same transaction as the ``LoanParams``
-    (``app/routes/loan/params.py:125``), the Step-4 migration backfilled every
-    pre-existing loan, and ``pay_period_admin.reset_pay_periods`` re-syncs.  This
-    helper exists so the handful of tests that pin behaviour ON that broken state
-    -- the readers' ``None`` contract, and the seam's fail-loud raise -- can
-    construct it EXPLICITLY and say so at the call site.
-
-    It is deliberately the only way to build a ledger-less loan THROUGH THESE
-    HELPERS (a hand-rolled ``LoanParams`` insert still yields one by omission --
-    see :func:`_sync_loan_ledger`).  A boolean ``open_ledger=False`` knob on
-    :func:`create_loan_account` would leave a casual escape hatch back onto the
-    fallback path this arc exists to delete; a call to something named
-    ``clear_loan_ledger`` cannot be made by accident.
-
-    Commits.
-
-    Args:
-        loan_account_id: The loan whose genesis ledger to remove.
-    """
-    # Pylint: ``import-outside-toplevel`` -- same lazy-app-import convention every
-    # helper in this module follows.
-    # pylint: disable=import-outside-toplevel
-    from app import ref_cache
-    from app.enums import PostingSourceEnum
-    from app.extensions import db
-
-    # ID-based, never a name-string compare (the project's ref-table rule): the
-    # three source kinds the loan sync emits.
-    genesis_source_ids = [
-        ref_cache.posting_source_id(source)
-        for source in (
-            PostingSourceEnum.LOAN_OPENING,
-            PostingSourceEnum.LOAN_TRUEUP,
-            PostingSourceEnum.LOAN_PAYMENT,
-        )
-    ]
-    # A loan owns two shapes of ledger account: the LINKED one (``account_id``)
-    # and its derived opening-equity / interest / escrow / refund ones
-    # (``loan_account_id``).  Scope to entries of a genesis kind touching either.
-    #
-    # The entry ids are resolved to a Python list FIRST, deliberately: the
-    # predicate reaches the entry THROUGH its postings, so deleting the postings
-    # would empty the predicate and strand every journal-entry header behind it.
-    entry_ids = [
-        row[0] for row in db.session.execute(db.text("""
-            SELECT DISTINCT je.id
-            FROM budget.journal_entries je
-            JOIN budget.account_postings p ON p.journal_entry_id = je.id
-            JOIN budget.ledger_accounts la ON la.id = p.ledger_account_id
-            WHERE je.source_kind_id = ANY(:src)
-              AND (la.account_id = :a OR la.loan_account_id = :a)
-        """), {"a": loan_account_id, "src": genesis_source_ids}).all()
-    ]
-    if not entry_ids:
-        return
-    # Legs before the header, for explicitness -- the FK CASCADE would do it
-    # either way, and the ordering carries no safety property: the balanced-entry
-    # constraint trigger fires AFTER INSERT OR UPDATE only
-    # (``app/posting_infrastructure.py:151``), never on DELETE, so an entry cannot
-    # be caught mid-delete with too few legs.
-    db.session.execute(db.text(
-        "DELETE FROM budget.account_postings "
-        "WHERE journal_entry_id = ANY(:ids)"
-    ), {"ids": entry_ids})
-    db.session.execute(db.text(
-        "DELETE FROM budget.journal_entries WHERE id = ANY(:ids)"
-    ), {"ids": entry_ids})
-    db.session.commit()
-
-
 def insert_trueup_event(loan_params, anchor_balance, anchor_date=None):
     """Append a user-trueup :class:`LoanAnchorEvent` asserting a balance.
 
@@ -988,14 +832,14 @@ def insert_trueup_event(loan_params, anchor_balance, anchor_date=None):
     it now is: a balance true-up, exactly as the user does after making
     an extra or lump-sum payment.
 
-    Like production, the event is RECONCILED INTO POSTINGS in the same
-    transaction (:func:`_sync_loan_ledger`): ``apply_loan_anchor_true_up`` appends
-    the row and re-syncs every scenario
-    (``loan_anchor_service._append_loan_anchor_and_commit``, which then commits; this
-    helper leaves the commit to its caller).  An un-reconciled true-up
-    does not exist as far as the ledger is concerned -- and the ledger is what
-    every loan surface now reads -- so a fixture that only wrote the event left
-    the loan reporting its pre-true-up balance on every page.
+    Like production, the event row is the whole of the act:
+    ``apply_loan_anchor_true_up`` appends it
+    (``loan_anchor_service._append_loan_anchor_and_commit``, which then
+    commits; this helper leaves the commit to its caller), and every loan
+    surface walks the loan from it on its next read.  *It re-synced the stored
+    ledger's genesis postings here too, as the door did, until plan task
+    plan#3132 deleted that call after plan task plan#3076 had deleted the
+    door's.*
 
     Args:
         loan_params: The :class:`LoanParams` ORM instance, already
@@ -1007,8 +851,7 @@ def insert_trueup_event(loan_params, anchor_balance, anchor_date=None):
             origination event and becomes the resolver's latest anchor.
 
     Returns:
-        The newly added :class:`LoanAnchorEvent` (added and reconciled into
-        postings, not committed).
+        The newly added :class:`LoanAnchorEvent`, flushed and not committed.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
     # avoidance as insert_origination_rate above.
@@ -1029,7 +872,7 @@ def insert_trueup_event(loan_params, anchor_balance, anchor_date=None):
         ),
     )
     db.session.add(event)
-    _sync_loan_ledger(loan_params.account_id)
+    db.session.flush()
     return event
 
 
@@ -1048,11 +891,12 @@ def insert_tracking_start_event(loan_params, anchor_balance, anchor_date):
     origination (step C1), so a date at/after the tracking-start reads this
     asserted balance and a date before it reads the origination opening held flat.
 
-    Like production, the event is RECONCILED INTO POSTINGS in the same
-    transaction (:func:`_sync_loan_ledger`): ``record_loan_tracking_start``
-    appends the row and re-syncs every scenario (it shares
-    ``loan_anchor_service._append_loan_anchor_and_commit`` with the true-up, which then
-    commits; this helper leaves the commit to its caller).
+    Like production, the event row is the whole of the act:
+    ``record_loan_tracking_start`` appends it (it shares
+    ``loan_anchor_service._append_loan_anchor_and_commit`` with the true-up,
+    which then commits; this helper leaves the commit to its caller).  It
+    re-synced the stored ledger here too until plan task plan#3132, as
+    :func:`insert_trueup_event` says.
 
     Args:
         loan_params: The :class:`LoanParams` ORM instance, already flushed.
@@ -1060,8 +904,7 @@ def insert_tracking_start_event(loan_params, anchor_balance, anchor_date):
         anchor_date: The date the balance was asserted.
 
     Returns:
-        The newly added :class:`LoanAnchorEvent` (added and reconciled into
-        postings, not committed).
+        The newly added :class:`LoanAnchorEvent`, flushed and not committed.
     """
     # pylint: disable=import-outside-toplevel  -- same circular-dep
     # avoidance as insert_trueup_event above.
@@ -1079,7 +922,7 @@ def insert_tracking_start_event(loan_params, anchor_balance, anchor_date):
         ),
     )
     db.session.add(event)
-    _sync_loan_ledger(loan_params.account_id)
+    db.session.flush()
     return event
 
 
@@ -1096,30 +939,24 @@ def create_loan_account(
     Routes the account through the canonical ``account_service.create_account``
     factory (so it gets its origination ``AccountAnchorHistory`` row), inserts a
     ``LoanParams`` row, seeds the origination ``RateHistory`` the loan resolver
-    requires, records the balance stated at setup as the ``tracking_start``
-    assertion the setup door writes (when a caller states one), and OPENS the
-    genesis posting ledger -- so a caller never has to repeat that dance, and
-    cannot accidentally omit a step.
+    requires, and records the balance stated at setup as the
+    ``tracking_start`` assertion the setup door writes (when a caller states
+    one) -- so a caller never has to repeat that dance, and cannot
+    accidentally omit a step.
 
     Seventeen suites used to hand-roll this block (a ``LoanParams(...)`` insert
     beside a copy of the account-factory call).  Every one of them omitted the
-    ledger open, so their loans silently exercised the no-ledger FALLBACK that
-    production never takes -- which is exactly how a $3,455.79 divergence between
-    the two balance producers stayed invisible to the whole suite.  They differed
-    from this factory in only two respects, which are the two knobs below:
-    the account TYPE and the anchor PERIOD.  Everything else was duplication.
+    stored ledger's open, so their loans silently exercised a no-ledger
+    FALLBACK production never took -- which is exactly how a $3,455.79
+    divergence between the two balance producers stayed invisible to the whole
+    suite.  They differed from this factory in only two respects, which are the
+    two knobs below: the account TYPE and the anchor PERIOD.  Everything else
+    was duplication.
 
-    **Always OPENS the loan's genesis ledger** (:func:`_sync_loan_ledger`), which
-    is what ``loan.create_params`` does in the same transaction as the
-    ``LoanParams`` insert (``app/routes/loan/params.py:125``).  There is no
-    opt-out: a configured loan without an opening posting is a state production
-    cannot produce, and a suite built on it exercises the no-ledger fallback that
-    production never takes.  A test that needs that broken loan on purpose builds
-    it explicitly with :func:`clear_loan_ledger`.
-
-    The sync runs after the ``RateHistory`` insert because the genesis walk
-    resolves the loan's rate periods, and the resolver raises on an empty
-    rate-change feed.
+    *It opened the loan's genesis postings in the stored ledger too, as
+    ``loan.create_params`` did, until plan task plan#3132 deleted that call
+    after plan task plan#3076 had deleted the door's; a loan's ledger is
+    worked out from these rows when read.*
 
     Commits before returning so the loan is fully resolvable.
 
@@ -1131,8 +968,7 @@ def create_loan_account(
     shape, a loan whose balance today is not what amortizing its origination
     would say.  ``tracked_balance`` / ``tracked_from`` are that pair; given,
     the assertion is appended through :func:`insert_tracking_start_event`
-    (the row the door writes, reconciled into the ledger the way the door
-    does) before the ledger opens.  Omitted, the loan carries only its
+    (the row the door writes).  Omitted, the loan carries only its
     synthesized origination assertion -- the shape of a loan set up on its
     origination day -- and under ruling R-R71 every contractual month after
     origination that a test leaves unrecorded is CHARGED, so a fixture that
@@ -1275,11 +1111,7 @@ def create_loan_account(
     db_session.flush()
     insert_origination_rate(params, rate)
     if tracked_from is not None:
-        # The door's own order: the assertion is staged before the one ledger
-        # open, and this helper's re-sync IS that open.
         insert_tracking_start_event(params, tracked_balance, tracked_from)
-    else:
-        _sync_loan_ledger(account.id)
     db_session.commit()
     return account
 
@@ -3271,14 +3103,14 @@ def create_settled_cash_transaction(  # pylint: disable=too-many-arguments
     Step 3 posting-ledger oracle: a ONE-OFF placed through
     :func:`one_off_row_of` (plan step balance:X-bi-7c; it built a link-less
     row owning its figure until then, the shape the cutover deleted), then
-    settled through :func:`settle_cash_row` -- the two REAL go-forward
-    production primitives, the status seam and the posting builder, in the
-    order the mark-done route applies them.  So the returned transaction is
-    genuinely settled (``status.is_settled``, ``settled_on`` stamped) AND its
-    confirmed cash effect is posted to the double-entry ledger, exactly as
-    production produces it when a user marks a transaction Paid / Received.
+    settled through :func:`settle_cash_row` -- the REAL go-forward
+    production primitive, the status seam, as the mark-done route applies
+    it.  So the returned transaction is genuinely settled
+    (``status.is_settled``, ``settled_on`` stamped, its covering movement
+    dated), exactly as production produces it when a user marks a
+    transaction Paid / Received.
 
-    Flushes via the builder; the caller commits.
+    Flushes; the caller commits.
 
     Args:
         seed_user: The ``seed_user`` (or ``seed_second_user``) fixture dict --
@@ -3330,19 +3162,21 @@ def create_settled_cash_transaction(  # pylint: disable=too-many-arguments
 def settle_cash_row(
     txn, *, is_income=False, settled_amount=None, settled_on=_UNSET_SETTLED_ON,
 ):
-    """Settle the Projected row *txn* go-forward and post its cash effect.
+    """Settle the Projected row *txn* go-forward.
 
     The settle half of :func:`create_settled_cash_transaction`, its own
     function since plan step balance:X-bi-7c so a case that builds its row
-    another way settles it through the same two primitives without
-    re-spelling either (ruling **R-BAL59**; the legacy link-less builder
-    was its first other caller, until the cutover ``balance:X-bi-7d-2``
-    deleted that shape).  Income settles to Received and expenses to Paid
-    (Done) --
-    the same split the mark-done route applies (``mutations.py``).  A plain
+    another way settles it through the same primitive without re-spelling
+    it (ruling **R-BAL59**; the legacy link-less builder was its first
+    other caller, until the cutover ``balance:X-bi-7d-2`` deleted that
+    shape).  Income settles to Received and expenses to Paid (Done) -- the
+    same split the mark-done route applies (``mutations.py``).  A plain
     transaction carries no entries, so its effect is its resolved figure;
     callers needing the envelope debit-only effect attach credit entries
-    separately (the backfill / lifecycle suites cover that path).
+    separately (the lifecycle suites cover that path).  *It also reconciled
+    the stored ledger to the row (``posting_service.sync_transaction_postings``,
+    as the mark-done route did) until plan task plan#3132 deleted that call
+    after plan task plan#3097 had deleted the route's.*
 
     Args:
         txn: The Projected :class:`~app.models.transaction.Transaction`,
@@ -3357,18 +3191,19 @@ def settle_cash_row(
             Passing ``None`` explicitly leaves the seam's stamp too.
 
     Returns:
-        *txn*, settled and posted, flushed.
+        *txn*, settled and flushed.
     """
     # pylint: disable=import-outside-toplevel  -- the module convention.
     from app import ref_cache
     from app.enums import SettledDayBasisEnum, StatusEnum
-    from app.services import posting_service, status_seam
+    from app.extensions import db
+    from app.services import status_seam
     from app.services.settle_day import SettleDay, record_settle_day
     from app.services.status_seam._covering import sync_covering_movement
 
     # Settle through the real go-forward path: the seam flips the status and
-    # stamps settled_on, the optional manual actual is applied AFTER (as the route
-    # does), and the builder reconciles the ledger to the confirmed effect last.
+    # stamps settled_on, and the optional manual actual is applied AFTER (as the
+    # route does).
     settled_status = StatusEnum.RECEIVED if is_income else StatusEnum.DONE
     # A settle RECORDS what moved (plan step X-au-c3), and this goes through
     # :func:`settlement_if_settling` rather than calling
@@ -3408,7 +3243,10 @@ def settle_cash_row(
             SettleDay(day=settled_on, basis=SettledDayBasisEnum.ENTERED),
         )
         sync_covering_movement(txn, now_settled=True, settlement=None)
-    posting_service.sync_transaction_postings(txn)
+    # The flush the ledger sync's queries gave this helper by autoflush until
+    # plan task plan#3132, kept explicit so the row returns flushed, as the
+    # docstring says.
+    db.session.flush()
     return txn
 
 
@@ -5429,19 +5267,21 @@ def append_only_guard_lifted(db_session, table):
     UPDATE, every DELETE and (since X-f3c-2d) every TRUNCATE on the three
     account-history tables, whoever asks --
     which is what makes the rule true, and which also means it SHADOWS the
-    controls it sits on top of.  Three of those still matter and would
+    controls it sits on top of.  Two of those still matter and would
     otherwise go ungraded:
 
     * ``fk_transactions_reconciled_by``'s ``ON DELETE RESTRICT``, which refuses
       to un-clear a line by removing the statement it names (ruling **R-FL**);
     * ``ck_books_open_before_movements``' UPDATE and DELETE arms, which exist
       precisely for "a raw ``UPDATE`` moving the governing row's ``opened_on``
-      forward, and a raw ``DELETE`` of the governing row" (plan step X-f3c-2b);
-    * the posted-only reversal branch of ``account_posting_service``, defensive
-      against a history row that vanished from under its journal entry.
+      forward, and a raw ``DELETE`` of the governing row" (plan step X-f3c-2b).
+
+    (A third was the stored ledger's posted-only reversal branch, defensive
+    against a history row that vanished from under its journal entry; its case
+    went with the writer's suite at plan task plan#3079.)
 
     A control nobody can reach is a control nobody can trust, and deleting
-    those three because a newer guard happens to stand in front of them would
+    those two because a newer guard happens to stand in front of them would
     trade a measured refusal for an argument.  So a case that grades one lifts
     the outer guard for exactly its own statement and says so.
 
@@ -5536,11 +5376,6 @@ def account_never_asserted(
     read.  They are defensive arms for an impossible state, and a fixture that
     could not build one would leave every one of them ungraded.
 
-    **It PAIRS the ledger account**, because that pairing is not part of what
-    the fixture is withholding: a posted-ledger reader asked about an account
-    with no chart row raises for a different reason, and a case meaning "no
-    assertion" would then be graded by the wrong refusal.
-
     Args:
         seed_user: The ``seed_user`` fixture dict, for the owner.
         db_session: The test ``db.session``.
@@ -5564,7 +5399,6 @@ def account_never_asserted(
     from app.models.account import Account
     from app.models.account_opening import AccountOpening
     from app.models.ref import AccountType
-    from app.services import ledger_account_service
     from app.utils.dates import display_today
 
     account_type = (
@@ -5586,7 +5420,6 @@ def account_never_asserted(
                 AccountOpeningSourceEnum.USER_DECLARED,
             ),
         ))
-    ledger_account_service.create_ledger_account_for_account(account)
     db_session.flush()
     return account
 
@@ -5669,7 +5502,6 @@ def open_books_before_the_first_assertion(
     from app.models.pay_period import PayPeriod
     from app.models.transaction import Transaction
     from app.models.transaction_entry import TransactionEntry
-    from app.services import account_posting_service
 
     db_session.flush()
     earliest_assertion = (
@@ -5710,19 +5542,10 @@ def open_books_before_the_first_assertion(
     opened_on = min(min(candidates) - _real_timedelta(days=1), standing)
     if opened_on == standing:
         return opened_on
+    # The stored ledger's account corrections were re-synced onto the moved
+    # books here until plan task plan#3132; the worked-out ledger reads the
+    # restated opening row itself.
     restate_account_opening(db_session, account, opened_on)
-    # **The posted ledger follows the books** (plan step X-f3c-2b).
-    # ``create_account`` has already booked the ``account_opening`` journal
-    # entry keyed on the day it asserted, so a restatement afterwards leaves
-    # that entry on a day the books no longer open -- the stale-key-plus-
-    # reversal shape ``tests/conftest.py``'s own factory comment warns about.
-    # The reconcile is idempotent and self-healing, and re-running it is what
-    # PRODUCTION's deploy did after the same restatement (its account
-    # backfill, until plan task plan#3077 deleted the deploy's hooks), so the
-    # fixture takes the same path rather than a shortcut.
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        account.id,
-    )
     return opened_on
 
 
@@ -9282,9 +9105,10 @@ def rebuild_calendar_on(user_id, first_payday, num_periods, rhythm):
     **Plan step ``pay_calendar:C4-b-1``.**  The one place the test tree says
     "give this owner that calendar", and it says it by calling
     ``pay_period_admin.reset_pay_periods`` -- the settings-page correction at
-    ``POST /pay-periods/reset``, which wipes every period, records the new
-    batch through the writer and re-syncs the loan genesis postings and the
-    account anchor corrections onto what it built.
+    ``POST /pay-periods/reset``, which wipes every period and records the new
+    batch through the writer.  (It also re-synced the stored ledger's loan
+    genesis postings and account anchor corrections onto what it built, until
+    plan task plan#3076 deleted those re-syncs.)
 
     **A test that builds a pay period by hand builds a row no owner can
     have**, and that is not a style point.  ``end_date`` and ``period_index``

@@ -31,7 +31,7 @@ from app.models.account import AccountAnchorHistory
 from app.models.ref import Status
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.services import posting_service, status_seam, transaction_service
+from app.services import status_seam, transaction_service
 # The leaf, imported for ONE control that spies on a private name the package
 # does not re-export -- see
 # ``test_the_live_figure_is_resolved_BEFORE_the_status_flip`` for why patching
@@ -49,6 +49,7 @@ from tests._ledger_reads import (
     net_posted_by_day,
     owner_worked_out_lines,
 )
+from tests._records_oracle import posted_purchase_effect
 from tests._test_helpers import NO_TAX_LAW
 from tests._test_helpers import (
     amount_basis_for,
@@ -1150,7 +1151,7 @@ class TestApplyRequestedStatusTheDoorVerb:
             }
             # effective_amount == estimated_amount == 100.00, nothing credited,
             # so the cash account's movement effect is a 100.00 outflow.
-            assert posting_service.posted_purchase_effect(
+            assert posted_purchase_effect(
                 seed_user["account"].id, seed_user["scenario"].id,
             ) == Decimal("-100.00")
 

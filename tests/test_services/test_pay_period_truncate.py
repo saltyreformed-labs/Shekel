@@ -35,11 +35,7 @@ from app.exceptions import (
 from app.models.pay_period import PayPeriod
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
-from app.services import (
-    account_posting_service,
-    pay_period_admin,
-    transfer_service,
-)
+from app.services import pay_period_admin, transfer_service
 from app.services.ledger_lines import linked_key
 from app.services.pay_period_locks import PeriodLockReason
 # The APP's civil day, never ``date.today()`` -- these fixtures build periods
@@ -438,9 +434,6 @@ class TestTruncateHardLocks:
                 seed_user, db.session, "Savings", Decimal("500.00"),
             )
             restate_account_opening(db.session, savings, anchored.start_date)
-            account_posting_service.sync_account_anchor_postings_all_scenarios(
-                savings.id,
-            )
             loan = create_loan_account(
                 seed_user, db.session, name="Car Loan",
                 principal=Decimal("20000.00"), rate=Decimal("0.05"),

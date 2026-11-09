@@ -11,13 +11,14 @@ from app.enums import LedgerAccountKindEnum
 from app.extensions import db as _db
 from app.models.loan_features import RateHistory
 from app.models.scenario import Scenario
-from app.services import loan_ledger, loan_loaders, loan_posting_service, posting_service
+from app.services import loan_ledger, loan_loaders
 from app.services.ledger_lines import loan_key
 from tests._ledger_reads import (
     account_net,
     ledger_net,
     loan_correction_lines,
 )
+from tests._records_oracle import posted_purchase_effect, settled_transfer_effect
 from tests._test_helpers import (
     create_loan_account,
     insert_tracking_start_event,
@@ -349,13 +350,6 @@ class TestParallelRunAgainstResolver:
             assert splits[0].interest == Decimal("1250.00")
             assert loan_correction_lines(db.session, xfer.id, loan.id) != []
 
-            # Post the opening + true-up (the read-switch corrections): the
-            # ONE sync since plan step ``balance:X-bi-6-3`` (the anchor-only
-            # door went with the split's row key, ruling R-BAL102; the split
-            # it reconciles beside is already at target, so nothing moves).
-            loan_posting_service.sync_loan_postings(loan.id, scenario_id)
-            db.session.commit()
-
             # -(linked net) reproduces the resolver's anchor, which subsumes P1.
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             assert resolver == _ANCHOR_BALANCE  # 100000.00
@@ -396,10 +390,10 @@ class TestSupersedesCashInvariantForLoans:
             db.session.commit()
 
             linked = account_net(_db.session, loan.id, scenario_id)
-            cash_effect = posting_service.settled_transfer_effect(
+            cash_effect = settled_transfer_effect(
                 loan.id, scenario_id,
             )
-            txn_effect = posting_service.posted_purchase_effect(
+            txn_effect = posted_purchase_effect(
                 loan.id, scenario_id,
             )
             non_principal = _per_loan_correction_net(loan.id, scenario_id)

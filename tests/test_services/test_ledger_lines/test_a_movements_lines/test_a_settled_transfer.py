@@ -10,7 +10,7 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import PostingKindEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
-from app.services import posting_service, transfer_service
+from app.services import transfer_service
 from app.services.ledger_lines import linked_key, transit_key
 from tests._ledger_reads import (
     account_net,
@@ -19,6 +19,7 @@ from tests._ledger_reads import (
     scenario_lines,
     transfer_family_movement_ids,
 )
+from tests._records_oracle import settled_transfer_effect
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
@@ -254,7 +255,7 @@ class TestARevertAndAReSettle:
             assert account_net(
                 _db.session, savings.id, scenario_id,
             ) == Decimal("250.00")
-            assert posting_service.settled_transfer_effect(
+            assert settled_transfer_effect(
                 savings.id, scenario_id,
             ) == Decimal("150.00")
             assert ledger_net(_db.session, transit_key(), scenario_id) == Decimal("0.00")
@@ -293,13 +294,13 @@ class TestTheOracleAgreesWithTheRead:
             assert account_net(
                 _db.session, savings.id, scenario_id,
             ) == Decimal("200.00")
-            assert posting_service.settled_transfer_effect(
+            assert settled_transfer_effect(
                 savings.id, scenario_id,
             ) == Decimal("100.00")
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == Decimal("900.00")
-            assert posting_service.settled_transfer_effect(
+            assert settled_transfer_effect(
                 checking.id, scenario_id,
             ) == Decimal("-100.00")
 
@@ -335,7 +336,7 @@ class TestTheOracleAgreesWithTheRead:
                 assert account_net(
                     _db.session, account.id, scenario_id,
                 ) == opening
-                assert posting_service.settled_transfer_effect(
+                assert settled_transfer_effect(
                     account.id, scenario_id,
                 ) == Decimal("0.00")
 
@@ -357,7 +358,7 @@ class TestTheOracleAgreesWithTheRead:
             _db.session.commit()
 
             scenario_id = _scenario_id(seed_user)
-            assert posting_service.settled_transfer_effect(
+            assert settled_transfer_effect(
                 savings.id, scenario_id,
             ) == Decimal("97.50")
             assert account_net(

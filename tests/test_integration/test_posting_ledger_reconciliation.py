@@ -44,8 +44,9 @@ independent ways that must all agree:
     ``settled_transfer_effect``'s semantics; the hand-computed literals, not this
     query, are what make the oracle non-tautological -- this layer adds the
     cross-table, whole-DB sweep the literals cannot.)
-  * **the production service helper** -- ``settled_transfer_effect`` must
-    match the hand-computed literals too.
+  * **the records oracle** -- ``tests/_records_oracle.py``'s
+    ``settled_transfer_effect`` must match the hand-computed literals too
+    (``posting_service``'s until plan task plan#3132).
 
 Adversarial cases prove the oracle is not vacuous: a read that loses lines makes
 the per-account reconciliation and the trial balance FAIL -- driven through the real
@@ -54,8 +55,8 @@ regression in the helper itself is caught, not only in an inline re-derivation.
 
 All money is ``Decimal`` from strings, with the arithmetic shown per the
 testing standard.  Transfers are built through ``transfer_service`` (the sole
-writer), so every transfer is written exactly as production writes one; Commit
-5 wiring auto-posts each settle.
+writer), so every transfer is written exactly as production writes one, and
+the worked-out ledger books each settle from its records.
 """
 from __future__ import annotations
 
@@ -72,7 +73,7 @@ from app.models.ref import AccountType
 from app.models.scenario import Scenario
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-from app.services import posting_service, transfer_service
+from app.services import transfer_service
 from app.services.ledger_lines import linked_key
 from app.utils.balance_predicates import settled_status_ids
 from tests import _ledger_reads
@@ -82,6 +83,7 @@ from tests._ledger_reads import (
     transfer_family_movement_ids,
     trial_balance,
 )
+from tests._records_oracle import settled_transfer_effect
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
@@ -291,7 +293,7 @@ class TestPerAccountReconciliation:
         amortizing (no account-walk opening; it carries no LoanParams, so no
         loan genesis either), leaving its ledger at the bare +250.00.  All
         three independent computations -- hand-computed literal, independent
-        cross-table query, and the production service helper -- must agree
+        cross-table query, and the records oracle -- must agree
         on every account.
         """
         with app.app_context():
@@ -315,8 +317,8 @@ class TestPerAccountReconciliation:
                 assert _independent_txn_effect(
                     account_id, scenario_id,
                 ) == want_effect
-                # (c) the production service helper agrees too.
-                assert posting_service.settled_transfer_effect(
+                # (c) the records oracle agrees too.
+                assert settled_transfer_effect(
                     account_id, scenario_id,
                 ) == want_effect
 
@@ -416,7 +418,7 @@ class TestPerAccountReconciliation:
                 assert _independent_txn_effect(
                     account_id, scenario_id,
                 ) == want_effect
-                assert posting_service.settled_transfer_effect(
+                assert settled_transfer_effect(
                     account_id, scenario_id,
                 ) == want_effect
             _assert_full_reconciliation(scenario_id)

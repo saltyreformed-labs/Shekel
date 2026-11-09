@@ -28,7 +28,8 @@ with it.  What they pin, with hand-computed arithmetic:
     line and a re-settle books into the new one.
   * **The records oracle** -- the per-account figure the read states equals
     an independent query over the dated movements
-    (``posting_service.settled_transfer_effect`` / ``posted_purchase_effect``).
+    (``tests/_records_oracle.py``'s ``settled_transfer_effect`` /
+    ``posted_purchase_effect``).
 
 Every account's net is ABSOLUTE: its opening and true-ups are corrections on
 the same read, so a case's account net is its opening (the seed Checking's

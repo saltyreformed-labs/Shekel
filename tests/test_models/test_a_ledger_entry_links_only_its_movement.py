@@ -24,11 +24,11 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import or_, select, text
 
 from app.extensions import db as _db
-from app.services import account_posting_service, posting_service
-from tests._stored_ledger import ledger_accounts_for_account
+from app.models.transaction_entry import TransactionEntry
+from tests._stored_ledger import chart_row_or_plant
 from tests._test_helpers import (
     add_txn,
     create_savings_account,
@@ -127,13 +127,21 @@ def _schema():
 def _world(seed_user, seed_periods):
     """Build what the plants link and post into, then step down below the revision.
 
-    A settled transfer Checking -> Savings (its two movement entries are the
-    ``transfer_movement`` entries a delete must leave alone), a second
-    transfer and a plain row for the links to name, the seed Checking's
-    opening, and three accounts' linked ledgers.  The movement entries and the
-    opening are posted through the stored ledger's writers, as the doors did
-    until plan tasks plan#3075 and plan#3076.  Plain ids, read before the
-    downgrade.
+    A settled transfer Checking -> Savings and a second Checking -> Reserve
+    (their covering movements' ``transfer_movement`` entries are what a delete
+    must leave alone), a plain row for the links to name, the seed Checking's
+    opening, and three accounts' linked ledgers (found, or planted by SQL once
+    plan task plan#3133 stops ``create_account`` pairing them).  Plain ids, read
+    before the downgrade.
+
+    **The entries that stay are planted by SQL after the downgrade, as the
+    legacy plants are** (:func:`_plant`): one ``transfer_movement`` entry
+    linking each covering movement, and one ``account_opening`` entry.  The
+    stored ledger's writers posted them until plan task plan#3132, as the
+    doors did until plan tasks plan#3075 and plan#3076.  Their legs run
+    between the three linked ledgers, the legacy plants' shape too: the
+    revision reads an entry of another kind only for its two links, which
+    neither carries.
     """
     savings = create_savings_account(
         seed_user, _db.session, "Savings", Decimal("0.00"),
@@ -153,15 +161,16 @@ def _world(seed_user, seed_periods):
     txn = add_txn(
         _db.session, seed_user, seed_periods[0], "Groceries", "40.00",
     )
-    # The entries the delete must leave alone, posted through the writers
-    # where the doors posted them: the transfer settle until plan task
-    # plan#3075, account create's opening until plan task plan#3076.
-    for transfer in (xfer, other_xfer):
-        posting_service.sync_transfer_postings(transfer)
-    account_posting_service.sync_account_anchor_postings_all_scenarios(
-        seed_user["account"].id,
-    )
     _db.session.commit()
+    movements = {
+        transfer.id: _db.session.scalars(
+            select(TransactionEntry.id).where(or_(
+                TransactionEntry.expense_transfer_id == transfer.id,
+                TransactionEntry.income_transfer_id == transfer.id,
+            )).order_by(TransactionEntry.id),
+        ).all()
+        for transfer in (xfer, other_xfer)
+    }
     world = {
         "user": seed_user["user"].id,
         "scenario": seed_user["scenario"].id,
@@ -170,11 +179,25 @@ def _world(seed_user, seed_periods):
         "transfers": (xfer.id, other_xfer.id),
         "transaction": txn.id,
         "ledgers": tuple(
-            ledger_accounts_for_account(_db.session, account.id)[0].id
+            chart_row_or_plant(_db.session, account, "linked", "Asset")
             for account in (seed_user["account"], savings, reserve)
         ),
     }
     run_migration_callable(_MIGRATION.downgrade, _db.session)
+    checking, savings, reserve = world["ledgers"]
+    for transfer_id, into in zip(world["transfers"], (savings, reserve)):
+        assert len(movements[transfer_id]) == 2, movements
+        for movement_id in movements[transfer_id]:
+            _plant(
+                world, "transfer_movement",
+                {checking: Decimal("-100.00"), into: Decimal("100.00")},
+                transaction_entry_id=movement_id,
+            )
+    _plant(
+        world, "account_opening",
+        {checking: Decimal("1000.00"), reserve: Decimal("-1000.00")},
+    )
+    _db.session.commit()
     return world
 
 

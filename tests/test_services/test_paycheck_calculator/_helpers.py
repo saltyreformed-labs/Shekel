@@ -264,6 +264,9 @@ class FakeProfile:
                  other_dependents=0, *, user_id=_STAND_IN_OWNER):
         self.user_id = user_id
         self.pay_entries = [FakePayEntry(pay_from, Decimal(str(pay)))]
+        # The job's pay periods end six days before payday (ruling
+        # plan#3096), as every profile the suite builds states.
+        self.period_end_days_before_payday = 6
         self.raises = raises or []
         self.lines = lines or []
         self.pay_stubs = []

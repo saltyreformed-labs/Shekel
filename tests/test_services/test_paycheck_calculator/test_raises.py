@@ -58,9 +58,16 @@ class TestRecurringRaiseCompounding:
         assert _walked_pay(self._march_merit(), date(2026, 2, 13)) == Decimal("3846.15")
 
     def test_recurring_raise_first_year_at_effective_month(self):
-        """In effective year at effective month, raise should apply once."""
-        # 2026-03-13, March's first payday: 3846.15 x 1.03 = 3961.5345 -> 3961.53
-        assert _walked_pay(self._march_merit(), date(2026, 3, 13)) == Decimal("3961.53")
+        """In effective year at effective month, raise should apply once.
+
+        2026-03-27 is the first paycheck paid wholly in March (03-08..03-21):
+        3846.15 x 1.03 = 3961.5345 -> 3961.53.  2026-03-13, March's first
+        payday, pays 02-22..03-07, five weekdays each side of Sunday 03-01
+        (ruling plan#3089): 3846.15 x 5/10 = 1923.075 -> 1923.08 and 3961.53
+        x 5/10 = 1980.765 -> 1980.77, 3903.85 (it read 3961.53).
+        """
+        assert _walked_pay(self._march_merit(), date(2026, 3, 27)) == Decimal("3961.53")
+        assert _walked_pay(self._march_merit(), date(2026, 3, 13)) == Decimal("3903.85")
 
     def test_recurring_raise_first_year_after_effective_month(self):
         """Later in effective year, raise should still apply once."""
@@ -120,10 +127,15 @@ class TestRecurringRaiseCompounding:
           years_passed = 2027 - 2026 = 1
           period_month (3) >= eff_month (3) → applications = 1 + 1 = 2
         This is correct because the raise applied in March 2026 AND
-        recurs again in March 2027.  On 2027-03-12, March's first payday:
-        3846.15 x 1.03 = 3961.53; x 1.03 = 4080.3759 -> 4080.38.
+        recurs again in March 2027.  On 2027-03-26, the first paycheck paid
+        wholly in March (03-07..03-20): 3846.15 x 1.03 = 3961.53; x 1.03 =
+        4080.3759 -> 4080.38.  2027-03-12, March's first payday, pays
+        02-21..03-06, five weekdays before Monday 03-01 and five after
+        (ruling plan#3089): 3961.53 x 5/10 = 1980.765 -> 1980.77 and 4080.38
+        x 5/10 = 2040.19, 4020.96 (it read 4080.38).
         """
-        assert _walked_pay(self._march_merit(), date(2027, 3, 12)) == Decimal("4080.38")
+        assert _walked_pay(self._march_merit(), date(2027, 3, 26)) == Decimal("4080.38")
+        assert _walked_pay(self._march_merit(), date(2027, 3, 12)) == Decimal("4020.96")
 
 
 class TestRaiseOrdering:
@@ -471,8 +483,9 @@ class TestTheBasisNamesItsRaiseSet:
 
     **The pay entry is dated 2026-01-09**, a payday on this calendar's rhythm
     (2029-01-05 less 78 fortnights) before the raise's first landing on
-    2027-03-01: an entry replaces every raise landing on or before its payday
-    (ruling R-SAL59), so an entry on the calendar's opening 2029-01-05 would
+    2027-03-01: an entry replaces every raise dated by the first day its
+    paycheck pays for (ruling plan#3091, amending R-SAL59's "on or before its
+    payday"), so an entry on the calendar's opening 2029-01-05 would
     already hold the 2027 and 2028 applications and the rows and the terms
     would differ by one application where this class needs three against one
     (the developer's rule-5 ruling "Keep each raise working").
@@ -595,9 +608,15 @@ class TestTheBasisNamesItsRaiseSet:
         """Site 3: the year-to-date gross sums the terms' salary.
 
         Ten prior 2029 paydays at ``$2,423.07`` sum to ``$24,230.70`` under
-        the terms.  Under the rows the January and February paydays carry two
-        applications (``$2,544.22``) and the March-May ones three
-        (``$2,671.43``): ``4 x 2,544.22 + 6 x 2,671.43 = $26,205.46``.
+        the terms.  Under the rows the paychecks paying January and February
+        carry two applications (``$2,544.22``): 01-05 through 03-02, which
+        pays 02-11..02-24.  03-16 pays 02-25..03-10, three weekdays before
+        Thursday 03-01 and seven after (ruling plan#3089): 2,544.22 x 3/10 =
+        763.266 -> 763.27 and 2,671.43 x 7/10 = 1,870.001 -> 1,870.00,
+        ``$2,633.27``.  03-30 through 05-11 carry three (``$2,671.43``):
+        ``5 x 2,544.22 + 2,633.27 + 4 x 2,671.43 = $26,040.09`` (it read
+        ``4 x 2,544.22 + 6 x 2,671.43 = $26,205.46`` when 03-02 carried the
+        whole March raise).
         """
         profile, terms = self._rows_and_terms()
         periods = self._periods_2029()
@@ -605,7 +624,7 @@ class TestTheBasisNamesItsRaiseSet:
         stored = payroll_basis(profile, periods)
         believed = replace(stored, raise_terms=terms)
 
-        assert _get_cumulative_wages(stored, eleventh.start_date) == Decimal("26205.46")
+        assert _get_cumulative_wages(stored, eleventh.start_date) == Decimal("26040.09")
         assert _get_cumulative_wages(believed, eleventh.start_date) == Decimal("24230.70"), (
             "the FICA wage-base cumulative summed the profile's rows' salary, "
             "not the raise set the basis names"
@@ -618,7 +637,8 @@ class TestTheBasisNamesItsRaiseSet:
         ten prior paydays took ``10 x round($2,423.07 x 0.10) = $2,423.10``,
         leaving ``$76.90`` of room, so the eleventh paycheck's line is
         clamped to exactly that.  Under the rows they took
-        ``4 x 254.42 + 6 x 267.14 = $2,620.52``, past the cap, so the line is
+        ``5 x 254.42 + 263.33 + 4 x 267.14 = $2,603.99`` (the case above's
+        paychecks at 10%), past the cap, so the line is
         ``$0.00`` -- which is also what a replay that read the rows while the
         live gross read the terms would produce, so ``$76.90`` pins the
         replay's raise set and not merely the paycheck's.

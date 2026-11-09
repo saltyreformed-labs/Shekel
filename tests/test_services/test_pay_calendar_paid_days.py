@@ -78,7 +78,7 @@ class TestTheDevelopersJuly:
         07-16 - 6 = 07-10, and it starts the day after 07-02 - 6 = 06-26.
         """
         assert [
-            days_paid_for(self.CALENDAR, _paycheck(self.CALENDAR, payday), GAP)
+            days_paid_for(self.CALENDAR, _paycheck(self.CALENDAR, payday).start_date, GAP)
             for payday in (date(2026, 7, 2), date(2026, 7, 16), date(2026, 7, 30))
         ] == [
             PaidDays(first=date(2026, 6, 13), last=date(2026, 6, 26)),
@@ -94,7 +94,7 @@ class TestTheDevelopersJuly:
         """
         paycheck = _paycheck(self.CALENDAR, date(2026, 9, 10))
         assert paycheck.period_id is None
-        assert days_paid_for(self.CALENDAR, paycheck, GAP) == PaidDays(
+        assert days_paid_for(self.CALENDAR, paycheck.start_date, GAP) == PaidDays(
             first=date(2026, 8, 22), last=date(2026, 9, 4),
         )
 
@@ -117,7 +117,7 @@ class TestAHolidayPayday:
         )
         paid = THANKSGIVING - timedelta(days=1)
         assert scheduled_payday(calendar, paid) == THANKSGIVING
-        assert days_paid_for(calendar, _paycheck(calendar, paid), GAP) == PaidDays(
+        assert days_paid_for(calendar, _paycheck(calendar, paid).start_date, GAP) == PaidDays(
             first=date(2030, 11, 9), last=date(2030, 11, 22),
         )
 
@@ -127,7 +127,7 @@ class TestAHolidayPayday:
             _fortnights(date(2030, 1, 10), 2), (era_of(date(2030, 1, 10), 14, PRIOR),),
         )
         assert days_paid_for(
-            calendar, _paycheck(calendar, date(2030, 12, 12)), GAP,
+            calendar, _paycheck(calendar, date(2030, 12, 12)).start_date, GAP,
         ) == PaidDays(first=date(2030, 11, 23), last=date(2030, 12, 6))
 
     def test_paid_LATE_it_pays_the_scheduled_period(self):
@@ -137,7 +137,7 @@ class TestAHolidayPayday:
         )
         paid = THANKSGIVING + timedelta(days=1)
         assert scheduled_payday(calendar, paid) == THANKSGIVING
-        assert days_paid_for(calendar, _paycheck(calendar, paid), GAP) == PaidDays(
+        assert days_paid_for(calendar, _paycheck(calendar, paid).start_date, GAP) == PaidDays(
             first=date(2030, 11, 9), last=date(2030, 11, 22),
         )
 
@@ -153,7 +153,7 @@ class TestTheOpeningPaycheck:
         """
         calendar = _calendar(_fortnights(date(2026, 3, 26), 3), (DEVELOPER_ERA,))
         assert days_paid_for(
-            calendar, _paycheck(calendar, date(2026, 3, 26)), GAP,
+            calendar, _paycheck(calendar, date(2026, 3, 26)).start_date, GAP,
         ) == PaidDays(first=date(2026, 3, 7), last=date(2026, 3, 20))
 
 
@@ -169,7 +169,7 @@ class TestThePeriodsTile:
     def _walk(self, count):
         """The first *count* paychecks with the days each pays for."""
         return [
-            (paycheck.start_date, days_paid_for(self.CALENDAR, paycheck, GAP))
+            (paycheck.start_date, days_paid_for(self.CALENDAR, paycheck.start_date, GAP))
             for paycheck in islice(paychecks_from(self.CALENDAR, date(2026, 1, 2)), count)
         ]
 

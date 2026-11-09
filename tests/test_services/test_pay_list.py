@@ -1,15 +1,20 @@
 """The pay list's walk: what a payday is priced at (plan step salary:X-av-3a).
 
-:meth:`~app.services.payroll_basis.PayrollBasis.base_pay_on` prices a payday
-from the latest pay entry on or before it (else the first), carries the pay
-across each change of rhythm at the yearly figure, and applies each forecast
-raise landing AFTER that entry, rounding every step to the cent.  Each class
-pins one ruling on its own worked example, every figure made up:
+:meth:`~app.services.payroll_basis.PayrollBasis.base_pay_on` prices each
+weekday a paycheck pays for at the pay in force that day (task plan#3100,
+ruling plan#3089): from the latest pay entry whose paycheck opens on or
+before the day (else the first), carried across each change of rhythm at the
+yearly figure, and raised by each forecast raise landing AFTER that entry
+opens, rounding every step to the cent.  On this file's calendar every
+paycheck pays Saturday through the Friday six days before it, so a raise
+from July 1 reaches 07-16 for 8 of its 10 weekdays and 07-02 not at all.
+Each class pins one ruling on its own worked example, every figure made up;
+``test_a_paycheck_pays_its_weekdays`` pins the weekday rule itself:
 
-* **R-SAL59** ("Dated pay list + forecasts"): a recorded entry replaces the
-  forecast raises due by its payday, later raises compound on it, a Fix moves
-  only the paychecks its entry covers, and paychecks before the first entry
-  use it;
+* **R-SAL59** ("Dated pay list + forecasts") as plan#3091 amends it: a
+  recorded entry replaces the forecast raises dated by the first day its
+  paycheck pays for, later raises compound on it, a Fix moves only the
+  paychecks its entry covers, and paychecks before the first entry use it;
 * **R-SAL60** ("Each raise rounds"): ``$1,999.00`` then +3%, +2.5%, +3% is
   ``$2,058.97``, ``$2,110.44``, ``$2,173.75``;
 * **R-SAL65** ("Yearly dollars, spread"): a flat raise is dollars a year over
@@ -18,9 +23,10 @@ pins one ruling on its own worked example, every figure made up:
   entry recorded, the pay is the yearly pay over the new count, and the
   salary page names it; on a day a raise also lands, the change comes first;
 * **R-SAL84** / **R-SAL85** and **R-SAL89** ("Yearly pay across a
-  seam"): the paycheck where a recorded entry begins badges ``PAY +/-$X``
-  against the one before it -- in yearly pay across a change of rhythm -- and
-  a replaced forecast raise badges nothing.
+  seam"), as plan#3091 amends them: the paycheck where a recorded entry
+  begins badges ``PAY +/-$X`` against the pay in force the day before it
+  opens -- in yearly pay across a change of rhythm -- and a replaced forecast
+  raise badges nothing.
 
 Built on a real :class:`~app.services.pay_calendar.PayCalendar` and a
 duck-typed profile, with the raise set handed in as
@@ -54,11 +60,14 @@ class _Entry:
 
 @dataclass
 class _Profile:
-    """The profile attributes the walk reads: its pay list and its lines."""
+    """The profile attributes the walk reads: its pay list, its lines and its pay periods."""
 
     pay_entries: list
     lines: list = field(default_factory=list)
     raises: list = field(default_factory=list)
+    #: The job's pay periods end six days before payday (ruling plan#3096),
+    #: as every profile the suite builds states.
+    period_end_days_before_payday: int = 6
 
 
 def _calendar(paydays, eras):
@@ -101,6 +110,14 @@ def _percent(year, month, pct, *, recurring=False):
         effective_date=date(year, month, 1), is_recurring=recurring,
         percentage=Decimal(pct), flat_amount=None, terminal_year=None,
         raise_type_name="merit",
+    )
+
+
+def _raise_on(day):
+    """A one-time 3% merit raise from *day*, any day of its month (ruling plan#3090)."""
+    return RaiseTerms(
+        effective_date=day, is_recurring=False, percentage=Decimal("0.03"),
+        flat_amount=None, terminal_year=None, raise_type_name="merit",
     )
 
 
@@ -154,14 +171,33 @@ class TestADatedPayList:
     """R-SAL59's worked example on this calendar's paydays: $2,000.00 from 2026-01-01, +3% every July."""
 
     def test_the_forecast_alone(self):
-        """No recorded change: 2,000.00; 07-02 x 1.03 = 2,060.00; 2027-07-01 = 2,121.80."""
+        """No recorded change: 2,000.00; x 1.03 = 2,060.00 from 07-01; x 1.03 = 2,121.80 a year on.
+
+        07-02 pays 06-13..06-26, before the raise: 2,000.00 (it read 2,060.00
+        until ruling plan#3089).  07-16 pays 06-27..07-10, 2 weekdays before
+        and 8 after: 2,000.00 x 2/10 = 400.00 and 2,060.00 x 8/10 =
+        1,648.00, 2,048.00.  07-30 is wholly after: 2,060.00.  2027-07-01
+        pays 2027-06-12..06-25, before that year's raise: 2,060.00 (it read
+        2,121.80); 2027-07-29 is wholly after it: 2,121.80.
+        """
         basis = _basis(_biweekly(), [(date(2026, 1, 1), "2000.00")], _EVERY_JULY)
         assert _pay(basis, date(2026, 6, 18)) == Decimal("2000.00")
-        assert _pay(basis, date(2026, 7, 2)) == Decimal("2060.00")
-        assert _pay(basis, date(2027, 7, 1)) == Decimal("2121.80")
+        assert _pay(basis, date(2026, 7, 2)) == Decimal("2000.00")
+        assert _pay(basis, date(2026, 7, 16)) == Decimal("2048.00")
+        assert _pay(basis, date(2026, 7, 30)) == Decimal("2060.00")
+        assert _pay(basis, date(2027, 7, 1)) == Decimal("2060.00")
+        assert _pay(basis, date(2027, 7, 29)) == Decimal("2121.80")
 
-    def test_a_recorded_raise_replaces_the_forecast_due_by_its_payday(self):
-        """From 07-02: 2,070.00 -- July 2026's 3% NOT added -- then 2,070 x 1.03 = 2,132.10."""
+    def test_an_entry_before_a_raise_keeps_the_raise(self):
+        """From 07-02: 2,070.00, which opens 06-13 -- so July 2026's 3% still lands on it.
+
+        Ruling plan#3091: recorded pay holds only the raises dated by the
+        first day its paycheck pays for, and July 1 is after 06-13.  07-16
+        pays 2,070.00 x 2/10 = 414.00 and 2,070.00 x 1.03 = 2,132.10 x 8/10
+        = 1,705.68: 2,119.68 (it read 2,070.00 when an entry held every raise
+        through its payday, R-SAL59).  2027-07-01 pays 2027-06-12..06-25 at
+        2,132.10.
+        """
         basis = _basis(
             _biweekly(),
             [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 2), "2070.00")],
@@ -169,8 +205,24 @@ class TestADatedPayList:
         )
         assert _pay(basis, date(2026, 6, 18)) == Decimal("2000.00")
         assert _pay(basis, date(2026, 7, 2)) == Decimal("2070.00")
-        assert _pay(basis, date(2026, 7, 16)) == Decimal("2070.00")
+        assert _pay(basis, date(2026, 7, 16)) == Decimal("2119.68")
         assert _pay(basis, date(2027, 7, 1)) == Decimal("2132.10")
+
+    def test_a_recorded_raise_replaces_the_forecast_dated_by_the_day_it_opens(self):
+        """From 07-30: 2,132.10, which opens 07-11 -- July 2026's 3% is inside it.
+
+        07-30 and 08-13 pay 2,132.10, not 2,132.10 x 1.03; 2027-07-29, wholly
+        past the next July, pays 2,132.10 x 1.03 = 2,196.063 -> 2,196.06.
+        """
+        basis = _basis(
+            _biweekly(),
+            [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 30), "2132.10")],
+            _EVERY_JULY,
+        )
+        assert _pay(basis, date(2026, 7, 16)) == Decimal("2048.00")
+        assert _pay(basis, date(2026, 7, 30)) == Decimal("2132.10")
+        assert _pay(basis, date(2026, 8, 13)) == Decimal("2132.10")
+        assert _pay(basis, date(2027, 7, 29)) == Decimal("2196.06")
 
     def test_a_fix_moves_only_the_paychecks_its_entry_covers(self):
         """The first entry fixed to 2,000.04: 01-01 .. 06-18 move; 07-02 on do not."""
@@ -185,45 +237,62 @@ class TestADatedPayList:
         assert _pay(basis, date(2027, 7, 1)) == Decimal("2132.10")
 
     def test_paychecks_before_the_first_entry_use_it(self):
-        """Entry from 03-12; a February raise lands before it and is inside it.
+        """Entry from 03-12, which opens 02-21; a February raise lands before it and is inside it.
 
         01-15 (before the entry) and 03-26 (after it) both pay 2,000.00: the
-        raise landing 2026-02-01 is on or before the entry's payday, so the
-        entry already holds it.
+        raise landing 2026-02-01 is on or before the day the entry opens, so
+        the entry already holds it.  02-12 pays 01-24..02-06, across the
+        raise's day but before the entry opens: the entry, raised by
+        nothing, 2,000.00.
         """
         basis = _basis(
             _biweekly(), [(date(2026, 3, 12), "2000.00")],
             (_percent(2026, 2, "0.03"),),
         )
         assert _pay(basis, date(2026, 1, 15)) == Decimal("2000.00")
+        assert _pay(basis, date(2026, 2, 12)) == Decimal("2000.00")
         assert _pay(basis, date(2026, 3, 26)) == Decimal("2000.00")
 
-    def test_a_raise_landing_ON_the_entry_payday_is_inside_it(self):
-        """Entry from 2026-01-01, and 3% landing 2026-01-01: the entry holds it (R-SAL59).
+    def test_a_raise_landing_ON_the_day_the_entry_opens_is_inside_it(self):
+        """Entry from 01-29, which opens Saturday 01-10, and 3% landing 01-10: the entry holds it.
 
-        "On or before its date": 01-15 pays 2,000.00, not 2,060.00, and no
-        January paycheck (01-01, 01-15, 01-29) badges the raise the entry
-        replaced.  Every
-        other case dates its entry strictly off the 1st a raise lands on, so
-        this is the one that tells "on or before" from "before" (an
-        adversarial review of this step: the boundary flipped passed 1,111
-        tests).
+        "On or before the first day its paycheck pays for" (ruling
+        plan#3091, amending R-SAL59's "on or before its payday"): 01-29 pays
+        2,000.00, and no January paycheck (01-01, 01-15, 01-29) badges the
+        raise the entry replaced.  The same raise from Sunday 01-11 is after
+        the entry opens and before every weekday 01-29 pays for, so 01-29
+        pays 2,000.00 x 1.03 = 2,060.00: this is the case that tells "on or
+        before" from "before" (an adversarial review of plan step
+        salary:X-av-3a: the boundary flipped passed 1,111 tests).  It was
+        stated on an entry from 01-01 with the raise ON that payday until
+        ruling plan#3091 moved the boundary to the day the entry opens.
         """
-        basis = _basis(
-            _biweekly(), [(date(2026, 1, 1), "2000.00")],
-            (_percent(2026, 1, "0.03"),),
-        )
-        assert _pay(basis, date(2026, 1, 15)) == Decimal("2000.00")
-        assert _badge(basis, date(2026, 1, 1)) == ""
-        assert _badge(basis, date(2026, 1, 15)) == ""
-        assert _badge(basis, date(2026, 1, 29)) == ""
+        entries = [(date(2026, 1, 29), "2000.00")]
+        on = _basis(_biweekly(), entries, (_raise_on(date(2026, 1, 10)),))
+        after = _basis(_biweekly(), entries, (_raise_on(date(2026, 1, 11)),))
+        assert _pay(on, date(2026, 1, 15)) == Decimal("2000.00")
+        assert _pay(on, date(2026, 1, 29)) == Decimal("2000.00")
+        assert _badge(on, date(2026, 1, 1)) == ""
+        assert _badge(on, date(2026, 1, 15)) == ""
+        assert _badge(on, date(2026, 1, 29)) == ""
+        assert _pay(after, date(2026, 1, 29)) == Decimal("2060.00")
 
 
 class TestEachRaiseRounds:
     """R-SAL60's worked example."""
 
     def test_three_raises_each_rounded_to_the_cent(self):
-        """1,999.00 x 1.03 = 2,058.97; x 1.025 = 2,110.44(425); x 1.03 = 2,173.75(32)."""
+        """1,999.00 x 1.03 = 2,058.97; x 1.025 = 2,110.44(425); x 1.03 = 2,173.75(32).
+
+        Each is the pay in force from its raise's day, and the first paycheck
+        paid wholly at it pays it: 2026-07-30, 2027-07-29, 2028-07-27.  The
+        first payday after each raise read the same three figures until
+        ruling plan#3089; each pays the days before its raise at the old pay
+        now: 2026-07-02 pays 1,999.00 (06-13..06-26), 2027-07-01 pays
+        2,058.97 (2027-06-12..06-25), and 2028-07-13 pays 2028-06-24..07-07,
+        five weekdays each side, 2,110.44 x 5/10 = 1,055.22 and 2,173.75 x
+        5/10 = 1,086.875 -> 1,086.88: 2,142.10.
+        """
         basis = _basis(
             _biweekly(), [(date(2026, 1, 1), "1999.00")],
             (
@@ -232,51 +301,87 @@ class TestEachRaiseRounds:
                 _percent(2028, 7, "0.03"),
             ),
         )
-        assert _pay(basis, date(2026, 7, 2)) == Decimal("2058.97")
-        assert _pay(basis, date(2027, 7, 1)) == Decimal("2110.44")
-        assert _pay(basis, date(2028, 7, 13)) == Decimal("2173.75")
+        assert basis.pay_rate_on(date(2026, 7, 1)).per_paycheck == Decimal("2058.97")
+        assert basis.pay_rate_on(date(2027, 7, 1)).per_paycheck == Decimal("2110.44")
+        assert basis.pay_rate_on(date(2028, 7, 1)).per_paycheck == Decimal("2173.75")
+        assert _pay(basis, date(2026, 7, 30)) == Decimal("2058.97")
+        assert _pay(basis, date(2027, 7, 29)) == Decimal("2110.44")
+        assert _pay(basis, date(2028, 7, 27)) == Decimal("2173.75")
+        assert _pay(basis, date(2026, 7, 2)) == Decimal("1999.00")
+        assert _pay(basis, date(2027, 7, 1)) == Decimal("2058.97")
+        assert _pay(basis, date(2028, 7, 13)) == Decimal("2142.10")
 
 
 class TestAFlatRaiseIsDollarsAYear:
     """R-SAL65's worked example: dollars a year over the paychecks a year where it lands."""
 
     def test_1300_a_year_is_50_a_paycheck(self):
-        """1,300.00 / 26 = 50.00 -> 2,050.00."""
+        """1,300.00 / 26 = 50.00 -> 2,050.00 from 07-01, which 07-30 pays.
+
+        07-02 pays 06-13..06-26, before it: 2,000.00 (it read 2,050.00 until
+        ruling plan#3089).
+        """
         basis = _basis(
             _biweekly(), [(date(2026, 1, 1), "2000.00")],
             (_flat(2026, 7, "1300.00"),),
         )
-        assert _pay(basis, date(2026, 7, 2)) == Decimal("2050.00")
+        assert _pay(basis, date(2026, 7, 30)) == Decimal("2050.00")
+        assert _pay(basis, date(2026, 7, 2)) == Decimal("2000.00")
 
     def test_1000_a_year_rounds_to_38_46(self):
-        """1,000.00 / 26 = 38.4615 -> 38.46 -> 2,038.46."""
+        """1,000.00 / 26 = 38.4615 -> 38.46 -> 2,038.46 from 07-01, which 07-30 pays.
+
+        07-02, before it, pays 2,000.00 (it read 2,038.46 until ruling
+        plan#3089).
+        """
         basis = _basis(
             _biweekly(), [(date(2026, 1, 1), "2000.00")],
             (_flat(2026, 7, "1000.00"),),
         )
-        assert _pay(basis, date(2026, 7, 2)) == Decimal("2038.46")
+        assert _pay(basis, date(2026, 7, 30)) == Decimal("2038.46")
+        assert _pay(basis, date(2026, 7, 2)) == Decimal("2000.00")
 
     def test_the_count_is_the_one_in_force_where_it_lands(self):
-        """Weekly from 2027-01-07: 2,000 carried to 1,000.00, then 1,300 / 52 = 25.00 -> 1,025.00."""
+        """Weekly from 2027-01-07: 2,000 carried to 1,000.00, then 1,300 / 52 = 25.00 -> 1,025.00.
+
+        The weekly paychecks pay Saturday through Friday six days before
+        payday.  2027-07-15 pays 07-03..07-09, wholly after the raise:
+        1,025.00.  07-01 pays 06-19..06-25, before it: 1,000.00 (it read
+        1,025.00 until ruling plan#3089).  07-08 pays 06-26..07-02, 3
+        weekdays before and 2 after: 1,000.00 x 3/5 = 600.00 and 1,025.00 x
+        2/5 = 410.00, 1,010.00.
+        """
         basis = _basis(
             _biweekly_then_weekly(), [(date(2026, 1, 8), "2000.00")],
             (_flat(2027, 7, "1300.00"),),
         )
-        assert _pay(basis, date(2027, 7, 1)) == Decimal("1025.00")
+        assert _pay(basis, date(2027, 7, 15)) == Decimal("1025.00")
+        assert _pay(basis, date(2027, 7, 1)) == Decimal("1000.00")
+        assert _pay(basis, date(2027, 7, 8)) == Decimal("1010.00")
 
 
 class TestYearlyPayCarries:
     """R-SAL82's worked example: biweekly to weekly on 2027-01-07."""
 
     def test_the_pay_is_carried_at_the_yearly_figure(self):
-        """2,060.00 x 26 / 52 = 1,030.00; the 2027-07-01 raise: 1,030 x 1.03 = 1,060.90."""
+        """2,060.00 x 26 / 52 = 1,030.00; the 2027-07-01 raise: 1,030 x 1.03 = 1,060.90.
+
+        The weekly rhythm takes effect from 2026-12-19, the first day its
+        first paycheck (2027-01-07) pays for.  2027-07-15 is the first
+        paycheck wholly past the 2027 raise: 1,060.90.  2027-07-01 pays
+        06-19..06-25, before it: 1,030.00 (it read 1,060.90 until ruling
+        plan#3089).
+        """
         basis = _basis(
             _biweekly_then_weekly(), [(date(2026, 1, 8), "2000.00")], _EVERY_JULY,
         )
         assert _pay(basis, date(2026, 12, 24)) == Decimal("2060.00")
         assert _pay(basis, date(2027, 1, 7)) == Decimal("1030.00")
         assert basis.base_pay_on(date(2027, 1, 7)).periods_per_year == Decimal("52")
-        assert _pay(basis, date(2027, 7, 1)) == Decimal("1060.90")
+        assert basis.pay_rate_on(date(2026, 12, 18)).periods_per_year == Decimal("26")
+        assert basis.pay_rate_on(date(2026, 12, 19)).per_paycheck == Decimal("1030.00")
+        assert _pay(basis, date(2027, 7, 15)) == Decimal("1060.90")
+        assert _pay(basis, date(2027, 7, 1)) == Decimal("1030.00")
 
     def test_the_salary_page_names_the_carry(self):
         """One change named: 2027-01-07, priced 1,030.00 from the yearly 53,560.00."""
@@ -309,15 +414,31 @@ class TestThePayChangeBadge:
     """R-SAL84 / R-SAL85, and yearly pay across a seam."""
 
     def test_a_recorded_raise_badges_its_change_and_the_replaced_forecast_badges_nothing(self):
-        """07-02: 'PAY +$70.00'; 07-16, still July, nothing; 2027-07-01 the forecast."""
+        """From 07-30 (opens 07-11): 'PAY +$72.10'; 08-13 nothing; 2027-07-01 the forecast.
+
+        2,132.10 against the 2,060.00 in force on 07-10, the day before the
+        entry opens (ruling plan#3091: pay with pay).  The entry holds July
+        2026's raise, so no later paycheck badges it.  An entry from 07-02,
+        which opens 06-13, holds no July raise and the raise goes on reaching
+        07-16 (``test_an_entry_before_a_raise_keeps_the_raise``), so 07-16
+        badges it: 'MERIT +3.00%'.  That case badged '' while an entry held
+        every raise through its payday (R-SAL59).
+        """
         basis = _basis(
+            _biweekly(),
+            [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 30), "2132.10")],
+            _EVERY_JULY,
+        )
+        assert _badge(basis, date(2026, 7, 30)) == "PAY +$72.10"
+        assert _badge(basis, date(2026, 8, 13)) == ""
+        assert _badge(basis, date(2027, 7, 1)).startswith("MERIT +")
+        before_the_raise = _basis(
             _biweekly(),
             [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 2), "2070.00")],
             _EVERY_JULY,
         )
-        assert _badge(basis, date(2026, 7, 2)) == "PAY +$70.00"
-        assert _badge(basis, date(2026, 7, 16)) == ""
-        assert _badge(basis, date(2027, 7, 1)).startswith("MERIT +")
+        assert _badge(before_the_raise, date(2026, 7, 2)) == "PAY +$70.00"
+        assert _badge(before_the_raise, date(2026, 7, 16)) == "MERIT +3.00%"
 
     def test_the_forecast_badges_where_no_entry_replaces_it(self):
         """No recorded change: July 2026 badges its merit raise."""
@@ -392,12 +513,17 @@ class TestOnOneDayTheRhythmChangesFirst:
     """A change of rhythm and a raise landing on one day: the change applies first (``_walk``)."""
 
     def test_the_raise_compounds_on_the_carried_pay(self):
-        """2,001.01 biweekly; weekly from 2027-07-01, and 3% landing 2027-07-01.
+        """2,001.01 biweekly; weekly from 2027-07-01, and 3% landing 2027-06-12.
 
-        Rhythm first: 2,001.01 x 26 / 52 = 1,000.505 -> 1,000.51, x 1.03 =
-        1,030.5253 -> 1,030.53.  The raise first would read 2,001.01 x 1.03
-        = 2,061.0403 -> 2,061.04, x 26 / 52 = 1,030.52: the day's paycheck
-        is paid at the new rhythm, so the raise lands on the carried pay.
+        The weekly rhythm takes effect from 2027-06-12, the first day its
+        first paycheck (07-01) pays for (task plan#3100), and the raise lands
+        that day too.  Rhythm first: 2,001.01 x 26 / 52 = 1,000.505 ->
+        1,000.51, x 1.03 = 1,030.5253 -> 1,030.53.  The raise first would
+        read 2,001.01 x 1.03 = 2,061.0403 -> 2,061.04, x 26 / 52 = 1,030.52:
+        the day is paid at the new rhythm, so the raise lands on the carried
+        pay.  The raise was dated 2027-07-01, the weekly era's first PAYDAY,
+        until the change of rhythm moved to its first paycheck's first day;
+        from 07-01 it would reach 07-01's paycheck not at all (1,000.51).
         """
         biweekly = [date(2027, 1, 14) + timedelta(days=14 * step) for step in range(12)]
         weekly = [date(2027, 7, 1) + timedelta(days=7 * step) for step in range(10)]
@@ -407,7 +533,7 @@ class TestOnOneDayTheRhythmChangesFirst:
                 (_era(date(2027, 1, 14), 14), _era(date(2027, 7, 1), 7)),
             ),
             [(date(2027, 1, 14), "2001.01")],
-            (_percent(2027, 7, "0.03"),),
+            (_raise_on(date(2027, 6, 12)),),
         )
         assert _pay(basis, date(2027, 6, 17)) == Decimal("2001.01")
         assert _pay(basis, date(2027, 7, 1)) == Decimal("1030.53")

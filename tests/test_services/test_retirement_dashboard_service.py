@@ -222,10 +222,13 @@ def _paid(pay):
     salary:X-av-3a (ruling R-SAL59); with no raise the walk answers the
     entry's pay on every later payday, so a projected final year is exactly
     *pay* and the case's figures depend only on the arithmetic it grades.
+    Its pay periods end six days before payday (ruling plan#3096), as every
+    profile the suite builds states.
     """
-    return SalaryProfile(pay_entries=[
-        SalaryPayEntry(payday=_FIRST_PAYDAY, amount=Decimal(pay)),
-    ])
+    return SalaryProfile(
+        pay_entries=[SalaryPayEntry(payday=_FIRST_PAYDAY, amount=Decimal(pay))],
+        period_end_days_before_payday=6,
+    )
 
 
 def _gap_inputs(profile, cadence_days=14):

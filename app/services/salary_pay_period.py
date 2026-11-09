@@ -158,7 +158,7 @@ def pay_period_view(
     upcoming = tuple(
         UpcomingPaycheck(
             payday=paycheck.start_date,
-            paid_days=days_paid_for(calendar, paycheck, ends_days_before),
+            paid_days=days_paid_for(calendar, paycheck.start_date, ends_days_before),
         )
         for paycheck in islice(
             (p for p in paychecks_from(calendar, today) if p.start_date >= today),
@@ -169,7 +169,9 @@ def pay_period_view(
         return PayPeriodView(pay_date=None, period_end=None, upcoming=upcoming)
     return PayPeriodView(
         pay_date=latest.start_date,
-        period_end=days_paid_for(calendar, latest, ends_days_before).last,
+        period_end=days_paid_for(
+            calendar, latest.start_date, ends_days_before,
+        ).last,
         upcoming=upcoming,
     )
 

@@ -273,9 +273,10 @@ def applications_between(raises, after, through):
     each later year it is believed.  It landed on the 1st of its effective
     month until then, which is the same day for every raise that migration
     ``6740ce13e174`` dated, since each was dated on its month's 1st.  *after*
-    is the payday of the pay entry the paycheck is priced from: an entry
-    REPLACES every forecast raise due on or before its payday, because the
-    pay it records already holds them.
+    is the first day the paycheck of the pay entry being raised pays for: an
+    entry REPLACES every forecast raise dated on or before that day, because
+    the pay it records already holds them (ruling **plan#3091**, amending
+    R-SAL59's "on or before its payday" since task plan#3100).
 
     **APPLICATIONS are ordered by the date each one lands on**, not by the
     raise they belong to.  Raise application is non-commutative (a flat
@@ -298,8 +299,9 @@ def applications_between(raises, after, through):
             ``effective_date``, ``is_recurring``, ``percentage``,
             ``flat_amount`` and ``terminal_year`` -- rows or
             :class:`RaiseTerms` values.
-        after: The day the pay being raised was recorded from; an
-            application landing on or before it is excluded.
+        after: The first day the pay being raised is in force from (the day
+            its entry's paycheck opens); an application landing on or before
+            it is excluded.
         through: The last day an application may land on to be included.
 
     Returns:
@@ -432,10 +434,11 @@ def get_raise_event(raises, period, replaced_through=None):
     banner now.
 
     **It badges only an application the paycheck is PRICED under since plan
-    step salary:X-av-3a** (ruling **R-SAL84**): a forecast raise due on or
-    before the payday of the pay entry a paycheck is priced from is replaced
-    by that entry (:func:`applications_between`), so its banner would announce
-    money that never arrives.  *replaced_through* is that entry's payday.
+    step salary:X-av-3a** (ruling **R-SAL84**): a forecast raise dated on or
+    before the day the pay entry a paycheck is priced from opens is replaced
+    by that entry (:func:`applications_between`, ruling **plan#3091**), so
+    its banner would announce money that never arrives.  *replaced_through*
+    is that day.
 
     Args:
         raises: The raise set -- each exposing what
@@ -444,9 +447,10 @@ def get_raise_event(raises, period, replaced_through=None):
             :class:`~app.models.salary_raise.SalaryRaise` row exposes as a
             property; a falsy/empty set badges nothing.
         period: The pay period, read for ``start_date`` alone.
-        replaced_through: The payday of the pay entry the period's paycheck
-            is priced from; an application landing on or before it badges
-            nothing.  ``None`` badges every application of the month.
+        replaced_through: The first day the pay entry the period's paycheck
+            is priced from is in force (its own paycheck's first day); an
+            application landing on or before it badges nothing.  ``None``
+            badges every application of the month.
 
     Returns:
         The comma-joined event labels for *period*, or ``""``.

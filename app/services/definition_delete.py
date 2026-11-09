@@ -60,51 +60,6 @@ import.  It MUTATES and does NOT commit -- the caller owns the unit of work.
 from app.extensions import db
 from app.models.ref import Status
 from app.models.transaction import Transaction
-from app.services import posting_service
-
-
-def rows_holding_purchase_postings(*scope):
-    """Return the template rows matching *scope* that hold ledger postings.
-
-    **A PROJECTED row can hold postings since plan step X-f3b** (ruling
-    **R-FM**): a purchase whose bank posting day the owner recorded books its
-    own balanced cash leg whatever its envelope's status is.  Every bulk
-    statement over a definition's rows was written under the opposite premise
-    -- "a Projected row has no postings, so a bulk archive / restore / delete
-    cannot touch the ledger" -- and that premise is what fell.
-
-    The narrowing is what keeps the cost honest: a template generates ~50 rows
-    over the forward horizon and at most a handful can ever hold a purchase, so
-    this returns the empty list with ONE indexed read in the ordinary case and
-    the callers loop over nothing.  Moved here whole from
-    ``routes/templates/crud`` at plan step ``balance:X-bi-7a``, with the
-    delete that used it.  **The unarchive's restore is its one caller since
-    plan step ``credit_card:CC-5-4a-4``**: the archive and this module's
-    delete no longer reach a row holding a movement (rulings **R-CC63**,
-    **R-CC54**), and a row holds a posting only through one, so both loops
-    were deleted.  The restore keeps it although it finds nothing since that
-    step, because a definition's hidden row holds no movement, and the
-    DATABASE holds that: a movement cannot arrive under a hidden row (ruling
-    **R-CC89**), a row cannot be hidden while it holds one (**R-CC92**) --
-    in either order of a race too, because the arrival check locks the row
-    (**R-CC96**) -- and the release's migration refuses to inherit one
-    (**R-CC82**) --
-    :mod:`app.deleted_row_infrastructure`.  Kept as the restore's own
-    statement of what it re-posts rather than an argument that nothing could.
-
-    Args:
-        *scope: The SQLAlchemy clauses selecting the rows the bulk statement is
-            about to touch -- built by the caller, so this reader can never
-            select a different set from the statement it guards.
-
-    Returns:
-        The matching :class:`~app.models.transaction.Transaction` rows.
-    """
-    return (
-        db.session.query(Transaction)
-        .filter(*scope, posting_service.posted_purchase_exists_clause())
-        .all()
-    )
 
 
 def is_last_row_of_its_definition(txn) -> bool:

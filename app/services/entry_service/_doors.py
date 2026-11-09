@@ -1,8 +1,8 @@
 """The WRITE doors: what a user may do to one purchase, and what follows.
 
 ``entry_service``'s CRUD half -- the guards a mutation must pass, the three
-doors themselves (create, update, delete), the owner resolution they share, and
-the re-derivation every one of them triggers.  What a set of purchases ADDS UP
+doors themselves (create, update, delete) and the owner resolution they
+share.  What a set of purchases ADDS UP
 TO, and the screen contexts built from those sums, is the sibling leaf
 (:mod:`._sums`); the arrow runs one way -- this module reads
 the reductions in :mod:`._sums`, and that module reads nothing here.
@@ -25,7 +25,7 @@ from app.models.transaction_entry import TransactionEntry
 from app.models.user import User
 from app import ref_cache
 from app.exceptions import NotFoundError, ValidationError
-from app.services import match_press, match_withdrawal, movement_removal, posting_service
+from app.services import match_press, match_withdrawal, movement_removal
 from app.services.entry_credit_workflow import (
     payback_a_removal_deletes,
     sync_entry_payback,
@@ -79,80 +79,6 @@ logger = logging.getLogger(__name__)
 _UPDATABLE_FIELDS = frozenset({
     "figure", "description", "purchased_on", "settle_day", "is_credit",
 })
-
-
-def _resync_after_entry_change(txn: Transaction) -> None:
-    """Reconcile an envelope's postings after an entry change.
-
-    **It writes no figure, and losing that half is plan step X-au-c3's doing.**
-    It re-derived ``actual_amount = sum(entries)`` for a settled envelope, and a
-    settled row stores no figure at all -- its amount IS the sum of its
-    entries, answered on read by ``row_valuation.settled_figure`` (the
-    envelope's since X-au-c3, every settled row's since ``balance:X-bi-4b-1``,
-    and the row's own figure columns gone at ``X-bi-4b-2``).  A stored copy is
-    what needed a reconciler; with the copy gone the reconciler has nothing
-    left to reconcile, and the entries and the figure they add up to cannot
-    drift because there is only one of them.
-
-    **Its whole gate was ``if settled and txn.entries``, and BOTH halves of that
-    gate are gone.**  The figure it would have written no longer exists to
-    write, and the ``settled`` half stopped being a question this function may
-    ask: a settled parent DOES reach here, through the one entry edit
-    :func:`_reject_settled_parent` admits on such a row -- recording the day
-    the bank took a purchase -- and re-dating that purchase's cash is the whole
-    point of the reconcile below.  Two defects went with the deleted arm:
-
-      * deleting the LAST purchase from a settled envelope left the previous
-        figure standing -- deliberately, because rewriting the close to ``$0.00``
-        looked worse than a stale number.  That state is unreachable now for a
-        different reason than when this was written: it said *the delete is
-        refused*, and plan step ``bank_import:X-f6f`` admits one where removing
-        the purchase cannot change what the row's own close booked.  What makes
-        the stale figure impossible is that there is no stored figure left to go
-        stale -- a settled row answers ``Sigma(entries)``, so one closed
-        empty answers ``$0.00`` because that is what its records say;
-      * adding a purchase to a settled row whose figure was a HUMAN's correction
-        overwrote that correction with the entry sum.  That cannot happen now
-        for two independent reasons: the hook is gone, and
-        :func:`_reject_settled_addition` admits an add only on a settled row
-        holding no covering movement -- one whose entries ARE its record, so
-        there is no stated figure for a human to have corrected.  Ruling
-        **R-FB**'s rule -- a figure somebody read off a statement is a fact --
-        finally holds on this path too.
-
-    What remains is the ledger reconcile (Build-Order Step 3).  An entry mutation
-    changes what the row's family has posted: recording a posting day makes
-    that purchase a dated leg of its own, clearing one reverses it, flipping
-    an entry to or from credit posts or reverses its leg, and an amount edit
-    re-prices a dated one.  The row itself books nothing (plan step
-    ``balance:X-bi-4a``, ruling **R-BAL80**), so a purchase with no day moves
-    nothing in the ledger -- it is in flight in the projection instead.
-
-    **It is UNGATED since plan step X-f3b, and that is ruling R-FM.**  It ran
-    only on the settled band, on the premise that "a Projected envelope has no
-    postings" -- false once a purchase carrying a recorded bank posting day
-    books its own leg whatever its envelope's status is.  One call reconciles
-    the whole family, so this door needs no second list of what changed; on a
-    Projected row with no posted purchases it reads an empty ledger and writes
-    nothing.
-
-    Does NOT commit -- the calling service function owns the session boundary
-    (the reconcile flushes but does not commit, matching this module's
-    contract).
-
-    **The reconcile takes no ``settled`` flag since plan step
-    ``balance:X-bi-4a``.**  It took one through ``X-bi-3e``, read off the ROW
-    rather than hardcoded ``False`` -- a choice that paid for itself when the
-    developer's 2026-08-17 ruling widened this door to admit a posting-day
-    edit on a settled row, whose own leg a hardcoded ``False`` would have
-    silently stopped booking.  The flag chose the row's OWN target, and a row
-    has none now: a movement posts iff it is dated under a contributing
-    parent, which the reconcile reads off each movement.
-
-    Args:
-        txn: The parent envelope transaction whose entries changed.
-    """
-    posting_service.sync_transaction_postings(txn)
 
 
 def resolve_owner_id(user_id: int) -> int:
@@ -257,9 +183,9 @@ class EntryDetails:
 
     Recording it here rather than through a follow-up :func:`update_entry` is
     the difference between one act and two: the second call would re-run
-    ``sync_entry_payback`` and the posting reconcile against an intermediate
-    state in which a purchase the bank has already taken looks outstanding, and
-    it would leave that state committed if anything after it refused.
+    ``sync_entry_payback`` against an intermediate state in which a purchase
+    the bank has already taken looks outstanding, and it would leave that
+    state committed if anything after it refused.
     """
 
     figure: StatedFigure
@@ -531,9 +457,9 @@ def create_entry(
         # swipe, and the two move different balances.
         account_id=account_id,
         # The posting day is logged because a purchase BORN with one has
-        # already moved money: it books its own dated cash leg at the reconcile
-        # below, where a purchase born without one holds its envelope's budget
-        # back instead.  A receipt that named only the amount could not tell
+        # already moved money: it is a dated cash movement of its own, where a
+        # purchase born without one holds its envelope's budget back
+        # instead.  A receipt that named only the amount could not tell
         # the two apart.
         settled_on=(
             posting_day.isoformat() if posting_day is not None else None
@@ -554,7 +480,6 @@ def create_entry(
         moves_credit_total=bool(details.is_credit and details.figure.amount),
         press=press,
     )
-    _resync_after_entry_change(txn)
 
     return entry
 
@@ -844,7 +769,6 @@ def update_entry(
         moves_credit_total=moves_credit_total,
         press=press,
     )
-    _resync_after_entry_change(entry.transaction)
 
     return entry
 
@@ -915,15 +839,14 @@ def delete_entry(
     # it.
     removed_credit = bool(entry.is_credit and entry.amount)
     # Off the books through the ONE act every door that removes a movement
-    # calls (plan step ``credit_card:CC-5-4a-3``, ruling **R-CC54**): its OWN
-    # cash leg reversed while ``journal_entries.transaction_entry_id`` still
-    # links it (ruling **R-FM**, plan step X-f3b; that key is ON DELETE SET
-    # NULL), then out of the matches naming it -- a bank line matched to this
-    # purchase is no longer explained by it once it goes, so an act left
-    # naming no app row is withdrawn and the line is unexplained again
-    # (developer ruling 2026-08-25, plan step ``bank_import:X-gb``) -- then
-    # deleted out of its envelope's ``entries``, and the anchor corrections
-    # re-checked once it is gone (ruling **plan#2564**).  Its PARENT is untouched:
+    # calls (plan step ``credit_card:CC-5-4a-3``, ruling **R-CC54**): out of
+    # the matches naming it -- a bank line matched to this purchase is no
+    # longer explained by it once it goes, so an act left naming no app row
+    # is withdrawn and the line is unexplained again (developer ruling
+    # 2026-08-25, plan step ``bank_import:X-gb``) -- then deleted out of its
+    # envelope's ``entries``.  The act reversed its stored cash leg first and
+    # re-checked the anchor corrections after until plan task plan#3097.  Its
+    # PARENT is untouched:
     # removing one purchase leaves the envelope and every other purchase in it
     # asserting exactly what they did.  The X names the line first since plan
     # step ``credit_card:CC-5-4a-5`` (ruling **R-CC80**, closing finding
@@ -933,9 +856,8 @@ def delete_entry(
     # ``credit_card:CC-5-4a-5``): the act grades "the WHOLE set one press
     # removes" against what the X named, and on the envelope's account a
     # second act would meet the first's line and refuse the press as out of
-    # date.  The row delete takes its payback chain so; the act reverses the
-    # payback's movements with the purchase and re-checks the anchors once
-    # after both are gone (ruling **plan#2564**), and the sync below deletes
+    # date.  The row delete takes its payback chain so; the act takes the
+    # payback's movements off with the purchase, and the sync below deletes
     # the payback ROW, by the same arithmetic.
     doomed = payback_a_removal_deletes(txn, {entry.id})
     movements, leaving = [entry], ()
@@ -961,7 +883,6 @@ def delete_entry(
         transaction_id, owner_id, moves_credit_total=removed_credit,
         press=press,
     )
-    _resync_after_entry_change(txn)
 
     return transaction_id
 

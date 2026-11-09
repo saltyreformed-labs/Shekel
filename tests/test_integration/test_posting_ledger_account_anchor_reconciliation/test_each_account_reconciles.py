@@ -356,9 +356,8 @@ class TestRevertAfterTrueupSelfHeals:
 
         Continuing from anchor 500 / spend 200 (T+1h) / true-up 350 (T+2h) /
         spend 100 (T+3h) -- linked ledger 250.00 -- the $200.00 pre-true-up
-        expense is reverted through the real ``sync_transaction_postings``
-        (``settled=False``) path.  The true-up's walked ``ledger_before`` moves
-        300 -> 500, so its delta moves +50 -> -150.  The reverted source drops
+        expense is reverted through the status seam.  The true-up's walked
+        ``ledger_before`` moves 300 -> 500, so its delta moves +50 -> -150.  The reverted source drops
         from the transaction truth too:
 
           linked = 500 (opening) - 150 (re-based true-up) - 100 = 250.00
@@ -403,7 +402,6 @@ class TestRevertAfterTrueupSelfHeals:
             status_seam.apply_status_change(
                 spend, ref_cache.status_id(StatusEnum.PROJECTED),
             )
-            posting_service.sync_transaction_postings(spend)
             db.session.commit()
 
             assert account_net(

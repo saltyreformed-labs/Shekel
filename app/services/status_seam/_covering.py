@@ -72,9 +72,8 @@ Two records still WITHDRAW the mirror outright (``_withdraw``): a ``$0.00``
 figure, which ``ck_transaction_entries_positive_amount`` lets no movement
 carry, and a ``purchases`` record, whose figure the row's own purchases
 state -- through the ONE act that takes a movement off the books
-(``movement_removal.remove_movements``, ruling **R-CC54**), which reverses
-the payment's legs and takes it out of every match naming it before it
-deletes it (finding **CC-358**).
+(``movement_removal.remove_movements``, ruling **R-CC54**), which takes it out
+of every match naming it before it deletes it (finding **CC-358**).
 
 **Which entry is the covering movement is a STORED fact of the movement**
 (``transaction_entries.covers_settlement``), never a derivation over the
@@ -151,20 +150,16 @@ covering movement's cash ON THE ACCOUNT ASKED ABOUT (:func:`covered_cash_leg`,
 ruling **R-CC40**).
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): no Flask imports;
-mutates in place and never commits; the withdraw arm's posting reversal
-FLUSHES, as every ledger write does, and the caller owns the session
-boundary.  The ledger is otherwise the DOOR's: a revert un-dates the mirror
-here and the verb's family reconcile (``posting_service.
-sync_transaction_postings``, which walks ``txn.entries`` after the seam
-returns and posts nothing for an un-dated movement) reverses its legs --
-the parent posts nothing of its own since plan step ``balance:X-bi-4a``
-(ruling **R-BAL80**), so the movement's legs are the whole of what a revert
-reverses -- every production revert of a transaction reaches
-the seam through ``transaction_service.apply_requested_status``, and a
-transfer's through ``transfer_service`` and the pair's own door
+mutates in place and never commits; the withdraw arm's match step FLUSHES
+when a match named the movement, and the caller owns the session boundary.
+A revert un-dates the mirror here, and the worked-out ledger reads an
+un-dated movement as posting nothing (``ledger_lines.purchase_posts`` needs a
+day).  A transaction's verb reconciled the stored ledger after the seam
+returned, reversing the movement's legs, until plan task plan#3097 deleted
+that with the stored ledger's transaction doors; a transfer's revert reaches
+the seam through ``transfer_service`` and the pair's own door
 (``posting_service.sync_transfer_postings``, which reads each movement's
-state since plan step ``balance:X-bi-6-3``); ``scripts/integrity_check.py``'s
-DC-10 grades the state a caller of the bare seam would leave.  Money is
+state since plan step ``balance:X-bi-6-3``).  Money is
 ``Decimal`` throughout, read off the
 :class:`~app.services.status_seam._record.Settlement` the seam was handed.
 """
@@ -756,8 +751,9 @@ def _cover(
     )
     _record_onto(row, movement, settlement)
     # Appended to the relationship rather than only added to the session, so
-    # the verbs' ledger reconcile -- which walks ``txn.entries`` after the seam
-    # returns -- posts it in the same pass as the parent's now-zero leg.
+    # the row's loaded family holds the movement for every later reader in
+    # the request; the verbs' ledger reconcile walked ``txn.entries`` after
+    # the seam returned until plan task plan#3097.
     row.entries.append(movement)
     db.session.add(movement)
     _record_moved(row)
@@ -776,10 +772,8 @@ def _withdraw(row: Transaction, press: Press | None) -> None:
 
     **Through the ONE act that takes a movement off the books** (plan step
     ``credit_card:CC-5-4a-3``, ruling **R-CC54**;
-    ``movement_removal.remove_movements``): its ledger reversed, out of
-    every match naming it, taken out of ``row.entries`` -- the collection the
-    verbs' ledger reconcile walks after the seam returns, whose
-    ``delete-orphan`` issues the DELETE.  Until that step this deleted the
+    ``movement_removal.remove_movements``): out of every match naming it,
+    deleted, and taken out of ``row.entries``.  Until that step this deleted the
     payment itself and asked no match (finding **CC-358**): the act naming it
     kept its bank line alone, and matching that line again raised on
     ``uq_statement_match_members_line``.  The screen that offers either
@@ -822,13 +816,10 @@ def _follow_assertion(row: Transaction) -> None:
     * **an identity re-submit**, or a non-settled row that still carries a
       kept movement (re-submitted, cancelled, reactivated): nothing moves.
 
-    The ledger is the door's.  An un-dated movement posts nothing
-    (``ledger_lines.purchase_posts`` needs a day), so the family
-    reconcile every revert door runs after the seam reverses whatever the
-    movement had posted -- the one walk, which reversed the parent's own leg
-    beside it through ``X-bi-3e`` and posts nothing for the row since
-    ``balance:X-bi-4a`` (ruling **R-BAL80**) -- one spelling rather than an
-    explicit reversal here beside it.  The revert
+    No ledger is written here.  An un-dated movement posts nothing
+    (``ledger_lines.purchase_posts`` needs a day), so the worked-out ledger
+    drops it on the revert by itself; the family reconcile every revert door
+    ran after the seam reversed its stored legs until plan task plan#3097.  The revert
     arm deleted the row and reversed its legs itself through ``X-bi-3e-1``,
     because ``journal_entries.transaction_entry_id`` is SET NULL on delete
     and legs left behind a deleted row could never be reversed; a kept row
@@ -941,8 +932,7 @@ def sync_covering_movement(
     link is already ``None`` -- ``_mirror_assertion``'s equal-days arm would
     write nothing), and reading it would cost a lazy load of the row's
     ``entries`` and a mid-update autoflush for a no-op wherever the caller
-    has not loaded them (a transaction's door loads them for its reconcile
-    anyway).
+    has not loaded them.
     The seam asks the predicate the transfer seam's arm and status writer
     ask (``_side.sync_side_records``,
     ``transfer_service._status.apply_status_to_all_three``); this arm

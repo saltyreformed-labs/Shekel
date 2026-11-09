@@ -231,9 +231,10 @@ def gate_deletable_tail(
         # whatever ``_regenerable`` says, and BEFORE the discard count below
         # -- so no confirmation reaches it.  Its refusal names every payment
         # and purchase, its amount and its row (plan step pay_calendar:C22,
-        # ruling R-PC116).  Whoever relaxes these locks MUST first reverse the
-        # postings (movement_removal.remove_movements, the one act that
-        # reverses and deletes a movement / the loan sync).
+        # ruling R-PC116).  Whoever relaxes these locks MUST first take the
+        # movements off the books (movement_removal.remove_movements, the one
+        # act that deletes a movement, which reversed their stored postings
+        # until plan task plan#3097 / the loan sync).
         # A correction, an opening or a true-up, locks nothing (ruling
         # plan#2782): worked out from the records it files by its day on
         # whichever paycheck stands, and the journal_entries.pay_period_id

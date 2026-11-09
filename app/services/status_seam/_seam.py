@@ -372,19 +372,17 @@ def apply_status_change(
          not do this before X-aj1 and held only because every route commits
          before it renders.
 
-    It deliberately does NOT reconcile the ledger and does NOT commit:
-    ledger emission is reconciled at the END of each handler, after every
-    effect field is applied, never at the status flip (Build-Order Step 3,
-    Commit 6 -- the same placement ``transfer_service.update_transfer`` uses;
-    the PATCH handler's UNLOCK order, ruling **R-BAL58**, runs the status verb
-    before its field writes and reconciles again after them); the caller owns
-    the session boundary.  **The two exceptions are the covering movement's
-    own**, and each may FLUSH: a payment a ``$0.00`` or ``purchases`` record
-    takes off the books has its legs reversed and its matches withdrawn
-    before it is deleted (``_covering._withdraw`` through
+    It deliberately writes no ledger and does NOT commit: the caller owns the
+    session boundary.  A transaction's door reconciled the stored ledger at
+    the END of its handler, never at the status flip (Build-Order Step 3,
+    Commit 6), until plan task plan#3097 deleted those reconciles; a
+    transfer's still does (``transfer_service.update_transfer``).  **The two
+    exceptions are the covering movement's own**, and each may FLUSH: a
+    payment a ``$0.00`` or ``purchases`` record takes off the books has its
+    matches withdrawn before it is deleted (``_covering._withdraw`` through
     ``movement_removal.remove_movements``, plan step
-    ``credit_card:CC-5-4a-3``), because those legs and members must go while
-    the rows they link still exist; and a re-pointed payment leaves its
+    ``credit_card:CC-5-4a-3``), because those members must go while the
+    rows they link still exist; and a re-pointed payment leaves its
     matches before its account moves (``_covering._re_point``), because the
     member's composite key would refuse the account change while it stands.
 

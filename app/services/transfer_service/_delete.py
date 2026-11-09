@@ -100,12 +100,10 @@ def delete_transfer(transfer_id, user_id, soft=False, *, press=None):
     # is deleted, so an act it was the last app row of is withdrawn and that
     # line is unexplained again.  Through the ONE act that takes a movement off
     # the books (plan step ``credit_card:CC-5-4a-3``, ruling **R-CC54**): both
-    # sides' records reversed, out of their matches and deleted, then the
-    # anchor corrections re-checked once their records are gone -- the pair's
-    # posted effect is the act's to reverse since plan task plan#2557 (ruling
-    # **plan#2564**), where a teardown reconcile here reversed it first and
-    # re-checked while both records still stood, which left a deleted Paid
-    # transfer's true-up in place -- and FLUSHED before the
+    # sides' records out of their matches and deleted (the act also reversed
+    # the pair's stored postings and re-checked the anchor corrections after,
+    # from plan task plan#2557, ruling **plan#2564**, until plan task
+    # plan#3097) -- and FLUSHED before the
     # transfer goes.  Since plan step ``balance:X-bi-6-4d-2`` the records hang
     # off the TRANSFER by side keys that are NO ACTION (ruling **R-CC64**), so
     # a transfer still holding one REFUSES its own delete, and an order that

@@ -17,12 +17,11 @@ and transfer arms settle through a status seam, so their writers dispatch to a
 service verb per row (ruling **R-FA**).  Nothing here should be generalised
 into a shape those two can share until they exist.
 
-**All three now reconcile the LEDGER, and that is plan step X-f3b** (ruling
-**R-FM**): a purchase whose posting day is recorded is a cash movement of its
-own, so stamping one posts its cash leg.  The bulk ``UPDATE`` stays -- the
-column write is still one statement -- and the postings are reconciled per
-FAMILY afterwards, which keeps the security property (the SCOPE is what decides
-which rows were stamped) and adds no second definition of "outstanding".
+**A purchase whose posting day is recorded is a cash movement of its own**
+(ruling **R-FM**, plan step X-f3b), so stamping one moves its cash onto the
+statement's day in the worked-out ledger.  The arm posted it to the stored
+ledger too, per FAMILY after the bulk ``UPDATE``, until plan task plan#3097
+deleted that with the stored ledger's transaction doors.
 
 Architecture (``CLAUDE.md``):
   - No Flask imports.  Plain data in, frozen dataclasses out.
@@ -38,7 +37,7 @@ from app.enums import SettledDayBasisEnum
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.services import posting_service, status_seam
+from app.services import status_seam
 from app.services.cash_ledger import reject_movement_before_books_open
 from app.services.reconcile_service import _rows
 from app.services.reconcile_service._offers import OutstandingPurchase
@@ -82,7 +81,7 @@ def _outstanding_scope(statement: "_rows.Statement"):
       checking envelope is a movement ON the card: it is what the CARD's
       statement shows and what checking's never will, so it is offered on the
       card's statement and not on checking's, while its envelope row stays
-      where it was filed.  ``_post_stamped_purchases`` re-scoped the STAMPED
+      where it was filed.  ``_refresh_stamped_purchases`` re-scopes the STAMPED
       set by the movement's account already; the offer and the tick now ask
       one column.
     * ``NOT covers_settlement`` -- a PURCHASE, never the row's own payment
@@ -262,43 +261,30 @@ def outstanding_purchases(
     return blocks
 
 
-def _post_stamped_purchases(
+def _refresh_stamped_purchases(
     account_id: int, entry_ids: "set[int]", anchor_id: int,
 ) -> None:
-    """Post the cash leg of every purchase the tick just stamped -- ruling **R-FM**.
+    """Re-read every purchase the tick just stamped into the session.
 
-    Plan step X-f3b's half of this writer.  A purchase carrying a recorded bank
-    posting day is a cash movement of its own, so stamping one is a LEDGER act
-    as well as a column write, exactly as the transaction arm's settle already
-    is.  This arm's writer is a bulk ``UPDATE`` and stays one; the postings are
-    reconciled per FAMILY afterwards, which is what
-    ``posting_service.sync_transaction_postings`` is for -- see the comment at
-    that call for why it is the family and not the purchase.
+    The bulk ``UPDATE`` runs with ``synchronize_session=False``, so a
+    :class:`~app.models.transaction_entry.TransactionEntry` the session
+    already holds keeps its pre-update ``settled_on``, basis and link;
+    ``populate_existing()`` refreshes exactly the rows this act stamped, so
+    every later reader in the act's session sees the day just written.  That
+    is not hypothetical: measured 2026-11-09 over the 28 test files that reach
+    this writer, 11 of 15 stamps found every stamped purchase already loaded.
+    It also POSTED each stamped family's cash leg to the stored ledger until
+    plan task plan#3097 deleted that half (ruling **R-FM**'s posting).
 
-    **The set is re-read rather than assumed**, and both halves of that matter.
-    The ``UPDATE`` ran with ``synchronize_session=False``, so any
-    :class:`~app.models.transaction_entry.TransactionEntry` already in the
-    identity map holds the pre-update values -- ``populate_existing()`` refreshes
-    exactly the rows this touched, so the posting reconcile (and the TRANSACTION
-    arm that runs after it, which reads the same purchases through their
-    parent's ``entries``) both see the day that was just written.  And the
-    filter re-derives WHICH rows landed from the database rather than from
-    *entry_ids*: an id the scope rejected was never stamped and must not be
-    posted.
-
-    ``reconciled_by_id == anchor_id`` identifies them exactly.  An entry inside
+    The filter re-derives WHICH rows landed from the database rather than from
+    *entry_ids*: an id the scope rejected was never stamped.
+    ``reconciled_by_id == anchor_id`` identifies them exactly -- an entry inside
     :func:`_outstanding_scope` carries no ``settled_on``, and
-    ``ck_transaction_entries_cleared_needs_settle_day`` makes a link without one
-    unwritable -- so no entry this call could have stamped already named this
-    statement, and every one that names it now was stamped here.
-
-    **The account clause is redundant and is written anyway.**  A purchase
-    naming this assertion is already on this account by construction --
-    ``fk_transaction_entries_reconciled_by`` is a COMPOSITE key over
-    ``(account_id, reconciled_by_id)``, so a cross-account link is unwritable --
-    but every other read in this arm re-scopes on principle rather than on an
-    argument, and a scope that rests on an argument is one refactor away from
-    resting on nothing.
+    ``ck_transaction_entries_cleared_needs_settle_day`` makes a link without
+    one unwritable, so every entry naming this statement now was stamped here.
+    The account clause is redundant by the composite key
+    ``fk_transaction_entries_reconciled_by`` and is written anyway: every read
+    in this arm re-scopes on principle rather than on an argument.
 
     Args:
         account_id: The cash account the balance was asserted for.
@@ -307,7 +293,7 @@ def _post_stamped_purchases(
         anchor_id: The governing assertion's id, just written onto the stamped
             rows.
     """
-    stamped = (
+    (
         db.session.query(TransactionEntry)
         .populate_existing()
         .filter(
@@ -317,39 +303,6 @@ def _post_stamped_purchases(
         )
         .all()
     )
-    # **The FAMILY is reconciled, not the purchase**, and that is a defect fixed
-    # rather than a tidier spelling (plan step X-au-c3, second pass).  This
-    # loop called ``posting_service.sync_purchase_postings`` per entry (a door
-    # deleted at plan step ``balance:X-bi-4a`` with zero callers left, ledger
-    # row **BAL-507**), whose own docstring stated the precondition it was
-    # written under: it was "for the write paths that change a purchase
-    # WITHOUT touching its parent's own cash leg".
-    #
-    # Widening :func:`_outstanding_scope` to admit a SETTLED parent broke that
-    # precondition, because through ``X-bi-3e`` a settled row's confirmed
-    # effect was ``settled figure - Sigma(credit) - Sigma(POSTED purchases)``
-    # (the row's own leg): recording the day SHRANK the parent's own leg by
-    # exactly what the purchase's new leg booked.  Posting the purchase alone
-    # left the parent's full leg standing beside it and the money was counted
-    # TWICE -- measured on a ``$30.00`` purchase under a
-    # settled envelope on a ``$1,000.00`` anchor, ledger ``970 -> 940`` while
-    # its own sources still said ``970``, breaking the Build-Order Step-5
-    # per-account invariant through an ordinary ``POST /accounts/<id>/reconcile``.
-    #
-    # ``sync_transaction_postings`` is the door for a caller that changed the
-    # parent, and it reconciles one leg per dated purchase in a single
-    # idempotent pass -- so it replaces the per-entry call outright rather
-    # than being added beside it.  The parent's status is not its question:
-    # a purchase posts iff it is dated under a contributing parent, which is
-    # ruling **R-FM**, and the row books nothing of its own (plan step
-    # ``balance:X-bi-4a``).
-    #
-    # Grouped so a statement that ticks four purchases of one envelope
-    # reconciles that family ONCE; ``dict`` preserves insertion order, so the
-    # pass stays deterministic.
-    families = {entry.transaction_id: entry.transaction for entry in stamped}
-    for txn in families.values():
-        posting_service.sync_transaction_postings(txn)
 
 
 def record_settled_days(
@@ -441,12 +394,12 @@ def record_settled_days(
     # Plan step X-f2-c2 then put a SECOND writer after this one in the same
     # session -- the transaction arm, which ``selectinload``s the same parents'
     # ``entries`` -- and it looked as though ``'fetch'`` had finally earned
-    # itself.  MEASURED, it has not, twice over: that arm reads an entry's
-    # ``amount`` and the relationship's truthiness and never its ``settled_on``;
-    # and a probe of the identity map at this statement counted **ZERO**
-    # ``TransactionEntry`` objects, because nothing in the POST loads one before
-    # here.  ``'fetch'`` pre-SELECTs primary keys in order to synchronise an
-    # empty set.
+    # itself.  MEASURED, it has not: that arm reads an entry's ``amount`` and
+    # the relationship's truthiness and never its ``settled_on``, and a probe
+    # of the identity map at this statement in the POST counted **ZERO**
+    # ``TransactionEntry`` objects.  A service caller can hold some (measured
+    # 2026-11-09 in the suite), which :func:`_refresh_stamped_purchases`
+    # re-reads after the statement.
     # **THREE columns, and the third says what KIND of day the first is** (plan
     # step **X-az**, finding **N-332**).  ``asserted`` is not a nicety: this
     # writer's own docstring calls the day an UPPER BOUND, and until this step
@@ -485,7 +438,7 @@ def record_settled_days(
     )
 
     if updated:
-        _post_stamped_purchases(
+        _refresh_stamped_purchases(
             account_id, entry_ids, statement.anchor.anchor_id,
         )
         log_event(

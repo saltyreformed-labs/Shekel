@@ -41,7 +41,6 @@ from app.models.category import Category
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from app.services import (
-    posting_service,
     transaction_service,
 )
 from app.services.one_off import (
@@ -695,17 +694,6 @@ def close_container(
         transaction_service.settle_from_entries(
             envelope, settle_day=close_on,
         )
-        # **``settle_from_entries`` does NOT reconcile the ledger** -- it is the
-        # envelope PRIMITIVE, and its docstring says carry-forward owes that
-        # reconcile a different moment.  Both of its other callers pair it with
-        # this line (`transaction_service._settle.settle_transaction`,
-        # `carry_forward_service._execute`), and so does this one.  It is a
-        # no-op on today's arithmetic -- `create_entry` already reconciled the
-        # family while the row was Projected, and a close whose every purchase
-        # is posted targets `0.00` -- but a contract kept by a cancellation
-        # nobody asserts is finding **N-318**'s shape, one module over.  Found
-        # by adversarial security review 2026-08-19.
-        posting_service.sync_transaction_postings(envelope)
 
 
 @dataclass(frozen=True)

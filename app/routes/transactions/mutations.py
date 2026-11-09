@@ -11,12 +11,11 @@ re-expressed a request on a shadow row as a transfer update) are gone, and a
 request naming a shadow row is a 404 at the ownership helper.
 
 The edit and status concerns share this one module deliberately: their
-paths are near-identical parallel code (the apply +
-posting reconcile + commit body, the ``StaleDataError`` / ``IntegrityError``
-tails, the ``RenderTarget`` response handling).  Splitting those across
-modules would re-surface the intra-file duplication the monolith hid (R0801
-is cross-file only); co-locating them keeps that intentional parallel code in
-one file.
+paths are near-identical parallel code (the apply + commit body, the
+``StaleDataError`` / ``IntegrityError`` tails, the ``RenderTarget`` response
+handling).  Splitting those across modules would re-surface the intra-file
+duplication the monolith hid (R0801 is cross-file only); co-locating them
+keeps that intentional parallel code in one file.
 """
 
 import logging
@@ -33,7 +32,6 @@ from app.extensions import db
 from app.models.ref import Status
 from app.services import (
     credit_workflow,
-    posting_service,
     state_machine,
     status_seam,
     transaction_service,
@@ -82,69 +80,15 @@ from app.utils.error_fragments import flatten_schema_errors
 logger = logging.getLogger(__name__)
 
 
-# The PATCH fields whose change can alter a transaction's posted double-entry
-# ledger effect, so a change to any triggers a posting reconcile (Build-Order
-# Step 3, the transaction analog of ``transfer_service._POSTING_RELEVANT_FIELDS``).
-# ``status_id`` flips the settled/unsettled target; ``estimated_amount`` is the
-# row's PLAN and ``settled_amount`` what it RECORDED, and the status decides
-# which one is the magnitude posted (``row_valuation.settled_figure``, plan step
-# X-au-c3 -- it was ``COALESCE(actual, estimated)``); ``category_id``
-# moves which counter (category) ledger account the expense/income leg books
-# into.
-#
-# ``settled_on`` IS here, and its inclusion is ruling **R-ED**'s second half:
-# since plan step E1a a settle's civil day IS the ``entry_date`` its postings
-# are filed under, so moving the day moves the day every posting counts from.
-# ``sync_transaction_postings`` reconciles per ``(period, entry_date)``, so the
-# entry at the OLD day reverses at that day and the effect re-posts at the new
-# one (finding **N-13**), and its tail re-derives the account's anchor
-# corrections that the moved delta staled.  Without it the rendered balance
-# would move while the posted ledger kept the stale date -- the books silently
-# out of step with the screen, on the one surface this arc exists to keep in
-# step.
-#
-#
-# ``pay_period_id`` IS here since plan step X-f3b (ruling **R-FM**), and the
-# reason it was not is the reason it must be: the omission was justified by "a
-# settled row's period cannot move anyway (the finalised-edit lock blocks
-# editing it unless the same PATCH reverts to Projected)", which was sound
-# while only a SETTLED row held postings.  A PROJECTED envelope now holds one
-# per purchase whose bank posting day is recorded, and a posting carries the
-# BUDGET column its source row is attributed to -- so moving such a row without
-# a reconcile leaves its purchases' legs filed under the period it left, which
-# is the R2 attribution rule broken on the one row type that can now reach it.
-# The reconcile keys by ``(period, entry date)``, so the move reverses the old
-# key and posts the new one in one balanced pair, exactly as a revert-and-move
-# already does for a settled row.
-#
-# The other PATCH fields (``notes`` / ``name`` / ``due_date`` /
-# ``is_envelope`` / the visibility flags) move none of
-# those, so a metadata-only edit raises no reconcile.  The reconcile is
-# idempotent, so listing a field that did not move the effect is a harmless
-# no-op; this set is the cheap pre-filter that avoids a ledger round-trip on a
-# pure metadata edit.
-#
-# **A PLACED row's ``category_id`` never reaches this filter** (plan step
-# ``balance:X-bi-7b``): it is the DEFINITION's, so ``_apply_field_updates``
-# takes it out of ``data`` and lands it there, and the propagation that
-# brings the row into line reconciles the row's postings itself.  What that
-# spares is narrow -- the card posts ``status_id`` on every save, so the
-# status arm reconciles the row again anyway, idempotently -- but the filter
-# should not name a key this door no longer writes to the row.
-_POSTING_RELEVANT_FIELDS = frozenset({
-    "status_id", "estimated_amount", "settled_amount", "category_id",
-    "settled_on", "pay_period_id",
-})
-
 def _apply_regular_update(txn, txn_id, data, *, target_period, posted):
     """Apply a PATCH update to a transaction (the inline edit save).
 
     Runs the three pre-mutation gates, writes the submitted fields
     (:func:`_apply_field_updates`) and applies the requested status through
     ``transaction_service.apply_requested_status`` -- the status FIRST where
-    it lifts a finalised row's lock, the fields first otherwise, and the
-    ledger reconciled after the fields either way (*unlock, edit, lock*,
-    ruling **R-BAL58**; the comment at ``unlocks`` below) -- deletes the auto-generated
+    it lifts a finalised row's lock, the fields first otherwise (*unlock,
+    edit, lock*, ruling **R-BAL58**; the comment at ``unlocks`` below) --
+    deletes the auto-generated
     payback when the change reverts a Credit row (mirroring ``unmark_credit``
     via the shared ``credit_workflow.delete_payback_on_credit_revert``), and
     commits under the optimistic lock.  A ``pay_period_id`` change relocates the
@@ -270,8 +214,8 @@ def _apply_regular_update(txn, txn_id, data, *, target_period, posted):
     # re-submitting the day the row already carried.
     #
     # **This route does NOT decide what applying a status MEANS** --
-    # ``transaction_service.apply_requested_status`` does, and it reconciles the
-    # ledger as part of the act.  Calling the seam here instead is finding
+    # ``transaction_service.apply_requested_status`` does.  Calling the seam
+    # here instead is finding
     # **N-219**: the seam is the MECHANICS primitive, so a door that reaches for
     # it settles a row without ever asking what the row is worth.
     #
@@ -307,39 +251,36 @@ def _apply_regular_update(txn, txn_id, data, *, target_period, posted):
     # definition said Rent, the row still said Groceries, and the next settle
     # posted `$50.00` to Groceries -- every one-off's shape after the cutover.
     #
-    # **The ledger is reconciled LAST in BOTH orders.**  The status verb
-    # reconciles at the transition (``apply_requested_status``, so no door can
-    # forget it); in the unlock order that reconcile reads the PRE-edit row,
-    # and an edit that moves a posting-relevant field afterwards -- the period
-    # or the category of an envelope whose purchases are posted -- re-files
-    # nothing by itself: the purchase legs stayed under the old paycheck
-    # (found by 7c-1's adversarial review, measured on a settled envelope
-    # reverted and moved in one PATCH).  So the unlock order owes the row the
-    # same end-of-handler reconcile the no-status path has always made, which
-    # is the discipline ``transaction_service._door`` states: reconciled after
-    # the caller's own field writes, reading the final amount and category.
+    # **The unlock order owed the row a second ledger reconcile until plan
+    # task plan#3097.**  The status verb reconciled the stored ledger at the
+    # transition, which in the unlock order read the PRE-edit row, so an edit
+    # moving the period or the category of an envelope whose purchases were
+    # posted re-filed nothing (found by 7c-1's adversarial review), and this
+    # handler reconciled again after its field writes.  That task deleted both
+    # reconciles with the stored ledger's transaction doors; the worked-out
+    # ledger reads the final row whichever order the act ran in.
     unlocks = "status_id" in data and state_machine.lock_lifts(
         db.session.get(Status, txn.status_id),
         db.session.get(Status, data["status_id"]),
     )
 
-    # **The three excepts cover the WHOLE tail, and they were split by the order
-    # the phases were written in rather than by a decision** -- the same
-    # unification :func:`_mark_done_regular` records, forced here by the same
-    # cause: the status verb now reconciles the ledger, so one call raises both
-    # the designed ``ValidationError`` (a 400) and the concurrency
-    # ``StaleDataError`` (a 409) and cannot be split across two nets.  Nothing
-    # moves the other way: ``PostingError`` is a SIBLING of ``ValidationError``
-    # under ``ShekelError`` rather than a subclass, so a broken ledger invariant
-    # still fails loud instead of rendering as a designed refusal, and
-    # ``credit_workflow.delete_payback_on_credit_revert`` raises neither (its
-    # three ``ValidationError`` siblings are in ``mark_as_credit`` /
+    # **The three excepts cover the WHOLE tail, commit included, and they were
+    # split by the order the phases were written in rather than by a
+    # decision** -- the same unification :func:`_mark_done_regular` records.
+    # The status verb raises the designed ``ValidationError`` (a 400), and the
+    # field write's autoflush (below) and the commit raise the concurrency
+    # ``StaleDataError`` (a 409) and an ``IntegrityError``.  The verb's ledger
+    # reconcile flushed inside it too until plan task plan#3097 deleted it;
+    # measured over the whole suite at that task, a PATCH whose reconcile had
+    # been its first flush flushes next at the commit below, inside the net.
+    # ``credit_workflow.delete_payback_on_credit_revert`` raises no
+    # ``ValidationError`` (its three are in ``mark_as_credit`` /
     # ``unmark_credit``, which this path does not call).
     try:
         # ONE press for the save (R-CC135); a field refusal abandons it.
         with Press(posted.shown) as one_save:
             if unlocks:
-                _apply_status_or_postings(txn, data, new_status_id, one_save)
+                _apply_status(txn, data, new_status_id, one_save)
             # Write the submitted fields, flag a template row as overridden, and
             # refuse an amount the settle would discard -- three acts whose ORDER is
             # load-bearing and is documented at the helper.  Extracted so this
@@ -366,9 +307,7 @@ def _apply_regular_update(txn, txn_id, data, *, target_period, posted):
                 one_save.abandon()
                 return refusal
             if not unlocks:
-                _apply_status_or_postings(txn, data, new_status_id, one_save)
-            elif _POSTING_RELEVANT_FIELDS & data.keys():
-                posting_service.sync_transaction_postings(txn)
+                _apply_status(txn, data, new_status_id, one_save)
             if reverts_credit:
                 # Inside the StaleDataError net deliberately: the payback
                 # lookup autoflushes the already-dirtied row (the
@@ -412,17 +351,17 @@ def _apply_regular_update(txn, txn_id, data, *, target_period, posted):
     }
 
 
-def _apply_status_or_postings(txn, data, new_status_id, press: Press):
-    """Apply the status the payload asks for, else reconcile the edited row.
+def _apply_status(txn, data, new_status_id, press: Press):
+    """Apply the status the payload asks for, when it asks for one.
 
     The status half of :func:`_apply_regular_update`, in one place so the
     UNLOCK order there can run it before the field writes and the ordinary
-    order after them.  A payload naming a status, a settle day or a settled
-    figure goes through ``transaction_service.apply_requested_status`` (the
-    route layer's one status entry point, plan step X-ap), which reconciles
-    the ledger itself; one naming none of them but a posting-relevant field
-    owes the row its own reconcile.  Every comment below is the arm's own,
-    moved with it.
+    order after them.  A payload naming a status, a settle day, a settled
+    figure or a tender goes through ``transaction_service.apply_requested_status``
+    (the route layer's one status entry point, plan step X-ap); one naming
+    none of them changes no status.  It reconciled the edited row's stored
+    ledger in that case too until plan task plan#3097 deleted the arm.  Every
+    comment below is the arm's own, moved with it.
 
     Args:
         txn: The Transaction being edited.
@@ -477,33 +416,6 @@ def _apply_status_or_postings(txn, data, new_status_id, press: Press):
             ),
             press=press,
         )
-    elif _POSTING_RELEVANT_FIELDS & data.keys():
-        # Posting ledger reconcile (Build-Order Step 3) for the edit that
-        # moves a posted effect WITHOUT touching the status: a re-category,
-        # a corrected amount.  The status arm above owns the reconcile for
-        # every other case, which is what keeps this request to exactly ONE
-        # ledger round-trip -- ``status_id`` and ``settled_on`` are both in
-        # ``_POSTING_RELEVANT_FIELDS``, so an ungated call here would be a
-        # second reconcile of the same row on every status change.  (The
-        # UNLOCK order is the one request that makes two, and the caller
-        # says why.)  Placed
-        # LAST -- NOT at the field write -- so it reads the FINAL amount and
-        # category, the exact discipline
-        # ``transfer_service.update_transfer`` documents (the 2.8b HIGH: a
-        # settle-and-recategorize PATCH applies category_id after status_id,
-        # so posting at the flip would book the stale category).  The
-        # reconcile reads the OLD category's posted legs back from the
-        # ledger by transaction_id, so a revert-and-recategorize reverses
-        # the old category cleanly whichever order the door ran it in --
-        # before the field writes since the UNLOCK order (plan step
-        # ``balance:X-bi-7c``), after them until then, when
-        # ``txn.category_id`` already pointed at the new one (the 2.8
-        # CRITICAL).  Gated so a notes-only
-        # edit posts nothing.  Inside the StaleDataError net for the same
-        # reason as the caller's payback delete: the reconcile's flush
-        # autoflushes the version-pinned row, so a concurrent commit
-        # surfaces here as a 409, not a 500.
-        posting_service.sync_transaction_postings(txn)
 
 
 @transactions_bp.route("/transactions/<int:txn_id>", methods=["PATCH"])
@@ -617,8 +529,8 @@ def delete_transaction(txn_id):
     """Remove a transaction from the books, soft or hard.
 
     **The HTTP shape only.**  What a delete MEANS -- which matches it
-    withdraws, which payback it takes down, which postings it reverses and
-    whether the row leaves the table at all -- is
+    withdraws, which payback it takes down and whether the row
+    leaves the table at all -- is
     :func:`transaction_service.delete_transaction`, the verb this route and
     ``statement_match``'s undo now share (plan step ``bank_import:X-gb``).
     The sequence was spelled here and again there, and each of its four steps
@@ -708,22 +620,12 @@ def _mark_done_regular(txn, submitted, tender_account_id, posted, target):
 
     **It fixes no live defect, and the first draft of this paragraph claimed it
     did.**  Reconstructing the pre-change route from git and running the new
-    control against it shows the same 409 both ways.  The reason is not visible
-    by reading the phases: the FIRST flush of a settle is
-    ``txn.status.is_settled``, the argument to the posting reconcile, because
-    ``apply_status_change`` both dirties the row and expires ``status``, so
-    reading it back refreshes and autoflushes.  That expression is inside the
-    net under either topology, and everything before it reads columns or
-    already-loaded relationships.  Recorded at
+    control against it shows the same 409 both ways: the settle's first flush
+    sat inside the net under either topology.  That flush was the verb's
+    ledger reconcile until plan task plan#3097 deleted it; measured over the
+    whole suite at that task, a settle whose reconcile had been its first
+    flush flushes next at the commit below, inside the net too.  Recorded at
     ``TestTransactionStaleFormPrevention.test_mark_done_catches_a_stale_settle_as_409``.
-
-    Nothing moves the other way either: the reconcile raises ``PostingError``,
-    a SIBLING of ``ValidationError`` under ``ShekelError`` rather than a
-    subclass, so a broken ledger invariant still fails loud instead of
-    rendering as a designed refusal -- and no module in the reconcile's import
-    closure raises ``ValidationError`` at all (measured across
-    ``posting_service``, ``posting_reads``, ``_posting_write``,
-    ``ledger_account_service`` and ``user_write_lock``).
 
     Args:
         txn: The Transaction being settled.
@@ -967,23 +869,17 @@ def cancel_transaction(txn_id):
     cancelled_id = ref_cache.status_id(StatusEnum.CANCELLED)
 
     # Route the cancel through the ONE status verb (state-machine check +
-    # status_id + settled_on + the ledger reconcile).  Cancelled is reachable
+    # status_id + settled_on).  Cancelled is reachable
     # only from Projected (or the Cancelled identity edge for idempotent
     # re-submits); a direct done -> cancelled or settled -> cancelled would
     # erase the paid/archived audit trail and raises ValidationError -> 400.
     # Cancelled is non-settled, so the seam leaves settled_on clear.  Audit
     # reference: F-047 / F-161 follow-up to commit C-21.
     #
-    # The reconcile inside the verb is what this handler used to run itself:
-    # reconcile to the new status's settled sense as the final step, mirroring
-    # the transfer pattern (reconcile on every status change).  Cancelled is
-    # non-settled and is reachable only from Projected, so it is an idempotent
-    # no-op today (a Projected source has no postings to reverse), but it keeps
-    # the "every status change reconciles last" invariant complete and
-    # self-heals if the state machine ever admits cancelling a settled row.
-    # Inside the StaleDataError net: the reconcile's flush autoflushes the
-    # version-pinned row, so a concurrent commit surfaces here as a 409, not a
-    # 500.
+    # Every flush of the act, the commit's included, is inside the
+    # StaleDataError net, so a concurrent commit surfaces here as a 409, not a
+    # 500.  The verb's ledger reconcile flushed first until plan task plan#3097
+    # deleted it.
     try:
         transaction_service.apply_requested_status(txn, cancelled_id)
         db.session.commit()

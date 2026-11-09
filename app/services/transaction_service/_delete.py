@@ -34,26 +34,20 @@ door's own precondition, asked before the sequence starts.
    dialog sends back the purchases it named, and a row holding others is
    refused before anything is written, its popover redrawn under ruling
    **R-CC128**.
-1. **Reverse the postings**, while ``journal_entries.transaction_entry_id``
-   still links them to their movements.  It is ``ON DELETE SET NULL`` and the
-   movements are deleted next: reversing afterwards is impossible and the
-   original legs would be stranded on their ledger accounts with nothing to
-   offset them.  (The row's own ``journal_entries.transaction_id`` link went
-   with plan step ``balance:X-bi-6-5``'s second leaf, card plan#1845.)
-   **This door reverses nothing itself since plan task plan#2557** (ruling
-   **plan#2564**): the one removal act of step 2 reverses every movement it
-   is handed, the row's and its live CC-payback chain's, then deletes them and
-   re-checks the anchor corrections ONCE, after the records are gone.  Until
-   then this door reversed each row's family first, one anchor re-check per
-   row, and that re-check walked records still holding every movement the
-   act was about to delete.  The row is reversed on the soft arm too: a
-   tombstone contributes to no balance.
+1. **The postings were reversed here until plan task plan#3097**, while
+   ``journal_entries.transaction_entry_id`` still linked them to their
+   movements (``ON DELETE SET NULL``, the movements deleted next).  From plan
+   task plan#2557 (ruling **plan#2564**) the one removal act of step 2 did it
+   for every movement it was handed, then re-checked the anchor corrections
+   once the records were gone; plan task plan#3097 deleted the reversal and
+   the re-check with the stored ledger's transaction doors, so no step here
+   writes a ledger.  The worked-out ledger reads the records, and a movement
+   this act deletes is gone from it.
 2. **Take the movements off the books through the ONE act**
    (:mod:`app.services.movement_removal`, plan step ``credit_card:CC-5-4a-3``,
    ruling **R-CC54**) -- the row's purchases and payment AND those of its live
    CC-payback chain, because all of them go in this one commit.  The act
-   reverses them (step 1), takes them out of every match, withdrawing one left
-   naming no app row
+   takes them out of every match, withdrawing one left naming no app row
    (developer ruling 2026-08-25): a match asserts that a bank line IS these
    rows, and when the last of them stops existing the line is unexplained
    again.  Over the WHOLE set in one call, so the dialog's figure and the
@@ -367,8 +361,7 @@ def delete_transaction(
 
     Args:
         txn: The row to delete.  Must still be flushed (``txn.id`` set) so its
-            movements can be found for the reversal entries to link and the
-            match members can be read back.
+            movements' match members can be read back.
         owner_id: The user the caller proved owns it, recorded on the events
             AND reconciled against the row (step 0 of the module docstring's
             order, finding **N-373**).
@@ -411,8 +404,8 @@ def delete_transaction(
             or a CC payback.  It fires BEFORE anything is written, so a refused
             delete leaves the database exactly as it was.  Also when the
             lines the press frees differ from what its page named (ruling **R-CC127**):
-            that one is raised after the reversal has flushed, and the
-            route's rollback undoes the press.  And as
+            that one is raised inside the removal act, and the route's
+            rollback undoes whatever the save had written before it.  And as
             :class:`~app.exceptions.PageOutOfDate` when the row holds other
             purchases than *purchases_named* (ruling **R-CC131**), before
             anything is written.
@@ -438,9 +431,7 @@ def delete_transaction(
     # session has already deleted is not a read this door may rely on.
     definition = txn.template if last_row_of_definition else None
     # Over every row, on both arms (rulings R-CC75, R-CC84): a tombstone keeps
-    # its place in the table and nothing it held, and counts as gone.  The act
-    # reverses each movement first and re-checks the anchors after deleting
-    # them (ruling plan#2564; the module docstring's step 1).
+    # its place in the table and nothing it held, and counts as gone.
     withdrawn = movement_removal.remove_movements(
         [movement for row in rows for movement in row.entries],
         owner_id, because=match_withdrawal.LEFT_THE_BOOKS, press=press,

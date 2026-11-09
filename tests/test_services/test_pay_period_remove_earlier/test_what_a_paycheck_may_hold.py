@@ -20,7 +20,6 @@ from app.services import (
     account_posting_service,
     loan_posting_service,
     pay_period_admin,
-    posting_service,
     status_seam,
     transfer_service,
 )
@@ -242,12 +241,10 @@ class TestWhatAPaycheckMayHold:
             ).one()
             settle_cash_row(row, settled_on=head[1].start_date)
             db.session.commit()
-            # Set back as the route does it: the seam, then the posting
-            # writer, which reverses the leg in the same paycheck and day.
+            # Set back through the seam, as the route's status verb does it.
             status_seam.apply_status_change(
                 row, ref_cache.status_id(StatusEnum.PROJECTED),
             )
-            posting_service.sync_transaction_postings(row)
             db.session.commit()
             assert row.entries and not row.purchases, (
                 "the revert must leave the covering mark and no purchase"

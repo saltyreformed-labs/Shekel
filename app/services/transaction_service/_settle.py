@@ -8,11 +8,11 @@ the predicate that tells a human's correction from the panel's own prefill, and
 the envelope primitive underneath it all.
 
 **Two settle entry points, and the difference is deliberate.**
-:func:`settle_transaction` is what settling a row MEANS -- amount and status and
-ledger together.  :func:`settle_from_entries` is the envelope PRIMITIVE
-underneath it, and it stays public for ``carry_forward_service``, which settles
-a BATCH and must reconcile the ledger after its ``no_autoflush`` block, so it
-owns that act itself.
+:func:`settle_transaction` is what settling a row MEANS -- amount and status
+together.  :func:`settle_from_entries` is the envelope PRIMITIVE underneath it,
+and it stays public for ``carry_forward_service``, which settles a BATCH whose
+unspent budget it has already rolled forward, so an empty envelope settles at
+``$0.00`` there and at its estimate through the verb (ruling **R-FJ**).
 
 **The rule this module holds is that a door states an INTENT and the service
 decides what it costs.**  Every public function here is one of those decisions,
@@ -28,8 +28,8 @@ Architecture:
   - Does NOT flush or commit -- the caller owns the transaction
     boundary so the helper can safely participate in larger atomic
     operations (e.g. the carry-forward batch in Phase 4).  The ledger
-    reconcile :func:`settle_transaction` runs FLUSHES; it still does not
-    commit.
+    reconcile :func:`settle_transaction` ran flushed until plan task
+    plan#3097 deleted it.
 """
 
 import logging
@@ -38,7 +38,6 @@ from decimal import Decimal
 
 from app.exceptions import ValidationError
 from app.models.transaction import Transaction
-from app.services import posting_service
 from app.services.cash_ledger import (
     AmountBasis,
     derived_amount_basis,
@@ -377,7 +376,7 @@ def settle_transaction(
     atomicity and no channel for a statement date.  So the rule left the route
     and both doors call it.
 
-    Three acts, in this order and the order matters:
+    Two acts, in this order and the order matters:
 
     1. **The amount, which is what the row is worth right now** (ruling
        **R-FE**, plan step X-aq).  An envelope-tracked row WITH entries settles
@@ -418,23 +417,20 @@ def settle_transaction(
        ``transaction_entries`` row carrying the figure, who wrote it, the day
        and the link, so a bill's money is recorded the way an envelope's
        purchases already are (``status_seam._covering``).  Balance-neutral by
-       ruling **R-FM**'s identity, which is why act 3 needs no new arm: the
-       ledger reconcile walks ``txn.entries`` and posts the family at once.
-    3. **The ledger**, reconciled LAST, so it reads the final amount rather
-       than the estimate -- the discipline ``transfer_service.update_transfer``
-       documents and the reason the reconcile is not at the status flip.
+       ruling **R-FM**'s identity.
 
-    **Why act 3 is inside this verb and not left to the caller.**  Every
-    settle door must reconcile, and a door that forgets posts nothing while
-    reporting success -- an argument a caller can get wrong is a defect, not a
-    contract (Section 8).  ``carry_forward_service`` genuinely cannot use this
-    verb: it settles a BATCH and must reconcile after its ``no_autoflush``
-    block so ``_emit_balanced_entry``'s flush lands on the batch's index-safe
-    final state, so it keeps calling :func:`settle_from_entries` directly and
-    owns its own reconcile.  That is the layering: the primitive for a batch,
-    this verb for a settle, and since plan step X-ap the batch is the ONLY
-    non-caller -- the full-edit Status dropdown was the other one, and it was a
-    defect rather than a layering choice.
+    **A third act reconciled the stored ledger until plan task plan#3097**,
+    LAST, so it read the final amount: the task deleted it with the stored
+    ledger's transaction doors (ruling plan#2516, option A), which also closes
+    finding **N-221** -- a reconcile tick looped this verb, so it reconciled
+    the ledger once per ticked row.  ``carry_forward_service`` still calls
+    :func:`settle_from_entries` directly rather than this verb, because it
+    settles a BATCH whose unspent budget it has already rolled forward (ruling
+    **R-FJ**); its own reconcile after the batch went with this one.  That is
+    the layering: the primitive for a batch, this verb for a settle, and since
+    plan step X-ap the batch is the ONLY non-caller -- the full-edit Status
+    dropdown was the other one, and it was a defect rather than a layering
+    choice.
 
     **It takes a settle DAY since plan step X-f2-c2's money commit**, which is
     the caller ruling **R-EC** was waiting for: the reconcile tick knows the day
@@ -545,9 +541,6 @@ def settle_transaction(
         NotFoundError: When *tender_account_id* names no account of the ROW's
             owner (the security response rule: one answer for "not found"
             and "not yours").  A 404 at the route.
-        PostingError: From act 3, on a broken ledger invariant.  Deliberately
-            NOT a sibling of ``ValidationError`` -- it must fail loud rather
-            than render as a designed refusal.
     """
     # Checked FIRST and before any mutation, so a refused call leaves the row
     # untouched -- the ordering ``status_seam.apply_status_change`` uses for
@@ -704,7 +697,6 @@ def settle_transaction(
             press=press,
         )
 
-    posting_service.sync_transaction_postings(txn)
     return correction is not None
 
 
@@ -721,8 +713,9 @@ def settle_from_entries(
     verb, which chooses this branch when the row holds purchases (ruling
     **R-BAL78**: whatever its definition's flag says), while
     ``carry_forward_service._execute`` calls this directly
-    because it settles a batch and owes its ledger reconcile a different
-    moment (see ``docs/carry-forward-aftermath-design.md`` Option F).
+    because it settles a batch whose leftover it has already rolled forward
+    (see ``docs/carry-forward-aftermath-design.md`` Option F, and ruling
+    **R-FJ** below).
 
     **An EMPTY entry list settles at ``Decimal("0")`` here and at the row's own
     estimate through :func:`settle_transaction`, and that difference is RULED

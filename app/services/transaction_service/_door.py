@@ -3,7 +3,7 @@ Shekel Budget App -- Transaction Service: what a DOOR's requested status means
 
 The route layer's ONE status entry point.  A door states the status the USER
 asked for; :func:`apply_requested_status` decides what applying it means --
-dispatching a settle to the verb, and reconciling the posted ledger either way.
+dispatching a settle to the verb, and every other change to the status seam.
 What a REVERT undoes is the status seam's, in one statement with the status
 itself (plan step X-au-c3): leaving the settled band releases the whole
 settlement record.
@@ -20,7 +20,6 @@ Flask-isolated: plain data and ORM rows in, mutations applied in place, no
 from dataclasses import dataclass, replace
 
 from app.exceptions import ValidationError
-from app.services import posting_service
 from app.services.match_press import Press
 from app.models.transaction import Transaction
 from app.services.movement_account import admitted_movement_account_id
@@ -97,7 +96,7 @@ def apply_requested_status(
     stated: StatedRecord = NOTHING_STATED,
     press: Press | None = None,
 ) -> None:
-    """Apply the status a DOOR requested, and reconcile the ledger to it.
+    """Apply the status a DOOR requested: a settle through the verb, else the seam.
 
     **The route layer's ONE status entry point, and the reason it exists is
     that a route was deciding what a status change MEANS.**  The transaction
@@ -122,21 +121,11 @@ def apply_requested_status(
     a FOURTH transaction settle door cannot be opened by reaching for the obvious
     primitive, which is how the third one was.
 
-    **The ledger reconcile is here rather than at each door** for the reason
-    :func:`._settle.settle_transaction` states for its own: every status change moves
-    the row's posted effect (a settle posts it, a cancel reverses it), and a
-    door that forgets posts nothing while reporting success.  It is reconciled
-    LAST, after the caller's own field writes, so it reads the final amount and
-    category rather than the pre-edit ones -- the discipline
-    ``transfer_service.update_transfer`` documents.  A caller that edits
-    posting-relevant fields WITHOUT changing the status still owes its own
-    reconcile; there is no status change for this function to hang one on.
-    So does a caller that runs this BEFORE its field writes -- the PATCH
-    handler's unlock order (ruling **R-BAL58**: a transition that lifts a
-    finalised row's lock is applied first, so the edits land on an unlocked
-    row) -- because the reconcile here read the pre-edit row, and a moved
-    period or category re-files an envelope's purchase legs only through a
-    reconcile that reads the final one.
+    **It reconciled the stored ledger too, until plan task plan#3097** deleted
+    that reconcile with the stored ledger's transaction doors (ruling
+    plan#2516, option A).  The worked-out ledger reads the records the seam
+    writes, so nothing a door does after this call, nor the order it does it
+    in, has a ledger to keep in step.
 
     Does NOT flush or commit -- the caller owns the session boundary.
 
@@ -169,16 +158,11 @@ def apply_requested_status(
             refusals, or the tender gate.  A 400 at the route.
         NotFoundError: When *stated*'s tender names no account of the row's
             owner.  A 404 at the route.
-        PostingError: From the reconcile, on a broken ledger invariant.
-            Deliberately NOT a sibling of ``ValidationError`` -- it must fail
-            loud rather than render as a designed refusal.
     """
     # THE DISPATCH, and it is the whole of finding **N-219**'s fix.  Moving a
     # row INTO the settled band is a SETTLE, which decides an amount before it
     # decides a status; every other status change is the mechanics plus
-    # whatever the caller stated about what moved.  The verb reconciles the
-    # ledger itself, so this arm returns rather than falling through to a
-    # second reconcile of the same row.
+    # whatever the caller stated about what moved.
     if enters_settled_band(txn, new_status_id):
         reject_mismatched_settled_status(txn, new_status_id)
         settle_transaction(
@@ -209,9 +193,7 @@ def apply_requested_status(
     # The cause was treating a CORRECTION and a STATUS CHANGE as alternatives.
     # They are independent facts, and the seam already takes both in one call
     # -- which is what makes "a settled row states what moved" its property
-    # rather than a convention each door keeps.  Composing them also collapses
-    # what used to be two ledger reconciles into the one this function always
-    # promised.
+    # rather than a convention each door keeps.
     #
     # **A figure on a row STAYING in the settled band is a CORRECTION to what
     # it recorded**, and it is applied rather than refused (developer ruling,
@@ -236,7 +218,6 @@ def apply_requested_status(
         txn, new_status_id, settle_day=settle_day, settlement=settlement,
         press=press,
     )
-    posting_service.sync_transaction_postings(txn)
 
 
 def _correction_for_status(

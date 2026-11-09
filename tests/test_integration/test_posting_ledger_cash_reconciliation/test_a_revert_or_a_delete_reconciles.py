@@ -15,7 +15,7 @@ from app.extensions import db as _db
 from app.models.transaction import Transaction
 from app.models.account import AccountAnchorHistory
 from app.models.transaction_entry import TransactionEntry
-from app.services import posting_service, status_seam, transaction_service
+from app.services import status_seam, transaction_service
 from app.services.ledger_lines import category_key, linked_key
 from app.utils.balance_predicates import balance_excluded_status_ids
 from tests._ledger_reads import (
@@ -247,12 +247,11 @@ class TestRevertedTransactionReconcilesAtZero:
                 _db.session, groceries_counter, scenario_id,
             ) == Decimal("50.00")
 
-            # Revert to Projected via the real primitives (seam, then reconcile).
+            # Revert to Projected through the seam.
             status_seam.apply_status_change(
                 txn, ref_cache.status_id(StatusEnum.PROJECTED),
                 settlement=settlement_if_settling(txn, ref_cache.status_id(StatusEnum.PROJECTED)),
             )
-            posting_service.sync_transaction_postings(txn)
             db.session.commit()
 
             assert account_net(
@@ -336,7 +335,6 @@ class TestAPostedPurchaseReconcilesUnderAnUnsettledParent:
             )
             _db.session.add(entry)
             _db.session.flush()
-            posting_service.sync_transaction_postings(txn)
             db.session.commit()
 
             groceries_counter = category_key(
@@ -401,7 +399,6 @@ class TestACancelledEnvelopesDatedPurchaseReconcilesAtZero:
             )
             _db.session.add(entry)
             _db.session.flush()
-            posting_service.sync_transaction_postings(txn)
             db.session.commit()
             assert account_net(
                 _db.session, checking.id, scenario_id,
@@ -413,7 +410,6 @@ class TestACancelledEnvelopesDatedPurchaseReconcilesAtZero:
                 txn, cancelled_id,
                 settlement=settlement_if_settling(txn, cancelled_id),
             )
-            posting_service.sync_transaction_postings(txn)
             db.session.commit()
             db.session.expire_all()
             txn = db.session.get(Transaction, txn.id)

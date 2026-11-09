@@ -63,8 +63,8 @@ side's endpoint by the side key, so a transfer settle names no tender and a
 new record books on the endpoint.
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): no Flask imports;
-mutates in place and never commits; the removal act's posting reversal
-FLUSHES, and the caller owns the session boundary.
+mutates in place and never commits; the removal act's match step FLUSHES when
+a match named a movement, and the caller owns the session boundary.
 """
 
 from __future__ import annotations
@@ -141,8 +141,8 @@ def sync_side_records(
     from-side's day onto a to-side whose books open later left the new
     from-side record staged when the to-side was refused).  The removal act
     a ``$0.00`` close runs is the exception: it refuses a line the press did
-    not name after reversing what the records posted, though before taking
-    either off, and the transfer's ``0.00`` is written after it.
+    not name before taking either record off, and the transfer's ``0.00`` is
+    written after it.
 
     Args:
         legs: The transfer's ``(expense, income)`` legs

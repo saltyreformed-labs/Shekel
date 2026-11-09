@@ -4,7 +4,9 @@ Plan step ``credit_card:CC-5-4a-3``, ruling **R-CC54** (developer
 2026-09-22), verbatim in its first part: *"ONE act takes a payment or purchase
 off the books: it reverses its ledger, takes it out of any match (withdrawing
 a match left with nothing and saying which bank line that freed), then deletes
-it.  Every door calls it, including the popover's two paths."*
+it.  Every door calls it, including the popover's two paths."*  Its ledger
+half went at plan task plan#3097 (ruling plan#2516, option A: the saves stop
+writing the stored ledger), so the act is the match step and the delete.
 
 **Why it is one act.**  A movement -- a purchase, or the covering movement a
 settle wrote (ruling **R-BAL80**: the movement IS the money) -- was taken off
@@ -20,27 +22,19 @@ that line, and matching it again raised on
 remembering it is a rule the next door forgets; one act every door calls is
 not.
 
-**The order, and why each step is where it is** -- the ruling's own: reverse,
-out of every match, delete; and then, by ruling **plan#2564** (developer
-2026-11-01), re-check the anchors.
+**The order, and why each step is where it is** -- the ruling's own: out of
+every match, then delete.  It reversed the stored ledger first, and by ruling
+**plan#2564** (developer 2026-11-01) re-checked the anchor corrections once
+after the deletes, until plan task plan#3097 deleted both: the row deletes,
+the payback teardowns and the transfer delete hand this act every movement
+their rows hold, and the worked-out ledger reads the records, so a movement
+deleted here is gone from it with nothing to reverse.
 
-1. **Reverse its ledger** (``posting_service.reverse_leaving_movements``),
-   while ``journal_entries.transaction_entry_id`` still links the legs -- it
-   is ``ON DELETE SET NULL``, so reversing afterwards would strand them.
-   **Every movement leaving is reversed HERE, a row's and a transfer's
-   included** (ruling **plan#2564**): the row deletes, the payback
-   teardowns and the transfer delete hand this act every movement their rows
-   hold, and reverse nothing themselves.  Until plan task plan#2557 each
-   reversed its own family first, ONE anchor re-check per row, so this
-   found nothing left there -- and that re-check walked records that still
-   held every movement it was about to delete.
-2. **Out of every match** (:func:`app.services.match_withdrawal.take_out_of_matches`),
+1. **Out of every match** (:func:`app.services.match_withdrawal.take_out_of_matches`),
    while the movements still exist for their members to be read: an act left
    naming no app row is withdrawn with its freed lines logged, and one keeping
-   another row loses this member and turns amber on the register.  Reversing
-   first changes nothing it reads -- a reversal writes journal entries and
-   touches neither a movement nor a member.
-3. **Delete it** -- ``db.session.delete`` on the movement, then out of the
+   another row loses this member and turns amber on the register.
+2. **Delete it** -- ``db.session.delete`` on the movement, then out of the
    list its parent loaded it into, so a reconcile that walks that list after
    the act returns (the settle verbs', the entry door's re-derivation) never
    meets a movement that is gone.  The list is asked of
@@ -61,36 +55,25 @@ out of every match, delete; and then, by ruling **plan#2564** (developer
    SQLAlchemy 2.0.54, delete-then-remove here and remove-then-delete by
    CC-5-4a-4's first review).  The collection itself is read before either,
    so a lazy load's autoflush cannot land the ``DELETE`` under it first.
-   **Flushed only when step 1 reversed something**, for step 4: a door that
-   deletes the row next deletes it through the ORM, whose unit of work
-   orders the movement's ``DELETE`` first either way; the transfer delete
-   flushes after this itself, because a transfer's ``DELETE`` landing before
-   its records' is refused rather than cascaded; and the status seam runs
-   this inside callers' ``no_autoflush`` blocks (the carry-forward batch),
-   where a flush the old seam never made would write an intermediate state
-   early.  That last is why the flush is conditional: a reversal's balanced
-   write has already flushed the session, so this flush writes nothing of
-   the caller's that step 1 had not, and a removal that reversed nothing
-   (an un-dated movement, nearly every seam withdrawal) flushes nothing.
-   Step 2 flushes only when a match named a movement.
-4. **Re-check the anchor corrections, ONCE per scenario, after the deletes**
-   (``posting_service.re_check_held_anchor_corrections``, ruling
-   **plan#2564**).  The re-check walks the RECORDS since plan task
-   plan#2525, so it is right only once they no longer hold the movements
-   leaving; asked inside step 1, it re-derived the corrections the delete
-   was about to stale and left them stale (a $200.00 Paid transfer deleted
-   left a Savings account opened at $0.00 reading -$200.00).  HERE, because
-   every movement leaves the books through this act and nothing else
-   (ruling **R-CC64**, step 3), and a hidden row holds none
-   (``ck_hidden_row_holds_nothing``), so the deletes are the one change to
-   the records a teardown makes: no door can forget the re-check, and one
-   per act is the batch shape ruling **R-BAL103** gave the deploy resync.
+   **The act does not flush the deletes**: a door that deletes the row next
+   deletes it through the ORM, whose unit of work orders the movement's
+   ``DELETE`` first either way; the transfer delete flushes after this
+   itself, because a transfer's ``DELETE`` landing before its records' is
+   refused rather than cascaded; and the status seam runs this inside
+   callers' ``no_autoflush`` blocks (the carry-forward batch), where a flush
+   would write an intermediate state early.  Step 1 flushes only when a
+   match named a movement.  The act flushed once more, after the deletes,
+   for its anchor re-check until plan task plan#3097; measured over the whole
+   suite at that task, a removal whose reversal had been its caller's first
+   flush is next flushed by its caller, inside the caller's own nets (the
+   carry-forward batch's at its closing flush, outside its ``no_autoflush``
+   block, which is that batch's index-safe point).
 
 **What it does NOT do** is anything about the ROW.  Whether the row goes, stays
 as a tombstone, re-derives its figure or re-books its payback is the door's;
 this act only takes movements off.  The re-point of a payment onto another
 account is not a removal either -- the movement stays on the books -- so it
-takes only step 2 (``match_withdrawal.withdraw_for_moved_movement``, ruling
+takes only step 1 (``match_withdrawal.withdraw_for_moved_movement``, ruling
 **R-CC46**).
 
 **The doors that are NOT row deletes do not reach a movement at all** (plan
@@ -107,14 +90,13 @@ the books by deleting it, or its row, through a door that calls this.
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): ORM rows in, a
 frozen dataclass out, no Flask import.  It MUTATES and does NOT commit -- the
-caller owns the unit of work; it flushes only as step 1's ledger writes, step
-2's match writes and step 4's walk need.
+caller owns the unit of work; it flushes only as step 1's match writes need.
 """
 
 from __future__ import annotations
 
 from app.extensions import db
-from app.services import match_withdrawal, posting_service, transfer_legs
+from app.services import match_withdrawal, transfer_legs
 from app.services.match_press import Press
 from app.services.match_withdrawal import MatchWithdrawal
 
@@ -123,19 +105,16 @@ def remove_movements(
     movements, owner_id: int, *, because: str, press: Press | None,
     rows_leaving=(),
 ) -> MatchWithdrawal:
-    """Take *movements* off the books: reversed, out of their matches, deleted.
+    """Take *movements* off the books: out of their matches, then deleted.
 
-    Then the anchor corrections their leaving staled are re-checked, once per
-    scenario.  The module docstring carries the order and why each step is
-    where it is.
+    The module docstring carries the order and why each step is where it is.
     *press* is REQUIRED, a keyword with no default (ruling **R-CC81**): a
     door taking a payment or purchase off the books says what its page named
-    before the press, or what lets it stay silent, and step 2 refuses at once
+    before the press, or what lets it stay silent, and step 1 refuses at once
     a line that page did not name (``match_withdrawal.take_out_of_matches``,
     rulings **R-CC127**, **R-CC135**); the press's close compares the save.
-    The refusal comes after step 1's reversal has flushed, so it is the
-    door's rollback that undoes the press -- as for every refusal raised
-    inside the status seam.
+    It is the door's rollback that undoes whatever the save wrote before the
+    refusal -- as for every refusal raised inside the status seam.
 
     Does NOT commit -- the caller owns the session boundary.
 
@@ -163,13 +142,10 @@ def remove_movements(
         when no act named any of them, which is nearly every removal.
 
     Raises:
-        ValidationError: When step 2 frees a line *press*'s page did not
+        ValidationError: When step 1 frees a line *press*'s page did not
             name.
-        PostingError: When step 4's re-check owes a correction on an account
-            with no linked ledger to book it on.
     """
     movements = list(movements)
-    held = posting_service.reverse_leaving_movements(movements)
     withdrawn = match_withdrawal.take_out_of_matches(
         movements, owner_id, because=because, press=press,
         rows_leaving=rows_leaving,
@@ -177,17 +153,11 @@ def remove_movements(
     for movement in movements:
         # The collection is read FIRST: deleted before the collection is
         # loaded, the lazy load's autoflush would emit the DELETE first and
-        # load a collection it is no longer in (step 2's flush expires it,
+        # load a collection it is no longer in (step 1's flush expires it,
         # which is how a MATCHED purchase met that).  Then deleted AND out of
         # the collection -- removed without the delete, the flush would NULL
-        # its ``transaction_id`` (the module docstring's step 3).
+        # its ``transaction_id`` (the module docstring's step 2).
         family = transfer_legs.parent_entries(movement)
         db.session.delete(movement)
         family.remove(movement)
-    if held:
-        # Step 4: the walk is SQL, and under a caller's ``no_autoflush`` it
-        # would still read the staged deletes' rows; step 1's balanced write
-        # has flushed the session already, so this writes only the act's own.
-        db.session.flush()
-        posting_service.re_check_held_anchor_corrections(held)
     return withdrawn

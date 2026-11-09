@@ -75,8 +75,8 @@ act's match step** (plan step ``credit_card:CC-5-4a-3``, ruling **R-CC54**,
 developer 2026-09-22).  :func:`take_out_of_matches` is the match step of
 :func:`app.services.movement_removal.remove_movements` -- take the going
 movements out of every act naming them, withdraw an act that leaves naming no
-app row -- after that act has reversed their ledger and before it deletes
-them.
+app row -- before that act deletes them (it reversed their ledger first
+until plan task plan#3097).
 The doors that remove a movement call THAT act rather than this module: the
 transaction delete verb, the purchase delete, both CC-payback teardowns, the
 transfer delete, and the status seam's ``$0.00`` / ``purchases`` record

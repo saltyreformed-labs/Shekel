@@ -34,7 +34,6 @@ from app.services import (
     definition_delete,
     definition_edit,
     definition_unarchive,
-    posting_service,
     recurrence_engine,
     template_amount_service,
 )
@@ -614,13 +613,12 @@ def _soft_delete_projected_rows(template):
     delete did.  The row stays as it is, visible,
     for the owner to close, lower or delete through its own door.
 
-    **No posting reversal precedes the statement any more, and none is
-    owed.**  One ran here because a soft-deleted row's purchase postings
-    would strand (plan step X-f3b, ruling **R-FM**); a row holds a posting
-    only through a DATED purchase, which is a movement
-    (``_posting_purchases.posted_purchase_exists_clause`` is an ``EXISTS``
-    over its entries), so every row this hides holds none by construction.
-    Routed through ``is_projected_clause`` (D6-09 / MED-02) as the
+    **No posting reversal precedes the statement any more.**  One ran here
+    because a soft-deleted row's purchase postings would strand (plan step
+    X-f3b, ruling **R-FM**); a row held a posting only through a DATED
+    purchase, which is a movement, so every row this hides held none by
+    construction, and since plan task plan#3097 no transaction door writes the
+    stored ledger at all.  Routed through ``is_projected_clause`` (D6-09 / MED-02) as the
     unarchive's restore scope is.
 
     Args:
@@ -692,17 +690,9 @@ def unarchive_template(template_id):
 
     template.is_active = True
 
-    restore_scope = unarchive.restores()
-    restored = definition_delete.rows_holding_purchase_postings(*restore_scope)
     restored_count = db.session.query(Transaction).filter(
-        *restore_scope,
+        *unarchive.restores(),
     ).update({"is_deleted": False}, synchronize_session="fetch")
-    # The mirror of the archive: a restored row contributes again, so its
-    # purchases' legs go back.  AFTER the update, and read through the session
-    # the bulk statement synchronised, so each row's ``is_deleted`` is the value
-    # the reconcile must price it at.
-    for txn in restored:
-        posting_service.sync_transaction_postings(txn)
 
     # Regenerate to fill in any missing future periods, on the one read pass
     # this restore's generate runs in (plan step R7d-c-1).

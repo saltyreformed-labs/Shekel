@@ -87,6 +87,11 @@ def posted_purchase_exists_clause():
     guard.  Two spellings of "can this row hold postings" is the shape ruling
     R-FM's whole family of fixes exists to prevent, one tier up.
 
+    The template restore's reader
+    (``definition_delete.rows_holding_purchase_postings``) went at plan task
+    plan#3097 with the transaction doors' syncs, so the deploy resync is its
+    one caller in ``app/``.
+
     Returns:
         A SQLAlchemy ``EXISTS`` clause, correlated to ``Transaction``, for use
         in any query rooted there.

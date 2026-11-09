@@ -21,7 +21,6 @@ from app.services import (
     match_press,
     match_withdrawal,
     movement_removal,
-    posting_service,
     status_seam,
 )
 from app.services.cash_ledger import (
@@ -168,15 +167,9 @@ def delete_payback_on_credit_revert(
     if payback:
         deleted_payback_id = payback.id
         # Its movements off the books through the ONE act (plan step
-        # ``credit_card:CC-5-4a-3``, ruling **R-CC54**), which reverses their
-        # postings before it deletes them (Build-Order Step 3
-        # reverse-before-delete: a payback settled -- and therefore posted --
-        # before its source's Credit status is reverted must not leave its
-        # legs stranded) and re-checks the anchor corrections once they are
-        # gone (ruling **plan#2564**; this reversed the payback's family
-        # itself, re-checking while its movements stood, until plan task
-        # plan#2557).  A no-op for the usual still-Projected payback, whose
-        # movements never posted.  A payback a bank line
+        # ``credit_card:CC-5-4a-3``, ruling **R-CC54**), which reversed their
+        # stored postings before it deleted them until plan task plan#3097.
+        # A payback a bank line
         # was matched to stops existing here, so an act it was the last app row
         # of is withdrawn and that line is unexplained again (developer ruling
         # 2026-08-25, plan step ``bank_import:X-gb``).  Measured on the
@@ -256,11 +249,10 @@ def delete_payback_on_source_delete(txn: Transaction, user_id: int) -> None:
     ``ondelete="RESTRICT"`` since plan step ``balance:X-bi-7d-2`` (finding
     **CC-352**).
 
-    **It reverses no posting, because none is left to reverse**: the one
-    caller's removal act reversed every level's movements, deleted them and
-    re-checked the anchors before this runs (ruling **plan#2564**), and a
-    level still holding a movement could not be deleted here at all -- the
-    movement's key is NO ACTION (ruling **R-CC64**).  It called
+    **It reverses no posting**: the one caller's removal act has deleted
+    every level's movements before this runs, and a level still holding a
+    movement could not be deleted here at all -- the movement's key is NO
+    ACTION (ruling **R-CC64**).  It called
     ``posting_service.reverse_postings_before_delete`` per level, a no-op
     for a row holding nothing, until plan task plan#2557 deleted that door.
 
@@ -282,8 +274,8 @@ def delete_payback_on_source_delete(txn: Transaction, user_id: int) -> None:
     the level above it, which ``fk_transactions_credit_payback_for``
     (``ON DELETE RESTRICT``) requires: a level deleted while the one below
     it still names it is refused.  The order carries nothing for the
-    ledger, because the one caller reversed every level's postings and
-    took every movement off the books before this runs.
+    ledger, because the one caller took every movement off the books before
+    this runs.
     The walk is published because the delete verb and its confirm dialog
     need the same chain and neither may write to get it (plan step
     ``bank_import:X-gb``).
@@ -474,16 +466,6 @@ def mark_as_credit(transaction_id, user_id):
         txn, next_period, category, payback_amount,
     )
 
-    # Posting ledger reconcile (Build-Order Step 3): reconcile the SOURCE row's
-    # family as the final step (the transfer pattern: reconcile on every status
-    # change).  Credit is non-contributing, so every dated purchase the row
-    # holds reverses to zero here (``purchase_posts`` reads the contributing
-    # gate); it is reachable only from Projected, so a source with no dated
-    # purchase is an idempotent no-op -- and the call keeps the "every status
-    # handler reconciles last" invariant complete.  The payback itself is
-    # born Projected and posts nothing until it settles through the seam.
-    posting_service.sync_transaction_postings(txn)
-
     log_event(
         logger, logging.INFO, EVT_CREDIT_MARKED, BUSINESS,
         "Transaction marked Credit; payback expense generated",
@@ -574,15 +556,6 @@ def unmark_credit(
     # transaction PATCH route's status-revert path via the single
     # cleanup helper so the two endpoints cannot disagree.
     delete_payback_on_credit_revert(txn, user_id, press=press)
-
-    # Posting ledger reconcile (Build-Order Step 3): reconcile the SOURCE row's
-    # family as the final step (the transfer pattern: reconcile on every status
-    # change).  Projected contributes again, so a dated purchase the Credit
-    # status had reversed posts again here; a row with none is an idempotent
-    # no-op -- keeping the "every status handler reconciles last" invariant
-    # complete.  The payback's own postings were already reversed inside
-    # delete_payback_on_credit_revert.
-    posting_service.sync_transaction_postings(txn)
 
 
 def get_or_create_cc_category(user_id: int) -> Category:

@@ -19,7 +19,7 @@ from app.exceptions import ValidationError
 from app.extensions import db
 from app.models.amount_ownership import AmountOwnership
 from app.models.transaction import Transaction
-from app.services import posting_service, transfer_service
+from app.services import transfer_service
 from app.services.amount_ownership import state_own_amount
 from app.services.match_press import NOTHING_SHOWN, Press, Shown
 from app.services.cash_ledger import resolve_transaction_amount
@@ -331,39 +331,6 @@ def _carry_forward(source_period_id, target_period_id, scenario_id,
         count += 1
 
     db.session.flush()
-
-    # ── Posting ledger reconcile (Build-Order Step 3) ──────────────
-    # Each envelope source was settled at sum(entries) inside the loop above;
-    # post its confirmed cash effect to the double-entry ledger.  Done AFTER the
-    # no_autoflush block and its flush -- NOT inside settle_from_entries (which
-    # runs inside that block) -- so _emit_balanced_entry's flush lands on the
-    # batch's index-safe final state, never mid-loop where a partially-mutated
-    # partially-mutated row could violate a generation index.  The reconcile is
-    # idempotent and a no-op for the common empty-envelope rollover and for a
-    # source whose purchases are all still in flight: a source row books
-    # nothing of its own (plan step ``balance:X-bi-4a``, ruling **R-BAL80**),
-    # and its DATED purchases were posted when they were dated.  Only envelope
-    # sources need a reconcile here: carry-forward moves only Projected rows,
-    # so the transfers relocated above are unsettled and
-    # transfer_service.update_transfer posted nothing for them.
-    for source_txn in ctx.envelope_txns:
-        posting_service.sync_transaction_postings(source_txn)
-    # **The DISCRETE rows need one too, since plan step X-f3b** (ruling
-    # **R-FM**).  They are RELOCATED rather than settled -- the bulk UPDATEs
-    # above set ``pay_period_id`` to the target -- and a posting carries the
-    # BUDGET column its source row is attributed to, so a link-less
-    # envelope (which ``_context`` routed here, moving whole with its
-    # entries, until the family's cutover ``X-bi-7d-2`` minted every one a
-    # definition) left its purchases' legs filed under the period it left.
-    # The discrete rows are still relocated, so the reconcile stays; what
-    # the cutover retired is the row that carried purchases into it.  The comment above used to
-    # justify skipping them with "carry-forward moves only Projected rows",
-    # which was sound while only a settled row held postings and is the same
-    # premise ``routes/transactions/mutations`` re-listed ``pay_period_id``
-    # for.  Empty-handed for every row whose family never posted, which is every
-    # bill and every plain expense in the batch.
-    for moved_txn in ctx.discrete_txns:
-        posting_service.sync_transaction_postings(moved_txn)
 
     return count, ctx
 

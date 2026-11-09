@@ -798,9 +798,10 @@ def filed_acts(seed_user, how_many, *, by_rule):
 
     **Each act gets an envelope of its own, and that is a MEASUREMENT rather
     than a style choice.**  ``posting_service.sync_transaction_postings``
-    reconciles a transaction's whole purchase FAMILY on every entry change
-    (ruling **R-FM**), so filing the *k*-th purchase into an envelope that
-    already holds *k-1* of them calls
+    reconciled a transaction's whole purchase FAMILY on every entry change
+    (ruling **R-FM**) until plan task plan#3097 took it out of the entry
+    doors, so filing the *k*-th purchase into an envelope that
+    already holds *k-1* of them called
     :func:`~app.services._posting_purchases.emit_purchase_deltas` *k* times --
     quadratic in the number of acts.  Measured 2026-08-31 on this box, 51
     acts: **1,326 emit calls (51x52/2) and 4.50 s into one envelope, against

@@ -606,7 +606,6 @@ class TestSourceFactValuation:
         owner finished the envelope to the day the money actually left, which
         is the whole point of the step.
         """
-        from app.services import posting_service  # pylint: disable=import-outside-toplevel
         from app.models.transaction_entry import TransactionEntry  # pylint: disable=import-outside-toplevel
         from tests._test_helpers import create_envelope_txn  # pylint: disable=import-outside-toplevel
 
@@ -643,7 +642,6 @@ class TestSourceFactValuation:
         assert settled_figure(txn) == Decimal("200.00")
         assert purchases_total(list(txn.entries)) == Decimal("200.00")
         record_settle_day(txn, an_entered_day(date(2026, 2, 1)))
-        posting_service.sync_transaction_postings(txn)
         db.session.commit()
 
         [purchase_fact] = settled_cash_facts(account.id, scenario.id)

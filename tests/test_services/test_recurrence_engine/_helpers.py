@@ -355,11 +355,12 @@ class _TestRegenerateForTemplateMembers:
 
         Through ``entry_service`` rather than onto the model, because the door
         is where the behaviour under test actually comes from: it runs the
-        entry-capability guard, and its closing ``_resync_after_entry_change``
-        is what stamps the parent's ``actual_amount`` and books the purchase's
-        ledger legs.  A hand-built ``TransactionEntry`` skips all three, so a
-        suite written that way can assert nothing about the ledger -- which is
-        exactly what an adversarial review of plan step R10-a found.
+        entry-capability guard and the payback sync, and until plan task
+        plan#3097 its closing ``_resync_after_entry_change`` booked the
+        purchase's stored ledger legs.  A hand-built ``TransactionEntry``
+        skipped all of that, so a suite written that way could assert nothing
+        about the door -- which is exactly what an adversarial review of plan
+        step R10-a found.
 
         Args:
             txn: The parent transaction.

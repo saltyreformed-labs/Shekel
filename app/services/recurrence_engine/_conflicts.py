@@ -65,7 +65,6 @@ from typing import NamedTuple
 from app.enums import AmountSourceEnum
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.services import posting_service
 from app.services.amount_ownership import declare_derived
 from app.services.balance_at import BalanceContext
 from app.services._recurrence_common import log_resource_access_denied
@@ -242,15 +241,6 @@ def resolve_conflicts(
             # chooser cannot come to disagree (``CLAUDE.md`` rule 14).
             declare_derived(txn, AmountSourceEnum.TEMPLATE)
         db.session.flush()
-        # **Restoring a row restores its purchases' cash legs** (plan step
-        # X-f3b, ruling **R-FM**).  This loop un-deletes rows and may re-price
-        # them, and both moves are ledger acts now that a PROJECTED envelope can
-        # hold postings: ``delete_transaction`` reversed a soft-deleted row's
-        # family on the way out, so without this the read fold re-acquires a
-        # movement the ledger no longer holds.  Idempotent and empty-handed for
-        # a row whose family never posted, which is every other row here.
-        for txn in use.handed_back:
-            posting_service.sync_transaction_postings(txn)
         log_use_resolved(_RESOLVED, ctx, use, skipped_count)
         return use.notice
     return None

@@ -1,15 +1,14 @@
 """Lifecycle tests for the transaction -> posting-ledger wiring (Step 3, Commit 6).
 
-Commit 6 wires :func:`~app.services.posting_service.sync_transaction_postings`
+Commit 6 wired :func:`~app.services.posting_service.sync_transaction_postings`
 into every ordinary-transaction effect boundary -- the mark-done / PATCH /
 cancel / delete routes, the envelope entry-mutation service, the credit
-payback-delete paths, and carry-forward -- so settling, editing, reverting,
-deleting, and carrying forward a transaction keep the append-only double-entry
-ledger in step.  These tests drive transactions END TO END through those
-handlers (NOT by calling ``posting_service`` directly -- that is Commit 4's unit
-suite) and assert the resulting ledger state, read from the ledger worked out
-from the records, which holds no reversal: a door's act on the store itself is
-not graded here (plan step plan#2914).
+payback-delete paths, and carry-forward -- and plan task plan#3097 took it out
+of every one of them: no transaction door writes the stored ledger.  These
+tests drive transactions END TO END through those handlers and assert the
+ledger worked out from the records, which is what settling, editing,
+reverting, deleting and carrying forward a transaction still move (plan step
+plan#2914).
 
 The load-bearing wiring properties, each pinned by a test below:
 
@@ -395,12 +394,10 @@ class TestPatchPostingLifecycle:
     ):
         """A metadata-only PATCH on a Paid row leaves the ledger untouched.
 
-        ``notes`` is not in ``_POSTING_RELEVANT_FIELDS``, so the reconcile is
-        skipped.  This asserts the observable RESULT (Checking still nets
-        $950.00), not that the gate fired: because ``sync_transaction_postings``
-        is idempotent, an ungated call here would also be a no-op (delta 0).
-        The gate is a pure performance pre-filter that avoids the ledger
-        round-trip; its only effect is on cost, not on the ledger.
+        ``notes`` moves no record the worked-out ledger reads, so Checking
+        still nets $950.00.  The PATCH door gated its store reconcile on
+        ``_POSTING_RELEVANT_FIELDS`` until plan task plan#3097 deleted both;
+        what this grades is the ledger, which never depended on the gate.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -500,10 +497,11 @@ class TestEnvelopePostingLifecycle:
     # The three cases below graded ``_resync_after_entry_change``'s ledger
     # reconcile on a SETTLED envelope until plan step X-au-c3.  That row shape
     # is unreachable now -- a settled row's purchases are closed on all three
-    # doors -- so they grade the same reconcile on the shape it is actually
-    # FOR: a PROJECTED envelope whose purchases carry a recorded bank posting
-    # day, which is ruling **R-FM**'s own case and the reason the reconcile is
-    # ungated.  Every end figure is the one the settled ordering produced.
+    # doors -- so they grade the shape ruling **R-FM** is about: a PROJECTED
+    # envelope whose purchases carry a recorded bank posting day.  The
+    # reconcile itself went at plan task plan#3097; what they grade is the
+    # worked-out ledger each entry change moves.  Every end figure is the one
+    # the settled ordering produced.
     #
     # The posting day is the period start PLUS A DAY throughout, and that
     # matters: a leg dated ON the opening assertion's day is ABSORBED by its

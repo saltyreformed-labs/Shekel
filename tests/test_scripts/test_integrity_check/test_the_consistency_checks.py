@@ -523,66 +523,6 @@ class TestDataConsistency:
         assert not dc09.passed
         assert dc09.detail_count == 1  # 1 deduction targeting another user's account
 
-    def test_dc10_detects_an_un_dated_movement_holding_a_live_leg(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """DC-10 grades what a caller of the BARE status seam would leave.
-
-        Plan step ``balance:X-bi-3e-2``: a revert un-dates the covering
-        movement and keeps it, and the ledger is the DOOR's -- the family
-        reconcile after the seam reverses the movement's legs.  So the state
-        this arm exists for is planted by the seam ALONE: settle through the
-        verb (the movement posts), revert through ``apply_status_change``
-        with no reconcile.  The arm fires on that movement and passes once the
-        door's reconcile runs -- the same row, both directions, so the check
-        is graded firing and not merely quiet.
-        """
-        # pylint: disable=import-outside-toplevel  -- the module convention.
-        from app import ref_cache
-        from app.services import posting_service, status_seam, transaction_service
-
-        txn = generate_row_of(
-            make_expense_template(
-                db.session, seed_user, amount="148.32",
-                name="Electric", category_key="Rent",
-            ),
-            seed_periods[0],
-        )
-        transaction_service.settle_transaction(txn)
-        db.session.flush()
-        (movement,) = txn.covering_movements
-        assert movement.settled_on is not None
-        dc10 = next(
-            r for r in check_data_consistency(db.session) if r.check_id == "DC-10"
-        )
-        assert dc10.passed, "a DATED movement's live leg is not a finding"
-
-        status_seam.apply_status_change(
-            txn, ref_cache.status_id(StatusEnum.PROJECTED),
-        )
-        db.session.flush()
-        assert movement.settled_on is None
-
-        dc10 = next(
-            r for r in check_data_consistency(db.session) if r.check_id == "DC-10"
-        )
-        assert not dc10.passed
-        assert dc10.severity == "critical"
-        # One row per live ledger account: the cash leg and its category leg.
-        assert {row["entry_id"] for row in dc10.details} == {movement.id}
-        assert {row["net"] for row in dc10.details} == {
-            Decimal("-148.32"), Decimal("148.32"),
-        }
-        assert all(row["covers_settlement"] is True for row in dc10.details)
-
-        posting_service.sync_transaction_postings(txn)
-        db.session.flush()
-        dc10 = next(
-            r for r in check_data_consistency(db.session) if r.check_id == "DC-10"
-        )
-        assert dc10.passed
-        assert movement.settled_on is None, "the movement is still un-dated and kept"
-
     def test_dc10_names_a_transfer_sides_record_by_its_transfer(
         self, app, db, seed_user, seed_periods,
     ):

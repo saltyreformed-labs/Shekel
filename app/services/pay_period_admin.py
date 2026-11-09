@@ -737,9 +737,9 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     # balanced-journal trigger never fires on DELETE).  Because any settled,
     # non-deleted row or transfer blocks the reset entirely, no live settled
     # item's posting is ever wiped.  Whoever relaxes this gate MUST first
-    # reverse those postings, a row's and a transfer's alike, through the one
-    # act that reverses and deletes a movement
-    # (movement_removal.remove_movements, ruling plan#2564).
+    # account for those postings: the one act that takes a movement off the
+    # books (movement_removal.remove_movements, ruling plan#2564) reversed a
+    # row's and a transfer's alike until plan task plan#3097.
     #
     # The gate does NOT protect a LOAN's genesis postings: a loan's opening /
     # true-up entries exist without any settled row or transfer (a payment-less

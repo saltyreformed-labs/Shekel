@@ -9,7 +9,7 @@ from app.extensions import db
 from app.models.transaction import Transaction
 from app import ref_cache
 from app.enums import StatusEnum, TxnTypeEnum
-from app.services import balance_at, posting_service, status_seam, transaction_service
+from app.services import balance_at, status_seam, transaction_service
 from app.services.balance_at import BalanceContext
 from app.utils.dates import display_today
 
@@ -203,7 +203,7 @@ class TestSettleDayLifecycle:
         with app.app_context():
             from app import ref_cache
             from app.enums import StatusEnum
-            from app.services import posting_service, status_seam
+            from app.services import status_seam
 
             txn = self._create_test_txn(seed_user, seed_periods_today)
 
@@ -222,7 +222,6 @@ class TestSettleDayLifecycle:
                 settle_day=an_entered_day(settled_a_week_ago),
                 settlement=settlement_if_settling(txn, ref_cache.status_id(StatusEnum.DONE)),
             )
-            posting_service.sync_transaction_postings(txn)
             db.session.commit()
 
             def _ledger_days():
@@ -279,7 +278,7 @@ class TestSettleDayLifecycle:
         with app.app_context():
             from app import ref_cache
             from app.enums import StatusEnum
-            from app.services import posting_service, status_seam
+            from app.services import status_seam
 
             txn = self._create_test_txn(seed_user, seed_periods_today)
 
@@ -300,7 +299,6 @@ class TestSettleDayLifecycle:
                 settle_day=an_entered_day(settled_a_week_ago),
                 settlement=settlement_if_settling(txn, ref_cache.status_id(StatusEnum.DONE)),
             )
-            posting_service.sync_transaction_postings(txn)
             db.session.commit()
 
             def _ledger_days():

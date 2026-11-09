@@ -43,7 +43,6 @@ from app.services import (
     balance_at,
     credit_workflow,
     entry_service,
-    posting_service,
     statement_match,
     status_seam,
     transaction_service,
@@ -919,8 +918,6 @@ class TestTheSettledParentRuleIsTheArithmetic:
         db.session.flush()
         transaction_service.settle_from_entries(envelope)
         db.session.flush()
-        posting_service.sync_transaction_postings(envelope)
-        db.session.flush()
         return envelope, doomed
 
     def test_a_POSTED_purchase_may_be_removed_and_the_close_is_untouched(
@@ -1057,8 +1054,6 @@ class TestTheSettledParentRuleIsTheArithmetic:
         payback = sync_entry_payback(envelope.id, seed_user["user"].id)
         db.session.flush()
         transaction_service.settle_from_entries(envelope)
-        db.session.flush()
-        posting_service.sync_transaction_postings(envelope)
         db.session.flush()
         assert movement_cash_leg(envelope, doomed) == Decimal("0.00")
         before = sum(

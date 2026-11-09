@@ -447,12 +447,9 @@ def sync_entry_payback(
             if entry.credit_payback_id == existing_payback.id:
                 entry.credit_payback_id = None
         # Its movements off the books through the ONE act (plan step
-        # ``credit_card:CC-5-4a-3``, ruling **R-CC54**), which reverses their
-        # postings before it deletes them (Build-Order Step 3
-        # reverse-before-delete) and re-checks the anchor corrections once they
-        # are gone (ruling **plan#2564**; this reversed the payback's family
-        # itself, re-checking while its movements stood, until plan task
-        # plan#2557).  Idempotent for movements that never posted.  A match
+        # ``credit_card:CC-5-4a-3``, ruling **R-CC54**), which reversed their
+        # stored postings before it deleted them until plan task plan#3097.
+        # A match
         # naming this payback stops being true when the row goes, so it is
         # withdrawn and its bank line is unexplained again (developer ruling
         # 2026-08-25, plan

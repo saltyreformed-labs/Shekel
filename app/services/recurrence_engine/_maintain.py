@@ -33,7 +33,6 @@ import logging
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.services import posting_service
 from app.services.recurrence_engine._generate import _selector
 from app.services.recurrence_engine._amounts import (
     _derive_row_fields,
@@ -62,8 +61,7 @@ def regenerate_for_template(template, schedule, scenario_id, effective_from=None
     Four outcomes, one per period the pass considers:
 
       1. the rule names the period and an auto-generated row is there -- the
-         row is UPDATED in place from :class:`DerivedRowFields` and its
-         postings reconciled;
+         row is UPDATED in place from :class:`DerivedRowFields`;
       2. the rule names the period and nothing is there -- a row is created,
          exactly as :func:`generate_for_template` would;
       3. the rule NO LONGER names the period -- the row is removed if it is
@@ -302,11 +300,14 @@ def _no_row_is_reattributed(existing, template) -> "frozenset[int]":
 
 
 def _apply_maintain_work(work, derived, template, scenario_id, projected_id):
-    """Write one classified maintain pass, and reconcile what it moved.
+    """Write one classified maintain pass.
 
-    The only writer in the maintain path.  Order is load-bearing in one place:
-    the ledger reconcile runs AFTER the flush, so each updated row's postings
-    are reconciled against the amount and account the flush actually stored.
+    The only writer in the maintain path.  It ends in a flush, which was the
+    ledger reconcile's precondition (each updated row reconciled against what
+    the flush stored) until plan task plan#3097 deleted the reconcile; the
+    flush is kept, as the point where a constraint the pass's writes break is
+    raised inside the pass rather than at the caller's commit, and moving that
+    point would be a change of its own.
 
     Args:
         work: The :class:`~app.services._recurrence_common.MaintainWork`
@@ -405,13 +406,6 @@ def _apply_maintain_work(work, derived, template, scenario_id, projected_id):
         db.session.delete(row)
 
     db.session.flush()
-
-    # An updated row may have moved money: its amount can change with the
-    # template's, and its account with it.  Reconciling to the STORED values is
-    # what keeps the ledger equal to the rows without a second definition of
-    # what those rows say.
-    for row in updated:
-        posting_service.sync_transaction_postings(row)
     return created, updated
 
 
@@ -448,9 +442,9 @@ def propagate_to_unruled_definition(template, rows) -> "list[int]":
     Every row takes :func:`~._amounts._derive_unruled_fields` whole --
     the definition's account, name, category, type and TEMPLATE ownership,
     with the row's own due date -- through the same ``setattr`` splat
-    :func:`_apply_maintain_work` uses, and its postings are reconciled
-    after the flush for the same reason: an updated row may have moved
-    money's category or account.  Ownership is written as a declaration and
+    :func:`_apply_maintain_work` uses, and ends in a flush as that writer
+    does (its postings were reconciled after the flush until plan task
+    plan#3097).  Ownership is written as a declaration and
     never a figure (plan step X-au-e).  The caller selects rows that are not
     overridden, so a figure the owner typed at the grid (OWN with the flag
     beside it) is never reached here; an OWN figure written WITHOUT the flag
@@ -473,8 +467,6 @@ def propagate_to_unruled_definition(template, rows) -> "list[int]":
         for field, value in _derive_unruled_fields(template, row)._asdict().items():
             setattr(row, field, value)
     db.session.flush()
-    for row in rows:
-        posting_service.sync_transaction_postings(row)
     return []
 
 

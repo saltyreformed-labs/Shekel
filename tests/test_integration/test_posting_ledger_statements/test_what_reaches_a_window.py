@@ -8,7 +8,7 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import StatusEnum
 from app.models.pay_period import PayPeriod
-from app.services import ledger_report_service, posting_service, status_seam
+from app.services import ledger_report_service, status_seam
 from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 
@@ -38,7 +38,7 @@ class TestRevertAndResidueDropped:
         """Settling then reverting a $400 expense removes it from both statements.
 
         A $400.00 Groceries expense settled in 2099 posts, then is reverted via
-        the real ``sync_transaction_postings(settled=False)`` path -- a
+        the status seam -- a
         projected row books no line, so the worked-out ledger holds none for
         it.  The income statement shows no Groceries line and the balance
         sheet's Checking is back on its $1000.00 opening, tie-out green.
@@ -65,7 +65,6 @@ class TestRevertAndResidueDropped:
             status_seam.apply_status_change(
                 txn, ref_cache.status_id(StatusEnum.PROJECTED),
             )
-            posting_service.sync_transaction_postings(txn)
             db.session.commit()
 
             after = ledger_report_service.compute_income_statement(

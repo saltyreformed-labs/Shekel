@@ -189,104 +189,6 @@ class TestCleanRaiseLabel:
         assert svc.clean_raise_label("") == ""
 
 
-class TestRaiseRunStarts:
-    """raise_run_starts: the shared run-start seam (chip, chart, banner).
-
-    The calculator badges the SAME raise_event on every paycheck of a raise
-    month, so this collapses a run to its first period (P-SA1).  A run
-    starts when the cleaned label is non-empty AND differs from the
-    predecessor's; ``None`` predecessor means no predecessor (first period).
-    """
-
-    def test_no_event_is_not_a_start(self):
-        """A period with no raise event never starts a run."""
-        assert svc.raise_run_starts("", "COLA +3.0000%") is False
-        assert svc.raise_run_starts("", None) is False
-
-    def test_first_period_with_event_is_a_start(self):
-        """A raise event with no predecessor (idx 0) starts a run."""
-        assert svc.raise_run_starts("MERIT +2.5000%", None) is True
-
-    def test_new_label_after_no_event_is_a_start(self):
-        """The first raised paycheck after a non-raise period starts a run."""
-        assert svc.raise_run_starts("COLA +3.0000%", "") is True
-
-    def test_same_label_as_predecessor_is_not_a_start(self):
-        """A later paycheck of the SAME run does not restart it.
-
-        07/16 carries the same "COLA +3.0000%" the calculator badged on
-        07/02, so it is inside the run, not a new start -- the exact
-        banner-repeat case P-SA1 fixes.
-        """
-        assert svc.raise_run_starts("COLA +3.0000%", "COLA +3.0000%") is False
-
-    def test_different_label_back_to_back_is_a_start(self):
-        """Two different raises in adjacent periods are two runs."""
-        assert svc.raise_run_starts("MERIT +2.5000%", "COLA +3.0000%") is True
-
-    def test_same_label_after_a_gap_is_a_fresh_start(self):
-        """Next year's COLA (same label, after a no-event gap) is a new run.
-
-        The predecessor of the fresh COLA is the intervening non-raise
-        period (empty event), so the label re-appearing starts a new run.
-        """
-        assert svc.raise_run_starts("COLA +3.0000%", "") is True
-
-    def test_precision_agnostic_match(self):
-        """Equal cleaned labels from different source precision are one run.
-
-        "COLA +3.0000%" and "COLA +3.00%" both clean to "Cola +3%", so a
-        precision change between adjacent periods is not a new run.
-        """
-        assert svc.raise_run_starts("COLA +3.0000%", "COLA +3.00%") is False
-
-
-class TestRaiseRunStartPeriodIds:
-    """raise_run_start_period_ids: run-start ids across the full ledger (P-SA1).
-
-    The projection ledger renders every period, so it flags the raise badge
-    only on each run's first paycheck -- this returns exactly those period ids.
-    """
-
-    def test_shared_scenario_single_raise(self):
-        """The shared 7-period scenario has one raise, at period id 14.
-
-        The only raise is the 07/01 merit (idx 4); its neighbours carry no
-        event, so it is a one-period run and its id is the only run start.
-        """
-        assert svc.raise_run_start_period_ids(_scenario()) == {14}
-
-    def test_collapses_multi_period_run_to_its_first(self):
-        """A 3-period COLA run + a following merit yields only the two starts.
-
-        The calculator badges "COLA +3.0000%" on three consecutive periods (a
-        July COLA hitting 07/02, 07/16, 07/30), then a January merit.  The set
-        holds only the first COLA period id (51) and the merit id (55) -- the
-        two run STARTS -- not the two COLA continuations (52, 53).
-        """
-        pairs = [
-            _pair(50, date(2026, 6, 1), date(2026, 6, 14), "50000", "1900", "1500"),
-            _pair(51, date(2026, 7, 2), date(2026, 7, 15), "51500", "1957", "1545",
-                  raise_event="COLA +3.0000%"),
-            _pair(52, date(2026, 7, 16), date(2026, 7, 29), "51500", "1957", "1545",
-                  raise_event="COLA +3.0000%"),
-            _pair(53, date(2026, 7, 30), date(2026, 8, 12), "51500", "1957", "1545",
-                  raise_event="COLA +3.0000%"),
-            _pair(54, date(2026, 8, 13), date(2026, 8, 26), "51500", "1957", "1545"),
-            _pair(55, date(2027, 1, 7), date(2027, 1, 20), "52800", "2007", "1584",
-                  raise_event="MERIT +2.5000%"),
-        ]
-        assert svc.raise_run_start_period_ids(pairs) == {51, 55}
-
-    def test_no_raise_events_is_empty(self):
-        """A ledger with no raise events yields the empty set."""
-        pairs = [
-            _pair(60, date(2026, 5, 1), date(2026, 5, 14), "50000", "1900", "1500"),
-            _pair(61, date(2026, 5, 15), date(2026, 5, 28), "50000", "1900", "1500"),
-        ]
-        assert svc.raise_run_start_period_ids(pairs) == set()
-
-
 class TestBaseRegularNet:
     """base_regular_net: nearest regular paycheck at the same salary."""
 
@@ -340,48 +242,42 @@ class TestNextEvents:
         pairs = [_pair(1, date(2026, 1, 1), date(2026, 1, 14), "52000", "2000", "1400")]
         assert svc.next_raise_after(pairs, TODAY) is None
 
-    def test_next_raise_skips_run_started_on_or_before_today(self):
-        """Live-data shape: today 07/03, July COLA run 07/02-07/30 -> Jan Merit.
+    def test_next_raise_is_the_next_badged_paycheck(self):
+        """Today 07-03 and a July 1 raise: 07-16, the paycheck the engine badges.
 
-        The calculator badges EVERY period of a raise month, so 07/16 and
-        07/30 carry the same "COLA +3.0000%" as 07/02.  That run STARTED
-        07/02 (on/before today 07/03), so the raise already landed and the
-        whole run is skipped -- its 07/16 / 07/30 tails must NOT surface as
-        "the next raise".  The honest next raise is the Jan 2027 Merit
-        run's first period.
+        The engine badges a raise on the one paycheck it first reaches (ruling
+        plan#3092): 07-02 pays for days before July 1 and carries nothing,
+        07-16 carries the raise, and 07-30 carries nothing.  Made-up figures.
         """
-        live_today = date(2026, 7, 3)
         pairs = [
-            _pair(1, date(2026, 7, 2), date(2026, 7, 15), "94425.25", "3631.74", "2650",
+            _pair(1, date(2026, 7, 2), date(2026, 7, 15), "52000", "2000", "1400"),
+            _pair(2, date(2026, 7, 16), date(2026, 7, 29), "53560", "2048", "1430",
                   raise_event="COLA +3.0000%"),
-            _pair(2, date(2026, 7, 16), date(2026, 7, 29), "94425.25", "3631.74", "2650",
-                  raise_event="COLA +3.0000%"),
-            _pair(3, date(2026, 7, 30), date(2026, 8, 12), "94425.25", "3631.74", "2650",
-                  raise_event="COLA +3.0000%"),
-            _pair(4, date(2026, 8, 13), date(2026, 8, 26), "94425.25", "3631.74", "2650"),
-            _pair(5, date(2027, 1, 7), date(2027, 1, 20), "96786", "3722.54", "2710",
+            _pair(3, date(2026, 7, 30), date(2026, 8, 12), "53560", "2060", "1440"),
+            _pair(4, date(2027, 1, 7), date(2027, 1, 20), "54899", "2111.50", "1475",
                   raise_event="MERIT +2.5000%"),
         ]
-        result = svc.next_raise_after(pairs, live_today)
-        assert result == {
-            "label": "Merit +2.5%",
-            "period_start": date(2027, 1, 7),
+        assert svc.next_raise_after(pairs, date(2026, 7, 3)) == {
+            "label": "Cola +3%",
+            "period_start": date(2026, 7, 16),
         }
 
-    def test_next_raise_future_run_returns_its_start(self):
-        """A future run returns its FIRST period even with badged tails."""
+    def test_an_equal_label_after_today_is_the_next_raise(self):
+        """Two equal raises reaching 08-01 and 08-15; today 08-05: 08-15.
+
+        Each banner is its own raise.  The run-start filter this replaced
+        (task plan#3111) read 08-15 as the tail of a run that started on or
+        before today and skipped it, answering None.
+        """
         pairs = [
-            _pair(1, date(2026, 8, 1), date(2026, 8, 14), "52000", "2000", "1400",
+            _pair(1, date(2026, 8, 1), date(2026, 8, 14), "53560", "2060", "1440",
                   raise_event="COLA +3.0000%"),
-            _pair(2, date(2026, 8, 15), date(2026, 8, 28), "52000", "2000", "1400",
+            _pair(2, date(2026, 8, 15), date(2026, 8, 28), "55167", "2121.80", "1480",
                   raise_event="COLA +3.0000%"),
         ]
-        # Both periods start after TODAY (2026-06-05); only the run START
-        # (08/01) is a candidate, never the 08/15 tail.
-        result = svc.next_raise_after(pairs, TODAY)
-        assert result == {
+        assert svc.next_raise_after(pairs, date(2026, 8, 5)) == {
             "label": "Cola +3%",
-            "period_start": date(2026, 8, 1),
+            "period_start": date(2026, 8, 15),
         }
 
 
@@ -663,39 +559,28 @@ class TestBuildChartSeries:
         # 2028-06-01 is beyond 2026-06-05 + 18 months (2027-12-05) -> excluded.
         assert all(pt["start"].year < 2028 for pt in series["periods"])
 
-    def test_raise_run_collapsed_to_one_entry(self):
-        """Three consecutive periods with one COLA emit ONE raises[] entry.
+    def test_each_badged_paycheck_emits_its_label(self):
+        """Two equal raises back to back, then a different one: three labels.
 
-        The live 07/02-07/30 shape: the calculator badges all three July
-        periods with "COLA +3.0000%"; the chart must paint one label at
-        the run start (07/02), not three stacked ones.
+        The engine badges each raise on the paycheck it first reaches (ruling
+        plan#3092), so every badge is a raise and the chart paints each.  The
+        run-start filter this replaced (task plan#3111) painted one label for
+        the two equal ones.  Made-up figures.
         """
         pairs = [
-            _pair(1, date(2026, 7, 2), date(2026, 7, 15), "94425.25", "3631.74", "2650",
+            _pair(1, date(2026, 8, 1), date(2026, 8, 14), "53560", "2060", "1440",
                   raise_event="COLA +3.0000%"),
-            _pair(2, date(2026, 7, 16), date(2026, 7, 29), "94425.25", "3631.74", "2650",
+            _pair(2, date(2026, 8, 15), date(2026, 8, 28), "55167", "2121.80", "1480",
                   raise_event="COLA +3.0000%"),
-            _pair(3, date(2026, 7, 30), date(2026, 8, 12), "94425.25", "3631.74", "2650",
-                  raise_event="COLA +3.0000%"),
-            _pair(4, date(2026, 8, 13), date(2026, 8, 26), "94425.25", "3631.74", "2650"),
-        ]
-        series = svc.build_chart_series(pairs, date(2026, 7, 3))
-        assert series["raises"] == [
-            {"start": date(2026, 7, 2), "label": "Cola +3%"},
-        ]
-
-    def test_adjacent_different_raises_are_two_runs(self):
-        """A label change starts a new run: back-to-back COLA then Merit."""
-        pairs = [
-            _pair(1, date(2026, 7, 2), date(2026, 7, 15), "94425.25", "3631.74", "2650",
-                  raise_event="COLA +3.0000%"),
-            _pair(2, date(2026, 7, 16), date(2026, 7, 29), "96786", "3722.54", "2710",
+            _pair(3, date(2026, 8, 29), date(2026, 9, 11), "56546", "2174.85", "1515",
                   raise_event="MERIT +2.5000%"),
+            _pair(4, date(2026, 9, 12), date(2026, 9, 25), "56546", "2174.85", "1515"),
         ]
-        series = svc.build_chart_series(pairs, date(2026, 7, 3))
+        series = svc.build_chart_series(pairs, date(2026, 8, 5))
         assert series["raises"] == [
-            {"start": date(2026, 7, 2), "label": "Cola +3%"},
-            {"start": date(2026, 7, 16), "label": "Merit +2.5%"},
+            {"start": date(2026, 8, 1), "label": "Cola +3%"},
+            {"start": date(2026, 8, 15), "label": "Cola +3%"},
+            {"start": date(2026, 8, 29), "label": "Merit +2.5%"},
         ]
 
 

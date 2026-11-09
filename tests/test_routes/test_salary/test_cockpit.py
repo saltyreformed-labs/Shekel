@@ -345,16 +345,15 @@ class TestAnatomyFragment:
             resp = auth_client.get(f"/salary/{profile.id}/anatomy/999999")
             assert resp.status_code == 404
 
-    def test_anatomy_raise_banner_shows_on_run_start(
+    def test_anatomy_raise_banner_shows_on_the_first_paycheck_it_reaches(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """The raise banner shows on the paycheck where a raise takes effect.
+        """The raise banner shows on the paycheck a raise first reaches.
 
-        A MERIT raise effective March 2026 badges BOTH March paychecks
-        (seed_periods[5] on 2026-03-13 and [6] on 2026-03-27; get_raise_event
-        marks every period of the raise month).  Period 5 is the run START --
-        its predecessor (period 4, 2026-02-27) carries no raise -- so its
-        anatomy fragment shows the "Raise: Merit +2.5%" banner (P-SA1).
+        A MERIT raise from 2026-03-01 first reaches seed_periods[5]
+        (2026-03-13, paying 02-22..03-07), so the engine badges it there
+        (ruling plan#3092) and its anatomy fragment shows the "Raise: Merit
+        +2.5%" banner.
         """
         with app.app_context():
             profile = _create_profile(seed_user)
@@ -375,15 +374,17 @@ class TestAnatomyFragment:
             assert "Raise:" in html
             assert "Merit +2.5%" in html
 
-    def test_anatomy_raise_banner_hidden_on_run_continuation(
+    def test_anatomy_raise_banner_absent_on_a_later_paycheck(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """The raise banner does NOT repeat on a later paycheck of the run.
+        """The raise banner does NOT repeat on a later paycheck.
 
-        seed_periods[6] (2026-03-27) carries the same "MERIT +2.5000%" the
-        calculator badged on [5] (2026-03-13), so it is inside the run, not a
-        new raise -- its anatomy fragment omits the banner (P-SA1) while the
-        composition card still renders.
+        seed_periods[6] (2026-03-27) pays 03-08..03-21, wholly after the
+        2026-03-01 raise that [5] (2026-03-13) first reaches, so the engine
+        badges nothing there and its anatomy fragment omits the banner while
+        the composition card still renders.  It was the cockpit's run-start
+        filter that hid it until task plan#3111, when the engine badged both
+        March paychecks (P-SA1).
         """
         with app.app_context():
             profile = _create_profile(seed_user)
@@ -401,8 +402,37 @@ class TestAnatomyFragment:
             )
             assert resp.status_code == 200
             html = resp.data.decode()
-            # The banner is collapsed to the run start (period 5), so period 6
-            # shows no "Raise:" alert even though it carries the badged event.
+            # The engine badges the raise on period 5 alone, so period 6
+            # shows no "Raise:" alert.
             assert "Raise:" not in html
             # Sanity: the fragment still rendered its composition card.
             assert "Where this paycheck goes" in html
+
+    def test_anatomy_an_equal_raise_on_the_next_paycheck_shows_its_own_banner(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """Two 2.5% merit raises, from 03-01 and 03-15: 03-27 shows the second.
+
+        03-15 falls in seed_periods[6]'s 03-08..03-21, so the engine badges
+        [6] with the second raise as it badges [5] with the first, two
+        banners with one label.  The run-start filter this replaced (task
+        plan#3111) read [6] as the first raise's run going on and hid it.
+        """
+        with app.app_context():
+            profile = _create_profile(seed_user)
+            raise_type = db.session.query(RaiseType).filter_by(name="merit").one()
+            for day in (date(2026, 3, 1), date(2026, 3, 15)):
+                db.session.add(SalaryRaise(
+                    salary_profile_id=profile.id,
+                    raise_type_id=raise_type.id,
+                    effective_date=day,
+                    percentage=Decimal("0.0250"),
+                ))
+            db.session.commit()
+
+            for period in (seed_periods[5], seed_periods[6]):
+                resp = auth_client.get(f"/salary/{profile.id}/anatomy/{period.id}")
+                assert resp.status_code == 200
+                html = resp.data.decode()
+                assert "Raise:" in html, f"no banner on {period.start_date}"
+                assert "Merit +2.5%" in html

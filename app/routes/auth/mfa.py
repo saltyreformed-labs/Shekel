@@ -44,10 +44,10 @@ from app.exceptions import AuthError
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     MFA_SETUP_PENDING_TTL,
-    _browser_standing,
     _clear_mfa_pending_state,
     _complete_sign_in,
     _consume_backup_code,
+    _known_device,
     _mfa_pending_is_fresh,
     _totp_accepted_or_key_failure,
     _verify_totp_with_replay_logging,
@@ -191,9 +191,11 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     cookie-replay window closes at exactly this gate.
 
     A wrong, replayed or empty code and a wrong backup code count toward the
-    account's lock, and a locked account is refused here even with the right
-    code.  Not counted: a form the schema rejects, which cannot be a right
-    answer, and a failed encryption key, which is the operator's fault.  Two
+    lock, and a stranger is refused here while the account is locked, even
+    with the right code.  A known browser counts on its own record and passes
+    the account's lock, as at the password (plan#2772).  Not counted: a form
+    the schema rejects, which cannot be a right answer, and a failed
+    encryption key, which is the operator's fault.  Two
     limits apply, one by address and one by the pending account, so that
     moving between addresses buys no more guesses.  A pending sign-in past its
     time spends only the address's.
@@ -248,7 +250,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
 
     user = db.session.get(User, pending_user_id)
     mfa_config = None
-    standing = None
+    device = None
     if user:
         # The signing-in owner's lock BEFORE the codes are read (ruling
         # R-CC121, "Lock, then check"): the code check rewrites
@@ -256,10 +258,10 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         # codes" writes the same row under this lock.  Unlocked, a backup-code
         # sign-in racing a regenerate wrote the old codes back over the new
         # ones, and one code signed in two devices.  Under the lock, read once
-        # what this browser's cookie is worth: a known browser's finished
-        # sign-in leaves the strangers' count alone (plan#2772).
+        # whose attempt this is: the lock, the count and what the completion
+        # clears all turn on it (plan#2772).
         bind_sign_in_owner(user.id, user.data_owner_id)
-        standing = _browser_standing(user)
+        device = _known_device(user)
         mfa_config = (
             db.session.query(MfaConfig)
             .filter_by(user_id=user.id, is_enabled=True)
@@ -275,10 +277,11 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         _clear_mfa_pending_state()
         return redirect(url_for("auth.login"))
 
-    if auth_service.is_locked_out(user):
+    if auth_service.is_locked_out(user, device):
         # Read under the owner's lock taken above.  This person has the
         # password, so naming the lock tells them nothing a stranger could
         # use.  Back to /login, where the lock refuses them until it ends.
+        # A known browser is never here: the lock refuses only strangers.
         log_event(
             logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
             "Login failed: account locked at the code form",
@@ -311,7 +314,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         return redirect(url_for("auth.login"))
 
     if not valid:
-        auth_service.record_failed_attempt(user)
+        auth_service.record_failed_attempt(user, device)
         log_event(
             logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
             "Login failed: bad code", user_id=pending_user_id,
@@ -333,7 +336,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     trust = verify_data["trust_device"] and not used_backup_code
     response = _complete_sign_in(
         user, flask_session.get("_mfa_pending_next"),
-        known=standing is not None, trust=trust,
+        known=device is not None, trust=trust,
     )
 
     if used_backup_code:
@@ -663,10 +666,12 @@ def mfa_disable_confirm():
     recently-used TOTP code cannot use that code to disable MFA, the
     same defence that ``/mfa/verify`` provides at login.
 
-    A wrong password or code counts toward the account's lock, and a locked
-    account is refused here even with the right ones (ruling plan#3008).
-    Success does not clear the count: that is a finished sign-in's or
-    re-confirm's (ruling plan#3007).
+    A wrong password or code counts toward the lock, and the lock refuses
+    the right ones (ruling plan#3008), with sign-in's one rule for whose
+    attempt it is (plan#2772, ruling plan#3034): a known browser counts on
+    its own record and passes the account's lock, a stranger counts on the
+    account and meets it.  Success does not clear the count: that is a
+    finished sign-in's or re-confirm's (ruling plan#3007).
     """
     # Schema validates shape before bcrypt is invoked.  current_password
     # accepts any historical length (legacy short passwords still work
@@ -680,11 +685,12 @@ def mfa_disable_confirm():
 
     current_password = disable_data["current_password"]
     totp_code = disable_data["totp_code"]
+    device = _known_device(current_user)
 
     # Verify the user's current password first.
     try:
         auth_service.check_signed_in_password(
-            current_user, current_password, "Invalid password.",
+            current_user, current_password, "Invalid password.", device,
         )
     except AuthError as exc:
         log_event(
@@ -718,7 +724,7 @@ def mfa_disable_confirm():
         return redirect(url_for("settings.show", section="security"))
 
     if not accepted:
-        auth_service.record_failed_attempt(current_user)
+        auth_service.record_failed_attempt(current_user, device)
         log_event(
             logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
             "Disable two-factor failed: bad code",

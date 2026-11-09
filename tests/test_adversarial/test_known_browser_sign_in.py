@@ -18,6 +18,10 @@ Plan#2772.  A browser that finishes a sign-in holds one record and one cookie
 * :class:`TestTenWrongMakeAStranger` -- a known browser's wrong passwords
   count on its own record, and ten in a row delete it (ruling **plan#2996**),
   leaving the user's other browsers signing in.
+* :class:`TestEveryDoorHasTheOneRule` -- the code form, re-confirm, Change
+  password and Disable two-factor let a known browser past the strangers' lock
+  and count its wrong answers on its own record (ruling **plan#3034**).  Their
+  stranger's side is ``tests/test_routes/test_every_guess_counts.py``.
 """
 
 import logging
@@ -29,8 +33,8 @@ import sqlalchemy
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
-from app.models.user import User
-from app.services import known_device_service
+from app.models.user import MfaConfig, User
+from app.services import auth_service, known_device_service
 from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
@@ -633,4 +637,113 @@ class TestTenWrongMakeAStranger:
             _password(browser, password=_WRONG_PASSWORD)
 
         assert _device_count(user_id, _token(browser, user_id)) == _THRESHOLD - 1
+
+
+class TestEveryDoorHasTheOneRule:
+    """Wherever a password or code is checked, a known browser passes the strangers' lock.
+
+    Each case locks the account by strangers' wrong passwords at the real form
+    while the known browser waits, then has that browser finish the door.
+    """
+
+    def test_a_known_browser_finishes_its_code_while_locked(self, app, seed_user):
+        """Known but not trusted: the password and then the code both get past."""
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _known_with_a_code(app, secret, trust=False)
+        lock_before = _strangers_lock(app, user_id)
+        assert _asked_the_code(_password(browser))
+
+        response = browser.post(
+            "/mfa/verify", data={"totp_code": _second_code(secret)},
+        )
+
+        assert _signed_in(response)
+        assert _lock_state(user_id) == lock_before
+
+    def test_a_known_browsers_wrong_code_counts_on_its_record(self, app, seed_user):
+        """One wrong code: 1 on the browser's record, 0 on the account's."""
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _known_with_a_code(app, secret, trust=False)
+        assert _asked_the_code(_password(browser))
+
+        response = browser.post("/mfa/verify", data={"totp_code": "xxxxxx"})
+
+        assert b"Invalid verification code" in response.data
+        assert _device_count(user_id, _token(browser, user_id)) == 1
+        assert _lock_state(user_id) == (0, None)
+
+    def test_a_known_browser_re_confirms_while_locked(self, app, seed_user):
+        """Signed in, then locked by strangers: ``/reauth`` takes the right password."""
+        user_id = seed_user["user"].id
+        browser = app.test_client()
+        assert _signed_in(_password(browser))
+        lock_before = _strangers_lock(app, user_id)
+
+        response = browser.post("/reauth", data={"password": SEED_USER_PASSWORD})
+
+        assert response.status_code == 302
+        assert response.headers["Location"].endswith("/dashboard")
+        assert _lock_state(user_id) == lock_before
+
+    def test_a_re_confirm_counts_and_clears_on_the_browser(self, app, seed_user):
+        """A wrong password counts 1 on the record; the right one clears it to 0.
+
+        The strangers' four on the account stay four throughout.
+        """
+        user_id = seed_user["user"].id
+        browser = app.test_client()
+        assert _signed_in(_password(browser))
+        _strangers_guess(app, 4)
+        token = _token(browser, user_id)
+
+        refused = browser.post("/reauth", data={"password": _WRONG_PASSWORD})
+        assert b"Invalid password." in refused.data
+        assert _device_count(user_id, token) == 1
+
+        assert browser.post(
+            "/reauth", data={"password": SEED_USER_PASSWORD},
+        ).status_code == 302
+
+        assert _device_count(user_id, token) == 0
+        assert _lock_state(user_id) == (4, None)
+
+    def test_a_known_browser_changes_its_password_while_locked(self, app, seed_user):
+        """The current password gets past the lock, and the new one is stored."""
+        user_id = seed_user["user"].id
+        browser = app.test_client()
+        assert _signed_in(_password(browser))
+        lock_before = _strangers_lock(app, user_id)
+        new_password = "a-brand-new-passphrase"
+
+        browser.post("/change-password", data={
+            "current_password": SEED_USER_PASSWORD,
+            "new_password": new_password,
+            "confirm_password": new_password,
+        })
+
+        db.session.expire_all()
+        user = db.session.get(User, user_id)
+        assert auth_service.verify_password(new_password, user.password_hash)
+        assert _lock_state(user_id) == lock_before
+
+    def test_a_known_browser_turns_two_factor_off_while_locked(self, app, seed_user):
+        """The password and the code get past the lock, and two-factor is off."""
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = app.test_client()
+        assert _asked_the_code(_password(browser))
+        assert _signed_in(browser.post("/mfa/verify", data={"totp_code": _code(secret)}))
+        _strangers_lock(app, user_id)
+
+        browser.post("/mfa/disable", data={
+            "current_password": SEED_USER_PASSWORD,
+            "totp_code": _second_code(secret),
+        })
+
+        db.session.expire_all()
+        assert db.session.query(MfaConfig).filter_by(
+            user_id=user_id,
+        ).one().is_enabled is False
 

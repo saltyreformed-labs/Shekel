@@ -8,6 +8,12 @@ answer while locked, and only a finished sign-in or re-confirm clears the count
 (ruling plan#3007).  The code form also has a limit of its own by the pending
 account, so moving between addresses buys no more guesses.
 
+Every test here is a stranger's, whose guesses count on the account.  A
+browser that finished a sign-in is known instead, and counts on its own record
+(plan#2772), so the signed-in doors' tests guess from a signed-in stranger: a
+browser whose record has gone (``stranger_client``).  The known browser's side
+is ``tests/test_adversarial/test_known_browser_sign_in.py``.
+
 The ``/login`` password and its lock have their own tests in
 ``tests/test_services/`` and ``tests/test_routes/test_auth.py``.
 """
@@ -22,6 +28,7 @@ import pytest
 
 from app import CONFIG_MAP, create_app
 from app.extensions import db, limiter
+from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig, User
 from app.routes.auth._helpers import _MFA_PENDING_MAX_AGE
 from app.services import auth_service, mfa_service
@@ -356,26 +363,46 @@ class TestTheCodeFormCounts:
             assert _reloaded(user_id).locked_until is None
 
 
+@pytest.fixture(name="stranger_client")
+def _stranger_client(auth_client, seed_user):
+    """Return a signed-in browser that is a stranger: its record has gone.
+
+    A signed-in browser stays known only while its record lives; one whose
+    record aged out, or was deleted by its own ten wrong guesses, is a stranger
+    at every door (ruling plan#3034) and counts on the account.
+
+    Args:
+        auth_client: The signed-in test client.
+        seed_user: Its account.
+
+    Returns:
+        *auth_client*, its account holding no record.
+    """
+    db.session.query(KnownDevice).filter_by(user_id=seed_user["user"].id).delete()
+    db.session.commit()
+    return auth_client
+
+
 class TestReauthCounts:
     """``/reauth`` counts, refuses while locked, and clears when it finishes."""
 
-    def test_a_wrong_password_counts(self, app, auth_client, seed_user):
+    def test_a_wrong_password_counts(self, app, stranger_client, seed_user):
         """One wrong password is one on the count."""
         with app.app_context():
             user_id = seed_user["user"].id
 
-            response = auth_client.post("/reauth", data={"password": "wrong"})
+            response = stranger_client.post("/reauth", data={"password": "wrong"})
 
             assert b"Invalid password" in response.data
             assert _reloaded(user_id).failed_login_count == 1
 
-    def test_a_wrong_code_counts(self, app, auth_client, seed_user):
+    def test_a_wrong_code_counts(self, app, stranger_client, seed_user):
         """The right password and a wrong code is one on the count."""
         with app.app_context():
             user_id = seed_user["user"].id
             secret = _enable_mfa(user_id)
 
-            response = auth_client.post("/reauth", data={
+            response = stranger_client.post("/reauth", data={
                 "password": _PASSWORD, "totp_code": _wrong_code(secret),
             })
 
@@ -383,19 +410,19 @@ class TestReauthCounts:
             assert _reloaded(user_id).failed_login_count == 1
 
     def test_a_form_the_schema_rejects_does_not_count(
-        self, app, auth_client, seed_user,
+        self, app, stranger_client, seed_user,
     ):
         """No password at all is no guess at one."""
         with app.app_context():
             user_id = seed_user["user"].id
 
-            response = auth_client.post("/reauth", data={})
+            response = stranger_client.post("/reauth", data={})
 
             assert b"Invalid password" in response.data
             assert _reloaded(user_id).failed_login_count == 0
 
     def test_a_failed_encryption_key_does_not_count(
-        self, app, auth_client, seed_user,
+        self, app, stranger_client, seed_user,
     ):
         """The operator's key problem is not the person's guess."""
         with app.app_context():
@@ -405,7 +432,7 @@ class TestReauthCounts:
             with patch.object(
                 mfa_service, "verify_totp_code", side_effect=RuntimeError("no key"),
             ):
-                response = auth_client.post("/reauth", data={
+                response = stranger_client.post("/reauth", data={
                     "password": _PASSWORD, "totp_code": _wrong_code(secret),
                 })
 
@@ -413,7 +440,7 @@ class TestReauthCounts:
             assert _reloaded(user_id).failed_login_count == 0
 
     def test_a_locked_account_refuses_the_right_password_without_bcrypt(
-        self, app, auth_client, seed_user,
+        self, app, stranger_client, seed_user,
     ):
         """The lock comes first: the right password is refused and never checked."""
         with app.app_context():
@@ -421,7 +448,7 @@ class TestReauthCounts:
             _set_lock_state(user_id, locked_for=timedelta(minutes=10))
 
             with patch.object(auth_service, "verify_password") as verify:
-                response = auth_client.post(
+                response = stranger_client.post(
                     "/reauth", data={"password": _PASSWORD},
                 )
 
@@ -430,7 +457,7 @@ class TestReauthCounts:
             assert _reloaded(user_id).failed_login_count == 0
 
     def test_success_clears_the_count_and_a_run_out_lock(
-        self, app, auth_client, seed_user,
+        self, app, stranger_client, seed_user,
     ):
         """A finished re-confirm is every check this account faces."""
         with app.app_context():
@@ -439,7 +466,7 @@ class TestReauthCounts:
                 user_id, count=3, locked_for=timedelta(seconds=-1),
             )
 
-            response = auth_client.post("/reauth", data={"password": _PASSWORD})
+            response = stranger_client.post("/reauth", data={"password": _PASSWORD})
 
             assert response.status_code == 302
             user = _reloaded(user_id)
@@ -447,7 +474,7 @@ class TestReauthCounts:
             assert user.locked_until is None
 
     def test_success_with_two_factor_clears_the_count(
-        self, app, auth_client, seed_user,
+        self, app, stranger_client, seed_user,
     ):
         """With a second factor, the clear waits for the code."""
         with app.app_context():
@@ -455,12 +482,12 @@ class TestReauthCounts:
             secret = _enable_mfa(user_id)
             _set_lock_state(user_id, count=3)
 
-            auth_client.post("/reauth", data={
+            stranger_client.post("/reauth", data={
                 "password": _PASSWORD, "totp_code": _wrong_code(secret),
             })
             assert _reloaded(user_id).failed_login_count == 4
 
-            response = auth_client.post("/reauth", data={
+            response = stranger_client.post("/reauth", data={
                 "password": _PASSWORD, "totp_code": _right_code(secret),
             })
 
@@ -489,14 +516,14 @@ class TestChangePasswordCounts:
         }, follow_redirects=True)
 
     def test_a_wrong_password_counts_and_changes_nothing(
-        self, app, auth_client, seed_user,
+        self, app, stranger_client, seed_user,
     ):
         """One wrong current password is one on the count, and the hash stays."""
         with app.app_context():
             user_id = seed_user["user"].id
             before = _reloaded(user_id).password_hash
 
-            response = self._post(auth_client, "wrong")
+            response = self._post(stranger_client, "wrong")
 
             assert b"Current password is incorrect" in response.data
             user = _reloaded(user_id)
@@ -504,7 +531,7 @@ class TestChangePasswordCounts:
             assert user.password_hash == before
 
     def test_a_locked_account_refuses_the_right_password(
-        self, app, auth_client, seed_user,
+        self, app, stranger_client, seed_user,
     ):
         """The right current password while locked changes nothing."""
         with app.app_context():
@@ -512,19 +539,19 @@ class TestChangePasswordCounts:
             before = _reloaded(user_id).password_hash
             _set_lock_state(user_id, locked_for=timedelta(minutes=10))
 
-            response = self._post(auth_client, _PASSWORD)
+            response = self._post(stranger_client, _PASSWORD)
 
             assert _LOCKED_MESSAGE in response.data
             assert _reloaded(user_id).password_hash == before
 
-    def test_success_does_not_clear_the_count(self, app, auth_client, seed_user):
+    def test_success_does_not_clear_the_count(self, app, stranger_client, seed_user):
         """A password alone is not every check, so the count stays."""
         with app.app_context():
             user_id = seed_user["user"].id
             before = _reloaded(user_id).password_hash
             _set_lock_state(user_id, count=3)
 
-            response = self._post(auth_client, _PASSWORD)
+            response = self._post(stranger_client, _PASSWORD)
 
             assert b"Password changed successfully" in response.data
             user = _reloaded(user_id)
@@ -532,13 +559,13 @@ class TestChangePasswordCounts:
             assert user.failed_login_count == 3
 
     def test_a_form_the_schema_rejects_does_not_count(
-        self, app, auth_client, seed_user,
+        self, app, stranger_client, seed_user,
     ):
         """No current password is no guess at one."""
         with app.app_context():
             user_id = seed_user["user"].id
 
-            auth_client.post("/change-password", data={
+            stranger_client.post("/change-password", data={
                 "new_password": _NEW_PASSWORD,
                 "confirm_password": _NEW_PASSWORD,
             })
@@ -563,13 +590,13 @@ class TestDisableTwoFactorCounts:
         db.session.refresh(config)
         return config.is_enabled
 
-    def test_a_wrong_password_counts(self, app, auth_client, seed_user):
+    def test_a_wrong_password_counts(self, app, stranger_client, seed_user):
         """One wrong password is one on the count, and two-factor stays on."""
         with app.app_context():
             user_id = seed_user["user"].id
             secret = _enable_mfa(user_id)
 
-            response = auth_client.post("/mfa/disable", data={
+            response = stranger_client.post("/mfa/disable", data={
                 "current_password": "wrong", "totp_code": _right_code(secret),
             }, follow_redirects=True)
 
@@ -577,13 +604,13 @@ class TestDisableTwoFactorCounts:
             assert _reloaded(user_id).failed_login_count == 1
             assert self._still_enabled(user_id)
 
-    def test_a_wrong_code_counts(self, app, auth_client, seed_user):
+    def test_a_wrong_code_counts(self, app, stranger_client, seed_user):
         """The right password and a wrong code is one on the count."""
         with app.app_context():
             user_id = seed_user["user"].id
             secret = _enable_mfa(user_id)
 
-            response = auth_client.post("/mfa/disable", data={
+            response = stranger_client.post("/mfa/disable", data={
                 "current_password": _PASSWORD,
                 "totp_code": _wrong_code(secret),
             }, follow_redirects=True)
@@ -593,7 +620,7 @@ class TestDisableTwoFactorCounts:
             assert self._still_enabled(user_id)
 
     def test_a_locked_account_refuses_the_right_answers(
-        self, app, auth_client, seed_user,
+        self, app, stranger_client, seed_user,
     ):
         """The right password and code while locked leave two-factor on."""
         with app.app_context():
@@ -601,7 +628,7 @@ class TestDisableTwoFactorCounts:
             secret = _enable_mfa(user_id)
             _set_lock_state(user_id, locked_for=timedelta(minutes=10))
 
-            response = auth_client.post("/mfa/disable", data={
+            response = stranger_client.post("/mfa/disable", data={
                 "current_password": _PASSWORD,
                 "totp_code": _right_code(secret),
             }, follow_redirects=True)
@@ -609,14 +636,14 @@ class TestDisableTwoFactorCounts:
             assert _LOCKED_MESSAGE in response.data
             assert self._still_enabled(user_id)
 
-    def test_success_does_not_clear_the_count(self, app, auth_client, seed_user):
+    def test_success_does_not_clear_the_count(self, app, stranger_client, seed_user):
         """Clearing is a finished sign-in's or re-confirm's, not this form's."""
         with app.app_context():
             user_id = seed_user["user"].id
             secret = _enable_mfa(user_id)
             _set_lock_state(user_id, count=3)
 
-            response = auth_client.post("/mfa/disable", data={
+            response = stranger_client.post("/mfa/disable", data={
                 "current_password": _PASSWORD,
                 "totp_code": _right_code(secret),
             }, follow_redirects=True)
@@ -630,7 +657,7 @@ class TestOneCountAcrossEveryDoor:
     """The doors share one count and one lock, and a lock leaves signed-in pages working."""
 
     def test_guesses_at_different_doors_add_up_to_one_lock(
-        self, app, auth_client, seed_user, monkeypatch,
+        self, app, stranger_client, seed_user, monkeypatch,
     ):
         """Three wrong answers at three doors trip a threshold of three."""
         monkeypatch.setenv("LOCKOUT_THRESHOLD", "3")
@@ -638,8 +665,8 @@ class TestOneCountAcrossEveryDoor:
             user_id = seed_user["user"].id
             _enable_mfa(user_id)
 
-            auth_client.post("/reauth", data={"password": "wrong"})
-            auth_client.post("/change-password", data={
+            stranger_client.post("/reauth", data={"password": "wrong"})
+            stranger_client.post("/change-password", data={
                 "current_password": "wrong",
                 "new_password": _NEW_PASSWORD,
                 "confirm_password": _NEW_PASSWORD,
@@ -647,7 +674,7 @@ class TestOneCountAcrossEveryDoor:
             assert _reloaded(user_id).failed_login_count == 2
             assert _reloaded(user_id).locked_until is None
 
-            auth_client.post("/mfa/disable", data={
+            stranger_client.post("/mfa/disable", data={
                 "current_password": "wrong", "totp_code": _NEVER_A_CODE,
             })
 
@@ -656,14 +683,14 @@ class TestOneCountAcrossEveryDoor:
             assert user.locked_until > datetime.now(timezone.utc)
 
     def test_pages_already_signed_in_keep_working_while_locked(
-        self, app, auth_client, seed_user,
+        self, app, stranger_client, seed_user,
     ):
         """The lock refuses passwords and codes, never a session's ordinary pages."""
         with app.app_context():
             user_id = seed_user["user"].id
             _set_lock_state(user_id, locked_for=timedelta(minutes=10))
 
-            response = auth_client.get("/settings?section=security")
+            response = stranger_client.get("/settings?section=security")
 
             assert response.status_code == 200
             assert b"Two-Factor Authentication" in response.data

@@ -22,19 +22,19 @@ class User(UserMixin, TimestampMixin, db.Model):
 
       * ``failed_login_count`` -- count of consecutive wrong passwords and
         codes counted on the account, at sign-in and at the signed-in password
-        and code checks.  A known browser's wrong password at sign-in counts
-        on its own record instead (``KnownDevice.failed_login_count``,
-        plan#2772).  Incremented only by
+        and code checks.  A known browser's wrong passwords and codes count
+        on its own record instead, at every door
+        (``KnownDevice.failed_login_count``, plan#2772).  Incremented only by
         ``auth_service.record_failed_attempt``; reset to ``0`` when the
         threshold trips and ``locked_until`` is stamped, and by
         ``auth_service.clear_failed_attempts`` once every check has passed: a
-        stranger's finished sign-in or a re-confirm, not a correct password
+        stranger's finished sign-in or re-confirm, not a correct password
         alone.
       * ``locked_until`` -- exclusive upper bound on the lockout window;
         ``NULL`` when never locked or cleared, and a past value once a window
         has run out, which every check reads the same as ``NULL``.  Each check
-        refuses while ``locked_until > now``, except that sign-in's password
-        step lets a known browser past (plan#2772).  The signed-in checks
+        refuses a stranger while ``locked_until > now``, and lets a known
+        browser past (plan#2772).  The signed-in checks
         refuse without running ``verify_password``, and say why.  Sign-in
         hides the lock, so it runs a throwaway check against a dummy hash
         instead (ruling plan#2999): a brute-force attacker observes rejections

@@ -514,24 +514,37 @@ def _count_on_the_browser(user: User, device: KnownDevice) -> None:
         )
 
 
-def clear_failed_attempts(user: User) -> None:
-    """Clear *user*'s count and any lock, once every check they face has passed.
+def clear_failed_attempts(user: User, device: KnownDevice | None = None) -> None:
+    """Clear the count the guesses went to, once every check has passed.
 
-    Called at a stranger's finished sign-in and at a finished re-confirm, and
-    nowhere else (ruling plan#3007).  A known browser's finished sign-in leaves
-    the strangers' count and lock alone (plan#2772), so no sign-in refills a
-    stranger's guesses; that browser's own count clears in
-    :func:`~app.services.known_device_service.record_sign_in`.  A correct
-    password alone does not clear it: someone holding the password but not the
-    second factor could otherwise re-enter it between wrong codes, and the lock
-    would never fire.
+    Called at a finished sign-in and a finished re-confirm, and nowhere else
+    (ruling plan#3007).  A correct password alone does not clear it: someone
+    holding the password but not the second factor could otherwise re-enter it
+    between wrong codes, and the lock would never fire.  Whose count it is
+    turns on the browser, as in :func:`record_failed_attempt` (plan#2772):
+
+    * A stranger's clears the account's count and any lock.
+    * A known browser's clears its own record's count, which breaks its row
+      of wrong guesses (ruling plan#2996), and leaves the account's count and
+      lock alone: those are the strangers', and clearing them would refill a
+      stranger's guesses.  A known browser's finished sign-in clears its count
+      in :func:`~app.services.known_device_service.record_sign_in` instead,
+      which renews the whole record.
 
     Commits only when there is something to clear: the common path is a user
     with no failure history, for whom the commit would be a no-op write.
 
     Args:
         user: The account whose checks have all passed.
+        device: This browser's record for *user*, as
+            :func:`~app.services.known_device_service.find_browser` read it
+            under the owner's lock, or ``None`` for a stranger.
     """
+    if device is not None:
+        if device.failed_login_count != 0:
+            known_device_service.clear_failed_attempts(device)
+            db.session.commit()
+        return
     if user.failed_login_count != 0 or user.locked_until is not None:
         user.failed_login_count = 0
         user.locked_until = None
@@ -540,12 +553,17 @@ def clear_failed_attempts(user: User) -> None:
 
 def check_signed_in_password(
     user: User, password: str, wrong_password_message: str,
+    device: KnownDevice | None = None,
 ) -> None:
     """Check a signed-in door's password, counting a wrong one toward the lock.
 
     The one password check of ``/reauth``, ``/change-password`` and
-    ``/mfa/disable``.  The lock is checked first, so bcrypt never runs on a
-    locked account.  Unlike ``/login`` the refusal names the lock: whoever is
+    ``/mfa/disable``, with sign-in's one rule for whose attempt it is
+    (plan#2772, ruling plan#3034): a known browser, *device*, passes the
+    account's lock and counts a wrong password on its own record, and a
+    stranger meets the lock and counts on the account.  The lock is checked
+    first, so bcrypt never runs on a locked attempt.  Unlike ``/login`` the
+    refusal names the lock: whoever is
     here holds a live session on this account, so the lock's existence tells
     them nothing a stranger could use, and neither does how fast it is said.
     ``/login`` hides the lock, so there a locked attempt pays a throwaway
@@ -556,15 +574,19 @@ def check_signed_in_password(
             lock at the request's boundary.
         password: The password typed.
         wrong_password_message: What this door says to a wrong password.
+        device: This browser's record for *user*, as
+            :func:`~app.services.known_device_service.find_browser` read it
+            under the owner's lock, or ``None`` for a stranger.
 
     Raises:
-        AuthError: With :data:`LOCKED_OUT_MESSAGE` while locked, else with
-            *wrong_password_message* when the password is wrong.
+        AuthError: With :data:`LOCKED_OUT_MESSAGE` while the lock refuses
+            this attempt, else with *wrong_password_message* when the password
+            is wrong.
     """
-    if is_locked_out(user):
+    if is_locked_out(user, device):
         raise AuthError(LOCKED_OUT_MESSAGE)
     if not verify_password(password, user.password_hash):
-        record_failed_attempt(user)
+        record_failed_attempt(user, device)
         raise AuthError(wrong_password_message)
 
 
@@ -658,24 +680,30 @@ def authenticate(
     return user
 
 
-def change_password(user, current_password, new_password):
+def change_password(
+    user: User, current_password: str, new_password: str,
+    device: KnownDevice | None = None,
+) -> None:
     """Change a user's password after verifying the current one.
 
     Args:
         user: The User object whose password is being changed.
         current_password: The user's current plaintext password.
         new_password: The new plaintext password (must be >= 12 chars).
+        device: This browser's record for *user*, or ``None`` for a stranger:
+            whose attempt the current password is
+            (:func:`check_signed_in_password`).
 
     Returns:
         None on success.
 
     Raises:
-        AuthError: If the account is locked, or current_password does not
-            match the stored hash (:func:`check_signed_in_password`).
+        AuthError: If the lock refuses this attempt, or current_password does
+            not match the stored hash (:func:`check_signed_in_password`).
         ValidationError: If new_password is shorter than 12 characters.
     """
     check_signed_in_password(
-        user, current_password, "Current password is incorrect.",
+        user, current_password, "Current password is incorrect.", device,
     )
     if len(new_password) < 12:
         raise ValidationError("New password must be at least 12 characters.")

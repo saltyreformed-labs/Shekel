@@ -5,14 +5,15 @@ One browser a user has finished a sign-in on (plan#2772, ruling plan#2994).
 The row holds two separate standings, and neither ever signs anyone in:
 
 **Known**: the user finished a sign-in here within :data:`KNOWN_LIFETIME`.  A
-known browser is not stopped by the lock strangers' wrong passwords put on the
-account, and its own wrong passwords count on :attr:`KnownDevice.failed_login_count`
-rather than on the account (OWASP's "Slow Down Online Guessing Attacks with
-Device Cookies").  It still needs the password, and the code too on an account
-with two-factor.  Nothing a person presses ends this standing, so a thief with
-a live session cannot press a button and then lock the owner out (ruling
-plan#2997): it ends by age, or when the browser gets the password wrong too
-many times in a row, which deletes the row (ruling plan#2996).
+known browser is not stopped by the lock strangers' wrong guesses put on the
+account, at any door, and its own wrong passwords and codes count on
+:attr:`KnownDevice.failed_login_count` rather than on the account (OWASP's
+"Slow Down Online Guessing Attacks with Device Cookies").  It still needs the
+password, and the code too on an account with two-factor.  Nothing a person
+presses ends this standing, so a thief with a live session cannot press a
+button and then lock the owner out (ruling plan#2997): it ends by age, or when
+the browser guesses wrong too many times in a row, which deletes the row
+(ruling plan#2996).
 
 **Trusted**: the user typed a two-factor code here and asked to be trusted
 (plan#2173, ruling plan#2406).  What trust skips is the code, and only that.
@@ -108,8 +109,9 @@ class KnownDevice(db.Model):
     # NULL means no one ever asked this browser to be trusted, which is what
     # most browsers are: a sign-in without the box ticked writes no trust.
     trusted_at = db.Column(db.DateTime(timezone=True), nullable=True)
-    # Wrong passwords in a row from this browser since its last finished
-    # sign-in.  Not the account's count: a stranger's guess never moves it.
+    # Wrong passwords and codes in a row from this browser since its last
+    # finished sign-in or re-confirm.  Not the account's count: a stranger's
+    # guess never moves it.
     failed_login_count = db.Column(
         db.Integer, nullable=False, default=0, server_default=db.text("0"),
     )

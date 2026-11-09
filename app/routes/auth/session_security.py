@@ -29,6 +29,7 @@ from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     _first_validation_message,
     _is_safe_redirect,
+    _known_device,
     _totp_accepted_or_key_failure,
 )
 from app.utils.auth_helpers import log_refused_lookup
@@ -74,7 +75,10 @@ def change_password():
     new_password = change_data["new_password"]
 
     try:
-        auth_service.change_password(current_user, current_password, new_password)
+        auth_service.change_password(
+            current_user, current_password, new_password,
+            _known_device(current_user),
+        )
         db.session.commit()
         # Invalidate all other sessions after password change.  A
         # single ``now`` value flows into both the DB column and
@@ -191,8 +195,11 @@ def reauth():
 
       * Password is verified through
         ``auth_service.check_signed_in_password`` -- the same bcrypt path
-        used at primary login, refused while the account is locked, and a
-        wrong one counts toward the lock.
+        used at primary login, refused while the lock refuses this browser,
+        and a wrong one counts toward the lock.  Whose attempt it is follows
+        sign-in's one rule (plan#2772, ruling plan#3034): a known browser
+        passes the account's lock and counts on its own record, a stranger
+        meets it and counts on the account.
       * If the user has MFA enabled, a TOTP code is required.  A wrong or
         replayed one counts toward the lock.  The
         same ``_verify_totp_with_replay_logging`` helper used by
@@ -211,8 +218,9 @@ def reauth():
         operator-actionable message and re-render the form, mirroring
         /mfa/verify and /mfa/disable.
 
-    Success clears the wrong-guess count (ruling plan#3007): every check
-    this account faces has passed.
+    Success clears the count the guesses went to (ruling plan#3007): every
+    check this account faces has passed.  A known browser's re-confirm clears
+    its own record's count and leaves the strangers' count and lock alone.
 
     The ``next`` parameter is validated through ``_is_safe_redirect``
     on every read (storage time and post-success redirect) so an
@@ -243,9 +251,10 @@ def reauth():
         flash("Invalid password.", "danger")
         return render_template("auth/reauth.html", next=safe_next)
 
+    device = _known_device(current_user)
     try:
         auth_service.check_signed_in_password(
-            current_user, reauth_data["password"], "Invalid password.",
+            current_user, reauth_data["password"], "Invalid password.", device,
         )
     except AuthError as exc:
         log_event(
@@ -269,7 +278,7 @@ def reauth():
         if key_failure:
             return render_template("auth/reauth.html", next=safe_next)
         if not accepted:
-            auth_service.record_failed_attempt(current_user)
+            auth_service.record_failed_attempt(current_user, device)
             log_event(
                 logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
                 "Step-up re-auth failed: bad TOTP",
@@ -278,7 +287,7 @@ def reauth():
             flash("Invalid authentication code.", "danger")
             return render_template("auth/reauth.html", next=safe_next)
 
-    auth_service.clear_failed_attempts(current_user)
+    auth_service.clear_failed_attempts(current_user, device)
     stamp_reauth_session(datetime.now(timezone.utc))
     log_event(
         logger, logging.INFO, EVT_REAUTH_SUCCESS, AUTH,

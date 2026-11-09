@@ -5,9 +5,10 @@ One browser, one record, one cookie (plan#2772, ruling plan#2994).  A finished
 sign-in writes the record; a trust is one fact on it, and skips only the
 two-factor code, never the password (plan#2173, ruling plan#2406).  This module
 owns the record's acts: read what a browser's token is worth, record a finished
-sign-in, count a wrong guess, list a user's trusted devices, and forget one.
-Beside them, :func:`device_named_by` picks a browser's device out of a list
-already read, so the token's hash is spelled in this module alone.
+sign-in, count a wrong guess and clear the count, list a user's trusted
+devices, and forget one.  Beside them, :func:`device_named_by` picks a
+browser's device out of a list already read, so the token's hash is spelled in
+this module alone.
 
 **Each standing is stated once**: :func:`_known`, a finished sign-in less than
 :data:`~app.models.known_device.KNOWN_LIFETIME` ago, and :func:`_trusted`, a
@@ -248,8 +249,9 @@ def count_failed_attempt(device: KnownDevice, threshold: int) -> bool:
     *threshold* deletes the record, so the browser is a stranger again and
     every other browser of the user is untouched (ruling plan#2996): its
     cookie then names nothing, and :func:`find_browser` answers ``None`` for a
-    token no record holds.  The count runs "in a row" because only
-    :func:`record_sign_in`, at a finished sign-in, clears it.
+    token no record holds.  The count runs "in a row" because only a finished
+    sign-in (:func:`record_sign_in`) or re-confirm
+    (:func:`clear_failed_attempts`) clears it.
 
     Args:
         device: The known browser's record, as :func:`find_browser` read it in
@@ -267,6 +269,20 @@ def count_failed_attempt(device: KnownDevice, threshold: int) -> bool:
         db.session.delete(device)
     db.session.flush()
     return deleted
+
+
+def clear_failed_attempts(device: KnownDevice) -> None:
+    """Clear *device*'s count of wrong guesses, at a finished re-confirm on it.
+
+    A finished sign-in clears it in :func:`record_sign_in`, which renews the
+    whole record; a re-confirm renews nothing else (ruling plan#3007).
+
+    Args:
+        device: The known browser's record, as :func:`find_browser` read it in
+            this transaction.
+    """
+    device.failed_login_count = 0
+    db.session.flush()
 
 
 def list_trusted_devices(user_id: int) -> list[KnownDevice]:

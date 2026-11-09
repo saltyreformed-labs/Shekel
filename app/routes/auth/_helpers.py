@@ -10,8 +10,9 @@ the two halves of the login flow -- the password POST in
 :mod:`~app.routes.auth.mfa` enforces freshness and clears them -- so it
 lives here rather than in either route module; a typo on any one key
 would silently break the flow, which is why the key names are
-centralised at all.  :func:`_browser_standing` is the one read, per sign-in
-request, of what the browser's cookie is worth (plan#2772).
+centralised at all.  :func:`_browser_standing` (and :func:`_known_device`)
+is the one read, per request, of what the browser's cookie is worth
+(plan#2772).
 :func:`_complete_sign_in` is the ONE completion of a sign-in, whichever proof
 finished it: a password with no second factor, a password and a code, or a
 password on a trusted device (plan#2173), so the three cannot drift on what a
@@ -39,6 +40,7 @@ from marshmallow import ValidationError as MarshmallowValidationError
 from app import ref_cache
 from app.enums import RoleEnum
 from app.extensions import db
+from app.models.known_device import KnownDevice
 from app.services import auth_service, known_device_service, mfa_service
 from app.services.known_device_service import BrowserStanding
 from app.utils.device_cookie import device_token, set_device_cookie
@@ -105,18 +107,22 @@ def _clear_mfa_pending_state():
 def _browser_standing(user) -> BrowserStanding | None:
     """Return what this browser's cookie is worth for *user*, or ``None``.
 
-    Read once per sign-in request, by ``/login`` and ``/mfa/verify``, right
-    after the owner's lock is taken, so everything in the request that turns
-    on the browser judges it at one moment (plan#2772): at ``/login`` the
-    lock, the count and the trusted skip of the code, and at both what the
-    completion clears.  It is the cookie for THAT user, judged by
+    Read once per request, under the owner's lock, by every door with a
+    password or code to check: ``/login`` and ``/mfa/verify`` right after they
+    take it, and the signed-in doors (``/reauth``, ``/change-password``,
+    ``/mfa/disable``), whose request took it at its boundary.  So everything in
+    the request that turns on the browser judges it at one moment (plan#2772):
+    the lock, the count and what a success clears, and at ``/login`` the
+    trusted skip of the code.  It is the cookie for THAT user, judged by
     :func:`~app.services.known_device_service.find_browser`, so no cookie, a
     token no record holds, another user's token and a browser past its thirty
-    days all answer ``None``.
+    days all answer ``None``.  So does a signed-in browser whose record has
+    gone: being signed in is not being known, by one rule for every door
+    (ruling plan#3034).
 
     Args:
-        user: The :class:`~app.models.user.User` signing in, whose owner's lock
-            is held.
+        user: The :class:`~app.models.user.User` signing in or signed in,
+            whose owner's lock is held.
 
     Returns:
         The browser's
@@ -124,6 +130,24 @@ def _browser_standing(user) -> BrowserStanding | None:
         ``None`` for a stranger.
     """
     return known_device_service.find_browser(user.id, device_token(user.id))
+
+
+def _known_device(user) -> KnownDevice | None:
+    """Return this browser's record for *user*, or ``None`` for a stranger.
+
+    :func:`_browser_standing` for a door that asks only whose attempt it is,
+    as the lock and the count do, and not whether the browser is trusted.
+
+    Args:
+        user: The :class:`~app.models.user.User` signing in or signed in,
+            whose owner's lock is held.
+
+    Returns:
+        The known browser's :class:`~app.models.known_device.KnownDevice`, or
+        ``None``.
+    """
+    standing = _browser_standing(user)
+    return None if standing is None else standing.device
 
 
 def _complete_sign_in(

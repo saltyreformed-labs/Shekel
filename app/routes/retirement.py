@@ -130,7 +130,7 @@ def dashboard():
     crossing a NEW YEAR could project the verdict card's salary path from
     year N and the lever card's from N+1.  Both survivors take the pass's day
     now.  The gates are
-    ``tests/test_arch/test_one_read_pass_per_render.py`` for the pass and
+    ``tests/test_arch/test_one_read_pass_per_render/`` for the pass and
     ``test_retirement_dashboard_service.TestTheRenderDayOpensTheSalaryPath``
     for the day.
     """

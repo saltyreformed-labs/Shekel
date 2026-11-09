@@ -8725,7 +8725,7 @@ def counting_calls(*targets):
 
     **The ONE instrument for "how many times did this render run that"**,
     shared by the architecture gate
-    (``tests/test_arch/test_one_read_pass_per_render.py``) and the render
+    (``tests/test_arch/test_one_read_pass_per_render/``) and the render
     harness (``tests/manual/verify_retirement_render.py``) -- the same sharing
     :func:`counting_read_passes` below states its own case for, and for the
     same reason: two copies of a measuring instrument is the shape where one is
@@ -8776,7 +8776,7 @@ def counting_read_passes():
     """Count every ``BalanceContext.build`` while the block runs.
 
     **The ONE instrument for "how many read passes did this open"**, shared by
-    the architecture gate (``tests/test_arch/test_one_read_pass_per_render.py``)
+    the architecture gate (``tests/test_arch/test_one_read_pass_per_render/``)
     and the cutover harness (``tests/manual/verify_retirement_pass_cutover.py``)
     -- which is what plan step ``C2-f2d-1``'s adversarial code review asked for
     after both shipped their own copy of it. Two copies of a measuring

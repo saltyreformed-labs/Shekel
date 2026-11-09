@@ -111,7 +111,7 @@ from app.services.amount_ownership import state_own_amount
 from app.tax_law import TaxLaw
 
 #: The one database door every pay-calendar derivation goes through, as
-#: ``tests/test_arch/test_one_read_pass_per_render.py`` names it.  A service
+#: ``tests/test_arch/test_one_read_pass_per_render/`` names it.  A service
 #: that derives one below its caller's door shows up here as a non-zero count.
 _CALENDAR_DOOR = ("app.services.pay_calendar._loader", "calendar_for")
 
@@ -1564,7 +1564,7 @@ class TestOneScheduleReadServesTheWholeRequest:
     the caller's :class:`~app.services.pay_calendar.PayCalendar`.  So the
     number this asserts is ZERO derivations inside the service -- the request's
     one derivation happens at its door, which is what ledger row **P68** asked
-    for.  ``tests/test_arch/test_one_read_pass_per_render.py`` grades the
+    for.  ``tests/test_arch/test_one_read_pass_per_render/`` grades the
     render's total; this grades the service's share of it.
 
     **Plan step R7d-c-1 made it the read PASS, and the zero now has a

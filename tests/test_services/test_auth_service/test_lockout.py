@@ -1,14 +1,17 @@
 """Auth service tests: the account lockout's settings and behaviour."""
 
+import logging
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
 
 from app.extensions import db
+from app.models.known_device import KnownDevice
 from app.models.user import User
-from app.services import auth_service
+from app.services import auth_service, known_device_service
 from app.exceptions import AuthError
+from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
 
 
 # ---------------------------------------------------------------------------
@@ -340,3 +343,143 @@ class TestAccountLockoutBehaviour:
             ):
                 db.session.commit()
             db.session.rollback()
+
+
+_EMAIL = "test@shekel.local"
+_PASSWORD = "testpass"
+
+
+def _known_browser(user_id: int) -> str:
+    """Record a finished sign-in for *user_id* on a new browser; return its token.
+
+    Args:
+        user_id: The account.
+
+    Returns:
+        The browser's token.
+    """
+    token = known_device_service.record_sign_in(user_id, None, "")
+    db.session.commit()
+    return token
+
+
+def _attempt(token: str | None, password: str) -> User:
+    """Sign in as the route does: find, read the browser, then authenticate.
+
+    The browser is read afresh on each attempt, as each request reads it.
+
+    Args:
+        token: The browser's token, or ``None`` for a browser holding none.
+        password: The password typed.
+
+    Returns:
+        The user :func:`~app.services.auth_service.authenticate` returns.
+    """
+    user = auth_service.find_sign_in_user(_EMAIL)
+    standing = known_device_service.find_browser(user.id, token)
+    return auth_service.authenticate(
+        user, password, None if standing is None else standing.device,
+    )
+
+
+def _lock(user_id: int, count: int) -> datetime:
+    """Lock *user_id* for ten minutes with *count* on the account; return the end.
+
+    Args:
+        user_id: The account.
+        count: The strangers' count to store.
+
+    Returns:
+        The stored ``locked_until``.
+    """
+    user = db.session.get(User, user_id)
+    user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=10)
+    user.failed_login_count = count
+    db.session.commit()
+    return user.locked_until
+
+
+class TestAKnownBrowser:
+    """The account's lock and count are the strangers'; a known browser has its own.
+
+    Plan#2772: a browser that finished a sign-in in the last thirty days is not
+    stopped by the lock strangers' wrong passwords put on the account, and its
+    own wrong passwords count on its record, never on the account (ruling
+    plan#2996).
+    """
+
+    def test_it_passes_the_lock_with_the_right_password(self, app, db, seed_user):
+        """Locked by strangers with 4 on the count: the user comes back, both untouched."""
+        user_id = seed_user["user"].id
+        token = _known_browser(user_id)
+        locked_until = _lock(user_id, 4)
+
+        assert _attempt(token, _PASSWORD).id == user_id
+
+        db.session.expire_all()
+        user = db.session.get(User, user_id)
+        assert user.locked_until == locked_until
+        assert user.failed_login_count == 4
+
+    def test_a_stranger_is_still_refused_the_right_password(
+        self, app, db, seed_user,
+    ):
+        """The control: the same lock refuses a browser holding no token."""
+        user_id = seed_user["user"].id
+        _known_browser(user_id)
+        _lock(user_id, 4)
+
+        with pytest.raises(AuthError, match="Invalid email or password"):
+            _attempt(None, _PASSWORD)
+
+    def test_its_wrong_password_counts_on_its_record_alone(
+        self, app, db, seed_user,
+    ):
+        """One wrong password: 1 on the browser's record, 0 on the account's."""
+        user_id = seed_user["user"].id
+        token = _known_browser(user_id)
+
+        with pytest.raises(AuthError, match="Invalid email or password"):
+            _attempt(token, "wrong-password")
+
+        db.session.expire_all()
+        user = db.session.get(User, user_id)
+        assert user.failed_login_count == 0
+        assert user.locked_until is None
+        assert known_device_service.find_browser(
+            user_id, token,
+        ).device.failed_login_count == 1
+
+    def test_the_accounts_threshold_deletes_its_record(
+        self, app, db, seed_user, monkeypatch, caplog,
+    ):
+        """At a threshold of 3 the third wrong password deletes the record, with its event.
+
+        The next wrong password from that browser is a stranger's, so it counts
+        on the account: 1.  The account was never locked.
+        """
+        monkeypatch.setenv("LOCKOUT_THRESHOLD", "3")
+        user_id = seed_user["user"].id
+        token = _known_browser(user_id)
+        device_id = known_device_service.find_browser(user_id, token).device.id
+
+        with caplog.at_level(logging.WARNING, logger="app.services.auth_service"):
+            for _ in range(3):
+                with pytest.raises(AuthError):
+                    _attempt(token, "wrong-password")
+
+        assert db.session.query(KnownDevice).filter_by(user_id=user_id).count() == 0
+        assert [
+            (r.user_id, r.device_id) for r in caplog.records
+            if getattr(r, "event", None) == EVT_KNOWN_DEVICE_DELETED
+        ] == [(user_id, device_id)]
+        db.session.expire_all()
+        assert db.session.get(User, user_id).failed_login_count == 0
+
+        with pytest.raises(AuthError):
+            _attempt(token, "wrong-password")
+
+        db.session.expire_all()
+        user = db.session.get(User, user_id)
+        assert user.failed_login_count == 1
+        assert user.locked_until is None

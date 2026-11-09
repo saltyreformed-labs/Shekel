@@ -5,9 +5,9 @@ One browser, one record, one cookie (plan#2772, ruling plan#2994).  A finished
 sign-in writes the record; a trust is one fact on it, and skips only the
 two-factor code, never the password (plan#2173, ruling plan#2406).  This module
 owns the record's acts: read what a browser's token is worth, record a finished
-sign-in, list a user's trusted devices, and forget one.  Beside them,
-:func:`device_named_by` picks a browser's device out of a list already read, so
-the token's hash is spelled in this module alone.
+sign-in, count a wrong guess, list a user's trusted devices, and forget one.
+Beside them, :func:`device_named_by` picks a browser's device out of a list
+already read, so the token's hash is spelled in this module alone.
 
 **Each standing is stated once**: :func:`_known`, a finished sign-in less than
 :data:`~app.models.known_device.KNOWN_LIFETIME` ago, and :func:`_trusted`, a
@@ -238,6 +238,35 @@ def record_sign_in(
         device.trusted_at = now
     db.session.flush()
     return new_token
+
+
+def count_failed_attempt(device: KnownDevice, threshold: int) -> bool:
+    """Count one wrong guess on *device*, deleting the record at *threshold*.
+
+    The browser's own count, never its account's: a guess counted here cannot
+    lock the account, and leaves the account's count as it was.  Reaching
+    *threshold* deletes the record, so the browser is a stranger again and
+    every other browser of the user is untouched (ruling plan#2996): its
+    cookie then names nothing, and :func:`find_browser` answers ``None`` for a
+    token no record holds.  The count runs "in a row" because only
+    :func:`record_sign_in`, at a finished sign-in, clears it.
+
+    Args:
+        device: The known browser's record, as :func:`find_browser` read it in
+            this transaction.
+        threshold: How many wrong guesses in a row delete the record.  The
+            account lock's own threshold, which the caller reads, so the two
+            are one number.
+
+    Returns:
+        True when this guess deleted the record.
+    """
+    device.failed_login_count += 1
+    deleted = device.failed_login_count >= threshold
+    if deleted:
+        db.session.delete(device)
+    db.session.flush()
+    return deleted
 
 
 def list_trusted_devices(user_id: int) -> list[KnownDevice]:

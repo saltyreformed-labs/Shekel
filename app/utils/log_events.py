@@ -227,6 +227,11 @@ EVT_ACCOUNT_LOCKED = _register(
     "account_locked", AUTH,
     "Threshold-many consecutive failures triggered an account lockout.",
 )
+EVT_KNOWN_DEVICE_DELETED = _register(
+    "known_device_deleted", AUTH,
+    "Threshold-many consecutive wrong guesses from a known browser deleted "
+    "its record, so it is a stranger again (ruling plan#2996).",
+)
 
 
 # ── Access / authorization events (F-144 / C-14) ───────────────────

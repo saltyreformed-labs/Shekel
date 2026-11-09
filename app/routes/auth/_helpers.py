@@ -10,11 +10,13 @@ the two halves of the login flow -- the password POST in
 :mod:`~app.routes.auth.mfa` enforces freshness and clears them -- so it
 lives here rather than in either route module; a typo on any one key
 would silently break the flow, which is why the key names are
-centralised at all.  :func:`_complete_sign_in` is the ONE completion of a
-sign-in, whichever proof finished it: a password with no second factor, a
-password and a code, or a password on a trusted device (plan#2173), so the
-three cannot drift on what a signed-in session carries, what the browser
-holds afterwards (plan#2772) or where it lands.
+centralised at all.  :func:`_browser_standing` is the one read, per sign-in
+request, of what the browser's cookie is worth (plan#2772).
+:func:`_complete_sign_in` is the ONE completion of a sign-in, whichever proof
+finished it: a password with no second factor, a password and a code, or a
+password on a trusted device (plan#2173), so the three cannot drift on what a
+signed-in session carries, what the browser holds afterwards (plan#2772) or
+where it lands.
 :func:`_verify_totp_with_replay_logging` (and its
 backup-code sibling :func:`_consume_backup_code`) is shared by
 ``/mfa/verify``, ``/mfa/disable``, and the step-up ``/reauth`` so all
@@ -38,6 +40,7 @@ from app import ref_cache
 from app.enums import RoleEnum
 from app.extensions import db
 from app.services import auth_service, known_device_service, mfa_service
+from app.services.known_device_service import BrowserStanding
 from app.utils.device_cookie import device_token, set_device_cookie
 from app.utils.log_events import (
     AUTH,
@@ -99,8 +102,32 @@ def _clear_mfa_pending_state():
         flask_session.pop(key, None)
 
 
+def _browser_standing(user) -> BrowserStanding | None:
+    """Return what this browser's cookie is worth for *user*, or ``None``.
+
+    Read once per sign-in request, by ``/login`` and ``/mfa/verify``, right
+    after the owner's lock is taken, so everything in the request that turns
+    on the browser judges it at one moment (plan#2772): at ``/login`` the
+    lock, the count and the trusted skip of the code, and at both what the
+    completion clears.  It is the cookie for THAT user, judged by
+    :func:`~app.services.known_device_service.find_browser`, so no cookie, a
+    token no record holds, another user's token and a browser past its thirty
+    days all answer ``None``.
+
+    Args:
+        user: The :class:`~app.models.user.User` signing in, whose owner's lock
+            is held.
+
+    Returns:
+        The browser's
+        :class:`~app.services.known_device_service.BrowserStanding`, or
+        ``None`` for a stranger.
+    """
+    return known_device_service.find_browser(user.id, device_token(user.id))
+
+
 def _complete_sign_in(
-    user, next_page: str | None, *, trust: bool = False,
+    user, next_page: str | None, *, known: bool, trust: bool = False,
 ) -> Response:
     """Sign *user* in and return the redirect to where they land.
 
@@ -108,14 +135,19 @@ def _complete_sign_in(
     ``/login`` password with no second factor, ``/mfa/verify``'s code, or
     the ``/login`` password on a trusted device (plan#2173).  It clears any
     pending code state (a completed sign-in leaves none behind), clears the
-    wrong-guess count now that every check has passed (ruling plan#3007),
-    records the browser (plan#2772, ruling plan#2994) so a password alone
-    never makes one known on an account with a code, calls ``login_user``,
-    stamps the user and every lifecycle key from one instant so the idle and
-    fresh-login checks start where the session did (commit C-10) and no other
-    user's id can be loaded on it (plan#2173), and chooses the landing page.
-    What differs per proof stays with its caller: the log event, and a backup
-    code's sign-out of every other session.
+    account's wrong-guess count now that every check has passed (ruling
+    plan#3007) unless the browser is *known*, records the browser (plan#2772,
+    ruling plan#2994) so a password alone never makes one known on an account
+    with a code, calls ``login_user``, stamps the user and every lifecycle key
+    from one instant so the idle and fresh-login checks start where the
+    session did (commit C-10) and no other user's id can be loaded on it
+    (plan#2173), and chooses the landing page.  What differs per proof stays
+    with its caller: the log event, and a backup code's sign-out of every other
+    session.
+
+    A known browser's sign-in writes nothing to the account's count or lock,
+    so no sign-in refills a stranger's guesses; the browser's own count clears
+    in its record.
 
     The record is committed before its cookie rides the response, so a browser
     never holds a token whose record a failed commit lost.
@@ -124,6 +156,8 @@ def _complete_sign_in(
         user: The :class:`~app.models.user.User` whose proof was accepted.
         next_page: Where the sign-in was asked for from, or ``None``.
             Validated here, at redirect time, whatever validated it before.
+        known: Whether this request's :func:`_browser_standing` found the
+            browser known.
         trust: Whether the user typed a code and asked to trust this browser.
 
     Returns:
@@ -132,7 +166,8 @@ def _complete_sign_in(
         dashboard.
     """
     _clear_mfa_pending_state()
-    auth_service.clear_failed_attempts(user)
+    if not known:
+        auth_service.clear_failed_attempts(user)
     token = known_device_service.record_sign_in(
         user.id, device_token(user.id),
         request.headers.get("User-Agent", ""), trust=trust,

@@ -20,13 +20,16 @@ import bcrypt
 import requests
 
 from app.extensions import db
+from app.models.known_device import KnownDevice
 from app.models.user import User
 from app.exceptions import AuthError, ValidationError
+from app.services import known_device_service
 from app.utils.log_events import (
     AUTH,
     EVT_ACCOUNT_LOCKED,
     EVT_HIBP_CHECK_FAILED,
     EVT_HIBP_CHECK_REJECTED,
+    EVT_KNOWN_DEVICE_DELETED,
     log_event,
 )
 
@@ -407,8 +410,13 @@ def find_sign_in_user(email):
     return db.session.query(User).filter_by(email=email).first()
 
 
-def is_locked_out(user: User) -> bool:
-    """Return True while *user*'s lock window is open.
+def is_locked_out(user: User, device: KnownDevice | None = None) -> bool:
+    """Return True while the lock refuses this attempt on *user*.
+
+    The lock is the account's, and it refuses only strangers (plan#2772): a
+    known browser, *device*, passes it, so no one who knows the email can keep
+    the owner out of a browser they have signed in on.  A known browser's own
+    wrong guesses count on its record instead (:func:`record_failed_attempt`).
 
     ``locked_until`` is an exclusive upper bound: at the instant it equals
     ``now`` the lock is over.  A value in the past is therefore the same as
@@ -417,33 +425,60 @@ def is_locked_out(user: User) -> bool:
 
     Args:
         user: The account being checked.
+        device: This browser's record for *user*, as
+            :func:`~app.services.known_device_service.find_browser` read it
+            under the owner's lock, or ``None`` for a stranger.
 
     Returns:
-        True while the account refuses every password and code.
+        True while the account's lock window is open and the attempt is a
+        stranger's.
     """
     return (
-        user.locked_until is not None
+        device is None
+        and user.locked_until is not None
         and user.locked_until > datetime.now(timezone.utc)
     )
 
 
-def record_failed_attempt(user: User) -> None:
-    """Count one wrong password or code against *user*, tripping the lock at the threshold.
+def record_failed_attempt(user: User, device: KnownDevice | None = None) -> None:
+    """Count one wrong password or code on *user*, from a stranger or a known browser.
 
     The ONE home of the count and the trip, whichever check the guess failed:
     sign-in's password and code, and the signed-in password and code checks.
     The caller holds the owner's lock (ruling **R-CC121**), so two guesses
-    cannot count once.
+    cannot count once.  Whose count it is turns on the browser (plan#2772), at
+    one threshold (``LOCKOUT_THRESHOLD``, default 10):
 
-    At the threshold (``LOCKOUT_THRESHOLD``, default 10) this stamps
-    ``locked_until = now + LOCKOUT_DURATION_MINUTES``, zeroes the count, and
-    emits the structured ``account_locked`` event.  It zeroes the count so a
-    second lock takes another threshold-many failures rather than one more:
-    otherwise an account whose failures already crossed the threshold would
-    lock again on the very next attempt after the window expires.
+    * A stranger's guess counts on the account.  At the threshold this stamps
+      ``locked_until = now + LOCKOUT_DURATION_MINUTES``, zeroes the count, and
+      emits the structured ``account_locked`` event.  It zeroes the count so a
+      second lock takes another threshold-many failures rather than one more:
+      otherwise an account whose failures already crossed the threshold would
+      lock again on the very next attempt after the window expires.
+    * A known browser's guess counts on its own record, *device*, and never on
+      the account.  At the threshold the record is deleted, so the browser is
+      a stranger again and the user's other browsers are untouched (ruling
+      plan#2996), and the structured ``known_device_deleted`` event is
+      emitted.
 
     Commits, even short of the threshold, so the count survives the caller's
     refusal.
+
+    Args:
+        user: The account the guess was against.
+        device: This browser's record for *user*, as
+            :func:`~app.services.known_device_service.find_browser` read it
+            under the owner's lock, or ``None`` for a stranger.
+    """
+    if device is None:
+        _count_on_the_account(user)
+    else:
+        _count_on_the_browser(user, device)
+    db.session.commit()
+
+
+def _count_on_the_account(user: User) -> None:
+    """Count a stranger's wrong guess on *user*, locking the account at the threshold.
 
     Args:
         user: The account the guess was against.
@@ -460,16 +495,35 @@ def record_failed_attempt(user: User) -> None:
             "Account locked after consecutive wrong passwords or codes",
             user_id=user.id, lockout_until=user.locked_until.isoformat(),
         )
-    db.session.commit()
+
+
+def _count_on_the_browser(user: User, device: KnownDevice) -> None:
+    """Count a known browser's wrong guess on its record, deleting it at the threshold.
+
+    Args:
+        user: The account the guess was against.
+        device: That browser's record for *user*.
+    """
+    device_id = device.id
+    if known_device_service.count_failed_attempt(device, _get_lockout_threshold()):
+        log_event(
+            logger, logging.WARNING, EVT_KNOWN_DEVICE_DELETED, AUTH,
+            "Known browser made a stranger after consecutive wrong guesses",
+            user_id=user.id, device_id=device_id,
+        )
 
 
 def clear_failed_attempts(user: User) -> None:
     """Clear *user*'s count and any lock, once every check they face has passed.
 
-    Called at a finished sign-in and a finished re-confirm, and nowhere else
-    (ruling plan#3007).  A correct password alone does not clear it: someone
-    holding the password but not the second factor could otherwise re-enter it
-    between wrong codes, and the lock would never fire.
+    Called at a stranger's finished sign-in and at a finished re-confirm, and
+    nowhere else (ruling plan#3007).  A known browser's finished sign-in leaves
+    the strangers' count and lock alone (plan#2772), so no sign-in refills a
+    stranger's guesses; that browser's own count clears in
+    :func:`~app.services.known_device_service.record_sign_in`.  A correct
+    password alone does not clear it: someone holding the password but not the
+    second factor could otherwise re-enter it between wrong codes, and the lock
+    would never fire.
 
     Commits only when there is something to clear: the common path is a user
     with no failure history, for whom the commit would be a no-op write.
@@ -511,13 +565,18 @@ def check_signed_in_password(
         raise AuthError(wrong_password_message)
 
 
-def authenticate(user, password):
-    """Check *password* for *user*, enforcing account lockout.
+def authenticate(
+    user: User | None, password: str, device: KnownDevice | None = None,
+) -> User:
+    """Check *password* for *user* from this browser, enforcing account lockout.
 
     *user* is what :func:`find_sign_in_user` returned, and the caller has
     taken its owner lock in between (ruling **R-CC121**), so the lockout
     columns read below and the counter this writes cannot interleave with
-    another sign-in's or a signed-in door's write of the same row.
+    another sign-in's or a signed-in door's write of the same row.  Under the
+    same lock the caller read *device*, what this browser's cookie is worth
+    for *user*: whose attempt this is decides which lock and which count apply
+    (plan#2772).
 
     Lockout flow (audit finding F-033 / commit C-11):
 
@@ -529,12 +588,14 @@ def authenticate(user, password):
         response-content AND the response-timing email-enumeration
         oracle.
       * If the user row's ``locked_until`` is set and still in the
-        future -- raise ``AuthError`` WITHOUT calling
-        :func:`verify_password`.  Skipping the bcrypt step means an
-        attacker observing response timing cannot distinguish "locked
-        and password is wrong" from "locked and password is right",
-        so a lockout window cannot be used as a side-channel oracle.
-      * If the password is wrong -- :func:`record_failed_attempt`.
+        future, and the attempt is a stranger's -- raise ``AuthError``
+        WITHOUT calling :func:`verify_password`.  Skipping the bcrypt step
+        means an attacker observing response timing cannot distinguish
+        "locked and password is wrong" from "locked and password is right",
+        so a lockout window cannot be used as a side-channel oracle.  A
+        known browser is not stopped by that lock (:func:`is_locked_out`).
+      * If the password is wrong -- :func:`record_failed_attempt`: on
+        *device* for a known browser, on the account for a stranger.
       * If the password is right but ``is_active`` is False -- raise
         ``AuthError`` with a message that explicitly says the account
         is disabled.  We have already proven knowledge of the
@@ -554,14 +615,17 @@ def authenticate(user, password):
     Args:
         user:     The account :func:`find_sign_in_user` found, or ``None``.
         password: The plaintext password.
+        device:   This browser's record for *user*, as
+            :func:`~app.services.known_device_service.find_browser` read it
+            under the owner's lock, or ``None`` for a stranger.
 
     Returns:
         The :class:`~app.models.user.User` object on successful auth.
 
     Raises:
         AuthError: If no account was found, the account is in an
-            active lockout window, the password is wrong, or the
-            account is disabled.
+            active lockout window and the attempt is a stranger's, the
+            password is wrong, or the account is disabled.
     """
     if user is None:
         # Timing equalization (deep-hunt #27): pay the same bcrypt cost as
@@ -576,11 +640,11 @@ def authenticate(user, password):
 
     # Lockout gate FIRST so we never run bcrypt on a locked account.
     # See module docstring above for the timing-oracle rationale.
-    if is_locked_out(user):
+    if is_locked_out(user, device):
         raise AuthError("Invalid email or password.")
 
     if not verify_password(password, user.password_hash):
-        record_failed_attempt(user)
+        record_failed_attempt(user, device)
         raise AuthError("Invalid email or password.")
 
     if not user.is_active:

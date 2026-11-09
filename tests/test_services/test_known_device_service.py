@@ -469,3 +469,72 @@ class TestForgettingADevice:
         acts.forget(_T0 + _THIRTY_DAYS, user_id, device_id)
 
         assert _device_of(db, token).trusted_at is None
+
+
+class TestCountingAWrongGuess:
+    """A wrong guess counts on the browser's record, and the threshold deletes it.
+
+    Ruling plan#2996: the browser is then a stranger, and the user's other
+    browsers are untouched.  The clock plays no part, so the acts here are the
+    service's own, called directly.
+    """
+
+    def test_short_of_the_threshold_the_count_moves_and_the_row_stays(
+        self, app, db, acts, seed_user,
+    ):
+        """One guess of three: the count is 1 and the browser is still known."""
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        deleted = known_device_service.count_failed_attempt(
+            _device_of(db, token), 3,
+        )
+        db.session.commit()
+
+        assert deleted is False
+        db.session.expire_all()
+        assert _device_of(db, token).failed_login_count == 1
+
+    def test_the_threshold_deletes_that_row_and_no_other(
+        self, app, db, acts, seed_user,
+    ):
+        """The third of three deletes the guessing browser's row; the other stays.
+
+        The first two answer False and the third True: the guess that reaches
+        the threshold is the one that deletes.
+        """
+        user_id = seed_user["user"].id
+        guessing = acts.trust(_T0, user_id)
+        other_id = _device_of(db, acts.trust(_T0, user_id)).id
+        device = _device_of(db, guessing)
+
+        answers = [
+            known_device_service.count_failed_attempt(device, 3)
+            for _ in range(3)
+        ]
+        db.session.commit()
+
+        assert answers == [False, False, True]
+        assert _rows_of(db, user_id) == [other_id]
+        assert known_device_service.find_browser(user_id, guessing) is None
+
+    def test_a_finished_sign_in_clears_the_count(
+        self, app, db, acts, seed_user,
+    ):
+        """Two guesses, then a sign-in on that browser: the count is 0 again.
+
+        So the threshold counts wrong guesses in a row, and only a finished
+        sign-in breaks the row.
+        """
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+        device = _device_of(db, token)
+        known_device_service.count_failed_attempt(device, 3)
+        known_device_service.count_failed_attempt(device, 3)
+        db.session.commit()
+
+        new_token = known_device_service.record_sign_in(user_id, token, _FIREFOX)
+        db.session.commit()
+
+        db.session.expire_all()
+        assert _device_of(db, new_token).failed_login_count == 0

@@ -11,15 +11,27 @@ Plan#2772.  A browser that finishes a sign-in holds one record and one cookie
   and a trust keeps its own date.
 * :class:`TestWhatEndsBeingKnown` -- age does.  No bump does (ruling
   **plan#2997**).
+* :class:`TestPastTheStrangersLock` -- strangers' wrong passwords lock the
+  account, and a known browser still signs in, leaving their count and lock
+  as it found them.  A stranger, a new browser, another user's cookie and a
+  cookie thirty days old stay refused.
+* :class:`TestTenWrongMakeAStranger` -- a known browser's wrong passwords
+  count on its own record, and ten in a row delete it (ruling **plan#2996**),
+  leaving the user's other browsers signing in.
 """
 
-from datetime import timedelta
+import logging
+import time
+from datetime import datetime, timedelta, timezone
 
+import pyotp
 import sqlalchemy
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
+from app.models.user import User
 from app.services import known_device_service
+from app.utils.log_events import EVT_KNOWN_DEVICE_DELETED
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -30,6 +42,17 @@ _BACKUP_CODE = "aaaaaaaabbbbbbbbccccccccdddd"
 
 #: Thirty days in seconds: the cookie's Max-Age, spelled here as an oracle.
 _THIRTY_DAYS_IN_SECONDS = 30 * 24 * 60 * 60
+
+#: Wrong passwords in a row that lock the account, or delete a known browser's
+#: record (ruling plan#2996): spelled here as an oracle.
+_THRESHOLD = 10
+
+_WRONG_PASSWORD = "not-the-password"
+
+_REFUSED = b"Invalid email or password."
+
+#: The length of one authenticator step.
+_TOTP_STEP_SECONDS = 30
 
 
 def _password(client, email=SEED_USER_EMAIL, password=SEED_USER_PASSWORD, **kwargs):
@@ -74,6 +97,88 @@ def _rows_of(user_id):
     return db.session.query(KnownDevice).filter_by(
         user_id=user_id,
     ).order_by(KnownDevice.id).all()
+
+
+def _lock_state(user_id):
+    """Return *user_id*'s ``(failed_login_count, locked_until)``, read fresh."""
+    db.session.expire_all()
+    user = db.session.get(User, user_id)
+    return user.failed_login_count, user.locked_until
+
+
+def _strangers_guess(app, times, email=SEED_USER_EMAIL):
+    """POST *times* wrong passwords for *email*, each from a new browser."""
+    for _ in range(times):
+        response = _password(app.test_client(), email, _WRONG_PASSWORD)
+        assert _REFUSED in response.data
+
+
+def _strangers_lock(app, user_id):
+    """Lock *user_id* by strangers' wrong passwords; return its lock state.
+
+    Ten of them, each from a new browser, so the lock is the one the real
+    form puts on the account.
+    """
+    _strangers_guess(app, _THRESHOLD)
+    count, locked_until = _lock_state(user_id)
+    assert locked_until > datetime.now(timezone.utc)
+    return count, locked_until
+
+
+def _known(app, email=SEED_USER_EMAIL, password=SEED_USER_PASSWORD):
+    """Return a browser that finished a sign-in with no code, then signed out."""
+    browser = app.test_client()
+    assert _signed_in(_password(browser, email, password))
+    browser.post("/logout")
+    return browser
+
+
+def _code(secret):
+    """Return the code valid now for *secret*."""
+    return pyotp.TOTP(secret).at(int(time.time()))
+
+
+def _second_code(secret):
+    """Return a code for *secret* one step past now's, for a second sign-in.
+
+    A code's step must be later than the last one accepted, so a second code
+    typed within the same thirty seconds is refused as a replay.  The next
+    step's code is inside the verifier's one-step drift window and later than
+    any step accepted before it.
+    """
+    return pyotp.TOTP(secret).at(int(time.time()) + _TOTP_STEP_SECONDS)
+
+
+def _known_with_a_code(app, secret, trust):
+    """Return a browser that finished a sign-in with its code, then signed out.
+
+    Args:
+        app: The application.
+        secret: The account's two-factor secret.
+        trust: Whether to tick "Trust this device".
+    """
+    browser = app.test_client()
+    assert _asked_the_code(_password(browser))
+    form = {"totp_code": _code(secret)}
+    if trust:
+        form["trust_device"] = "1"
+    assert _signed_in(browser.post("/mfa/verify", data=form))
+    browser.post("/logout")
+    return browser
+
+
+def _device_count(user_id, token):
+    """Return the wrong passwords counted on the record *token* names."""
+    db.session.expire_all()
+    return known_device_service.find_browser(user_id, token).device.failed_login_count
+
+
+def _deleted_devices(caplog):
+    """Return ``(user_id, device_id)`` of each ``known_device_deleted`` event."""
+    return [
+        (record.user_id, record.device_id) for record in caplog.records
+        if getattr(record, "event", None) == EVT_KNOWN_DEVICE_DELETED
+    ]
 
 
 def _age_the_last_sign_in(user_id, interval):
@@ -318,7 +423,214 @@ class TestWhatEndsBeingKnown:
 
         assert response.status_code == 302
         db.session.expire_all()
-        assert seed_user["user"] is not None
         assert known_device_service.find_browser(
             user_id, _token(browser, user_id),
         ) is not None
+
+
+class TestPastTheStrangersLock:
+    """Strangers lock the account; a browser that signed in before still signs in.
+
+    Plan#2772's done-when.  The lock is put on by ten wrong passwords at the
+    real form, each from a new browser, as a stranger who knows the email would.
+    """
+
+    def test_a_known_browser_signs_in_and_the_lock_stays(self, app, seed_user):
+        """No two-factor: signed in, and the strangers' count and lock as they were."""
+        user_id = seed_user["user"].id
+        browser = _known(app)
+        lock_before = _strangers_lock(app, user_id)
+
+        assert _signed_in(_password(browser))
+
+        assert _lock_state(user_id) == lock_before
+
+    def test_a_trusted_browser_signs_in_with_two_factor(self, app, seed_user):
+        """A browser trusted with a code skips it, locked or not, and the lock stays."""
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _known_with_a_code(app, secret, trust=True)
+        lock_before = _strangers_lock(app, user_id)
+
+        assert _signed_in(_password(browser))
+
+        assert _lock_state(user_id) == lock_before
+
+    def test_a_known_browser_owing_its_code_is_asked_for_it(self, app, seed_user):
+        """Known but not trusted: the password gets past the lock to the code form."""
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _known_with_a_code(app, secret, trust=False)
+        lock_before = _strangers_lock(app, user_id)
+
+        assert _asked_the_code(_password(browser))
+
+        assert _lock_state(user_id) == lock_before
+
+    def test_a_stranger_and_a_new_browser_stay_refused(self, app, seed_user):
+        """A stranger's guess and the right password on a new browser: both refused.
+
+        Neither moves the count while the lock holds, and neither earns a
+        cookie or a row: the one row is the known browser's.
+        """
+        user_id = seed_user["user"].id
+        _known(app)
+        lock_before = _strangers_lock(app, user_id)
+
+        guess = _password(app.test_client(), password=_WRONG_PASSWORD)
+        new_browser = _password(app.test_client())
+
+        for response in (guess, new_browser):
+            assert response.status_code == 200
+            assert _REFUSED in response.data
+            assert _cookie_header(response, user_id) is None
+        assert _lock_state(user_id) == lock_before
+        assert len(_rows_of(user_id)) == 1
+
+    def test_a_cookie_alone_signs_nobody_in(self, app, seed_user):
+        """The known browser with a wrong password is refused, and it counts there."""
+        user_id = seed_user["user"].id
+        browser = _known(app)
+        lock_before = _strangers_lock(app, user_id)
+
+        response = _password(browser, password=_WRONG_PASSWORD)
+
+        assert response.status_code == 200
+        assert _REFUSED in response.data
+        assert _device_count(user_id, _token(browser, user_id)) == 1
+        assert _lock_state(user_id) == lock_before
+
+    def test_another_users_cookie_is_a_strangers(
+        self, app, seed_user, seed_second_user,
+    ):
+        """The second user's token, sent under the first user's cookie name: refused.
+
+        The record is the second user's, so it is worth nothing for the first.
+        """
+        user_id = seed_user["user"].id
+        browser = _known(app, _SECOND_EMAIL, _SECOND_PASSWORD)
+        browser.set_cookie(
+            f"shekel_device_{user_id}",
+            _token(browser, seed_second_user["user"].id),
+        )
+        lock_before = _strangers_lock(app, user_id)
+
+        response = _password(browser)
+
+        assert _REFUSED in response.data
+        assert _lock_state(user_id) == lock_before
+
+    def test_a_cookie_thirty_days_old_is_a_strangers(self, app, seed_user):
+        """Thirty days and a minute since its last sign-in: refused like a stranger."""
+        user_id = seed_user["user"].id
+        browser = _known(app)
+        _age_the_last_sign_in(user_id, "30 days 1 minute")
+        _strangers_lock(app, user_id)
+
+        response = _password(browser)
+
+        assert _REFUSED in response.data
+
+    def test_a_known_browsers_sign_in_leaves_the_strangers_count(
+        self, app, seed_user,
+    ):
+        """Four strangers' guesses, then the known browser signs in: still four.
+
+        So no sign-in refills a stranger's guesses.
+        """
+        user_id = seed_user["user"].id
+        browser = _known(app)
+        _strangers_guess(app, 4)
+
+        assert _signed_in(_password(browser))
+
+        assert _lock_state(user_id) == (4, None)
+
+    def test_a_known_browsers_code_leaves_the_strangers_count(
+        self, app, seed_user,
+    ):
+        """Four strangers' guesses, then the known browser types its code: still four."""
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _known_with_a_code(app, secret, trust=False)
+        _strangers_guess(app, 4)
+        assert _asked_the_code(_password(browser))
+
+        response = browser.post(
+            "/mfa/verify", data={"totp_code": _second_code(secret)},
+        )
+
+        assert _signed_in(response)
+        assert _lock_state(user_id) == (4, None)
+
+
+class TestTenWrongMakeAStranger:
+    """A known browser's wrong passwords are its own, and ten in a row delete it."""
+
+    def test_ten_wrong_leave_another_browser_signing_in(
+        self, app, seed_user, caplog,
+    ):
+        """Ten on one browser delete its row, with the event; the other browser signs in.
+
+        Nine leave the row; the tenth deletes it.  The account's count never
+        moves, and the guessing browser's next wrong password is a stranger's,
+        so it counts on the account.
+        """
+        user_id = seed_user["user"].id
+        guessing = _known(app)
+        other = _known(app)
+        token = _token(guessing, user_id)
+        guessing_id = known_device_service.find_browser(user_id, token).device.id
+
+        with caplog.at_level(logging.WARNING, logger="app.services.auth_service"):
+            for _ in range(_THRESHOLD - 1):
+                assert _REFUSED in _password(guessing, password=_WRONG_PASSWORD).data
+            assert _device_count(user_id, token) == _THRESHOLD - 1
+            assert _deleted_devices(caplog) == []
+
+            assert _REFUSED in _password(guessing, password=_WRONG_PASSWORD).data
+
+        assert _deleted_devices(caplog) == [(user_id, guessing_id)]
+        assert known_device_service.find_browser(user_id, token) is None
+        assert guessing_id not in [row.id for row in _rows_of(user_id)]
+        assert _lock_state(user_id) == (0, None)
+        assert _signed_in(_password(other))
+
+        _password(guessing, password=_WRONG_PASSWORD)
+        assert _lock_state(user_id) == (1, None)
+
+    def test_a_password_still_owing_its_code_does_not_break_the_row(
+        self, app, seed_user,
+    ):
+        """Nine wrong, the right one with the code still owed, then one more: deleted.
+
+        Only a finished sign-in clears a browser's count, as only one clears
+        the account's (ruling plan#3007).
+        """
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _known_with_a_code(app, secret, trust=False)
+        token = _token(browser, user_id)
+        for _ in range(_THRESHOLD - 1):
+            _password(browser, password=_WRONG_PASSWORD)
+
+        assert _asked_the_code(_password(browser))
+        assert _device_count(user_id, token) == _THRESHOLD - 1
+        _password(browser, password=_WRONG_PASSWORD)
+
+        assert known_device_service.find_browser(user_id, token) is None
+
+    def test_a_finished_sign_in_breaks_the_row(self, app, seed_user):
+        """Nine wrong, a sign-in, nine more: the browser is still known, at nine."""
+        user_id = seed_user["user"].id
+        browser = _known(app)
+        for _ in range(_THRESHOLD - 1):
+            _password(browser, password=_WRONG_PASSWORD)
+        assert _signed_in(_password(browser))
+        browser.post("/logout")
+
+        for _ in range(_THRESHOLD - 1):
+            _password(browser, password=_WRONG_PASSWORD)
+
+        assert _device_count(user_id, _token(browser, user_id)) == _THRESHOLD - 1
+

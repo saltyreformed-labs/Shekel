@@ -5,8 +5,8 @@ The password-credential lifecycle: login (including the handoff into
 the MFA pending state that :mod:`~app.routes.auth.mfa` consumes, and the
 skip of that state on a trusted device), registration, and logout.  Each
 route registers against the shared ``auth_bp`` from
-:mod:`~app.routes.auth._bp`; the sign-in completion, the open-redirect
-guard and the form-error flattener come from
+:mod:`~app.routes.auth._bp`; the browser's standing, the sign-in
+completion, the open-redirect guard and the form-error flattener come from
 :mod:`~app.routes.auth._helpers`.
 """
 
@@ -31,17 +31,13 @@ from app import ref_cache
 from app.db_transaction import bind_sign_in_owner
 from app.enums import RoleEnum
 from app.extensions import db, limiter
-from app.models.known_device import KnownDevice
-from app.models.user import MfaConfig, User
+from app.models.user import MfaConfig
 from app.schemas.validation import LoginSchema, RegisterSchema
-from app.services import (
-    auth_service,
-    known_device_service,
-    registration_service,
-)
+from app.services import auth_service, registration_service
 from app.exceptions import AuthError, ConflictError, ValidationError
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
+    _browser_standing,
     _complete_sign_in,
     _first_validation_message,
     _is_safe_redirect,
@@ -55,7 +51,6 @@ from app.utils.log_events import (
     EVT_USER_REGISTERED,
     log_event,
 )
-from app.utils.device_cookie import device_token
 
 logger = logging.getLogger(__name__)
 
@@ -83,29 +78,6 @@ def _render_register_form():
         The rendered registration page.
     """
     return render_template("auth/register.html")
-
-
-def _trusted_device_of(user: User) -> KnownDevice | None:
-    """Return the trusted device this browser holds for *user*, or ``None``.
-
-    Read only once *user*'s password was correct (plan#2173, ruling
-    plan#2406): the browser's cookie for THAT user, judged by
-    :func:`~app.services.known_device_service.find_browser`, so a cookie
-    alone, another user's cookie, a browser no one trusted, and a device past
-    its thirty days or forgotten by a ``session_invalidated_at`` bump all
-    answer ``None``.
-
-    Args:
-        user: The user whose password was just accepted.
-
-    Returns:
-        The trusted :class:`~app.models.known_device.KnownDevice`, or
-        ``None``.
-    """
-    standing = known_device_service.find_browser(user.id, device_token(user.id))
-    if standing is None or not standing.trusted:
-        return None
-    return standing.device
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -143,11 +115,18 @@ def login():
             # Find the account, take its owner's lock, THEN check it (ruling
             # R-CC121, "Lock, then check"): the check reads the lockout
             # columns and writes the failed-attempt count, and a signed-in
-            # door writes the same row under that lock.
+            # door writes the same row under that lock.  Under the lock, read
+            # once what this browser's cookie is worth for the account: the
+            # lock, the count and the code's skip all turn on it (plan#2772).
             user = auth_service.find_sign_in_user(email)
+            standing = None
             if user is not None:
                 bind_sign_in_owner(user.id, user.data_owner_id)
-            user = auth_service.authenticate(user, password)
+                standing = _browser_standing(user)
+            user = auth_service.authenticate(
+                user, password,
+                device=None if standing is None else standing.device,
+            )
 
             # Check if MFA is enabled for this user.
             mfa_config = (
@@ -158,13 +137,15 @@ def login():
             if mfa_config:
                 # A trusted device skips only the code, never this
                 # password (plan#2173, ruling plan#2406).
-                device = _trusted_device_of(user)
-                if device is not None:
-                    response = _complete_sign_in(user, request.args.get("next"))
+                if standing is not None and standing.trusted:
+                    device_id = standing.device.id
+                    response = _complete_sign_in(
+                        user, request.args.get("next"), known=True,
+                    )
                     log_event(
                         logger, logging.INFO, EVT_TRUSTED_DEVICE_SIGN_IN, AUTH,
                         "User logged in on a trusted device",
-                        user_id=user.id, device_id=device.id,
+                        user_id=user.id, device_id=device_id,
                     )
                     return response
                 # Store pending auth state in session (user is NOT logged in yet).
@@ -187,7 +168,9 @@ def login():
             # No MFA -- complete login immediately, through the one
             # completion every sign-in shares (it stamps the lifecycle
             # keys and validates ``next``).
-            response = _complete_sign_in(user, request.args.get("next"))
+            response = _complete_sign_in(
+                user, request.args.get("next"), known=standing is not None,
+            )
             log_event(logger, logging.INFO, EVT_LOGIN_SUCCESS, AUTH,
                       "User logged in", user_id=user.id, email=email)
             return response

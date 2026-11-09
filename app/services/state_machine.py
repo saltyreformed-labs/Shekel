@@ -289,7 +289,10 @@ def allowed_transitions(row):
     The template-facing half of the state machine (grid audit D2, ruled
     2026-07-11): the action cards' status dropdowns disable options this
     set excludes, so the user is pre-hinted instead of discovering an
-    illegal transition through a 400.  :func:`verify_transition` remains
+    illegal transition through a 400.  The transaction popover reads it
+    through ``transaction_service.offerable_status_ids``, which offers a row
+    put on the card its identity move as Credit rather than Paid (plan task
+    plan#3054).  :func:`verify_transition` remains
     the enforcement seam -- this helper is display guidance only, and a
     crafted request that ignores it is still rejected there.
 

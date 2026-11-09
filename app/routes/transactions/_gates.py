@@ -28,7 +28,9 @@ door, before ``_apply_regular_update`` -- and answers a 409 rather than a
 is this module's whole membership test.
 
 Boundary discipline: these read the request's already-schema-loaded ``data`` and
-the loaded row, and write nothing.
+the loaded row, and write nothing to the row.  Two rewrite the payload: the
+stale-form check pops its pins, and the status gate reads the posted status as
+the stored one it asks for (plan task plan#3054).
 """
 
 import logging
@@ -38,7 +40,7 @@ from app.enums import StatusEnum
 from app.exceptions import ValidationError
 from app.services.card_today import a_save_may_date
 from app.services.state_machine import verify_transition
-from app.services.transaction_service import repays_card_spend
+from app.services.transaction_service import repays_card_spend, requested_status_id
 
 from app.routes._render_helpers import render_transaction_cell
 from app.routes.transactions._helpers import _error_transaction_response
@@ -61,9 +63,19 @@ def _resolve_status_change(txn, data):
     verification as the single source of truth -- this early call exists purely
     for error precedence.
 
+    **It first reads the posted status as the stored one** (plan task
+    plan#3054, ``transaction_service.requested_status_id``): the Status
+    dropdown speaks the status a row is DRAWN as, so on a row put on the card
+    it selects Credit and an untouched Save posts Credit, which means the
+    row's stored Paid.  Written back into *data* here because this gate is the
+    chain's first reader of it: the finalised-field lock, the Credit-revert
+    test, the lock-lifting order and the status verb all read the stored
+    status after it.
+
     Args:
         txn: The Transaction being edited.
-        data: The schema-loaded PATCH payload.
+        data: The schema-loaded PATCH payload; its ``status_id``, when
+            present, is replaced by the stored status it asks for.
 
     Returns:
         ``None`` when the status change is allowed (or absent), or a Flask
@@ -72,6 +84,7 @@ def _resolve_status_change(txn, data):
     """
     if "status_id" not in data:
         return None
+    data["status_id"] = requested_status_id(txn, data["status_id"])
 
     # Verify the transition BEFORE any other status-dependent work.  An illegal
     # transition -- for example settled -> projected -- short-circuits the

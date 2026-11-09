@@ -28,7 +28,9 @@ Architecture (per CLAUDE.md "Architecture" and
 ``docs/coding-standards.md``):
 
   * No Flask imports.  Takes plain SQLAlchemy collections and the
-    ``RowKey`` shape; returns plain ``list[RowKey]`` and ``dict``.
+    ``RowKey`` shape; returns plain ``list[RowKey]`` and ``dict``.  One
+    read of the session: :func:`drawn_status` takes the status row it draws
+    by primary key, from the identity map once loaded (plan task plan#3054).
   * No monetary arithmetic.  Status / category / income-vs-expense
     filtering only; every displayed dollar amount still flows through
     ``balance_resolver`` per mobile-first v3 plan Section 1 rule 2.
@@ -43,8 +45,11 @@ from collections.abc import Iterable
 from datetime import date
 
 
+from app.extensions import db
 from app.models.category import Category
+from app.models.ref import Status
 from app.services.pay_calendar import DerivedPeriod
+from app.services.status_seam import drawn_status_id
 from app.services.transfer_legs import (
     TRANSFER_FROM_PREFIX,
     TRANSFER_TO_PREFIX,
@@ -161,6 +166,40 @@ def card_dom_id(item: GridItem, prefix: str = "") -> str:
         namespace = f"{prefix}-" if prefix else ""
         return f"card-{namespace}xfer-{item.transfer.id}-{item.account_id}"
     return row_card_dom_id(item.id, prefix)
+
+
+def drawn_status(item: GridItem) -> Status | None:
+    """Return the status row *item* is DRAWN as: what the grid shows of it.
+
+    ``status_seam.drawn_status_id``'s answer as the ``ref.statuses`` row the
+    templates read (plan task plan#3054), a Jinja global of the same name: the
+    cell's chip and badge, the mobile card's and the Plan row's badge, the
+    status's name in their labels and on the popover's context line, and the
+    popover's Credit / Undo CC choice and its Status dropdown's selection.  A
+    row put on the card is stored Paid and drawn Credit, so all of them show
+    Credit, CC and Undo CC on it, and none a Paid tick; every other item is
+    drawn as it is stored.  A transfer LEG is its transfer's status: Credit
+    is a row's alone (``state_machine``'s transfer map has none).
+
+    The one session read here: the status row by primary key.  A row's own
+    status is joined onto it when it loads, so the identity map answers
+    without a query; the Credit row is fetched once per session, at the first
+    row on a card.
+
+    Args:
+        item: A row or a leg, with a row's ``entries`` loaded or loadable.
+
+    Returns:
+        The :class:`~app.models.ref.Status` to draw; ``None`` only for a
+        status id no ``ref.statuses`` row holds.
+
+    Raises:
+        ValueError: From ``status_seam.drawn_status_id``, on a row holding
+            two covering movements.
+    """
+    if isinstance(item, TransferLeg):
+        return item.status
+    return db.session.get(Status, drawn_status_id(item))
 
 
 def row_card_dom_id(row_id: int, prefix: str = "") -> str:

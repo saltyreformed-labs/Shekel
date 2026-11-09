@@ -189,8 +189,8 @@ def _apply_regular_update(txn, txn_id, data, *, target_period, posted):
     # change reports its own message BEFORE the finalised-field lock speaks, and
     # each returns ``None`` when it passes.
     #
-    # Gate 1, ``_resolve_status_change``: the state-machine transition check,
-    # run before any column is mutated so a rejection leaves the row untouched.
+    # Gate 1, ``_resolve_status_change``: the posted status read as the stored
+    # one (plan#3054), then the state-machine check, before any column moves.
     # Gate 2, the finalised-row edit lock (#26): a Paid/Received/
     # Credit/Cancelled row's money/period/category/due-date fields cannot be
     # rewritten unless this same request reverts it to Projected.

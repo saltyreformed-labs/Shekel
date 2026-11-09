@@ -71,7 +71,11 @@
    line.
 
    Jinja globals consumed (registered in app/jinja_globals.py):
-     STATUS_PROJECTED, STATUS_CREDIT.
+     STATUS_PROJECTED, STATUS_CREDIT; and `drawn_status`
+     (app/jinja_filters.py), the status an item is DRAWN as -- Credit for a
+     row put on the card, which is stored Paid (plan task plan#3054) -- so
+     the mobile card's and the Plan row's badges and labels say what the
+     desktop cell says.
 #}
 
 {% macro mstart(periods, idx) -%}
@@ -436,6 +440,9 @@
       is what a template cannot read half of. -#}
   {% set is_leg = txn is transfer_leg %}
   {% set key = cell_key(txn) %}
+  {#- The status the card DRAWS: Credit for a row put on the card (plan task
+      plan#3054), `drawn_status`, as the desktop cell draws it. -#}
+  {% set drawn = drawn_status(txn) %}
   {% set est_display = budgets[key] %}
   {# The row's RECORDED figure where its money has moved, else its plan
      (plan step X-au-c3). #}
@@ -461,13 +468,13 @@
         role="button" tabindex="0"
         aria-expanded="false"
         aria-controls="{{ _aid }}"
-        aria-label="{% if show_progress %}{{ txn.name }}: {{ money(es.total) }} / {{ money(es.budget) }} -- {{ money(remaining|abs) }} {% if over_budget %}over{% else %}remaining{% endif %} -- {{ es.count }} entr{{ 'ies' if es.count != 1 else 'y' }}{% if es.credit > 0 %} -- includes {{ money(es.credit) }} on CC{% endif %}{% else %}{{ txn.name }}: {{ money(display_amount) }}{% if will_book is not none %} -- marking paid records {{ money(will_book) }}{% endif %}{% if txn.status %} -- {{ txn.status.name }}{% endif %}{% endif %}">
+        aria-label="{% if show_progress %}{{ txn.name }}: {{ money(es.total) }} / {{ money(es.budget) }} -- {{ money(remaining|abs) }} {% if over_budget %}over{% else %}remaining{% endif %} -- {{ es.count }} entr{{ 'ies' if es.count != 1 else 'y' }}{% if es.credit > 0 %} -- includes {{ money(es.credit) }} on CC{% endif %}{% else %}{{ txn.name }}: {{ money(display_amount) }}{% if will_book is not none %} -- marking paid records {{ money(will_book) }}{% endif %}{% if drawn %} -- {{ drawn.name }}{% endif %}{% endif %}">
       <span class="text-truncate me-2">
         {{ rk.display_name }}
-        {% if txn.status %}
-          {% if txn.status.is_settled %}
+        {% if drawn %}
+          {% if drawn.is_settled %}
             <span class="badge-done ms-1">&#10003;</span>
-          {% elif txn.status_id == STATUS_CREDIT %}
+          {% elif drawn.id == STATUS_CREDIT %}
             <span class="badge-credit ms-1">CC</span>
           {% endif %}
         {% endif %}
@@ -680,6 +687,8 @@
       is what a template cannot read half of. -#}
   {% set is_leg = txn is transfer_leg %}
   {% set key = cell_key(txn) %}
+  {#- The DRAWN status, as on the interactive card: `drawn_status`. -#}
+  {% set drawn = drawn_status(txn) %}
   {% set est_display = budgets[key] %}
   {# The row's RECORDED figure where its money has moved, else its plan
      (plan step X-au-c3). #}
@@ -691,10 +700,10 @@
   <li class="list-group-item d-flex justify-content-between align-items-center py-2 px-3">
     <span class="text-truncate me-2">
       {{ rk.display_name }}
-      {% if txn.status %}
-        {% if txn.status.is_settled %}
+      {% if drawn %}
+        {% if drawn.is_settled %}
           <span class="badge-done ms-1">&#10003;</span>
-        {% elif txn.status_id == STATUS_CREDIT %}
+        {% elif drawn.id == STATUS_CREDIT %}
           <span class="badge-credit ms-1">CC</span>
         {% endif %}
       {% endif %}

@@ -37,6 +37,17 @@
    2026-08-17).
 #}
 {% set locked = txn.status and txn.status.is_immutable %}
+{#- **The status this card DRAWS** (plan task plan#3054): a row put on the card
+    is stored Paid and drawn Credit (`drawn_status`, the one answer the grid's
+    cell and cards draw too), so its context line says Credit, it offers Undo
+    CC and no Paid, and its Status dropdown selects Credit -- whose untouched
+    Save the door reads back as the stored Paid
+    (`transaction_service.requested_status_id`).  What a box SAYS about the
+    money stays keyed on the stored status: the row has settled, so the
+    Actual box and "Money moved on" correct what the card took and when, and
+    the "Paid from" picker shows the card (which accounts it offers there is
+    plan task plan#2931's). -#}
+{% set drawn = drawn_status(txn) %}
 {# Whether the settle verb would HONOUR a figure or an account typed here
    (ruling R-FF, the same sentence the reconcile panel's tick obeys): a row
    carrying purchase entries settles at their sum, so a figure typed here
@@ -145,8 +156,8 @@
      the card cannot land on the wrong period. #}
   <div class="txn-card-meta mb-2">
     {% if txn.category %}{{ txn.category.display_name }} &middot; {% endif
-    %}{{ period.label }}{% if txn.status %} &middot;
-    {{ txn.status.name }}{% endif %}{% if txn.due_date %} &middot;
+    %}{{ period.label }}{% if drawn %} &middot;
+    {{ drawn.name }}{% endif %}{% if txn.due_date %} &middot;
     Due {{ txn.due_date.strftime('%-m/%-d') }}{% endif %}
   </div>
 
@@ -178,7 +189,11 @@
             aria-label="Mark as credit card">
       <i class="bi bi-credit-card"></i> Credit
     </button>
-    {% elif txn.status_id == STATUS_CREDIT %}
+    {#- Undo CC on a row DRAWN as Credit: an old Credit row, whose press
+        deletes its payback, and a row put on the card (plan task plan#3054),
+        whose press `transactions.unmark_credit` still refuses until plan
+        task plan#3055 makes it take the row off the card. -#}
+    {% elif drawn and drawn.id == STATUS_CREDIT %}
     <button type="button" class="btn btn-xs btn-outline-warning flex-grow-1"
             hx-delete="{{ url_for('transactions.unmark_credit', txn_id=txn.id) }}"
             hx-target="#txn-cell-{{ txn.id }}" hx-swap="innerHTML"
@@ -493,7 +508,12 @@
          disabled for purchase-tracking rows (credit is per-entry, the
          same predicate as the Credit quick-action above).  The
          allowed_status_ids default keeps legacy render sites without
-         the context permissive. #}
+         the context permissive.
+
+         **It speaks the DRAWN status** (plan task plan#3054): a row put on
+         the card selects Credit, offers Credit and Projected
+         (`transaction_service.offerable_status_ids`), and an untouched Save
+         posts Credit, which the door reads as the stored Paid. #}
       {% set allowed_ids = allowed_status_ids if allowed_status_ids is defined else none %}
       <div class="mb-2">
         <label class="form-label mb-0 small">Status</label>
@@ -502,9 +522,9 @@
           {% set illegal = allowed_ids is not none and s.id not in allowed_ids %}
           {% set credit_blocked = s.id == STATUS_CREDIT and txn.tracks_purchases %}
           <option value="{{ s.id }}"
-                  {{ 'selected' if txn.status_id == s.id else '' }}
+                  {{ 'selected' if drawn and drawn.id == s.id else '' }}
                   {% if illegal %}disabled
-                  title="Not reachable from {{ txn.status.name if txn.status else 'the current status' }}"
+                  title="Not reachable from {{ drawn.name if drawn else 'the current status' }}"
                   {% elif credit_blocked %}disabled
                   title="Credit is recorded per purchase entry on tracked rows"{% endif %}>
             {{ s.name }}

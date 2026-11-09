@@ -65,6 +65,13 @@
 {% if t %}
 {% set is_leg = t is transfer_leg %}
 {% set key = cell_key(t) %}
+{#- The status the cell DRAWS (plan task plan#3054): a row put on the card is
+    stored Paid and drawn Credit, so its chip, its badge and the status named
+    in its label are Credit's.  `drawn_status` is the one answer
+    (`grid_view_service`), shared with the mobile card, the Plan row and the
+    popover.  What the cell OFFERS stays keyed on the stored status: the
+    one-click tick and `data-can-credit` are a Projected row's alone. -#}
+{% set drawn = drawn_status(t) %}
 {% set dom_id = cell_dom_id(t) %}
 {#- The row's amount comes off the render's ``budgets`` map (plan step
     X-au-c2b).  It was a transient ``t.live_estimated_amount`` the route
@@ -103,8 +110,8 @@
    the `.paybtn` check is the one-click mark-paid that posts to the
    existing mark-done endpoint, whose desktop response is this same
    cell partial re-rendered plus a gridRefresh trigger. #}
-{% set chip_state = 'done' if (t.status and t.status.is_settled)
-   else ('credit' if t.status_id == STATUS_CREDIT else 'projected') %}
+{% set chip_state = 'done' if (drawn and drawn.is_settled)
+   else ('credit' if (drawn and drawn.id == STATUS_CREDIT) else 'projected') %}
 {% if wrap_div is defined and wrap_div %}<div id="{{ dom_id }}"{% if wrap_oob is defined and wrap_oob %} hx-swap-oob="true"{% endif %}>{% endif %}
 <div class="txn-chip st-{{ chip_state }}{% if error_msg %} text-danger{% elif is_conflict %} text-warning{% endif %}">
   {# Clicking the amount opens the anchored action card (rebuild
@@ -117,12 +124,13 @@
   {# data-can-credit mirrors the card's Credit-button predicate so the
      keyboard C action (grid_keyboard.js) only fires where the button
      would render -- expense, projected, a row rather than a transfer
-     leg, not an envelope. #}
+     leg, not an envelope.  So a row already on the card (stored Paid,
+     drawn Credit) carries none, as an old Credit row carries none. #}
   {# aria-label and title share the same status/progress detail; build it
      ONCE (polyglot audit TPLB/TPL-10).  aria-label additionally prefixes
      the txn name for screen readers, and the two conflict prefixes differ
      only in punctuation, so those stay inline. #}
-  {% set detail %}{% if show_progress %}{{ money(es.total) }} / {{ money(es.budget) }} -- {{ money(remaining|abs) }} {% if over_budget %}over{% else %}remaining{% endif %} -- {{ es.count }} entr{{ 'ies' if es.count != 1 else 'y' }}{% if es.credit > 0 %} -- includes {{ money(es.credit) }} on CC{% endif %}{% else %}{{ money(display_amount) }}{% if recorded is not none and recorded != est_display %} (est: {{ money(est_display) }}){% endif %}{% if will_book is not none %} -- marking paid records {{ money(will_book) }}{% endif %}{% if t.status %} -- {{ t.status.name }}{% endif %}{% if t.notes %} -- {{ t.notes }}{% endif %}{% endif %}{% endset %}
+  {% set detail %}{% if show_progress %}{{ money(es.total) }} / {{ money(es.budget) }} -- {{ money(remaining|abs) }} {% if over_budget %}over{% else %}remaining{% endif %} -- {{ es.count }} entr{{ 'ies' if es.count != 1 else 'y' }}{% if es.credit > 0 %} -- includes {{ money(es.credit) }} on CC{% endif %}{% else %}{{ money(display_amount) }}{% if recorded is not none and recorded != est_display %} (est: {{ money(est_display) }}){% endif %}{% if will_book is not none %} -- marking paid records {{ money(will_book) }}{% endif %}{% if drawn %} -- {{ drawn.name }}{% endif %}{% if t.notes %} -- {{ t.notes }}{% endif %}{% endif %}{% endset %}
   <span class="txn-open"
         data-cell="{{ dom_id }}"
         {% if is_leg %}data-xfer-id="{{ t.transfer.id }}" data-leg-account-id="{{ t.account_id }}"{% else %}data-txn-id="{{ t.id }}"{% endif %}
@@ -189,11 +197,11 @@
     {% endif %}
     {{ retained_badge(will_book) }}
 
-    {# Status badge #}
-    {% if t.status %}
-      {% if t.status.is_settled %}
-        <span class="badge-done ms-1" aria-label="{{ t.status.name }}" data-bs-toggle="tooltip" data-bs-trigger="click focus" data-bs-title="{{ t.status.name }}">✓</span>
-      {% elif t.status_id == STATUS_CREDIT %}
+    {# Status badge: the DRAWN status's, so a row on the card shows CC. #}
+    {% if drawn %}
+      {% if drawn.is_settled %}
+        <span class="badge-done ms-1" aria-label="{{ drawn.name }}" data-bs-toggle="tooltip" data-bs-trigger="click focus" data-bs-title="{{ drawn.name }}">✓</span>
+      {% elif drawn.id == STATUS_CREDIT %}
         <span class="badge-credit ms-1" aria-label="Credit card" data-bs-toggle="tooltip" data-bs-trigger="click focus" data-bs-title="Credit card">CC</span>
       {% endif %}
     {% endif %}

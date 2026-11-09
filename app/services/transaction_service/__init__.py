@@ -48,8 +48,8 @@ makes the shape rather than shaving prose a fifth time.
 
 SIX leaves, cut by what each DECIDES rather than by size:
 
-* :mod:`._status_rules` -- which settled status a row's TYPE takes, and what a
-  dropdown may therefore offer;
+* :mod:`._status_rules` -- which settled status a row's TYPE takes, what a
+  dropdown may therefore offer, and what a status it posts back means;
 * :mod:`._row_rules` -- what SHAPE a row is and what that shape FORBIDS: the
   two predicates a screen reads before rendering an amount box, and the guard
   every settle door shares.  Split off at plan step X-au-j, when the CC-payback
@@ -100,6 +100,7 @@ from app.services.transaction_service._settle import (
 from app.services.transaction_service._status_rules import (
     offerable_status_ids,
     reject_mismatched_settled_status,
+    requested_status_id,
     settled_status_id,
     settled_status_member,
 )
@@ -119,6 +120,7 @@ __all__ = [
     "offerable_status_ids",
     "reject_mismatched_settled_status",
     "reject_unsettleable",
+    "requested_status_id",
     "retained_amount",
     "retained_amounts_by_key",
     "settle_amount",

@@ -31,6 +31,7 @@ from app.services.grid_view_service import (
     card_dom_id,
     cell_dom_id,
     cell_key,
+    drawn_status,
     leg_dom_id,
 )
 from app.services.salary_cockpit_service import clean_raise_label, is_pay_cut
@@ -298,6 +299,9 @@ def register_template_filters(app: Flask) -> None:
     app.add_template_global(cell_dom_id, "cell_dom_id")
     app.add_template_global(card_dom_id, "card_dom_id")
     app.add_template_global(leg_dom_id, "leg_dom_id")
+    # The status an item is drawn as (plan task plan#3054): Credit for a row
+    # put on the card, which is stored Paid.
+    app.add_template_global(drawn_status, "drawn_status")
     app.add_template_filter(to_percent, "to_percent")
     app.add_template_filter(local_datetime, "local_datetime")
     app.add_template_filter(ordinal, "ordinal")

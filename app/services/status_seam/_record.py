@@ -45,13 +45,13 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
 from app import ref_cache
-from app.enums import MovementFigureSourceEnum
+from app.enums import MovementFigureSourceEnum, StatusEnum
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services.account_projection import is_revolving
 from app.services.stated_figure import StatedFigure
-from app.utils.balance_predicates import settled_status_ids
+from app.utils.balance_predicates import is_done, settled_status_ids
 
 if TYPE_CHECKING:
     from app.services.transfer_legs import PlanParent
@@ -481,28 +481,64 @@ def tender_account_id_of(row: Transaction) -> int:
 
 
 def settled_on_a_card(row: Transaction) -> bool:
-    """Return whether *row* is settled with its money moved on a credit card.
+    """Return whether *row* is Paid with its money moved on a credit card.
 
     **What Credit IS since plan task plan#2929** (rulings plan#2887,
     plan#2888): a row put on the card is stored as Paid with its one covering
-    movement on the card, and drawn as Credit, so the movement's account is
-    the fact's one home and this reads it there.  A Credit press asks it so a
-    double press changes nothing (``transaction_service._credit``).
+    movement on the card, and drawn as Credit (:func:`drawn_status_id`), so
+    the movement's account is the fact's one home and this reads it there.  A
+    Credit press asks it so a double press changes nothing
+    (``transaction_service._credit``).
+
+    **Paid, not the settled band** (plan task plan#3054).  Credit is an
+    expense's (the press refuses income), and Paid is the one settled status
+    an expense takes (``transaction_service.settled_status_id``), so a refund
+    Received onto the card is Received and is not drawn as Credit.  Read
+    through the band, it was.
 
     Args:
         row: The transaction, with ``entries`` loaded or loadable.
 
     Returns:
-        ``True`` when *row* is in the settled band and its covering movement
-        is on a revolving account.
+        ``True`` when *row* is Paid and its covering movement is on a
+        revolving account.
 
     Raises:
         ValueError: From :func:`covering_movement_of`, on a row holding two.
     """
-    if row.status_id not in settled_status_ids():
+    if not is_done(row):
         return False
     movement = covering_movement_of(row)
     return movement is not None and is_revolving(movement.account)
+
+
+def drawn_status_id(row: Transaction) -> int:
+    """Return the status *row* is DRAWN as: Credit when it is on a card.
+
+    **The one answer to "what status does the owner see"** (plan task
+    plan#3054), because since plan#2929 the screen and the column differ on
+    one shape: a row put on the card is stored Paid and drawn Credit
+    (:func:`settled_on_a_card`).  Every other row is drawn as it is stored.
+    Read by the grid's drawing (``grid_view_service.drawn_status``: the
+    badge, the chip, the status's name, the Undo CC button), and by the
+    popover's Status dropdown and the door that reads what it posts back
+    (``transaction_service.offerable_status_ids`` and
+    ``requested_status_id``), so what the dropdown selects and what an
+    untouched Save means cannot part.
+
+    Args:
+        row: The transaction, with ``entries`` loaded or loadable.
+
+    Returns:
+        The ``ref.statuses.id`` of Credit for a row on a card, else
+        ``row.status_id``.
+
+    Raises:
+        ValueError: From :func:`covering_movement_of`, on a row holding two.
+    """
+    if settled_on_a_card(row):
+        return ref_cache.status_id(StatusEnum.CREDIT)
+    return row.status_id
 
 
 def _movement_settlement(movement) -> Settlement:

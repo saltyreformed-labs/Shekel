@@ -622,12 +622,11 @@ def is_done(txn: Transaction) -> bool:
     ``entry_service``'s actual-recompute hook. Pure status equality, does
     not consider ``is_deleted``.
 
-    **It has NO caller in ``app/`` as of plan step X-ap**, which merged that
-    hook with its posting-reconcile sibling onto the settled BAND -- the two
-    halves of one act were grading the same row differently (finding
-    **N-229**). Reported for plan step **X-e**, whose subject is exactly the
-    callerless public helper, rather than deleted inside a step scoped to the
-    settle doors.
+    It had no caller in ``app/`` from plan step X-ap, which merged that hook
+    with its posting-reconcile sibling onto the settled BAND (finding
+    **N-229**), until plan task plan#3054: ``status_seam.settled_on_a_card``
+    asks it, because a row on the card is stored Paid exactly, and a refund
+    Received onto the card is not Credit.
 
     Note on the name: ``StatusEnum.DONE`` is the enum member; the
     ref-table row carries display name "Paid" and ``is_settled=True``.

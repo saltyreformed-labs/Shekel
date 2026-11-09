@@ -5,6 +5,13 @@ Which settled status a row of a given TYPE takes -- income is Received, an
 expense is Paid -- and the two things that follow from it: the refusal when a
 door asks for the other one, and the narrowed set a dropdown may OFFER.
 
+**The dropdown speaks the status a row is DRAWN as** (plan task plan#3054),
+so this module also holds what a status POSTED from it means
+(:func:`requested_status_id`): a row put on the card is stored Paid and drawn
+Credit (``status_seam.drawn_status_id``), the dropdown selects Credit on it,
+and an untouched Save posts Credit back.  What it offers and what it posts are
+read through the same answer, so they cannot part.
+
 **It is a display convention with an enforced consequence**, which is why it is
 a leaf of its own rather than a line inside the settle.  Every reader of the
 settled band consumes ``settled_status_ids()`` as a SET and cannot tell Paid
@@ -21,6 +28,8 @@ from app.enums import StatusEnum
 from app.exceptions import ValidationError
 from app.models.transaction import Transaction
 from app.services.state_machine import allowed_transitions
+from app.services.status_seam import drawn_status_id
+from app.utils.balance_predicates import is_identity_move
 
 
 def settled_status_member(txn: Transaction) -> StatusEnum:
@@ -181,7 +190,8 @@ def reject_mismatched_settled_status(
 def offerable_status_ids(txn: Transaction) -> frozenset[int]:
     """Return the statuses a DOOR may offer for *txn* -- the dropdown's set.
 
-    ``state_machine.allowed_transitions`` narrowed by this module's type rule.
+    ``state_machine.allowed_transitions`` narrowed by this module's type rule,
+    with the identity move offered as the status the row is drawn as (below).
     The state machine grades the STATUS and cannot see the row's type, so its
     answer for a Projected row contains both Paid and Received; exactly one of
     them is reachable for any given row, and offering the other is offering a
@@ -203,11 +213,59 @@ def offerable_status_ids(txn: Transaction) -> frozenset[int]:
     test cannot fail is not a guard (finding **N-184**), and this module's own
     seam deleted one for that reason at plan step X-f1c.
 
+    **Staying put is offered as the status the row is DRAWN as** (plan task
+    plan#3054).  A row on the card is stored Paid and drawn Credit, so its
+    identity move is offered as Credit and Paid is not offered at all ("Such
+    a row offers no Paid", as an old Credit row offers none); every other move
+    is the stored status's, which is the move the door makes
+    (:func:`requested_status_id` reads a posted Credit back as the stored
+    Paid).  For every other row the drawn status is the stored one and the
+    set is the state machine's unchanged.
+
     Args:
         txn: The row the dropdown is being rendered for.
 
     Returns:
-        The legal successor ids, minus the settled status this row's type does
-        not take.
+        The legal successor ids, the identity drawn as the row is drawn, minus
+        the settled status this row's type does not take.
     """
-    return allowed_transitions(txn) - _mismatched_settled_status_ids(txn)
+    drawn = drawn_status_id(txn)
+    offered = frozenset(
+        drawn if is_identity_move(txn, status_id) else status_id
+        for status_id in allowed_transitions(txn)
+    )
+    return offered - _mismatched_settled_status_ids(txn)
+
+
+def requested_status_id(txn: Transaction, posted_status_id: int) -> int:
+    """Return the status a door applies for a status POSTED from the popover.
+
+    The read-back half of :func:`offerable_status_ids` (plan task plan#3054):
+    the dropdown offers staying put as the status the row is drawn as, so a
+    posted status equal to that one means "as it is", the row's stored
+    status.  On a row put on the card an untouched Save posts Credit, and the
+    door applies Paid, an identity move, so the Actual box, "Money moved on"
+    and Notes beside it correct the row on the card.  Read as Credit, the
+    state machine refused every such Save (Paid moves only to Projected);
+    admitting Paid -> Credit there instead would store status Credit holding
+    the movement, which drops the $800 from the card's balance (review B of
+    plan#2890).  Every other posted status is the move it names, graded by
+    the state machine on the stored status.
+
+    Args:
+        txn: The row the popover was drawn for, before any field is written.
+        posted_status_id: The ``ref.statuses.id`` the Status dropdown posted.
+
+    It is one translation, the inverse of the offer's: the drawn identity
+    reads as the stored one, and every other id reads as itself.
+
+    Returns:
+        ``txn.status_id`` when *posted_status_id* is the status *txn* is drawn
+        as, else *posted_status_id*.
+
+    Raises:
+        ValueError: From ``status_seam.drawn_status_id``, on a row holding two
+            covering movements.
+    """
+    stored_for_drawn = {drawn_status_id(txn): txn.status_id}
+    return stored_for_drawn.get(posted_status_id, posted_status_id)

@@ -18,7 +18,7 @@ from ._helpers import (
     FakeRule,
     twelve_rule,
     FakeDeduction,
-    FakeFicaConfig,
+    FakeFicaRules,
     FakeProfile,
     _WALK_OPENS,
     _walked_pay,
@@ -554,7 +554,7 @@ class TestEarningLines:
         configs = {
             "bracket_set": None,
             "state_config": None,
-            "fica_config": FakeFicaConfig(ss_wage_base="4700"),
+            "fica_config": FakeFicaRules(ss_wage_base="4700"),
         }
         periods = [
             _period(start_date=date(2026, 1, 2), period_id=1),

@@ -27,7 +27,6 @@ from app.models.ref import (
     RecurrenceUnit,
     StatementSource,
     Status,
-    TaxType,
     TransactionType,
     UserRole,
     WithholdingKind,
@@ -108,13 +107,6 @@ from app.models.pay_stub import (
     PayStubWithholding,
 )
 from app.models.ytd_tax_checkpoint import YtdTaxCheckpoint
-from app.models.tax_config import (
-    FicaConfig,
-    StateChildDeduction,
-    StateTaxConfig,
-    TaxBracket,
-    TaxBracketSet,
-)
 
 # Public API.  Every model class imported above is re-exported here.  Declaring
 # __all__ marks these otherwise side-effect-only imports (needed so Alembic
@@ -142,7 +134,6 @@ __all__ = [
     "RecurrenceUnit",
     "StatementSource",
     "Status",
-    "TaxType",
     "TransactionType",
     "UserRole",
     "WithholdingKind",
@@ -209,9 +200,4 @@ __all__ = [
     "PayStubOneOff",
     "PayStubWithholding",
     "YtdTaxCheckpoint",
-    "FicaConfig",
-    "StateChildDeduction",
-    "StateTaxConfig",
-    "TaxBracket",
-    "TaxBracketSet",
 ]

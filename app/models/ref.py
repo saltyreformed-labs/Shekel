@@ -340,19 +340,6 @@ class CalcMethod(db.Model):
         return f"<CalcMethod {self.name}>"
 
 
-class TaxType(db.Model):
-    """Tax type reference: 'flat', 'none', 'bracket' (Phase 2)."""
-
-    __tablename__ = "tax_types"
-    __table_args__ = {"schema": "ref"}
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(10), unique=True, nullable=False)
-
-    def __repr__(self):
-        return f"<TaxType {self.name}>"
-
-
 class RaiseType(db.Model):
     """Raise type reference: 'merit', 'cola', 'custom' (Phase 2)."""
 

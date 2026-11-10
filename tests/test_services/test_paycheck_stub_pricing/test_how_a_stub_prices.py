@@ -34,10 +34,10 @@ from tests._test_helpers import (
 )
 from tests.test_services.test_paycheck_calculator._helpers import (
     FakeBracket,
-    FakeBracketSet,
-    FakeFicaConfig,
+    FakeFederalRules,
+    FakeFicaRules,
     FakeProfile,
-    FakeStateTaxConfig,
+    FakeStateTaxRules,
 )
 from tests.test_services.test_tax_report_service._helpers import (
     _make_full_year_periods as _report_periods,
@@ -407,15 +407,15 @@ class TestTheStubSideTakesTheRhythmOnItsOwnPayday:
                 )
             ],
         )]
-        state = FakeStateTaxConfig(flat_rate="0.045")
+        state = FakeStateTaxRules(flat_rate="0.045")
         state.standard_deduction = Decimal("12000.00")
         configs = {
-            "bracket_set": FakeBracketSet(
+            "bracket_set": FakeFederalRules(
                 standard_deduction=Decimal("0"),
                 brackets=[FakeBracket(Decimal("0"), None, Decimal("0"), 0)],
             ),
             "state_config": state,
-            "fica_config": FakeFicaConfig(),
+            "fica_config": FakeFicaRules(),
         }
         period = next(p for p in calendar.periods if p.start_date == date(2026, 7, 2))
 

@@ -47,7 +47,6 @@ from app.enums import (
     StatementBalanceEvidenceEnum,
     StatementSourceEnum,
     StatusEnum,
-    TaxTypeEnum,
     TxnTypeEnum,
     WithholdingKindEnum,
 )
@@ -273,12 +272,6 @@ def calc_method_id(member):
     """Return the integer primary key for a CalcMethodEnum member."""
     require_init()
     return cache().enum_ids[CalcMethodEnum][member]
-
-
-def tax_type_id(member):
-    """Return the integer primary key for a TaxTypeEnum member."""
-    require_init()
-    return cache().enum_ids[TaxTypeEnum][member]
 
 
 def filing_status_member(filing_status_id):

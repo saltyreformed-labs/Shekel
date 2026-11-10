@@ -2,8 +2,8 @@
 Shekel Budget App -- Reference Table Enums
 
 Python Enums whose members correspond 1:1 with rows in the ref schema
-lookup tables.  The *value* of each member is the database ``name``
-column after all migrations have run.
+lookup tables (all but :class:`TaxTypeEnum`).  The *value* of each member
+is the database ``name`` column after all migrations have run.
 
 These enums are the single source of truth for valid reference values.
 The ref_cache module maps each member to its database integer ID at

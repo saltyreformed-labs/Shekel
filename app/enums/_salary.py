@@ -78,9 +78,9 @@ class CalcMethodEnum(enum.Enum):
 
 
 class TaxTypeEnum(enum.Enum):
-    """Tax type values.
+    """How a state taxes income, as the tax law states it; no ``ref`` table.
 
-    Values match ``ref.tax_types.name`` in the database.
+    Compared as members; plan step salary:X-at-2 dropped ``ref.tax_types`` (plan#3211).
     """
 
     FLAT = "flat"

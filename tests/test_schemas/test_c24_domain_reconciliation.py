@@ -52,7 +52,6 @@ from app import ref_cache
 from app.enums import CompoundingFrequencyEnum
 from app.models.interest_params import InterestParams
 from app.models.investment_params import InvestmentParams
-from app.models.tax_config import FicaConfig
 from app.schemas.validation import (
     EscrowComponentSchema,
     InterestParamsCreateSchema,
@@ -306,55 +305,6 @@ class TestC24_5AssumedReturnDefault:
             f"Expected Decimal default, got {type(default_arg).__name__}"
         )
         assert default_arg == Decimal("0.07000")
-
-
-# ── DH-#45 FicaConfig defaults are Decimal strings, not float ────
-
-
-class TestFicaConfigDecimalDefaults:
-    """DH-#45 / E-11 / E-28: every Python-side ``default`` on
-    ``FicaConfig``'s ``Numeric`` money/rate columns is a ``Decimal``
-    constructed from a string, not a ``float``/``int`` literal.
-
-    This is the same defect class C24-5 fixed on
-    ``InvestmentParams.assumed_annual_return`` but left unfixed on the
-    FICA rate/base columns (``ss_rate``/``medicare_rate``/
-    ``medicare_surtax_rate`` were ``float`` literals such as
-    ``0.0620``; ``ss_wage_base``/``medicare_surtax_threshold`` were
-    ``int`` literals).  A ``float`` literal introduces imprecision into
-    any read of ``Column.default.arg`` (the persisted value is
-    unaffected because PostgreSQL re-quantises on store).  The
-    storage-tier ``server_default`` side is covered separately by the
-    C-25 raw-INSERT test
-    (``test_fica_configs_rate_defaults_fire_on_raw_insert``).
-    """
-
-    # (column name, expected Decimal default) -- the values match the
-    # ``DEFAULT_FICA`` seed in ``auth_service.py``.
-    _EXPECTED = [
-        ("ss_rate", Decimal("0.0620")),
-        ("ss_wage_base", Decimal("176100")),
-        ("medicare_rate", Decimal("0.0145")),
-        ("medicare_surtax_rate", Decimal("0.0090")),
-        ("medicare_surtax_threshold", Decimal("200000")),
-    ]
-
-    @pytest.mark.parametrize("column_name, expected", _EXPECTED)
-    def test_default_is_decimal_not_float(self, column_name, expected):
-        """``Column.default.arg`` is a ``Decimal`` of the expected value.
-
-        Hand-check: ``isinstance(Decimal("0.0620"), Decimal) is True``,
-        ``isinstance(0.0620, Decimal) is False``.
-        """
-        col = FicaConfig.__table__.c[column_name]
-        # SQLAlchemy wraps the Python default in a ``ColumnDefault``
-        # object; ``.arg`` is the raw value passed to ``default=``.
-        default_arg = col.default.arg
-        assert isinstance(default_arg, Decimal), (
-            f"{column_name}: expected Decimal default, "
-            f"got {type(default_arg).__name__}"
-        )
-        assert default_arg == expected
 
 
 # ── C24-6 migration upgrade/downgrade round-trips ────────────────

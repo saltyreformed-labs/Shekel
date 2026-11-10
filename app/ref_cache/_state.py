@@ -59,7 +59,6 @@ from app.enums import (
     RoleEnum,
     StatementSourceEnum,
     StatusEnum,
-    TaxTypeEnum,
     TxnTypeEnum,
     WithholdingKindEnum,
 )
@@ -232,7 +231,6 @@ def _build_ref_specs(ref_models) -> list[_RefSpec]:
         _RefSpec(AcctCategoryEnum, ref_models.AccountTypeCategory),
         _RefSpec(PaycheckLineKindEnum, ref_models.PaycheckLineKind),
         _RefSpec(CalcMethodEnum, ref_models.CalcMethod),
-        _RefSpec(TaxTypeEnum, ref_models.TaxType),
         _RefSpec(RaiseTypeEnum, ref_models.RaiseType),
         _RefSpec(GoalModeEnum, ref_models.GoalMode),
         _RefSpec(IncomeUnitEnum, ref_models.IncomeUnit),

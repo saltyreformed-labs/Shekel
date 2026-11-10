@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import PaycheckLineKindEnum
+from app.enums import PaycheckLineKindEnum, TaxTypeEnum
 from app.services.pay_calendar import DerivedPeriod
 from tests._test_helpers import payroll_basis
 
@@ -190,7 +190,7 @@ class FakeBracket:
         self.sort_order = sort_order
 
 
-class FakeBracketSet:
+class FakeFederalRules:
     def __init__(self, standard_deduction=Decimal("15000"),
                  child_credit_amount=Decimal("2000"),
                  other_dependent_credit_amount=Decimal("500"),
@@ -210,23 +210,13 @@ class FakeBracketSet:
         return self
 
 
-class FakeTaxType:
-    def __init__(self, name="flat"):
-        self.name = name
-
-
-class FakeStateTaxConfig:
-    def __init__(self, flat_rate="0.045", tax_type_name="flat"):
+class FakeStateTaxRules:
+    def __init__(self, flat_rate="0.045"):
         self.flat_rate = Decimal(str(flat_rate))
-        self.tax_type = FakeTaxType(tax_type_name)
-        # Resolve the integer ID from the ref_cache for ID-based lookups.
-        from app import ref_cache  # pylint: disable=import-outside-toplevel
-        from app.enums import TaxTypeEnum  # pylint: disable=import-outside-toplevel
-        _name_to_enum = {e.value: e for e in TaxTypeEnum}
-        self.tax_type_id = ref_cache.tax_type_id(_name_to_enum[tax_type_name])
+        self.tax_type = TaxTypeEnum.FLAT
 
 
-class FakeFicaConfig:
+class FakeFicaRules:
     def __init__(self, ss_rate="0.062", ss_wage_base="168600",
                  medicare_rate="0.0145", medicare_surtax_rate="0.009",
                  medicare_surtax_threshold="200000"):

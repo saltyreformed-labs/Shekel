@@ -6,6 +6,7 @@ the tax types priced.
 import pytest
 from decimal import Decimal
 
+from app.enums import TaxTypeEnum
 from app.services.tax_calculator import (
     AnnualFederalTax,
     W4Inputs,
@@ -14,8 +15,9 @@ from app.services.tax_calculator import (
     resolve_child_deduction_per_child,
 )
 from app.services.exceptions import InvalidDependentCountError, InvalidFilingStatusError
+from app.services.tax_config_service import StateTaxRules
 
-from ._helpers import _FakeChildTier, _federal_2026_single, _FakeNCStateConfig, _federal_2026_mfj
+from ._helpers import _FakeChildTier, _federal_2026_single, _FakeNCStateTaxRules, _federal_2026_mfj
 
 
 class TestAnnualFederalLiability:
@@ -414,10 +416,10 @@ class TestStateTaxAdditionalDeduction:
         6,000 deduction lowers NC tax by 239.40.
         """
         with_ded = calculate_state_tax(
-            Decimal("99200.00"), _FakeNCStateConfig(),
+            Decimal("99200.00"), _FakeNCStateTaxRules(),
             additional_deduction=Decimal("6000.00"),
         )
-        without = calculate_state_tax(Decimal("99200.00"), _FakeNCStateConfig())
+        without = calculate_state_tax(Decimal("99200.00"), _FakeNCStateTaxRules())
         assert with_ded == Decimal("3209.96"), (
             f"With 6,000 child deduction: expected 3209.96, got {with_ded}"
         )
@@ -426,7 +428,7 @@ class TestStateTaxAdditionalDeduction:
     def test_additional_deduction_floors_taxable_at_zero(self):
         """A deduction larger than the base floors taxable (and tax) at zero."""
         result = calculate_state_tax(
-            Decimal("20000.00"), _FakeNCStateConfig(),
+            Decimal("20000.00"), _FakeNCStateTaxRules(),
             additional_deduction=Decimal("30000.00"),
         )
         assert result == Decimal("0.00")
@@ -448,7 +450,7 @@ class TestAnnualStateBase:
         ROUND_HALF_UP at the half-cent (the discarded .0050) rounds the
         second decimal up: 3,449.35 -> 3,449.36.
         """
-        result = calculate_state_tax(Decimal("99200.00"), _FakeNCStateConfig())
+        result = calculate_state_tax(Decimal("99200.00"), _FakeNCStateTaxRules())
         assert result == Decimal("3449.36"), (
             f"NC anchor state tax: expected 3449.36, got {result}"
         )
@@ -458,7 +460,7 @@ class TestAnnualStateBase:
 
         base 10,000 - std ded 12,750 = -2,750 -> clamped -> 0.00.
         """
-        result = calculate_state_tax(Decimal("10000.00"), _FakeNCStateConfig())
+        result = calculate_state_tax(Decimal("10000.00"), _FakeNCStateTaxRules())
         assert result == Decimal("0.00")
 
 
@@ -475,16 +477,9 @@ class TestStateTaxTypes:
     @staticmethod
     def _rules(tax_type, flat_rate):
         """A made-up state's rules for one filing status: no deduction, no child tiers."""
-        # Pylint: import-outside-toplevel -- ref_cache answers only once the
-        # app has loaded it, which the module's other stand-ins also wait for.
-        from app import ref_cache  # pylint: disable=import-outside-toplevel
-        from app.enums import TaxTypeEnum  # pylint: disable=import-outside-toplevel
-        from app.services.tax_config_service import (  # pylint: disable=import-outside-toplevel
-            StateTaxRules,
-        )
         return StateTaxRules(
             state_code="ZZ",
-            tax_type_id=ref_cache.tax_type_id(TaxTypeEnum[tax_type]),
+            tax_type=TaxTypeEnum[tax_type],
             flat_rate=flat_rate,
             standard_deduction=Decimal("0.00"),
             child_deduction_tiers=(),
@@ -520,7 +515,7 @@ class TestStateTaxTypes:
         with pytest.raises(
             ValueError,
             match=(
-                rf"no formula prices state tax type id {rules.tax_type_id}: "
+                r"no formula prices state tax type bracket: "
                 r"only a flat rate or no income tax is priced"
             ),
         ):

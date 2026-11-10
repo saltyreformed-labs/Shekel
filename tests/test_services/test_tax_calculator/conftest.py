@@ -6,13 +6,13 @@ here reaches exactly the tests that module held, at the scope it declared.
 import pytest
 from decimal import Decimal
 
-from ._helpers import FakeBracketSet, _single_brackets
+from ._helpers import FakeFederalRules, _single_brackets
 
 
 @pytest.fixture
 def single_bracket_set():
     """Single filer bracket set with $15,000 standard deduction."""
-    return FakeBracketSet(
+    return FakeFederalRules(
         standard_deduction=Decimal("15000"),
         child_credit_amount=Decimal("2000"),
         other_dependent_credit_amount=Decimal("500"),

@@ -137,7 +137,6 @@ _REF_TABLE_SEEDS = (
         "post_tax_deduction", "after_tax_earning",
     ]),
     ("CalcMethod", ["flat", "percentage"]),
-    ("TaxType", ["flat", "none", "bracket"]),
     ("RaiseType", ["merit", "cola", "custom"]),
     ("GoalMode", ["Fixed", "Income-Relative"]),
     ("IncomeUnit", ["Paychecks", "Months"]),

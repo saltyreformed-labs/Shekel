@@ -587,7 +587,7 @@ class TestPastTheStrangersLock:
     ):
         """Four strangers' guesses, then the known browser signs in: still four.
 
-        So no sign-in refills a stranger's guesses.
+        So a known browser's sign-in refills no stranger's guesses.
         """
         user_id = seed_user["user"].id
         browser = _known(app)

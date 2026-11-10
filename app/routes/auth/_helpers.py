@@ -11,11 +11,13 @@ the two halves of the login flow -- the password POST in
 lives here rather than in either route module; a typo on any one key
 would silently break the flow, which is why the key names are
 centralised at all.  :func:`_browser_standing` (and :func:`_known_device`)
-is the one read, per request, of what the browser's cookie is worth
-(plan#2772), :func:`_users_knowing_this_browser` the one question ``/login``
-asks of every cookie the browser sent, before the account is found, and
-:func:`_spend_a_try` the one spending of a door's tries from it, at the code
-form and at re-confirm.
+is the one read, per request, of what the browser's cookie is worth to its
+checks (plan#2772); a finished sign-in or re-confirm reads the record once
+more to renew it, and :func:`_browser_standing` says why the two can disagree
+only harmlessly.  :func:`_users_knowing_this_browser` is the one question
+``/login`` asks of every cookie the browser sent, before the account is found,
+and :func:`_spend_a_try` the one spending of a door's tries from it, at the
+code form and at re-confirm.
 :func:`_complete_sign_in` is the ONE completion of a sign-in, whichever proof
 finished it: a password with no second factor, a password and a code, or a
 password on a trusted device (plan#2173), so the three cannot drift on what a
@@ -114,16 +116,34 @@ def _clear_mfa_pending_state():
 def _browser_standing(user) -> BrowserStanding | None:
     """Return what this browser's cookie is worth for *user*, or ``None``.
 
-    Read once per request, under the owner's lock, by every door with a
-    password or code to check: ``/login`` right after it takes the lock for a
-    browser :func:`_users_knowing_this_browser` found known, ``/mfa/verify`` right
-    after it takes it, and the signed-in doors (``/reauth``,
-    ``/change-password``, ``/mfa/disable``), whose request took it at its
-    boundary.  So everything in the request that turns on the browser judges
-    it at one moment (plan#2772):
-    the lock, the count and what a success clears, at ``/login`` the trusted
-    skip of the code, and at ``/mfa/verify`` whose tries a code spends
-    (plan#3025).  It is the cookie for THAT user, judged by
+    Read once per request for its checks, under the owner's lock, by every
+    door with a password or code to check: ``/login`` right after it takes the
+    lock for a browser :func:`_users_knowing_this_browser` found known,
+    ``/mfa/verify`` right after it takes it, and the signed-in doors
+    (``/reauth``, ``/change-password``, ``/mfa/disable``), whose request took
+    it at its boundary.  So everything the checks turn on judges the browser
+    at one moment (plan#2772): the lock, the count and what a success clears,
+    at ``/login`` the trusted skip of the code, and at ``/mfa/verify`` and
+    ``/reauth`` whose tries are spent (plan#3025, ruling plan#3071).
+
+    A finished sign-in or re-confirm reads the record once more, to renew it
+    (:func:`~app.services.known_device_service.record_sign_in`,
+    :func:`~app.services.known_device_service.record_re_confirm`).  At
+    ``/login``, and at ``/reauth`` with no code, that read is in the same
+    transaction as this one.  At ``/mfa/verify``, and at ``/reauth`` with a
+    code, it is in a later one: the code's commit let the lock go, and the
+    next transaction takes it again first.  The two reads can disagree only
+    one way.  A record this read found may be gone by the second: a copy of
+    the cookie's tenth wrong guess deleted it, or its thirty days ran out.
+    The reverse cannot happen, because no write makes a token name a record
+    it did not: only the renewal at a finished sign-in or re-confirm sets a
+    record's token or moves its last sign-in, and it always sets a new token.
+    When the record has gone, a sign-in gets a new row, as any browser that
+    finishes one does (ruling plan#2994), and a re-confirm renews nothing.
+    Neither clears the account's count in the record's place, since what a
+    known browser's checks saw of it is nothing.
+
+    It is the cookie for THAT user, judged by
     :func:`~app.services.known_device_service.find_browser`, so no cookie, a
     token no record holds, another user's token and a browser past its thirty
     days all answer ``None``.  So does a signed-in browser whose record has
@@ -296,10 +316,12 @@ def _complete_sign_in(
     session.
 
     A known browser's sign-in writes nothing to the account's count or lock,
-    so no sign-in refills a stranger's guesses; the browser's own count clears
-    in its record.  A stranger's wrong guess judged after this sign-in's
-    checks takes no owner lock (ruling plan#3110), so the clear leaves a
-    record that has counted one since (:func:`auth_service.clear_failed_attempts`).
+    so it refills no stranger's guesses; the browser's own count clears in its
+    record.  A stranger's finished sign-in does clear the account's count and
+    lock, every check it faced having passed (ruling plan#3007).  A stranger's
+    wrong guess judged after this sign-in's checks takes no owner lock (ruling
+    plan#3110), so the clear leaves a record that has counted one since
+    (:func:`auth_service.clear_failed_attempts`).
 
     The record is committed before its cookie rides the response, so a browser
     never holds a token whose record a failed commit lost.

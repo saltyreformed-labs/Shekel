@@ -310,13 +310,16 @@ class TestTheLockEndsWithItsRequest:
         A correct password commits its try's judgment and then takes the key
         (ruling plan#3110), and commits nothing after that while the account
         still owes its code, so the sign-in's transaction is still open when
-        its route returns -- holding the owner's key.  (A
-        FINISHED sign-in commits its browser's record since plan#2772, and a
-        commit would free the key whatever the teardown did, so it can no longer
-        grade this.)  Production's app-context teardown ends it; under the test
-        client the app context outlives the request, and the request teardown is
-        what ends it.  The capture proves the sign-in took the key at all, so a
-        free key afterwards is the teardown's doing.
+        its route returns -- holding the owner's key.  A finished sign-in
+        would grade this too: its browser's record commits (plan#2772), and
+        then ``login_user`` reads the user that commit expired, which begins a
+        new transaction whose first act is the owner's key, and the route
+        returns holding it.  Measured 2026-11-10 with the teardown's rollback
+        removed: after a finished sign-in another connection could not take
+        the key, as after this one.  Production's app-context teardown ends
+        it; under the test client the app context outlives the request, and
+        the request teardown is what ends it.  The capture proves the sign-in
+        took the key at all, so a free key afterwards is the teardown's doing.
         """
         user_id = seed_user["user"].id
         _enable_mfa(user_id)

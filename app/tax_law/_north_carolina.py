@@ -7,6 +7,12 @@ rather than restating them; the year states only what does change, the flat
 rate (N.C.G.S. 105-153.7(a)).  A future year whose statute amends either table
 gets its own table beside these, and the years before it keep reading these.
 
+**Graded 2026-11-10** (step plan#3207): no session law through S.L. 2026-62,
+the latest then enacted, amends N.C.G.S. 105-153.5(a)(1) or (a1), and the 2025
+Form D-401 instructions print these same tables, band edges included.  Each
+year that reads them and has no D-401 instructions yet names the step that
+re-checks them against its own when NCDOR posts them.
+
 Married filing separately's standard deduction is the base $12,750; the
 statute's "$0 if the spouse itemizes" case is not modelled.
 """

@@ -1,4 +1,4 @@
-"""Shekel Budget App -- Adversarial Tests: a known browser's own tries, at the code form and re-confirm.
+"""Shekel Budget App -- Adversarial Tests: a known browser's own code and re-confirm tries.
 
 Plan#2772, ruling **plan#3023**.  ``/mfa/verify`` checks at most five codes in
 fifteen minutes from one counter.  Every browser that is not known shares its
@@ -14,9 +14,10 @@ days old are all strangers', and share the account's.
 
 These run on an app built with the limiter on, as in production; the suite's
 app has it off.  Each guess comes from an address of its own, so the address
-limit never answers in a test about the counters.  A browser's own sign-in
-before it was known was a stranger's, so it spent one of the account's five:
-the arithmetic in each test counts it.
+limit never answers in a test about the counters.  A browser's own code at a
+sign-in before it was known was a stranger's, so it spent one of the account's
+five: the arithmetic in each test counts it.  A sign-in with no code to ask
+spends none.
 
 The account's own counter, by itself, is
 ``tests/test_routes/test_every_guess_counts.py``
@@ -223,6 +224,34 @@ class TestAKnownBrowserHasItsOwnTries:
             stranger = _guess(rate_app, "9.9.9.9")
             assert stranger.status_code == 200
             assert _INVALID_CODE in stranger.data
+
+    def test_two_known_browsers_each_have_their_own_tries(self, rate_app, seed_user):
+        """One known browser spends its five; the account's other known browser is still checked.
+
+        Each browser has its own five (ruling plan#3023), not one counter that
+        every known browser of the account shares.  Both signed in before
+        two-factor was on, so neither spent a try.  The first's five wrong
+        codes, each from a new address, are checked and its sixth is refused;
+        then the second's wrong code is checked.
+        """
+        with rate_app.app_context():
+            first = signed_in_browser(rate_app, "7.7.7.7")
+            first.post("/logout", **through_nginx("7.7.7.7"))
+            second = signed_in_browser(rate_app, "7.7.7.8")
+            second.post("/logout", **through_nginx("7.7.7.8"))
+            enable_mfa(db.session, seed_user["user"].id)
+            _type_password(first, "7.7.7.7")
+            for octet in range(_CODE_TRIES):
+                response = _try_code(first, f"6.6.6.{octet}", _NEVER_A_CODE)
+                assert response.status_code == 200
+                assert _INVALID_CODE in response.data
+            assert _refused_for_tries(_try_code(first, "6.6.7.0", _NEVER_A_CODE))
+
+            _type_password(second, "7.7.7.8")
+            checked = _try_code(second, "6.6.8.0", _NEVER_A_CODE)
+
+            assert checked.status_code == 200
+            assert _INVALID_CODE in checked.data
 
     def test_a_new_browser_and_a_made_up_cookie_share_the_accounts_tries(
         self, rate_app, seed_user,

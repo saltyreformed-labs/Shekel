@@ -67,6 +67,11 @@ _WRONG_PASSWORD = "not-the-password"
 
 _REFUSED = b"Invalid email or password."
 
+#: Fits every code field and can match no secret, for a wrong code.
+_NEVER_A_CODE = "xxxxxx"
+
+_INVALID_CODE = b"Invalid authentication code."
+
 #: The length of one authenticator step.
 _TOTP_STEP_SECONDS = 30
 
@@ -183,8 +188,16 @@ def _known_with_a_code(app, secret, trust):
     return browser
 
 
+def _signed_in_with_a_code(app, secret):
+    """Return a browser that finished a sign-in with its code, still signed in."""
+    browser = app.test_client()
+    assert _asked_the_code(_password(browser))
+    assert _signed_in(browser.post("/mfa/verify", data={"totp_code": _code(secret)}))
+    return browser
+
+
 def _device_count(user_id, token):
-    """Return the wrong passwords counted on the record *token* names."""
+    """Return the wrong passwords and codes counted on the record *token* names."""
     db.session.expire_all()
     return known_device_service.find_browser(user_id, token).device.failed_login_count
 
@@ -676,8 +689,11 @@ class TestTenWrongMakeAStranger:
 class TestEveryDoorHasTheOneRule:
     """Wherever a password or code is checked, a known browser passes the strangers' lock.
 
-    Each case locks the account by strangers' wrong passwords at the real form
-    while the known browser waits, then has that browser finish the door.
+    Each case that finishes a door locks the account by strangers' wrong
+    passwords at the real form while the known browser waits, then has that
+    browser finish it.  Each case with a wrong answer has the known browser
+    give it, and finds it counted on the browser's record and not on the
+    account's.
     """
 
     def test_a_known_browser_finishes_its_code_while_locked(self, app, seed_user):
@@ -702,7 +718,7 @@ class TestEveryDoorHasTheOneRule:
         browser = _known_with_a_code(app, secret, trust=False)
         assert _asked_the_code(_password(browser))
 
-        response = browser.post("/mfa/verify", data={"totp_code": "xxxxxx"})
+        response = browser.post("/mfa/verify", data={"totp_code": _NEVER_A_CODE})
 
         assert b"Invalid verification code" in response.data
         assert _device_count(user_id, _token(browser, user_id)) == 1
@@ -743,6 +759,26 @@ class TestEveryDoorHasTheOneRule:
         assert _device_count(user_id, _token(browser, user_id)) == 0
         assert _lock_state(user_id) == (4, None)
 
+    def test_a_known_browsers_wrong_code_at_re_confirm_counts_on_its_record(
+        self, app, seed_user,
+    ):
+        """A wrong code at ``/reauth``: 1 on its record, 0 on the account's.
+
+        The password is right.
+        """
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _signed_in_with_a_code(app, secret)
+
+        response = browser.post("/reauth", data={
+            "password": SEED_USER_PASSWORD, "totp_code": _NEVER_A_CODE,
+        })
+
+        assert response.status_code == 200
+        assert _INVALID_CODE in response.data
+        assert _device_count(user_id, _token(browser, user_id)) == 1
+        assert _lock_state(user_id) == (0, None)
+
     def test_a_known_browser_changes_its_password_while_locked(self, app, seed_user):
         """The current password gets past the lock, and the new one is stored."""
         user_id = seed_user["user"].id
@@ -781,6 +817,29 @@ class TestEveryDoorHasTheOneRule:
             user_id=user_id,
         ).one().is_enabled is False
 
+    def test_a_known_browsers_wrong_code_at_disable_counts_on_its_record(
+        self, app, seed_user,
+    ):
+        """A wrong code at Disable two-factor: 1 on its record, 0 on the account's.
+
+        The password is right, and two-factor stays on.
+        """
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _signed_in_with_a_code(app, secret)
+
+        response = browser.post("/mfa/disable", data={
+            "current_password": SEED_USER_PASSWORD, "totp_code": _NEVER_A_CODE,
+        }, follow_redirects=True)
+
+        assert _INVALID_CODE in response.data
+        assert _device_count(user_id, _token(browser, user_id)) == 1
+        assert _lock_state(user_id) == (0, None)
+        db.session.expire_all()
+        assert db.session.query(MfaConfig).filter_by(
+            user_id=user_id,
+        ).one().is_enabled is True
+
 
 def _re_confirmed(response):
     """Return whether *response* is a finished re-confirm's redirect."""
@@ -788,14 +847,6 @@ def _re_confirmed(response):
         response.status_code == 302
         and response.headers["Location"].endswith("/dashboard")
     )
-
-
-def _signed_in_with_a_code(app, secret):
-    """Return a browser that finished a sign-in with its code, still signed in."""
-    browser = app.test_client()
-    assert _asked_the_code(_password(browser))
-    assert _signed_in(browser.post("/mfa/verify", data={"totp_code": _code(secret)}))
-    return browser
 
 
 class TestAReConfirmReplacesTheCookie:

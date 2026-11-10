@@ -384,14 +384,16 @@ def the_card(
 ) -> Account:
     """Return the card a Credit press on *txn*, or a CC tick on a purchase under it, puts money on.
 
-    A NAMED card is gated as "Paid from" gates one, by
-    :func:`admitted_movement_account_id` (another owner's account is not
-    found, an archived one is refused in words, one outside the owner's
-    cash-flow set is refused), and must then be a card.  With none named,
-    the choices are :func:`credit_cards`: the one card when there is one;
-    with none there is nothing to put it on, and with two or more the owner
-    must say which.  Moved here from ``transaction_service._credit`` at plan
-    task plan#2930, when the purchase doors became its second caller.
+    **The gate of the two acts that put money on a card** (plan task
+    plan#3232): a NAMED card is :func:`_named_card`'s, a gate of its own
+    rather than "Paid from"'s (:func:`admitted_movement_account_id`), because
+    the two acts admit different accounts (ruling plan#3227: "Paid from"
+    lists the cash a bill was paid with, and Credit and the CC tick name the
+    card it went on).  With none named, the choices are :func:`credit_cards`:
+    the one card when there is one; with none there is nothing to put it on,
+    and with two or more the owner must say which.  Moved here from
+    ``transaction_service._credit`` at plan task plan#2930, when the purchase
+    doors became its second caller.
 
     Args:
         txn: The row pressed, or the purchase's row.
@@ -411,16 +413,7 @@ def the_card(
             than one, could be the one meant.
     """
     if card_account_id is not None:
-        account = db.session.get(
-            Account,
-            admitted_movement_account_id(txn, card_account_id, movement="purchase"),
-        )
-        if not is_revolving(account):
-            raise ValidationError(
-                f"'{account.name}' is not a credit card, so {what} cannot go "
-                "on it: pick one of your cards."
-            )
-        return account
+        return _named_card(txn, card_account_id, what=what)
     cards = credit_cards(txn, resolve_owner_cash_flow_set(txn.user_id))
     if len(cards) == 1:
         return cards[0]
@@ -432,6 +425,51 @@ def the_card(
     raise ValidationError(
         f"You have {len(cards)} credit cards: pick the one {what} went on."
     )
+
+
+def _named_card(txn: Transaction, card_account_id: int, *, what: str) -> Account:
+    """Return the card *card_account_id* names, once a Credit press or a CC tick may name it.
+
+    :func:`the_card`'s named arm, the cards those two acts admit: the row's
+    own account when it is a card, archived or not (a row that lives on a
+    card means it, :func:`credit_cards`), or an ACTIVE card of the ROW's
+    owner, never the caller's (a companion's tick names the owner's card,
+    ruling **R-CC11**).  The refusals are "Paid from"'s, in its order: one
+    answer for "no such account" and "not the owner's", raised before the
+    account's name is read (the security response rule), then an archived
+    account in words; then an account that is not a card.  Until plan task
+    plan#3232 this asked :func:`admitted_movement_account_id` and then
+    whether the account was a card, which admitted the same cards while
+    "Paid from" offered every card too.
+
+    Args:
+        txn: The row pressed, or the purchase's row, already proven the
+            caller's.
+        card_account_id: The card the owner named.
+        what: What goes on the card, for the refusals' sentences.
+
+    Returns:
+        The card's :class:`~app.models.account.Account`.
+
+    Raises:
+        NotFoundError: The account does not exist or is not the ROW's owner's.
+        ValidationError: The account is archived (and not the row's own), or
+            is not a credit card.
+    """
+    account = db.session.get(Account, card_account_id)
+    if account is None or account.user_id != txn.user_id:
+        raise NotFoundError("Account not found.")
+    if not account.is_active and account.id != txn.account_id:
+        raise ValidationError(
+            f"'{account.name}' is archived, so a purchase cannot be filed "
+            "on it. Unarchive the account first, or pick another."
+        )
+    if not is_revolving(account):
+        raise ValidationError(
+            f"'{account.name}' is not a credit card, so {what} cannot go "
+            "on it: pick one of your cards."
+        )
+    return account
 
 
 @dataclass(frozen=True)

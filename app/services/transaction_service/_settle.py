@@ -37,6 +37,7 @@ from collections.abc import Iterable
 from decimal import Decimal
 
 from app.exceptions import ValidationError
+from app.models.account import Account
 from app.models.transaction import Transaction
 from app.services import posting_service
 from app.services.cash_ledger import (
@@ -586,13 +587,85 @@ def settle_transaction(
     # tender nobody changed), and R-CC42 keeps a kept record where it is.
     # The status handed to the reading is the one this verb settles INTO, so
     # its non-settled refusal cannot fire here.
+    #
+    # **The gate is "Paid from"'s** (plan task plan#3232, ruling plan#3227):
+    # every door that reaches this verb names the account a bill was PAID
+    # from -- the popover's picker, a Mark Paid, the matcher and the reconcile
+    # tick naming none -- so it admits what that box lists.  Credit puts a row
+    # on a card through the same settle and admits a card instead, so it
+    # enters at :func:`settle_onto_card`, its card gated by its own act
+    # (``movement_account.the_card``); the gate cannot sit below the fork
+    # without refusing Credit's card or admitting Paid's.
     tender = tender_for_status(
         txn, settled_status_id(txn), tender_account_id,
         tender_account_id_of(txn),
     )
     if tender is not None:
         tender = admitted_movement_account_id(txn, tender, movement="payment")
+    return _settle(
+        txn, submitted=submitted, settle_day=settle_day, tender=tender,
+        press=press,
+    )
 
+
+def settle_onto_card(
+    txn: Transaction, card: Account, *,
+    settle_day: SettleDay, press: Press | None,
+) -> None:
+    """Settle *txn* with its money moved on *card*: what a Credit press books.
+
+    :func:`settle_transaction` with the card as its tender (plan task
+    plan#2929, rulings plan#2887 and plan#2888), entered here rather than
+    through that verb's tender because the two acts admit different accounts
+    (plan task plan#3232, ruling plan#3227): "Paid from" lists the cash a
+    bill was paid with and refuses a card, and Credit names the card it went
+    on, gated by ``movement_account.the_card`` -- the one gate of the two
+    acts that put money on a card, asked by the press before its day so its
+    refusals come first.  Both entries share :func:`_settle`, so a Credit
+    press records what Paid records, with its movement on the card, and
+    nothing else.  The tender is read as that verb reads one (the echo rule):
+    a row whose kept payment is on the card already names nothing new.
+
+    Args:
+        txn: The row pressed, already proven the caller's by the door.
+        card: The card :func:`~app.services.movement_account.the_card`
+            answered for this press.
+        settle_day: The day the press puts the row on the card, and how it
+            is known.
+        press: The save's :class:`~app.services.match_press.Press`, or
+            ``None`` when its door named nothing.
+
+    Raises:
+        ValidationError: From :func:`settle_transaction`'s own refusals but
+            the tender gate's: a deleted row, an illegal transition, the
+            seam's settle-day refusals.
+        PostingError: From the ledger reconcile, on a broken invariant.
+    """
+    reject_unsettleable(txn)
+    _settle(
+        txn, submitted=None, settle_day=settle_day,
+        tender=tender_for_status(
+            txn, settled_status_id(txn), card.id, tender_account_id_of(txn),
+        ),
+        press=press,
+    )
+
+
+def _settle(
+    txn: Transaction, *, submitted: StatedFigure | None,
+    settle_day: SettleDay | None, tender: int | None, press: Press | None,
+) -> bool:
+    """Settle *txn* on a tender its entry has read and gated: the verb's three acts.
+
+    The body of :func:`settle_transaction` and :func:`settle_onto_card`
+    below each one's tender gate (plan task plan#3232): the identity no-op,
+    the amount and the status in one seam pass, and the ledger.  Its
+    arguments are :func:`settle_transaction`'s, the tender already admitted
+    by the entry that read it, or ``None`` for the seam's default.
+
+    Returns:
+        Whether the settle booked a human's figure (:func:`settle_transaction`).
+    """
     # **A row ALREADY in the status this settle would move it to is an
     # idempotent no-op**, which is the rule
     # ``transfer_service._update.settle_transfer`` has always stated one table

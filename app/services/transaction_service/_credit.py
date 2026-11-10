@@ -7,8 +7,9 @@ purchase went on the card, and what the card arc adds is the card itself: the
 row's money moves ON the card from the row's own date, so the card owes it,
 on that date's statement and due on that statement's due date, and checking
 pays it later through the card's payoff row.  A Credit press is therefore the
-settle verb with the card as its tender (:func:`._settle.settle_transaction`),
-on the row's own day, and it writes no CC Payback row.  The payback was the
+settle verb with the card as its tender (:func:`._settle.settle_onto_card`,
+the verb's entry for a card, gated by Credit's own act), on the row's own day,
+and it writes no CC Payback row.  The payback was the
 cheat's spelling of "checking pays this next paycheck" from before the card
 was an account (``credit_workflow.mark_as_credit`` wrote one until this task),
 and two spellings of one payment would pay the card twice.
@@ -76,7 +77,7 @@ from app.services.status_seam import (
     settled_on_a_card,
 )
 from app.services.transaction_service._door import apply_requested_status
-from app.services.transaction_service._settle import settle_transaction
+from app.services.transaction_service._settle import settle_onto_card
 from app.services.transaction_service._status_rules import settled_status_id
 from app.services.transfer_legs import PlanItem, TransferLeg, cell_key
 from app.utils.balance_predicates import is_credit, is_projected
@@ -95,11 +96,12 @@ def mark_as_credit(
 ) -> None:
     """Put *txn* on a credit card: settle it with its money moved on the card.
 
-    The row settles through the ONE settle verb with the card as its tender,
-    on the day the owner typed, else the day :func:`credit_day` gives it, so
-    it records what a Paid press with "Paid from: the card" records and
-    nothing else: one covering movement on the card carrying the row's
-    figure, and no CC Payback row.
+    The row settles through the ONE settle verb with the card as its tender
+    (:func:`._settle.settle_onto_card`: the card is gated here, by
+    ``movement_account.the_card``, and not by "Paid from"'s gate, which
+    refuses a card, plan task plan#3232), on the day the owner typed, else
+    the day :func:`credit_day` gives it, so it records one covering movement
+    on the card carrying the row's figure, and no CC Payback row.
 
     Refused, before anything is written: an income row (nothing is bought
     with a paycheck), a row whose purchases are tracked (its purchases each
@@ -168,9 +170,7 @@ def mark_as_credit(
         settle_day = settle_day_for_status(
             txn.user_id, settled_status_id(txn), day, recorded_settle_day(txn),
         )
-    settle_transaction(
-        txn, settle_day=settle_day, tender_account_id=card.id, press=press,
-    )
+    settle_onto_card(txn, card, settle_day=settle_day, press=press)
     movement = covering_movement_of(txn)
     if movement is None:
         raise ValidationError(

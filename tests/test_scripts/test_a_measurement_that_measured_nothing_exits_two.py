@@ -16,13 +16,10 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import sys
-from unittest import mock
 
 import pytest
 from sqlalchemy import text
 
-from tests.manual import exit_status
-from tests.manual import run_deploy_rewrites_on_dump as deploy_rewrites
 from tests.test_scripts._production_child import production_env
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -33,9 +30,10 @@ _PROBE = _MANUAL / "measure_worked_out_read.py"
 # both: the harness checked the store the deploy's cash resync had just
 # brought to target, and the resync went with the deploy's hooks.
 _READING_A_COPY = (_PROBE,)
+# ``run_deploy_rewrites_on_dump.py`` was a runner too, until plan task
+# plan#3080 deleted it with the stored ledger it diffed.
 _EVERY_MEASUREMENT = (
     *_READING_A_COPY,
-    _MANUAL / "run_deploy_rewrites_on_dump.py",
     _MANUAL / "run_statements_on_dump.py",
 )
 # Where Python's own printing of an uncaught exception opens.
@@ -143,7 +141,7 @@ class TestEveryMeasurementIsArmedBeforeItsImports:
         """A module that will not import ends it with 2, the module's message on stderr.
 
         Argparse's own usage error is exit 2 too, so the planted message is what grades it:
-        ``time_machine`` is what the two that read a copy meet first, ``psycopg`` the runners.
+        ``time_machine`` is what the probe that reads a copy meets first, ``psycopg`` the runner.
         """
         for module in ("time_machine", "psycopg"):
             (tmp_path / f"{module}.py").write_text(
@@ -209,38 +207,3 @@ class TestTheHook:
 
         assert result.returncode == status, result.stdout + result.stderr
         assert _A_CRASH not in result.stderr
-
-
-class TestWhatARunnerTakesFromAMeasurement:
-    """A runner folds its measurements by the highest status, so each must be 0, 1 or 2.
-
-    Each runner's fold runs in this process, its measurements stubbed: none makes a bench.
-    """
-
-    @pytest.mark.parametrize("returncode, status", (
-        (0, 0),     # clean
-        (1, 1),     # figures part
-        (2, 2),     # nothing measured, its own verdict
-        (-9, 2),    # killed: below 0, the highest of (0, -9) would read as clean
-        (-11, 2),   # a segfault
-        (127, 2),   # a shell's "command not found": no status a measurement documents
-    ))
-    def test_only_a_verdict_passes(self, returncode, status):
-        """0 and 1 are a measurement's own; everything else measured nothing."""
-        assert exit_status.measurement_status(returncode) == status
-
-    @pytest.mark.parametrize("measured, status", (
-        ((0, 0, 0, 0, 0), 0),
-        ((0, 1, 0, 0, 0), 1),
-        ((0, 0, 1, 0, 0), 1),
-        ((-9, 0, 0, 0, 0), 2),      # a harness killed: the highest raw status reads 0
-        ((0, 0, 0, 0, -9), 2),      # a probe killed
-    ))
-    def test_the_deploy_rewrites_run_folds_its_five(self, measured, status):
-        """Head's harness on two copies, then its probe on three: one status."""
-        with mock.patch.object(deploy_rewrites, "_measured", side_effect=measured):
-            folded = deploy_rewrites._measure_copies(
-                {"base": "b", "head": "h", "undeployed": "u"}, None, lambda *_: None,
-            )
-
-        assert folded == status

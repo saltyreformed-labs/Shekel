@@ -1,14 +1,14 @@
-"""The two statements before X-ew's second leaf and after, on a production dump.
+"""The two statements before a change and after, on a production dump.
 
-Plan task plan#2773 (plan step plan#2515, "The proof"): the leaf moves the income statement
-and the balance sheet off the stored journal onto the worked-out ledger (plan task plan#2771),
-and its proof is ``verify_statement_baseline.py`` byte-identical on a same-day production
-dump, before the leaf against after, with ``verify_render_surfaces.py`` for the pages that
-render a statement or a lock.  On the release kit's bench (``tools/rehearsal``): one dump
-restored once and cloned per copy, base's copy (the commit the card was claimed from) and
-head's each deployed by its own commit's step (``sides.deploy``) under ONE instant, noon of the
-dump's civil day (``sides.pinned_instant``).  Then each INSTRUMENT runs once per side, from the
-side's worktree on the side's copy at that instant (``_dump_runs.run_pinned_on``), and each
+Built for plan task plan#2773 (plan step plan#2515, "The proof"): that leaf moved the income
+statement and the balance sheet off the stored journal onto the worked-out ledger (plan task
+plan#2771), and its proof was ``verify_statement_baseline.py`` byte-identical on a same-day
+production dump, before the leaf against after, with ``verify_render_surfaces.py`` for the
+pages that render a statement or a lock.  On the release kit's bench (``tools/rehearsal``):
+one dump restored once and cloned per copy, base's copy (the commit the card was claimed from)
+and head's each deployed by its own commit's step (``sides.deploy``) under ONE instant, noon of
+the dump's civil day (``sides.pinned_instant``).  Then each INSTRUMENT runs once per side, from
+the side's worktree on the side's copy at that instant (``_dump_runs.run_pinned_on``), and each
 pair is compared byte for byte:
 
 * ``verify_statement_baseline.py``: every figure both statements give, for every paycheck,
@@ -24,25 +24,27 @@ the apps' difference and never the instruments': an instrument the leaf grew (th
 harness's statement routes) runs whole on base too.  Each run must import its own side's
 ``app`` (``_dump_runs.read_its_own``), so a pair cannot be one tree measured twice.
 
-**Base's statements read the store and head's the records, and the controls show each reads
-its own** (the verification standard's rule 4, before any agreement is believed).  The
-statement baseline runs again on four clones, each side's deployed copy with one of two
-plants, triggers off for the session so nothing else moves:
+**Both sides' statements must read the records, and a control shows each does** (the
+verification standard's rule 4, before any agreement is believed).  The statement baseline runs
+again on a clone of each side's deployed copy with **a cent on the records**, on every
+account's opening equity (:func:`plant_opening_cents`), triggers off for the session so nothing
+else moves: each side's statements must move.  A side whose statements held read nothing of the
+records, and the run measured nothing.  So a pair that reads alike is two apps agreeing over the
+records, never an instrument that cannot see them.
 
-* **a cent on the store**, on its largest posting (``plant_a_cent_and_a_pair``'s, whose
-  reversal pair nets $0.00 on its key): base's statements must move and head's must hold;
-* **a cent on the records**, on every account's opening equity (:func:`plant_opening_cents`):
-  head's statements must move and base's must hold.
+Until plan task plan#3080 the run planted **a cent on the store** too, on its largest posting,
+where base's statements had to move and head's to hold: at plan#2773's pairing base's
+statements read the store and head's the records, so the two controls showed each read its
+own, and the records control was graded the other way on base.  No side's statements have read
+the store since plan#2771, and a head past plan task plan#3078, whose migration emptied the
+store's tables, holds no posting to plant on.
 
-A control graded the other way is a run that measured nothing.  So a pair that reads alike is
-two sources agreeing, not one source read twice; and a head whose statements still read the
-store, or read nothing, fails a control rather than passing the comparison.
-
-**What a parting pair is.**  Ruling plan#2518 labels a line from its key's LIVE record, where
-base labelled a counter or loan line from the chart row's snapshot name, and the statement
-baseline keys lines by label: a renamed account's counter or loan line parts as one line gone
-and one added, and a deleted category's lines likewise.  The run names every parting line
-(``<instrument>.diff``); explaining each is its report's job, never this file's.
+**What a parting pair is.**  The run names every parting line (``<instrument>.diff``);
+explaining each is its report's job, never this file's.  At plan#2773's pairing one cause was
+known before the run: ruling plan#2518 labels a line from its key's LIVE record, where base
+labelled a counter or loan line from the chart row's snapshot name, and the statement baseline
+keys lines by label, so a renamed account's counter or loan line parted as one line gone and one
+added, and a deleted category's lines likewise.
 
 Usage, with production's locale pinned as ``scripts/test.sh`` pins it::
 
@@ -55,10 +57,10 @@ A commit with no ``uv.lock`` is refused, exit 2: the bench builds a side's venv 
 
 It writes into ``--out``: ``run.txt`` (each deploy's verdict, each pair's and each control's),
 and per instrument and side ``<instrument>_<side>.json`` with its ``_log.txt``, a pair that
-parts as ``<instrument>.diff``, and per control ``control_<side>_<plant>.json`` with its
-``_log.txt`` and, where it moved, ``.diff``.  Keep ``--out`` in the handoff folder: production
-figures never enter the repository (ruling R-BAL132), and a commit or pull request cites the
-path.
+parts as ``<instrument>.diff``, and per side its control's ``control_<side>_records.json``
+with its ``_log.txt`` and, where it moved, ``.diff``.  Keep ``--out`` in the handoff folder:
+production figures never enter the repository (ruling R-BAL132), and a commit or pull request
+cites the path.
 
 Exit status: 0 every pair byte-identical and every control as it must be; 1 a pair parts (each
 difference one the report must name and explain); 2 nothing was measured: the bench, a deploy,
@@ -75,19 +77,21 @@ from decimal import Decimal
 # The repository root, so ``tools`` and ``tests`` are importable when this runs by path.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-# Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
-# above; there is no import order that resolves ``tools`` before it runs.
-# pylint: disable=wrong-import-position
+# Pylint: ``wrong-import-position``, ``wrong-import-order`` -- these must
+# follow the path bootstrap above, and ``exit_status`` must arm before every
+# other import, a third party's too, so an import that fails exits 2 (its module
+# docstring): no import order resolves ``tools`` before the bootstrap runs, or
+# arms before ``exit_status`` is imported.
+# pylint: disable=wrong-import-position,wrong-import-order
 from tests.manual import exit_status
 
 exit_status.arm(__name__)
 
-import psycopg
-
 from tests.manual import _dump_runs
-from tests.manual.run_deploy_rewrites_on_dump import plant_a_cent_and_a_pair
 from tools.rehearsal import bench
 from tools.rehearsal.sides import deploy, pinned_instant
+
+import psycopg
 
 #: The instruments, as paths inside a worktree, the statement baseline first:
 #: its pair is the spec's proof and its output the controls' reference.
@@ -127,13 +131,6 @@ def plant_opening_cents(url):
     if not planted:
         raise bench.BenchError("the copy holds no account opening to plant on")
     return planted
-
-
-#: Each control's plant, and of each side whether its statements must move.
-_PLANTS = {
-    "store": (plant_a_cent_and_a_pair, {"base": True, "head": False}),
-    "records": (plant_opening_cents, {"base": False, "head": True}),
-}
 
 
 def _wrote(written):
@@ -187,22 +184,22 @@ def _instruments(made, pinned, out, say):
     return status
 
 
-def _control(made, side, plant_name, pinned, out):
-    """Run *side*'s statement baseline on a clone of its copy planted by *plant_name*.
+def _control(made, side, pinned, out):
+    """Run *side*'s statement baseline on a clone of its copy with a cent on the records.
 
     Returns:
-        ``(what the plant planted, the diff lines from the side's own
-        unplanted output, or None when the run failed, and a sentence saying
-        how)``.
+        ``(how many openings :func:`plant_opening_cents` planted, the diff
+        lines from the side's own unplanted output, or None when the run
+        failed, and a sentence saying how)``.
 
     Raises:
         bench.BenchError: The plant found nothing to plant on.
         psycopg.Error: The clone could not be made or planted.
     """
     state = made.made[side]
-    url = made.clone(state.database, f"rehearsal_{side}_{plant_name}")
-    planted = _PLANTS[plant_name][0](url)
-    written = out / f"control_{side}_{plant_name}.json"
+    url = made.clone(state.database, f"rehearsal_{side}_records")
+    planted = plant_opening_cents(url)
+    written = out / f"control_{side}_records.json"
     wrong = _dump_runs.run_pinned_on(
         state.worktree / _STATEMENTS, state, url, pinned, written)
     if wrong is not None:
@@ -216,29 +213,25 @@ def _control(made, side, plant_name, pinned, out):
 
 
 def _controls(made, pinned, out, say):
-    """Run every control (:func:`_control`); whether each was as it must be.
+    """Run each side's control (:func:`_control`); whether each side's statements moved.
 
     Raises:
         bench.BenchError: A plant found nothing to plant on.
         psycopg.Error: A clone could not be made or planted.
     """
     graded = True
-    for plant_name, (_plant, moves) in _PLANTS.items():
-        for side in _SIDES:
-            planted, parted, wrong = _control(made, side, plant_name, pinned,
-                                              out)
-            if wrong is not None:
-                say(f"!  {side}'s {_STATEMENTS.name} on its {plant_name} "
-                    f"clone {wrong}")
-                return False
-            right = bool(parted) == moves[side]
-            say(f"control 'a cent on the {plant_name}' ({planted}), on a clone "
-                f"of {side}'s copy: its statements "
-                + (f"MOVED, {len(parted)} diff line(s) in "
-                   f"control_{side}_{plant_name}.diff" if parted else "HELD")
-                + f", where they must {'move' if moves[side] else 'hold'}: "
-                + ("as they must" if right else "NOT AS THEY MUST"))
-            graded = graded and right
+    for side in _SIDES:
+        planted, parted, wrong = _control(made, side, pinned, out)
+        if wrong is not None:
+            say(f"!  {side}'s {_STATEMENTS.name} on its records clone {wrong}")
+            return False
+        say(f"control 'a cent on the records' ({planted}), on a clone of "
+            f"{side}'s copy: its statements "
+            + (f"MOVED, {len(parted)} diff line(s) in "
+               f"control_{side}_records.diff" if parted else "HELD")
+            + ", where they must move: "
+            + ("as they must" if parted else "NOT AS THEY MUST"))
+        graded = graded and bool(parted)
     return graded
 
 

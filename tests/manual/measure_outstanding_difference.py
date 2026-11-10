@@ -1,4 +1,4 @@
-"""Re-derive every account's OUTSTANDING DIFFERENCE, and corroborate it.
+"""Re-derive every account's OUTSTANDING DIFFERENCE, and its offer gate's inputs.
 
 The measurement plan step **balance:X-f3c-4** must take before it books
 anything, and the reason it is a script rather than a number written down:
@@ -13,22 +13,24 @@ safe and can only be taken out, was done only on the unmerged branch
 **Run this against a restore, never against a live database**, and quote its
 output with the database and the date beside it.
 
-It prints TWO independently-derived answers per account and they must agree to
-the cent:
+It prints the balance seam's own fold per account,
+``balance_at.cash_outstanding_difference`` (through
+``outstanding_difference.outstanding_difference``) -- the owner's latest
+declared balance less its stored opening equity plus every posting through that
+day.
 
-* ``balance_at.cash_outstanding_difference`` -- the balance seam's own fold,
-  the owner's latest declared balance less its stored opening equity plus every
-  posting through that day;
-* the persisted double-entry ledger's ``account_trueup`` net on that account's
-  linked ledger account -- written by ``account_posting_service`` and read here
-  by SQL that touches ``balance_at`` at no point.
-
-**Two producers sharing no code is the whole value of this file.**  A single
-producer re-read twice is one measurement with more witnesses, which is the
-shape ``lessons.md`` names; the ledger leg is a genuinely separate derivation of
-the same quantity, and its counter leg on ``<account> -- Opening``
-(``anchor_equity``) IS finding **N-171** -- the real economic activity the
-cutover moves onto the income statement.
+**It no longer corroborates that answer.**  Until plan task plan#3080 it printed
+a second, independently-derived one beside it, the persisted double-entry
+ledger's ``account_trueup`` net on the account's linked ledger account, written
+by ``account_posting_service`` and read by SQL that touched ``balance_at`` at no
+point, and the two had to agree to the cent; that ledger leg's counter leg on
+``<account> -- Opening`` (``anchor_equity``) IS finding **N-171**.  The stored
+ledger's writers went at plan task plan#3133, and the worked-out ledger that
+replaced it books each account's corrections off the seam's own replay
+(``ledger_lines._account_walk``, plan task plan#2525, rule 14), so its
+``account_trueup`` net is the seam's answer read a second time: one measurement
+with more witnesses, the shape ``lessons.md`` names, never a corroboration.  No
+second producer of this figure remains.
 
 **It also prints the OFFER GATE's inputs**, because the gate is what decides
 whether the figure may be acted on at all: whether an import reconciles the
@@ -46,70 +48,15 @@ Usage::
 Reads only.  No writes, no commit, nothing staged.
 """
 
-from decimal import Decimal
-
-from app import create_app, ref_cache
-from app.enums import LedgerAccountKindEnum
+from app import create_app
 from app.extensions import db
 from app.models.account import Account
 from app.models.user import User
 from app.services import balance_at, outstanding_difference
 
-#: The posted ledger's own answer for one account, by SQL that reaches the
-#: balance seam nowhere.
-#:
-#: **It narrows to the LINKED ledger row by KIND, and that narrowing is the
-#: whole correctness of this file.**  TWO ledger accounts carry the same
-#: ``account_id`` -- the linked one and the ``<account> -- Opening``
-#: ``anchor_equity`` one -- and a correction is a BALANCED entry across both.
-#: A query keyed on ``account_id`` alone therefore sums both legs and prints
-#: ``0.00`` for every account, which READS AS AGREEMENT and is the report
-#: manufacturing its own confirmation.  Plan step X-f3c-3's adversarial review
-#: caught exactly that query; this file reproduced it, and the first run refused
-#: to agree with the seam, which is what a corroboration is for.
-#:
-#: The kind arrives as an INTEGER id through ``ref_cache``, never as the
-#: ``name`` string (``CLAUDE.md``: ref tables are IDs for logic, strings for
-#: display).
-_LEDGER_SQL = """
-SELECT ps.name AS source, sum(p.amount) AS net
-FROM budget.account_postings p
-JOIN budget.journal_entries je ON je.id = p.journal_entry_id
-JOIN budget.ledger_accounts la ON la.id = p.ledger_account_id
-JOIN ref.posting_sources ps ON ps.id = je.source_kind_id
-WHERE la.account_id = :account_id
-  AND la.kind_id = :linked_kind_id
-  AND ps.name IN ('account_opening', 'account_trueup')
-GROUP BY ps.name
-"""
-
-
-def _ledger_trueup_net(account_id: int) -> Decimal:
-    """Return the ``account_trueup`` net on an account's LINKED ledger.
-
-    Args:
-        account_id: The real account whose linked ledger to sum.
-
-    Returns:
-        The signed net, ``Decimal("0.00")`` when the account has no correction.
-    """
-    rows = db.session.execute(
-        db.text(_LEDGER_SQL),
-        {
-            "account_id": account_id,
-            "linked_kind_id": ref_cache.ledger_account_kind_id(
-                LedgerAccountKindEnum.LINKED,
-            ),
-        },
-    ).all()
-    return next(
-        (row.net for row in rows if row.source == "account_trueup"),
-        Decimal("0.00"),
-    )
-
 
 def _report_account(account: Account, ctx) -> None:
-    """Print one account's difference, its corroboration and its gate inputs.
+    """Print one account's difference and its gate inputs.
 
     Args:
         account: The account to measure.
@@ -121,14 +68,11 @@ def _report_account(account: Account, ctx) -> None:
               f"apply (a MODELLED kind or a loan; ruling R-FO)")
         return
     diff, span = resolved.difference, resolved.difference.span
-    ledger = _ledger_trueup_net(account.id)
-    agree = "AGREE" if ledger == diff.amount else "*** DISAGREE ***"
     print(f"  {account.id:>3} {account.name[:30]:<30}")
     print(f"      books open {diff.opened_on} at {diff.opening_equity:>12}")
     print(f"      asserted   {diff.asserted_on} at {diff.asserted:>12}")
     print(f"      books produce            {diff.books:>12}")
     print(f"      OUTSTANDING DIFFERENCE   {diff.amount:>12}")
-    print(f"      ledger account_trueup    {ledger:>12}   {agree}")
     print(f"      span {span.first_day}..{span.last_day} "
           f"empty={span.is_empty}")
     if resolved.reconciliation is None:

@@ -1,17 +1,18 @@
 """A measurement on a production copy that measured nothing exits 2, never Python's own 1.
 
-Three production-dump measurements read one exit status, each arming this module: the two
-runners ``run_*_on_dump.py``, and ``measure_worked_out_read.py``, which they run (a third
-runner, ``run_worked_out_ledger_on_dump.py``, and the harness it ran,
-``verify_worked_out_ledger.py``, went at plan task plan#3077 with the deploy's cash resync
-that harness checked).  It is 0 clean, 1 figures part (a difference it
-measured, a question for the developer), 2 nothing measured.  The figure baselines and the render
-probe a runner also runs do not read it: any non-zero of theirs is nothing measured to the runner
+Two production-copy measurements read one exit status, each arming this module: the runner
+``run_statements_on_dump.py`` and the probe ``measure_worked_out_read.py``.  Two more runners
+and the harness one ran went with the stored ledger they measured:
+``run_worked_out_ledger_on_dump.py`` and ``verify_worked_out_ledger.py`` at plan task plan#3077,
+and ``run_deploy_rewrites_on_dump.py``, which ran the probe on each copy it deployed, at plan
+task plan#3080.  It is 0 clean, 1 figures part (a difference it measured, a question for the
+developer), 2 nothing measured.  The figure baselines and the render probe the runner runs do
+not read it: any non-zero of theirs is nothing measured to the runner
 (``_dump_runs.run_pinned_on``).  Python ends any uncaught exception with status 1, so however
-carefully each of the five chose its own statuses, each read every crash as figures that moved: on
-a dump older than head's migrations
-``measure_worked_out_read.py`` raised in ``ref_cache.init`` before it read a row, and exited as
-if a count had moved (measured 2026-11-04, ``PRE_FICA_DEDUCTION``, finding plan#2826).
+carefully each measurement chose its own statuses, each read every crash as figures that moved:
+on a dump older than head's migrations ``measure_worked_out_read.py`` raised in
+``ref_cache.init`` before it read a row, and exited as if a count had moved (measured
+2026-11-04, ``PRE_FICA_DEDUCTION``, finding plan#2826).
 
 :func:`arm` takes that one status out of the interpreter's hands, before the script's other
 imports, so it holds for an import that fails, an app that will not start, a report that cannot
@@ -20,9 +21,10 @@ unlisted kind from reading as figures that moved.  Nothing is swallowed, the tra
 as it always does, and a ``sys.exit`` reaches no exception hook, so a status a script returns is
 its own.
 
-:func:`measurement_status` is the other end: what a runner may take from a measurement it ran,
-since a process killed by a signal has a negative status, which a runner taking the highest of
-its statuses would read as clean.
+Its other end, ``measurement_status``, which turned a measurement's exit status into what a
+runner taking the highest of its statuses may read (a signal's negative status as nothing
+measured, never as clean), went at plan task plan#3080 with its one caller,
+``run_deploy_rewrites_on_dump.py``.
 """
 
 import os
@@ -30,8 +32,6 @@ import sys
 
 #: The status every measurement here documents for "nothing was measured".
 NOTHING_MEASURED = 2
-#: The statuses only a measurement that reached its verdict returns.
-_VERDICTS = (0, 1)
 
 
 def _print_and_end(kind, value, trace):
@@ -58,12 +58,3 @@ def arm(name):
     """
     if name == "__main__":
         sys.excepthook = _print_and_end
-
-
-def measurement_status(returncode):
-    """Return what a measurement's *returncode* says: 0 or 1 as it is, anything else 2.
-
-    Args:
-        returncode: The process's return code, negative for a signal's death.
-    """
-    return returncode if returncode in _VERDICTS else NOTHING_MEASURED

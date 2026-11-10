@@ -16,8 +16,10 @@ clone, and diff the two outputs from line 2.
 **Every door prints the posted ledger's inputs as well as the plan**: each
 settled payment's split and each anchor's correction off
 :func:`~app.services.loan_ledger.walk_loan_ledger`, and the posting TARGETS
-the walk implies -- what the next deploy's ``backfill_all_loan_postings``
-reconciles the ledger to -- then the plan's payments, the trajectory's
+the walk implies -- the loan's own lines in the ledger the statements read
+(:func:`~app.services.ledger_lines.worked_out_lines` books them by
+:func:`~app.services.ledger_lines.loan_correction_targets`, which builds them
+from the same two target rules) -- then the plan's payments, the trajectory's
 projected splits, the payoff, a balance grid, the what-if lever and the
 projected interest.  It reads only producers present on both sides of
 R16-c-2, so the one file runs on both trees.  *Since plan task plan#2524 the
@@ -227,10 +229,13 @@ def _target_lines(label, kind, account, targets):
 def _ledger_lines(label, account):
     """Print what the POSTED ledger books for a loan: its splits and its targets.
 
-    The posted ledger is a projection of the loan's settled walk, reconciled to
-    target by every deploy (``backfill_all_loan_postings``), so the targets the
-    walk implies ARE what the next deploy writes -- printed here rather than read
-    off the clone's stored postings, which the code under test has not synced.
+    The ledger books a loan's settled walk by its two target rules
+    (:func:`~app.services.ledger_lines.loan_correction_targets`, which the
+    worked-out read sums), so the targets printed here ARE the loan's lines.
+    Until plan task plan#3077 every deploy also reconciled the STORED ledger to
+    them (``backfill_all_loan_postings``), which is why they were printed rather
+    than read off a clone's stored postings, which the code under test had not
+    synced.
     """
     walk = walk_loan_ledger(account.id, get_baseline_scenario(USER_ID).id)
     for outcome in walk.settled_splits:

@@ -13,9 +13,11 @@ window change).
 
 So this samples EVERY DAY of a span, per cash account, plus every reported pay
 period column, and prints the exact days that move and by how much.  It also
-counts the ledger's own purchase-sourced entries, because a balance that did
-not move is only half the claim: the postings must exist and the trial balance
-must still close.
+counted the stored ledger's entries by source kind and its trial balance,
+because a balance that did not move was only half X-f3b's claim: the postings
+had to exist and the trial balance still close.  That half went at plan task
+plan#3080, the stored ledger's writers having gone (plan task plan#3133), and
+an older snapshot's two ledger keys are no longer read by ``--diff``.
 
 **Run it on BOTH sides, and the two sides differ by CHECKOUT, not by database.**
 The BEFORE side must execute the OLD CODE against the OLD schema; running both
@@ -81,29 +83,6 @@ def _days():
     return [_FROM + timedelta(days=offset) for offset in range(span + 1)]
 
 
-def _purchase_entry_count():
-    """Return how many journal entries the ledger holds per source kind.
-
-    Read as raw SQL against ``ref.posting_sources`` by NAME rather than through
-    ``ref_cache``, so the reader compiles and answers on a database that has no
-    ``purchase`` row at all -- which is exactly the ``before`` side.
-    """
-    rows = db.session.execute(db.text(
-        "SELECT s.name, count(*) FROM budget.journal_entries j "
-        "JOIN ref.posting_sources s ON s.id = j.source_kind_id "
-        "GROUP BY s.name ORDER BY s.name"
-    )).all()
-    return {name: count for name, count in rows}
-
-
-def _trial_balance():
-    """Return the whole ledger's signed sum, which must be exactly zero."""
-    total = db.session.execute(db.text(
-        "SELECT coalesce(sum(amount), 0) FROM budget.account_postings"
-    )).scalar()
-    return str(Decimal(str(total)))
-
-
 def snapshot():
     """Return the whole measurement as JSON-safe plain data.
 
@@ -126,15 +105,11 @@ def snapshot():
                 for day in days
             },
         }
-    return {
-        "accounts": accounts,
-        "entries_by_source": _purchase_entry_count(),
-        "trial_balance": _trial_balance(),
-    }
+    return {"accounts": accounts}
 
 
 def _diff(before_path, after_path):
-    """Print every day whose balance moved, per account, and the ledger counts."""
+    """Print every day whose balance moved, per account."""
     with open(before_path, encoding="utf-8") as handle:
         before = json.load(handle)
     with open(after_path, encoding="utf-8") as handle:
@@ -163,12 +138,6 @@ def _diff(before_path, after_path):
 
     print()
     print(f"days moved, all accounts: {moved_total}")
-    print(f"entries by source BEFORE: {before['entries_by_source']}")
-    print(f"entries by source AFTER:  {after['entries_by_source']}")
-    print(
-        f"trial balance BEFORE {before['trial_balance']} / "
-        f"AFTER {after['trial_balance']}"
-    )
 
 
 def main():

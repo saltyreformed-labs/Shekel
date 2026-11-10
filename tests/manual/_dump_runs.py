@@ -1,8 +1,11 @@
-"""The half the production-dump runners share: their arguments and report, and each side's run.
+"""A production-dump runner's frame: its arguments and report, and each side's run.
 
-``run_deploy_rewrites_on_dump.py`` and ``run_statements_on_dump.py`` each bring the release
-kit's bench up on a production dump with a base side and a head side, and differ in what they
-measure there.  What they share is here, once:
+``run_statements_on_dump.py`` brings the release kit's bench up on a production dump with a
+base side and a head side.  Its frame is here, apart from what it measures, as it was when two
+more runners shared it, each deleted with the stored ledger it measured:
+``run_worked_out_ledger_on_dump.py`` (plan task plan#3077), which measured one side with no
+pair, taking only that side's environment from here (:func:`side_environment`), and
+``run_deploy_rewrites_on_dump.py`` (plan task plan#3080):
 
 * **the runner's frame** (:func:`main`): its arguments (``--dump``, ``--out``, ``--base``,
   ``--head``), its report lines written to ``<out>/run.txt`` however the run ends, and its exit
@@ -13,9 +16,6 @@ measure there.  What they share is here, once:
   :data:`~tests.manual.run_pinned.IMPORTED` line), so a pair that reads alike cannot be one
   tree's code measured twice;
 * **a pair's comparison** (:func:`parted`), byte for byte.
-
-``run_worked_out_ledger_on_dump.py`` measured one side with no pair, taking only that side's
-environment from here (:func:`side_environment`), until plan task plan#3077 deleted it.
 """
 
 import argparse

@@ -1,8 +1,8 @@
 """Run a script by path with the clock frozen at one instant: one side's baseline read.
 
-The production-dump runners (``run_deploy_rewrites_on_dump.py``, ``run_statements_on_dump.py``,
-each by ``_dump_runs.run_pinned_on``) run a side's figure baselines and render probe
-(``verify_balance_baseline.py``, ``verify_statement_baseline.py``,
+The production-dump runner (``run_statements_on_dump.py``, by ``_dump_runs.run_pinned_on``;
+``run_deploy_rewrites_on_dump.py`` too, until plan task plan#3080) runs a side's figure
+baselines and render probe (``verify_balance_baseline.py``, ``verify_statement_baseline.py``,
 ``verify_render_surfaces.py``) from that side's worktree on that side's deployed copy through
 this, so both sides read the one instant every deploy ran under, and a run that crossed
 midnight could not read two days.  The clock is frozen as the

@@ -20,18 +20,21 @@ from flask_login import current_user
 
 from marshmallow import ValidationError as MarshmallowValidationError
 
-from app.extensions import db, limiter
+from app.extensions import db
 from app.models.user import MfaConfig
 from app.schemas.validation import ChangePasswordSchema, ReauthSchema
-from app.services import auth_service, trusted_device_service
+from app.services import auth_service, known_device_service
 from app.exceptions import AuthError, NotFoundError, ValidationError
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     _first_validation_message,
     _is_safe_redirect,
+    _known_device,
+    _spend_a_try,
     _totp_accepted_or_key_failure,
 )
 from app.utils.auth_helpers import log_refused_lookup
+from app.utils.device_cookie import device_token, set_device_cookie
 from app.utils.log_events import (
     AUTH,
     EVT_PASSWORD_CHANGED,
@@ -48,7 +51,7 @@ from app.utils.security_events import (
     record_security_event,
 )
 from app.utils.session_helpers import (
-    stamp_login_session,
+    stamp_password_change,
     stamp_reauth_session,
     stamp_session_refresh,
 )
@@ -74,16 +77,21 @@ def change_password():
     new_password = change_data["new_password"]
 
     try:
-        auth_service.change_password(current_user, current_password, new_password)
+        auth_service.change_password(
+            current_user, current_password, new_password,
+            device=_known_device(current_user),
+        )
         db.session.commit()
         # Invalidate all other sessions after password change.  A
         # single ``now`` value flows into both the DB column and
         # every cookie key so the strict-less-than comparison in
         # ``load_user`` accepts this session and rejects every
-        # parallel one.  ``stamp_login_session`` ALSO refreshes
+        # parallel one.  ``stamp_password_change`` ALSO refreshes
         # ``_fresh_login_at``: the user just typed their current
         # password, so this counts as a step-up re-auth and the
-        # five-minute fresh-login window restarts here.
+        # five-minute fresh-login window restarts here.  It is not a
+        # sign-in, so the session's thirty days run on from its own
+        # (ruling plan#3069).
         #
         # The same ``now`` is also written to the security-event
         # columns (audit F-091 / C-16) so the "was this you?" banner
@@ -98,7 +106,7 @@ def change_password():
             current_user, SecurityEventKind.PASSWORD_CHANGED, now=now,
         )
         db.session.commit()
-        stamp_login_session(now, current_user.id)
+        stamp_password_change(now)
         log_event(logger, logging.INFO, EVT_PASSWORD_CHANGED, AUTH,
                   "Password changed", user_id=current_user.id)
         flash("Password changed successfully.", "success")
@@ -159,9 +167,9 @@ def forget_trusted_device(device_id):
     a device is its own user's, whatever their role.
     """
     try:
-        trusted_device_service.forget_device(current_user.id, device_id)
+        known_device_service.forget_trust(current_user.id, device_id)
     except NotFoundError:
-        log_refused_lookup("TrustedDevice", device_id)
+        log_refused_lookup("KnownDevice", device_id)
         abort(404)
     db.session.commit()
     log_event(logger, logging.INFO, EVT_TRUSTED_DEVICE_FORGOTTEN, AUTH,
@@ -176,7 +184,6 @@ def forget_trusted_device(device_id):
 
 
 @auth_bp.route("/reauth", methods=["GET", "POST"])
-@limiter.limit("5 per 15 minutes", methods=["POST"])
 def reauth():
     """Step-up re-authentication for high-value operations.
 
@@ -191,8 +198,11 @@ def reauth():
 
       * Password is verified through
         ``auth_service.check_signed_in_password`` -- the same bcrypt path
-        used at primary login, refused while the account is locked, and a
-        wrong one counts toward the lock.
+        used at primary login, refused while the lock refuses this browser,
+        and a wrong one counts toward the lock.  Whose attempt it is follows
+        sign-in's one rule (plan#2772, ruling plan#3034): a known browser
+        passes the account's lock and counts on its own record, a stranger
+        meets it and counts on the account.
       * If the user has MFA enabled, a TOTP code is required.  A wrong or
         replayed one counts toward the lock.  The
         same ``_verify_totp_with_replay_logging`` helper used by
@@ -211,8 +221,30 @@ def reauth():
         operator-actionable message and re-render the form, mirroring
         /mfa/verify and /mfa/disable.
 
-    Success clears the wrong-guess count (ruling plan#3007): every check
-    this account faces has passed.
+    Each POST whose form the schema accepts spends a try
+    (:func:`~app.routes.auth._helpers._spend_a_try`) before its password is
+    checked, five in fifteen minutes per counter: a known browser's own, else
+    the account's, which every other browser signed in to it shares (ruling
+    plan#3071).  So someone holding a stolen session who spends the account's
+    tries cannot keep the owner's browser from re-confirming, and from what
+    sits behind it.  The try is spent before the lock is asked, so a stranger
+    the lock refuses spends one; a form the schema rejects spends none.
+
+    Success clears the count the guesses went to (ruling plan#3007): every
+    check this account faces has passed.  A stranger's re-confirm clears the
+    account's count and lock if the record still holds what the read of the
+    lock found, so a stranger's guess judged during these checks stands, and
+    gets no cookie: it has no record.  A known
+    browser's renews its record
+    (:func:`~app.services.known_device_service.record_re_confirm`): a new
+    cookie and its own count cleared, so a stolen copy of the old cookie
+    stops working here, as at a sign-in (ruling plan#3070).  The record's
+    thirty days do not move, and nor does the session's: a re-confirm is not
+    a sign-in (ruling plan#3069).  The strangers' count and lock are left
+    alone.  The record is read again for the renewal, after the code's commit
+    and under the owner's lock that the next transaction takes again: a record
+    a copy of the cookie deleted in between gets nothing, and the account's
+    count is not cleared in its place.
 
     The ``next`` parameter is validated through ``_is_safe_redirect``
     on every read (storage time and post-success redirect) so an
@@ -243,9 +275,19 @@ def reauth():
         flash("Invalid password.", "danger")
         return render_template("auth/reauth.html", next=safe_next)
 
+    device = _known_device(current_user)
+    # A password is about to be checked: spend one of this browser's tries,
+    # its own when it is known (ruling plan#3071).  Past the limit this
+    # raises, and the 429 handler answers before anything is checked.
+    _spend_a_try(current_user, device)
     try:
-        auth_service.check_signed_in_password(
+        # What the strangers' record held when the lock was read: a stranger's
+        # success clears it only if it still holds that, since a stranger's
+        # guess judged during these checks takes no owner lock (ruling
+        # plan#3110).
+        checked = auth_service.check_signed_in_password(
             current_user, reauth_data["password"], "Invalid password.",
+            device=device,
         )
     except AuthError as exc:
         log_event(
@@ -269,7 +311,7 @@ def reauth():
         if key_failure:
             return render_template("auth/reauth.html", next=safe_next)
         if not accepted:
-            auth_service.record_failed_attempt(current_user)
+            auth_service.record_failed_attempt(current_user, device=device)
             log_event(
                 logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
                 "Step-up re-auth failed: bad TOTP",
@@ -278,13 +320,26 @@ def reauth():
             flash("Invalid authentication code.", "danger")
             return render_template("auth/reauth.html", next=safe_next)
 
-    auth_service.clear_failed_attempts(current_user)
+    # Every check has passed.  ``device`` is asked only whether it was None:
+    # with two-factor, the code's commit has expired it, and a copy of this
+    # cookie may have deleted its row since, so it is never read again here.
+    token = None
+    if device is None:
+        auth_service.clear_failed_attempts(checked)
+    else:
+        token = known_device_service.record_re_confirm(
+            current_user.id, device_token(current_user.id),
+        )
+        db.session.commit()
     stamp_reauth_session(datetime.now(timezone.utc))
     log_event(
         logger, logging.INFO, EVT_REAUTH_SUCCESS, AUTH,
         "Step-up re-auth succeeded", user_id=current_user.id,
     )
-    return redirect(safe_next or url_for("dashboard.page"))
+    response = redirect(safe_next or url_for("dashboard.page"))
+    if token is not None:
+        set_device_cookie(response, current_user.id, token)
+    return response
 
 
 @auth_bp.route("/security-event/dismiss", methods=["POST"])

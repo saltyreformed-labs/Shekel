@@ -65,7 +65,8 @@ from werkzeug.test import TestResponse
 
 from app import create_app
 from app.config import DevContainerConfig, ProdConfig
-from app.extensions import db, limiter
+from app.extensions import db
+from app.rate_limits import limiter
 from tests.conftest import SEED_USER_EMAIL
 from tests.test_deploy._compose import REPO_ROOT, service, volume
 

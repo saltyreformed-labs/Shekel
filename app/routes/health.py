@@ -20,7 +20,8 @@ import logging
 
 from flask import Blueprint, jsonify
 
-from app.extensions import db, limiter
+from app.extensions import db
+from app.rate_limits import limiter
 
 logger = logging.getLogger(__name__)
 

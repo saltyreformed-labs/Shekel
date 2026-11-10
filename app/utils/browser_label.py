@@ -3,7 +3,7 @@ Shekel Budget App -- a browser's name, read from its User-Agent.
 
 Settings > Security names each trusted device by the browser it was trusted
 on (plan#2173, ruling plan#2406).  The record keeps the raw User-Agent header
-(``auth.trusted_devices.user_agent``), which is a string like
+(``auth.known_devices.user_agent``), which is a string like
 ``Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0``
 and names nothing a person would recognise.  This module turns it into
 ``Firefox on Linux``.

@@ -174,8 +174,10 @@ class BaseConfig:
     # non-permanent so Flask-Login's ``strong`` session protection
     # (F-038 / C-07) keeps wiping the session on IP / User-Agent drift
     # -- a permanent session is exempt from that wipe.  The effective
-    # bound on an open session is therefore IDLE_TIMEOUT_MINUTES below,
-    # not this value.  Nothing signs a browser back in once its session
+    # bounds on an open session are therefore IDLE_TIMEOUT_MINUTES below
+    # and KNOWN_LIFETIME after its sign-in however active (ruling
+    # plan#3069, ``app/models/known_device.py``), not this value.
+    # Nothing signs a browser back in once its session
     # cookie is gone: plan#2173 deleted "Remember me", whose cookie could
     # not be revoked (ruling plan#2406).
     PERMANENT_SESSION_LIFETIME = timedelta(
@@ -275,8 +277,8 @@ class BaseConfig:
     # there is no fallback.
     RATELIMIT_STORAGE_URI = "memory://"
 
-    # Default ceiling, per signed-in account or else per client
-    # (``rate_limit_key``), applied to every route that does NOT carry
+    # Default ceiling, per known browser, else per signed-in account, else
+    # per client (``rate_limit_key``), applied to every route that does NOT carry
     # an explicit ``@limiter.limit`` decorator.  As of audit verification
     # (Phase A 2026-04-15) only 4 of ~93 mutating routes have an explicit
     # rate limit.  Without this ceiling, an authenticated attacker could
@@ -325,9 +327,10 @@ class BaseConfig:
     # ---- Account lockout (audit finding F-033 / commit C-11) ----------
     #
     # Per-account brute-force throttling that cannot be bypassed by IP
-    # rotation.  See ``app/models/user.py`` for the column-level
-    # documentation and ``app/services/auth_service.py:authenticate``
-    # for the enforcement path.  These settings are documented here for
+    # rotation.  See ``app/models/guess_record.py`` for the column-level
+    # documentation and ``app/services/auth_service.py`` (its
+    # ``_judge_strangers_try``) for the enforcement path.  These settings
+    # are documented here for
     # operator discovery; the service itself reads ``os.getenv`` at call
     # time (matching the ``mfa_service.TOTP_ENCRYPTION_KEY`` pattern) so
     # tests can adjust thresholds via ``monkeypatch.setenv`` without

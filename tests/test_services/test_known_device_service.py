@@ -1,10 +1,11 @@
-"""The trusted-device service: who is trusted, until when, and who may forget.
+"""The known-device service: who is trusted, until when, and who may forget.
 
-Plan#2173, ruling **plan#2406**.  A trusted device skips only the two-factor
-code, and :mod:`app.services.trusted_device_service` holds the record's four
-acts.  Every boundary here is exact, to the second, because the predicate is
-the whole of revocation: a device is live while it was trusted less than
-thirty days ago AND not before its user's ``session_invalidated_at``.
+Plan#2173, ruling **plan#2406**; plan#2772, ruling **plan#2994**.  A trusted
+device skips only the two-factor code, and
+:mod:`app.services.known_device_service` holds the record's acts.  Every
+boundary here is exact, to the second, because the predicate is the whole of
+revocation: a device is live while it was trusted less than thirty days ago
+AND not before its user's ``session_invalidated_at``.
 
 **The clock is frozen, not approximated.**  The service reads
 ``datetime.now(timezone.utc)`` once per act, and this directory's autouse
@@ -21,11 +22,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 import sqlalchemy
+from sqlalchemy.engine.interfaces import CacheStats
+from sqlalchemy.orm import Session
 
 from app.exceptions import NotFoundError
-from app.models.trusted_device import TrustedDevice
-from app.services import trusted_device_service
-from tests._test_helpers import freeze_today
+from app.models.known_device import KnownDevice
+from app.services import known_device_service
+from tests._test_helpers import capture_sql_statements, freeze_today
 
 #: The moment the first trust in each case is made.  Fixed, so no case
 #: depends on the day the suite runs; the service never reads the calendar.
@@ -55,19 +58,24 @@ class _Acts:
         """Freeze the service module's clock at *moment* (UTC)."""
         freeze_today(
             self._monkeypatch, moment.date(),
-            modules=(trusted_device_service.__name__,),
+            modules=(known_device_service.__name__,),
             at_time=moment.time(),
         )
 
     def trust(self, moment, user_id, user_agent=_FIREFOX):
         """Trust a device for *user_id* at *moment*; return its token."""
         self._at(moment)
-        return trusted_device_service.trust_device(user_id, user_agent)
+        return known_device_service.record_sign_in(
+            user_id, None, user_agent, now=moment, trust=True,
+        )
 
     def find(self, moment, user_id, token):
         """Look *token* up for *user_id* at *moment*."""
         self._at(moment)
-        return trusted_device_service.find_live_device(user_id, token)
+        standing = known_device_service.find_browser(user_id, token)
+        if standing is None or not standing.trusted:
+            return None
+        return standing.device
 
     def listed(self, moment, user_id):
         """List *user_id*'s live devices at *moment*, as their ids in order."""
@@ -76,12 +84,22 @@ class _Acts:
     def devices(self, moment, user_id):
         """List *user_id*'s live devices at *moment*, as the rows."""
         self._at(moment)
-        return trusted_device_service.list_live_devices(user_id)
+        return known_device_service.list_trusted_devices(user_id)
 
     def forget(self, moment, user_id, device_id):
         """Forget *device_id* for *user_id* at *moment*."""
         self._at(moment)
-        trusted_device_service.forget_device(user_id, device_id)
+        known_device_service.forget_trust(user_id, device_id)
+
+    def known(self, moment, tokens):
+        """Ask at *moment* which users *tokens* name known records of."""
+        self._at(moment)
+        return known_device_service.known_to(tokens)
+
+    def record_id(self, moment, user_id, token):
+        """Ask at *moment* which of *user_id*'s records *token* names, by id."""
+        self._at(moment)
+        return known_device_service.known_browser_id(user_id, token)
 
 
 @pytest.fixture(name="acts")
@@ -93,7 +111,7 @@ def _acts(monkeypatch):
 def _device_of(db, token):
     """Return the row *token* names, read past the service (no liveness)."""
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    return db.session.query(TrustedDevice).filter_by(
+    return db.session.query(KnownDevice).filter_by(
         token_hash=token_hash,
     ).one()
 
@@ -102,7 +120,7 @@ def _rows_of(db, user_id):
     """Return the ids of every row *user_id* holds, live or dead."""
     return sorted(
         row.id for row in
-        db.session.query(TrustedDevice).filter_by(user_id=user_id)
+        db.session.query(KnownDevice).filter_by(user_id=user_id)
     )
 
 
@@ -117,7 +135,7 @@ class TestTrustingADevice:
 
         token = acts.trust(_T0, user_id)
 
-        [row] = db.session.query(TrustedDevice).filter_by(user_id=user_id)
+        [row] = db.session.query(KnownDevice).filter_by(user_id=user_id)
         assert row.token_hash == hashlib.sha256(token.encode()).hexdigest()
         assert token not in row.token_hash
         assert row.trusted_at == _T0
@@ -184,29 +202,23 @@ class TestTrustingADevice:
         assert _rows_of(db, user_id) == sorted([almost, new])
         assert _rows_of(db, other_id) == [others]
 
-    def test_the_trust_purges_the_users_forgotten_rows_and_nothing_else(
-        self, app, db, acts, seed_user,
-    ):
-        """At T0 + 3 days, the row trusted before the bump goes; the rest stay.
+    def test_a_bump_purges_nothing(self, app, db, acts, seed_user):
+        """At T0 + 3 days, a row trusted before a bump stays: it is still known.
 
-        The user's rows, judged at the purge (T0 + 3 days), each well inside
-        thirty days:
-
-        * trusted at T0, before the bump at T0 + 1 day: dead by the bump --
-          purged;
-        * trusted at T0 + 2 days, after it: live -- kept;
-        * the purge's own new row -- kept.
+        Ruling plan#2997: no bump ends a browser's known standing, so the bump
+        leaves its row for the age to purge.  The row no longer holds a live
+        trust; that half is :class:`TestTheInvalidation`'s.
         """
         user = seed_user["user"]
-        revoked = _device_of(db, acts.trust(_T0, user.id)).id
+        token = acts.trust(_T0, user.id)
+        before = _device_of(db, token).id
         user.session_invalidated_at = _T0 + _ONE_DAY
         db.session.flush()
-        after = _device_of(db, acts.trust(_T0 + 2 * _ONE_DAY, user.id)).id
 
         new = _device_of(db, acts.trust(_T0 + 3 * _ONE_DAY, user.id)).id
 
-        assert revoked not in _rows_of(db, user.id)
-        assert _rows_of(db, user.id) == sorted([after, new])
+        assert _rows_of(db, user.id) == sorted([before, new])
+        assert acts.find(_T0 + 3 * _ONE_DAY, user.id, token) is None
 
 
 class TestTheThirtyDays:
@@ -259,7 +271,7 @@ class TestTheThirtyDays:
         """The date Settings will show: T0 + 30 days on the row."""
         token = acts.trust(_T0, seed_user["user"].id)
 
-        assert _device_of(db, token).expires_at == _T0 + _THIRTY_DAYS
+        assert _device_of(db, token).trust_expires_at == _T0 + _THIRTY_DAYS
 
 
 class TestTheInvalidation:
@@ -348,6 +360,173 @@ class TestTheToken:
         assert acts.find(_T0, user_id, _device_of(db, token).token_hash) is None
 
 
+class TestWhoTheBrowserIsKnownTo:
+    """``/login``'s first question: every cookie the browser sent, in one statement.
+
+    Ruling plan#3130.  Each cookie is judged as :func:`find_browser` judges
+    one, so a user is in the answer only when the cookie named for them
+    carries a token of their live record.  A known browser's thirty days run
+    from its last sign-in (ruling plan#2995), which :meth:`_Acts.trust` makes.
+    """
+
+    def test_a_live_cookie_answers_and_a_made_up_one_does_not(
+        self, app, db, acts, seed_user, seed_second_user,
+    ):
+        """The first user's live cookie and a made-up one for the second: the first alone."""
+        user_id = seed_user["user"].id
+        other_id = seed_second_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        assert acts.known(_T0, {user_id: token, other_id: "made-up"}) == {user_id}
+
+    def test_another_users_token_answers_nobody(
+        self, app, db, acts, seed_user, seed_second_user,
+    ):
+        """The first user's token, in a cookie named for the second user: nobody."""
+        user_id = seed_user["user"].id
+        other_id = seed_second_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        assert acts.known(_T0, {other_id: token}) == frozenset()
+
+    def test_thirty_days_after_the_sign_in_it_answers_nobody(
+        self, app, db, acts, seed_user,
+    ):
+        """Known a second short of thirty days after the sign-in; nobody at thirty."""
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        assert acts.known(_T0 + _THIRTY_DAYS - _ONE_SECOND, {user_id: token}) == {user_id}
+        assert acts.known(_T0 + _THIRTY_DAYS, {user_id: token}) == frozenset()
+
+    def test_two_live_cookies_answer_both_from_one_statement(
+        self, app, db, acts, seed_user, seed_second_user,
+    ):
+        """A browser two people sign in on: both of them, from one statement."""
+        user_id = seed_user["user"].id
+        other_id = seed_second_user["user"].id
+        tokens = {
+            user_id: acts.trust(_T0, user_id),
+            other_id: acts.trust(_T0, other_id),
+        }
+
+        answer, statements = capture_sql_statements(lambda: acts.known(_T0, tokens))
+
+        assert answer == {user_id, other_id}
+        assert len(statements) == 1, statements
+
+    def test_no_cookie_sends_no_statement(self, app, db, acts):
+        """A browser that sent no device cookie: nobody, and nothing asked."""
+        answer, statements = capture_sql_statements(lambda: acts.known(_T0, {}))
+
+        assert answer == frozenset()
+        assert statements == []
+
+    def test_a_new_number_of_cookies_compiles_nothing_new(self, app, db, acts):
+        """Asked once, the question is compiled; asked of 3, 5 and 8 cookies, it is reused.
+
+        A statement compiled anew for each number of cookies is kept in each
+        worker's cache, so a stranger sending a different number each time
+        would grow it: measured 2026-11-09, a hundred counts kept a hundred
+        statements and 250 MB.  Each ask is read from SQLAlchemy's own report
+        of the cache, per statement.
+        """
+        reports = []
+
+        def on_execute(_conn, _cursor, _statement, _parameters, context, _many):
+            reports.append(context.cache_hit)
+
+        acts.known(_T0, {1: "made-up", 2: "made-up"})
+        sqlalchemy.event.listen(db.engine, "before_cursor_execute", on_execute)
+        try:
+            for count in (3, 5, 8):
+                acts.known(_T0, {user_id: "made-up" for user_id in range(1, count + 1)})
+        finally:
+            sqlalchemy.event.remove(db.engine, "before_cursor_execute", on_execute)
+
+        assert reports == [CacheStats.CACHE_HIT] * 3
+
+
+class TestWhichRecordTheBrowserNames:
+    """The rate limits' question of a signed-in request: its browser's record, by id.
+
+    Ruling plan#3108.  The cookie is judged as :func:`find_browser` judges
+    it, so the answer is the record's id exactly when that would answer a
+    standing.  It is asked before the owner's lock, so it loads no record.
+    """
+
+    def test_a_live_cookie_answers_its_records_id(self, app, db, acts, seed_user):
+        """The token a sign-in returned names that sign-in's record."""
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        assert acts.record_id(_T0, user_id, token) == _device_of(db, token).id
+
+    def test_a_made_up_token_answers_none(self, app, db, acts, seed_user):
+        """A token no record holds, beside a live record of the same user: none."""
+        user_id = seed_user["user"].id
+        acts.trust(_T0, user_id)
+
+        assert acts.record_id(_T0, user_id, "made-up") is None
+
+    def test_another_users_token_answers_none(
+        self, app, db, acts, seed_user, seed_second_user,
+    ):
+        """The first user's live token, asked of for the second user: none."""
+        token = acts.trust(_T0, seed_user["user"].id)
+
+        assert acts.record_id(_T0, seed_second_user["user"].id, token) is None
+
+    def test_thirty_days_after_the_sign_in_it_answers_none(
+        self, app, db, acts, seed_user,
+    ):
+        """Its id a second short of thirty days after the sign-in; none at thirty."""
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+        device_id = _device_of(db, token).id
+
+        assert acts.record_id(_T0 + _THIRTY_DAYS - _ONE_SECOND, user_id, token) == device_id
+        assert acts.record_id(_T0 + _THIRTY_DAYS, user_id, token) is None
+
+    def test_no_cookie_sends_no_statement(self, app, db, acts, seed_user):
+        """A browser that sent no cookie for the user: none, and nothing asked."""
+        user_id = seed_user["user"].id
+
+        answer, statements = capture_sql_statements(
+            lambda: acts.record_id(_T0, user_id, None),
+        )
+
+        assert answer is None
+        assert statements == []
+
+    def test_it_loads_no_record(self, app, db, acts, seed_user):
+        """Answering a live record's id loads no record into the session.
+
+        Counted by the load event rather than read from the identity map,
+        which holds rows weakly, and with the session emptied first, because
+        a record already in it is returned by a load without the event firing.
+        """
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+        device_id = _device_of(db, token).id
+        db.session.commit()
+        db.session.expunge_all()
+        loaded = []
+
+        def on_load(_session, instance):
+            if isinstance(instance, KnownDevice):
+                loaded.append(instance)
+
+        sqlalchemy.event.listen(Session, "loaded_as_persistent", on_load)
+        try:
+            answer = acts.record_id(_T0, user_id, token)
+        finally:
+            sqlalchemy.event.remove(Session, "loaded_as_persistent", on_load)
+
+        assert answer == device_id
+        assert loaded == []
+
+
 class TestTheList:
     """A user's live devices, theirs only, newest first."""
 
@@ -382,8 +561,8 @@ class TestTheBrowsersDevice:
         second = acts.trust(_T0 + _ONE_DAY, user_id)
         devices = acts.devices(_T0 + _ONE_DAY, user_id)
 
-        named_first = trusted_device_service.device_named_by(devices, first)
-        named_second = trusted_device_service.device_named_by(devices, second)
+        named_first = known_device_service.device_named_by(devices, first)
+        named_second = known_device_service.device_named_by(devices, second)
 
         assert named_first is _device_of(db, first)
         assert named_second is _device_of(db, second)
@@ -395,7 +574,7 @@ class TestTheBrowsersDevice:
         devices = acts.devices(_T0, user_id)
 
         assert devices
-        assert trusted_device_service.device_named_by(devices, None) is None
+        assert known_device_service.device_named_by(devices, None) is None
 
     def test_a_token_naming_no_listed_device_names_nothing(
         self, app, db, acts, seed_user, seed_second_user,
@@ -407,25 +586,34 @@ class TestTheBrowsersDevice:
         devices = acts.devices(_T0, user_id)
 
         assert devices
-        assert trusted_device_service.device_named_by(
+        assert known_device_service.device_named_by(
             devices, "not-a-token",
         ) is None
-        assert trusted_device_service.device_named_by(devices, theirs) is None
+        assert known_device_service.device_named_by(devices, theirs) is None
 
 
 class TestForgettingADevice:
-    """A user forgets their own device; nobody forgets another's."""
+    """A user forgets their own device's trust; nobody forgets another's."""
 
-    def test_a_user_forgets_their_own_device(self, app, db, acts, seed_user):
-        """The row is deleted, so the token finds nothing."""
+    def test_a_user_forgets_their_own_devices_trust(
+        self, app, db, acts, seed_user,
+    ):
+        """The trust goes and the row stays, so the browser is still known.
+
+        Ruling plan#2997: forgetting takes no password, so it must not be a
+        way to make the owner's browser a stranger.
+        """
         user_id = seed_user["user"].id
         token = acts.trust(_T0, user_id)
         device_id = _device_of(db, token).id
 
         acts.forget(_T0, user_id, device_id)
 
-        assert _rows_of(db, user_id) == []
+        assert _rows_of(db, user_id) == [device_id]
         assert acts.find(_T0, user_id, token) is None
+        standing = known_device_service.find_browser(user_id, token)
+        assert standing.device.id == device_id
+        assert standing.trusted is False
 
     def test_another_users_device_is_refused_and_kept(
         self, app, db, acts, seed_user, seed_second_user,
@@ -453,10 +641,82 @@ class TestForgettingADevice:
         assert _rows_of(db, user_id) == [device_id]
 
     def test_a_dead_device_is_still_forgettable(self, app, db, acts, seed_user):
-        """Expired since the user saw it listed: deleted, not refused."""
+        """Expired since the user saw it listed: cleared, not refused."""
         user_id = seed_user["user"].id
-        device_id = _device_of(db, acts.trust(_T0, user_id)).id
+        token = acts.trust(_T0, user_id)
+        device_id = _device_of(db, token).id
 
         acts.forget(_T0 + _THIRTY_DAYS, user_id, device_id)
 
-        assert _rows_of(db, user_id) == []
+        assert _device_of(db, token).trusted_at is None
+
+
+class TestCountingAWrongGuess:
+    """A wrong guess counts on the browser's record, and the threshold deletes it.
+
+    Ruling plan#2996: the browser is then a stranger, and the user's other
+    browsers are untouched.  The clock plays no part, so the acts here are the
+    service's own, called directly.
+    """
+
+    def test_short_of_the_threshold_the_count_moves_and_the_row_stays(
+        self, app, db, acts, seed_user,
+    ):
+        """One guess of three: the count is 1 and the browser is still known."""
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        deleted = known_device_service.count_failed_attempt(
+            _device_of(db, token), 3,
+        )
+        db.session.commit()
+
+        assert deleted is False
+        db.session.expire_all()
+        assert _device_of(db, token).failed_login_count == 1
+
+    def test_the_threshold_deletes_that_row_and_no_other(
+        self, app, db, acts, seed_user,
+    ):
+        """The third of three deletes the guessing browser's row; the other stays.
+
+        The first two answer False and the third True: the guess that reaches
+        the threshold is the one that deletes.
+        """
+        user_id = seed_user["user"].id
+        guessing = acts.trust(_T0, user_id)
+        other_id = _device_of(db, acts.trust(_T0, user_id)).id
+        device = _device_of(db, guessing)
+
+        answers = [
+            known_device_service.count_failed_attempt(device, 3)
+            for _ in range(3)
+        ]
+        db.session.commit()
+
+        assert answers == [False, False, True]
+        assert _rows_of(db, user_id) == [other_id]
+        assert known_device_service.find_browser(user_id, guessing) is None
+
+    def test_a_finished_sign_in_clears_the_count(
+        self, app, db, acts, seed_user,
+    ):
+        """Two guesses, then a sign-in on that browser: the count is 0 again.
+
+        So the threshold counts wrong guesses in a row, and only a finished
+        sign-in breaks the row.
+        """
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+        device = _device_of(db, token)
+        known_device_service.count_failed_attempt(device, 3)
+        known_device_service.count_failed_attempt(device, 3)
+        db.session.commit()
+
+        new_token = known_device_service.record_sign_in(
+            user_id, token, _FIREFOX, now=_T0,
+        )
+        db.session.commit()
+
+        db.session.expire_all()
+        assert _device_of(db, new_token).failed_login_count == 0

@@ -551,7 +551,9 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
         figures and -- through the timeline that appends the forward plan to
         this walk's stream (:func:`~app.services.balance_at._loan_stream
         .loan_timeline`) -- its balance, payoff and projected interest all read
-        it in a single ``/savings`` render.  The LOAD
+        it in a single ``/savings`` render, and the loan page's payment table
+        and drift scorecard read it beside them (:mod:`app.services
+        .loan_walk_reads`, since plan task plan#3081).  The LOAD
         (:func:`~app.services.loan_ledger.load_loan_stream`) is the expensive
         part -- the loan's params, anchors, rate periods, escrow lines and
         settled shadows -- so re-loading per producer is exactly the redundant

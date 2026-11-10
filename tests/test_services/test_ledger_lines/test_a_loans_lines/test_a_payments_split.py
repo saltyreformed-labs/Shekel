@@ -28,6 +28,7 @@ from tests._test_helpers import (
     create_settled_transfer,
     freeze_today,
     insert_trueup_event,
+    read_pass,
     transfer_side_record,
     typed,
 )
@@ -525,7 +526,7 @@ class TestTheSplitIsADateKeyedCorrection:
             assert _interest_net(loan, scenario_id) == Decimal("997.50")
 
             rows = loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, display_today(),
+                loan, read_pass(loan, seed_user["scenario"], display_today()),
             )
             assert [(row.installment, row.interest, row.principal) for row in rows] == [
                 (date(2026, 2, 1), Decimal("500.00"), Decimal("500.00")),

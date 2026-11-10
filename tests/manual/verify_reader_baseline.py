@@ -349,8 +349,19 @@ def _retirement(user_id):
 
 
 def _loans(user_id, scenario_id, accounts):
-    """Loan payment history and the confirmed split table, per loan account."""
+    """Loan payment history and the confirmed split table, per loan account.
+
+    The history reads one pass pinned at 2026-08-12 for every account, as the
+    loan page reads its one pass (plan task plan#3081).  Until that task it
+    took an id, a scenario and that date, walked every recorded fact and
+    filtered to the date; the pass replays only the facts visible by it, so a
+    run comparing a tree before that task with one after can differ where a
+    fact recorded after 2026-08-12 sits before a visible payment in contract
+    order, and reads ``[]`` where the older tree read ``None`` for an account
+    with no loan terms (ruling plan#2917).
+    """
     out = {}
+    history_ctx = BalanceContext.build(user_id, as_of=date(2026, 8, 12))
     for account in accounts:
         params = _guard(
             f"loan_params:{account.id}",
@@ -365,8 +376,9 @@ def _loans(user_id, scenario_id, accounts):
         )
         history = _guard(
             f"loan_history:{account.id}",
-            lambda a=account: loan_walk_reads
-            .confirmed_loan_payment_history(a.id, scenario_id, date(2026, 8, 12)),
+            lambda a=account: loan_walk_reads.confirmed_loan_payment_history(
+                a, history_ctx,
+            ),
         )
         out[str(account.id)] = {
             "loan_context_payments": params,

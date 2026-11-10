@@ -29,6 +29,7 @@ import pytest
 
 from app import ref_cache
 from app.enums import StatusEnum
+from app.extensions import db as _db
 from app.models.ref import AccountType
 from app.models.scenario import Scenario
 from app.services import account_service, loan_walk_reads, transfer_service
@@ -40,6 +41,7 @@ from tests._test_helpers import (
     create_loan_with_trueup,
     create_settled_transfer,
     freeze_today,
+    read_pass,
     seam_confirmed_view,
 )
 
@@ -79,10 +81,10 @@ def _make_split_loan(seed_user, db_session, *, escrow_annual=None, name="Split L
     )
 
 
-def _settle(seed_user, db_session, loan, period, cash, *, settled_on):
-    """Settle one Checking -> loan payment (auto-posts its ledger split)."""
+def _settle(seed_user, loan, period, cash, *, settled_on):
+    """Settle one Checking -> loan payment in the test's session."""
     return create_settled_transfer(
-        seed_user, db_session, seed_user["account"], loan, period,
+        seed_user, _db.session, seed_user["account"], loan, period,
         amount=cash, settled_on=settled_on,
     )
 
@@ -106,16 +108,15 @@ class TestConfirmedLoanPaymentHistory:
         Dated at the true monthly due date (2026-02-01 for period _P1).
         """
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
             loan = _make_split_loan(seed_user, db.session)
             _settle(
-                seed_user, db.session, loan, seed_periods[_P1],
+                seed_user, loan, seed_periods[_P1],
                 Decimal("1000.00"), settled_on=date(2026, 6, 1),
             )
             db.session.commit()
 
             rows = loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             )
             assert rows == [_P1_ROW]
 
@@ -127,17 +128,16 @@ class TestConfirmedLoanPaymentHistory:
         P1 500/500, P2 497.50/502.50, P3 494.99/505.01 (interest/principal).
         """
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
             loan = _make_split_loan(seed_user, db.session)
             for period in (seed_periods[_P1], seed_periods[_P2], seed_periods[_P3]):
                 _settle(
-                    seed_user, db.session, loan, period, Decimal("1000.00"),
+                    seed_user, loan, period, Decimal("1000.00"),
                     settled_on=date(2026, 6, 1),
                 )
             db.session.commit()
 
             rows = loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             )
             assert [(r.principal, r.interest, r.cash) for r in rows] == [
                 (Decimal("500.00"), Decimal("500.00"), Decimal("1000.00")),
@@ -154,18 +154,17 @@ class TestConfirmedLoanPaymentHistory:
         principal = 1100 - 500 - 100 = 500; and 500 + 500 + 100 = 1100 = cash.
         """
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
             loan = _make_split_loan(
                 seed_user, db.session, escrow_annual=Decimal("1200.00"),
             )
             _settle(
-                seed_user, db.session, loan, seed_periods[_P1],
+                seed_user, loan, seed_periods[_P1],
                 Decimal("1100.00"), settled_on=date(2026, 6, 1),
             )
             db.session.commit()
 
             [row] = loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             )
             assert row.cash == Decimal("1100.00")
             assert row.principal == Decimal("500.00")
@@ -178,16 +177,15 @@ class TestConfirmedLoanPaymentHistory:
     ):
         """A $1,500 payment: cash 1500, principal 1000, interest 500."""
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
             loan = _make_split_loan(seed_user, db.session)
             _settle(
-                seed_user, db.session, loan, seed_periods[_P1],
+                seed_user, loan, seed_periods[_P1],
                 Decimal("1500.00"), settled_on=date(2026, 6, 1),
             )
             db.session.commit()
 
             [row] = loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             )
             assert row.cash == Decimal("1500.00")
             assert row.principal == Decimal("1000.00")
@@ -198,22 +196,24 @@ class TestConfirmedLoanPaymentHistory:
     ):
         """The table's split equals the schedule's confirmed rows (same payments).
 
-        The table reads the ledger's walk; the schedule rows fold the read pass's
-        walk (plan step E1d-b).  A payment's (principal, interest) must be
-        identical between them, and this is where they are compared.
+        Both read a read pass's walk since plan task plan#3081 -- the table
+        read the ledger's walk until then -- and the schedule rows fold it
+        (plan step E1d-b).  A payment's (principal, interest) must be identical
+        between them, and this is where they are compared, each on a pass of
+        its own, so a memo shared between them cannot make them agree.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
             loan = _make_split_loan(seed_user, db.session)
             for period in (seed_periods[_P1], seed_periods[_P2]):
                 _settle(
-                    seed_user, db.session, loan, period, Decimal("1000.00"),
+                    seed_user, loan, period, Decimal("1000.00"),
                     settled_on=date(2026, 6, 1),
                 )
             db.session.commit()
 
             table = loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             )
             schedule = seam_confirmed_view(
                 loan.id, scenario_id, _AS_OF,
@@ -233,21 +233,21 @@ class TestConfirmedLoanPaymentHistory:
         no row; on the settled date it yields one.
         """
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
+            scenario = seed_user["scenario"]
             loan = _make_split_loan(seed_user, db.session)
             settled = date(2026, 6, 1)
             _settle(
-                seed_user, db.session, loan, seed_periods[_P3],
+                seed_user, loan, seed_periods[_P3],
                 Decimal("1000.00"), settled_on=date(2026, 6, 1),
             )
             db.session.commit()
 
             before = settled - timedelta(days=1)
             assert loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, before,
+                loan, read_pass(loan, scenario, before),
             ) == []
             assert len(loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, settled,
+                loan, read_pass(loan, scenario, settled),
             )) == 1
 
     def test_reverted_payment_drops_from_the_table(
@@ -255,10 +255,9 @@ class TestConfirmedLoanPaymentHistory:
     ):
         """A settled-then-reverted payment leaves no row (its legs net to zero)."""
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
             loan = _make_split_loan(seed_user, db.session)
             xfer = _settle(
-                seed_user, db.session, loan, seed_periods[_P1],
+                seed_user, loan, seed_periods[_P1],
                 Decimal("1000.00"), settled_on=date(2026, 6, 1),
             )
             db.session.commit()
@@ -270,14 +269,16 @@ class TestConfirmedLoanPaymentHistory:
             db.session.commit()
 
             assert loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             ) == []
 
-    def test_unconfigured_loan_returns_none(self, app, db, seed_user):
-        """A loan account with no terms reads None, and so does its scorecard.
+    def test_unconfigured_loan_reads_an_empty_list(self, app, db, seed_user):
+        """A loan account with no terms reads ``[]``, and so does its scorecard.
 
-        It walks to nothing, so both surfaces hide on the one gate rather than
-        showing a misleading empty table.
+        It walks to nothing, so both surfaces read the empty list the page
+        hides (ruling plan#2917, which changed this test's answer from
+        ``None`` and named it ``test_unconfigured_loan_returns_none``).  The
+        page never asks: it sends a loan with no terms to its setup page.
         """
         with app.app_context():
             loan_type = db.session.query(AccountType).filter_by(name="Auto Loan").one()
@@ -291,23 +292,23 @@ class TestConfirmedLoanPaymentHistory:
             )
             db.session.commit()
 
-            scenario_id = seed_user["scenario"].id
+            balance_ctx = read_pass(account, seed_user["scenario"], _AS_OF)
             assert loan_walk_reads.confirmed_loan_payment_history(
-                account.id, scenario_id, _AS_OF,
-            ) is None
+                account, balance_ctx,
+            ) == []
             assert loan_walk_reads.loan_balance_anchor_history(
-                account.id, scenario_id, _AS_OF,
-            ) is None
+                account, balance_ctx,
+            ) == []
 
     def test_a_configured_loan_with_no_payment_reads_an_empty_table(
         self, app, db, seed_user,
     ):
-        """A configured loan's walk opened, so no payment yet is ``[]``, not None."""
+        """A configured loan's walk opened, so no payment yet is ``[]``."""
         with app.app_context():
             loan = _make_split_loan(seed_user, db.session)
             db.session.commit()
             assert loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, seed_user["scenario"].id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             ) == []
 
     def test_a_scenario_shows_only_its_own_payments(
@@ -336,10 +337,15 @@ class TestConfirmedLoanPaymentHistory:
             )
             db.session.commit()
 
-            history = loan_walk_reads.confirmed_loan_payment_history
-            assert history(loan.id, whatif.id, _AS_OF) == [_P1_ROW]
-            assert history(loan.id, seed_user["scenario"].id, _AS_OF) == []
-            assert history(loan.id, unopened.id, _AS_OF) == []
+            def history(scenario):
+                """The table read on a pass over *scenario*."""
+                return loan_walk_reads.confirmed_loan_payment_history(
+                    loan, read_pass(loan, scenario, _AS_OF),
+                )
+
+            assert history(whatif) == [_P1_ROW]
+            assert history(seed_user["scenario"]) == []
+            assert history(unopened) == []
 
     def test_neither_surface_reads_the_stored_ledger(
         self, app, db, seed_user, seed_periods,
@@ -351,25 +357,27 @@ class TestConfirmedLoanPaymentHistory:
         agree could not pass.  A load FROM the terms' table is what says the
         capture measured the walk, which reads the terms by the loan's id: merely
         naming that table says nothing, since ``Account.loan_params`` joins it
-        into any load of the account.
+        into any load of the account.  Each surface is asked on a pass of its
+        own, because a surface reads its pass's memoized walk (plan task
+        plan#3081): on one pass the second capture would hold no load at all.
         """
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
+            scenario = seed_user["scenario"]
             loan = _make_split_loan(seed_user, db.session)
             _settle(
-                seed_user, db.session, loan, seed_periods[_P1],
+                seed_user, loan, seed_periods[_P1],
                 Decimal("1000.00"), settled_on=date(2026, 6, 1),
             )
             db.session.commit()
 
             rows, table_reads = capture_sql_statements(
                 lambda: loan_walk_reads.confirmed_loan_payment_history(
-                    loan.id, scenario_id, _AS_OF,
+                    loan, read_pass(loan, scenario, _AS_OF),
                 ),
             )
             drifts, scorecard_reads = capture_sql_statements(
                 lambda: loan_walk_reads.loan_balance_anchor_history(
-                    loan.id, scenario_id, _AS_OF,
+                    loan, read_pass(loan, scenario, _AS_OF),
                 ),
             )
             assert rows == [_P1_ROW]
@@ -386,13 +394,13 @@ class TestConfirmedLoanPaymentHistory:
                 ]
 
     def test_future_as_of_raises(self, app, db, seed_user):
-        """A future as_of is a forward projection, out of the reader's domain."""
+        """A pass dated after today is a forward projection, out of the reader's domain."""
         with app.app_context():
             loan = _make_split_loan(seed_user, db.session)
             db.session.commit()
             with pytest.raises(ValueError, match="as_of <= today"):
                 loan_walk_reads.confirmed_loan_payment_history(
-                    loan.id, seed_user["scenario"].id, date(2027, 6, 1),
+                    loan, read_pass(loan, seed_user["scenario"], date(2027, 6, 1)),
                 )
 
 
@@ -440,7 +448,7 @@ class TestAPaymentIsNamedByTheInstallmentItPays:
 
     def test_both_mar_10_payments_are_named_by_the_feb_22_installment(
         self, app, db, seed_user, seed_periods,
-    ):  # pylint: disable=unused-argument
+    ):
         """Two payments due 03-10 read ``Feb 2026`` / #1; the 03-22 one is unchanged.
 
         Walk (charges 02-22 and 03-22; the two 03-10 payments in recording
@@ -482,7 +490,7 @@ class TestAPaymentIsNamedByTheInstallmentItPays:
             db.session.commit()
 
             card = loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             )
             assert [
                 (row.installment, row.cash, row.interest, row.principal)
@@ -507,7 +515,7 @@ class TestAPaymentIsNamedByTheInstallmentItPays:
 
     def test_a_payment_due_before_the_first_installment_keeps_its_own_date(
         self, app, db, seed_user, seed_periods,
-    ):  # pylint: disable=unused-argument
+    ):
         """Due 01-28, before the 02-22 first installment: named 01-28, row #0.
 
         Ruling R-C's early extra pays no installment, so there is none to name
@@ -527,7 +535,7 @@ class TestAPaymentIsNamedByTheInstallmentItPays:
             db.session.commit()
 
             [row] = loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             )
             assert (row.installment, row.interest, row.principal) == (
                 due, Decimal("0.00"), Decimal("1000.00"),
@@ -561,14 +569,13 @@ class TestLoanBalanceAnchorHistory:
         ``is_opening`` flags it for the display).
         """
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
             loan = create_loan_account(
                 seed_user, db.session, principal=_ORIGINATION_PRINCIPAL,
                 rate=_RATE, origination_date=_ORIGINATION_DATE,
             )
 
             assert loan_walk_reads.loan_balance_anchor_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             ) == [LoanAnchorDrift(
                 anchor_date=_ORIGINATION_DATE,
                 recorded=Decimal("250000.00"),
@@ -587,12 +594,11 @@ class TestLoanBalanceAnchorHistory:
         250000 = -150000 -- the ledger had no payments recorded, so it read high.
         """
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
             loan = _make_split_loan(seed_user, db.session)
             db.session.commit()
 
             assert loan_walk_reads.loan_balance_anchor_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             ) == [
                 LoanAnchorDrift(
                     anchor_date=_ORIGINATION_DATE,
@@ -623,17 +629,16 @@ class TestLoanBalanceAnchorHistory:
         payments.
         """
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
             loan = _make_split_loan(seed_user, db.session)
             for period in (seed_periods[_P1], seed_periods[_P2]):
                 _settle(
-                    seed_user, db.session, loan, period, Decimal("1000.00"),
+                    seed_user, loan, period, Decimal("1000.00"),
                     settled_on=date(2026, 6, 1),
                 )
             db.session.commit()
 
             rows = loan_walk_reads.loan_balance_anchor_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             )
             assert [(r.recorded, r.computed, r.drift) for r in rows] == [
                 (Decimal("250000.00"), Decimal("0.00"), Decimal("250000.00")),
@@ -641,9 +646,14 @@ class TestLoanBalanceAnchorHistory:
                  Decimal("-150000.00")),
             ]
 
-    def test_unconfigured_loan_returns_none(self, app, db, seed_user):
-        """A non-loan account is not a configured loan, so the card is None."""
+    def test_unconfigured_loan_reads_an_empty_list(self, app, seed_user):
+        """A non-loan account is not a configured loan, so the card reads ``[]``.
+
+        Ruling plan#2917 changed this test's answer from ``None`` and named it
+        ``test_unconfigured_loan_returns_none``: the account walks to nothing.
+        """
         with app.app_context():
+            account = seed_user["account"]
             assert loan_walk_reads.loan_balance_anchor_history(
-                seed_user["account"].id, seed_user["scenario"].id, _AS_OF,
-            ) is None
+                account, read_pass(account, seed_user["scenario"], _AS_OF),
+            ) == []

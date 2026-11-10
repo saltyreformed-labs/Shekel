@@ -75,16 +75,17 @@ def confirmed_shadows_through(
     :func:`~app.services.loan_loaders.settled_income_legs`: the payments the
     balance readers count as confirmed history at ``as_of`` (their shared
     visible-on bound).  It returns LEGS since plan step balance:X-bi-6-4b and
-    keeps its shadow-era name until ``X-bi-6-4d``.  The posted ledger's
+    keeps its shadow-era name until ``X-bi-6-4d``.  The loan page's
     payment-history table
     (:func:`app.services.loan_walk_reads.confirmed_loan_payment_history`)
     consumed this until plan step ``balance:X-bi-6-3``, when it began reading
-    the walk's outcomes by the same ``visible_on`` bound, and since plan
-    step recurrence:R16-c-1 it is the payment half of a read pass's visibility
-    bound (:func:`.._walk.load_loan_stream`'s ``visible_by``, ruling R-R91);
-    the LEDGER's walk deliberately does NOT take it (it splits every settled
-    payment -- see :func:`~app.services.loan_loaders.settled_income_legs`
-    for why).
+    the ledger's walk's outcomes by the same ``visible_on`` bound.  Since plan
+    step recurrence:R16-c-1 this is the payment half of a read pass's visibility
+    bound (:func:`.._walk.load_loan_stream`'s ``visible_by``, ruling R-R91),
+    and since plan task plan#3081 that table reads the pass's walk, so this is
+    its bound again, stated once at the load.  The LEDGER's walk deliberately
+    does NOT take it (it splits every settled payment -- see
+    :func:`~app.services.loan_loaders.settled_income_legs` for why).
 
     A payment's visible-on date is its SETTLED date (step C2, ruling R-A) --
     or, for a ``$0.00`` close that moved nothing, the installment it skips

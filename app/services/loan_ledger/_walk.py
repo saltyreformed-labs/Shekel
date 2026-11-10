@@ -170,9 +170,10 @@ class LoanLedgerWalk:
         The ONE statement of the empty walk, the one a loan with no
         ``LoanParams`` walks to (the N1 guard): the worked-out read asks it
         of each loan to decide whether the
-        owner's pay calendar is loaded (``ledger_lines.worked_out_lines``),
-        and the loan page's two measured surfaces hide on it
-        (``loan_walk_reads._configured_loan_walk``).
+        owner's pay calendar is loaded (``ledger_lines.worked_out_lines``).
+        The loan page's two measured surfaces hid on it too, until ruling
+        plan#2917 had a loan with no terms read their empty list instead
+        (plan task plan#3081).
         """
         return not self.anchor_corrections and not self.payment_splits
 

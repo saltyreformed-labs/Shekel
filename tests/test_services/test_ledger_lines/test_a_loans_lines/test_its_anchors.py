@@ -23,6 +23,7 @@ from tests._test_helpers import (
     freeze_today,
     insert_tracking_start_event,
     last_covered_day,
+    read_pass,
 )
 
 from ._helpers import (
@@ -132,7 +133,6 @@ class TestTrackingStartOpening:
         that date) = -150000.
         """
         with app.app_context():
-            scenario_id = seed_user["scenario"].id
             loan = create_loan_account(
                 seed_user, db.session, name="Mid-life Loan 2",
                 principal=_ORIGINATION_PRINCIPAL, rate=_RATE,
@@ -144,7 +144,7 @@ class TestTrackingStartOpening:
             db.session.commit()
 
             rows = loan_walk_reads.loan_balance_anchor_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             )
             assert len(rows) == 2
             assert rows[0].is_opening is True

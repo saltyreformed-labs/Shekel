@@ -1,8 +1,9 @@
-"""Shekel Budget App -- the loan detail page's two surfaces, read off the loan's walk.
+"""Shekel Budget App -- the loan detail page's two surfaces, read off the pass's walk.
 
-Both are shaped from the ONE walk of the loan's facts
-(:func:`app.services.loan_ledger.walk_loan_ledger`), and neither reads a
-stored ledger row:
+Both are shaped from the read pass's ONE walk of the loan's facts
+(:meth:`app.services.balance_at.BalanceContext.loan_walk`), the walk the page's
+balance, confirmed schedule and paid-this-year chips already fold, and neither
+reads a stored ledger row:
 
 * the confirmed payment-history table (:func:`confirmed_loan_payment_history`,
   each payment's real cash / principal / interest / escrow split); and
@@ -28,19 +29,43 @@ chips moved OFF the postings onto the fold at step C6c
 :func:`~app.services.balance_at.loan_principal_paid_in_year`), so this module
 does not answer them.
 
-**Whether a surface shows is the walk's answer too** (plan task plan#2779):
-:func:`_configured_loan_walk`, the one gate both ask.  Reads only -- no
-writes, no commit.  It reads the clock once, in the payment table's refusal of
-a future *as_of*, which is why it is not a module of the walk's own package:
-:mod:`app.services.loan_ledger` reads no clock.
+**They take the READ PASS and walk nothing of their own** (plan task
+plan#3081, finding plan#2874).  Each called
+:func:`app.services.loan_ledger.walk_loan_ledger` until then, so one GET of
+the loan page walked the loan three times: the pass's walk and one per
+surface.  The two walks are not the same function.  The pass's replays the
+facts VISIBLE by its ``as_of`` (ruling **R-R91**), where the ledger's replays
+every recorded fact and each surface then filtered it by ``as_of``.  For a
+pass on or after every recorded fact they are one walk, and the page's pass
+is built at today, on or after every settle day and assertion date the write
+doors admit: the census :func:`app.services.loan_ledger.load_loan_stream`
+states, which rests on what no code enforces.  Where a pass pinned earlier
+parts them --
+for one, by a payment due before a visible one whose cash moved after the
+pass's day, which the ledger's walk splits first -- the pass's walk is the
+answer the rest of the page already shows, so the two tables now agree with
+the balance and the chips beside them rather than with the ledger's walk.
+
+**A loan with no terms reads an empty list** (ruling **plan#2917**).  It walks
+to nothing (:attr:`~app.services.loan_ledger.LoanLedgerWalk.is_empty`), so
+both surfaces read ``[]``.  Until that ruling each returned ``None`` through
+the one gate both asked (``_configured_loan_walk``), a branch no page reached:
+the dashboard sends a loan with no terms to its setup page before either
+surface is asked, and the template hides an empty table exactly as it hid
+``None``.
+
+Reads only -- no writes, no commit.  It reads the clock once, in the payment
+table's refusal of a pass dated after today, which is why it is not a module of
+the walk's own package: :mod:`app.services.loan_ledger` reads no clock.
 """
 
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.models.account import Account
+from app.services.balance_at import BalanceContext
 from app.services.installment_calendar import installment_paid_by
-from app.services.loan_ledger import LoanLedgerWalk, walk_loan_ledger
 from app.utils.money import round_money
 
 
@@ -140,67 +165,76 @@ class LoanAnchorDrift:
 
 
 def confirmed_loan_payment_history(
-    loan_account_id: int, scenario_id: int, as_of: date,
-) -> list[LoanPaymentHistoryRow] | None:
+    account: Account, balance_ctx: BalanceContext,
+) -> list[LoanPaymentHistoryRow]:
     """Return a loan's confirmed payments split into their real economic parts.
 
-    One :class:`LoanPaymentHistoryRow` per confirmed payment whose SETTLED date
-    has arrived by *as_of* (plan step C2's one clock: the outcome's
-    ``visible_on``, the same cut the balance readers and the seam's confirmed
-    view apply through :func:`~app.services.loan_ledger.confirmed_shadows_through`,
-    so the table agrees with the balance and the schedule) -- chronological by
-    installment, each carrying the ACTUAL cash paid and its real principal /
-    interest / escrow split as the ONE walk allocated it
-    (:func:`~app.services.loan_ledger.walk_loan_ledger`), never the schedule's
-    contractual replay.
+    One :class:`LoanPaymentHistoryRow` per payment the read pass's walk holds
+    (:meth:`~app.services.balance_at.BalanceContext.loan_walk`) --
+    chronological by installment, each carrying the ACTUAL cash paid and its
+    real principal / interest / escrow split as that ONE walk allocated it,
+    never the schedule's contractual replay.
+
+    **The pass's walk IS the confirmed set**, so the table states no bound of
+    its own.  That walk holds a payment iff its visible day has arrived by the
+    pass's ``as_of`` (plan step C2's one clock: its SETTLED day, or for a
+    ``$0.00`` close the installment it skips;
+    :func:`~app.services.loan_ledger.load_loan_stream`'s ``visible_by``,
+    through :func:`~app.services.loan_ledger.confirmed_shadows_through`), the
+    cut the balance and the confirmed schedule read off the same walk.  Until
+    plan task plan#3081 this read the ledger's walk of every settled payment
+    and kept each outcome whose ``visible_on`` had arrived by ``as_of``: the
+    same rule stated a second time, since an outcome's ``visible_on`` is the
+    :func:`~app.services.loan_ledger.payment_visible_on` that load keeps it by.
 
     **ONE walk, ONE load** (ruling **R-BAL102**).  Through plan step
     ``balance:X-bi-6-3`` this loaded the confirmed shadows once for the rows
     and summed each payment's posted legs back out of the ledger by the
     loan-side shadow's ``transaction_id`` in three more reads; the split has no
-    row link now and the walk the worked-out ledger books from already holds
-    every figure this table shows, so the walk is the table's one producer.
-    ``cash`` is the outcome's (the settled payment leg's
-    parent's :func:`~app.services.row_valuation.settled_contribution`, read once by
-    the walk's event); ``principal`` equals the payment's net on the loan's linked
+    row link now and the walk already holds every figure this table shows, so
+    the walk is the table's one producer.  ``cash`` is the outcome's (the
+    settled payment leg's parent's
+    :func:`~app.services.row_valuation.settled_contribution`, read once by the
+    walk's event); ``principal`` equals the payment's net on the loan's linked
     ledger by the split's construction; for an ordinary payment ``principal +
     interest + escrow == cash``; a payoff overpayment's surplus is a lender
     refund excluded from all three (see :class:`LoanPaymentHistoryRow`).
 
-    Returns ``None`` when the loan has no
-    :class:`~app.models.loan_params.LoanParams`, the same fallback contract as
-    the scorecard beside it (:func:`_configured_loan_walk`).  A configured loan
-    reads ``[]`` until a payment of its in the scenario is confirmed, a scenario
-    holding none of its payments included: the loan's opening is a term of the
-    loan, not of a scenario.  The page hides ``[]`` exactly as it hides ``None``.
+    Reads ``[]`` for a loan with no
+    :class:`~app.models.loan_params.LoanParams` (ruling **plan#2917**), and
+    for a configured loan until a payment of its in the pass's scenario is
+    confirmed: the loan's opening is a term of the loan, not of a scenario.
 
-    Reads only -- no writes, no commit.
+    Reads only -- no writes, no commit.  The walk is the pass's memo, so the
+    first surface of a render to ask may load it and every later one reads it.
 
     Args:
-        loan_account_id: The loan account whose confirmed payments to read.
-        scenario_id: The budget scenario to scope to.
-        as_of: The display boundary; must be on or before ``date.today()``.  A
-            payment whose cash has not moved by it is a forward projection,
-            excluded on the SETTLED day -- not the pay period, which this said
-            until plan step X-an corrected it.
+        account: The loan account whose confirmed payments to read.
+        balance_ctx: The read pass: its scenario scopes the payments, and its
+            ``as_of`` is the display boundary, which must be on or before
+            ``date.today()``.  A payment whose cash has not moved by it is a
+            forward projection, excluded on the SETTLED day -- not the pay
+            period, which this said until plan step X-an corrected it.
 
     Returns:
-        The chronological confirmed payment rows (possibly empty for a configured
-        loan with no confirmed payment yet), or ``None`` when the account is not
-        a configured loan.
+        The chronological confirmed payment rows; empty for a loan with no
+        terms or no confirmed payment.
 
     Raises:
-        ValueError: If *as_of* is after ``date.today()`` (out of the confirmed
-            reader's domain -- a future date is a forward projection).
+        ValueError: If the pass's ``as_of`` is after ``date.today()`` (out of
+            the confirmed reader's domain -- a future date is a forward
+            projection).
+        ForeignAccountError: When *account* belongs to another owner than the
+            pass (:meth:`~app.services.balance_at.BalanceContext.loan_walk`).
+        BaselineMissingError: When the pass has no baseline scenario.
     """
-    if as_of > date.today():
+    if balance_ctx.as_of > date.today():
         raise ValueError(
             f"confirmed_loan_payment_history answers only as_of <= today; got "
-            f"{as_of.isoformat()}.  A future date is a forward projection."
+            f"{balance_ctx.as_of.isoformat()}.  A future date is a forward "
+            f"projection."
         )
-    walk = _configured_loan_walk(loan_account_id, scenario_id)
-    if walk is None:
-        return None
+    walk = balance_ctx.loan_walk(account)
     # Sorted by the payment's own DUE date, matching how the ledger seam's
     # confirmed view orders its rows, and so by the INSTALLMENT it pays too:
     # ``installment_paid_by`` never falls as the due date rises.  The walk's
@@ -212,10 +246,7 @@ def confirmed_loan_payment_history(
     # two orders agree wherever a transfer's shadows were written with it (0
     # inversions measured on the 2026-09-23 21:17 production dump).
     by_installment = sorted(
-        (
-            outcome for outcome in walk.settled_splits
-            if outcome.visible_on <= as_of
-        ),
+        walk.settled_splits,
         key=lambda outcome: (outcome.due_date, outcome.source.transfer.id),
     )
     # The loan's calendar rides on the walk's stream (ruling R-R100), so the
@@ -237,83 +268,72 @@ def confirmed_loan_payment_history(
     ]
 
 
-def _configured_loan_walk(
-    loan_account_id: int, scenario_id: int,
-) -> LoanLedgerWalk | None:
-    """Walk a CONFIGURED loan's ledger, or return ``None`` when it has no terms.
-
-    The one gate behind both surfaces (:func:`confirmed_loan_payment_history`,
-    :func:`loan_balance_anchor_history`), so they hide on one condition: the
-    loan's own walk opened.  A loan with no
-    :class:`~app.models.loan_params.LoanParams` walks to nothing
-    (:attr:`~app.services.loan_ledger.LoanLedgerWalk.is_empty`); any other opens
-    at its synthesized origination, in every scenario.
-
-    Args:
-        loan_account_id: The loan account to walk.
-        scenario_id: The budget scenario the payments live in.
-
-    Returns:
-        The loan's :class:`~app.services.loan_ledger.LoanLedgerWalk`, or
-        ``None`` when the account carries no terms.
-    """
-    walk = walk_loan_ledger(loan_account_id, scenario_id)
-    return None if walk.is_empty else walk
-
-
 def loan_balance_anchor_history(
-    loan_account_id: int, scenario_id: int, as_of: date,
-) -> list[LoanAnchorDrift] | None:
-    """Return a loan's anchor events with the ledger's pre-correction balance.
+    account: Account, balance_ctx: BalanceContext,
+) -> list[LoanAnchorDrift]:
+    """Return a loan's anchor events with the walk's pre-correction balance.
 
-    One :class:`LoanAnchorDrift` per anchor the loan carries on or before *as_of*
-    -- its origination OPENING and every user balance TRUE-UP -- chronological,
-    each paired with what the genesis walk had computed the balance to be the
-    instant BEFORE the anchor reset it (the walk's ``owed_before``).  The drift
-    (``recorded - computed``) is the append-only jump the anchor booked: the
-    running scorecard of the operator's asserted balance vs the ledger's replay
-    that replaces the old use of the amortization schedule as a trust check.
+    One :class:`LoanAnchorDrift` per anchor the loan carries on or before the
+    pass's ``as_of`` -- its origination OPENING and every user balance TRUE-UP
+    -- chronological, each paired with what the read pass's walk
+    (:meth:`~app.services.balance_at.BalanceContext.loan_walk`) had computed
+    the balance to be the instant BEFORE the anchor reset it (the walk's
+    ``owed_before``).  The drift (``recorded - computed``) is the append-only
+    jump the anchor booked: the running scorecard of the operator's asserted
+    balance vs the walk's replay that replaces the old use of the amortization
+    schedule as a trust check.
 
-    Derived from the SAME deterministic walk
-    (:func:`app.services.loan_ledger.walk_loan_ledger`) the worked-out
-    ledger books the loan's opening / true-up corrections from
-    (:func:`app.services.ledger_lines.loan_correction_targets`), so a drift
-    row and the correction it describes can never disagree.
+    **The pass's walk, and the ledger's.**  The worked-out ledger books the
+    loan's opening / true-up corrections
+    (:func:`app.services.ledger_lines.loan_correction_targets`) off its own
+    walk of every recorded fact
+    (:func:`app.services.loan_ledger.walk_loan_ledgers`), where this reads the
+    facts visible by the pass's ``as_of``.  The two are one walk for a pass on
+    or after every recorded fact, the page's, so there a drift row and the
+    correction it describes agree; the module docstring says where a pass
+    pinned earlier parts them.  Until plan task plan#3081 this read the
+    ledger's walk, and said the two could never disagree.
 
-    **The *as_of* bound is applied HERE, on the walk's output, not inside it.**
-    The walk records every anchor the loan carries whatever its date (it reads no
-    clock); deciding which have HAPPENED by a display date is this reader's job,
-    and an anchor dated after *as_of* has not yet reset the balance, so it is not
-    yet a drift row.  Filtering after the walk cannot change what the surviving
-    rows say: an anchor's ``owed_before`` is the running balance of the events
-    BEFORE it, which admitting a LATER anchor cannot move.
+    **The bound here is what a drift ROW is**: an anchor dated after ``as_of``
+    has not yet reset the balance.  The pass's walk holds an assertion (a
+    true-up or a tracking start) only from its own date, but the OPENING
+    always -- a loan configured to close next
+    month projects its debt from it
+    (:func:`~app.services.loan_ledger.load_loan_stream`) -- so on that walk the
+    bound drops exactly an opening whose date has not arrived, and a loan that
+    has not originated by ``as_of`` correctly shows NO rows: nothing has
+    happened to it yet.  It is stated over every anchor because it is this
+    scorecard's rule, not a copy of the load's.  Dropping a row cannot change
+    what a surviving one says: an anchor's ``owed_before`` is the running
+    balance of the events BEFORE it, and the opening is the first.
 
-    Returns ``None`` when the loan has no
-    :class:`~app.models.loan_params.LoanParams` (unconfigured -- not
-    a loan yet), so the caller hides the card.  A configured loan always has at
-    least the synthesized origination opening -- though a loan that has not
-    originated by *as_of* correctly shows NO rows: nothing has happened to it yet.
+    Reads ``[]`` for a loan with no
+    :class:`~app.models.loan_params.LoanParams` (ruling **plan#2917**): it
+    walks to nothing.  A configured loan always has at least the synthesized
+    origination opening.
 
     Reads only -- no writes, no commit.
 
     Args:
-        loan_account_id: The loan account whose anchor history to read.
-        scenario_id: The budget scenario the payments live in (drives the running
-            balance the drift is measured against).
-        as_of: The display boundary; an anchor dated after it has not yet reset
-            the balance and is excluded.
+        account: The loan account whose anchor history to read.
+        balance_ctx: The read pass: its scenario holds the payments that drive
+            the running balance the drift is measured against, and its
+            ``as_of`` is the display boundary.
 
     Returns:
-        The chronological anchor drift rows (origination first), or ``None`` when
-        the account is not a configured loan.
+        The chronological anchor drift rows (origination first); empty for a
+        loan with no terms or one not originated by the pass's ``as_of``.
+
+    Raises:
+        ForeignAccountError: When *account* belongs to another owner than the
+            pass (:meth:`~app.services.balance_at.BalanceContext.loan_walk`).
+        BaselineMissingError: When the pass has no baseline scenario.
     """
-    walk = _configured_loan_walk(loan_account_id, scenario_id)
-    if walk is None:
-        return None
+    walk = balance_ctx.loan_walk(account)
     corrections = [
         correction
         for correction in walk.anchor_corrections
-        if correction.anchor.anchor_date <= as_of
+        if correction.anchor.anchor_date <= balance_ctx.as_of
     ]
     return [
         LoanAnchorDrift(

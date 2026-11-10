@@ -280,9 +280,7 @@ def _display_lines(label, account, ctx):
         card = None
         print(f"{label}\tCARD\taccount={account.id}\tas_of after today")
     else:
-        card = confirmed_loan_payment_history(
-            account.id, get_baseline_scenario(USER_ID).id, ctx.as_of,
-        )
+        card = confirmed_loan_payment_history(account, ctx)
     for row in card or ():
         named = getattr(row, "installment", None) or getattr(row, "due_date")
         print(

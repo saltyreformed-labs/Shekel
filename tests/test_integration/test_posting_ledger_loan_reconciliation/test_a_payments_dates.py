@@ -19,7 +19,7 @@ from app.services.installment_calendar import monthly_due_date
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
 from app.services.liability_sign import owed
-from tests._test_helpers import rhythm_of, last_covered_day
+from tests._test_helpers import last_covered_day, read_pass, rhythm_of
 
 from ._helpers import (
     _ANCHOR_BALANCE,
@@ -101,7 +101,7 @@ class TestLatePaidPaymentDating:
             assert [row.payment_date for row in rows] == [date(2026, 2, 1)]
 
             history = loan_walk_reads.confirmed_loan_payment_history(
-                loan.id, scenario_id, _AS_OF,
+                loan, read_pass(loan, seed_user["scenario"], _AS_OF),
             )
             assert [row.installment for row in history] == [date(2026, 2, 1)]
 

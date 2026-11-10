@@ -4,13 +4,18 @@ Split from ``tests/test_routes/test_loan.py`` by ``tools/split`` (ruling R-BAL30
 """
 
 import re
+import traceback
 from datetime import date, time
 from decimal import Decimal
 
+from sqlalchemy import event
+
 from app.enums import AcctTypeEnum, StatusEnum
+from app.extensions import db as _db
 from app.models.ref import AccountType
 from app.services.balance_at import BalanceContext
 from app.services import account_service, balance_at
+from app.services.loan_ledger import walk_loan_ledger
 
 from tests._test_helpers import (
     create_loan_with_trueup,
@@ -29,6 +34,50 @@ from ._helpers import (
     _add_escrow,
     _create_fresh_mortgage,
 )
+
+
+#: The walk's module: every walk of a loan's facts is assembled in it -- the
+#: read pass's (``load_loan_stream``, behind ``BalanceContext.loan_walk``) and
+#: the ledger's (``_ledger_walks``, behind ``walk_loan_ledger`` and
+#: ``walk_loan_ledgers``).
+_WALK_MODULE = "app/services/loan_ledger/_walk.py"
+#: What each walk's load reads exactly once: the loan's anchor facts.
+_ANCHOR_FACTS_READ = "FROM budget.loan_anchor_events"
+
+
+def _walk_loads(fn):
+    """Run *fn* and count the loan walks it loaded, by their statements.
+
+    A statement counts when it reads the loan's anchor facts while a frame of
+    the walk's module is on the stack.  Each walk's load reads them once (the
+    pass's through ``load_loan_anchor_facts``, the ledger's through
+    ``load_loan_records``' standing statements), so the count is the number
+    of walks loaded.  The frames are what make it a count of WALKS: the page
+    reads the same table outside any walk too (the seam's resolution and the
+    payoff scenarios' inputs), so a count of the table's reads alone would pin
+    those beside the walks.
+
+    Args:
+        fn: A zero-argument callable to run under the count.
+
+    Returns:
+        ``(result, walks)`` -- *fn*'s return value and the walk loads counted.
+    """
+    walks = []
+
+    def _count(_conn, _cursor, statement, *_args, **_kwargs):
+        if _ANCHOR_FACTS_READ in statement and any(
+            frame.filename.endswith(_WALK_MODULE)
+            for frame in traceback.extract_stack()
+        ):
+            walks.append(statement)
+
+    event.listen(_db.engine, "before_cursor_execute", _count)
+    try:
+        result = fn()
+    finally:
+        event.remove(_db.engine, "before_cursor_execute", _count)
+    return result, len(walks)
 
 
 class TestPaymentBreakdown:
@@ -359,6 +408,53 @@ class TestLoanDetailMeasuredSurfaces:
         # Balance-anchor scorecard: the origination row plus the user true-up.
         assert "Balance anchors" in html
         assert "Origination" in html
+
+    def test_one_get_walks_the_loan_once(
+        self, auth_client, seed_user, db, seed_periods,
+    ):
+        """One GET of the page loads the loan's walk ONCE: the read pass's.
+
+        Finding plan#2874: the payment history and the drift scorecard each
+        walked the loan's ledger again beside the pass's walk, so one GET
+        loaded three walks, measured at plan task plan#3081's start.  Since
+        that task both read the pass's walk, which the balance hero, the YTD
+        chips and the schedule already fold.  The page still renders both
+        tables off it: the payment table counts its one payment, and the
+        scorecard's card renders only when it holds a row.
+
+        The control walks the ledger on the same data and must count one, so
+        the count can see a walk loaded by the door the tables used to take;
+        the GET's own one is the pass's.
+        """
+        loan = create_loan_with_trueup(
+            seed_user, db.session,
+            origination_principal=Decimal("250000.00"),
+            anchor_balance=Decimal("100000.00"),
+            anchor_date=date(2026, 1, 1),
+            rate=Decimal("0.06000"),
+            origination_date=date(2023, 6, 1),
+            name="Walked Mortgage",
+        )
+        create_settled_transfer(
+            seed_user, db.session, seed_user["account"], loan,
+            seed_periods[3], amount=Decimal("1000.00"),
+            settled_on=date(2026, 3, 15),
+        )
+        db.session.commit()
+
+        resp, walks = _walk_loads(
+            lambda: auth_client.get(f"/accounts/{loan.id}/loan"),
+        )
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "1 confirmed" in html
+        assert "Balance anchors" in html
+        assert walks == 1
+
+        _walk, control = _walk_loads(
+            lambda: walk_loan_ledger(loan.id, seed_user["scenario"].id),
+        )
+        assert control == 1
 
     def test_a_loan_with_no_confirmed_payment_shows_no_payment_history(
         self, auth_client, seed_user, db, seed_periods,

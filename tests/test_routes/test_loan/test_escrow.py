@@ -10,7 +10,7 @@ from app.enums import AcctTypeEnum
 from app.models.escrow_line import EscrowComponentVersion, EscrowLine
 from app.services import escrow_calculator, loan_loaders
 
-from tests._test_helpers import add_escrow_line, create_settled_transfer
+from tests._test_helpers import add_escrow_line, create_settled_transfer, read_pass
 
 from ._helpers import _create_mortgage, _create_other_loan
 
@@ -225,7 +225,6 @@ class TestEscrow:
             confirmed_loan_payment_history,
         )
         acct = _create_mortgage(seed_user, db.session)
-        scenario_id = seed_user["scenario"].id
         old, new = self._build_split_escrow(db, acct.id, date(2026, 3, 1))
         create_settled_transfer(
             seed_user, db.session, seed_user["account"], acct,
@@ -234,7 +233,11 @@ class TestEscrow:
         )
         db.session.commit()
 
-        before = confirmed_loan_payment_history(acct.id, scenario_id, date.today())
+        # A pass per read: a pass memoizes the loan's walk, so the second read
+        # needs its own to see the merge.
+        before = confirmed_loan_payment_history(
+            acct, read_pass(acct, seed_user["scenario"], date.today()),
+        )
         assert len(before) == 1
         assert before[0].escrow == Decimal("500.00")  # Old Tax: 6000 / 12
 
@@ -246,7 +249,9 @@ class TestEscrow:
 
         # The split is identical, derived from the merged line, escrow-per-date
         # being preserved.
-        after = confirmed_loan_payment_history(acct.id, scenario_id, date.today())
+        after = confirmed_loan_payment_history(
+            acct, read_pass(acct, seed_user["scenario"], date.today()),
+        )
         assert after[0].escrow == before[0].escrow
         assert after[0].principal == before[0].principal
         assert after[0].interest == before[0].interest

@@ -418,11 +418,14 @@ class TaxLaw:
 def name_states(state_codes: Sequence[str]) -> str:
     """Name *state_codes* for a sentence: ``"NC"``, ``"NC and SC"``, ``"NC, SC and VA"``.
 
-    The one wording of a list of states in a sentence (ruling plan#3202, the
-    developer 2026-11-10): the refusals' -- the law's own, the profile doors'
-    and the engine's (:class:`app.exceptions.UnsupportedStateError`) -- and
-    the tax-law banner's (``templates/_tax_law_notice.html``, through the
-    template filter of the same name).  ``"no state"`` when empty.
+    The one wording of a list of state codes in a sentence (ruling plan#3202,
+    the developer 2026-11-10): the refusals' -- the law's own, the profile
+    doors' and the engine's (:class:`app.exceptions.UnsupportedStateError`)
+    -- and the tax-law banner's (``templates/_tax_law_notice.html``, through
+    the template filter of the same name).  ``"no state"`` when empty.  The
+    weekly tax-law email lists phrases, not codes ("NC on 2026's and SC on
+    2026's", ``scripts/check_tax_law.py``), in wording of its own that ruling
+    plan#3198 keeps.
 
     Args:
         state_codes: Two-letter state codes, in the order to name them.

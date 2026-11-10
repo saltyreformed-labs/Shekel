@@ -6,9 +6,11 @@
    from January on for as long as it lacks the current year's.  The gaps
    (``app/services/tax_law_alarm.py``) come one per missing piece, by year,
    and each missing YEAR is one sentence pair, however many pieces it lacks
-   (ruling plan#3198), so they are grouped here by year.  A year is missing
-   whole or missing states, never both (``gaps`` judges a year it carries by
-   its states), so a group's first gap says which.
+   (ruling plan#3198), so they are grouped here by year.  Within a year the
+   whole-year gap and the missing states are each picked out by their own
+   filter on ``state``, so a sentence never rests on which gap comes first.
+   ``gaps`` never gives one year both, because it judges a year it carries
+   by its states and a year it lacks as a whole, so each year is one pair.
 
    A year missing states names them together, in the one wording of a list
    of states (the ``name_states`` filter, ruling plan#3202), and says their
@@ -33,9 +35,9 @@
     <i class="bi bi-calendar2-x me-2 fs-5" aria-hidden="true"></i>
     <div class="flex-grow-1">
       {% for tax_year, year_gaps in tax_law_gaps|groupby("tax_year") %}
-      {% set gap = year_gaps|first %}
+      {% set states = year_gaps|rejectattr("state", "none")|map(attribute="state")|list %}
       <p class="mb-0">
-        {% if gap.state is none %}
+        {% for gap in year_gaps|selectattr("state", "none") %}
         Shekel doesn't have the {{ tax_year }} tax rules yet.
         {% if gap.priced_older %}
         Paychecks and tax estimates for {{ tax_year }} use older rules until an app update adds them.
@@ -44,10 +46,11 @@
         {% else %}
         It has no earlier year's rules to use for {{ tax_year }} until an app update adds them.
         {% endif %}
-        {% else %}
-        {% set states = year_gaps|map(attribute="state")|list|name_states %}
-        Shekel's {{ tax_year }} tax rules are missing {{ states }}.
-        {{ states }} tax for {{ tax_year }} {{ "uses" if year_gaps|length == 1 else "use" }} older rules until an app update adds them.
+        {% endfor %}
+        {% if states %}
+        {% set named = states|name_states %}
+        Shekel's {{ tax_year }} tax rules are missing {{ named }}.
+        {{ named }} tax for {{ tax_year }} {{ "uses" if states|length == 1 else "use" }} older rules until an app update adds them.
         {% endif %}
       </p>
       {% endfor %}

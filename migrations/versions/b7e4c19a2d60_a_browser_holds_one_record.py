@@ -36,7 +36,7 @@ Review: Josh, 2026-11-06 -- APPROVED, asked in those words: the rename, the trus
 date allowed to be empty, and what the downgrade deletes (plan#2772).
 
 Revision ID: b7e4c19a2d60
-Revises: 897a6663d221
+Revises: 0fe9c332b9b0
 Create Date: 2026-11-06
 """
 from alembic import op
@@ -45,11 +45,13 @@ import sqlalchemy as sa
 
 # Revision identifiers, used by Alembic.
 revision = 'b7e4c19a2d60'
-# The head of ``card/2772`` at authoring, measured (one head).  Another lane
-# landing a revision first makes two heads, which git merges cleanly and
+# The head of ``dev`` when ``card/2772`` took it in for its pull request,
+# measured 2026-11-10 at ``94c3b0649`` (one head; ``897a6663d221`` at
+# authoring, before ``6740ce13e174`` and ``0fe9c332b9b0`` landed).  Another
+# lane landing a revision first makes two heads, which git merges cleanly and
 # ``flask db upgrade`` refuses: re-point this at the measured head as the last
 # edit before the pull request.
-down_revision = '897a6663d221'
+down_revision = '0fe9c332b9b0'
 branch_labels = None
 depends_on = None
 

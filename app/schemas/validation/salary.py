@@ -21,6 +21,8 @@ from app.schemas.validation._helpers import (
     BaseSchema,
     RowId,
     _NON_NEGATIVE_MONETARY,
+    _PAY_AMOUNT_RANGE,
+    _PAYDAY_RANGE,
     _PERCENT_INPUT_RANGE,
     _RAISE_DATE_RANGE,
     _RAISE_YEAR_RANGE,
@@ -32,7 +34,7 @@ from app.services.salary_raises import (
     EndYearError,
     end_year_of,
 )
-from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN, to_display_date
+from app.utils.dates import to_display_date
 
 # The raise form's end-year answer is a MODE beside the year (plan step
 # **salary:S3-c**, ruling **R-SAL13**); the vocabulary and the ONE rule that
@@ -43,13 +45,6 @@ from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN, to_display_dat
 _END_YEAR_FIELDS = {"mode": "raise_end_mode", "year": "terminal_year"}
 
 
-#: What one paycheck may pay: above zero like ``ck_pay_entries_positive_amount``,
-#: under the same form-layer ceiling the other monetary inputs take.
-_PAY_AMOUNT_RANGE = validate.Range(
-    min=Decimal("0"), min_inclusive=False, max=Decimal("10000000"),
-)
-#: The window a pay entry's payday may be typed in: the calendar's own.
-_PAYDAY_RANGE = validate.Range(min=CALENDAR_DATE_MIN, max=CALENDAR_DATE_MAX)
 #: ``(month, day)`` of the one date a yearly repeat cannot land on every year.
 _LEAP_DAY = (2, 29)
 

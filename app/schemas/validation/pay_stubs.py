@@ -6,17 +6,16 @@ The entry door's value rules for a transcribed pay stub, moved out of
 bound: the stub entry door is its own subject beside the salary profile's.
 """
 
-from decimal import Decimal
-
 from marshmallow import fields, pre_load, validate
 
 from app.schemas.validation._helpers import (
     BaseSchema,
     RowId,
     _NON_NEGATIVE_MONETARY,
+    _PAY_AMOUNT_RANGE,
+    _PAYDAY_RANGE,
     _normalize_empty_inputs,
 )
-from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN
 
 
 # ── Pay stub entry (plan step salary:S11-b) ──────────────────────────
@@ -29,15 +28,11 @@ from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN
 # service's (``app.services.pay_stub_service``): those are rules about the
 # owner's lines, not about a field.
 
-#: A stub's payday is a date the pay calendar can walk to: an HTML date input
-#: accepts a five-digit-year typo, and ``9999-12-31`` overflows the calendar's
-#: forward projection (``app.utils.dates``, whose constants these are).
-_STUB_PAYDAY_RANGE = validate.Range(min=CALENDAR_DATE_MIN, max=CALENDAR_DATE_MAX)
-
-#: A stub's base pay and the gross it prints are above zero: the base like its
-#: column (``ck_pay_stubs_positive_base_pay``), and the gross because it is the
-#: base plus earnings that are never negative.
-_STUB_PAY_RANGE = validate.Range(min=Decimal("0"), min_inclusive=False, max=Decimal("10000000"))
+# A stub's payday and its base pay take the bounds a pay entry's do, from
+# their one home in ``_helpers`` (plan step salary:X-av-3b, finding SAL-586):
+# one paycheck's payday and base are one fact whichever door types them.  The
+# printed gross takes the base's bound because it is the base plus earnings
+# that are never negative, so it is above zero whenever the base is.
 
 
 class PayStubPaydaySchema(BaseSchema):
@@ -49,7 +44,7 @@ class PayStubPaydaySchema(BaseSchema):
     the service's refusal (:func:`~app.services.pay_stub_service.payday_refusal`).
     """
 
-    payday = fields.Date(required=True, validate=_STUB_PAYDAY_RANGE)
+    payday = fields.Date(required=True, validate=_PAYDAY_RANGE)
 
 
 class PayStubSchema(BaseSchema):
@@ -68,12 +63,12 @@ class PayStubSchema(BaseSchema):
         """Drop empty inputs; map empties on nullable fields to None."""
         return _normalize_empty_inputs(self, data)
 
-    payday = fields.Date(required=True, validate=_STUB_PAYDAY_RANGE)
+    payday = fields.Date(required=True, validate=_PAYDAY_RANGE)
     base_pay = fields.Decimal(
-        required=True, places=2, as_string=True, validate=_STUB_PAY_RANGE,
+        required=True, places=2, as_string=True, validate=_PAY_AMOUNT_RANGE,
     )
     printed_gross = fields.Decimal(
-        required=True, places=2, as_string=True, validate=_STUB_PAY_RANGE,
+        required=True, places=2, as_string=True, validate=_PAY_AMOUNT_RANGE,
     )
     printed_net = fields.Decimal(
         required=True, places=2, as_string=True,

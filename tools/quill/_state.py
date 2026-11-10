@@ -111,7 +111,7 @@ from tools.ci.gitcmd import DEV, MAIN
 from tools.quill._fields import ON_HOLD
 from tools.quill._git import MARKERS, Claim, task_file
 from tools.quill._tracker import BareCard, Card
-from tools.quill.setup_tracker import FILING, TASK
+from tools.quill.setup_tracker import FILING, MOVES_MONEY_LABEL, TASK
 
 #: How long a claim's branch may go without a commit before ``quill next`` reports it
 #: stale: the build plan's three days, measured from the branch's last commit since the
@@ -125,6 +125,13 @@ SHIPPABLE = ("step", "finding")
 #: the one card each is blocked by.  A finding and a ruling always name one; a question names
 #: the step it is asked for, when it has one (plan#1861's item 10).
 OWNED = ("finding", "ruling", "question")
+
+
+def moves_money(card: BareCard) -> bool:
+    """Whether ``card``'s release moves money: its OWN moves-money label (R-BAL287), never a
+    parent's.  The one reading of it: ``/release``'s card reader takes it through the door,
+    and ``quill claim`` for a card's Release kit (ruling plan#2860)."""
+    return MOVES_MONEY_LABEL in card.labels
 
 
 def leaves(card: BareCard, cards: Mapping[int, BareCard],

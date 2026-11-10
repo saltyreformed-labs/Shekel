@@ -20,7 +20,8 @@ which also says which changed entries are markers at all; a
 card's commits are those of ``<base>..<cut>`` that changed its marker, by quill's one walk
 (:func:`tools.quill.door.marker_changes`): its claim and the merge that landed it.
 
-**A card moves money when it carries the moves-money label**: its OWN label, as the
+**A card moves money when it carries the moves-money label** (quill's one reading,
+:func:`tools.quill.door.moves_money`): its OWN label, as the
 tracker holds it when the release is judged, split or not (the coordinator, under
 R-BAL207, 2026-10-14).  A label is no sentence a tick rewrites, so a card keeps its flag
 after it ships.  A step split into leaves since its marker
@@ -186,10 +187,11 @@ from tools.quill.door import (
     marker_changes,
     markers_in,
     merged_tree,
+    moves_money,
     owner,
     with_closure,
 )
-from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL, MOVES_MONEY_LABEL
+from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL
 from tools.release._model import Carried, Group, ReleaseError, Step, first_parent_line
 
 
@@ -333,7 +335,7 @@ def read(root: Path, base: str, cut: str, tracker: Tracker) -> Cards:
     _one_walk(groups, up, kinds)
     groups = {group: steps for group, steps in groups.items() if steps}
     return Cards(
-        {number: MOVES_MONEY_LABEL in held[number].labels for number in work},
+        {number: moves_money(held[number]) for number in work},
         {number: (number, *up[number]) for number in work},
         groups,
         {group: frozenset(leaf.number for leaf in leaves_below(closure[group], closure,

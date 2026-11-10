@@ -25,16 +25,17 @@ each rehearsal kit's manifest names (:mod:`tools.release._census`).
 Usage, from the repository root, after ``git fetch origin``::
 
     python -m tools.release.release plan --cut SHA [--base origin/main]
-        [--unrehearsed KEY|REVISION ...]
+        [--unrehearsed KEY ...]
     python -m tools.release.release production --cut SHA [--base origin/main]
     python -m tools.release.release census [--main origin/main] [--release-branch release/DATE]
         [--kit DIR ...]
 
-``--unrehearsed`` names a money-moving card (``plan#N``) or an added migration's
-revision for which the skill found no rehearsal kit; the release is refused for it.
-Each card's money flag is its label, and nothing is declared (R-BAL287).  ``--kit``
-names a rehearsal kit's directory, which holds the kit's ``release-manifest.txt``: one
-line per thing the kit made, written before it made it.
+``--unrehearsed`` names a money-moving card (``plan#N``) for which the skill found no
+rehearsal kit; the release is refused for it.  A migration needs none, since the skill's
+row comparison rehearses every one (ruling plan#2873), so a revision names nothing and
+judges nothing.  Each card's money flag is its label, and nothing is declared (R-BAL287).
+``--kit`` names a rehearsal kit's directory, which holds the kit's ``release-manifest.txt``:
+one line per thing the kit made, written before it made it.
 
 Exit status, ``plan``: 0 clean; 1 refused, each reason printed, with the cut to offer when
 the cut is refused; 3 the approval question must name what is printed; 2 nothing was judged
@@ -102,8 +103,8 @@ def parser() -> argparse.ArgumentParser:
     judged = commands.add_parser("plan", help="judge the release <base>..<cut>")
     judged.add_argument("--cut", required=True, help="the commit the release is cut at")
     judged.add_argument("--base", default="origin/main", help="what production runs")
-    judged.add_argument("--unrehearsed", action="append", default=[], metavar="KEY|REVISION",
-                        help="a money mover or added migration with no rehearsal kit")
+    judged.add_argument("--unrehearsed", action="append", default=[], metavar="KEY",
+                        help="a money mover (plan#N) with no rehearsal kit")
     shipped = commands.add_parser("production", help="list what each pull request in "
                                   "<base>..<cut> changes of what production runs")
     shipped.add_argument("--cut", required=True, help="the commit the release is cut at")

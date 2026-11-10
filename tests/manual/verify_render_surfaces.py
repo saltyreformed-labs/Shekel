@@ -56,7 +56,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # imported at all.
 # pylint: disable=wrong-import-position
 from app import create_app  # noqa: E402
-from app.extensions import db, limiter, login_manager  # noqa: E402
+from app.extensions import db, login_manager  # noqa: E402
+from app.rate_limits import limiter  # noqa: E402
 from app.models.account import Account  # noqa: E402
 from app.models.pay_period import PayPeriod  # noqa: E402
 from app.models.user import User  # noqa: E402

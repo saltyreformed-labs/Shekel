@@ -751,12 +751,12 @@ class StatementSourceEnum(enum.Enum):
     **Losing ``FITID`` costs nothing, and that is measured rather than
     assumed.**  A line's identity is
     ``(account, posted_on, amount, sequence within that group)``
-    (:func:`app.services.statement_import.line_identity`), which every source
+    (``uq_bank_statement_lines_identity``), which every source
     can compute including one carrying no id of its own.  Compared across two
     SECU exports twelve days apart, that key reproduced the ``FITID`` key
     exactly: 0 keys present in only one export, 0 lines whose ``FITID``
     disagreed, over 342 shared lines.  So an external id is stored as a
-    CORROBORATING fact (``bank_statement_lines.external_id``) rather than as the
+    CORROBORATING fact (``budget.line_source_ids``) rather than as the
     thing identity rests on, and the importer has ONE identity rule instead of
     one per format -- which is what lets ``X-f6b``'s automated source join
     without re-opening the question.

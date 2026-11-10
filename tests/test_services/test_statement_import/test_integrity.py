@@ -18,9 +18,10 @@ from decimal import Decimal
 
 import pytest
 
-from app.exceptions import StatementIntegrityError, StatementParseError
 from app.services.statement_import import (
+    StatementIntegrityError,
     StatementLine,
+    StatementParseError,
     carries_running_balance,
     opening_balance,
     verify_running_balance,

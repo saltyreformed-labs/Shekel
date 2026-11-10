@@ -26,29 +26,33 @@ from flask import (
     url_for,
 )
 from flask_login import current_user
-from werkzeug.wrappers import Response
 
 from cryptography.fernet import InvalidToken
 from marshmallow import ValidationError as MarshmallowValidationError
 
 from app.db_transaction import bind_sign_in_owner, write_transaction
-from app.extensions import db, limiter
-from app.models.trusted_device import TRUST_LIFETIME
+from app.extensions import db
+from app.models.known_device import TRUST_LIFETIME
 from app.models.user import MfaConfig, User
 from app.schemas.validation import (
     MfaConfirmSchema,
     MfaDisableSchema,
     MfaVerifySchema,
 )
-from app.services import auth_service, mfa_service, trusted_device_service
+from app.services import auth_service, mfa_service
 from app.exceptions import AuthError
+from app.rate_limits import limiter
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     MFA_SETUP_PENDING_TTL,
+    _MFA_PENDING_NEXT_KEY,
+    _MFA_PENDING_USER_ID_KEY,
     _clear_mfa_pending_state,
     _complete_sign_in,
     _consume_backup_code,
+    _known_device,
     _mfa_pending_is_fresh,
+    _spend_a_try,
     _totp_accepted_or_key_failure,
     _verify_totp_with_replay_logging,
 )
@@ -69,42 +73,8 @@ from app.utils.security_events import (
     record_security_event,
 )
 from app.utils.session_helpers import invalidate_other_sessions
-from app.utils.trusted_device_cookie import set_device_cookie
 
 logger = logging.getLogger(__name__)
-
-
-def _pending_user_key() -> str:
-    """Return what the code form's per-account limit counts against.
-
-    The session is signed, so a client cannot choose this id, and it survives
-    a change of address, which is the point: moving between addresses buys the
-    holder of a password no more code guesses.
-
-    Returns:
-        ``pending-user:<id>``.
-    """
-    return f"pending-user:{flask_session.get('_mfa_pending_user_id')}"
-
-
-def _no_live_pending_sign_in() -> bool:
-    """Return True when the request has no live pending sign-in to count against.
-
-    Such a request checks no code: the view only redirects it to /login.  With
-    no id they would all share one count under ``None``.  With an id past its
-    time, a kept cookie would spend the account's tries long after the password
-    step, because this limit runs before the view's own freshness check, and
-    the owner's right code would be refused.  Either way the request still
-    spends its own address's limit.
-
-    Returns:
-        True when the session holds no pending user, or one
-        :func:`~app.routes.auth._helpers._mfa_pending_is_fresh` refuses.
-    """
-    return (
-        not flask_session.get("_mfa_pending_user_id")
-        or not _mfa_pending_is_fresh()
-    )
 
 
 def _check_mfa_code(mfa_config, user_id, totp_code, backup_code):
@@ -135,7 +105,7 @@ def _render_verify_form():
     """Render the code form, from its three render sites.
 
     Passes the trust's length in days, so the "Trust this device" box states
-    :data:`~app.models.trusted_device.TRUST_LIFETIME` rather than a second
+    :data:`~app.models.known_device.TRUST_LIFETIME` rather than a second
     spelling of it.
 
     Returns:
@@ -169,33 +139,8 @@ def _flash_backup_codes_left(mfa_config: MfaConfig) -> None:
     )
 
 
-def _trust_this_browser(response: Response, user: User) -> None:
-    """Trust the signing-in browser for *user*: the record, then its cookie.
-
-    Called only on an authenticator-code success with the box ticked
-    (plan#2173, ruling plan#2406).  The record is committed before the
-    cookie rides the response, so a browser never holds a token whose record
-    a failed commit lost.
-
-    Args:
-        response: The redirect completing the sign-in; it takes the cookie.
-        user: The user who typed the code.
-    """
-    token = trusted_device_service.trust_device(
-        user.id, request.headers.get("User-Agent", ""),
-    )
-    db.session.commit()
-    set_device_cookie(response, user.id, token)
-    log_event(logger, logging.INFO, EVT_DEVICE_TRUSTED, AUTH,
-              "Device trusted", user_id=user.id)
-
-
 @auth_bp.route("/mfa/verify", methods=["GET", "POST"])
 @limiter.limit("5 per 15 minutes", methods=["POST"])
-@limiter.limit(
-    "5 per 15 minutes", methods=["POST"],
-    key_func=_pending_user_key, exempt_when=_no_live_pending_sign_in,
-)
 def mfa_verify():  # pylint: disable=too-many-return-statements
     """Display the MFA verification form and handle code submission.
 
@@ -213,12 +158,20 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     cookie-replay window closes at exactly this gate.
 
     A wrong, replayed or empty code and a wrong backup code count toward the
-    account's lock, and a locked account is refused here even with the right
-    code.  Not counted: a form the schema rejects, which cannot be a right
-    answer, and a failed encryption key, which is the operator's fault.  Two
-    limits apply, one by address and one by the pending account, so that
-    moving between addresses buys no more guesses.  A pending sign-in past its
-    time spends only the address's.
+    lock, and a stranger is refused here while the account is locked, even
+    with the right code.  A known browser counts on its own record and passes
+    the account's lock, as at the password (plan#2772).  Not counted: a form
+    the schema rejects, which cannot be a right answer, and a failed
+    encryption key, which is the operator's fault.
+
+    Two limits of its own apply, beside the app's defaults.  Every POST spends
+    its address's.  Each code checked also spends a try (:func:`_spend_a_try`):
+    a known browser's own, or else the account's, which every other browser
+    shares.  So moving between addresses buys a stranger no more guesses, and
+    a guesser who spends the account's tries still leaves the owner's browser
+    its own (ruling plan#3023).  A request that checks no code spends no try:
+    one with no live pending sign-in, a form the schema rejects, a pending
+    user gone or without two-factor, and a stranger the lock refuses.
 
     Pylint: ``too-many-return-statements`` (9/6) -- each early return is a
     distinct semantic exit (no pending state, stale state, GET render,
@@ -229,7 +182,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     no longer suppressed -- the TOTP/backup-code branching was extracted to
     :func:`_check_mfa_code`.)
     """
-    pending_user_id = flask_session.get("_mfa_pending_user_id")
+    pending_user_id = flask_session.get(_MFA_PENDING_USER_ID_KEY)
     if not pending_user_id:
         # No pending state at all -- silently redirect.  This is the
         # normal case for a user who navigated directly to /mfa/verify
@@ -270,14 +223,18 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
 
     user = db.session.get(User, pending_user_id)
     mfa_config = None
+    device = None
     if user:
         # The signing-in owner's lock BEFORE the codes are read (ruling
         # R-CC121, "Lock, then check"): the code check rewrites
         # ``backup_codes`` and ``last_totp_timestep``, and "Regenerate backup
         # codes" writes the same row under this lock.  Unlocked, a backup-code
         # sign-in racing a regenerate wrote the old codes back over the new
-        # ones, and one code signed in two devices.
+        # ones, and one code signed in two devices.  Under the lock, read once
+        # whose attempt this is: the lock, the tries a code spends, the count
+        # and what the completion clears all turn on it (plan#2772).
         bind_sign_in_owner(user.id, user.data_owner_id)
+        device = _known_device(user)
         mfa_config = (
             db.session.query(MfaConfig)
             .filter_by(user_id=user.id, is_enabled=True)
@@ -293,10 +250,16 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         _clear_mfa_pending_state()
         return redirect(url_for("auth.login"))
 
-    if auth_service.is_locked_out(user):
-        # Read under the owner's lock taken above.  This person has the
-        # password, so naming the lock tells them nothing a stranger could
-        # use.  Back to /login, where the lock refuses them until it ends.
+    # Read once, under the owner's lock taken above: whether the lock refuses
+    # this attempt, and what a finished sign-in clears if the record still
+    # holds it, since a stranger's guess judged during the code check takes
+    # no owner lock (ruling plan#3110).
+    reading = auth_service.read_the_lock(user, device=device)
+    if reading.locked:
+        # This person has the password, so naming the lock tells them
+        # nothing a stranger could use.  Back to /login, where the lock
+        # refuses them until it ends.  A known browser is never here: the
+        # lock refuses only strangers.
         log_event(
             logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
             "Login failed: account locked at the code form",
@@ -305,6 +268,11 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         _clear_mfa_pending_state()
         flash(auth_service.LOCKED_OUT_MESSAGE, "danger")
         return redirect(url_for("auth.login"))
+
+    # A code is about to be checked: spend one of this browser's tries, its
+    # own when it is known (ruling plan#3023).  Past the limit this raises,
+    # and the 429 handler answers before any code is checked or counted.
+    _spend_a_try(user, device)
 
     # Single try/except wraps both the up-front decrypt (preserving
     # the pre-C-09 fail-fast behaviour: a missing encryption key
@@ -329,7 +297,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         return redirect(url_for("auth.login"))
 
     if not valid:
-        auth_service.record_failed_attempt(user)
+        auth_service.record_failed_attempt(user, device=device)
         log_event(
             logger, logging.WARNING, EVT_LOGIN_FAILED, AUTH,
             "Login failed: bad code", user_id=pending_user_id,
@@ -348,7 +316,11 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     # ``session_invalidated_at``.  The two are equal, and the load_user check
     # is strict less-than, so this session survives while every earlier one
     # is refused.
-    response = _complete_sign_in(user, flask_session.get("_mfa_pending_next"))
+    trust = verify_data["trust_device"] and not used_backup_code
+    response = _complete_sign_in(
+        user, flask_session.get(_MFA_PENDING_NEXT_KEY),
+        checked=reading.held, trust=trust,
+    )
 
     if used_backup_code:
         # Backup-code consumption is the canonical "I lost my
@@ -362,12 +334,14 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         # refreshes the cookie (with its single ``now``) AFTER
         # Flask-Login has populated the session, ensuring the
         # current request survives the bump.
-        # It also forgets every trusted device of the user (the bump
-        # outdates them), so it never trusts this one.
+        # It also forgets every trust of the user (the bump outdates them),
+        # so it never trusts this browser, which stays known all the same
+        # (ruling plan#2997): it has just finished a sign-in.
         invalidate_other_sessions(user, "backup_code_consumed")
         _flash_backup_codes_left(mfa_config)
-    elif verify_data["trust_device"]:
-        _trust_this_browser(response, user)
+    elif trust:
+        log_event(logger, logging.INFO, EVT_DEVICE_TRUSTED, AUTH,
+                  "Device trusted", user_id=user.id)
 
     log_event(logger, logging.INFO, EVT_MFA_LOGIN_SUCCESS, AUTH,
               "MFA login succeeded", user_id=user.id)
@@ -675,10 +649,12 @@ def mfa_disable_confirm():
     recently-used TOTP code cannot use that code to disable MFA, the
     same defence that ``/mfa/verify`` provides at login.
 
-    A wrong password or code counts toward the account's lock, and a locked
-    account is refused here even with the right ones (ruling plan#3008).
-    Success does not clear the count: that is a finished sign-in's or
-    re-confirm's (ruling plan#3007).
+    A wrong password or code counts toward the lock, and the lock refuses
+    the right ones (ruling plan#3008), with sign-in's one rule for whose
+    attempt it is (plan#2772, ruling plan#3034): a known browser counts on
+    its own record and passes the account's lock, a stranger counts on the
+    account and meets it.  Success does not clear the count: that is a
+    finished sign-in's or re-confirm's (ruling plan#3007).
     """
     # Schema validates shape before bcrypt is invoked.  current_password
     # accepts any historical length (legacy short passwords still work
@@ -692,11 +668,13 @@ def mfa_disable_confirm():
 
     current_password = disable_data["current_password"]
     totp_code = disable_data["totp_code"]
+    device = _known_device(current_user)
 
     # Verify the user's current password first.
     try:
         auth_service.check_signed_in_password(
             current_user, current_password, "Invalid password.",
+            device=device,
         )
     except AuthError as exc:
         log_event(
@@ -730,7 +708,7 @@ def mfa_disable_confirm():
         return redirect(url_for("settings.show", section="security"))
 
     if not accepted:
-        auth_service.record_failed_attempt(current_user)
+        auth_service.record_failed_attempt(current_user, device=device)
         log_event(
             logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
             "Disable two-factor failed: bad code",

@@ -94,7 +94,9 @@ statement: the page's own work was **eight** statements either way, and the
 machinery around it was **seven** and is now **two** -- one ``SET
 TRANSACTION`` and one user load.  (Eleven rather than ten in total for the
 first GET after a POST, on both sides, because that one inherits an open
-transaction and pays the refusal probe; the saving is the same.)
+transaction and pays the refusal probe; the saving is the same.)  With the
+rate limiter on, a signed-in browser that sends its device cookie pays one
+more, the limits' read of its record's id (:mod:`app.rate_limits`).
 ``request_started`` is sent by ``Flask.full_dispatch_request``
 immediately before ``preprocess_request``, which is what runs the
 before-request hooks, so a receiver there precedes every one of them by
@@ -151,9 +153,8 @@ the advisory lock of the user whose data the request acts on (a companion's
 linked owner, :attr:`app.models.user.User.data_owner_id`) before it reads any
 of that owner's data, so two of one owner's writes never overlap: the second
 waits for the first to commit, and every statement it then runs sees the
-first's rows.  The only rows read before it are the signed-in user's own,
-loaded to sign the request in, and the role row joined to it; the user's row
-is expired once the lock is held (:func:`_lock_the_open_transaction`).
+first's rows.  What is read before it, and why none of it is a row a write
+decides on, is listed once, in :func:`_lock_the_open_transaction`.
 **The request's first transaction takes it after the form-token check and
 the app-wide rate limit** (ruling
 **R-CC122**), in a before-request hook registered after theirs
@@ -186,10 +187,14 @@ owes one thing of its own: a save's READS that decide its write must sit
 inside its block, because a read in the query's snapshot before the block is
 a read taken before the lock.  Sign-up takes no lock: its user is not
 committed, so no other transaction can touch it.  **Sign-in takes the
-signing-in person's owner lock** right after finding the account and before
-reading its codes or failed-attempt count (ruling **R-CC121**,
-:func:`bind_sign_in_owner`): it writes a committed user's rows before anyone
-is signed in, which no hook above can see.  A CLI script, a deploy reconcile
+signing-in person's owner lock itself** (:func:`bind_sign_in_owner`): it
+writes a committed user's rows before anyone is signed in, which no hook above
+can see.  The code step takes it right after finding the account and before
+reading its codes, and a known browser's password step before its check
+(ruling **R-CC121**); a stranger's password step takes it only once its check
+has committed and found the password right, on the way to signing in (ruling
+plan#3110), so no stranger's try waits on it while bcrypt runs, and the wait
+is no clue to which emails have accounts.  A CLI script, a deploy reconcile
 and Alembic hold no request, so nothing here locks for them: the three deploy
 reconciles lock every owner at their own start
 (:func:`app.services.user_write_lock.lock_every_user_writes`), and a script
@@ -675,17 +680,26 @@ def _take_the_request_owner_s_lock() -> None:
 def bind_sign_in_owner(user_id: int, owner_id: "int | None") -> None:
     """Take the lock of the owner whose data a SIGN-IN is about to write.
 
-    Ruling **R-CC121** ("Lock, then check"): sign-in takes the signing-in
-    person's owner lock right after finding the account, before it reads the
-    codes or the failed-attempt count, and re-checks nothing.  Sign-in is the
-    one writer of a committed user's rows that no signed-in request covers:
-    the password step (``failed_login_count``, ``locked_until``) and the code
-    step (``backup_codes``, ``last_totp_timestep``,
-    ``session_invalidated_at``) run before anyone is signed in, so
+    Sign-in is the one writer of a committed user's rows that no signed-in
+    request covers: the code step (``backup_codes``, ``last_totp_timestep``,
+    ``session_invalidated_at``), a known browser's count on its record, and
+    the completion's records run before anyone is signed in, so
     :func:`bind_request_actor` never saw an owner.  Unlocked, a backup-code
     sign-in racing "Regenerate backup codes" wrote the old codes back over the
-    new ones, one backup or authenticator code signed in two devices, and two
-    wrong passwords counted once.
+    new ones, one backup or authenticator code signed in two devices, and a
+    known browser's two wrong passwords counted once.  So the code step takes
+    it right after finding the account, before it reads the codes, and a known
+    browser's password step before its check (ruling **R-CC121**, "Lock, then
+    check").  A stranger's password step takes it only once its check has
+    committed and found the password right, and re-reads the account under it
+    (ruling plan#3110): a stranger's count is the record of the email typed
+    (``auth.guess_records``), whose own row lock serialises it, and a wait on
+    this lock through the check took twice as long for two tries at a real
+    email as at one no account has.
+
+    When the transaction that found the account is still open, the lock is
+    taken on it now; when a commit has ended it, the lock is the next
+    transaction's first act (:func:`_lock_the_open_transaction`).
 
     Records no ACTOR: the audit rows a sign-in writes carry none today, and who
     they are attributed to is not this ruling's to change.
@@ -703,14 +717,23 @@ def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") ->
     """Take *owner_id*'s lock on the command transaction open now, and arm every later one.
 
     The half :func:`_bind_transaction_mode` cannot do: the transaction open now
-    began before the owner was known -- finding the user is what opened it --
-    so the listener never saw an owner for it.  It is locked here directly, and
-    ``g`` is armed LAST, so the listener takes the lock on every transaction
-    that begins after this one and never on this one twice.
+    began before the owner was known -- finding the user opened it, or at
+    ``/login`` the question before it of which users the browser is known to
+    -- so the listener never saw an owner for it.  It is locked here directly,
+    and ``g`` is armed LAST, so the listener takes the lock on every
+    transaction that begins after this one and never on this one twice.
 
     The only rows that transaction has read before the lock are *user_id*'s
     own, loaded to sign the request in or to find the account, and the role
-    row joined to it (``User.role``, ``lazy="joined"``: the same statement).
+    row joined to it (``User.role``, ``lazy="joined"``: the same statement);
+    at ``/login``, also which users the browser's cookies name known records
+    of, read as user ids alone
+    (:func:`app.services.known_device_service.known_to`), so no record is
+    loaded; and on a signed-in request, for the rate limits, which record the
+    browser's cookie names, read as its id alone
+    (:func:`app.services.known_device_service.known_browser_id`), so none is
+    loaded there either.  A sign-in whose check committed holds no open transaction
+    here, so the lock is the next one's first act and nothing precedes it.
     The password, MFA and settings doors write the user's row, so it is
     EXPIRED once the lock is held, and its next use reloads it under the lock:
     nothing a write decides on was read before it.  The role row is a

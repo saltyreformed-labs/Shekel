@@ -127,7 +127,7 @@ class TestEachKindOfDifferenceIsReported:
             "ALTER TABLE salary.pay_entries ALTER COLUMN payday DROP NOT NULL"
         ))
         _db.session.execute(text(
-            "ALTER TABLE auth.users ALTER COLUMN failed_login_count DROP DEFAULT"
+            "ALTER TABLE auth.guess_records ALTER COLUMN failed_login_count DROP DEFAULT"
         ))
         _db.session.execute(text(
             "ALTER TABLE ref.account_types ALTER COLUMN name TYPE varchar(30) COLLATE \"C\""
@@ -135,7 +135,7 @@ class TestEachKindOfDifferenceIsReported:
 
         assert _drift() == (
             Drift(
-                "column", "auth.users.failed_login_count",
+                "column", "auth.guess_records.failed_login_count",
                 "integer NOT NULL", "integer NOT NULL DEFAULT 0",
             ),
             Drift(

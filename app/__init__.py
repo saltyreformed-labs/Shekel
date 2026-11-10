@@ -16,9 +16,10 @@ from app.config import CONFIG_MAP
 from app.context_processors import register_context_processors
 from app.db_transaction import register_transaction_boundary
 from app.error_handlers import register_error_handlers
-from app.extensions import csrf, db, limiter, login_manager, migrate
+from app.extensions import csrf, db, login_manager, migrate
 from app.jinja_filters import register_template_filters
 from app.login_gate import register_login_gate
+from app.rate_limits import limiter
 from app.routes.static_pass import static_file_version
 from app.url_converters import register_url_converters
 from app.utils.client_address import (
@@ -28,7 +29,9 @@ from app.utils.client_address import (
 from app.utils.logging_config import setup_logging
 from app.utils.session_helpers import (
     SESSION_LAST_ACTIVITY_KEY,
+    session_stamp,
     sign_in_created_at,
+    sign_in_is_live,
 )
 
 
@@ -111,7 +114,9 @@ def create_app(config_name=None, *, init_ref_cache=True):
         Returns None (forcing re-login) for any of:
           * No sign-in of THIS user stamped the session: none at all, or
             another user's, as a remember-cookie restore lands on
-            (plan#2173; ``sign_in_created_at`` in session_helpers).
+            (plan#2173; ``sign_in_created_at`` in session_helpers), or its
+            ``_session_created_at`` is missing or cannot be read (not
+            ISO-8601, or naive), which no sign-in writes (plan#3157).
           * Unknown user ID.
           * Deactivated user (``is_active=False``).
           * Session created before the most recent
@@ -119,6 +124,10 @@ def create_app(config_name=None, *, init_ref_cache=True):
             F-003, F-032).
           * Session whose last activity is older than
             ``IDLE_TIMEOUT_MINUTES`` or absent (commit C-10 -- F-006).
+          * Session whose sign-in is ``KNOWN_LIFETIME`` old or more, or
+            unstamped, however active (ruling plan#3069;
+            ``sign_in_is_live`` in session_helpers), so a browser that is
+            signed in is a known one.
 
         A None return triggers Flask-Login's "logged out" flow on the
         next request, redirecting to the configured ``login_view``.
@@ -142,19 +151,22 @@ def create_app(config_name=None, *, init_ref_cache=True):
         if not user.is_active:
             return None
         # Check whether this session was created before the most recent
-        # "log out all sessions" or password change event.
+        # "log out all sessions" or password change event.  A creation stamp
+        # in the future passes, as any stamp at or after the bump does:
+        # forging one needs SECRET_KEY, with which any stamp can be minted.
         invalidated_at = user.session_invalidated_at
-        if invalidated_at is not None and (
-            datetime.fromisoformat(session_created) < invalidated_at
-        ):
+        if invalidated_at is not None and session_created < invalidated_at:
             return None
-        # Idle-timeout check (commit C-10 / F-006).  Reject the
-        # session if ``_session_last_activity_at`` is older than
+        # The two checks the session's own stamps answer, one refusal.
+        # Idle timeout (commit C-10 / F-006): reject the session if
+        # ``_session_last_activity_at`` is older than
         # ``IDLE_TIMEOUT_MINUTES``.  See ``_idle_session_is_fresh``
         # docstring for the per-state policy (missing -> stale,
         # malformed/naive -> stale, future-dated -> fresh,
-        # within-window -> fresh, beyond-window -> stale).
-        if not _idle_session_is_fresh(app):
+        # within-window -> fresh, beyond-window -> stale).  The
+        # sign-in's lifetime (ruling plan#3069): reject it once its
+        # sign-in is ``KNOWN_LIFETIME`` old, however active.
+        if not _idle_session_is_fresh(app) or not sign_in_is_live(user_id):
             return None
         return user
 
@@ -446,14 +458,9 @@ def _idle_session_is_fresh(app):
         bool: True if the session may continue; False if ``load_user``
             must reject it.
     """
-    raw = flask_session.get(SESSION_LAST_ACTIVITY_KEY)
-    if raw is None:
-        return False
-    try:
-        last_activity = datetime.fromisoformat(raw)
-    except (TypeError, ValueError):
-        return False
-    if last_activity.tzinfo is None:
+    # The missing, malformed and naive cases are the one stamp parse's.
+    last_activity = session_stamp(SESSION_LAST_ACTIVITY_KEY)
+    if last_activity is None:
         return False
     elapsed = datetime.now(timezone.utc) - last_activity
     if elapsed < timedelta(0):

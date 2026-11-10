@@ -64,8 +64,9 @@ from typing import Callable, Iterable
 #     avoid recursive trigger fires.
 AUDITED_TABLES: tuple[tuple[str, str], ...] = (
     # ── auth schema ──────────────────────────────────────────────────
+    ("auth", "guess_records"),
+    ("auth", "known_devices"),
     ("auth", "mfa_configs"),
-    ("auth", "trusted_devices"),
     ("auth", "user_settings"),
     ("auth", "users"),
     # ── budget schema ────────────────────────────────────────────────
@@ -85,6 +86,7 @@ AUDITED_TABLES: tuple[tuple[str, str], ...] = (
     ("budget", "investment_params"),
     ("budget", "journal_entries"),
     ("budget", "ledger_accounts"),
+    ("budget", "line_source_ids"),
     ("budget", "loan_anchor_events"),
     ("budget", "loan_anchor_withdrawals"),
     ("budget", "loan_params"),

@@ -33,7 +33,8 @@ ship a dead control:
    options for the row's date (``_drive_line_weekday``, and the write pass's
    weekday edit).
 
-It is paced to the real Valkey limiter the dev app runs (30 a minute per IP),
+It is paced to the real Valkey limiter the dev app runs (30 a minute on each
+page per signed-in browser),
 exactly as its sibling is.
 
 **It WRITES, unlike its sibling, and only when asked to**: the swap in (2)

@@ -32,7 +32,6 @@ import pytest
 
 from app import ref_cache
 from app.enums import StatementBalanceEvidenceEnum, StatementSourceEnum
-from app.exceptions import StatementBalanceUnexplained
 from app.models.account import AccountAnchorHistory
 from app.models.statement_import import (
     BankStatementLine,
@@ -41,6 +40,7 @@ from app.models.statement_import import (
 )
 from app.services.statement_import import (
     KnownOpening,
+    StatementBalanceUnexplained,
     ParsedStatement,
     StatementLine,
     recorded_opening_before,

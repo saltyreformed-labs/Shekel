@@ -37,9 +37,11 @@ class TestASecondHoldIsRefused:
         """A second hold raises naming both acts; the first's close re-checks both cards.
 
         Two cards open, each asserted on 2026-05-14: Rewards at -$500.00 and
-        Travel at -$300.00.  Inside one hold a $120.00 bill is settled from
-        Rewards that day, a second hold is refused, and a $120.00 bill is
-        settled from Travel that day.  Each settle's re-check is queued, so
+        Travel at -$300.00.  Inside one hold a $120.00 bill planned on Rewards
+        is settled from it that day, a second hold is refused, and a $120.00
+        bill planned on Travel is settled from it that day (each bill was
+        planned on Checking until plan task plan#3232: "Paid from" names no
+        card but the row's own since ruling plan#3227).  Each settle's re-check is queued, so
         each card reads its leg on top of its opening until the close books
         the assertion's true-up around it:
 
@@ -66,8 +68,8 @@ class TestASecondHoldIsRefused:
                 anchor_balance=Decimal("-300.00"),
             )
             _db.session.commit()
-            first = _bill(seed_user, seed_periods[0])
-            second = _bill(seed_user, seed_periods[0])
+            first = _bill(seed_user, seed_periods[0], account=rewards)
+            second = _bill(seed_user, seed_periods[0], account=travel)
             scenario_id = first.scenario_id
 
             def total(card):

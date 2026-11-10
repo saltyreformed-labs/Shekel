@@ -7,8 +7,8 @@ that lives on Checking is counted once by the paying account's balance, not at a
 by Checking's, once by the posted ledger, and once by a true-up that follows it.
 
 The payment is put on the other account as a settled row's "Paid from"
-correction puts it there, because the gate still refuses those accounts as a
-tender until this task changes it: ``movement_account.re_point_movement``, the
+correction puts it there, because the gate refused those accounts as a tender
+when this was measured, before 53830e455 admitted them: ``movement_account.re_point_movement``, the
 one write of a movement's account, then ``posting_service.
 sync_transaction_postings``, which the correction door runs after the seam
 (``transaction_service._door``).  Without the second the posted ledger keeps the

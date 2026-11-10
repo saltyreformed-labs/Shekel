@@ -23,6 +23,7 @@ from app.services.anchor_service import AnchorTrueUpOutcome
 from tests._test_helpers import create_account_of_type, freeze_today
 from ._helpers import (
     _TODAY,
+    _bill,
     _opening_day,
     _settled_bill_paid_from,
 )
@@ -51,8 +52,8 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
     ):
         """A $120.00 card payment moved to Checking: the card still reads -$500.00.
 
-        The card opens at -$500.00, asserted on 2026-05-14, and the bill is
-        settled from it that day, so the assertion absorbs it: the card's
+        The card opens at -$500.00, asserted on 2026-05-14, and a bill on
+        Checking is put on the card that day, so the assertion absorbs it: the card's
         ledger reads the -500.00 opening, the -120.00 leg and a +120.00
         true-up.  Moved to Checking, the leg reverses (+120.00 on the card)
         and the card's records hold no payment, so its true-up must return
@@ -60,6 +61,15 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
 
             card     -500.00 (asserted; -380.00 with the card never re-checked)
             Checking 1,000.00 opening (2024) - 120.00 riding on top = 880.00
+
+        The bill reaches the card by a Credit press with the opening day
+        typed, which stores what a settle naming the card under "Paid from"
+        stored until plan task plan#3232 (ruling plan#3227 refuses a card
+        there): Paid, its payment on the card, the row on Checking.  Rows
+        paid from a card before then hold that shape too.  The row stays on
+        Checking so the account the payment leaves is one the row does not
+        name: a bill planned on the card would name it, and re-checking the
+        row's own account would pass here with the defect back.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -69,9 +79,12 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
             )
             _db.session.commit()
             # On the card's opening day, so the opening ABSORBS the payment.
-            row = _settled_bill_paid_from(
-                seed_user, seed_periods[0], card, _opening_day(card),
+            row = _bill(seed_user, seed_periods[0])
+            transaction_service.mark_as_credit(
+                row, card_account_id=card.id, day=_opening_day(card),
             )
+            _db.session.commit()
+            assert row.covering_movements[0].account_id == card.id
             scenario_id = row.scenario_id
             assert posting_service.account_posting_total(
                 card.id, scenario_id,

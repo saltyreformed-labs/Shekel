@@ -371,15 +371,17 @@ class TestTheUpgradeREFUSESARowMemberItCannotReKey:
         assert _row_members() == [(member_id, unpaid.id)]
 
     def test_a_payment_on_another_account_refuses(self, app, db, seed_user):
-        """The row's payment moved to the card after the act named the row.
+        """The row's payment moved to Savings after the act named the row.
 
         The movement key cannot hold the payment to checking's act, and the
-        revision does not decide which statement showed the money.
+        revision does not decide which statement showed the money.  The other
+        account was the card until plan task plan#3232: "Paid from" names no
+        card since ruling plan#3227, so the correction moves it to Savings.
         """
         _diverge_ids(seed_user)
-        card = create_account_of_type(
-            seed_user, db.session, "Credit Card", "Rewards Card",
-            anchor_balance=Decimal("-500.00"),
+        savings = create_account_of_type(
+            seed_user, db.session, "Savings", "Rainy Day",
+            anchor_balance=Decimal("500.00"),
             observed_on=seed_user["bootstrap_period"].start_date,
         )
         hotel = _settled_bill(seed_user)
@@ -388,10 +390,10 @@ class TestTheUpgradeREFUSESARowMemberItCannotReKey:
         _as_the_past_recorded_it(act, hotel.id)
         apply_requested_status(
             hotel, hotel.status_id,
-            stated=StatedRecord(tender_account_id=card.id),
+            stated=StatedRecord(tender_account_id=savings.id),
         )
         db.session.commit()
-        assert _payment(hotel).account_id == card.id
+        assert _payment(hotel).account_id == savings.id
         (member_id, _row), = _row_members()
 
         message = self._refused(db)

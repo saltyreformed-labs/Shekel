@@ -67,7 +67,8 @@ from app.services import (
 )
 from app.services.cash_ledger import settled_cash_facts
 from app.services.pay_calendar import calendar_for
-from app.services.transaction_service import settle_transaction
+from app.services.transaction_service import mark_as_credit, settle_transaction
+from app.utils.dates import display_today
 from app.utils.log_events import (
     EVT_SETTLEMENTS_RECONCILED,
     EVT_TRANSACTIONS_RECONCILED,
@@ -774,11 +775,17 @@ class TestAStatementLinksEveryFactOnItsOwnAccount:
     def test_a_card_statement_links_the_card_payment_and_not_the_row(
         self, app, seed_user, seed_periods,
     ):
-        """The shape the old body got wrong: it linked the row, which the row's key refuses."""
+        """The shape the old body got wrong: it linked the row, which the row's key refuses.
+
+        The row is put on the card by a Credit press, today typed as its day
+        (the day the settle took when "Paid from" named the card, until plan
+        task plan#3232: ruling plan#3227 refuses a card there).
+        """
         with app.app_context():
             card = _card(seed_user)
             txn = _row(seed_user, seed_periods[0])
-            settle_transaction(txn, tender_account_id=card.id)
+            mark_as_credit(txn, card_account_id=card.id, day=display_today())
+            assert _payment(txn).account_id == card.id
             anchor_id = cash_ledger.governing_anchor(card.id).anchor_id
 
             status_seam.record_clearing(txn, anchor_id)

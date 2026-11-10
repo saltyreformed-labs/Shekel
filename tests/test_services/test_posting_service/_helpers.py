@@ -243,8 +243,9 @@ def _bill(seed_user, period, *, account=None):
 def _settle_paid_from(row, tender, day) -> None:
     """Settle *row* from *tender* on *day*, committing nothing.
 
-    A payment may be paid from its row's own account, the owner's checking
-    account or a credit card.
+    A payment may be paid from its row's own account or any account of the
+    owner's that holds cash, never a card but the row's own (ruling
+    plan#3227).
     """
     transaction_service.settle_transaction(
         row,

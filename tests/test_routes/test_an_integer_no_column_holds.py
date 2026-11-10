@@ -43,13 +43,12 @@ because a 404 from the URL map and a 404 from the code look identical and are
 opposite claims about the input.
 """
 
-import re
-
 import pytest
 
 from app.enums import RecurrenceUnitEnum
 from app.extensions import db
 from app.utils.digit_strings import MAX_INTEGER_COLUMN, MIN_INTEGER_COLUMN
+from tests._csrf_tokens import without_csrf_tokens
 from tests._test_helpers import add_txn, cadence_payload, make_salary_profile
 
 #: The header htmx sends.  An analytics tab answers a request without it with
@@ -92,13 +91,6 @@ QUERY_SITES = (
     ),
 )
 
-#: Flask-WTF signs the CSRF token with a timestamp, so two renders a second
-#: apart carry two tokens; the value is blanked before bodies are compared.
-_CSRF_VALUE = re.compile(
-    r'((?:name="csrf_token" value|name="csrf-token" content)=")[^"]*"',
-)
-
-
 @pytest.fixture()
 def world(app, seed_user, seed_periods_today):
     """Seed the rows each site needs before its integer is read.
@@ -140,7 +132,7 @@ def _get(client, url, headers, ids, value):
 
 def _body(response):
     """Return *response*'s text with the CSRF token's value blanked."""
-    return _CSRF_VALUE.sub(r'\1"', response.get_data(as_text=True))
+    return without_csrf_tokens(response.get_data(as_text=True))
 
 
 class TestAQueryStringIntegerOutsideTheRange:

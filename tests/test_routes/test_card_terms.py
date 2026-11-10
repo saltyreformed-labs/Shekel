@@ -56,6 +56,7 @@ from decimal import Decimal
 from app.extensions import db
 from app.models.credit_card_params import CreditCardParams
 from app.utils.dates import display_today
+from tests._csrf_tokens import without_csrf_tokens
 from tests._request_race import race_two_requests, signed_in_clients
 from tests._test_helpers import create_account_of_type
 
@@ -113,18 +114,6 @@ def _rendered_values(page):
         )
         if name in _FORM
     }
-
-
-def _without_csrf_tokens(page):
-    """*page* with every CSRF token blanked, so two renders can be compared.
-
-    The token is time-salted and minted per request, so two renders can differ
-    in it whatever else they share; blanking it leaves the rest to compare.
-    """
-    page = re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token"', page)
-    return re.sub(
-        r'name="csrf-token" content="[^"]*"', 'name="csrf-token"', page,
-    )
 
 
 def _post(client, account_id, **overrides):
@@ -474,14 +463,14 @@ class TestThePageShowsTheCard:
         """
         account = _card(seed_user)
 
-        dormant = _without_csrf_tokens(
+        dormant = without_csrf_tokens(
             auth_client.get(f"/accounts/{account.id}/details").data.decode(),
         )
         _post(auth_client, account.id)
         # The save's flash is consumed by this render, so the pair compared
         # below differs by the terms row alone.
         auth_client.get(f"/accounts/{account.id}/details")
-        saved = _without_csrf_tokens(
+        saved = without_csrf_tokens(
             auth_client.get(f"/accounts/{account.id}/details").data.decode(),
         )
 

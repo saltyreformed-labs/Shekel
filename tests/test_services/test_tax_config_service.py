@@ -432,6 +432,7 @@ class TestTheBasis:
             )
             assert basis.substituted is False
             assert basis.rules_year == 2026
+            assert basis.has_some_own_rules is True
 
     def test_a_year_after_the_newest_is_priced_on_the_newest(
         self, app, seed_user, tax_law,
@@ -450,6 +451,7 @@ class TestTheBasis:
             )
             assert basis.substituted is True
             assert basis.rules_year == 2027
+            assert basis.has_some_own_rules is False
 
     def test_a_year_before_the_first_is_priced_on_the_first(
         self, app, seed_user, tax_law,
@@ -468,6 +470,7 @@ class TestTheBasis:
             )
             assert basis.substituted is True
             assert basis.rules_year == 2025
+            assert basis.has_some_own_rules is False
 
     def test_a_year_lacking_the_state_names_the_states_own_year(
         self, app, seed_user, tax_law,
@@ -488,6 +491,30 @@ class TestTheBasis:
             )
             assert basis.substituted is True
             assert basis.rules_year is None
+            assert basis.has_some_own_rules is True
+
+    def test_a_year_past_a_newest_lacking_the_state_has_none_of_its_own(
+        self, app, seed_user, tax_law,
+    ):
+        """2028 with 2027 shipped without NC: the parts differ, and none is 2028's.
+
+        Federal and FICA resolve on 2027, NC on 2026, so there is no one
+        rules year -- yet unlike 2027 itself no part is the year asked for.
+        The Taxes tab's note says "all of" only when some part is
+        (plan#3363), so this case is the one that tells the two apart.
+        """
+        tax_law(TaxLaw(years=(_nc_year(2026, Decimal("0.0399")), made_up_year(2027))))
+        with app.app_context():
+            profile = _make_profile(seed_user)
+
+            basis = load_tax_configs_for_year(profile, 2028)["basis"]
+
+            assert basis == TaxLawBasis(
+                tax_year=2028, federal_year=2027, state_year=2026, fica_year=2027,
+            )
+            assert basis.substituted is True
+            assert basis.rules_year is None
+            assert basis.has_some_own_rules is False
 
     def test_the_rules_handed_back_are_the_basis_years_rules(
         self, app, seed_user, tax_law,

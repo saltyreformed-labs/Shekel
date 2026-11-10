@@ -24,7 +24,10 @@
    The state is the primary profile's (report.assumptions.filing.state_code),
    never a literal: every label naming the state reads it (plan step
    salary:X-at-5; the law lists the states the app supports, ruling
-   salary:R-SAL78, so a second one needs no template change). #}
+   salary:R-SAL78).  So a second state needs no template change while every
+   active job is in one state; a household whose jobs are in two states is
+   its own step, plan#3362, because every state label and the liability
+   here are still the primary's. #}
 
 {# ── Header: title + year selector ─────────────────────────────── #}
 <div class="d-flex align-items-center justify-content-between mb-3">
@@ -134,20 +137,29 @@
              bare year when every part was priced on its own year's rules;
              "on <year>'s tax rules" when every part was priced on one other
              year, the app lacking the year asked for (ruling R-SAL76); and
-             each part's own year when they differ, a year having shipped
-             before its state's rules (ruling R-SAL86).  The note follows the
-             tax-law notice's words ("Shekel doesn't have the 2027 tax rules
-             yet", R-SAL87) without "yet", which is false for a year before
-             the law's first. #}
-          {% set basis = report.liability.basis %}
+             each part's own year when they differ.  They differ for a year
+             that shipped before its state's rules (ruling R-SAL86), and for
+             every year after it while the newest year still lacks the state:
+             with 2026 listing the state and 2027 not, 2028 is federal and
+             FICA 2027's, the state 2026's.
+
+             The note's words are this tab's own, modelled on the tax-law
+             notice's ("Shekel doesn't have the 2027 tax rules yet", ruling
+             R-SAL87) rather than copied: it says "2027's tax rules" where the
+             notice says "the 2027 tax rules", and it drops "yet", which is
+             false for a year before the law's first.  It says "all of" only
+             when some part was priced on the year's own rules
+             (has_some_own_rules): 2027 above, never 2028, whose rules the
+             app holds none of. #}
+          {% set rules_basis = report.liability.basis %}
           <dt class="col-6 fw-normal">Tax year</dt>
           <dd class="col-6 text-end mb-1">
-            {{- basis.tax_year }}
-            {%- if basis.substituted %}
-            {%- if basis.rules_year is not none %} on {{ basis.rules_year }}'s tax rules
-            {%- else %}: federal tax on {{ basis.federal_year }}'s rules, Social Security and Medicare on {{ basis.fica_year }}'s, {{ state_code }} tax on {{ basis.state_year }}'s
+            {{- rules_basis.tax_year }}
+            {%- if rules_basis.substituted %}
+            {%- if rules_basis.rules_year is not none %} on {{ rules_basis.rules_year }}'s tax rules
+            {%- else %}: federal tax on {{ rules_basis.federal_year }}'s rules, Social Security and Medicare on {{ rules_basis.fica_year }}'s, {{ state_code }} tax on {{ rules_basis.state_year }}'s
             {%- endif %}
-            <div class="text-muted">Shekel doesn't have {{ "" if basis.rules_year is not none else "all of " }}{{ basis.tax_year }}'s tax rules.</div>
+            <div class="text-muted">Shekel doesn't have {{ "all of " if rules_basis.has_some_own_rules }}{{ rules_basis.tax_year }}'s tax rules.</div>
             {%- endif -%}
           </dd>
           <dt class="col-6 fw-normal">Filing status</dt>

@@ -84,7 +84,7 @@ class FederalLiability:  # pylint: disable=too-many-instance-attributes
 
 @dataclass(frozen=True)
 class StateLiability:
-    """The NC (flat) annual tax layer plus its assumption inputs.
+    """The profile's state's (flat) annual tax layer plus its assumption inputs.
 
     ``flat_rate`` is ``None`` for a state the law lists with no income tax,
     whose ``standard_deduction`` is ``$0.00`` and ``liability`` zero
@@ -92,7 +92,10 @@ class StateLiability:
     only with no state rules at all, which since plan step salary:X-at-3 is a
     filing status the law does not model -- refused by the federal layer
     before this one is built -- because a state the law does not list is
-    refused outright (:func:`compute_annual_liability`).  ``child_deduction_per_child`` is the
+    refused by the resolver
+    (:func:`~app.services.tax_config_service.profile_tax_series`) before the
+    set :func:`compute_annual_liability` takes can be built.
+    ``child_deduction_per_child`` is the
     resolved AGI-tier per-child deduction (T-P5) and ``child_deduction_total``
     the amount actually subtracted (per-child x qualifying children); both are
     zero for a state with no child deduction or a filer with no children.

@@ -189,6 +189,23 @@ class TaxLawBasis:
         years = {self.federal_year, self.state_year, self.fica_year}
         return years.pop() if len(years) == 1 else None
 
+    @property
+    def has_some_own_rules(self) -> bool:
+        """Whether some part was priced on :attr:`tax_year`'s own rules.
+
+        A screen whose parts differ says "Shekel doesn't have all of 2027's
+        tax rules" only when the app holds some of them: 2027 shipped without
+        its state (ruling **R-SAL86**), so federal tax and FICA are 2027's.
+        For 2028 with the same law every part is an earlier year's -- federal
+        and FICA 2027's, the state 2026's -- and the app holds none of 2028's
+        rules, so "all of" would claim rules it does not have.
+
+        Returns:
+            ``True`` when a part's year is :attr:`tax_year`, which includes
+            every basis that substituted nothing.
+        """
+        return self.tax_year in (self.federal_year, self.state_year, self.fica_year)
+
 
 def profile_tax_series(profile) -> ProfileTaxSeries:
     """Return the law's three series for *profile*: every year, sliced to its status and state.
@@ -388,13 +405,18 @@ def _configs_from_series(series: ProfileTaxSeries, tax_year: int) -> dict:
 def load_tax_configs_for_year(profile, tax_year):
     """Return the tax law that APPLIES to ``tax_year`` for *profile*.
 
-    The resolving loader every single-year consumer wants: each kind's own
-    series decides which of ITS years applies (:func:`resolve_tax_year`).
-    Every surface that resolves per-year rules -- the tax report / withholding /
-    liability services and, through :func:`configs_by_year`, the salary
-    projection, breakdown and dashboard paths -- goes through here, so two
-    surfaces cannot disagree on which year's brackets and FICA wage base/cap
-    apply (deep-hunt DH-#30).
+    The resolving loader for a single year: each kind's own series decides
+    which of ITS years applies (:func:`resolve_tax_year`).  Its one caller in
+    the app is the Taxes tab's report
+    (:func:`~app.services.tax_report_service.compute_tax_report`), which hands
+    the set to the liability
+    (:func:`~app.services.tax_liability_service.compute_annual_liability`
+    resolves nothing itself).  The paycheck pricer
+    (:class:`~app.services.income_service.ProfilePaychecks`) -- and through it
+    the withholding service and the salary projection, breakdown and
+    dashboard paths -- resolves through :func:`configs_by_year` instead.  Both
+    doors share :func:`_configs_from_series`, so two surfaces cannot disagree
+    on which year's brackets and FICA wage base/cap apply (deep-hunt DH-#30).
 
     Args:
         profile (SalaryProfile): Supplies ``filing_status_id`` and

@@ -5,8 +5,11 @@ Ruling R-SAL75: "each screen showing tax lines prints one line from it, e.g.
 worked out by the screen; ruling R-SAL76 keeps a missing year on the nearest
 year's rules unchanged, and this line is what makes that visible (finding
 N-235).  Every case installs a made-up law (ruling R-SAL80), so none moves when
-a real year is published.  The cases ask for years with no pay periods, so the
-figures are zero and the words are what is under test.
+a real year is published.  The words are what is under test, never the
+figures: every case but the one naming another state asks for a year with no
+pay periods, so its figures are zero, and that one seeds 2026's
+(``seed_periods``) only so the effective-rate chip, whose caption names the
+state, renders.
 
 Its own module rather than ``test_analytics.py``, which is already past the
 1,000-line ceiling (ruling R-IR; its split is plan#2000's).
@@ -124,6 +127,35 @@ class TestTheRulesLine:
                 "Medicare on 2027's, NC tax on 2026's "
                 "Shekel doesn't have all of 2027's tax rules. Filing status"
             ) in text
+
+    def test_a_year_past_a_newest_lacking_its_state_has_none_of_its_rules(
+        self, app, auth_client, seed_user, db, tax_law,
+    ):
+        """2028, with 2027 shipped without the state: each part's year, and none of 2028's.
+
+        Federal and FICA resolve on 2027, the state on 2026, so the parts
+        differ and the line names each.  No part is 2028's, so the note says
+        the app lacks 2028's rules, never "all of" them (plan#3363).  The
+        tab's default year, today's, reaches this from 1 January of a year
+        whose law has not shipped while the newest year lacks the state.  A
+        made-up South Carolina profile, so a literal "NC" at the state's place
+        in the line cannot pass.
+        """
+        tax_law(TaxLaw(years=(
+            made_up_year(2026, states={"SC": made_up_state(Decimal("0.0500"))}),
+            made_up_year(2027),
+        )))
+        with app.app_context():
+            _seed_profile(seed_user, db, state_code="SC")
+
+            text = _tab_text(auth_client, 2028)
+
+            assert (
+                "Tax year 2028: federal tax on 2027's rules, Social Security and "
+                "Medicare on 2027's, SC tax on 2026's "
+                "Shekel doesn't have 2028's tax rules. Filing status"
+            ) in text
+            assert "all of" not in text
 
 
 class TestTheStateIsNamedFromTheProfile:

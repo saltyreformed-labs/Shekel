@@ -59,7 +59,8 @@ TRUST_LIFETIME = timedelta(days=30)
 #: A session ends this long after its sign-in too, however active (ruling
 #: plan#3069, ``app.utils.session_helpers.sign_in_is_live``): the sign-in that
 #: starts it renews the record from the same instant, so a browser that is
-#: signed in is known, unless its own wrong guesses removed its record.
+#: signed in is known, unless ten wrong guesses on its cookie, its own or a
+#: copy's, removed its record.
 KNOWN_LIFETIME = TRUST_LIFETIME
 
 #: The longest User-Agent a record keeps.  It is kept only to name the device

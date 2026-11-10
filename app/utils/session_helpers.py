@@ -47,7 +47,8 @@ that sign-in, which nothing after it moves.
 **A session ends** :data:`~app.models.known_device.KNOWN_LIFETIME` **after
 its sign-in, however active** (ruling plan#3069).  The sign-in renews the
 browser's record from the same instant, so a browser that is signed in is a
-known one (plan#2772), unless its own wrong guesses removed its record.
+known one (plan#2772), unless ten wrong guesses on its cookie, its own or a
+copy's, removed its record.
 ``_signed_in_at`` is that bound's own stamp because ``_session_created_at``
 cannot be: Change password, "log out all other sessions", turning two-factor
 off and a backup-code sign-in each move ``_session_created_at`` to now, so

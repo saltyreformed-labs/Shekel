@@ -362,9 +362,9 @@ def _stranger_client(auth_client, seed_user):
     """Return a signed-in browser that is a stranger: its record has gone.
 
     A signed-in browser stays known only while its record lives, which cannot
-    age out while the session lives (ruling plan#3069); one whose record its
-    own ten wrong guesses deleted is a stranger at every door (ruling
-    plan#3034) and counts on the account.
+    age out while the session lives (ruling plan#3069); one whose record ten
+    wrong guesses on its cookie deleted, its own or a copy's, is a stranger
+    at every door (ruling plan#3034) and counts on the account.
 
     Args:
         auth_client: The signed-in test client.

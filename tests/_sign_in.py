@@ -74,7 +74,8 @@ def make_a_stranger(user_id) -> None:
     A signed-in browser stays known only while its record lives.  The record
     cannot age out while the session lives, since a session ends when its
     sign-in is thirty days old, the instant the record stops being known
-    (ruling plan#3069); only the browser's own ten wrong guesses delete it,
+    (ruling plan#3069); only ten wrong guesses in a row on its cookie delete
+    it, this browser's or those of a browser holding a copy of the cookie,
     and then it is a stranger at every door (ruling plan#3034) and counts on
     the account.  Deleting the records here stands in for those guesses.
 

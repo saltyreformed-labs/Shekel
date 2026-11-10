@@ -32,7 +32,6 @@ from tests.test_services.test_statement_match._builders import (
 )
 
 from ._helpers import (
-    _card,
     _hotel_bill,
     _movement,
     _revert,
@@ -247,11 +246,13 @@ class TestTheClaimsSeeARowThroughItsPayment:
         it the movement's revision -- bumped by the re-point -- would refuse
         the form as moved.  The constructor's account test is graded
         DIRECTLY in ``test_cc5_3_settle_tender`` because on this path the
-        second guard masks it (measured by mutation).
+        second guard masks it (measured by mutation).  The money moves onto
+        Savings: since ruling plan#3227 "Paid from" names a cash account,
+        never a card.
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            savings = _savings(seed_user)
             bank_day = _first_day(seed_user)
             txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
             settle_transaction(txn, settle_day=_entered(bank_day))
@@ -264,7 +265,7 @@ class TestTheClaimsSeeARowThroughItsPayment:
             stale = a_submission(scope, lines=[line], transactions=[txn])
             assert {row.kind for row in stale.rows} == {RowKind.SETTLEMENT}
 
-            _correct_tender(txn, card.id)
+            _correct_tender(txn, savings.id)
 
             with pytest.raises(ValidationError, match="no longer available"):
                 accept_match(stale, a_scope(seed_user, checking))

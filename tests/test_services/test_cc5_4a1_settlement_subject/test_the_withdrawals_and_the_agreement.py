@@ -1,5 +1,9 @@
 """A re-point or a deleted bill withdraws the match naming the payment, and the bank agreement
 reads a payment's claim through the movement.
+
+A payment goes on the card by a Credit press, and a "Paid from" correction
+re-points one onto Savings: since ruling plan#3227 "Paid from" names a cash
+account, never a card.
 """
 
 from __future__ import annotations
@@ -23,8 +27,10 @@ from tests.test_services.test_statement_match._builders import (
 from ._helpers import (
     _HOTEL,
     _card,
+    _savings,
     _hotel_bill,
     _movement,
+    _on_the_card,
     _correct_tender,
     _entered,
     _first_day,
@@ -43,7 +49,7 @@ class TestARePointWithdrawsTheMatchNamingThePayment:
         """The disclosure before, the withdrawal at the seam, the line free after."""
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            savings = _savings(seed_user)
             bank_day = _first_day(seed_user)
             txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
             settle_transaction(txn, settle_day=_entered(bank_day))
@@ -63,15 +69,15 @@ class TestARePointWithdrawsTheMatchNamingThePayment:
             assert pending.lines[0].amount == Decimal("-120.00")
             assert db.session.query(StatementMatch).count() == 1
 
-            _correct_tender(txn, card.id)
+            _correct_tender(txn, savings.id)
 
-            assert _movement(txn).account_id == card.id
+            assert _movement(txn).account_id == savings.id
             assert db.session.query(StatementMatch).count() == 0
             assert db.session.query(StatementMatchMember).count() == 0
             assert matched_subjects(checking.id).lines == set()
-            # ...and the payment is the CARD screen's candidate now.
-            (on_card,) = _offered_for(seed_user, card, txn)
-            assert on_card.kind is RowKind.SETTLEMENT
+            # ...and the payment is the SAVINGS screen's candidate now.
+            (on_savings,) = _offered_for(seed_user, savings, txn)
+            assert on_savings.kind is RowKind.SETTLEMENT
             assert _offered_for(seed_user, checking, txn) == []
 
     def test_a_group_act_keeps_standing_without_the_moved_member(
@@ -80,7 +86,7 @@ class TestARePointWithdrawsTheMatchNamingThePayment:
         """The narrowest condition: an act keeping another row stays, flagged."""
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            savings = _savings(seed_user)
             bank_day = _first_day(seed_user)
             hotel = _hotel_bill(seed_user, seed_user["bootstrap_period"])
             other = generate_row_of(
@@ -104,7 +110,7 @@ class TestARePointWithdrawsTheMatchNamingThePayment:
             pending = match_withdrawal.pending_for_movements([_movement(hotel)])
             assert pending.matches == 0 and pending.lines == ()
 
-            _correct_tender(hotel, card.id)
+            _correct_tender(hotel, savings.id)
 
             assert db.session.query(StatementMatch).count() == 1
             members = _members_of(accepted.match_id)
@@ -120,16 +126,16 @@ class TestARePointWithdrawsTheMatchNamingThePayment:
     ):
         """The ordinary case, so the door's cost is a query and a no-op."""
         with app.app_context():
-            card = _card(seed_user)
+            savings = _savings(seed_user)
             txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
             settle_transaction(txn, settle_day=_entered(_first_day(seed_user)))
             db.session.commit()
 
             pending = match_withdrawal.pending_for_movements([_movement(txn)])
             assert pending.matches == 0 and not pending.frees_a_line
-            _correct_tender(txn, card.id)
+            _correct_tender(txn, savings.id)
 
-            assert _movement(txn).account_id == card.id
+            assert _movement(txn).account_id == savings.id
 
 
 class TestADeletedBillWithdrawsTheActNamingItsPaymentOnAnotherAccount:
@@ -146,10 +152,7 @@ class TestADeletedBillWithdrawsTheActNamingItsPaymentOnAnotherAccount:
                 seed_user, name="Hotel", amount="120.00", template=False,
             )
             db.session.commit()
-            settle_transaction(
-                txn, settle_day=_entered(bank_day), tender_account_id=card.id,
-            )
-            db.session.commit()
+            _on_the_card(txn, card, bank_day)
             line = a_bank_line(
                 seed_user, an_import(seed_user, card), amount="-120.00",
                 posted_on=bank_day, description="GROCERIES",
@@ -186,10 +189,7 @@ class TestTheBankAgreementReadsAPaymentsClaimThroughTheMovement:
             card = _card(seed_user)
             bank_day = _first_day(seed_user)
             txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
-            settle_transaction(
-                txn, settle_day=_entered(bank_day), tender_account_id=card.id,
-            )
-            db.session.commit()
+            _on_the_card(txn, card, bank_day)
             line = a_bank_line(
                 seed_user, an_import(seed_user, card), amount="-120.00",
                 posted_on=bank_day,

@@ -91,6 +91,16 @@ def _entered(day):
     return SettleDay(day=day, basis=SettledDayBasisEnum.ENTERED)
 
 
+def _on_the_card(txn, card, day):
+    """Press Credit on *txn* naming *card*, *day* typed under "Money moved on".
+
+    How a bill budgeted on Checking goes on the card since ruling plan#3227
+    took the card out of "Paid from" (it was a settle naming the card).
+    """
+    transaction_service.mark_as_credit(txn, card_account_id=card.id, day=day)
+    db.session.commit()
+
+
 def _first_day(seed_user):
     """The first day a settle on the fixture accounts is NOT absorbed.
 

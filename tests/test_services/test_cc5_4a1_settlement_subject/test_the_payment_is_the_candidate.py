@@ -1,5 +1,8 @@
 """The card's screen offers the payment movement as its candidate, and a Projected row is offered
 once while its kept payment is offered where the row is not.
+
+A Checking bill goes on the card by a Credit press (:func:`._helpers._on_the_card`):
+since ruling plan#3227 "Paid from" names a cash account, never a card.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from ._helpers import (
     _card,
     _hotel_bill,
     _movement,
+    _on_the_card,
     _revert,
     _entered,
     _first_day,
@@ -62,11 +66,7 @@ class TestThePaymentIsTheCardScreensCandidate:
             checking = seed_user["account"]
             card = _card(seed_user)
             txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
-            settle_transaction(
-                txn, settle_day=_entered(_first_day(seed_user)),
-                tender_account_id=card.id,
-            )
-            db.session.commit()
+            _on_the_card(txn, card, _first_day(seed_user))
             movement = _movement(txn)
 
             assert _offered_for(seed_user, checking, txn) == []
@@ -105,10 +105,7 @@ class TestThePaymentIsTheCardScreensCandidate:
             settled_day = _first_day(seed_user)
             bank_day = settled_day + timedelta(days=2)
             txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
-            settle_transaction(
-                txn, settle_day=_entered(settled_day), tender_account_id=card.id,
-            )
-            db.session.commit()
+            _on_the_card(txn, card, settled_day)
             movement_id = _movement(txn).id
             line = a_bank_line(
                 seed_user, an_import(seed_user, card), amount="-120.00",
@@ -179,10 +176,7 @@ class TestThePaymentIsTheCardScreensCandidate:
             ]
             db.session.commit()
             txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
-            settle_transaction(
-                txn, settle_day=_entered(bank_day), tender_account_id=card.id,
-            )
-            db.session.commit()
+            _on_the_card(txn, card, bank_day)
             movement = _movement(txn)
             assert movement.id != txn.id
             # The next row takes the movement's id (``setval`` with
@@ -227,11 +221,7 @@ class TestThePaymentIsTheCardScreensCandidate:
         with app.app_context():
             card = _card(seed_user)
             txn = _hotel_bill(seed_user, seed_user["bootstrap_period"])
-            settle_transaction(
-                txn, settle_day=_entered(_first_day(seed_user)),
-                tender_account_id=card.id,
-            )
-            db.session.commit()
+            _on_the_card(txn, card, _first_day(seed_user))
             line = a_bank_line(
                 seed_user, an_import(seed_user, card), amount="-120.00",
                 posted_on=_first_day(seed_user),

@@ -37,7 +37,7 @@ from app.services.tax_config_service import StateTaxRules
 
 
 class FakeBracket:
-    """Minimal stand-in for a TaxBracket ORM object."""
+    """Minimal stand-in for one rung of the law's ladder, an ``app.tax_law.Bracket``."""
 
     def __init__(self, min_income, max_income, rate, sort_order):
         self.min_income = min_income
@@ -47,11 +47,11 @@ class FakeBracket:
 
 
 class _FakeChildTier:
-    """Minimal stand-in for a StateChildDeduction tier row.
+    """Minimal stand-in for one ``app.tax_law.ChildDeductionTier``.
 
     ``resolve_child_deduction_per_child`` reads only ``agi_max`` and
     ``deduction_per_child`` (the lookup keys on ``agi_max``); ``agi_min`` is
-    carried for parity with the real row.
+    carried for parity with the real tier.
     """
 
     def __init__(self, agi_min, agi_max, deduction_per_child):
@@ -60,8 +60,8 @@ class _FakeChildTier:
         self.deduction_per_child = deduction_per_child
 
 
-class FakeBracketSet:
-    """Minimal stand-in for a TaxBracketSet ORM object.
+class FakeFederalRules:
+    """Minimal stand-in for a year's federal rules, an ``app.tax_law.FederalRules``.
 
     Bracket data below is for testing only and does not represent
     actual IRS bracket values.
@@ -98,7 +98,7 @@ def _single_brackets():
 @pytest.fixture
 def single_bracket_set():
     """Single filer bracket set with $15,000 standard deduction."""
-    return FakeBracketSet(
+    return FakeFederalRules(
         standard_deduction=Decimal("15000"),
         child_credit_amount=Decimal("2000"),
         other_dependent_credit_amount=Decimal("500"),
@@ -336,7 +336,7 @@ class TestHighIncomeScenario:
             FakeBracket(Decimal("100000"), None,
                         Decimal("0.37"), 1),
         ]
-        bracket_set = FakeBracketSet(
+        bracket_set = FakeFederalRules(
             standard_deduction=Decimal("15000"),
             brackets=brackets,
         )
@@ -412,7 +412,7 @@ class TestBracketBoundary:
         brackets = [
             FakeBracket(Decimal("0"), None, Decimal("0.15"), 0),
         ]
-        bracket_set = FakeBracketSet(
+        bracket_set = FakeFederalRules(
             standard_deduction=Decimal("0"),
             brackets=brackets,
         )
@@ -741,16 +741,16 @@ class TestAnnualConsistency:
 # ── Negative-Path and Boundary-Condition Tests ─────────────────────
 
 
-class _FakeStateTaxConfig:
-    """Minimal state tax config for negative path tests."""
+class _FakeStateTaxRules:
+    """Minimal ``tax_config_service.StateTaxRules`` for negative path tests."""
 
     def __init__(self, flat_rate="0.045"):
         self.flat_rate = Decimal(str(flat_rate))
         self.tax_type = TaxTypeEnum.FLAT
 
 
-class _FakeFicaConfig:
-    """Minimal FICA config for negative path tests."""
+class _FakeFicaRules:
+    """Minimal ``app.tax_law.FicaRules`` for negative path tests."""
 
     def __init__(self):
         self.ss_rate = Decimal("0.062")
@@ -782,7 +782,7 @@ class TestNegativeAndBoundaryPaths:
             FakeBracket(Decimal("0"), Decimal("50000"), Decimal("0.10"), 0),
             FakeBracket(Decimal("50000"), None, Decimal("0.22"), 1),
         ]
-        bracket_set = FakeBracketSet(
+        bracket_set = FakeFederalRules(
             standard_deduction=Decimal("15000"),
             brackets=brackets,
         )
@@ -813,7 +813,7 @@ class TestNegativeAndBoundaryPaths:
         assert fed_result == Decimal("0.00")
 
         # Federal withholding pipeline: zero gross
-        bracket_set = FakeBracketSet(brackets=_single_brackets())
+        bracket_set = FakeFederalRules(brackets=_single_brackets())
         fed_wh = calculate_federal_withholding(
             gross_pay=Decimal("0"),
             pay_periods=26,
@@ -822,11 +822,11 @@ class TestNegativeAndBoundaryPaths:
         assert fed_wh == Decimal("0.00")
 
         # State: zero annual income
-        state = calculate_state_tax(Decimal("0"), _FakeStateTaxConfig())
+        state = calculate_state_tax(Decimal("0"), _FakeStateTaxRules())
         assert state == Decimal("0.00")
 
         # FICA: zero wages
-        fica = calculate_fica(Decimal("0"), _FakeFicaConfig(), Decimal("0"))
+        fica = calculate_fica(Decimal("0"), _FakeFicaRules(), Decimal("0"))
         assert fica["ss"] == Decimal("0.00")
         assert fica["medicare"] == Decimal("0.00")
 
@@ -847,7 +847,7 @@ class TestNegativeAndBoundaryPaths:
         )
 
         # Via the full withholding pipeline: income below standard deduction
-        bracket_set = FakeBracketSet(
+        bracket_set = FakeFederalRules(
             standard_deduction=Decimal("15000"),
             brackets=_single_brackets(),
         )
@@ -889,7 +889,7 @@ class TestNegativeAndBoundaryPaths:
         Why: Zero wages must not produce negative taxes or crash.
         """
         result = calculate_fica(
-            Decimal("0"), _FakeFicaConfig(), Decimal("0")
+            Decimal("0"), _FakeFicaRules(), Decimal("0")
         )
 
         assert result["ss"] == Decimal("0.00"), (
@@ -903,8 +903,8 @@ class TestNegativeAndBoundaryPaths:
 # ── capped_social_security helper (CRIT-03 / F-037) ───────────────
 
 
-class _FicaConfig184500:
-    """Fixed FicaConfig stub at the 2026-seed wage base.
+class _FicaRules184500:
+    """Fixed ``app.tax_law.FicaRules`` stub at the 2026-seed wage base.
 
     capped_social_security only reads `ss_rate` and `ss_wage_base`.
     Medicare attributes are populated because test_calculate_fica_delegates_to_helper
@@ -940,7 +940,7 @@ class TestCappedSocialSecurityHelper:
         result = capped_social_security(
             Decimal("12000.00"),
             Decimal("48000.00"),
-            _FicaConfig184500(),
+            _FicaRules184500(),
         )
         assert result == Decimal("744.00"), (
             f"Under-cap SS must be 744.00, got {result}"
@@ -956,7 +956,7 @@ class TestCappedSocialSecurityHelper:
         result = capped_social_security(
             Decimal("12000.00"),
             Decimal("180000.00"),
-            _FicaConfig184500(),
+            _FicaRules184500(),
         )
         assert result == Decimal("279.00"), (
             f"Partial-crossing SS must be 279.00, got {result}"
@@ -970,7 +970,7 @@ class TestCappedSocialSecurityHelper:
         result = capped_social_security(
             Decimal("12000.00"),
             Decimal("184500.00"),
-            _FicaConfig184500(),
+            _FicaRules184500(),
         )
         assert result == Decimal("0.00"), (
             f"At-cap SS must be 0.00, got {result}"
@@ -984,7 +984,7 @@ class TestCappedSocialSecurityHelper:
         result = capped_social_security(
             Decimal("12000.00"),
             Decimal("192000.00"),
-            _FicaConfig184500(),
+            _FicaRules184500(),
         )
         assert result == Decimal("0.00"), (
             f"Above-cap SS must be 0.00, got {result}"
@@ -998,7 +998,7 @@ class TestCappedSocialSecurityHelper:
         reintroduces its own copy of the cap arithmetic, this assertion
         fails because the rounding boundaries diverge.
         """
-        cfg = _FicaConfig184500()
+        cfg = _FicaRules184500()
         # Sample the partial-crossing branch where rounding is most fragile.
         gross = Decimal("12000.00")
         cumul = Decimal("180000.00")
@@ -1013,7 +1013,7 @@ class TestCappedSocialSecurityHelper:
     def test_string_inputs_accepted(self):
         """String gross/cumulative are coerced to Decimal -- mirrors callers."""
         result = capped_social_security(
-            "12000.00", "48000.00", _FicaConfig184500()
+            "12000.00", "48000.00", _FicaRules184500()
         )
         assert result == Decimal("744.00")
 
@@ -1046,7 +1046,7 @@ def _federal_2026_single():
     against the app's own figures (std deduction 16,100; CTC 2,200 per
     OBBBA; ODC 500; refundable ACTC cap 1,700).
     """
-    return FakeBracketSet(
+    return FakeFederalRules(
         standard_deduction=Decimal("16100"),
         child_credit_amount=Decimal("2200"),
         other_dependent_credit_amount=Decimal("500"),
@@ -1063,8 +1063,8 @@ def _federal_2026_single():
     )
 
 
-class _FakeNCStateConfig:
-    """The seeded 2026 NC flat state config (rate 3.99%, std ded 12,750)."""
+class _FakeNCStateTaxRules:
+    """2026 NC as ``tax_config_service.StateTaxRules`` (flat 3.99%, std ded 12,750)."""
 
     def __init__(self, flat_rate="0.0399", standard_deduction="12750"):
         self.flat_rate = Decimal(flat_rate)
@@ -1283,7 +1283,7 @@ def _federal_2026_mfj():
     ``tax_seed_data`` seed until plan step salary:X-at-1): std
     deduction 32,200; CTC 2,200; ODC 500; refundable ACTC cap 1,700.
     """
-    return FakeBracketSet(
+    return FakeFederalRules(
         standard_deduction=Decimal("32200"),
         child_credit_amount=Decimal("2200"),
         other_dependent_credit_amount=Decimal("500"),
@@ -1493,10 +1493,10 @@ class TestStateTaxAdditionalDeduction:
         6,000 deduction lowers NC tax by 239.40.
         """
         with_ded = calculate_state_tax(
-            Decimal("99200.00"), _FakeNCStateConfig(),
+            Decimal("99200.00"), _FakeNCStateTaxRules(),
             additional_deduction=Decimal("6000.00"),
         )
-        without = calculate_state_tax(Decimal("99200.00"), _FakeNCStateConfig())
+        without = calculate_state_tax(Decimal("99200.00"), _FakeNCStateTaxRules())
         assert with_ded == Decimal("3209.96"), (
             f"With 6,000 child deduction: expected 3209.96, got {with_ded}"
         )
@@ -1505,7 +1505,7 @@ class TestStateTaxAdditionalDeduction:
     def test_additional_deduction_floors_taxable_at_zero(self):
         """A deduction larger than the base floors taxable (and tax) at zero."""
         result = calculate_state_tax(
-            Decimal("20000.00"), _FakeNCStateConfig(),
+            Decimal("20000.00"), _FakeNCStateTaxRules(),
             additional_deduction=Decimal("30000.00"),
         )
         assert result == Decimal("0.00")
@@ -1527,7 +1527,7 @@ class TestAnnualStateBase:
         ROUND_HALF_UP at the half-cent (the discarded .0050) rounds the
         second decimal up: 3,449.35 -> 3,449.36.
         """
-        result = calculate_state_tax(Decimal("99200.00"), _FakeNCStateConfig())
+        result = calculate_state_tax(Decimal("99200.00"), _FakeNCStateTaxRules())
         assert result == Decimal("3449.36"), (
             f"NC anchor state tax: expected 3449.36, got {result}"
         )
@@ -1537,7 +1537,7 @@ class TestAnnualStateBase:
 
         base 10,000 - std ded 12,750 = -2,750 -> clamped -> 0.00.
         """
-        result = calculate_state_tax(Decimal("10000.00"), _FakeNCStateConfig())
+        result = calculate_state_tax(Decimal("10000.00"), _FakeNCStateTaxRules())
         assert result == Decimal("0.00")
 
 

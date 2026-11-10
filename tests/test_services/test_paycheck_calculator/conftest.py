@@ -11,9 +11,9 @@ import pytest
 from ._helpers import (
     _period,
     FakeBracket,
-    FakeBracketSet,
-    FakeStateTaxConfig,
-    FakeFicaConfig,
+    FakeFederalRules,
+    FakeStateTaxRules,
+    FakeFicaRules,
     FakeProfile,
 )
 
@@ -24,7 +24,7 @@ from ._helpers import (
 @pytest.fixture
 def simple_bracket_set():
     """2-bracket progressive set: 10% up to $50k, 22% above."""
-    return FakeBracketSet(
+    return FakeFederalRules(
         standard_deduction=Decimal("15000"),
         brackets=[
             FakeBracket(Decimal("0"), Decimal("50000"), Decimal("0.10"), 0),
@@ -36,13 +36,13 @@ def simple_bracket_set():
 @pytest.fixture
 def nc_state_config():
     """NC flat rate 4.5%."""
-    return FakeStateTaxConfig(flat_rate="0.045")
+    return FakeStateTaxRules(flat_rate="0.045")
 
 
 @pytest.fixture
 def standard_fica():
     """Standard 2026 FICA rates."""
-    return FakeFicaConfig()
+    return FakeFicaRules()
 
 
 @pytest.fixture

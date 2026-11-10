@@ -86,11 +86,11 @@ from tests._test_helpers import (
 )
 from tests.test_services.test_paycheck_calculator._helpers import (
     FakeBracket,
-    FakeBracketSet,
+    FakeFederalRules,
     FakeDeduction,
-    FakeFicaConfig,
+    FakeFicaRules,
     FakeProfile,
-    FakeStateTaxConfig,
+    FakeStateTaxRules,
 )
 from tests.test_services.test_retirement_dashboard_service import _picture
 from tests.test_services.test_salary_cockpit_service import _pair
@@ -162,15 +162,15 @@ def _tax_configs(ss_wage_base="168600"):
     *ss_wage_base*, 1.45% Medicare, the surtax far above every figure here.
     """
     return {
-        "bracket_set": FakeBracketSet(
+        "bracket_set": FakeFederalRules(
             standard_deduction=Decimal("15000"),
             brackets=[
                 FakeBracket(Decimal("0"), Decimal("50000"), Decimal("0.10"), 0),
                 FakeBracket(Decimal("50000"), None, Decimal("0.22"), 1),
             ],
         ),
-        "state_config": FakeStateTaxConfig(flat_rate="0.045"),
-        "fica_config": FakeFicaConfig(ss_wage_base=ss_wage_base),
+        "state_config": FakeStateTaxRules(flat_rate="0.045"),
+        "fica_config": FakeFicaRules(ss_wage_base=ss_wage_base),
     }
 
 

@@ -190,7 +190,7 @@ class FakeBracket:
         self.sort_order = sort_order
 
 
-class FakeBracketSet:
+class FakeFederalRules:
     def __init__(self, standard_deduction=Decimal("15000"),
                  child_credit_amount=Decimal("2000"),
                  other_dependent_credit_amount=Decimal("500"),
@@ -201,13 +201,13 @@ class FakeBracketSet:
         self.brackets = brackets or []
 
 
-class FakeStateTaxConfig:
+class FakeStateTaxRules:
     def __init__(self, flat_rate="0.045"):
         self.flat_rate = Decimal(str(flat_rate))
         self.tax_type = TaxTypeEnum.FLAT
 
 
-class FakeFicaConfig:
+class FakeFicaRules:
     def __init__(self, ss_rate="0.062", ss_wage_base="168600",
                  medicare_rate="0.0145", medicare_surtax_rate="0.009",
                  medicare_surtax_threshold="200000"):

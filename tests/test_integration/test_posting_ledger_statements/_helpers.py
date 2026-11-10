@@ -230,25 +230,6 @@ def _assert_ledger_self_consistent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _origin_instant(account) -> datetime:
-    """Return the factory origination row's stored assertion instant (aware UTC).
-
-    The one instant a test cannot choose (the origination ``created_at`` is the
-    INSERT's server ``now()``); a fixture's pinned true-up instants are built
-    relative to it, in whole DAYS, so the civil-day partition is deterministic.
-    """
-    row = (
-        _db.session.query(AccountAnchorHistory)
-        .filter_by(account_id=account.id)
-        .order_by(AccountAnchorHistory.created_at, AccountAnchorHistory.id)
-        .first()
-    )
-    created_at = row.created_at
-    if created_at.tzinfo is None:
-        return created_at.replace(tzinfo=timezone.utc)
-    return created_at.astimezone(timezone.utc)
-
-
 def _true_up_at(account, balance, created_at) -> None:
     """Assert a controlled true-up at a pinned instant.
 

@@ -95,16 +95,6 @@ _MONTHLY_PAID = PayCadence(FixedDays(30))
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _income_type_id(db_session):
-    """Get the Income transaction type ID from the database."""
-    return ref_cache.txn_type_id(TxnTypeEnum.INCOME)
-
-
-def _expense_type_id(db_session):
-    """Get the Expense transaction type ID from the database."""
-    return ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-
-
 def _add_transaction(
     db_session, seed_user, period, name, amount,
     is_income=False, due_date=None,
@@ -1626,7 +1616,6 @@ class TestYearOverview:
     def test_year_overview_marks_third_paycheck(self, app, seed_user, db):
         """Year overview with 26 periods marks exactly 2 third-paycheck months."""
         with app.app_context():
-            from app.services import pay_period_service
             # The BINDING went with the ``current_anchor_period_id`` line it
             # fed (ruling R-EH); the CALL is fixture setup and stays -- these
             # 26 periods ARE the third-paycheck year under test.
@@ -1729,7 +1718,6 @@ class TestEdgeCases:
     def test_feb_leap_year(self, app, seed_user, db):
         """Txn due_date Feb 29, 2028 (leap year) appears in day_entries[29]."""
         with app.app_context():
-            from app.services import pay_period_service
             # Create a period that overlaps Feb 2028.
             periods = record_paydays_across_a_hole(
                 user_id=seed_user["user"].id,

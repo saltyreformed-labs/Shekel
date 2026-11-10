@@ -236,20 +236,6 @@ def _parse_band_chart(html):
     return _parse_chart_array(html, "chart")
 
 
-def _label_to_month_tuple(label):
-    """Convert a ``"%b %Y"`` chart label to a (year, month) tuple.
-
-    Chart labels are formatted as ``"Mar 2026"`` via
-    ``strftime('%b %Y')``; ``strptime`` round-trips them so the
-    comparison test can build an ordered (year, month) key for
-    today's-month boundary checks.
-    """
-    from datetime import datetime  # pylint: disable=import-outside-toplevel
-
-    parsed = datetime.strptime(label, "%b %Y")
-    return (parsed.year, parsed.month)
-
-
 # ── Section 5 Regression Baseline ──────────────────────────────────────
 
 # All five amortizing account types with realistic parameters.

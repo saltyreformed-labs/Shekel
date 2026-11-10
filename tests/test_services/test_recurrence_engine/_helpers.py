@@ -323,9 +323,7 @@ class _TestRegenerateForTemplateMembers:
         db.session.flush()
         state_template_price(template, Decimal("100.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
-        rule = make_cadence_rule(
-            template, cadence, **rule_kwargs,
-        )
+        make_cadence_rule(template, cadence, **rule_kwargs)
 
         # Load the relationships for the recurrence engine.
         db.session.refresh(template)
@@ -381,7 +379,7 @@ class _TestRegenerateForTemplateMembers:
         )
         if settled_on is not None:
             entry_service.update_entry(
-                entry.id, seed_user["user"].id, settle_day=None if settled_on is None else an_entered_day(settled_on),
+                entry.id, seed_user["user"].id, settle_day=an_entered_day(settled_on),
             )
         db.session.flush()
         return entry

@@ -84,42 +84,6 @@ def _shell_autoload_target(html):
     return match.group(1) if match else None
 
 
-def _create_paid_expense_for_route_test(db, seed_user, seed_periods,
-                                        name, amount, category_key):
-    """Create a settled expense for year-end spending tests.
-
-    Args:
-        db: Database session fixture.
-        seed_user: User fixture dict.
-        seed_periods: Pay periods list.
-        name: Transaction name.
-        amount: Decimal amount.
-        category_key: Key into seed_user['categories'] dict.
-    """
-    expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-    paid_status_id = ref_cache.status_id(StatusEnum.DONE)
-    cat = seed_user["categories"].get(category_key)
-    txn = one_off_row_of(
-        seed_periods[0],
-        name=name,
-        amount=amount,
-        user_id=seed_periods[0].user_id,
-        account_id=seed_user["account"].id,
-        scenario_id=seed_user["scenario"].id,
-        transaction_type_id=expense_type_id,
-        category_id=cat.id if cat else None,
-    )
-    txn.status_id = paid_status_id
-    # The settle day laid on BARE, as ``add_txn`` lays it (X-f1); the
-    # record is the covering movement written after the flush (X-bi-4b-2).
-    for _column, _value in settle_day_columns(seed_periods[0].start_date).items():
-        setattr(txn, _column, _value)
-    db.session.flush()
-    # The record's home is the covering movement (X-bi-4b-1).
-    cover_bare_settled_row(db.session, txn, amount)
-    db.session.commit()
-
-
 def _chart_payload(html):
     """Parse the spending chart canvas's ``data-chart`` JSON from a page.
 

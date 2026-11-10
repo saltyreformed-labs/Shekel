@@ -125,11 +125,6 @@ def _zero_rate_loan(seed_user, name="Car Loan"):
     )
 
 
-def _owed(loan, ctx, day):
-    """What the loan owes on *day*, from the loan domain's own producer."""
-    return balance_at.positions(loan, ctx, [day])[day]
-
-
 def _goal_datum(ctx, goal):
     """The goal's record from the full /savings build."""
     data = savings_dashboard_service.compute_dashboard_data(ctx)

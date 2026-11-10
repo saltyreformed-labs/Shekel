@@ -252,18 +252,7 @@ class TestRequiredExtraForProjection:
             ),
         )
 
-    def _plan_override(self, inputs, months, extra):
-        """(year, month) -> contractual + extra for the first ``months``."""
-        override = {}
-        year, month = inputs.starting_date.year, inputs.starting_date.month
-        for _ in range(months):
-            override[(year, month)] = self.CONTRACTUAL + extra
-            month += 1
-            if month == 13:
-                year, month = year + 1, 1
-        return override
-
-    def test_no_override_matches_calculate_payoff_by_date(self):
+    def test_matches_calculate_payoff_by_date(self):
         """Refactor lock: the core reproduces the wrapped function.
 
         Same loan facts as ``test_achievable_target``'s regression lock

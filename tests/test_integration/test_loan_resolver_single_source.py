@@ -90,29 +90,27 @@ ARM_FIXED_WINDOW_PAYMENT = Decimal("2398.20")
 # -- Fixture helpers -------------------------------------------------------
 
 
-def _create_fixed_loan(seed_user, period):
+def _create_fixed_loan(seed_user):
     """Materialise the canonical fixed-rate $300k mortgage.
 
     Routes through the shared :func:`create_loan_account` factory, which builds
     the :class:`Account`, the :class:`LoanParams`, the origination
     :class:`RateHistory` / anchor, AND the loan's genesis posting ledger in one
     transaction -- the same dance ``app/routes/loan/params.py`` performs on every
-    production loan write.  Commits.  Returns the account and loan_params.
+    production loan write.  Commits.  Returns the account.
 
     Args:
         seed_user: The ``seed_user`` fixture dict.
-        period: The :class:`PayPeriod` to anchor the account to.
     """
-    account = create_loan_account(
+    return create_loan_account(
         seed_user, db.session, name="Single-Source Mortgage",
         principal=FIXED_PRINCIPAL, rate=FIXED_RATE, term=FIXED_TERM,
         origination_date=FIXED_ORIGINATION_DATE, payment_day=1,
         account_type=AcctTypeEnum.MORTGAGE,
     )
-    return account, loan_params_for(db.session, account.id)
 
 
-def _create_arm_loan(seed_user, period):
+def _create_arm_loan(seed_user):
     """Materialise the canonical 5/5 ARM in its fixed-rate window.
 
     Anchor at origination; no payments; the resolver's monthly_payment
@@ -126,7 +124,6 @@ def _create_arm_loan(seed_user, period):
 
     Args:
         seed_user: The ``seed_user`` fixture dict.
-        period: The :class:`PayPeriod` to anchor the account to.
     """
     account = create_loan_account(
         seed_user, db.session, name="Single-Source ARM",
@@ -142,7 +139,7 @@ def _create_arm_loan(seed_user, period):
     return account, loan_params
 
 
-def _settle_one_payment(seed_user, loan_account, period, auth_client):
+def _settle_one_payment(seed_user, loan_account, period):
     """Settle a PITI transfer through the sole writer, pinned to the period start.
 
     Routes through ``create_settled_transfer`` -- transfer_service, the same
@@ -151,8 +148,7 @@ def _settle_one_payment(seed_user, loan_account, period, auth_client):
     today under C2's settled-date clock.  The HTTP mark-done route stamps
     ``now()``, whose UTC-civil date can sit a day ahead of the host's
     ``date.today()`` and hide the payment; that route path is covered directly by
-    ``test_loan_principal_settles.py``.  ``auth_client`` is kept for call-site
-    symmetry though the settle no longer uses it.
+    ``test_loan_principal_settles.py``.
     """
     create_settled_transfer(
         seed_user, db.session, seed_user["account"], loan_account, period,
@@ -167,7 +163,7 @@ def _settle_one_payment(seed_user, loan_account, period, auth_client):
     db.session.expire_all()
 
 
-def _replay_window(account_id, loan_params, scenario_id):
+def _replay_window(account_id, scenario_id):
     """Return the anchor + settled-payment replay balance as of today.
 
     The sanity-floor window the deleted ``LoanState.current_balance`` carried
@@ -178,11 +174,7 @@ def _replay_window(account_id, loan_params, scenario_id):
     It took a loaded ``LoanContext`` -- and so the whole pricing tier -- until
     plan step **balance:X-bl-2b** put the replay on the amount-free feed.  It
     takes the SCENARIO now, because that is all the feed needs to be scoped.
-
-    ``loan_params`` is taken and unused: the helper re-loads it from the
-    account id.
     """
-    del loan_params  # identity carried by account_id; kept for call clarity
     return unseeded_replay_balance(account_id, scenario_id, date.today())
 
 
@@ -263,13 +255,9 @@ def test_fixed_loan_card_equals_savings_equals_resolver_before_settle(
     settle landed; see :func:`test_fixed_loan_card_equals_savings_after_settle`).
     """
     with app.app_context():
-        account, loan_params = _create_fixed_loan(
-            seed_user, seed_periods[0],
-        )
+        account = _create_fixed_loan(seed_user)
 
-        replayed = _replay_window(
-            account.id, loan_params, seed_user["scenario"].id,
-        )
+        replayed = _replay_window(account.id, seed_user["scenario"].id)
         assert replayed == FIXED_PRINCIPAL, (
             f"Sanity floor: the anchor replay should report {FIXED_PRINCIPAL} "
             f"for a fresh loan, got {replayed}."
@@ -306,17 +294,11 @@ def test_fixed_loan_card_equals_savings_after_settle(  # C15-1 / C15-6
         balance           = 300000.00 -  298.65 = 299,701.35
     """
     with app.app_context():
-        account, loan_params = _create_fixed_loan(
-            seed_user, seed_periods[0],
-        )
-        _settle_one_payment(
-            seed_user, account, seed_periods[3], auth_client,
-        )
+        account = _create_fixed_loan(seed_user)
+        _settle_one_payment(seed_user, account, seed_periods[3])
 
         scenario_id = seed_user["scenario"].id
-        assert _replay_window(
-            account.id, loan_params, scenario_id,
-        ) == BALANCE_AFTER_ONE_SETTLE
+        assert _replay_window(account.id, scenario_id) == BALANCE_AFTER_ONE_SETTLE
 
         # F-008 / F-015 / F-016 / symptom #5 re-pin: loan card display
         # equals the seam-folded balance, not the stored
@@ -366,9 +348,7 @@ def test_arm_monthly_payment_card_equals_resolver_constant(  # C15-2
     inside the 60-month fixed-rate window.
     """
     with app.app_context():
-        account, loan_params = _create_arm_loan(
-            seed_user, seed_periods[0],
-        )
+        account, loan_params = _create_arm_loan(seed_user)
 
         ctx = loan_payment_service.load_loan_context(
             account.id, amount_basis_for_scenario(seed_user["scenario"].id),

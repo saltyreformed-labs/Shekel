@@ -152,7 +152,7 @@ def _make_template(seed_user, cadence, **rule_kwargs):
     db.session.flush()
     state_template_price(template, Decimal("39.54"))
     # The definition first, then the cadence onto it (plan step R-F6).
-    rule = make_cadence_rule(
+    make_cadence_rule(
         template, cadence,
         interval_n=rule_kwargs.pop("interval_n", 1),
         fires_on_day=rule_kwargs.pop("day_of_month", None),
@@ -182,28 +182,6 @@ def _rows(template, scenario_id):
     for row in rows:
         result.setdefault(row.pay_period.start_date, []).append(row)
     return result
-
-
-def _placements(template, scenario_id):
-    """Return what a pass DECIDED, free of row identity.
-
-    ``_rows`` keys by period and hands back the ``Transaction`` objects, which
-    two passes over two templates can never compare equal.  What a generate
-    pass decides is which paycheck each row lands in and what the definition
-    says there, so that is what this reduces to.
-
-    Args:
-        template: The template whose rows to read.
-        scenario_id: The scenario to read within.
-
-    Returns:
-        ``{start_date: [(due_date, estimated_amount), ...]}``, the due dates
-        sorted so a repeated paycheck compares stably.
-    """
-    return {
-        start: sorted((row.due_date, row.estimated_amount) for row in rows)
-        for start, rows in _rows(template, scenario_id).items()
-    }
 
 
 def _append_period(seed_user, seed_periods):
@@ -594,9 +572,7 @@ class TestThePaycheckSeesTheWholeSchedule:
         db.session.add(template)
         db.session.flush()
         # The definition first, then the cadence onto it (plan step R-F6).
-        rule = make_cadence_rule(
-            template, EVERY_PERIOD,
-        )
+        make_cadence_rule(template, EVERY_PERIOD)
 
         profile = SalaryProfile(
             user_id=seed_user["user"].id,
@@ -1178,7 +1154,7 @@ class TestTheTransferEngineTakesTheSameSchedule:
         db.session.add(template)
         db.session.flush()
         # The definition first, then the cadence onto it (plan step R-F6).
-        rule = make_cadence_rule(template, cadence)
+        make_cadence_rule(template, cadence)
         return template
 
     def test_an_extend_does_not_duplicate_a_monthly_first_transfer(
@@ -1531,7 +1507,6 @@ class TestTheGeneratePassTakesTheReadPass:
             db.session.flush()
 
             created = _append_period(seed_user, seed_periods)
-            new_ids = {period.id for period in created}
 
             with counting_read_passes() as passes:
                 written = populate_new_periods(seed_user["user"].id, created)

@@ -511,7 +511,7 @@ class TestReaderParallelRunAgainstResolver:
             assert reader_both < reader_dec
             _assert_loan_reconciles(loan, scenario_id)
 
-    def test_reader_is_scenario_scoped_and_none_when_unopened(
+    def test_reader_is_scenario_scoped_and_an_unpaid_one_reads_its_anchor(
         self, app, db, seed_user, seed_periods,
     ):
         """The reader reads each scenario's own balance, and never another's.

@@ -636,8 +636,10 @@ class TestARecurringTransferMovedOntoALoan:
         unchanged, the start is the loan's, the stop is the loan's (ruling
         **R-R77**).
 
-        NEGATIVE CONTROL: delete the three ``data[...] =`` writes from
-        ``_cadence_unit_to_settle`` and the row moves with its savings start.
+        NEGATIVE CONTROL: return *submission* uncompleted from
+        ``_complete_the_cadence`` (``_cadence_unit_to_settle`` until plan step
+        R7e, which wrote the cadence's three keys into the payload) and the
+        row moves with its savings start.
         """
         loan = _mortgage(seed_user)
         savings = _savings(seed_user)
@@ -821,7 +823,7 @@ class TestARecurringTransferMovedOntoALoan:
         destination was a loan.
 
         NEGATIVE CONTROL: move the ``load_loan_params`` read in
-        ``settle_destination_for_update`` below the ``_cadence_unit_to_settle``
+        ``settle_destination_for_update`` below the ``_complete_the_cadence``
         call and the spy fires.
         """
         savings = _savings(seed_user)
@@ -881,8 +883,8 @@ class TestARecurringTransferMovedOntoALoan:
 
         A servicer's day 31 first billing in a 30-day month: the derived pair
         is the month's last day plus ``nominal_day = 31``, and on a move the
-        re-point branch reads ``nominal_day`` beside the PRESENT ``starts_on``
-        the settle wrote (``update_recurrence_rule_from_form``).  A door that
+        re-point branch reads ``nominal_day`` beside the STATED start the
+        settle wrote (``RecurrenceSubmission.applied_to``).  A door that
         wrote the date alone would model every later installment a day early.
         """
         loan = create_loan_account(

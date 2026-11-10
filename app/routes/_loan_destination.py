@@ -10,7 +10,7 @@ it:
   plan step R7d-g-2): where the definition WOULD be the destination loan's
   standing payment -- no active recurring transfer into the loan is older
   than it, the seam's own reading -- its first occurrence is the loan's
-  first contractual installment, derived into the payload, and a stated stop
+  first contractual installment, derived into the submission, and a stated stop
   is refused; otherwise this is a SECOND transfer, whose start is its
   OWNER's -- required, and refused at or before the loan's origination --
   and whose stop is its owner's;
@@ -59,11 +59,18 @@ route-internal) rather than a service because every door here consumes Flask
 globals (``flash``, ``current_user``, the redirect through
 :class:`~app.routes._redirect_target.RedirectTarget`);
 ``CLAUDE.md::Architecture`` keeps services isolated from Flask.  Nothing here
-creates or mutates transfer shadow transactions -- the doors write into the
-PAYLOAD and refuse, and the writes stay the route's -- so the transfer
+creates or mutates transfer shadow transactions -- the doors settle the
+submission and refuse, and the writes stay the route's -- so the transfer
 invariants are unaffected.
+
+**The doors settle a SUBMISSION, not the payload, since plan step R7e**
+(finding **D36**): each returns the
+:class:`~app.services.recurrence.RecurrenceSubmission` it was handed with what
+it derives stated in it -- the loan's first occurrence and its reading, the
+completed cadence of a partial move, the unbounded stop -- where it wrote
+those into the payload as keys the next step tested for.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
@@ -81,9 +88,7 @@ from app.routes._recurrence_form_refusals import (
 )
 from app.routes._redirect_target import RedirectTarget
 from app.schemas.validation import (
-    RECURRENCE_END_BOUND_KEY,
     RECURRENCE_NEEDS_A_START,
-    RECURRENCE_REPEATS_ON_KEY,
     RECURRENCE_STARTS_ON_KEY,
 )
 from app.services import loan_loaders, loan_recurrence_sync
@@ -91,8 +96,12 @@ from app.services.balance_at import BalanceContext
 from app.services.recurrence import (
     NEVER_ENDS,
     UNREADABLE_CADENCE_MESSAGE,
+    UNSET,
     EndBound,
     MonthReading,
+    RecurrenceSubmission,
+    SubmittedCadence,
+    Unset,
     stored_cadence,
 )
 
@@ -157,8 +166,11 @@ Formatted with the loan's name and its origination date.
 
 
 def settle_first_occurrence(
-    data: dict[str, Any], *, redirect: RedirectTarget,
-) -> Response | None:
+    submission: RecurrenceSubmission,
+    *,
+    to_account_id: int,
+    redirect: RedirectTarget,
+) -> RecurrenceSubmission | Response:
     """Settle a loan destination's first occurrence and stop, or refuse the start.
 
     **The CREATE-form half of the rule the EDIT form states as
@@ -217,47 +229,55 @@ def settle_first_occurrence(
     not repeat" needs no first occurrence.
 
     Args:
-        data: The validated payload, mutated in place on the standing branch.
-            Its ``to_account_id`` must already be ownership-checked -- this
-            reads the destination's loan parameters, so an unchecked id would
-            be an IDOR.
+        submission: What the create form stated.
+        to_account_id: The destination, which must already be
+            ownership-checked -- this reads its loan parameters, so an
+            unchecked id would be an IDOR.
         redirect: Where to send the user when the submission is refused.
 
     Returns:
-        * ``None`` -- ``data`` now carries a first occurrence, or names no
-          cadence at all; the caller continues.
+        * The :class:`~app.services.recurrence.RecurrenceSubmission` the
+          create authors from: *submission* with the loan's derived first
+          occurrence stated in it on the standing branch, else as given --
+          stating a first occurrence, or naming no cadence at all.
         * :class:`Response` -- the refusal redirect, returned verbatim -- an
           unstated first occurrence where the owner must state one, a stop
           stated for the standing payment, or a second transfer's start at
           or before its loan's origination.
     """
-    if data.get("recurrence_unit") is None:
-        return None
-    to_account_id = data["to_account_id"]
+    cadence = submission.named_cadence
+    if cadence is None:
+        return submission
     params = loan_loaders.load_loan_params(to_account_id)
     if params is not None and would_be_standing_payment(
         to_account_id, current_user.id,
     ):
-        settle_loan_start(data, params=params, unit=data["recurrence_unit"])
+        settled = settle_loan_start(submission, params=params, unit=cadence.unit)
         # A create states one bound for both rules: what it submits is what
-        # it writes (an absent one authors the unbounded rule).
-        return _refuse_stop_on_a_new_loan_payment(
-            data.get(RECURRENCE_END_BOUND_KEY), redirect=redirect,
+        # it writes (an unmentioned one authors the unbounded rule).
+        refusal = _refuse_stop_on_a_new_loan_payment(
+            settled.end_bound, redirect=redirect,
         )
-    starts_on = data.get(RECURRENCE_STARTS_ON_KEY)
-    if starts_on is None:
+        return settled if refusal is None else refusal
+    if submission.starts_on is UNSET:
         for message in RECURRENCE_NEEDS_A_START[RECURRENCE_STARTS_ON_KEY]:
             flash(message, "danger")
         return redirect.to_response()
     if params is None:
-        return None
-    return _refuse_start_before_origination(params, starts_on, redirect=redirect)
+        return submission
+    refusal = _refuse_start_before_origination(
+        params, submission.starts_on, redirect=redirect,
+    )
+    return submission if refusal is None else refusal
 
 
 def settle_loan_start(
-    data: dict[str, Any], *, params: LoanParams, unit: RecurrenceUnitEnum,
-) -> loan_recurrence_sync.LoanCadenceStart:
-    """Write a loan destination's derived first occurrence into *data*.
+    submission: RecurrenceSubmission,
+    *,
+    params: LoanParams,
+    unit: RecurrenceUnitEnum,
+) -> RecurrenceSubmission:
+    """Return *submission* with a loan destination's derived first occurrence stated.
 
     The one derivation both doors run for the recurring transfer that BECOMES
     a loan's standing payment (plan step R7c-b at create, R7d-f-4 at update;
@@ -265,44 +285,46 @@ def settle_loan_start(
     ruling **R-R81**): the first occurrence is
     the loan's first contractual installment, read through the one producer
     :func:`~app.services.loan_recurrence_sync.loan_cadence_start`, and written
-    into the payload BEFORE the rule is built so nothing is authored that a
-    sync then replaces.  Whatever the payload said about ``starts_on`` is
+    into the submission BEFORE the rule is built so nothing is authored that
+    a sync then replaces.  Whatever the submission said about the start is
     replaced.  The create form locks the control and posts nothing; a posted
     date -- a browser with the script off, a crafted POST, an edit form whose
     row is still open -- is exactly the input the door was written to stop
     being authored, and no worse an outcome than a discarded input.
 
     Args:
-        data: The validated payload, mutated in place: ``starts_on`` and
-            ``repeats_on`` are written -- the loan's first contractual
-            installment, read by the contract's day (ruling **R-R96**), so a
-            weekday reading posted beside a date this replaces is replaced
-            with it (plan step recurrence:R8-c): it read a date the rule will
-            not carry.
+        submission: What the form stated (or a partial move's completion of
+            it).  NOT mutated: the value is frozen, and a replacement is
+            returned.
         params: The destination loan's terms, loaded by the caller -- each
             door loads them ONCE, after the destination is ownership-checked
             (an unchecked read would be an IDOR), and decides on the answer
             whether it has a loan destination at all before anything else is
             settled.  The load stays the caller's so that decision precedes
-            every other write into *data* (an adversarial review of plan step
+            every other settle of the submission (an adversarial review of plan step
             R7d-f-4 found the update door completing a partial submission's
             cadence before it knew the destination was a loan).
         unit: The cadence unit the derivation keys the nominal day on.
 
     Returns:
-        The :class:`~app.services.loan_recurrence_sync.LoanCadenceStart` just
-        written.
+        *submission* with its start STATED as the loan's first contractual
+        installment, read by the contract's day (ruling **R-R96**) -- so a
+        weekday reading posted beside a date this replaces is replaced with it
+        (plan step recurrence:R8-c): it read a date the rule will not carry.
+        Stated rather than left unmentioned because both update branches read
+        it as stated: the authoring branch as the start it builds from, the
+        re-point branch as a start that replaces the stored one.
     """
     cadence_start = loan_recurrence_sync.loan_cadence_start(unit, params)
-    data[RECURRENCE_STARTS_ON_KEY] = cadence_start.starts_on
-    data[RECURRENCE_REPEATS_ON_KEY] = MonthReading(
-        nominal_day=cadence_start.nominal_day,
+    return replace(
+        submission,
+        starts_on=cadence_start.starts_on,
+        reading=MonthReading(nominal_day=cadence_start.nominal_day),
     )
-    return cadence_start
 
 
 def _refuse_stop_on_a_new_loan_payment(
-    bound: EndBound | None, *, redirect: RedirectTarget,
+    bound: EndBound | Unset, *, redirect: RedirectTarget,
 ) -> Response | None:
     """Refuse a stated stop for the definition that becomes its loan's payment.
 
@@ -331,8 +353,9 @@ def _refuse_stop_on_a_new_loan_payment(
     presence would therefore make the script the control -- the thing R-R60
     demotes to an affordance -- and refuse an owner who chose nothing on a
     page rendered before the loan lost its payment.  A stated "Never" and an
-    absent key author the same row here (``recurrence_spec_for_create`` reads
-    an absent bound as unbounded, and the update door states ``NEVER_ENDS``
+    absent key author the same row here (a create reads an unmentioned bound
+    as unbounded, :meth:`~app.services.recurrence.RecurrenceSubmission.authored`,
+    and the update door states ``NEVER_ENDS``
     for it under R-R77), the unbounded rule the loan's payment carries, so
     accepting both refuses nothing real.  The reason the edit door reads
     presence for the standing payment -- a posted START could be a stale echo
@@ -346,17 +369,18 @@ def _refuse_stop_on_a_new_loan_payment(
     the owner's own start.
 
     Args:
-        bound: The composed closing bound THIS SUBMISSION states (``None``
-            when it stated nothing; ``NEVER_ENDS`` when the form said
-            "Never").  Never a stored bound: what an update leaves alone is
-            not something its owner stated here (ruling **R-R77**).
+        bound: The closing bound THIS SUBMISSION states
+            (:data:`~app.services.recurrence.UNSET` when it stated nothing;
+            ``NEVER_ENDS`` when the form said "Never").  Never a stored bound:
+            what an update leaves alone is not something its owner stated
+            here (ruling **R-R77**).
         redirect: Where to send the user when the submission is refused.
 
     Returns:
         * ``None`` -- no real stop was stated.
         * :class:`Response` -- the refusal redirect, returned verbatim.
     """
-    if bound is None or bound == NEVER_ENDS:
+    if bound is UNSET or bound == NEVER_ENDS:
         return None
     flash(LOAN_PAYMENT_BOUND_IS_DERIVED, "danger")
     return redirect.to_response()
@@ -405,11 +429,11 @@ def _refuse_start_before_origination(
 def settle_destination_for_update(
     template: TransferTemplate,
     data: dict[str, Any],
+    submission: RecurrenceSubmission,
     *,
-    end_bound: EndBound | None,
     pass_ctx: BalanceContext,
     redirect: RedirectTarget,
-) -> tuple[EndBound | None, Response | None]:
+) -> RecurrenceSubmission | Response:
     """Settle what an UPDATE's destination decides about the rule's two bounds.
 
     **The update door's twin of :func:`settle_first_occurrence`** (plan step
@@ -458,20 +482,20 @@ def settle_destination_for_update(
        edits that make the definition a recurring transfer into it -- adding
        a cadence to a definition that had none, or moving one that repeats
        onto it -- the first occurrence is DERIVED, whatever the payload said,
-       exactly as at create.  Written into the payload, where both update
+       exactly as at create.  Stated in the submission, where both update
        branches read it: the authoring branch as the start it builds from,
-       the re-point branch as a PRESENT key that replaces the stored date.  A
-       partial submission that moves a recurring definition without restating
-       its cadence is COMPLETED from the stored row
+       the re-point branch as a stated start that replaces the stored date.
+       A partial submission that moves a recurring definition without
+       restating its cadence is COMPLETED from the stored row
        (:func:`~app.services.recurrence.stored_cadence`) so the re-point
-       branch runs and carries the derived start: "absent leaves the stored
-       cadence alone" and "restate the stored cadence" are one request, and
-       completing it is what keeps the derivation on one branch rather than
-       giving this function a rule writer of its own.  A cadence the
+       branch runs and carries the derived start: "an unmentioned cadence
+       leaves the stored one alone" and "restate the stored cadence" are one
+       request, and completing it is what keeps the derivation on one branch
+       rather than giving this function a rule writer of its own.  A cadence the
        application cannot read cannot be completed, so that submission is
        refused with the form's own repair sentence
        (:data:`~app.services.recurrence.UNREADABLE_CADENCE_MESSAGE`).  Which
-       cadence is :func:`_cadence_unit_to_settle`, asked only once the
+       cadence is :func:`_complete_the_cadence`'s, asked only once the
        destination is known to be such a loan (an adversarial review of plan
        step R7d-f-4 found the first cut completing a partial move onto
        SAVINGS).  The closing bound is the create door's, one door over
@@ -487,38 +511,36 @@ def settle_destination_for_update(
        OLDER payment** (ruling **R-R81**, plan step R7d-g-2; until then this
        derived the start too, plan ledger row **D50**): nothing is derived.
        The start the edit leaves -- the submitted one, or the stored one an
-       absent key leaves alone -- is the OWNER's and is refused at or before
+       unmentioned start leaves alone -- is the OWNER's and is refused at or before
        the loan's origination (:func:`_refuse_start_before_origination`); an
        authoring edit that states none is refused one step on, by the
        recurrence step's own "needs a start" sentence, exactly as for a
        savings destination.  The stop is the owner's on the update door's
-       ordinary reading: a stated one replaces, an absent one leaves the
+       ordinary reading: a stated one replaces, an unmentioned one leaves the
        stored one alone, and the schema has graded a submitted pair.
 
     Args:
         template: The definition being edited, owner-checked by the route.
             Read for its stored destination, rule, settings row and active
             flag; NOT mutated -- the field loop moves the column afterwards.
-        data: The validated partial payload, mutated in place on the standing
-            branch: the derived ``starts_on`` and ``repeats_on`` are
-            written, and the stored cadence keys for a partial move (rule
-            2).  Every FK in it must already be ownership-checked -- this
-            reads the destination's loan parameters, so an unchecked id would
-            be an IDOR.
-        end_bound: The closing bound the submission composed, or ``None``
-            when it stated nothing about it (the route lifted it out of
-            *data* before this).
+        data: The validated partial payload, read for the destination the
+            edit leaves (``to_account_id``) and NOT mutated.  Every FK in it
+            must already be ownership-checked -- this reads the destination's
+            loan parameters, so an unchecked id would be an IDOR.
+        submission: What the edit form stated about the recurrence, which
+            the route lifted out of *data* before this.
         pass_ctx: The read pass the route built BEFORE any write.  Rule 1's
             identity is read off its loan-resolution memo, which the refusals
             after this read again for free.
         redirect: Where a refusal sends the user (the edit form).
 
     Returns:
-        ``(end_bound, refusal)``.  *end_bound* is the closing bound the write
-        states: *end_bound* as given, or ``NEVER_ENDS`` where rule 2 makes
-        the stop the loan's and the submission stated none.  *refusal* is
-        ``None`` when the edit may proceed, else the redirect the caller
-        returns verbatim.
+        The :class:`~app.services.recurrence.RecurrenceSubmission` the
+        recurrence step applies -- *submission* as given, or, on rule 2's
+        branch, with the derived first occurrence, the completed cadence of a
+        partial move and the unbounded stop (``NEVER_ENDS``, where the
+        submission stated "Never" or nothing) stated in it -- or the refusal
+        redirect the caller returns verbatim.
     """
     moving = (
         "to_account_id" in data
@@ -526,14 +548,14 @@ def settle_destination_for_update(
     )
     if moving and is_loan_payment_or_standing(template, pass_ctx):
         flash(LOAN_PAYMENT_CANNOT_CHANGE_DESTINATION, "danger")
-        return end_bound, redirect.to_response()
+        return redirect.to_response()
     # The two edits this door settles: a cadence added to a definition that
     # had none, or a definition that repeats moved.  Neither, and the edit is
     # an ordinary one (a rename, an amount, a re-pointed cadence that stays
     # put) -- cheapest disqualifier first, so nothing below runs for it.
     rule = template.recurrence_rule
     if rule is not None and not moving:
-        return end_bound, None
+        return submission
     # The DESTINATION is settled before the cadence is: whether it is a loan,
     # and whether that loan holds a payment, is what decides that anything at
     # all is derived, and the partial submission rule 2 completes must be
@@ -542,64 +564,68 @@ def settle_destination_for_update(
     to_account_id = data.get("to_account_id", template.to_account_id)
     params = loan_loaders.load_loan_params(to_account_id)
     if params is None:
-        return end_bound, None
+        return submission
     if would_be_standing_payment(
         to_account_id, current_user.id, template_id=template.id,
     ):
         return _settle_standing_payment(
-            rule, data, params=params, end_bound=end_bound, redirect=redirect,
+            rule, submission, params=params, redirect=redirect,
         )
-    return end_bound, _refuse_second_transfers_start(
-        rule, data, params=params, redirect=redirect,
+    refusal = _refuse_second_transfers_start(
+        rule, submission, params=params, redirect=redirect,
     )
+    return submission if refusal is None else refusal
 
 
 def _settle_standing_payment(
     rule: RecurrenceRule | None,
-    data: dict[str, Any],
+    submission: RecurrenceSubmission,
     *,
     params: LoanParams,
-    end_bound: EndBound | None,
     redirect: RedirectTarget,
-) -> tuple[EndBound | None, Response | None]:
+) -> RecurrenceSubmission | Response:
     """Rule 2 of :func:`settle_destination_for_update`: the standing branch.
 
     Reached once that door knows the edit is one it settles and that the
     definition would be the standing payment of the configured loan the edit
     leaves it paying into.
-    Derives the first occurrence into *data* for the cadence the definition
-    repeats on afterwards, refuses a real stated stop, and hands the
-    unbounded rule to the recurrence step as the stop the write states.
+    States the first occurrence for the cadence the definition repeats on
+    afterwards, refuses a real stated stop, and hands the unbounded rule to
+    the recurrence step as the stop the write states.
 
     Args:
         rule: The definition's stored rule, or ``None`` when the edit is the
             one that authors it.
-        data: The validated partial payload, mutated in place (the derived
-            start, and the stored cadence keys for a partial move).
+        submission: What the edit form stated.
         params: The destination loan's terms, loaded by the caller.
-        end_bound: The closing bound the submission composed, or ``None``.
         redirect: Where a refusal sends the user.
 
     Returns:
-        ``(end_bound, refusal)`` as :func:`settle_destination_for_update`
-        documents them.
+        The settled submission, or the refusal redirect, as
+        :func:`settle_destination_for_update` documents them.
     """
-    unit, refusal = _cadence_unit_to_settle(rule, data, redirect=redirect)
-    if unit is None:
-        return end_bound, refusal
-    settle_loan_start(data, params=params, unit=unit)
-    refusal = _refuse_stop_on_a_new_loan_payment(end_bound, redirect=redirect)
+    completed = _complete_the_cadence(rule, submission, redirect=redirect)
+    if isinstance(completed, Response):
+        return completed
+    cadence = completed.named_cadence
+    if cadence is None:
+        # Nothing repeats after this edit: nothing to derive, no stop to judge.
+        return completed
+    settled = settle_loan_start(completed, params=params, unit=cadence.unit)
+    refusal = _refuse_stop_on_a_new_loan_payment(
+        settled.end_bound, redirect=redirect,
+    )
     if refusal is not None:
-        return end_bound, refusal
-    # Handed to the recurrence step as a STATED bound: an absent key means
-    # "leave the stored one alone" one step on, and the stored one is not the
-    # loan's payment's to keep.
-    return NEVER_ENDS, None
+        return refusal
+    # Handed to the recurrence step as a STATED bound: an unmentioned bound
+    # means "leave the stored one alone" one step on, and the stored one is
+    # not the loan's payment's to keep.
+    return replace(settled, end_bound=NEVER_ENDS)
 
 
 def _refuse_second_transfers_start(
     rule: RecurrenceRule | None,
-    data: dict[str, Any],
+    submission: RecurrenceSubmission,
     *,
     params: LoanParams,
     redirect: RedirectTarget,
@@ -615,7 +641,7 @@ def _refuse_second_transfers_start(
     Args:
         rule: The definition's stored rule, or ``None`` when it does not
             repeat yet.
-        data: The validated partial payload, read and not mutated.
+        submission: What the edit form stated.
         params: The destination loan's terms, loaded by the caller.
         redirect: Where a refusal sends the user.
 
@@ -625,69 +651,75 @@ def _refuse_second_transfers_start(
         refuses that with its own sentence) and an edit after which the
         definition does not repeat (nothing to grade).
     """
-    # Whether it repeats after this edit: the submitted unit where the form
-    # stated one (``None`` is "Does not repeat"), else the stored rule's.
-    if "recurrence_unit" in data:
-        repeats = data["recurrence_unit"] is not None
+    # Whether it repeats after this edit: the submitted cadence where the form
+    # mentioned one (``None`` is "Does not repeat"), else the stored rule's.
+    if submission.mentions_the_cadence:
+        repeats = submission.named_cadence is not None
     else:
         repeats = rule is not None
     if not repeats:
         return None
-    starts_on = data.get(
-        RECURRENCE_STARTS_ON_KEY, rule.starts_on if rule is not None else None,
+    # The start the edit LEAVES, through the submission's one merge rule.
+    starts_on = submission.starts_on_over(
+        rule.starts_on if rule is not None else None,
     )
     if starts_on is None:
         return None
     return _refuse_start_before_origination(params, starts_on, redirect=redirect)
 
 
-def _cadence_unit_to_settle(
+def _complete_the_cadence(
     rule: RecurrenceRule | None,
-    data: dict[str, Any],
+    submission: RecurrenceSubmission,
     *,
     redirect: RedirectTarget,
-) -> tuple[RecurrenceUnitEnum | None, Response | None]:
-    """Return the cadence the definition repeats on after an edit this door settles.
+) -> RecurrenceSubmission | Response:
+    """Return *submission* naming the cadence the definition repeats on after this edit.
 
     Rule 2's first half (:func:`settle_destination_for_update`), asked once
     the caller knows the edit is one of the two it settles AND the
     destination is a loan: on WHICH cadence the definition repeats afterwards.
     The submitted one; or, for a partial submission that moves a repeating
     definition without restating its cadence, the stored one it leaves alone,
-    which is COMPLETED into *data* so the re-point branch runs and carries
-    the derived start.  A submitted ``None`` is "Does not repeat": nothing
-    repeats after that edit, so there is nothing to derive and no stop to
-    judge (whether the clear itself is allowed is
+    which is COMPLETED into the submission so the re-point branch runs and
+    carries the derived start -- unit, interval and placement, with the
+    per-month ceiling left unmentioned, so the stored ceiling rides through
+    the merge as it would beside any restated cadence.  A cleared cadence is
+    "Does not repeat": nothing repeats after that edit, so there is nothing to
+    derive and no stop to judge (whether the clear itself is allowed is
     ``refuse_recurrence_update``'s first rule); and a one-time transfer moved
-    by a partial submission still does not repeat.
+    by a partial submission still does not repeat.  It was
+    ``_cadence_unit_to_settle`` until plan step R7e, which wrote the stored
+    cadence's three keys into the payload and returned the unit beside a
+    refusal.
 
     Args:
         rule: The definition's stored rule, or ``None`` when it does not
             repeat yet.
-        data: The validated partial payload.  Mutated ONLY for a partial move
-            of a recurring definition, where the stored cadence's three keys
-            are written.
+        submission: What the edit form stated.
         redirect: Where the one refusal here -- a stored cadence the
             application cannot read, so cannot complete -- sends the user.
 
     Returns:
-        ``(unit, refusal)``.  *unit* is the cadence unit the loan branch
-        derives for, or ``None`` when nothing repeats after this edit;
-        *refusal* is set only beside a ``None`` unit, for the
-        unreadable-cadence case.
+        The submission the loan branch settles: *submission* as given (its
+        own cadence, a cleared one, or none for a definition that does not
+        repeat), or completed with the stored cadence -- or the
+        unreadable-cadence refusal redirect.
     """
-    if "recurrence_unit" in data:
-        return data["recurrence_unit"], None
-    if rule is None:
-        return None, None
+    if submission.mentions_the_cadence or rule is None:
+        return submission
     reading = stored_cadence(rule)
     if reading is None:
         flash(UNREADABLE_CADENCE_MESSAGE, "danger")
-        return None, redirect.to_response()
-    data["recurrence_unit"] = reading.cadence.unit
-    data["interval_n"] = reading.cadence.interval_n
-    data["recurrence_placement"] = reading.placement
-    return reading.cadence.unit, None
+        return redirect.to_response()
+    return replace(
+        submission,
+        cadence=SubmittedCadence(
+            unit=reading.cadence.unit,
+            interval_n=reading.cadence.interval_n,
+            placement=reading.placement,
+        ),
+    )
 
 
 @dataclass(frozen=True)

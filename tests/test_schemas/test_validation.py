@@ -21,9 +21,10 @@ from app.schemas.validation.templates import A_CADENCE_IS_REQUIRED
 from tests._stub_period import stub_period_on
 from tests._test_helpers import EMPTY_TAX_LAW, cadence_payload, made_up_law
 from app.services.pay_rhythm import FixedDays
-from app.services.recurrence import MonthReading
+from app.services.recurrence import UNSET, MonthReading
 from app.schemas.validation import (
     RECURRENCE_NEEDS_A_START,
+    RECURRENCE_SUBMISSION_KEY,
     AccountCreateSchema,
     CategoryCreateSchema,
     PaycheckLineCreateSchema,
@@ -1085,15 +1086,15 @@ class TestDeductionCreateSchema:
             ),
         }
         blank = PaycheckLineCreateSchema().load(base)
-        assert "starts_on" not in blank
-        assert "recurrence_end_mode" not in blank
+        assert blank[RECURRENCE_SUBMISSION_KEY].starts_on is UNSET
+        assert blank[RECURRENCE_SUBMISSION_KEY].end_bound is UNSET
 
         stated = PaycheckLineCreateSchema().load({
             **base, "starts_on": "2026-09-01",
             "recurrence_end_mode": "on_date", "end_date": "2027-06-30",
         })
-        assert stated["starts_on"] == date(2026, 9, 1)
-        assert stated["recurrence_end_mode"] == EndsOnDate(on=date(2027, 6, 30))
+        assert stated[RECURRENCE_SUBMISSION_KEY].starts_on == date(2026, 9, 1)
+        assert stated[RECURRENCE_SUBMISSION_KEY].end_bound == EndsOnDate(on=date(2027, 6, 30))
         assert "end_date" not in stated
 
         with pytest.raises(ValidationError) as exc:
@@ -1425,7 +1426,7 @@ class TestTemplateCreateSchemaBoundary:
         data = TemplateCreateSchema().load(
             self._valid_template_data(repeats_on="31")
         )
-        assert data["repeats_on"] == MonthReading(nominal_day=31)
+        assert data[RECURRENCE_SUBMISSION_KEY].reading == MonthReading(nominal_day=31)
 
     def test_starts_on_outside_the_calendar_window_rejected(self):
         """A five-digit-year typo in the date box is a FIELD error.

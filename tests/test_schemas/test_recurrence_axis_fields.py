@@ -39,8 +39,12 @@ from app import ref_cache
 from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
 from app.extensions import db
 from app.models.ref import PeriodPlacement, RecurrenceUnit
-from app.schemas.validation import TemplateCreateSchema, TemplateUpdateSchema
-from app.services.recurrence import MonthReading
+from app.schemas.validation import (
+    RECURRENCE_SUBMISSION_KEY,
+    TemplateCreateSchema,
+    TemplateUpdateSchema,
+)
+from app.services.recurrence import UNSET, MonthReading
 from app.schemas.validation.templates import A_CADENCE_IS_REQUIRED
 from app.schemas.validation.salary import (
     PaycheckLineCreateSchema,
@@ -275,11 +279,21 @@ class TestTheModelledCasesStillPass:
     def test_an_explicit_none_still_loads_on_the_transfer_schemas(
         self, app, label, schema_cls, field, _enum, _accessor, _refusal,
     ):
-        """The transfer form keeps "does not repeat", so its ``None`` loads whole."""
+        """The transfer form keeps "does not repeat", so its ``None`` loads whole.
+
+        **What the loaded value says, since plan step R7e**, which consumes
+        both axes into the one submission: an empty UNIT is "Does not repeat"
+        (the cadence ``None``), and an empty PLACEMENT beside no unit names no
+        cadence at all (``UNSET``) -- the placement is consumed with it and
+        applied nowhere, as the route helpers' pops applied it nowhere before.
+        The refusal arm is unchanged: an explicit ``None`` on either axis
+        loads rather than meeting the field's "Invalid ..." refusal.
+        """
         with app.app_context():
             loaded = schema_cls().load({field: None}, partial=True)
 
-            assert loaded[field] is None, label
+            expected = None if field == "recurrence_unit" else UNSET
+            assert loaded[RECURRENCE_SUBMISSION_KEY].cadence is expected, label
 
     @pytest.mark.parametrize("field,_enum,_accessor,_refusal", _AXES)
     def test_a_non_canonical_spelling_is_still_refused_by_row_id(
@@ -394,8 +408,8 @@ class TestTheTripleMustBeStorable:
                 partial=True,
             )
 
-            assert loaded["recurrence_unit"] is RecurrenceUnitEnum.MONTH
-            assert loaded["recurrence_placement"] is (
+            assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.unit is RecurrenceUnitEnum.MONTH
+            assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.placement is (
                 PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER
             )
 
@@ -416,7 +430,7 @@ class TestTheTripleMustBeStorable:
                 partial=True,
             )
 
-            assert loaded["recurrence_unit"] is RecurrenceUnitEnum.MONTH
+            assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.unit is RecurrenceUnitEnum.MONTH
 
     @pytest.mark.parametrize("interval_n", [1, 2, 3, 7, 26])
     def test_any_positive_paycheck_interval_passes(self, app, interval_n):
@@ -435,7 +449,7 @@ class TestTheTripleMustBeStorable:
                 partial=True,
             )
 
-            assert loaded["interval_n"] == interval_n
+            assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.interval_n == interval_n
 
     @pytest.mark.parametrize(
         ("label", "schema_cls"),
@@ -537,7 +551,7 @@ class TestTheTripleMustBeStorable:
                 partial=True,
             )
 
-            assert loaded["interval_n"] == 2147483647
+            assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.interval_n == 2147483647
 
     @pytest.mark.parametrize(
         ("label", "placement_value"),
@@ -596,7 +610,7 @@ class TestTheTripleMustBeStorable:
                 {"amount": "10.00"}, partial=True,
             )
 
-            assert "recurrence_unit" not in loaded
+            assert loaded[RECURRENCE_SUBMISSION_KEY].cadence is UNSET
 
 
 class TestTheNominalDayMustFitTheFirstOccurrence:
@@ -694,7 +708,7 @@ class TestTheNominalDayMustFitTheFirstOccurrence:
                 partial=True,
             )
 
-            assert loaded["repeats_on"] == MonthReading(nominal_day=31)
+            assert loaded[RECURRENCE_SUBMISSION_KEY].reading == MonthReading(nominal_day=31)
 
     def test_a_MONTHLY_FIRST_cadence_may_carry_one_too(self, app):
         """The cadence the two day questions disagree about.
@@ -724,7 +738,7 @@ class TestTheNominalDayMustFitTheFirstOccurrence:
                 partial=True,
             )
 
-            assert loaded["repeats_on"] == MonthReading(nominal_day=31)
+            assert loaded[RECURRENCE_SUBMISSION_KEY].reading == MonthReading(nominal_day=31)
 
     def test_an_absent_start_skips_the_rule(self, app):
         """A locked "Starts on" control posts nothing, and must stay savable.
@@ -752,8 +766,8 @@ class TestTheNominalDayMustFitTheFirstOccurrence:
                 partial=True,
             )
 
-            assert loaded["repeats_on"] == MonthReading(nominal_day=31)
-            assert "starts_on" not in loaded
+            assert loaded[RECURRENCE_SUBMISSION_KEY].reading == MonthReading(nominal_day=31)
+            assert loaded[RECURRENCE_SUBMISSION_KEY].starts_on is UNSET
 
 
 class TestThePerMonthCeilingFitsTheUnit:
@@ -793,7 +807,7 @@ class TestThePerMonthCeilingFitsTheUnit:
                 partial=True,
             )
 
-        assert loaded["max_per_month"] == 2, schema_label
+        assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.max_per_month == 2, schema_label
 
     @pytest.mark.parametrize("schema_label,schema_cls", _CADENCE_SCHEMAS)
     @pytest.mark.parametrize(
@@ -842,8 +856,8 @@ class TestThePerMonthCeilingFitsTheUnit:
                 partial=True,
             )
 
-        assert "max_per_month" in loaded
-        assert loaded["max_per_month"] is None
+        assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.max_per_month is not UNSET
+        assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.max_per_month is None
 
     def test_no_ceiling_key_states_nothing(self, app):
         """A submission without the key loads without it: absence is preserved."""
@@ -852,7 +866,7 @@ class TestThePerMonthCeilingFitsTheUnit:
                 self._cadence(RecurrenceUnitEnum.MONTH), partial=True,
             )
 
-        assert "max_per_month" not in loaded
+        assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.max_per_month is UNSET
 
 
 class TestTheTransactionSchemasRequireACadence:
@@ -892,7 +906,7 @@ class TestTheTransactionSchemasRequireACadence:
         with app.app_context():
             loaded = TemplateUpdateSchema().load({"name": "Rent"}, partial=True)
 
-            assert "recurrence_unit" not in loaded
+            assert loaded[RECURRENCE_SUBMISSION_KEY].cadence is UNSET
 
 
 
@@ -964,10 +978,10 @@ class TestTheLineSchemasTakeTheCadenceAndTheSpan:
                 },
                 partial=True,
             )
-        assert loaded["recurrence_unit"] is RecurrenceUnitEnum.MONTH, label
-        assert loaded["interval_n"] == 1, label
-        assert loaded["starts_on"] == date(2026, 4, 1), label
-        assert loaded["recurrence_end_mode"] == EndsOnDate(on=date(2027, 1, 1)), label
+        assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.unit is RecurrenceUnitEnum.MONTH, label
+        assert loaded[RECURRENCE_SUBMISSION_KEY].cadence.interval_n == 1, label
+        assert loaded[RECURRENCE_SUBMISSION_KEY].starts_on == date(2026, 4, 1), label
+        assert loaded[RECURRENCE_SUBMISSION_KEY].end_bound == EndsOnDate(on=date(2027, 1, 1)), label
         # The compose consumed both inputs; the shape kept the one it needed.
         assert "end_date" not in loaded and "max_occurrences" not in loaded, label
 

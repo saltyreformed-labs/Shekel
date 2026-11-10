@@ -38,9 +38,7 @@ from app.routes._commit_helpers import (
     handle_stale_form_conflict,
 )
 from app.routes._recurrence_form_helpers import (
-    recurrence_spec_from_form,
     resolve_recurrence_rule_for_update,
-    update_recurrence_rule_from_form,
 )
 from app.routes._recurrence_form_refusals import RecurrenceFormContext
 from app.routes._redirect_target import RedirectTarget
@@ -55,6 +53,7 @@ from app.services.recurrence import (
     RecurrenceResolutionError,
     RecurrenceSpec,
     build_transient_rule,
+    reauthor_rule,
     recurrence_spec,
     resolve,
 )
@@ -70,6 +69,7 @@ from tests._test_helpers import (
     insert_trueup_event,
     loan_params_for,
     make_loan_payment_template,
+    submission_from,
     transient_cadence_rule,
     validated_cadence,
 )
@@ -99,7 +99,13 @@ class _Definition(SimpleNamespace):
 
 
 class TestBuildRecurrenceRuleFromForm:
-    """Helper :func:`recurrence_spec_from_form` contract tests."""
+    """The create builder's contract tests.
+
+    :meth:`~app.services.recurrence.RecurrenceSubmission.authored` since plan
+    step R7e, reached through the schema's own consumer
+    (:func:`~tests._test_helpers.submission_from`); the route helper
+    ``recurrence_spec_from_form`` until then.
+    """
 
     def test_no_pattern_returns_none_and_pops_all_keys(
         self, app, auth_client, seed_user,  # pylint: disable=unused-argument
@@ -131,14 +137,7 @@ class TestBuildRecurrenceRuleFromForm:
                 "starts_on": None,
                 "name": "Should survive",  # non-recurrence key
             }
-            result = recurrence_spec_from_form(
-                data,
-                user_id=seed_user["user"].id,
-                ctx=RecurrenceFormContext(
-                    end_bound=None,
-                    redirect=RedirectTarget("templates.new_template"),
-                ),
-            )
+            result = submission_from(data).authored(seed_user["user"].id)
             assert result is None
             assert data == {"name": "Should survive"}
 
@@ -172,14 +171,7 @@ class TestBuildRecurrenceRuleFromForm:
                 "end_date": None,
             }
             data["starts_on"] = chosen.start_date
-            result = recurrence_spec_from_form(
-                data,
-                user_id=seed_user["user"].id,
-                ctx=RecurrenceFormContext(
-                    end_bound=None,
-                    redirect=RedirectTarget("templates.new_template"),
-                ),
-            )
+            result = submission_from(data).authored(seed_user["user"].id)
             assert isinstance(result, RecurrenceSpec)
             # 1 % 4 = 1.  Read through the resolver since plan step
             # R7c-c dropped the column -- see ``_phase_of``.
@@ -223,14 +215,7 @@ class TestBuildRecurrenceRuleFromForm:
                 # which states one whenever it states a cadence -- the schema
                 # requires the pair on a create (plan step R7c-b).
             }
-            result = recurrence_spec_from_form(
-                data,
-                user_id=seed_user["user"].id,
-                ctx=RecurrenceFormContext(
-                    end_bound=None,
-                    redirect=RedirectTarget("templates.new_template"),
-                ),
-            )
+            result = submission_from(data).authored(seed_user["user"].id)
 
             assert isinstance(result, RecurrenceSpec)
             assert not isinstance(result, Response)
@@ -263,14 +248,7 @@ class TestBuildRecurrenceRuleFromForm:
                 "end_date": None,
                 "starts_on": own_period.start_date,
             }
-            result = recurrence_spec_from_form(
-                data,
-                user_id=seed_user["user"].id,
-                ctx=RecurrenceFormContext(
-                    end_bound=None,
-                    redirect=RedirectTarget("templates.new_template"),
-                ),
-            )
+            result = submission_from(data).authored(seed_user["user"].id)
             assert isinstance(result, RecurrenceSpec)
             assert result.starts_on == own_period.start_date
             # The phase is PERIOD-unit only, whatever the bound's index.
@@ -325,16 +303,10 @@ class TestAnEditCannotRePhaseARule:
                 ),
                 "starts_on": seed_periods[3].start_date,
             }
-            update_recurrence_rule_from_form(
+            reauthor_rule(
                 rule,
-                data,
-                ctx=RecurrenceFormContext(
-                    end_bound=None,
-                    redirect=RedirectTarget(
-                        "templates.edit_template", {"template_id": 1},
-                    ),
-                ),
-                calendar=calendar_for(seed_user["user"].id),
+                submission_from(data).applied_to(rule),
+                calendar_for(seed_user["user"].id),
             )
             assert _phase_of(rule) == 3, (
                 "the edit re-phased a rule whose phase nothing else states"
@@ -373,16 +345,10 @@ class TestAnEditCannotRePhaseARule:
                 "offset_periods": 0,
                 "starts_on": seed_periods[3].start_date,
             }
-            update_recurrence_rule_from_form(
+            reauthor_rule(
                 rule,
-                data,
-                ctx=RecurrenceFormContext(
-                    end_bound=None,
-                    redirect=RedirectTarget(
-                        "templates.edit_template", {"template_id": 1},
-                    ),
-                ),
-                calendar=calendar_for(seed_user["user"].id),
+                submission_from(data).applied_to(rule),
+                calendar_for(seed_user["user"].id),
             )
             assert _phase_of(rule) == 3
             assert data == {"offset_periods": 0}
@@ -419,9 +385,8 @@ class TestAnEditCannotRePhaseARule:
             }
             result = resolve_recurrence_rule_for_update(
                 template,
-                data,
                 ctx=RecurrenceFormContext(
-                    end_bound=None,
+                    submission=submission_from(data),
                     redirect=RedirectTarget(
                         "templates.edit_template", {"template_id": 1},
                     ),
@@ -471,40 +436,29 @@ class TestUpdateKeepsTheStatedStartsPhase:
             # definition owning it.  Transient here -- what this case grades is
             # the phase, which is a property of the resolution.
             rule = build_transient_rule(
-                recurrence_spec_from_form(
+                submission_from(
                     {
                         **validated_cadence(
                             unit=RecurrenceUnitEnum.PERIOD, interval_n=3,
                         ),
                         "starts_on": seed_periods[2].start_date,
                     },
-                    user_id=seed_user["user"].id,
-                    ctx=RecurrenceFormContext(
-                        end_bound=None,
-                        redirect=RedirectTarget(
-                            "templates.edit_template", {"template_id": 1},
-                        ),
-                    ),
-                ),
+                ).authored(seed_user["user"].id),
                 calendar_for(seed_user["user"].id),
             )
             assert _phase_of(rule) == 2
 
-            update_recurrence_rule_from_form(
+            reauthor_rule(
                 rule,
-                {
-                    **validated_cadence(
-                        unit=RecurrenceUnitEnum.PERIOD, interval_n=3,
-                    ),
-                    "starts_on": seed_periods[2].start_date,
-                },
-                ctx=RecurrenceFormContext(
-                    end_bound=None,
-                    redirect=RedirectTarget(
-                        "templates.edit_template", {"template_id": 1},
-                    ),
-                ),
-                calendar=calendar_for(seed_user["user"].id),
+                submission_from(
+                    {
+                        **validated_cadence(
+                            unit=RecurrenceUnitEnum.PERIOD, interval_n=3,
+                        ),
+                        "starts_on": seed_periods[2].start_date,
+                    },
+                ).applied_to(rule),
+                calendar_for(seed_user["user"].id),
             )
 
             assert _phase_of(rule) == 2
@@ -645,8 +599,10 @@ def _phase_of_spec(spec):
 
     :func:`_phase_of`'s sibling for the cases that read what the FORM
     authored rather than what a row stored -- which is what
-    ``recurrence_spec_from_form`` answers since plan step R-F6 split reading a
-    submission from writing it.  Same producer, same question, one hop earlier.
+    :meth:`~app.services.recurrence.RecurrenceSubmission.authored` answers
+    (``recurrence_spec_from_form`` until plan step R7e), since plan step R-F6
+    split reading a submission from writing it.  Same producer, same question,
+    one hop earlier.
 
     Args:
         spec: The :class:`~app.services.recurrence.RecurrenceSpec` to resolve.
@@ -704,15 +660,10 @@ class TestTheColumnSaysWhatTheCadenceSays:
                     unit=unit, interval_n=interval, **stated,
                 ),
             }
-            update_recurrence_rule_from_form(
-                rule, data,
-                ctx=RecurrenceFormContext(
-                    end_bound=None,
-                    redirect=RedirectTarget(
-                        "templates.edit_template", {"template_id": 1},
-                    ),
-                ),
-                calendar=calendar_for(seed_user["user"].id),
+            reauthor_rule(
+                rule,
+                submission_from(data).applied_to(rule),
+                calendar_for(seed_user["user"].id),
             )
             assert "interval_n" not in data, (
                 "interval_n must be popped whether or not it is written, so "
@@ -843,15 +794,10 @@ class TestTheColumnSaysWhatTheCadenceSays:
                 ),
             }
             with pytest.raises(RecurrenceResolutionError) as excinfo:
-                update_recurrence_rule_from_form(
-                    rule, data,
-                    ctx=RecurrenceFormContext(
-                        end_bound=None,
-                        redirect=RedirectTarget(
-                            "templates.edit_template", {"template_id": 1},
-                        ),
-                    ),
-                    calendar=calendar_for(seed_user["user"].id),
+                reauthor_rule(
+                    rule,
+                    submission_from(data).applied_to(rule),
+                    calendar_for(seed_user["user"].id),
                 )
             assert "not one this application can author" in str(excinfo.value)
             assert rule.unit_id == before, (
@@ -922,17 +868,19 @@ class TestAnUpdateMayNotInvertTheWindow:
         )
 
     @staticmethod
-    def _ctx(end_bound):
-        """Return a form context carrying *end_bound* and a real redirect.
+    def _ctx(data, end_bound):
+        """Return a form context carrying *data*'s submission and a real redirect.
 
         Args:
+            data: The post-``load()`` payload, its recurrence keys consumed
+                into the submission (:func:`~tests._test_helpers.submission_from`).
             end_bound: The submitted closing bound, or ``None``.
 
         Returns:
             The :class:`RecurrenceFormContext`.
         """
         return RecurrenceFormContext(
-            end_bound=end_bound,
+            submission=submission_from(data, end_bound),
             redirect=RedirectTarget(
                 "templates.edit_template", {"template_id": 1},
             ),
@@ -950,16 +898,15 @@ class TestAnUpdateMayNotInvertTheWindow:
             The flushed :class:`RecurrenceRule`.
         """
         return build_transient_rule(
-            recurrence_spec_from_form(
+            submission_from(
                 {
                     **validated_cadence(
                         unit=RecurrenceUnitEnum.MONTH, starts_on=starts_on,
                     ),
                     "starts_on": starts_on,
                 },
-                user_id=seed_user["user"].id,
-                ctx=self._ctx(end_bound),
-            ),
+                end_bound,
+            ).authored(seed_user["user"].id),
             calendar_for(seed_user["user"].id),
         )
 
@@ -1018,13 +965,15 @@ class TestAnUpdateMayNotInvertTheWindow:
             with app.test_request_context():
                 refusal = resolve_recurrence_rule_for_update(
                     tpl,
-                    {
-                        **validated_cadence(
-                            unit=RecurrenceUnitEnum.MONTH,
-                            states_a_start=False,
-                        ),
-                    },
-                    ctx=self._ctx(None),
+                    ctx=self._ctx(
+                        {
+                            **validated_cadence(
+                                unit=RecurrenceUnitEnum.MONTH,
+                                states_a_start=False,
+                            ),
+                        },
+                        None,
+                    ),
                     pass_ctx=pass_ctx,
                 )
 
@@ -1048,12 +997,14 @@ class TestAnUpdateMayNotInvertTheWindow:
 
             refusal = resolve_recurrence_rule_for_update(
                 self._template_with(rule, seed_user["user"].id),
-                {
-                    **validated_cadence(
-                        unit=RecurrenceUnitEnum.MONTH, states_a_start=False,
-                    ),
-                },
-                ctx=self._ctx(EndsOnDate(on=date(2026, 5, 31))),
+                ctx=self._ctx(
+                    {
+                        **validated_cadence(
+                            unit=RecurrenceUnitEnum.MONTH, states_a_start=False,
+                        ),
+                    },
+                    EndsOnDate(on=date(2026, 5, 31)),
+                ),
                 pass_ctx=BalanceContext.build(seed_user["user"].id),
             )
 
@@ -1084,12 +1035,14 @@ class TestAnUpdateMayNotInvertTheWindow:
 
             refusal = resolve_recurrence_rule_for_update(
                 self._template_with(rule, seed_user["user"].id),
-                {
-                    **validated_cadence(
-                        unit=RecurrenceUnitEnum.PERIOD, states_a_start=False,
-                    ),
-                },
-                ctx=self._ctx(None),
+                ctx=self._ctx(
+                    {
+                        **validated_cadence(
+                            unit=RecurrenceUnitEnum.PERIOD, states_a_start=False,
+                        ),
+                    },
+                    None,
+                ),
                 pass_ctx=BalanceContext.build(seed_user["user"].id),
             )
             flashed = get_flashed_messages()
@@ -1120,14 +1073,16 @@ class TestAnUpdateMayNotInvertTheWindow:
 
             refusal = resolve_recurrence_rule_for_update(
                 self._template_with(rule, seed_user["user"].id),
-                {
-                    **validated_cadence(
-                        unit=RecurrenceUnitEnum.MONTH,
-                        starts_on=date(2026, 9, 1),
-                    ),
-                    "starts_on": date(2026, 9, 1),
-                },
-                ctx=self._ctx(None),
+                ctx=self._ctx(
+                    {
+                        **validated_cadence(
+                            unit=RecurrenceUnitEnum.MONTH,
+                            starts_on=date(2026, 9, 1),
+                        ),
+                        "starts_on": date(2026, 9, 1),
+                    },
+                    None,
+                ),
                 pass_ctx=BalanceContext.build(seed_user["user"].id),
             )
 
@@ -1150,14 +1105,16 @@ class TestAnUpdateMayNotInvertTheWindow:
 
             outcome = resolve_recurrence_rule_for_update(
                 self._template_with(rule, seed_user["user"].id),
-                {
-                    **validated_cadence(
-                        unit=RecurrenceUnitEnum.MONTH,
-                        starts_on=date(2026, 6, 1),
-                    ),
-                    "starts_on": date(2026, 6, 1),
-                },
-                ctx=self._ctx(EndsOnDate(on=date(2026, 6, 1))),
+                ctx=self._ctx(
+                    {
+                        **validated_cadence(
+                            unit=RecurrenceUnitEnum.MONTH,
+                            starts_on=date(2026, 6, 1),
+                        ),
+                        "starts_on": date(2026, 6, 1),
+                    },
+                    EndsOnDate(on=date(2026, 6, 1)),
+                ),
                 pass_ctx=BalanceContext.build(seed_user["user"].id),
             )
 
@@ -1181,8 +1138,7 @@ class TestAnUpdateMayNotInvertTheWindow:
 
             outcome = resolve_recurrence_rule_for_update(
                 self._template_with(rule, seed_user["user"].id),
-                {"amount": Decimal("10.00")},
-                ctx=self._ctx(None),
+                ctx=self._ctx({"amount": Decimal("10.00")}, None),
                 pass_ctx=BalanceContext.build(seed_user["user"].id),
             )
 
@@ -1219,7 +1175,7 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
         """
         with app.test_request_context():
             rule = build_transient_rule(
-                recurrence_spec_from_form(
+                submission_from(
                     {
                         **validated_cadence(
                             unit=RecurrenceUnitEnum.MONTH,
@@ -1229,32 +1185,21 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
                         "starts_on": date(2026, 4, 30),
                         "repeats_on": MonthReading(nominal_day=31),
                     },
-                    user_id=seed_user["user"].id,
-                    ctx=RecurrenceFormContext(
-                        end_bound=None,
-                        redirect=RedirectTarget(
-                            "templates.edit_template", {"template_id": 1},
-                        ),
-                    ),
-                ),
+                ).authored(seed_user["user"].id),
                 calendar_for(seed_user["user"].id),
             )
             assert rule.nominal_day == 31
 
-            update_recurrence_rule_from_form(
+            reauthor_rule(
                 rule,
-                {
-                    **validated_cadence(
-                        unit=RecurrenceUnitEnum.PERIOD, states_a_start=False,
-                    ),
-                },
-                ctx=RecurrenceFormContext(
-                    end_bound=None,
-                    redirect=RedirectTarget(
-                        "templates.edit_template", {"template_id": 1},
-                    ),
-                ),
-                calendar=calendar_for(seed_user["user"].id),
+                submission_from(
+                    {
+                        **validated_cadence(
+                            unit=RecurrenceUnitEnum.PERIOD, states_a_start=False,
+                        ),
+                    },
+                ).applied_to(rule),
+                calendar_for(seed_user["user"].id),
             )
 
             assert rule.nominal_day is None
@@ -1274,7 +1219,7 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
         """
         with app.test_request_context():
             rule = build_transient_rule(
-                recurrence_spec_from_form(
+                submission_from(
                     {
                         **validated_cadence(
                             unit=RecurrenceUnitEnum.MONTH,
@@ -1284,14 +1229,7 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
                         "starts_on": date(2026, 4, 30),
                         "repeats_on": MonthReading(nominal_day=31),
                     },
-                    user_id=seed_user["user"].id,
-                    ctx=RecurrenceFormContext(
-                        end_bound=None,
-                        redirect=RedirectTarget(
-                            "templates.edit_template", {"template_id": 1},
-                        ),
-                    ),
-                ),
+                ).authored(seed_user["user"].id),
                 calendar_for(seed_user["user"].id),
             )
 
@@ -1310,7 +1248,7 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
         """
         with app.test_request_context():
             rule = build_transient_rule(
-                recurrence_spec_from_form(
+                submission_from(
                     {
                         **validated_cadence(
                             unit=RecurrenceUnitEnum.MONTH,
@@ -1320,38 +1258,27 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
                         "starts_on": date(2026, 4, 30),
                         "repeats_on": MonthReading(nominal_day=31),
                     },
-                    user_id=seed_user["user"].id,
-                    ctx=RecurrenceFormContext(
-                        end_bound=None,
-                        redirect=RedirectTarget(
-                            "templates.edit_template", {"template_id": 1},
-                        ),
-                    ),
-                ),
+                ).authored(seed_user["user"].id),
                 calendar_for(seed_user["user"].id),
             )
 
-            update_recurrence_rule_from_form(
+            reauthor_rule(
                 rule,
-                {
-                    **validated_cadence(
-                        unit=RecurrenceUnitEnum.MONTH,
-                        placement=(
-                            PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER
+                submission_from(
+                    {
+                        **validated_cadence(
+                            unit=RecurrenceUnitEnum.MONTH,
+                            placement=(
+                                PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER
+                            ),
+                            starts_on=date(2026, 4, 30),
+                            nominal_day=31,
                         ),
-                        starts_on=date(2026, 4, 30),
-                        nominal_day=31,
-                    ),
-                    "starts_on": date(2026, 4, 30),
-                    "repeats_on": MonthReading(nominal_day=31),
-                },
-                ctx=RecurrenceFormContext(
-                    end_bound=None,
-                    redirect=RedirectTarget(
-                        "templates.edit_template", {"template_id": 1},
-                    ),
-                ),
-                calendar=calendar_for(seed_user["user"].id),
+                        "starts_on": date(2026, 4, 30),
+                        "repeats_on": MonthReading(nominal_day=31),
+                    },
+                ).applied_to(rule),
+                calendar_for(seed_user["user"].id),
             )
 
             assert rule.nominal_day == 31

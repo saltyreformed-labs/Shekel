@@ -17,8 +17,8 @@ collision, and other DB errors) -- IS factored out, through
 """
 
 import logging
+from dataclasses import replace
 from decimal import Decimal
-from typing import Any
 
 from flask import Response, abort, flash, request, url_for
 from flask_login import current_user
@@ -49,19 +49,19 @@ from app.routes._commit_helpers import (
 from app.routes._form_errors import load_form_or_redirect, load_form_or_refuse
 from app.routes._recurrence_form_helpers import (
     author_recurrence_for_create,
-    recurrence_spec_for_create,
     resolve_recurrence_rule_for_update,
 )
 from app.routes._recurrence_form_refusals import RecurrenceFormContext
-from app.schemas.validation import (
-    RECURRENCE_END_BOUND_KEY,
-    RECURRENCE_MAX_PER_MONTH_KEY,
-    RECURRENCE_REPEATS_ON_KEY,
-    RECURRENCE_STARTS_ON_KEY,
-)
+from app.schemas.validation import RECURRENCE_SUBMISSION_KEY
 from app.services import paycheck_line_kinds, pay_stub_service, payroll_line_cadence
 from app.services.balance_at import BalanceContext
-from app.services.recurrence import MonthReading, NeverEnds, end_bound_from_columns
+from app.services.recurrence import (
+    UNSET,
+    MonthReading,
+    NeverEnds,
+    RecurrenceSubmission,
+    end_bound_from_columns,
+)
 from app.routes.salary._bp import salary_bp
 from app.routes.salary._helpers import (
     _LINE_UPDATE_FIELDS,
@@ -345,18 +345,21 @@ def update_raise(raise_id):
 
 
 def _settle_line_cadence(
-    data: dict[str, Any], ctx: BalanceContext, *, stored: RecurrenceRule | None,
-) -> None:
-    """Write into the payload what the line form leaves to the app about its rule.
+    submission: RecurrenceSubmission,
+    ctx: BalanceContext,
+    *,
+    stored: RecurrenceRule | None,
+) -> RecurrenceSubmission:
+    """State in the submission what the line form leaves to the app about its rule.
 
     The line form authors a cadence through the shared recurrence controls
     (plan step salary:R15-c, ruling **R-SAL31**) and, since plan step
     salary:R18-c (ruling **R-SAL38** (2), amending R-SAL30 and R-SAL31), a
     SPAN: a "Starts on" that may be left blank and an optional closing bound.
-    Before the recurrence seam reads the payload the way it reads a template
-    form's, the two facts a payroll line's rule derives are written in,
-    exactly as ``_loan_destination.settle_first_occurrence`` writes a loan
-    payment's derived start into a transfer form's payload:
+    Before the recurrence seam reads the submission the way it reads a
+    template form's, the two facts a payroll line's rule derives are stated
+    in it, exactly as ``_loan_destination.settle_first_occurrence`` states a
+    loan payment's derived start in a transfer form's:
 
     * a BLANK ``starts_on`` -- the STORED unit's zero at the owner's opening
       payday (rulings **R-SAL30**, **R-SAL36**;
@@ -383,9 +386,10 @@ def _settle_line_cadence(
       differently, and a typed date must not pick the side silently.  What
       *every paycheck* means below the opening is the developer's question,
       not this door's.  The ceiling and the bound are read the way the seam's
-      update door reads them: a PRESENT key (an enabled control, possibly
-      cleared) is what the form said, an ABSENT one (a control the form
-      disabled, or a crafted POST) leaves the STORED value standing -- so a
+      update door reads them, through the submission's merge: a STATED value
+      (an enabled control, possibly cleared) is what the form said, an
+      unmentioned one (a control the form disabled, or a crafted POST)
+      leaves the STORED value standing -- so a
       24 line re-saved with the key missing is still the 24 shape, and a
       bounded line re-saved with the bound's keys missing keeps its stop
       rather than losing its rule.
@@ -406,44 +410,46 @@ def _settle_line_cadence(
     pre-write side makes.
 
     Args:
-        data: The schema-loaded payload, mutated in place.
+        submission: What the line form stated, as the schema composed it.
         ctx: The read pass the route built before any write; its
             ``calendar()`` is what the first occurrence is derived from.
         stored: The rule the line carries today, or ``None`` on a create or
-            for a line with none -- read only for its ceiling, and only when
-            the payload states none.
+            for a line with none -- read only for its ceiling and its bound,
+            and only where the submission does not mention them.
+
+    Returns:
+        The submission the recurrence seam reads: *submission* as given, or
+        with the cadence CLEARED (the every-paycheck spelling), or with the
+        derived start stated.  Read through the submission's own merge rule
+        since plan step R7e, where this read each key's presence for itself
+        (finding **D36**).
     """
-    unit = data.get("recurrence_unit")
-    if unit is None:
-        return
-    ceiling = (
-        data[RECURRENCE_MAX_PER_MONTH_KEY]
-        if RECURRENCE_MAX_PER_MONTH_KEY in data
-        else (stored.max_per_month if stored is not None else None)
+    cadence = submission.named_cadence
+    if cadence is None:
+        return submission
+    ceiling = cadence.ceiling_over(
+        stored.max_per_month if stored is not None else None,
     )
-    bound = (
-        data[RECURRENCE_END_BOUND_KEY]
-        if RECURRENCE_END_BOUND_KEY in data
-        else (
-            end_bound_from_columns(stored.end_date, stored.max_occurrences)
-            if stored is not None else None
-        )
+    bound = submission.end_bound_over(
+        end_bound_from_columns(stored.end_date, stored.max_occurrences)
+        if stored is not None else None,
     )
-    stated_start = data.get(RECURRENCE_STARTS_ON_KEY)
-    spans = stated_start is not None or (
+    spans = submission.starts_on is not UNSET or (
         bound is not None and not isinstance(bound, NeverEnds)
     )
-    if (
-        not spans
-        and payroll_line_cadence.is_every_paycheck(unit, data["interval_n"], ceiling)
+    if not spans and payroll_line_cadence.is_every_paycheck(
+        cadence.unit, cadence.interval_n, ceiling,
     ):
-        data["recurrence_unit"] = None
-        return
-    if stated_start is None:
-        data[RECURRENCE_STARTS_ON_KEY] = payroll_line_cadence.first_occurrence(
-            unit, data["interval_n"], ctx.calendar(),
+        return replace(submission, cadence=None)
+    if submission.starts_on is UNSET:
+        return replace(
+            submission,
+            starts_on=payroll_line_cadence.first_occurrence(
+                cadence.unit, cadence.interval_n, ctx.calendar(),
+            ),
+            reading=MonthReading(),
         )
-        data[RECURRENCE_REPEATS_ON_KEY] = MonthReading()
+    return submission
 
 
 @salary_bp.route("/salary/<int:profile_id>/lines", methods=["POST"])
@@ -461,14 +467,14 @@ def add_line(profile_id):
     through the one door the template forms use
     (:func:`~app.routes._form_errors.load_form_or_redirect`, so a refused
     cadence is heard in its own words rather than as the generic prompt),
-    the derived facts are settled into it
-    (:func:`_settle_line_cadence`), the create preamble every recurrence
-    form runs reads the spec out
-    (:func:`~app.routes._recurrence_form_helpers.recurrence_spec_for_create`),
-    and the rule is written onto the flushed line through the write door
-    itself -- inside the ``try`` below, because the line's flush precedes it
-    there and the name-collision ``IntegrityError`` that flush can surface is
-    the one this route already absorbs.
+    the derived facts are settled into the submission the schema composed
+    (:func:`_settle_line_cadence`), the spec it authors is read out of it
+    (:meth:`~app.services.recurrence.RecurrenceSubmission.authored`, as
+    every recurrence form's create does), and the rule is written onto the
+    flushed line through the write door itself -- inside the ``try`` below,
+    because the line's flush precedes it there and the name-collision
+    ``IntegrityError`` that flush can surface is the one this route already
+    absorbs.
     """
     profile = get_or_404(SalaryProfile, profile_id)
     if profile is None:
@@ -493,12 +499,9 @@ def add_line(profile_id):
     # handed a second, built after the write; whether it may take this one
     # is finding plan#1589's.
     ctx = BalanceContext.build(current_user.id)
-    _settle_line_cadence(data, ctx, stored=None)
-    spec = recurrence_spec_for_create(
-        data,
-        user_id=current_user.id,
-        redirect=_edit_page(profile_id),
-    )
+    spec = _settle_line_cadence(
+        data.pop(RECURRENCE_SUBMISSION_KEY), ctx, stored=None,
+    ).authored(current_user.id)
 
     # Convert percentage inputs (e.g. 6 → 0.06) for storage.
     if data["calc_method_id"] == ref_cache.calc_method_id(CalcMethodEnum.PERCENTAGE):
@@ -760,18 +763,17 @@ def update_line(line_id):
     # once the derived facts are settled in (:func:`_settle_line_cadence`).
     # The pass is the PRE-WRITE one its refusals read (plan step R7d-f) and
     # the calendar the re-author resolves against; the regeneration below is
-    # handed a second, built after the write (finding plan#1589).  The
-    # dispatcher pops every recurrence key, so the field loop below sees none.
+    # handed a second, built after the write (finding plan#1589).  The schema
+    # consumed every recurrence key into the one submission popped here, so
+    # the field loop below sees none.
     ctx = BalanceContext.build(current_user.id)
-    _settle_line_cadence(data, ctx, stored=deduction.recurrence_rule)
     refusal = resolve_recurrence_rule_for_update(
         deduction,
-        data,
         ctx=RecurrenceFormContext(
-            # The closing bound the form stated, composed by the schema
-            # (plan step salary:R18-c); ``None`` when it stated nothing,
-            # which leaves the stored bound alone.
-            end_bound=data.pop(RECURRENCE_END_BOUND_KEY, None),
+            submission=_settle_line_cadence(
+                data.pop(RECURRENCE_SUBMISSION_KEY), ctx,
+                stored=deduction.recurrence_rule,
+            ),
             redirect=_edit_page(profile.id),
         ),
         pass_ctx=ctx,

@@ -8023,12 +8023,12 @@ def validated_cadence(
     unit=None, interval_n=1, placement=None, starts_on=None, nominal_day=None,
     states_a_start=True, max_per_month=None,
 ):
-    """Return one cadence as a SCHEMA hands it to a route helper.
+    """Return one cadence as a SCHEMA's fields deserialize it.
 
-    The post-``load()`` shape: enum members, a real ``int`` and a real
-    ``date``, which is what
-    :func:`app.routes._recurrence_form_helpers.recurrence_spec_from_form`
-    and its siblings read.
+    The deserialized shape: enum members, a real ``int`` and a real ``date``
+    -- what the schema's ``@post_load`` consumes into the submission a route
+    helper reads, and what :func:`submission_from` consumes the same way (the
+    route helpers read this dict's keys directly until plan step R7e).
 
     **``starts_on`` rides WITH the cadence since plan step R7c-b**, and it is
     not optional garnish: the rule's first occurrence is authored (ruling
@@ -8095,6 +8095,47 @@ def validated_cadence(
     if max_per_month is not None:
         payload["max_per_month"] = max_per_month
     return payload
+
+
+def submission_from(data, end_bound=None):
+    """Return the submission a recurrence schema hands a route for *data*.
+
+    Plan step R7e moved what a recurrence form STATES out of the payload's
+    keys and into one :class:`~app.services.recurrence.RecurrenceSubmission`,
+    which the schema's ``@post_load`` composes through
+    :func:`~app.schemas.validation._recurrence_submission.consume_recurrence_submission`.
+    A test that drives a route helper directly with a post-``load()`` payload
+    (:func:`validated_cadence`'s shape) reaches the value through that SAME
+    consumer, so the wire meaning of each field keeps one statement and this
+    helper restates none of it.
+
+    **It CONSUMES *data*'s recurrence keys, as the schema does**: every
+    recurrence key leaves the dict and everything else stays, so a test's
+    ``data == {...}`` assertion still grades "no recurrence key reaches the
+    caller's model constructor" -- the contract the route helpers' own pops
+    held until R7e and the consumer holds now.
+
+    Args:
+        data: A post-``load()`` payload, mutated in place.
+        end_bound: The composed closing bound the form stated, or ``None``
+            for one it did not mention.  A separate argument because the
+            route helpers took it apart from the payload until R7e (the
+            context's ``end_bound``); it is placed where the schema's bound
+            composer leaves it before the consumer reads it.
+
+    Returns:
+        The :class:`~app.services.recurrence.RecurrenceSubmission`.
+    """
+    # Pylint: ``import-outside-toplevel`` -- see :func:`validated_cadence`.
+    # pylint: disable=import-outside-toplevel
+    from app.schemas.validation._recurrence_submission import (
+        RECURRENCE_END_BOUND_KEY,
+        consume_recurrence_submission,
+    )
+
+    if end_bound is not None:
+        data[RECURRENCE_END_BOUND_KEY] = end_bound
+    return consume_recurrence_submission(data)
 
 
 def end_bound_payload(bound=None):

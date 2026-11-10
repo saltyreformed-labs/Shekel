@@ -66,6 +66,7 @@ from tests._test_helpers import (
     loan_params_for,
     make_loan_payment_template,
     make_transfer_template,
+    submission_from,
     validated_cadence,
 )
 from tests.oracles.recurrence_baseline import MONTHLY
@@ -182,10 +183,15 @@ def _selected_mode(body):
     return None
 
 
-def _form_ctx(end_bound):
-    """Return a form context carrying *end_bound* and a real redirect target."""
+def _form_ctx(data, end_bound):
+    """Return a form context carrying *data*'s submission and a real redirect target.
+
+    *data* is a post-``load()`` payload whose recurrence keys are consumed into
+    the submission (:func:`~tests._test_helpers.submission_from`), beside the
+    closing bound *end_bound* (``None`` for one the form did not mention).
+    """
     return RecurrenceFormContext(
-        end_bound=end_bound,
+        submission=submission_from(data, end_bound),
         redirect=RedirectTarget(
             "transfers.edit_transfer_template", {"template_id": 1},
         ),
@@ -546,13 +552,15 @@ class TestTheInvertedWindowRefusalReadsTheDoor:
             with app.test_request_context():
                 refusal = resolve_recurrence_rule_for_update(
                     second,
-                    {
-                        **validated_cadence(
-                            unit=RecurrenceUnitEnum.MONTH, starts_on=moved_to,
-                        ),
-                        "starts_on": moved_to,
-                    },
-                    ctx=_form_ctx(None),
+                    ctx=_form_ctx(
+                        {
+                            **validated_cadence(
+                                unit=RecurrenceUnitEnum.MONTH, starts_on=moved_to,
+                            ),
+                            "starts_on": moved_to,
+                        },
+                        None,
+                    ),
                     pass_ctx=ctx,
                 )
                 flashed = get_flashed_messages()
@@ -602,7 +610,7 @@ class TestAnUnrelatedEditLeavesTheStoredBoundAlone:
     def test_a_cadence_edit_writes_the_stored_bound_back_unchanged(
         self, app, seed_user, seed_periods,
     ):
-        """``update_recurrence_rule_from_form`` re-authors the stored bound on every edit.
+        """The re-point branch re-authors the stored bound on every edit.
 
         For the standing payment the form locks the control and posts nothing
         about it, so the re-author carries the stored value through
@@ -622,10 +630,12 @@ class TestAnUnrelatedEditLeavesTheStoredBoundAlone:
             with app.test_request_context():
                 outcome = resolve_recurrence_rule_for_update(
                     tpl,
-                    validated_cadence(
-                        unit=RecurrenceUnitEnum.MONTH, states_a_start=False,
+                    ctx=_form_ctx(
+                        validated_cadence(
+                            unit=RecurrenceUnitEnum.MONTH, states_a_start=False,
+                        ),
+                        None,
                     ),
-                    ctx=_form_ctx(None),
                     pass_ctx=ctx,
                 )
             db.session.flush()

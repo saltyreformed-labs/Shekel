@@ -20,10 +20,10 @@ from app.services.payroll_basis import PayrollBasis
 from app.services.salary_paydays import paycheck_on
 from app.services.tax_config_service import (
     configs_by_year,
-    load_tax_configs_for_year,
     profile_tax_series,
 )
 from app.tax_law import TaxLaw
+from tests._tax_configs import tax_configs_for
 from tests._test_helpers import (
     add_test_pay_stub,
     made_up_federal,
@@ -292,7 +292,7 @@ class TestAStubIsPricedOnItsOwnYearsLaw:
         with pytest.raises(ValueError, match="R-SAL77"):
             paycheck_calculator.project_salary(
                 PayrollBasis(profile, ctx.calendar()), [period],
-                load_tax_configs_for_year(profile, 2027),
+                tax_configs_for(profile, 2027),
             )
 
     def test_a_per_year_law_missing_the_stubs_year_is_refused(self, owner, db):

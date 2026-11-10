@@ -574,7 +574,8 @@
          ``entry_lists`` (built by ``entry_service.build_entry_lists_dict``
          on the route, passed via ``render_template`` context) carries
          ``entries`` / ``remaining`` / ``out_of_period_ids`` /
-         ``posted_ids`` / ``accounts`` / ``removals`` / ``owner_viewing`` for every
+         ``posted_ids`` / ``accounts`` / ``tick_cards`` / ``cards_on`` /
+         ``on_a_card`` / ``removals`` / ``owner_viewing`` for every
          envelope txn; the include uses those plus ``today`` (also from
          context) and the default ``editing_id=None`` to mirror what
          ``_render_entry_list`` in ``app/routes/entries.py`` produces per
@@ -618,10 +619,14 @@
              an Undefined is falsy SILENTLY, which would hide the tick on every
              initial render while the HTMX refresh drew it. #}
           {% set tick_cards = _entry_data.tick_cards %}
-          {# The card each purchase is on, which the edit form's tick and pick
-             are drawn as (plan task plan#3142).  `cards_on[entry.id]` over an
-             Undefined raises, rather than drawing the tick off. #}
+          {# The card each purchase is on, which the edit form's pick is drawn
+             as (plan task plan#3142).  `cards_on[entry.id]` over an
+             Undefined raises, rather than drawing the pick unset. #}
           {% set cards_on = _entry_data.cards_on %}
+          {# Whether each purchase is on a card, which the CC badge and the
+             tick read (plan task plan#3143).  `on_a_card[entry.id]` over an
+             Undefined raises too. #}
+          {% set on_a_card = _entry_data.on_a_card %}
           {# What each purchase's X and CC un-tick would free, and whether the
              session's user may be shown it (plan step credit_card:CC-5-4a-5).
              The same trap again: `removals[entry.id]` over an Undefined

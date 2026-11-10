@@ -670,9 +670,11 @@ def _remove(row: PlannedRemoval, owner_id: int) -> None:
     But a purchase the create arm records is born a debit one
     (:func:`~._create._born_purchase` states no card flag), and the card
     total counts ``is_credit`` alone (``app.utils.entry_partition``), so it
-    becomes its envelope's last card purchase only by a CC tick -- an edit,
-    which moves its revision, and :func:`_subject_removal` refuses an edited
-    subject before anything is written.  Neither arm passes a press, so each
+    never becomes its envelope's last card purchase: no door writes the flag
+    since plan task plan#3142, whose CC tick moves a purchase onto the card
+    instead.  That move is an edit, which moves its revision, and
+    :func:`_subject_removal` refuses an edited subject before anything is
+    written.  Neither arm passes a press, so each
     removal is a press of one call naming nothing, which refuses any line it
     would free (``match_withdrawal.take_out_of_matches``, ruling
     **R-CC127**): a fence the arguments above keep from firing.

@@ -1,11 +1,11 @@
-"""Tests for the shared credit-vs-debit entry partition (deep-hunt #75).
+"""Tests for the CC Payback's flagged-vs-unflagged entry partition (deep-hunt #75).
 
-``partition_entries`` is the single definition of "which entries are
-credit-card purchases vs direct debits," shared by
-``entry_service.compute_entry_sums`` (which sums each group) and
-``entry_credit_workflow.sync_entry_payback`` (which needs the credit-entry
-list to size and link the CC Payback).  This file pins the partition
-contract so both callers share one tested rule:
+``partition_entries`` is the single definition of "which purchases does the
+CC Payback repay," read by ``entry_credit_workflow.sync_entry_payback``
+(which needs the flagged list to size and link the CC Payback).
+``entry_service.compute_entry_sums`` read it too until plan task plan#3143,
+which splits the cell's "on CC" sum on ``movement_account.on_a_card``
+instead.  This file pins the partition contract:
 
 - an entry is a credit iff ``entry.is_credit`` is true;
 - the return order is ``(debit_entries, credit_entries)``, mirroring
@@ -22,7 +22,7 @@ _FakeEntry = namedtuple("_FakeEntry", ["eid", "is_credit"])
 
 
 class TestPartitionEntries:
-    """Pin the credit-vs-debit partition shared across both consumers."""
+    """Pin the flagged-vs-unflagged partition the CC Payback is sized from."""
 
     def test_empty_list_returns_two_empty_lists(self):
         """No entries -> two empty groups (the no-op base case)."""

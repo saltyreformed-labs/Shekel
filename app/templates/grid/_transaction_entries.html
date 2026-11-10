@@ -24,7 +24,17 @@
                           (plan task plan#3142).
      cards_on          -- {entry id: Account or None}: the card each purchase
                           is on (``movement_account.purchase_card``), which
-                          the edit form's tick and pick are drawn as.
+                          the edit form's pick is drawn as and its tick's
+                          title and caption name.
+     on_a_card         -- {entry id: bool}: whether each purchase is on a card
+                          (``movement_account.on_a_card``: the old CC flag, or
+                          a card other than the row's account; plan task
+                          plan#3143), the one predicate the cell's "on CC"
+                          sum reads too.  The display row's CC badge and the
+                          edit form's tick, drawn ticked, read it; the posted
+                          indicator does not (its comment says why).  A map,
+                          so a caller that forgets it raises rather than
+                          drawing False.
      remaining         -- Decimal remaining budget (negative = overspent)
      today             -- the USER's today (display timezone): the add form's
                           default purchased_on AND both pickers' ``max``.
@@ -153,13 +163,14 @@
           plan#2888): ticked, onto the owner's card; un-ticked, back to the
           row's account; the "Which card" pick, drawn for two or more cards,
           moves it to another card.  It reads the purchase as the door does
-          (`cards_on`, ``movement_account.purchase_card``), so an untouched
-          Save posts back what it drew and moves nothing.  Drawn where there
-          is a card it could mean, where the purchase is already on one, and
-          on an old flagged line, which keeps its flag while ticked and loses
-          it when un-ticked (its CC payback deleted or re-priced) and draws no
-          pick: it is on no card to name.  It posts as `is_credit`, loaded as
-          `on_card`, as the add tick does.
+          (`on_a_card` ticks it, ``movement_account.on_a_card``; `cards_on`
+          picks its card, ``movement_account.purchase_card``), so an
+          untouched Save posts back what it drew and moves nothing.  Drawn
+          where there is a card it could mean and where the purchase is on a
+          card already: on one, or an old flagged line, which keeps its flag
+          while ticked and loses it when un-ticked (its CC payback deleted or
+          re-priced) and draws no pick: it is on no card to name.  It posts
+          as `is_credit`, loaded as `on_card`, as the add tick does.
 
           **What the save would FREE is named below the button row and posted
           back** (rulings R-CC80 / R-CC127): a move takes the purchase out of
@@ -171,9 +182,9 @@
           (R-CC132), and its door refuses a save that would free one, naming
           the purchase or the payback. -#}
       {% set removal = removals[entry.id] %}
-      {% set on_card = cards_on[entry.id] %}
+      {% set its_card = cards_on[entry.id] %}
       {% set draws_tick = not purchases_closed
-         and (tick_cards or on_card or entry.is_credit) %}
+         and (tick_cards or on_a_card[entry.id]) %}
       {% set draws_pick = draws_tick and not entry.is_credit
          and tick_cards | length > 1 %}
       {% set uncredit_caption = owner_viewing and draws_tick and entry.is_credit
@@ -277,13 +288,13 @@
           <input type="checkbox" name="is_credit" value="true"
                  class="form-check-input" id="edit-cc-{{ entry_list_host_id }}-{{ entry.id }}"
                  {%- if uncredit_caption or move_caption %} aria-describedby="cc-withdraws-{{ entry_list_host_id }}-{{ entry.id }}"{% endif %}
-                 {{ 'checked' if entry.is_credit or on_card else '' }}>
+                 {{ 'checked' if on_a_card[entry.id] else '' }}>
           <input type="hidden" name="is_credit" value="false">
           {#- The form's word that the box is drawn as the purchase IS, not as
               the old CC flag alone (the schema's `tick_drawn`). -#}
           <input type="hidden" name="tick_drawn" value="true">
           <label class="form-check-label small" for="edit-cc-{{ entry_list_host_id }}-{{ entry.id }}"
-                 title="{% if on_card %}On {{ on_card.name }}{% elif entry.is_credit %}Repaid by this envelope's CC payback{% else %}Bought on {{ tick_cards[0].name if tick_cards | length == 1 else 'a credit card' }}{% endif %}">CC</label>
+                 title="{% if its_card %}On {{ its_card.name }}{% elif entry.is_credit %}Repaid by this envelope's CC payback{% else %}Bought on {{ tick_cards[0].name if tick_cards | length == 1 else 'a credit card' }}{% endif %}">CC</label>
         </div>
         {#- The pick names the card the purchase is on; with none of the
             offered cards its own (an archived card), its prompt stands and
@@ -294,7 +305,7 @@
                 title="The card this purchase went on, when CC is ticked">
           <option value="">Which card</option>
           {% for card in tick_cards %}
-          <option value="{{ card.id }}"{% if on_card and card.id == on_card.id %} selected{% endif %}>{{ card.name }}</option>
+          <option value="{{ card.id }}"{% if its_card and card.id == its_card.id %} selected{% endif %}>{{ card.name }}</option>
           {% endfor %}
         </select>
         {% endif %}
@@ -313,9 +324,9 @@
       <div class="form-text" id="cc-withdraws-{{ entry_list_host_id }}-{{ entry.id }}">
         Un-ticking CC deletes this envelope's CC payback and {{ frees_lines(removal.uncredit) }}.
       </div>
-      {%- elif move_caption and on_card %}
+      {%- elif move_caption and its_card %}
       <div class="form-text" id="cc-withdraws-{{ entry_list_host_id }}-{{ entry.id }}">
-        Moving this off {{ on_card.name }}, by un-ticking CC{{ ' or picking another card' if draws_pick }}, {{ frees_lines(removal.own) }}.
+        Moving this off {{ its_card.name }}, by un-ticking CC{{ ' or picking another card' if draws_pick }}, {{ frees_lines(removal.own) }}.
       </div>
       {%- elif move_caption %}
       <div class="form-text" id="cc-withdraws-{{ entry_list_host_id }}-{{ entry.id }}">
@@ -334,7 +345,9 @@
       <span class="text-muted fs-xs">
         {{ entry.purchased_on.strftime('%m/%d') }}
       </span>
-      {% if entry.is_credit %}
+      {#- On a card (plan task plan#3143): the old flag, or a card other than
+          the row's account, whose chip below names it. -#}
+      {% if on_a_card[entry.id] %}
       <span class="badge bg-warning-subtle text-warning" title="Credit card">CC</span>
       {% endif %}
       {#- The account this purchase's money moved through, when it is not the
@@ -364,8 +377,15 @@
          manual toggle it replaced let the indicator and the projection be set
          against each other, and the fact that is actually wrong when this is
          wrong is the POSTING DATE -- which the edit form above carries.  Hidden
-         for credit entries: those never touch checking (the CC Payback workflow
-         settles them) so the question does not apply. #}
+         for an old FLAGGED line alone: it is a movement on no account (every
+         fold and every statement offer leaves out ``is_credit``, and its CC
+         Payback settles it), so its posting day moves nothing and the question
+         does not apply.  NOT for every purchase on a card (`on_a_card`, the
+         badge's predicate; the review of plan task plan#3143): a purchase the
+         tick or "Paid from" put on a card is a movement ON the card, in flight
+         until its posting day and booked on it after
+         (``cash_ledger._movement_scope``), and the card's reconcile panel
+         offers it until then, so whether it has posted is the card's to show. #}
       {% set has_posted = entry.id in posted_ids %}
       <span class="{% if has_posted %}text-success{% else %}text-muted{% endif %}"
             title="{% if has_posted %}Posted {{ entry.settled_on.strftime('%b %-d') }} -- this money has left your account, so its budget is not held back again{% else %}Not yet seen on a statement, so the budget is still held back.  Confirm it at your next balance true-up.{% endif %}">

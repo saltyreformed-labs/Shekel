@@ -43,12 +43,12 @@ from app.services.entry_service._removals import (
 )
 from app.services.movement_account import (
     PurchaseChoices,
+    on_a_card,
     purchase_card,
     purchase_choices,
 )
 from app.services.pay_calendar import DerivedPeriod
 from app.services.transfer_legs import PlanItem
-from app.utils.entry_partition import partition_entries
 from app.utils.money import percent_complete
 
 
@@ -103,7 +103,12 @@ def purchase_amount(magnitude: Decimal, *, records_a_refund: bool) -> Decimal:
 def credit_total_moves(
     entry: TransactionEntry, valid_updates: dict, *, flag_after: bool,
 ) -> bool:
-    """Return whether applying *valid_updates* moves the envelope's credit total.
+    """Return whether applying *valid_updates* moves the envelope's flagged total.
+
+    The total the CC Payback repays: the envelope's purchases carrying the old
+    flag (``app.utils.entry_partition``), and NOT the cell's "on CC" figure,
+    which counts a purchase on a card too (:func:`compute_entry_sums`, plan
+    task plan#3143) and which no payback repays.
 
     Finding **N-323**: the payback sync refuses a settled payback's re-derive
     only for a write that moves the total.  Asked as the entry's own
@@ -144,19 +149,39 @@ def credit_total_moves(
 def compute_entry_sums(
     entries: list[TransactionEntry],
 ) -> tuple[Decimal, Decimal]:
-    """Compute (sum_debit, sum_credit) from a list of entries.
+    """Compute (sum_debit, sum_credit) from a list of entries: off a card, and on one.
 
-    Pure function -- no database access.
+    **The credit half is every purchase ON A CARD** (plan task plan#3143,
+    :func:`~app.services.movement_account.on_a_card`): the old CC flag, or a
+    purchase on a card other than its row's account, which is how the CC tick
+    files one since plan task plan#2930.  It split on the flag alone
+    (``app.utils.entry_partition``) until then, so the cell's "includes $X on
+    CC" missed every ticked purchase: a $120.00 tick in an $800.00 envelope
+    said nothing on CC, and beside an old $100.00 flagged line a $50.00 tick
+    said "includes $100.00 on CC".  That partition is the CC payback's, which
+    repays the flagged lines alone, and it stays there.
+
+    The two halves partition *entries* (one boolean per purchase), so
+    ``sum_debit + sum_credit`` is every purchase's sum whatever the split,
+    which is all the dashboard's bill row reads of it.
+
+    The predicate reads each purchase's row, which is the caller's and in
+    the identity map, and the account of a purchase off its row's account.
 
     Args:
-        entries: List of TransactionEntry objects.
+        entries: List of TransactionEntry objects, each one's
+            ``transaction`` and ``account`` loadable.
 
     Returns:
         Tuple of (sum_debit, sum_credit) as Decimals.
     """
-    debit_entries, credit_entries = partition_entries(entries)
-    sum_debit = sum((e.amount for e in debit_entries), Decimal("0"))
-    sum_credit = sum((e.amount for e in credit_entries), Decimal("0"))
+    sum_debit = Decimal("0")
+    sum_credit = Decimal("0")
+    for entry in entries:
+        if on_a_card(entry):
+            sum_credit += entry.amount
+        else:
+            sum_debit += entry.amount
     return sum_debit, sum_credit
 
 
@@ -194,9 +219,13 @@ def build_entry_sums_dict(
     the cell's numerator, its denominator and the balance row beside it are one
     figure rather than three reads that agree by luck.
 
-    Pure function -- no database access beyond what was already loaded
-    on the Transaction objects (expects entries to be accessible, either
-    via eager load or lazy access).
+    No write, and no database access beyond what is loaded on the
+    Transaction objects (expects entries to be accessible, either via eager
+    load or lazy access) but for one: the "on CC" split reads the account of
+    each purchase off its row's account (:func:`compute_entry_sums`), a
+    primary-key load the session answers from its identity map when the
+    request has read that account already (the cash-flow set's members) and
+    with one ``SELECT`` per such account when it has not (an archived card).
 
     Args:
         transactions: List of Transaction objects with entries accessible.
@@ -209,7 +238,10 @@ def build_entry_sums_dict(
     Returns:
         dict mapping transaction ID to {"debit": Decimal, "credit": Decimal,
         "total": Decimal, "count": int, "budget": Decimal,
-        "remaining": Decimal, "over_budget": bool, "pct": Decimal}.  Empty dict
+        "remaining": Decimal, "over_budget": bool, "pct": Decimal}, the
+        ``credit`` the purchases on a card, which the cell's title and the
+        phone card's label say are "on CC" (:func:`compute_entry_sums`, plan
+        task plan#3143).  Empty dict
         if no transactions have entries.  ``pct`` is the entries-to-estimate ratio clamped
         to [0, 100] via :func:`pct_complete`; it drives the mobile
         progress-bar's ``data-progress-pct`` attribute on the unified
@@ -465,7 +497,7 @@ def entry_list_view(
             silent withdrawal ruling **R-CC80** forbids.
 
     Returns:
-        The nine keys the template consumes:
+        The ten keys the template consumes:
 
           - ``entries``: the list as given.
           - ``accounts``: *choices*' accounts.  The template renders its
@@ -483,9 +515,17 @@ def entry_list_view(
           - ``cards_on`` (dict[int, Account | None]): the card each purchase
             is on (``movement_account.purchase_card``, which the edit door
             reads too), for the edit form's tick and its pick (plan task
-            plan#3142): ticked, and the pick naming that card, where it is on
-            one, so an untouched Save posts back what the door reads and
-            moves nothing.
+            plan#3142): the pick naming that card, where it is on one, so an
+            untouched Save posts back what the door reads and moves nothing.
+          - ``on_a_card`` (dict[int, bool]): whether each purchase is on a
+            card (:func:`~app.services.movement_account.on_a_card`, the
+            predicate the cell's "on CC" sum reads, plan task plan#3143):
+            the list's CC badge and the edit form's tick drawn ticked.  Not
+            the posted indicator, which is every purchase's but an old
+            flagged line's (the predicate's docstring says why).  A map rather than a set, so a
+            caller that forgets the key raises at ``on_a_card[entry.id]``
+            rather than answering ``False``: the trap the posted indicator
+            fell in on every initial render (this docstring's opening).
           - ``remaining`` (Decimal): the row's resolved budget minus the sum
             of all entries (debit + credit), via :func:`compute_remaining`.
           - ``out_of_period_ids`` (set[int]): entry IDs whose ``purchased_on``
@@ -520,6 +560,7 @@ def entry_list_view(
         "accounts": choices.accounts,
         "tick_cards": choices.cards,
         "cards_on": {entry.id: purchase_card(entry) for entry in entries},
+        "on_a_card": {entry.id: on_a_card(entry) for entry in entries},
         "remaining": compute_remaining(budget, entries),
         "out_of_period_ids": {
             e.id for e in entries if not period.covers(e.purchased_on)

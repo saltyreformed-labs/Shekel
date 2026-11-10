@@ -77,7 +77,8 @@ body of ``_re_point`` until the purchase door became its second caller; the
 entry doors cannot reach that package's private module, and a second spelling
 of "out of its matches, unlinked, on the new account" would part the first
 time one of them learned a consequence the other did not (rule 14: move the
-leaf).  :func:`purchase_card` is what the tick reads a purchase as.
+leaf).  :func:`purchase_card` is what the tick reads a purchase as, and
+:func:`on_a_card` what every screen marks CC (plan task plan#3143).
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): no Flask imports;
 the gate and the card answers read the named account and the owner's set and
@@ -314,6 +315,68 @@ def purchase_card(entry: TransactionEntry) -> Account | None:
     if entry.account_id == entry.transaction.account_id:
         return None
     return entry.account if is_revolving(entry.account) else None
+
+
+def on_a_card(entry: TransactionEntry) -> bool:
+    """Return whether a recorded purchase's money went on a credit card: what the screen marks CC.
+
+    **The one predicate the screens mark a purchase CC by** (plan task
+    plan#3143): the grid cell's and the phone card's "includes $X on CC"
+    (``entry_service.compute_entry_sums``), and the purchase list's CC badge
+    and its edit tick's checked state (``entry_service.entry_list_view``),
+    so the cell's figure is the sum of the purchases the list badges.  Until
+    then the screen had two spellings: the sum and the badge read the old
+    flag alone, so a purchase the CC tick put on the card (plan tasks
+    plan#2930, plan#3142), which carries no flag, read as a checking
+    purchase beside an edit tick drawn ticked.
+
+    Two arms, as the edit tick reads a purchase (``entry_service._details.
+    tick_edit``): the old CC flag, the cheat's spelling for the lines that
+    carry it until plan#1034's re-plan converts them, or the card the
+    purchase is on (:func:`purchase_card`).
+
+    "On a card" is the tick's question, and the tick reads
+    :func:`purchase_card`, which settles two neighbouring readings:
+
+    * **it is NARROWER than the money side's "not on its row's account"**
+      (``cash_ledger._cash_leg._moves_elsewhere``, the flag or an account
+      other than the row's) by every purchase on an account other than its
+      row's that is not a card: one paid from Checking under a row that
+      lives on a card, or under a row on Savings (ruling **R-CC39**: every
+      row's "Paid from" offers its own account, Checking and the cards).  It
+      is on no card, and badging it CC would say the opposite of its account
+      chip.  The reconcile panel's cash figure partitions on
+      ``_moves_elsewhere`` and not on this, rightly: it says what the
+      panel's own statement will not show, wherever the rest went (its
+      caption calls all of that "on a card", which plan#3150 rewords);
+    * **and it is not "on a revolving account"**, which would add a purchase
+      on the card a row lives on.  That purchase is on its row's account,
+      which ``_moves_elsewhere`` does not count either: the row is the
+      card's, its chip says so once, and its edit form draws no tick
+      (:func:`tick_cards`), so a CC badge would mark a purchase its own form
+      cannot un-tick.  A purchase on ANOTHER card under that row is on a
+      card (its chip names that card, and its tick, un-ticked, moves it onto
+      the row's), so the row's cell counts it, and only it, on CC.
+
+    **What it does not decide: the posted indicator.**  That says whether a
+    purchase's posting day is recorded, which the balance and the reconcile
+    panel of the account it is on read for every purchase but an old
+    flagged line (which is on no account's books).  A purchase on a card is
+    in flight on the card until then (``cash_ledger._movement_scope``), so
+    the list draws the indicator for every purchase but a flagged one.
+
+    No money reader asks this: the CC payback repays the flagged lines alone
+    (``app.utils.entry_partition``), and each cash leg is its own account's
+    (``cash_ledger._cash_leg``).
+
+    Args:
+        entry: The purchase, its ``transaction`` and ``account`` loadable.
+
+    Returns:
+        ``True`` when the purchase carries the old flag or is on a card other
+        than its row's account.
+    """
+    return entry.is_credit or purchase_card(entry) is not None
 
 
 def the_card(

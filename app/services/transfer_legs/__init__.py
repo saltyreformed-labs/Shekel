@@ -171,10 +171,11 @@ itself for the seam pass, an endpoint move and the statement link -- for the
 transfer's hard delete, which hands
 the removal act every entry its transfer holds
 (:func:`held_transfer_entries`), and for the loan posting probe
-(``loan_posting_service._sync``, ledger row **BAL-579**), which loads the
-movements it resolves through :func:`movement_parent_loads` where it spelled
-that chain inline.  The loan walk's refusal of an un-dated settle
-(``loan_ledger._visible.payment_visible_on``) stopped reaching a movement
+(``loan_posting_service._sync``, ledger row **BAL-579**), which loaded the
+movements it resolved through :func:`movement_parent_loads` where it spelled
+that chain inline, until plan task plan#3133 deleted it.  The loan walk's
+refusal of an un-dated settle (``loan_ledger._visible.payment_visible_on``)
+stopped reaching a movement
 through a shadow at that leaf too: it named the shadow's ``transaction_id``
 and then the transfer, until plan step ``balance:X-bi-6-5``'s third leaf
 deleted it, the status-band rule refusing a settled side's un-dated record

@@ -1,11 +1,12 @@
 """The ledger worked out from the records: every line, for one owner and scenario.
 
-The read X-ew's first leaf builds (plan step plan#2513, plan task plan#2526):
-for one owner and one scenario, every line the stored journal holds a net for,
+The read X-ew's first leaf built (plan step plan#2513, plan task plan#2526):
+for one owner and one scenario, every line the stored journal held a net for,
 worked out from today's records by the very rules the stored ledger's writers
-post from -- built BESIDE the store, proven equal to it to the cent by the
+posted from -- built BESIDE the store, proven equal to it to the cent by the
 parity test (plan#2527) and the production run (plan#2528), and the one read
-X-ew's second leaf moves every report onto.  Three kinds of line:
+X-ew's second leaf (plan#2515) moved every report onto before plan task
+plan#3133 deleted the writers.  Three kinds of line:
 
 * **the movement lines**: each dated, non-card movement under a contributing
   parent books its cash leg on the account its money moved through and its
@@ -22,8 +23,7 @@ X-ew's second leaf moves every report onto.  Three kinds of line:
 
 **It issues no write of its own and creates no row of any table**: every
 line names its chart account by a :class:`~._chart.ChartKey` (ruling
-plan#2518), where the writers resolve each key to a stored chart row and mint
-the rows they lack.  **Its queries read the caller's pending rows as
+plan#2518), never by a stored chart row.  **Its queries read the caller's pending rows as
 flushed**: its first query autoflushes whatever the session holds pending,
 as every query in the session does, so a balance check or a movement a
 write has staged is read rather than missed -- which is why the read leaves
@@ -49,14 +49,6 @@ the number of accounts, loans or movements: they depend only on which kinds of
 record the owner holds (an escrow line's versions, a settled payment's
 paychecks, a $0.00 close's records are each one statement when any exists,
 and the owner's pay calendar is loaded when any correction is to be filed).
-
-**A scenario the store has never reconciled can differ from it by
-construction**, and that difference is the store's: its account and loan
-writers reconcile the owner's baseline and each scenario already holding a
-posting on the account (``account_posting_service``'s
-``sync_account_anchor_postings_all_scenarios``, ``loan_posting_service``'s
-twin), while this read answers whichever scenario it is asked for.  Today
-every owner holds only a baseline.
 """
 
 from collections.abc import Callable, Iterable
@@ -99,8 +91,9 @@ class LedgerLine:
     The worked-out twin of one stored posting with its journal header's
     filing (``budget.account_postings`` under ``budget.journal_entries``):
     what a statement nets by key, paycheck and day.  A line of ``$0.00`` is
-    never one -- the writers post no zero leg, and a merged correction key can
-    hold one (two same-day true-ups that cancel).
+    never one -- the stored ledger's writers posted no zero leg and the read
+    keeps that rule, and a merged correction key can hold one (two same-day
+    true-ups that cancel).
 
     Attributes:
         key: The chart account the line is booked on (ruling plan#2518).
@@ -139,9 +132,10 @@ def worked_out_lines(
     The movement lines first, ascending by movement id, then each account's
     correction lines, ascending by account id and in its walk's order.
     Every account the owner holds is walked, archived ones included: an
-    archived account's corrections still stand, as the writers' account set
-    (``account_posting_service._sync._non_loan_accounts_id_query``) keeps
-    them.
+    archived account's corrections still stand, as the stored ledger's
+    writers' account set kept them
+    (``account_posting_service._sync._non_loan_accounts_id_query``, until
+    plan task plan#3133 deleted it).
 
     The owner's accounts are loaded once, up front, and held for the read:
     each movement's account (its cash line's key) and each walked account
@@ -155,13 +149,9 @@ def worked_out_lines(
     in one statement by their ids.
 
     **The owner's pay calendar is asked of *calendar_source* only when a
-    correction is to be filed**, as the writers load it
-    (``account_posting_service``'s ``reconcile_account_anchor_corrections``
-    returns before it on an empty corrections list,
-    ``loan_posting_service``'s ``reconcile_loan_corrections`` on an empty
-    walk, which each loan here answers by the same
-    :attr:`~app.services.loan_ledger.LoanLedgerWalk.is_empty`): an owner
-    with no correction to file asks it nothing, so one holding neither a pay
+    correction is to be filed** (an account framed a correction, or a loan's
+    walk is not :attr:`~app.services.loan_ledger.LoanLedgerWalk.is_empty`):
+    an owner with no correction to file asks it nothing, so one holding neither a pay
     schedule (which :func:`~app.services.pay_calendar.calendar_for` refuses)
     nor a correction reads its ledger rather than that refusal.
 
@@ -191,8 +181,7 @@ def worked_out_lines(
             pay schedule (from :func:`app.services.pay_calendar.calendar_for`
             behind *calendar_source*), or a correction has no materialised
             paycheck to file in (from
-            :meth:`~app.services.pay_calendar.PayCalendar.filing_period`) --
-            the refusals the writers raise for the same states.
+            :meth:`~app.services.pay_calendar.PayCalendar.filing_period`).
         ValueError: *calendar_source* answered another owner's calendar,
             whose paychecks would file this owner's corrections; or an
             account whose projection kind has no true-up counter rule
@@ -239,8 +228,8 @@ def accounts_hold_lines(accounts: Iterable[Account]) -> bool:
     at both of its doors: a line is an account's when its key names the account
     as its record (:func:`._chart.chart_record_type`), which is the account's own
     line, its correction counters and a loan's components, and never a category
-    or an owner bucket.  What the store holds with no record behind it is no
-    line, so a settle and its revert leave an account holding none.
+    or an owner bucket.  A line is worked out from the records as they stand,
+    so a settle and its revert leave an account holding none.
 
     Each owner's ledger is read once per scenario, by the one read the statements
     fold (:func:`worked_out_lines`), and its calendar loaded at most once.
@@ -291,8 +280,8 @@ def _is_loan(account: Account) -> bool:
     """Return whether *account* walks as a loan rather than on its records.
 
     :func:`app.services.account_projection.classify_account`'s answer, the
-    predicate both writers split their account sets by: an amortizing
-    account is a loan.
+    predicate the read splits the owner's accounts by: an amortizing account
+    is a loan.
 
     Args:
         account: The account, with ``account_type`` loaded.
@@ -310,8 +299,8 @@ def _movement_lines(
 
     Every dated movement the owner holds in the scenario
     (:attr:`app.services.cash_ledger.OwnerCashRecords.movements`), kept where
-    :func:`._movements.purchase_posts` says it books -- the gate the writer
-    posts by, which the loader's transfer arm does not state in SQL -- and
+    :func:`._movements.purchase_posts` says it books -- a gate the loader's
+    transfer arm does not state in SQL -- and
     booked as :func:`._movements.purchase_target`'s two legs under the
     source and leg kinds its parent's shape decides.
 
@@ -357,8 +346,8 @@ def _correction_targets(
     each walk built by the owner's one load of its kind.  The dispatch is
     :func:`_is_loan`'s, the one the read chose each map's accounts by (the
     stored ledger's two writers split their account sets by it until plan
-    task plan#3133 deleted them).  A loan with no terms walks to nothing, as
-    it posts nothing.
+    task plan#3133 deleted them).  A loan with no terms walks to nothing, so
+    it books nothing.
 
     Args:
         account: The account, with ``account_type`` loaded.

@@ -88,17 +88,16 @@ _ZERO_MONEY = Decimal("0.00")
 
 @dataclass(frozen=True)
 class AccountAnchorCorrection:
-    """One correction the posted ledger owes: the OPENING, or a true-up.
+    """One correction the ledger books: the OPENING, or a true-up.
 
     The per-correction result of :func:`account_corrections`.  The
     linked-ledger delta is ``target_balance - ledger_before`` (its counter leg
     the negative), so the two sum to zero and the linked ledger's total lands
     exactly on the target.  A correction whose ``ledger_before`` already equals
-    its target books nothing (a fresh $0 account mints no entries and no equity
-    row).
+    its target books nothing (a fresh $0 account books no line).
 
     **It carries no ``CashAnchorFact`` since plan step X-f3c-2a, and that is
-    the point.**  Every field the reconcile needs is now stated ON the
+    the point.**  Every field the correction rule needs is now stated ON the
     correction, because the FIRST correction is no longer an assertion at all:
     it is the account's stored OPENING EQUITY
     (``budget.account_openings``), which has an ``opened_on`` and an amount but

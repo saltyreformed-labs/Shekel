@@ -2,12 +2,11 @@
 
 The REAL principal / interest / escrow / refund split of a confirmed loan
 payment, as the balanced CORRECTION the ledger layers on top of the payment's
-cash movement (:mod:`app.services._posting_purchases`, plan step
-``balance:X-bi-6-3``: the loan-side covering movement's own entry
-``Loan +cash / Transit -cash``).  That entry dumps the ENTIRE cash onto the
-loan, when only the PRINCIPAL portion pays the debt down.  Because a posted
-entry is immutable, the ledger appends a second balanced entry that moves the
-non-principal off the loan::
+cash movement (:mod:`._movements`, plan step ``balance:X-bi-6-3``: the
+loan-side covering movement's own legs ``Loan +cash / Transit -cash``).  Those
+legs put the ENTIRE cash onto the loan, when only the PRINCIPAL portion pays
+the debt down, so the ledger books a second balanced set of legs that moves
+the non-principal off the loan::
 
     Loan     -(interest + escrow + excess)   [principal]
     Interest +interest                        [interest -> Expense]
@@ -27,30 +26,31 @@ clear.
 **A DERIVATION, keyed like one: ``(loan_payment kind, the payment's pay
 period, its visible day)`` and NO row link** (ruling **R-BAL102**, which
 re-ruled **R-BAL100**).  The split is re-computed from scratch by every walk,
-exactly as the loan's opening and true-ups are, so it is reconciled in the
-SAME loop as they are (``loan_posting_service._corrections``) and its entry links no row: not
+exactly as the loan's opening and true-ups are, so it is worked out in the
+SAME pass as they are (:func:`._loan_corrections.loan_correction_targets`)
+and its lines link no row: not
 the loan-side shadow (its key through ``balance:X-bi-6-1b``, a row plan step
 ``X-bi-6-4d-2`` deleted), not the shadow's covering movement (R-BAL100's key,
 which a ``$0.00`` payment does not have -- the seam writes no movement for a
 figure of nothing, and the walk still charges the installment), not the
-transfer.  A key with no row has nothing to lose: no teardown door owes it a
-reversal first, no detector hunts payments that "left the confirmed set" (a
-key with no target reverses in the same pass), and no reader maps rows back
-onto payments.  Two payments on one day in one period merge into one entry,
-which is the sum the ledger holds; WHICH payment paid what is the walk's
-answer (``loan_walk_reads``), never the ledger's.
+transfer.  A key with no row had nothing to lose while the stored ledger
+reconciled it (``loan_posting_service._corrections``, until plan task
+plan#3133 deleted it): no teardown door owed it a reversal first, no detector
+hunted payments that "left the confirmed set", and no reader mapped rows back
+onto payments.  Two payments on one day in one period merge into one
+correction, which is the sum the ledger books; WHICH payment paid what is the
+walk's answer (``loan_walk_reads``), never the ledger's.
 
-**This module builds the TARGET and nothing else**, for the stored ledger's
-writer and the worked-out read alike; it was ``loan_posting_service._payments``
-until plan task plan#2526 moved it beside the read.  The reconcile -- what is
-posted, the delta, the emission -- is ``loan_posting_service._corrections``' one loop over the
-anchor and split targets together, on the shared primitives in
-:mod:`app.services._posting_reconcile`.
+**This module builds the TARGET and nothing else**, for the worked-out read;
+it was ``loan_posting_service._payments`` until plan task plan#2526 moved it
+beside the read.  The stored ledger's reconcile -- what was posted, the
+delta, the emission -- was ``loan_posting_service._corrections``' one loop
+over the anchor and split targets together, on the shared primitives in
+``app.services._posting_reconcile``, until plan task plan#3133 deleted them.
 
 **Flask-isolated**: plain data in, plain values out; never imports
 ``request`` / ``session``.  Names each leg by its chart KEY and touches no
-stored chart row (plan task plan#2524): the reconcile loop resolves the keys,
-minting a per-loan row on first use, at its emit step.
+stored chart row (plan task plan#2524).
 """
 
 from decimal import Decimal
@@ -89,8 +89,7 @@ def _loan_payment_target(outcome: PaymentOutcome, loan: Account) -> ChartLegMap:
     """Build the target ledger legs for one payment's real-split correction.
 
     Maps the split to ``{chart key: (signed amount, posting_kind_id)}``,
-    dropping any zero component so no empty per-loan ledger account is minted and
-    no zero leg is written:
+    dropping any zero component so no zero leg is booked:
 
     * the per-loan ``loan_interest`` Expense ledger gets ``+interest``;
     * the per-loan ``loan_escrow`` Expense ledger gets ``+escrow``;
@@ -103,9 +102,8 @@ def _loan_payment_target(outcome: PaymentOutcome, loan: Account) -> ChartLegMap:
 
     Each leg is named by its :class:`~app.services.ledger_lines.ChartKey` (the
     loan's own line, or one of its component lines) and only when its amount
-    is non-zero, so the writer mints a per-loan row only for a component that
-    books (:func:`app.services._posting_write.resolve_chart_targets`, plan task
-    plan#2524; until that task this resolved and minted the rows as it went).
+    is non-zero (until plan task plan#2524 this resolved and minted the stored
+    rows as it went).
     An all-principal payment (``interest == escrow == excess == 0``) yields an
     EMPTY target: the loan already nets to principal from the cash leg, so no
     correction is owed.
@@ -127,7 +125,7 @@ def _loan_payment_target(outcome: PaymentOutcome, loan: Account) -> ChartLegMap:
         outcome: The payment's :class:`~app.services.loan_ledger.PaymentOutcome`
             -- a RECORDED payment's, whose ``event.source`` is the to-side
             :class:`~app.services.transfer_legs.TransferLeg` of its settled
-            transfer (the walk this writer books from carries no projection:
+            transfer (the walk these legs are booked from carries no projection:
             :func:`~app.services.loan_ledger.walk_loan_ledger`).
         loan: The loan the walk is of, with ``account_type`` loaded, which is
             the account every one of its payments' legs is on.  It was read
@@ -183,12 +181,13 @@ def payment_split_targets(
     day the cash movement's entry carries too), so the split and the cash it
     re-classifies land on one date.
 
-    An all-principal outcome contributes an empty leg map, and that is not
-    what reverses a stale correction: the reconcile walks the UNION of the
-    target and posted keys, so a key the ledger holds a correction under and
-    the walk no longer prices -- a reverted payment, a re-split that fell to
-    all-principal, a payment moved to another period or day -- reverses
-    whether or not it appears here.  Two payments on one day in one period
+    An all-principal outcome contributes an empty leg map.  A payment the walk
+    no longer prices -- a reverted payment, a re-split that fell to
+    all-principal, a payment moved to another period or day -- books no
+    correction where it was, because the lines are worked out from the walk
+    as it stands and nothing posted is left to reverse (the stored ledger's
+    reconcile walked the UNION of the target and posted keys to reverse one,
+    until plan task plan#3133 deleted it).  Two payments on one day in one period
     sum here; a second payment inside one accrual period clears nothing fresh
     (plan step X-au-g-2c-3b-2) and contributes nothing.
 

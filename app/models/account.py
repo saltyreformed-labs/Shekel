@@ -284,8 +284,8 @@ class AccountAnchorHistory(AccountScopedMixin, CreatedAtMixin, db.Model):
     record of what the bank said: a schedule reset wiped all 78 of the
     developer's production assertions and wrote 9 fabricated replacements.  The
     column was also a CACHE of a derivation rather than a fact -- both posting
-    reconciles derive a correction's period from ``observed_on`` and
-    ``account_posting_service._anchors`` refuses this column BY NAME -- and it
+    reconciles derived a correction's period from ``observed_on`` and
+    ``account_posting_service._anchors`` refused this column BY NAME -- and it
     was already WRONG on 2 of those 78 rows, whose stored period does not
     contain their own ``observed_on`` (finding N-168).  A reader wanting the
     period an assertion books in derives it from the day, which is ruling
@@ -334,7 +334,7 @@ class AccountAnchorHistory(AccountScopedMixin, CreatedAtMixin, db.Model):
     :func:`app.services.cash_ledger.cash_anchor_facts` marks the OPENING
     positionally (``is_opening = index == 0`` over
     ``(observed_on, created_at, id)``) and
-    ``account_posting_service._anchors`` maps that to the typed
+    ``account_posting_service._anchors`` mapped that to the typed
     ``account_opening`` / ``account_trueup`` posting kinds, so a back-dated
     assertion could make the label and the flag name different rows.  What the
     column held is not lost: this table is in

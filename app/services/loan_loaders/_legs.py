@@ -454,8 +454,8 @@ def scenarios_with_loan_payments(loan_account_id: int) -> list[int]:
     of each.
 
     *It lived in the loan posting package until plan task plan#3133*, whose
-    loan-global re-sync walks the same set (adding the owner's baseline) to
-    re-post a loan's corrections in each scenario; that task deletes the
+    loan-global re-sync walked the same set (adding the owner's baseline) to
+    re-post a loan's corrections in each scenario; that task deleted the
     re-sync with the stored ledger's other writers, and moved the query here
     first, beside the leg loaders the tracking-start door reads it with.
 

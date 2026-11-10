@@ -55,8 +55,9 @@ run, which is a corruption generator rather than a cache (plan step A3,
 ``docs/audits/balance_architecture/archive/anchor_settle_partition.md``).  A movement
 carries :attr:`CashSourceFact.settled_on` and an assertion carries
 :attr:`CashAnchorFact.observed_on`; both are resolved ONCE at construction, and
-every consumer -- the partition, the fold's sampling, the period bucketing, the
-posting writer's entry dating -- reads that one field.  Two independently-derived
+every consumer -- the partition, the fold's sampling, the period bucketing (and
+the posting writer's entry dating, until plan task plan#3133) -- reads that one
+field.  Two independently-derived
 keys for one question is finding N-34's shape (the loan split keyed its rate on
 the pay period while its ordering keyed on the due date, and the two disagreed by
 $500.00 on a single payment).  Here they cannot: there is one key.
@@ -273,8 +274,8 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
     SHARED :func:`app.services.cash_ledger.movement_cash_leg` -- its whole
     figure in its PARENT's direction (plan step X-bi-3b, ruling **R-BAL35**;
     a transfer side's figure is its transfer's, which its record does not
-    hold), the same figure the posting writer books for it
-    (``ledger_lines.purchase_target``) -- so the walk and the posted
+    hold), the same figure the ledger books for it
+    (``ledger_lines.purchase_target``) -- so the walk and the
     ledger value one movement identically by construction, not by two rules
     that happen to agree.
 
@@ -292,11 +293,11 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
     transfer -- budget column, type and contributing gate the TRANSFER's and
     its side's (the shadow row's until then), and its figure the
     TRANSFER's since plan step ``balance:X-bi-6-4d-2`` -- through
-    :func:`app.services.transfer_legs.recorded_transfer_legs`; the posted
-    ledger books each of them as its own entry against the owner's transit
-    account since plan step ``balance:X-bi-6-3``
-    (``posting_service.sync_transfer_postings``, ruling **R-BAL45**), so the
-    fold and the ledger read one movement each.
+    :func:`app.services.transfer_legs.recorded_transfer_legs`; the ledger
+    books each of them as its own pair against the owner's transit account
+    since plan step ``balance:X-bi-6-3`` (ruling **R-BAL45**,
+    :func:`app.services.ledger_lines.purchase_target`), so the fold and the
+    ledger read one movement each.
 
     **It carries TWO clocks, and the second one is not decoration** (plan step
     X-c1).  :attr:`settled_on` is the CASH clock -- the day the money moved,

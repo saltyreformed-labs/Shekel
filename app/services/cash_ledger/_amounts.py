@@ -103,7 +103,7 @@ neither of the above:
     one cut as the statement matcher's pricing of a settled row and is
     deleted (ruling **R-BAL81**: a settled row is worth what its covering
     movement moves, ``status_seam.covered_cash_leg``; ``bank_import``'s
-    question, stated there), read by neither the walk nor the writer.
+    question, stated there), read by neither the walk nor the ledger.
 
 **Why they are one module (plan step D1c).**  They were split across two: the
 override map's producer sat in the cash event sources while the four rules that

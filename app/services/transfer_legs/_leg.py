@@ -129,7 +129,7 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
 
     Pylint: ``too-many-public-methods`` (24/20) -- each answers a question a
     plan ROW answers (the grid's, the dashboard's, the fold's, since leaf
-    ``X-bi-6-4a`` the ledger writer's ``user_id``, since leaf
+    ``X-bi-6-4a`` the owner's ``user_id``, since leaf
     ``X-bi-6-4c-1`` the statement register's ``covering_movements``, since
     ruling **plan#1983** the fragment renderers' ``purchases``, and since
     ruling **plan#1984** the side's :attr:`record`, read where it was stored),
@@ -276,10 +276,10 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
     def user_id(self) -> int:
         """The parent's owner: whose ledger a leg's money is booked in.
 
-        The ledger writer's header owner and transit account
-        (``_posting_write.emit_typed_source_deltas``,
-        ``ledger_lines.purchase_target``), read off the transfer, the
-        one home a transfer's owner has.
+        Read off the transfer, the one home a transfer's owner has.  The
+        stored ledger's writer stamped it as each entry's header owner
+        (``_posting_write.emit_typed_source_deltas``) until plan task
+        plan#3133 deleted it.
         """
         return self.transfer.user_id
 

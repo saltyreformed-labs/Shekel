@@ -307,13 +307,13 @@ def _planned_from_legs(
     declarable; had only the named one moved, the cutover would have 500'd
     every surface that folds a loan's forward plan.
 
-    **The other six callers of that accessor really are settled-only**, which
-    is what makes "two" a census rather than a second guess (a seventh,
-    ``cash_ledger.settled_cash_leg``, is deleted at plan step
+    **The other six callers of that accessor really were settled-only** at
+    that step, which is what made "two" a census rather than a second guess (a
+    seventh, ``cash_ledger.settled_cash_leg``, is deleted at plan step
     ``balance:X-bi-4a``): ``loan_ledger._events.loan_event_stream``
     (``._split.split_one_payment`` until plan step X-au-g-2c-3b-2),
-    ``loan_posting_service._sync`` and ``._display`` (``loan_walk_reads``
-    since plan task plan#3133),
+    ``loan_posting_service._sync`` (deleted at plan task plan#3133) and
+    ``._display`` (``loan_walk_reads`` since that task),
     ``savings_dashboard_service._metrics``, and the spending report's
     ``_window`` and ``_breakdown`` -- each loading rows filtered to the settled
     statuses in SQL.

@@ -13,18 +13,20 @@ interest accrued on, the way three independent walks could.
 and one :class:`LoanAnchorCorrection` per anchor, in CONTRACT-time order.
 Turning those facts into "what is owed on date D" is the FOLD -- re-key each event
 by the date it becomes VISIBLE (:func:`dated_deltas`, here since plan step E1a
-because BOTH sides consume it), then prefix-sum the paydowns -- and the prefix-sum
+because BOTH sides consumed it), then prefix-sum the paydowns -- and the prefix-sum
 lives in the balance seam (:mod:`app.services.balance_at._fold`) as of plan step
 **D-fold**, not here.  A consumer holding a walk therefore cannot reach a balance
 from a public leaf name, which is why the walk needs no fence (the sampling that
 would turn the dated facts into money is seam-private).
 
-**Two consumers, one walk.**  The posting writer
-(:mod:`app.services.loan_posting_service`) projects this walk into the balanced
-corrections it reconciles onto the general ledger; the seam's read pass folds it
-into a balance at a date.  The walk is the leaf both depend on, which is what
-makes the posted ledger a re-derivable projection of the loan's facts rather
-than a second opinion about them.
+**Two consumers, one walk.**  The worked-out ledger
+(:mod:`app.services.ledger_lines`) projects this walk into the balanced
+corrections it books on the general ledger; the seam's read pass folds it into
+a balance at a date.  The walk is the leaf both depend on, which is what makes
+the ledger's loan lines a re-derivable projection of the loan's facts rather
+than a second opinion about them.  The stored ledger's posting writer
+(``loan_posting_service``) projected it too, until plan task plan#3133 deleted
+it.
 
 **Takes no as-of, and reads no clock**: it walks the loan's FACTS and records
 every one of them, whatever their date.  Its output is therefore a function of
@@ -75,12 +77,13 @@ class LoanAnchorCorrection:
     The per-anchor result of the fold's walk (:func:`walk_loan_ledger`).  Every
     anchor a loan carries -- the one opening and any ``user_trueup`` events --
     drives the running balance to the anchor's verified value at the anchor's
-    date, and the walk amortizes forward from there.  The posting writer turns
-    each of these into a balanced correction: the opening anchor's is the loan's
-    OPENING (its ``owed_before`` is zero, so it books ``-original_principal``
-    onto the loan and ``+original_principal`` onto the loan's opening-equity
-    account); a ``user_trueup`` anchor's is the append-only TRUE-UP that
-    reproduces the resolver's balance jump without editing any prior posting.
+    date, and the walk amortizes forward from there.  The ledger turns each of
+    these into a balanced correction
+    (:func:`app.services.ledger_lines.anchor_correction_targets`): the opening
+    anchor's is the loan's OPENING (its ``owed_before`` is zero, so it books
+    ``-original_principal`` onto the loan and ``+original_principal`` onto the
+    loan's opening-equity account); a ``user_trueup`` anchor's is the TRUE-UP
+    that reproduces the resolver's balance jump on top of every line before it.
 
     The correction's loan-linked leg is ``owed_before - anchor_balance`` (its
     equity leg the negative), so the two sum to zero and the ledger's implied
@@ -147,7 +150,7 @@ class LoanLedgerWalk:
 
     @property
     def settled_splits(self) -> list[PaymentOutcome]:
-        """The outcomes of the RECORDED payments -- the posted ledger's half."""
+        """The outcomes of the RECORDED payments -- the ledger's half."""
         return [
             outcome for outcome in self.payment_splits
             if not outcome.is_projected
@@ -165,10 +168,8 @@ class LoanLedgerWalk:
         """Whether the walk holds no anchor and no payment, so books nothing.
 
         The ONE statement of the empty walk, the one a loan with no
-        ``LoanParams`` walks to (the N1 guard): the loan writers return on it
-        before they read what is posted (``loan_posting_service``'s
-        ``reconcile_loan_corrections``),
-        the worked-out read asks it of each loan to decide whether the
+        ``LoanParams`` walks to (the N1 guard): the worked-out read asks it
+        of each loan to decide whether the
         owner's pay calendar is loaded (``ledger_lines.worked_out_lines``),
         and the loan page's two measured surfaces hide on it
         (``loan_walk_reads._configured_loan_walk``).
@@ -184,7 +185,7 @@ def replay_loan_stream(
     The ONE walk, pure: it hands *stream* to
     :func:`._replay.replay_loan_events` -- the ONE rule, seeded at zero because a
     loan's first event is always its opening assertion -- and maps each reset's
-    outcome onto the :class:`LoanAnchorCorrection` the posting writer books.  The
+    outcome onto the :class:`LoanAnchorCorrection` the ledger books.  The
     payment outcomes are read as the replay produced them; the per-field copy
     the walk used to make of each (``LoanPaymentSplit``) was a second home for
     the allocation's value and is deleted at plan step recurrence:R16-c-1.
@@ -538,9 +539,9 @@ def dated_deltas(walk: LoanLedgerWalk) -> list[tuple[date, Decimal]]:
     * an anchor: ``anchor_balance - owed_before`` -- the jump its reset booked;
     * a payment: ``-principal`` -- the debt its cash actually paid down.
 
-    Negated, these are exactly the amounts the posting writer books onto the
-    loan's linked ledger (the debit-positive convention), each at this same
-    visible date (the ``entry_date`` its entry carries).  The balance seam's
+    Negated, these are exactly the amounts the worked-out ledger books on the
+    loan's own line (the debit-positive convention), each at this same
+    visible date (the ``entry_date`` its line carries).  The balance seam's
     fold prefix-sums the deltas and samples a date
     (:func:`app.services.balance_at._fold.fold_from_walk`).  It moved onto the
     leaf at plan step E1a because the posting writer's checked-projection
@@ -554,10 +555,10 @@ def dated_deltas(walk: LoanLedgerWalk) -> list[tuple[date, Decimal]]:
     VISIBLE date, and that is deliberate.**  A payment's split depends on the
     balance at its installment, so the walk runs in due-date order
     (:func:`._replay.replay_loan_events`, over
-    :func:`._events.loan_event_stream`); the ledger stores those
+    :func:`._events.loan_event_stream`); the ledger books those
     amounts, and a reader counts whichever are visible.  Under the one clock a
     payment's visible date is its SETTLED date and an anchor's is its own date
-    (:mod:`._visible`) -- the same day each posting carries in ``entry_date``
+    (:mod:`._visible`) -- the same day each line carries in ``entry_date``
     -- so a late-settled payment's principal is shown from the day its cash
     moved, while its split stays fixed to the installment it paid.  A
     PROJECTION's is its effective day (``max(due, as_of + 1d)``, ruling D1),

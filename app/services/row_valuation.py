@@ -125,9 +125,9 @@ def purchases_total(entries) -> Decimal:
     **It lives HERE rather than in ``entry_service``, where it was
     ``compute_actual_from_entries``** (plan step X-au-c3).  Two reasons, and the
     first is mechanical: :func:`settled_figure` below needs it, this module sits
-    under both the cash and loan tiers, and ``entry_service`` reaches down
-    through ``posting_service`` into ``cash_ledger`` -- so importing it here
-    would close a cycle.  The second is that the old name referred to
+    under both the cash and loan tiers, and ``entry_service`` reached down
+    through ``posting_service`` into ``cash_ledger`` at that step -- so
+    importing it here would have closed a cycle.  The second is that the old name referred to
     ``actual_amount``, a column this step removed; a helper named for a column
     that no longer exists is a citation a reader cannot follow.
 
@@ -192,8 +192,9 @@ def settled_figure(parent: PlanParent) -> "Decimal | None":
     holds no entry and records ``$0.00`` (ruling **R-BAL82**: a movement of
     nothing is not one, so a ``$0.00`` close is a close with no entries).  One
     kind-blind reduction, the same one :func:`purchases_total` performs for
-    the close that books it and ``posting_reads.settled_figure_clause``
-    performs in SQL, over the same rows the fold books one by one on their
+    the close that books it (and ``posting_reads.settled_figure_clause``
+    performed in SQL until plan task plan#3133 deleted it), over the same
+    rows the fold books one by one on their
     own days (``cash_ledger._events.settled_cash_facts`` reads the movements
     and nothing of the row, ruling **R-BAL80**; a card purchase is a row of
     the record that moves no cash of its own, :func:`purchases_total` says

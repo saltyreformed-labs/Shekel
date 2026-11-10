@@ -543,15 +543,13 @@ def held_transfer_entries(*filters: ColumnElement) -> Query:
 def movement_parent(movement: TransactionEntry) -> PlanItem:
     """Return what *movement* records money FOR: its plan row, or its transfer's LEG.
 
-    **The ledger writer's ONE resolution of a loaded movement's parent**
-    (leaf ``X-bi-6-4a``, its second half, ruling **R-BAL106**).  Every door
-    that books a movement -- the pair door, a row's family reconcile, the
-    teardowns and the one removal act -- asks this, and the writer takes
-    what it answers as the parent that types the movement's legs: a plan
-    row's category and owner, or for a transfer movement the LEG, whose
-    period, owner, scenario, contributing gate and side are its TRANSFER's
-    (:class:`TransferLeg`), never the shadow row's.  So the ledger and the
-    cash fold read a transfer's money off the same parent.
+    **The ONE resolution of a loaded movement's parent** (leaf ``X-bi-6-4a``,
+    its second half, ruling **R-BAL106**): a plan row, or for a transfer
+    movement the LEG, whose period, owner, scenario, contributing gate and
+    side are its TRANSFER's (:class:`TransferLeg`), never the shadow row's.
+    The stored ledger's writer typed each movement's legs off it, at every
+    door that booked one, until plan task plan#3133 deleted it; the match
+    withdrawal, the entry refusals and the statement matcher ask it now.
 
     **Read off the movement's side links** (plan step ``balance:X-bi-6-4d-2``,
     :func:`_side_of`), the Python twin of :func:`_leg_transfer_id` and
@@ -584,9 +582,10 @@ def movement_parent_loads() -> tuple:
 
     For a reader that resolves MANY loaded movements' parents -- the
     statement register folds every act on an account (leaf
-    ``X-bi-6-4c-1``), and the loan posting probe names the transfer of
-    every stale movement it finds (``loan_posting_service._sync``, leaf
-    ``X-bi-6-4d-1``) -- and must not lazy-load one transfer per member:
+    ``X-bi-6-4c-1``; the loan posting probe, ``loan_posting_service._sync``,
+    named the transfer of every stale movement it found from leaf
+    ``X-bi-6-4d-1`` until plan task plan#3133 deleted it) -- and must not
+    lazy-load one transfer per member:
     the movement's plan row, or its side's transfer, whose endpoints and
     status ride it (``lazy="joined"``).  Published HERE rather than spelled
     by the reader because which relationships :func:`movement_parent` walks

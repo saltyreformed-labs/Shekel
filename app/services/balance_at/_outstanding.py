@@ -240,16 +240,16 @@ def cash_outstanding_difference(
     :func:`_books_balance_at` seeds at the assembly's stored opening equity and
     samples the leaf's :func:`~app.services.cash_ledger.dated_deltas` through
     the shared :func:`~._fold.sample_cumulative` -- the same re-key the posting
-    writer consumes and the same sampling core every other balance in this
-    package is read off.  Summing ``walk.source_facts`` here instead would be a
-    third statement of "which day does this event count from, and for how
-    much", which is precisely how the fold and the posted ledger drift apart.
+    writer consumed until plan task plan#3133 and the same sampling core every
+    other balance in this package is read off.  Summing ``walk.source_facts``
+    here instead would be a third statement of "which day does this event count
+    from, and for how much", which is precisely how two balances drift apart.
 
     **Cross-checked against a producer that shares no code with it.**  On a
     clone of the dev database migrated to head, 2026-09-01, Checking's figure
-    is ``$2,370.02`` -- and the persisted double-entry ledger, written by
+    was ``$2,370.02`` -- and the persisted double-entry ledger, written by
     ``account_posting_service`` and read by SQL that touches this package at no
-    point, carries exactly ``$2,370.02`` of ``account_trueup`` postings on that
+    point, carried exactly ``$2,370.02`` of ``account_trueup`` postings on that
     account's linked ledger account with ``-$2,370.02`` against
     ``Checking -- Opening`` equity.  That equity leg is finding **N-171**, and
     it is what plan step X-f3c-4 moves onto the income statement.

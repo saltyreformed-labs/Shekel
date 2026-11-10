@@ -550,8 +550,8 @@ def _unwindowed_contributing_rows(
     of two, and is rejected: the Projected half is roughly two years of forward
     projection, so a post-filter would eager-load entries for the whole horizon to
     keep the ~130 settled rows the walk wants -- and the settled half has a
-    consumer (the walk, and at plan step X-d the posting writer) that never wants
-    the plan at all.
+    consumer (the walk, and from plan step X-d until plan task plan#3133 the
+    posting writer) that never wants the plan at all.
 
     Args:
         account_id: The account whose rows to load.

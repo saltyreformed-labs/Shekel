@@ -91,10 +91,7 @@ def confirmed_shadows_through(
     (ruling **R-BAL139**), its interval's (ruling **R-R107**) -- read through
     the SAME
     :func:`._visible.payment_visible_on` the fold uses, so the history rows and
-    the fold cannot key a payment on two different days.  The SQL reader that
-    must agree with this (:func:`app.services.loan_posting_service`) bounds the
-    same postings by their ``entry_date``, which the writer stamps with that
-    identical day.
+    the fold cannot key a payment on two different days.
 
     Args:
         loan_account_id: The loan account whose payments to load.
@@ -149,7 +146,7 @@ def loan_event_stream(
     replay uses (:func:`is_confirmed_payment_eligible`, fed the same derivation
     via :attr:`~app.services.amortization_engine.PaymentDates.due_date`) -- the
     two MUST stay on one derivation,
-    or the posted ledger and the replayed balance drift on which payments a given
+    or the ledger and the replayed balance drift on which payments a given
     anchor subsumes.
 
     **The CHARGES are the CONTRACT's**, every installment from origination
@@ -213,7 +210,7 @@ def loan_event_stream(
         The loan's :class:`~._replay.LoanEventStream` -- its RECORDED facts.
         It carries no projection: the seam appends the forward plan's to a
         copy of this stream (``balance_at._loan_stream``) for a read, and the
-        posted ledger replays it as it is.
+        ledger's walk replays it as it is.
     """
     payments = [
         LoanCashEvent(
@@ -222,8 +219,8 @@ def loan_event_stream(
             ),
             cash=settled_contribution(parent_of(leg)),
             source=leg,
-            # The ONE clock, read once here: the settled day the posting
-            # writer stamps the entry with, and the day the fold counts the
+            # The ONE clock, read once here: the settled day the ledger books
+            # the payment's split on, and the day the fold counts the
             # principal from (plan step recurrence:R16-c-1 moved the read
             # from ``dated_deltas`` onto the event, so the projections the
             # seam appends carry their own day under the same name).

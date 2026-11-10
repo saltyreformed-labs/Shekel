@@ -694,9 +694,9 @@ def _true_up_request_gates(
     request and a designed fragment would be a rendering nobody could reach.
     **An account's kind is EDITABLE.**  ``_ACCOUNT_UPDATE_FIELDS`` includes
     ``account_type_id``, and ``_validate_account_type_change`` permits a
-    boundary-crossing re-type while the account has no ledger postings -- which
-    a ``$0.00`` opening leaves it with, because a zero correction emits no legs
-    (``account_posting_service/_anchors.py``).  So: open the editor on such an
+    boundary-crossing re-type while the account holds no ledger line -- which
+    a ``$0.00`` opening leaves it holding, because a zero correction books no
+    line (``ledger_lines.accounts_hold_lines``).  So: open the editor on such an
     account, re-type it to a mortgage in a second tab, press Save.  That is a
     real user in ordinary use, and ``base.html`` leaves 4xx non-swapping, so
     the raw body rendered NOTHING and the form simply sat there -- the exact
@@ -773,10 +773,10 @@ def true_up(account_id):
     tabs submitting the SAME balance for the same day are still idempotent --
     the write door compares against the governing assertion under the owner's
     lock and writes nothing (ruling R-EQ), and the route reports success.  The
-    LEDGER those assertions reconcile into is serialised by the same lock,
+    LEDGER those assertions reconciled into was serialised by the same lock,
     which this PATCH's transaction took before the route ran, as every
     signed-in save's does (plan step ``balance:X-bn``), so the settle
-    self-heal and the pay-period resync reaching that window hold it too.
+    self-heal and the pay-period resync, both gone since plan#3076, held it too.
     *It was taken inside the reconcile until then: a lock at this door would
     have left those doors, and the direct anchor edit X-f1e deleted, unguarded.*
     """

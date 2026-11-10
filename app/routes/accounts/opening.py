@@ -7,8 +7,8 @@ that appends the restatement.
 
 **Why it is not in :mod:`app.routes.accounts.crud`.**  That module owns account
 CRUD -- a name, a type, a sort order, an active flag, all plain columns on one
-row -- and this writes an append-only MONEY fact through a service that
-re-bases the posted ledger under the owner's write lock.  It is a third subject
+row -- and this writes an append-only MONEY fact through a service of its own
+(``opening_service``), under the owner's write lock.  It is a third subject
 beside it exactly as :mod:`app.routes.accounts.history` is a third subject
 beside ``detail``'s page and ``anchor``'s write door, and it is split for the
 same reason: a door with its own service, its own schema and its own refusals

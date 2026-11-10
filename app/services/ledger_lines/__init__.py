@@ -2,17 +2,17 @@
 Shekel Budget App -- The ledger worked out from the records
 
 The package that outlives the stored ledger (balance:X-ew, plan#2023).  X-ew's
-first leaf (plan#2513) builds here, BESIDE the stored journal, the ledger worked
-out from today's records, and proves the two equal to the cent; its second leaf
-moves every reader onto it, and its third deletes the store.
+first leaf (plan#2513) built here, BESIDE the stored journal, the ledger worked
+out from today's records, and proved the two equal to the cent; its second leaf
+(plan#2515) moved every reader onto it, and its third (plan#2516) deletes the
+store, whose writers plan task plan#3133 deleted.
 
 ## Package layout
 
 * :mod:`._chart` -- the chart of accounts worked out from the records (ruling
   plan#2518): the :class:`ChartKey` a line is booked on, the class rule applied
   when one is built, the label rule a statement reads, and ruling R-FO's
-  counter dispatch.  The stored chart's writer (``ledger_account_service``)
-  reads its class and label from here while the store lives.
+  counter dispatch.
 * :mod:`._movements` -- the movement rule: whether a dated movement books
   (:func:`purchase_posts`), its two legs (:func:`purchase_target`), and the
   source and leg kinds its parent's shape decides.
@@ -31,12 +31,12 @@ moves every reader onto it, and its third deletes the store.
   (:func:`worked_out_lines`), issuing no write of its own, and whether an
   account holds one (:func:`accounts_hold_lines`).
 
-**The rules are the worked-out ledger's, and the writer imports them back**
-(plan task plan#2526): every target rule the stored ledger's writers posted
-from moved here, so the read sums the very legs the writer posts and the
-rules outlive the store.  What stays with the writers is only the store's
-part: resolving each chart key to a stored row, reading what is posted, and
-emitting the difference.
+**The rules are the worked-out ledger's** (plan task plan#2526): every
+target rule the stored ledger's writers posted from moved here, so the read
+summed the very legs the writers posted, and the rules outlived the writers
+when plan task plan#3133 deleted them with the store's own part (resolving
+each chart key to a stored row, reading what was posted, and emitting the
+difference).
 
 Flask-isolated per the project architecture rule (``CLAUDE.md`` Architecture
 section): plain data in, plain data out; nothing here issues a write of

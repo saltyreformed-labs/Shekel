@@ -418,7 +418,7 @@ class Transfer(
     # display metadata: it is the INSTALLMENT the payment satisfies (the loan
     # engine reads it via ``loan_loaders.loan_payment_due_date`` rather than
     # re-deriving it from the pay period, which is wrong for a payment settled
-    # late), and the genesis write walk orders payments by it and applies its
+    # late), and the loan walk orders payments by it and applies its
     # strict ``anchor_date < due_date`` post-anchor boundary against it.  Moving
     # it therefore changes the loan's balance, which every reader works out
     # from the column as it stands, so a writer of it owes nothing after.  (It

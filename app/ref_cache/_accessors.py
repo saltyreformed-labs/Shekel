@@ -684,9 +684,9 @@ def ledger_account_class_id(member):
     """Return the integer primary key for a LedgerAccountClassEnum member.
 
     Used by the chart-of-accounts sync hook (Commit 2) to derive a real
-    account's ledger class from its account-type category, and by later
-    Build-Order steps that read postings to compare against
-    ``budget.ledger_accounts.class_id`` without ever reading the string
+    account's ledger class from its account-type category, until plan task
+    plan#3133 deleted it, and by the statements' attribution
+    (``ledger_report_service._attribution``) without ever reading the string
     ``name``.  Matches the project-wide IDs-for-logic invariant.
 
     Args:
@@ -764,10 +764,11 @@ def ledger_account_kind_id(member):
 def posting_kind_id(member):
     """Return the integer primary key for a PostingKindEnum member.
 
-    Used by ``posting_service`` (Commit 4) to tag each
-    ``budget.account_postings`` leg with its kind, and by later readers
-    that branch on the leg kind -- always via the integer ID, never the
-    string ``name``.  Matches the project-wide IDs-for-logic invariant.
+    Used by the worked-out ledger (:mod:`app.services.ledger_lines`) to tag
+    each line with its leg kind, as ``posting_service`` (Commit 4) tagged
+    each ``budget.account_postings`` leg until plan task plan#3133 deleted
+    it -- always via the integer ID, never the string ``name``.  Matches the
+    project-wide IDs-for-logic invariant.
 
     Args:
         member: A ``PostingKindEnum`` member
@@ -787,10 +788,11 @@ def posting_kind_id(member):
 def posting_source_id(member):
     """Return the integer primary key for a PostingSourceEnum member.
 
-    Used by ``posting_service`` (Commit 4) to tag each
-    ``budget.journal_entries`` row with its source-event kind, and by
-    later readers -- always via the integer ID, never the string
-    ``name``.  Matches the project-wide IDs-for-logic invariant.
+    Used by the worked-out ledger (:mod:`app.services.ledger_lines`) to tag
+    each line with its source-event kind, as ``posting_service`` (Commit 4)
+    tagged each ``budget.journal_entries`` row until plan task plan#3133
+    deleted it -- always via the integer ID, never the string ``name``.
+    Matches the project-wide IDs-for-logic invariant.
 
     Args:
         member: A ``PostingSourceEnum`` member

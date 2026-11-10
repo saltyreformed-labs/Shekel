@@ -55,8 +55,8 @@ def _reject_transaction_on_loan(account: Account) -> tuple[str, int] | None:
 
     A loan's balance is ledger-derived, not a transaction sum (ruling D4).
     A raw transaction posted onto a loan account books a bare cash leg onto
-    the loan's linked ledger that the sum-of-postings reader counts as a
-    real paydown while the loan fold cannot see it -- finding N-11, the one
+    the loan's own ledger line that the ledger counts as a real paydown
+    while the loan fold cannot see it -- finding N-11, the one
     balance shape where the two producers diverge with nothing to reconcile
     them.  So it is forbidden at the transaction-create chokepoint, exactly
     as a transfer OUT of a loan is forbidden at the transfer-create

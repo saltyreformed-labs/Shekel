@@ -118,8 +118,8 @@ def _history_rows_from_walk(
     walk's split:
 
     * ``principal`` / ``interest`` -- the split's real principal and accrued
-      interest, which the posting writer books verbatim onto the ledger, so they
-      equal the posted nets.
+      interest, which the ledger books verbatim
+      (``ledger_lines.payment_split_targets``), so they equal its nets.
     * ``remaining_balance`` -- the genesis running balance owed AFTER this payment,
       accumulated in CONTRACT order over the walk's events, every one of which
       is visible by the pass's as-of: an

@@ -9,8 +9,7 @@ moment.  Ruling plan#2518 (developer, 2026-11-01) works it out instead, so a
 line names what it is booked on with a :class:`ChartKey` -- its kind, its class
 and the record behind it -- and no row of any table is created to name it.
 
-**This module is the ONE home of the chart's rules**, and the stored chart's
-writer reads them from here for as long as the store lives:
+**This module is the ONE home of the chart's rules**:
 
 * **the class**, applied once, when a key is built: a real account's own line by
   its type's category (:func:`linked_ledger_class`); a category line by its
@@ -20,7 +19,7 @@ writer reads them from here for as long as the store lives:
 * **the label** (:func:`chart_label`), from the LIVE record
   :func:`chart_record_type` names: the account's or category's name today,
   the canonical bucket labels, and the ``"<account> -- <component>"`` form
-  the stored counter and loan rows snapshot.  The ruling's answer is
+  the stored counter and loan rows snapshotted.  The ruling's answer is
   "Statements show current names": a rename relabels past lines, where a
   stored snapshot kept the name it was minted with.
 * **which counter an account's correction books on** (ruling **R-FO**,
@@ -29,23 +28,23 @@ writer reads them from here for as long as the store lives:
   ``ledger_account_service``'s until plan task plan#2526 moved it beside the
   correction rules that read it (:mod:`._account_anchors`).
 
-``ledger_account_service`` stamps each stored row's class and snapshots its
-name from these rules, so the row the writer stores and the key worked out here
-cannot part.  X-ew's third leaf (plan#2516) deletes that writer and the table;
-this module is what is left of the chart.
+``ledger_account_service`` stamped each stored row's class and snapshotted its
+name from these rules, so the row the writer stored and the key worked out here
+could not part, until plan task plan#3133 deleted that writer.  X-ew's third
+leaf (plan#2516) deletes the table; this module is what is left of the chart.
 
 **A key is built through its constructor, never by hand.**  The constructors
 are where the class rule runs and where a kind is refused a class or a record
-it cannot carry -- the guards the stored resolvers held, and whose refusals
-they raise unchanged.  The one place a key is spelled from columns directly is
-the proof's mapping of a STORED row onto its key (plan#2527), which must read
+it cannot carry -- the guards the stored chart's resolvers held until plan
+task plan#3133 deleted them, with the same refusals.  The one place a key is
+spelled from columns directly is the proof's mapping of a STORED row onto its
+key (plan#2527), which must read
 the row as it stands rather than re-derive it.
 
 **No key names an ``orphan``.**  That kind is a stored row's state after its
 budget category was deleted (the ``category_id`` SET NULL), and app code never
 writes it.  Worked out from the records, the deleted category's rows read
-``category_id`` NULL, so their lines book on the owner's Uncategorized bucket
--- which is where today's writer re-books them at the next resync too.
+``category_id`` NULL, so their lines book on the owner's Uncategorized bucket.
 
 Pure: reads the records it is handed and the cached reference ids, writes
 nothing, and queries nothing.

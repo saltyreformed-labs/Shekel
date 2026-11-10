@@ -315,7 +315,7 @@ class LoanEventStream:
         projections: The cash events that have NOT happened -- the forward
             plan's projected rows and estimated occurrences -- in the caller's
             own order.  Walked after every recorded fact (see the module
-            docstring); empty for the posted ledger's replay, which books
+            docstring); empty for the ledger's replay, which books
             facts and nothing else.
         calendar: The loan's :class:`~._charges.LoanCalendar` the charges were
             built from (:func:`with_contract_charges`), or ``None`` for a
@@ -344,7 +344,7 @@ def with_contract_charges(
     """Return *stream* charged every contractual installment through its LAST event.
 
     **The ONE composer of a production stream's charges** (ruling **R-R100**,
-    plan step recurrence:R16-c-2).  The posted ledger's stream (its recorded
+    plan step recurrence:R16-c-2).  The ledger's stream (its recorded
     facts) and a screen's (the same facts, then the forward plan's payments)
     both reach their charges here, so the two cannot be charged on two
     calendars: every installment from the loan's first
@@ -436,8 +436,9 @@ class PaymentOutcome:
 
     # The parts every reader wants, read THROUGH the two values that hold them.
     # Delegation, not a copy: each name below has exactly one home, and the
-    # flat spelling is the one idiom (the posting writer, the confirmed view,
-    # the tax reader and the loan page all read ``outcome.principal``).
+    # flat spelling is the one idiom (the confirmed view, the tax reader and
+    # the loan page all read ``outcome.principal``, and the worked-out ledger
+    # each non-principal component).
 
     @property
     def source(self) -> object:

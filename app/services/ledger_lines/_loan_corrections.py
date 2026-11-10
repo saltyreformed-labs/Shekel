@@ -5,10 +5,11 @@ running-balance walk (:func:`app.services.loan_ledger.walk_loan_ledger`) --
 the opening and every true-up (:mod:`._loan_anchors`) and every settled
 payment's principal / interest / escrow / refund split
 (:mod:`._loan_payments`) -- and this module is their ONE combined answer
-(plan task plan#2526), which the stored ledger's writer reconciles to
-(``loan_posting_service.reconcile_loan_corrections``) and the worked-out read
-sums.  The two halves must come off the same walk: interest accrues on the
-running balance the anchors reset, so a pre-true-up payment change re-splits
+(plan task plan#2526), which the worked-out read sums (the stored ledger's
+writer reconciled to it, ``loan_posting_service.reconcile_loan_corrections``,
+until plan task plan#3133 deleted it).  The two halves must come off the same
+walk: interest accrues on the running balance the anchors reset, so a
+pre-true-up payment change re-splits
 every later payment AND moves the true-up's ``owed_before``.
 
 Pure over the walk it is handed: no query, no write.

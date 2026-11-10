@@ -62,7 +62,8 @@ def account_category(account) -> AcctCategoryEnum | None:
     :func:`app.services.ledger_lines.linked_ledger_class`,
     which asks THIS function's asset-vs-liability question a second time for the
     LEDGER -- it decides which class a real account's own ledger line carries,
-    the stored chart row's and the worked-out chart key's alike (it was
+    in the worked-out chart key (and in the stored chart row until plan task
+    plan#3133 deleted its writer; it was
     ``ledger_account_service.ledger_class_id_for_category`` until plan#2523).
     The two agree by READING, which is finding N-118's own condition;
     **finding N-122 owns it and plan step X-ab is where it is merged**, because

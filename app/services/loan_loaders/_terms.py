@@ -576,15 +576,16 @@ def load_loan_account_ids_for_user(user_id: int) -> list[int]:
 
     Every :class:`LoanParams` row whose account belongs to *user_id*, joined
     through :class:`~app.models.account.Account`.  Its all-owners counterpart
-    backed the deploy-time backfill until plan task plan#3077 deleted both;
-    this scoped set backs a PER-USER re-sync
-    (:func:`app.services.loan_posting_service.resync_user_loan_postings`), which
-    ``pay_period_admin._refile_ledger`` called until plan task plan#3076 to
-    rebuild only one user's loan genesis postings after a reset's wipe or a
+    backed the deploy-time backfill until plan task plan#3077 deleted both.
+    The loan form's destination locks read it
+    (``routes._loan_destination._loan_destination_lock_set``).  It also backed
+    a PER-USER re-sync (``loan_posting_service.resync_user_loan_postings``),
+    which ``pay_period_admin._refile_ledger`` called until plan task plan#3076
+    to rebuild only one user's loan genesis postings after a reset's wipe or a
     "Remove earlier paychecks" delete (plan step
     ``pay_calendar:C21``) -- the period CASCADE (``journal_entries.pay_period_id
-    ON DELETE CASCADE``) disposes THIS user's loan opening / true-up entries
-    along with the periods, so each stays inside its own single-user
+    ON DELETE CASCADE``) disposed THIS user's loan opening / true-up entries
+    along with the periods, so each stayed inside its own single-user
     transaction rather than reconciling every owner's loans.
 
     Args:

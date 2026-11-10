@@ -79,8 +79,8 @@ class PaymentDates:
             INSTALLMENT basis above; the installment it pays is the one this
             date falls in).  Supplied by
             :func:`app.services.loan_loaders.loan_payment_due_date` -- the one
-            derivation the genesis write walk uses too, so the posted ledger
-            and the replay can never drift on a payment's due date.  A feed
+            derivation the loan walk uses too, so the ledger and the replay
+            can never drift on a payment's due date.  A feed
             that has been through
             :func:`~app.services.amortization_engine.slotted_dates` carries the
             SCHEDULE SLOT here instead, which for a payment whose due month is

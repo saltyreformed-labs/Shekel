@@ -1,10 +1,10 @@
 """WHEN a loan event becomes visible to a balance read -- the ONE honest clock.
 
-The fold reads a loan's SOURCE events, but the balance every screen shows is a
-sum of POSTINGS, so the fold must count each event on the SAME day the posted
-ledger does or the two would diverge (step B2's parallel run is an EQUALITY).
-That day is the day the event HAPPENED, and it is already the day the posting
-carries in ``journal_entries.entry_date``:
+The fold reads a loan's SOURCE events, and the ledger books the same events as
+lines, so the fold must count each event on the SAME day the ledger books it
+or the two would diverge (step B2's parallel run was an EQUALITY).  That day is
+the day the event HAPPENED, and it is the day each line carries in its
+``entry_date``:
 
 * a **PAYMENT** is visible from its **settled date** -- the STORED
   ``settled_on`` of the loan-side covering movement its leg carries as its
@@ -15,7 +15,7 @@ carries in ``journal_entries.entry_date``:
   ``balance:X-bi-6-5``'s third leaf: a settled transfer's records are dated
   (the status-band rule, :mod:`app.side_band_infrastructure`), so a record
   under one carries its day.  It is the day
-  the posting writer files the loan-side entry under (plan step
+  the ledger books the loan-side movement's line on (plan step
   ``balance:X-bi-6-3``) and the day the cash walk folds that movement on.  It
   is the LOAN side's own day (plan step ``balance:X-bi-6-4c-3``, ruling
   **R-BAL142**): the same date the checking outflow moves on while the loan
@@ -47,8 +47,8 @@ carries in ``journal_entries.entry_date``:
   ``$1,910.95`` mortgage payment stamped 2026-07-02 00:38:53 UTC, the evening of
   2026-07-01 Eastern and the last day of that pay period.
 * an **ANCHOR** is visible from its **own civil date** (``anchor_date``) -- the one
-  date it ever asserts, and the ``entry_date`` the anchor correction is posted at
-  (:func:`app.services._posting_reconcile.emit_correction_entry`).
+  date it ever asserts, and the ``entry_date`` the anchor correction's lines
+  carry (:func:`app.services.ledger_lines.anchor_correction_targets`).
 
 **This is step C2 -- the one clock that replaced the two boundary predicates the
 old rule used.**  Before it, a payment counted from its pay period's ``start_date``
@@ -72,9 +72,9 @@ chronology rule neither of them shares with anything in this package was being
 reached by an import from the CASH posting package into the LOAN package
 (finding **N-169**).  The 2026-08-10 pay-calendar ruling replaced the chain
 with one clamp on
-:meth:`app.services.pay_calendar.PayCalendar.filing_period`, both writers now
-take it through :func:`app.services._posting_reconcile.filing_calendar_for`,
-and all three names are deleted.
+:meth:`app.services.pay_calendar.PayCalendar.filing_period`, both writers
+took it through ``_posting_reconcile.filing_calendar_for`` until plan task
+plan#3133 deleted them, and all three names are deleted.
 
 **Chronology only, and now PURE.**  The two names left here each return a
 ``date``; neither yields a balance-at-T, which is why both are ruled
@@ -100,8 +100,8 @@ def anchor_visible_on(anchor_date: date) -> date:
     """Return the date an anchor's balance correction becomes visible to a read.
 
     The anchor's OWN civil date (step C2): an assertion happens on the date it
-    asserts, which is the ``entry_date`` its correction is posted at
-    (:func:`app.services._posting_reconcile.emit_correction_entry`).  It no
+    asserts, which is the ``entry_date`` its correction's lines carry
+    (:func:`app.services.ledger_lines.anchor_correction_targets`).  It no
     longer needs the owner's calendar -- the pre-C2 rule
     ``LEAST(anchor_date, containing period.start)`` did, only to reach the pay
     period the anchor had to be FILED under -- a requirement of the per-period
@@ -130,11 +130,11 @@ def payment_visible_on(
     the leg's record -- the loan-side covering movement -- read through the
     leg's own :attr:`~app.services.transfer_legs.TransferLeg.settled_on`.
     That movement is
-    what the cash fold counts AND what the posting writer files the loan-side
-    entry under (plan step ``balance:X-bi-6-3``), so the day the fold counts
-    this payment and the day the sum-of-postings reader counts it cannot
-    drift.  It is the LOAN side's own day (plan step ``balance:X-bi-6-4c-3``,
-    ruling **R-BAL142**) -- the checking outflow's day while the loan side
+    what the cash fold counts AND what the ledger books the loan-side line
+    on (plan step ``balance:X-bi-6-3``), so the day the fold counts this
+    payment and the day the ledger's statements count it cannot drift.  It is
+    the LOAN side's own day (plan step ``balance:X-bi-6-4c-3``, ruling
+    **R-BAL142**) -- the checking outflow's day while the loan side
     borrows it, its own day when it holds one.  It read the SHADOW's
     ``settled_on`` until plan step balance:X-bi-6-4b; the status seam keeps
     each shadow equal to its own movement (measured equal on all 20 settled

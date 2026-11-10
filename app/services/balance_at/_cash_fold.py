@@ -7,8 +7,9 @@ WALK (the facts), this owns the FOLD (the balance).  The same split plan step
 D-fold made on the loan side, for the same reason -- *a fold is a balance; a walk
 is a fact* -- and the same placement: because the prefix-sum lives HERE, a
 consumer legitimately holding a
-:class:`~app.services.cash_ledger.CashLedgerWalk` (the posting writer at plan
-step X-d) cannot reach a balance from a public leaf name.
+:class:`~app.services.cash_ledger.CashLedgerWalk` (the worked-out ledger's
+account corrections; the posting writer from plan step X-d until plan task
+plan#3133) cannot reach a balance from a public leaf name.
 
 **Three tiers, ONE :func:`~app.services.balance_at._fold.sample_cumulative`, no
 branch.**  Every date is answered off a single running total
@@ -20,8 +21,8 @@ branch.**  Every date is answered off a single running total
   ruling R-I's back-projection).  See :func:`_actual_steps`.
 * the **ACTUAL** steps -- X-a's walk re-keyed by the day each event became
   visible (:func:`app.services.cash_ledger.dated_deltas`, the ONE statement of
-  that clock, shared with the posting writer so the fold and the posted ledger
-  cannot drift).
+  that clock, shared with the posting writer until plan task plan#3133 so the
+  fold and the posted ledger could not drift).
 * the **PLANNED** steps -- the still-Projected rows, each landing at
   ``max(its attribution date, as_of + 1 day)`` (ruling R-G: "a plan cannot have
   already happened").  The cash twin of the loan timeline's projections
@@ -699,7 +700,8 @@ def _actual_steps(
     :func:`app.services.cash_ledger.dated_deltas` plus the assertion RESETS this
     fold has chosen to apply; nothing is re-keyed, re-valued or compensated.
     That restraint is deliberate: the same re-key is what the posting writer
-    consumes at plan step X-d, and a second statement of "which day does this
+    consumed from plan step X-d until plan task plan#3133, and a second
+    statement of "which day does this
     event count from, and for how much" is precisely how the fold and the posted
     ledger drift apart (the shape plan step E1a found on the loan side).
 

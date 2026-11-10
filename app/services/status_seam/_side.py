@@ -338,9 +338,9 @@ def _cover_side(leg: "TransferLeg", day: SettleDay) -> bool:
         description=leg.name,
     )
     _follow_day(record, day)
-    # Appended to the side's list, the one list the leg's record is read off,
-    # the posting writer's pair door walks and the one removal act takes a
-    # record out of (``transfer_legs.side_movements``, ruling plan#1984).
+    # Appended to the side's list, the one list the leg's record is read off
+    # and the one removal act takes a record out of
+    # (``transfer_legs.side_movements``, ruling plan#1984).
     side_movements(transfer, is_income=leg.is_income).append(record)
     db.session.add(record)
     return True

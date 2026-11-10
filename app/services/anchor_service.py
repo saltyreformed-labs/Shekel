@@ -114,7 +114,7 @@ Two consequences worth stating, both measured before the indexes were dropped:
     ``balance:X-bn``), so the waiter reads the winner's row.  Even without
     it the cost was
     ``$0.00``: a duplicate assertion's correction delta is zero, a zero delta
-    emits no legs (``account_posting_service._anchors``), and same-day
+    books no line (``ledger_lines.account_correction_targets``), and same-day
     corrections merge on one key.
   * *History, superseded by plan step ``balance:X-bn``, which takes the lock
     where each signed-in request's command transaction begins and deleted
@@ -211,7 +211,7 @@ class AmortizingAccountAnchorError(ValueError):
     A loan's balance is never ``accounts.current_anchor_balance`` -- it is
     ledger-derived, and its true-up path is
     :func:`app.services.loan_anchor_service.apply_loan_anchor_true_up` (an append-only
-    :class:`LoanAnchorEvent` plus a posting re-sync).  Writing the cash
+    :class:`LoanAnchorEvent`).  Writing the cash
     column instead creates a second, stored, never-reconciled loan balance
     (plan-of-record finding B-15: the real Mortgage's column was set to
     $1.00 with an HTTP 200 while the ledger said $177,277.97, and the grid
@@ -767,8 +767,8 @@ def apply_anchor_true_up(
     call.**  *History since plan task plan#3076, which deleted the re-sync this
     paragraph is about; the call now writes the one table.*  The
     ``sync_account_anchor_postings_all_scenarios`` that stood below was a
-    RECONCILE-TO-TARGET: it reads what is posted, subtracts that from what the
-    assertions say, and INSERTs the difference into ``budget.journal_entries``
+    RECONCILE-TO-TARGET: it read what was posted, subtracted that from what the
+    assertions said, and INSERTed the difference into ``budget.journal_entries``
     / ``budget.account_postings``.  Nothing about append-only makes a
     read-modify-write safe, and the deleted ``version_id`` UPDATE had been
     serialising it by accident -- it autoflushed and took a row lock before the
@@ -782,13 +782,13 @@ def apply_anchor_true_up(
     ``balance:X-bn`` it is taken by every command transaction a signed-in
     request opens, before it reads any of the owner's data**
     (:mod:`app.db_transaction`), so every door into that same window (the
-    settle self-heal, the pay-period resync) is covered before its first read
-    and the sync takes none of its own.  *This list also named "the direct
+    settle self-heal, the pay-period resync) was covered before its first read
+    and the sync took none of its own.  *This list also named "the direct
     anchor edit", the full account form's balance field, which plan step X-f1e
     deleted.*
     The waiting transaction re-reads under READ COMMITTED, which ruling `balance:R-GU`
-    guarantees for a WRITER (its override is also ``READ ONLY``), so it sees
-    the winner's postings and reconciles to the true merged target.
+    guarantees for a WRITER (its override is also ``READ ONLY``), so it saw
+    the winner's postings and reconciled to the true merged target.
     *History until plan step ``balance:X-bn``, which deleted every acquisition
     this paragraph names:* **since plan step X-f1c4b the SAME lock was taken
     one layer up**, in :func:`stage_anchor_true_up`, because ruling R-EQ's

@@ -7,8 +7,8 @@ each answers its legs as a :data:`ChartLegMap` keyed by a
 :data:`CorrectionKey`, and two corrections sharing a key merge by
 :func:`merge_target_legs`.  They lived in the correction writers' shared leaf
 (``app.services._posting_reconcile``) until plan task plan#2526 moved the rules
-beside the read that sums them; the writer reconciles the same targets
-against what it has posted.
+beside the read that sums them; the writer reconciled the same targets
+against what it had posted until plan task plan#3133 deleted it.
 
 Pure: no query, no write.
 """
@@ -30,23 +30,24 @@ _ZERO_MONEY = Decimal("0.00")
 # ``transaction_id`` until that step, and every teardown of that row owed it
 # a reversal first; a key with no row has nothing to lose.
 #
-# **The period is in the key because R2 is an attribution rule, not a
+# **The period entered the key because R2 was an attribution rule, not a
 # convention** (plan step X-ai-r, finding N-161).  A correction "carries the
 # PAY PERIOD of the postings it reverses -- read back from the ledger per
-# period, never the source row's current period"
-# (:mod:`app.services.posting_service`).  The other two reconciles in this
-# ledger obey it structurally by carrying the period in their key --
-# ``_posting_write.posted_by_period`` for a movement (a transaction's and a
-# transfer's own sources too, until plan#1845 deleted them) and
-# the loan payment split's own reader (folded into :func:`posted_correction_legs`
-# at ``balance:X-bi-6-3``), both ``(pay_period_id, entry_date)``.  This one did not: it read
+# period, never the source row's current period" (the stored ledger's
+# ``posting_service``, until plan task plan#3133 deleted it).  The stored
+# ledger's other two reconciles obeyed it structurally by carrying the period
+# in their key -- ``_posting_write.posted_by_period`` for a movement (a
+# transaction's and a transfer's own sources too, until plan#1845 deleted
+# them) and the loan payment split's own reader (folded into
+# ``posted_correction_legs`` at ``balance:X-bi-6-3``), both
+# ``(pay_period_id, entry_date)``.  This one did not: it read
 # the posted side keyed ``(source_kind_id, entry_date)`` with no period, so
 # it could not know WHICH period it was correcting, and the account reconcile
 # re-supplied one from the source row's current period -- verbatim what the
-# rule forbids.  Measured on production data, that filed a ``$2,854.36``
-# reversal of period-5 postings into period 6.  The period is therefore not
-# decoration on this tuple: it is the half of the key that makes a reversal
-# land where the postings it undoes live.  The worked-out ledger reads the
+# rule forbade.  Measured on production data, that filed a ``$2,854.36``
+# reversal of period-5 postings into period 6.  So the period was not
+# decoration on this tuple: it was the half of the key that made a reversal
+# land where the postings it undid lived.  The worked-out ledger reads the
 # same key and files a correction by the same day-to-period rule when it is
 # read (ruling plan#2519), so its period is never a stored fact.
 CorrectionKey = tuple[int, int, date]
@@ -59,14 +60,16 @@ ChartLegMap = dict[ChartKey, tuple[Decimal, int]]
 def merge_target_legs(bucket: ChartLegMap, legs: ChartLegMap) -> None:
     """Sum a correction's legs into a per-key target *bucket*, in place.
 
-    The same-key merge both anchor reconciles apply when two anchors share
-    one reconcile key -- same source kind, same pay period AND same civil day.
-    Each chart key's amounts add -- one key is one stored row, so it is the
-    sum each row took while this merged by row -- and the merged target
+    The same-key merge each correction rule applies when two corrections
+    share one key -- same source kind, same pay period AND same civil day.
+    Each chart key's amounts add -- one key is one chart account, so its sum
+    is what that account books -- and the merged target
     expresses the anchors' combined jump (landing on the later anchor's value,
     since each correction's delta already accounts for the prior one).  A leg
-    that nets to zero stays in the bucket, so its row is still resolved
-    (``app.services._posting_write.resolve_chart_targets``).  The posting kind
+    that nets to zero stays in the bucket (the stored ledger's writer resolved
+    its row, ``_posting_write.resolve_chart_targets``, until plan task
+    plan#3133 deleted it), and the read drops its ``$0.00`` line
+    (:func:`._worked_out.worked_out_lines`).  The posting kind
     is shared within a key by construction (one key holds one source kind,
     whose legs all carry that kind), so the incoming kind simply wins.
 

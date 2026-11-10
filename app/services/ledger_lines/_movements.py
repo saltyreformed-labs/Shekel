@@ -1,7 +1,7 @@
 """A movement's place in the ledger: whether it books, on what, and as what.
 
-**The movement rule, stated once for the stored ledger's writer and the
-worked-out read** (plan task plan#2526).  Every dated movement -- a purchase
+**The movement rule, stated once for the worked-out read** (plan task
+plan#2526).  Every dated movement -- a purchase
 the bank was seen to take, a bill's or a paycheck's covering movement, a
 transfer side's record -- books ONE balanced pair: its cash leg on the
 account its money moved through, and its counter leg on its PARENT's category
@@ -16,12 +16,11 @@ module is that rule:
 * :func:`purchase_source` and :func:`posting_kind_of` -- the source kind and
   the leg kind its parent's shape decides, through :func:`is_transfer_leg`.
 
-The rule lived in the writer's leaves (``_posting_purchases`` and
-``_posting_write``) until plan task plan#2526 moved it here, so the read sums
-the very legs the writer posts and the rule outlives the store (X-ew's third
-leaf, plan#2516, deletes the writer).  The writer imports it back and adds
-only what is the store's: resolving each key to a stored row, reading what it
-has posted, emitting the difference.
+The rule lived in the stored ledger's writer's leaves (``_posting_purchases``
+and ``_posting_write``) until plan task plan#2526 moved it here, so the read
+summed the very legs the writer posted, and the rule outlived the writer when
+plan task plan#3133 deleted it with what was the store's own: resolving each
+key to a stored row, reading what it had posted, emitting the difference.
 
 Reads the movement's account by its column (an identity-map hit for every
 caller today) and writes nothing.
@@ -49,7 +48,7 @@ from ._chart import (
 def is_transfer_leg(parent) -> bool:
     """Return whether *parent* is one leg of a transfer.
 
-    The ONE spelling of the writer's shape dispatch (plan step
+    The ONE spelling of the ledger's shape dispatch (plan step
     ``balance:X-bi-6-3``, ruling **R-BAL101**): a transfer's movement books
     against the owner's transit account under the ``transfer_movement``
     source with the ``transfer`` leg kind, and the sites that decide that --
@@ -58,12 +57,13 @@ def is_transfer_leg(parent) -> bool:
     adversarial review counted three spellings).
 
     **It asks what the parent IS, not a shadow's column** (leaf
-    ``X-bi-6-4a``, ruling **R-BAL106**): every door hands the writer the
-    parent :func:`app.services.transfer_legs.movement_parent` resolved, a
-    plan row or a :class:`~app.services.transfer_legs.TransferLeg`, so no
-    door of this writer reaches a movement's parent through
-    ``transaction.transfer_id``.  One reader of the column remained beside
-    it: the deploy resync's row selector kept shadow rows out of its ROW arm
+    ``X-bi-6-4a``, ruling **R-BAL106**): every door handed the stored
+    ledger's writer the parent
+    :func:`app.services.transfer_legs.movement_parent` resolved, a plan row
+    or a :class:`~app.services.transfer_legs.TransferLeg`, so no door of that
+    writer reached a movement's parent through ``transaction.transfer_id``.
+    One reader of the column remained beside it: the deploy resync's row
+    selector kept shadow rows out of its ROW arm
     (the fold's ``_movements_of`` twin) until plan step ``X-bi-6-5`` deleted
     that exclusion and then the column.
     The loan ledger's stale-movement probe (``loan_posting_service._sync``)
@@ -119,9 +119,9 @@ def purchase_source(parent: PlanItem) -> PostingSourceEnum:
     ``transfer_movement`` for a transfer LEG's covering movement and
     ``purchase`` for every other (a purchase against an envelope, a bill's or
     a paycheck's covering movement) -- plan step ``balance:X-bi-6-3``, ruling
-    **R-BAL101**.  The stored ledger's writer stamps it on each entry header
-    and filters its posted side by it; the worked-out read names each line's
-    source by it.  It was spelled inline in
+    **R-BAL101**.  The worked-out read names each line's source by it, as the
+    stored ledger's writer stamped it on each entry header and filtered its
+    posted side by it until plan task plan#3133 deleted that writer.  It was spelled inline in
     ``_posting_purchases.emit_purchase_deltas`` until plan task plan#2526 gave
     the read the same answer from the same place.
 
@@ -141,10 +141,11 @@ def purchase_source(parent: PlanItem) -> PostingSourceEnum:
 def purchase_posts(parent: PlanItem, entry) -> bool:
     """Return whether *entry* books a cash leg of its own -- ruling **R-FM**.
 
-    The ONE statement of "is this purchase in the ledger", read by the stored
-    ledger's writer and by the worked-out read alike (it was the writer's,
+    The ONE statement of "is this purchase in the ledger", read by the
+    worked-out read (it was the stored ledger's writer's,
     ``_posting_purchases.purchase_posts``, until plan task plan#2526 moved it
-    here), and the twin of the cash fold's own three narrowings
+    here, and the writer read it here until plan task plan#3133 deleted
+    it), and the twin of the cash fold's own three narrowings
     (:func:`app.services.cash_ledger._events.settled_cash_facts`).  All
     three are load-bearing and each is stated there in full:
 
@@ -207,9 +208,10 @@ def purchase_target(entry, parent: PlanItem) -> dict[ChartKey, Decimal]:
     account's own line (:func:`~._chart.linked_key`), the
     counter leg the parent's category line or the owner's transit bucket.  It
     found the cash row and got or created the counter row as it went until
-    that task; the writer resolves the keys at its emit step now
-    (``app.services._posting_write.resolve_chart_targets``), so the
-    worked-out ledger reads this very rule and creates nothing.  It was the
+    that task; the stored ledger's writer resolved the keys at its emit step
+    after it (``_posting_write.resolve_chart_targets``, until plan task
+    plan#3133 deleted it), so the worked-out ledger reads this very rule and
+    creates nothing.  It was the
     writer's private ``_posting_purchases._purchase_target`` until plan task
     plan#2526 moved it here, beside the read that sums it.
     A purchase against an envelope books ``{cash: -amount, category:
@@ -256,11 +258,11 @@ def purchase_target(entry, parent: PlanItem) -> dict[ChartKey, Decimal]:
     open envelope's real spend as uncategorised on the income statement and
     makes every close write a reclassification pair.
 
-    A re-category of the parent is therefore a re-category of its purchases, and
-    it reconciles by the same mechanism the parent's own leg uses: the sync
-    reads the OLD legs back from the ledger and reverses them
-    (``routes/transactions/mutations`` lists ``category_id`` among the fields
-    that raise a reconcile, on a Projected row as well as a settled one).
+    A re-category of the parent is therefore a re-category of its purchases:
+    each purchase's counter leg is worked out from the parent's category as
+    it stands, so its lines move with the parent and nothing is reversed.
+    The stored ledger's sync read the OLD legs back and reversed them until
+    plan task plan#3097 deleted the transaction doors' syncs.
 
     Args:
         entry: The purchase.  Its ``account_id`` is the account its money
@@ -281,8 +283,9 @@ def purchase_target(entry, parent: PlanItem) -> dict[ChartKey, Decimal]:
             load, and so every movement of one family is provably booked to
             one category.  Its ``user_id`` is the counter account's owner,
             the ONE home ``pay_calendar:C13-b`` gave a row's owner (a leg's is
-            its transfer's), which the writer reads when it resolves the keys
-            (``app.services._posting_write.emit_typed_source_deltas``).
+            its transfer's), which the stored ledger's writer read when it
+            resolved the keys (``_posting_write.emit_typed_source_deltas``,
+            until plan task plan#3133 deleted it).
 
     Returns:
         ``{cash key: leg, counter key: -leg}``.

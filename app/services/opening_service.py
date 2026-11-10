@@ -497,7 +497,7 @@ def apply_opening_restatement(
     as it stands, so nothing is left to re-sync.  *Until plan task plan#3076
     this door re-synced the stored ledger here, which walked the UNION of the
     target and posted keys
-    (:func:`app.services._posting_reconcile.emit_correction_deltas`) to
+    (``app.services._posting_reconcile.emit_correction_deltas``) to
     reverse the old-dated entry to zero and post the new one in the same
     transaction.*
 

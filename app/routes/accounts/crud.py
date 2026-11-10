@@ -420,7 +420,7 @@ def update_account(account_id):
         asserts one** (plan step X-f1e, finding N-195).  It ran the same
         re-sync on ``anchor_changed or type_changed``; with the anchor branch
         deleted, a type change was the only thing here that could move a
-        posted correction, so the whole body is one condition.  A balance
+        posted correction, so the whole body was one condition.  A balance
         assertion goes through its own door
         (``anchor_service.apply_anchor_true_up``), which is where the assertion
         is now written.

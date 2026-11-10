@@ -1,18 +1,17 @@
 """Loan-anchor correction posting: the opening and true-up TARGET legs.
 
 The genesis balance corrections -- the once-per-loan OPENING and every user
-balance TRUE-UP -- a loan books into the append-only double-entry ledger, so its
-confirmed balance is fully reconstructable as ``-(sum of its linked postings)``
-with no external anchor read (the foundation the read switch and Step-5 reporting
-move onto).  **This module builds the TARGET and nothing else** (plan step
-``balance:X-bi-6-3``, ruling **R-BAL102**), for the stored ledger's writer and
-the worked-out read alike; it was ``loan_posting_service._anchors`` until plan
-task plan#2526 moved it beside the read: the reconcile -- what is posted, the
-delta, the emission -- is ``loan_posting_service._corrections``' one loop over the anchor and the
-payment-split targets together, which is what keeps a loan's three correction
-kinds on one read and one write per sync.
+balance TRUE-UP -- a loan books into the double-entry ledger, so its
+confirmed balance is fully reconstructable as ``-(sum of its linked lines)``
+with no external anchor read.  **This module builds the TARGET and nothing
+else** (plan step ``balance:X-bi-6-3``, ruling **R-BAL102**), for the
+worked-out read; it was ``loan_posting_service._anchors`` until plan task
+plan#2526 moved it beside the read.  The stored ledger's reconcile -- what
+was posted, the delta, the emission -- was ``loan_posting_service._corrections``'
+one loop over the anchor and the payment-split targets together, until plan
+task plan#3133 deleted it.
 
-Every anchor a loan carries posts one balanced correction (:mod:`app.services.loan_ledger` computes
+Every anchor a loan carries books one balanced correction (:mod:`app.services.loan_ledger` computes
 its ``owed_before``)::
 
     loan-linked ledger   (owed_before - anchor_balance)   [opening | trueup]
@@ -23,51 +22,50 @@ its ``owed_before``)::
 The origination anchor's ``owed_before`` is zero, so its correction is the
 opening ``-original_principal`` onto the loan and ``+original_principal`` onto its
 per-loan opening-equity (Equity) account.  A user-trueup's correction is
-``owed_before - verified`` -- the append-only jump that reproduces the resolver's
-true-up without editing any prior posting.
+``owed_before - verified`` -- the jump that reproduces the resolver's true-up
+on top of every line before it.
 
-**Reconciled to target, keyed by (source kind, pay period, entry date).**
-A correction is a derivation and has no row to key on, so the reconcile keys
-each anchor's entry by its ``source_kind_id`` (opening vs. true-up), the pay
-period the anchor books in, and its ``entry_date`` (the anchor date), scoped to
-the loan's own chart rows.  The payment split keys the same way since ruling
-**R-BAL102** (it carried the loan-side shadow's ``transaction_id`` before it,
-the one derivation in the ledger with a row key).  A change to a pre-true-up
-payment moves a true-up's ``owed_before``; re-running the sync re-derives the
-target and posts the balancing delta, so a stale true-up self-heals.  Names
-each leg by its chart KEY and touches no stored chart row (plan task
-plan#2524): the reconcile loop resolves the keys, minting the per-loan equity
-row on first use, at its emit step.
+**Keyed by (source kind, pay period, entry date).**  A correction is a
+derivation and has no row to key on, so each anchor's correction is keyed by
+its ``source_kind_id`` (opening vs. true-up), the pay period the anchor books
+in, and its ``entry_date`` (the anchor date), on the loan's own chart keys.
+The payment split keys the same way since ruling **R-BAL102** (it carried the
+loan-side shadow's ``transaction_id`` before it, the one derivation in the
+ledger with a row key).  A change to a pre-true-up payment moves a true-up's
+``owed_before``, and the read works the true-up out again from the walk as it
+stands (the stored ledger's sync re-derived the target and posted the
+balancing delta until plan task plan#3133 deleted it).  Names each leg by its
+chart KEY and touches no stored chart row (plan task plan#2524).
 
 **The period entered the key at plan step X-ai-r (finding N-161), and on this
-side it closes a LATENT hole rather than a live one.**  The key was ``(source
-kind, entry date)`` and the entry's period was resolved inside the emission
-loop from the anchor date, so on a fixed calendar the target and the posted
-entries always agreed and no loan figure moves (measured on a production
-clone: zero deltas across every loan).  They stop agreeing when the calendar
-GROWS A PERIOD around an anchor that had none.
-:meth:`app.services.pay_calendar.PayCalendar.filing_period` clamps to the last
-period that OPENED on or before the anchor date when none contains it, so a
-loan asserted past the end of the user's schedule files against that clamp; the
-next ``extend_pay_periods`` -- or the rolling-window top-up
+side it closed a LATENT hole in the stored ledger rather than a live one.**
+The key was ``(source kind, entry date)`` and the entry's period was resolved
+inside the emission loop from the anchor date, so on a fixed calendar the
+target and the posted entries always agreed and no loan figure moved
+(measured on a production clone: zero deltas across every loan).  They
+stopped agreeing when the calendar GREW A PERIOD around an anchor that had
+none.  :meth:`app.services.pay_calendar.PayCalendar.filing_period` clamps to
+the last period that OPENED on or before the anchor date when none contains
+it, so a loan asserted past the end of the user's schedule files against that
+clamp; the next ``extend_pay_periods`` -- or the rolling-window top-up
 (``pay_period_rolling.top_up_rolling_window``, which appends through the same
 function on an ordinary grid or dashboard load) -- then creates the period
 that really contains it.  A period-blind key compared the two as equal, so the
-delta was zero and the correction sat in the clamped period permanently, with
-any later adjustment filed there too.  With the period in the key the stale
-key reverses to zero and the real one posts fresh, which is the same lifecycle
-every other reconcile in this ledger already gets.
+delta was zero and the stored correction sat in the clamped period
+permanently, with any later adjustment filed there too; with the period in
+the key the stale key reversed to zero and the real one posted fresh.  The
+worked-out read keeps no copy to go stale: it files each correction by its day
+on whichever paycheck stands when it is read (ruling plan#2519).
 
-*The truncating paths are NOT the mechanism.*  Only a period APPEARING under an
-existing correction reaches this.  A period being DELETED takes the stored
-correction with it through the ``pay_period_id`` cascade, so no stale key is
-left to reverse and the next reconcile posts the target fresh.
+*The truncating paths were NOT the mechanism.*  Only a period APPEARING under
+an existing correction reached this.  A period being DELETED took the stored
+correction with it through the ``pay_period_id`` cascade, so no stale key was
+left to reverse and the next reconcile posted the target fresh.
 ``reset_pay_periods`` wiped and paired itself with a full resync
 (``resync_user_loan_postings`` / ``resync_user_account_anchor_postings``)
 until plan task plan#3076, and ``truncate_pay_periods`` and
 ``regenerate_pay_periods`` ran none, so since ruling plan#2782 deleted the lock
-that refused them the stored copy was short until that next re-sync; the
-worked-out line files by its day on whichever paycheck stands.
+that refused them the stored copy was short until that next re-sync.
 
 **Where the period comes from is the SAME on both halves, and this paragraph
 used to say it was not.**  A loan anchor's period is DERIVED from its date
@@ -147,15 +145,12 @@ def _loan_anchor_correction_target(
     to zero and the ledger's implied ``owed`` moves from ``owed_before`` to the
     verified value.  A correction whose ``owed_before`` already equals the anchor
     balance (a true-up that matches the walked balance) books NOTHING -- an empty
-    target, so no zero leg is written and no opening-equity account is minted for
-    it.
+    target, so no zero leg is booked.
 
     Each leg is named by its :class:`~app.services.ledger_lines.ChartKey` (the
-    loan's own line and its ``equity_opening`` line), and the writer mints the
-    per-loan opening-equity row only for a correction that books
-    (:func:`app.services._posting_write.resolve_chart_targets`, plan task
-    plan#2524; until that task this resolved and minted it as it went, through
-    :func:`app.services.ledger_account_service.get_or_create_loan_ledger_account`).
+    loan's own line and its ``equity_opening`` line); until plan task plan#2524
+    this resolved and minted the stored opening-equity row as it went, through
+    ``ledger_account_service.get_or_create_loan_ledger_account``.
 
     Args:
         correction: The anchor correction from :func:`walk_loan_ledger`.
@@ -163,7 +158,7 @@ def _loan_anchor_correction_target(
             account every one of its anchors is asserted for.  It was read off
             the anchor (``anchor.account_id``), with the owner beside it, until
             plan task plan#2524, when the loan's own line's key came to need
-            the account's type; the owner is the writer's, at its emit step.
+            the account's type.
 
     Returns:
         ``{chart key: (amount, posting_kind_id)}`` (the two balanced legs, or
@@ -197,16 +192,17 @@ def anchor_correction_targets(
     same-kind anchors (the unique index permits two true-ups on one day with
     different balances) net to a single balanced target that lands owed on the
     LATER value -- exactly the combined jump they express.  A correction that
-    books nothing still creates its key with an empty leg map, so an entry it
-    previously posted (now matching) is reversed to zero by the reconcile.
+    books nothing still creates its key with an empty leg map, which books no
+    line (the stored ledger's reconcile reversed an entry it had posted under
+    that key to zero, until plan task plan#3133 deleted it).
 
     **The period is RESOLVED here, from the calendar, rather than in the
-    emission loop** (plan step X-ai-r).  It is part of the key, so it has to be
-    known before the target and the posted side can be compared -- which is
-    exactly the point: a boundary that moved under an already-posted correction
-    now shows up as two keys (the old one reversing, the new one posting) instead
-    of one target silently re-filed.  Two same-day anchors always resolve to the
-    same period, so this narrows no group that was merged before.
+    emission loop** (plan step X-ai-r).  It is part of the key, so the stored
+    ledger's reconcile knew it before comparing the target and the posted
+    side: a boundary that moved under an already-posted correction showed up as
+    two keys (the old one reversing, the new one posting) instead of one target
+    silently re-filed.  Two same-day anchors always resolve to the same period,
+    so this narrows no group that was merged before.
 
     Args:
         corrections: The loan's anchor corrections from

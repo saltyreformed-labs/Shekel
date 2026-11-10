@@ -27,8 +27,8 @@ shared a file; plan step ``bank_import:X-gq`` moved the class out.*
 
 **Ruling R-FN is what the row is**, and its mechanism already exists: an
 ordinary transaction with ``category_id`` NULL books to the per-owner
-``Uncategorized Income`` / ``Uncategorized Expense`` ledger account through
-``ledger_account_service.get_or_create_category_ledger_account``, needs no new
+``Uncategorized Income`` / ``Uncategorized Expense`` bucket
+(``ledger_lines.category_key``), needs no new
 ledger-account kind, and is CATEGORIZABLE later through the ordinary edit
 door -- which is the mechanism that shrinks the bucket.  It is emphatically NOT
 a plug to ``anchor_equity``: that is what R-FN replaced, and plan step

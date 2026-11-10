@@ -28,29 +28,31 @@ replay_loan_stream(facts + projections) = the same replay, the whole timeline
 (ruling **R-R90**): the seam appends a loan's forward plan -- its projected
 rows and estimated occurrences -- to a copy of the recorded stream, behind
 every fact, and :func:`replay_loan_stream` replays it from the same seed the
-posted ledger's walk uses, the origination.  A projection cannot be placed
+ledger's walk uses, the origination.  A projection cannot be placed
 ahead of a fact (:func:`projection_boundary`), so the fact prefix of that
 replay IS :func:`walk_loan_ledger`'s output and the two cannot disagree on a
 recorded payment.
 
 ## Why it is a leaf, and what depends on it
 
-The posting ledger (:mod:`app.services.loan_posting_service`) is the GENERAL
+The worked-out ledger (:mod:`app.services.ledger_lines`) is the GENERAL
 ledger -- the balance sheet, the statements, the attribution.  It is NOT the
 answer to "what do I owe".  It projects THIS walk into the balanced corrections
-it reconciles onto the chart of accounts, which is what makes the posted rows a
+it books on the chart of accounts, which is what makes its loan lines a
 re-derivable projection of the loan's facts rather than a second opinion about
 them.  The dependency runs one way::
 
-    loan_posting_service (the general ledger)  ->  loan_ledger (the walk)
-    balance_at (the read seam)                 ->  loan_ledger (the walk)
+    ledger_lines (the general ledger)  ->  loan_ledger (the walk)
+    balance_at (the read seam)         ->  loan_ledger (the walk)
 
-The walk lived INSIDE the posting package until step B0, which put the general
-ledger in the position of owning the answer to "what do I owe" and left every
-other consumer reaching through its privates for the split.  Moving it here is
-what lets the ledger become a CHECKED PROJECTION of the walk
+The walk lived INSIDE the stored ledger's posting package
+(``loan_posting_service``) until step B0, which put the general ledger in the
+position of owning the answer to "what do I owe" and left every other consumer
+reaching through its privates for the split.  Moving it here is what let the
+stored ledger become a CHECKED PROJECTION of the walk
 (``sum(postings) == fold(ACTUAL events)``, plan step E1) instead of the source of
-truth it was mistaken for.  A consumer holding a walk cannot reach a balance from
+truth it was mistaken for, until plan task plan#3093 deleted that check and
+plan task plan#3133 the posting package.  A consumer holding a walk cannot reach a balance from
 any public name here -- the fold that would is seam-private -- which is why the
 walk needs no fence (plan step D-fold).
 
@@ -80,8 +82,9 @@ walk needs no fence (plan step D-fold).
 * :mod:`._walk` -- the running-balance replay over that stream (the loan's FACTS:
   per-payment splits and per-anchor corrections), the payment-split view of it,
   and the visible-date re-key of its events (:func:`dated_deltas`, step E1a --
-  shared by the seam's fold and the posting writer's checked-projection assert
-  so neither carries its own copy of the one clock).  Renamed from ``_fold`` at
+  read by the seam's fold, and shared with the posting writer's
+  checked-projection assert until plan task plan#3093 deleted it, so neither
+  carried its own copy of the one clock).  Renamed from ``_fold`` at
   step D-fold, when the fold (the balance) left for the seam and only the walk
   (the facts) remained.
 * :mod:`._visible` -- WHEN each fact becomes countable (the ONE clock).

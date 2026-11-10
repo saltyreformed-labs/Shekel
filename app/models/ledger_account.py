@@ -17,9 +17,10 @@ NOT NULL ``kind_id`` FK to :class:`app.models.ref.LedgerAccountKind` that
 names its kind *positively* -- a reader branches on that integer ID, never
 on which of ``account_id`` / ``category_id`` / ``is_owner_bucket`` /
 ``loan_account_id`` happen to be NULL.  ``kind_id`` is the authoritative
-discriminator; it is stamped by the sole writer (``ledger_account_service``)
-on exactly the same trust contract ``class_id`` carries (see "Storage-tier
-shape enforcement" below for what the constraints do and do not police).
+discriminator; it was stamped by the sole writer (``ledger_account_service``)
+until plan task plan#3133 deleted it, on exactly the same trust contract
+``class_id`` carries (see "Storage-tier shape enforcement" below for what the
+constraints do and do not police).
 Twelve kinds coexist in one table:
 
 * **linked** (``account_id`` set, ``category_id`` NULL, ``is_owner_bucket``
@@ -144,10 +145,11 @@ kinds.**  A CHECK constraint cannot contain a subquery, so "this row's
 embedding the seeded ``ref.ledger_account_kinds`` row IDs as literals -- which
 the project forbids (ref IDs are resolved through ``ref_cache``, never
 hardcoded).  The CHECK therefore policies the column *shape* of a loan row,
-and "a loan row's kind is a loan kind" is guaranteed by the sole writer
+and "a loan row's kind is a loan kind" was guaranteed by the sole writer
 (``ledger_account_service.get_or_create_loan_ledger_account``, Step 4) and its
-tests -- the identical, deliberately-accepted trust contract the (un-CHECKed)
-``class_id`` already carries (see ``ledger_account_service``).
+tests until plan task plan#3133 deleted them -- the identical,
+deliberately-accepted trust contract the (un-CHECKed) ``class_id`` carries.
+No door writes a row since.
 
 **Reconciliation of orphans** (a forward note for Build-Order Step 8's
 oracle).  An orphan still holds the immutable postings made while its
@@ -169,7 +171,7 @@ own snapshot.  **The COALESCE rule is the LINKED-row rule only**: an
 per-account COUNTER row also carries ``account_id`` (so the COALESCE would
 wrongly resolve to the bare account name), so readers rendering chart
 entries branch on ``kind_id`` and use the ``name`` snapshot for those rows
--- the sole writer always stamps one.  No reader renders these rows since
+-- the sole writer always stamped one.  No reader renders these rows since
 plan task plan#2771: the statements label each line from the worked-out
 chart, by its live record (``ledger_lines.chart_label``, ruling plan#2518).
 The ``ck_ledger_accounts_name_present`` CHECK guarantees at least one of the
@@ -177,7 +179,8 @@ two is present so the display rule can never resolve to NULL -- and because
 a non-account-linked row has ``account_id`` NULL, that CHECK forces it to
 carry a ``name``.
 
-**Not append-only.**  Rows are created by the sync hook / backfill and
+**Not append-only.**  Rows were created by the sync hook / backfill (until
+plan task plan#3133) and
 ``kind_id``, ``account_id`` and ``loan_account_id`` are intrinsic, a linked
 row's ``name`` stays NULL (the display name lives on ``account.name``), and its
 ``class_id`` follows the account's type when a re-type crosses the
@@ -429,7 +432,8 @@ class LedgerAccount(UserScopedMixin, CreatedAtMixin, db.Model):
     # anchor_equity / interest_income / unrealized_change).
     # NOT NULL -- every row names its kind positively; readers branch on this
     # integer ID, never on which other FKs are NULL.  Stamped by the sole writer
-    # (``ledger_account_service``) on the same trust contract as ``class_id``.
+    # (``ledger_account_service``) until plan task plan#3133 deleted it, on the
+    # same trust contract as ``class_id``.
     # RESTRICT: the seeded ``ref.ledger_account_kinds`` rows are non-removable
     # invariants.  Explicit convention FK name (the naming convention is not
     # installed on the metadata, so new FKs name themselves).

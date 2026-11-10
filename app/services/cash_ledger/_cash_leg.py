@@ -26,7 +26,7 @@ direct charge on a Credit Card account).
 
 **A SETTLED ROW's own leg has NO reader since plan step ``balance:X-bi-4a``**
 (rulings **R-BAL77**, **R-BAL80**, **R-BAL81**).  The cash walk and the
-posting writer read a settled row's money as its MOVEMENTS and nothing else,
+ledger read a settled row's money as its MOVEMENTS and nothing else,
 and the statement matcher prices a settled row at what its covering movement
 moves (``status_seam.covered_cash_leg``, ruling **R-BAL81**).  Through
 ``X-bi-3e`` all of them read the row's leg, one rule in one expression --
@@ -119,9 +119,9 @@ def posted_purchase_sum(txn: Transaction) -> Decimal:
 
     The ``Sigma(posted debit purchases)`` term ruling **R-FM** adds to the
     confirmed cash effect (plan step X-f3b).  A purchase carrying a recorded
-    bank posting day books its OWN cash leg on its OWN day
-    (``_posting_purchases.emit_purchase_deltas``), so a row's leg priced
-    beside it must leave it out or the same dollars are counted twice.
+    bank posting day books its OWN cash leg on its OWN day (the fold's
+    :func:`~._events.settled_cash_facts`), so a row's leg priced beside it
+    must leave it out or the same dollars are counted twice.
 
     A DEBIT purchase only: a card purchase never touches checking at all, and
     :func:`credit_entry_sum` is the term that removes it.  The two are disjoint

@@ -425,25 +425,26 @@ def dated_deltas(walk: CashLedgerWalk) -> list[tuple[date, Decimal]]:
     CHECK (plan step X-f3c) merges nothing, and this list is the whole recorded
     tier.
 
-    **These are the amounts the posting writer books onto the account's LINKED
-    ledger, in the same sign -- NOT their negatives.**  The loan twin says
+    **These are the amounts the ledger books on the account's own LINKED
+    line, in the same sign -- NOT their negatives.**  The loan twin says
     "negated" and is right to, because a loan walk tracks OWED against a
     credit-normal liability ledger; cash does not.
     :func:`app.services.cash_ledger.movement_cash_leg` is debit-positive, so
     these steps ARE the linked ledger's movements in one convention, for assets
-    and liabilities alike.  Verified against the writer:
+    and liabilities alike.  Verified against the ledger's rule:
     ``ledger_lines.purchase_target`` books ``movement_cash_leg(txn,
     entry)`` -- this module's :attr:`~._events.CashSourceFact.delta` -- onto
     the linked ledger.
     The NEGATIVES are the counter legs (the category ledger, the anchor-equity
-    account).  Getting this backwards is not a cosmetic error: plan step X-d
-    wires the writer onto this walk, and a sign flip there still balances every
-    entry -- so the trial balance closes and only the balance sheet is upside
-    down.
+    account).  Getting this backwards is not a cosmetic error: a consumer that
+    books these (the posting writer did from plan step X-d until plan task
+    plan#3133) still balances every entry under a sign flip -- so the trial
+    balance closes and only the balance sheet is upside down.
 
-    That equality is why the re-key lives on the LEAF: two consumers, one
-    derivation.  A third statement of "which day does this event count from, and
-    for how much" is precisely how the fold and the posted ledger drift apart
+    That equality is why the re-key lives on the LEAF: it had two consumers,
+    the fold and the posting writer, and one derivation.  A third statement of
+    "which day does this event count from, and for how much" is precisely how
+    the fold and the posted ledger drift apart
     (plan step E1a's finding, on the loan side).
 
     **This list carries no source dated at or before the account's opening, and

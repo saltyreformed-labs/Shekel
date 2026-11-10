@@ -62,7 +62,7 @@ Architecture:
     ``transfer_legs``), the books grade (``planned_rows_books``), the figure
     and press values (``stated_figure``, ``match_press``), the match
     withdrawal (``match_withdrawal``) and the one act that takes a movement
-    off the books (``movement_removal``, which reaches the ledger writer and
+    off the books (``movement_removal``, which reaches
     ``match_withdrawal``) -- never on the higher-level services
     that call it (``transaction_service``,
     ``credit_workflow``, ``transfer_service``, the route layer, and the loan /

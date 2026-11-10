@@ -238,7 +238,7 @@ def gate_deletable_tail(
         # A correction, an opening or a true-up, locks nothing (ruling
         # plan#2782): worked out from the records it files by its day on
         # whichever paycheck stands, and the journal_entries.pay_period_id
-        # cascade takes only the stored copy, which the next re-sync rebuilds.
+        # cascade took only the stored copy, which the next re-sync rebuilt.
         raise PayPeriodLocked(
             blocking, pay_period_locks.locked_refusal(to_delete, blocking),
         )
@@ -311,11 +311,11 @@ def gate_removable_head(
        refuse.  Rows filed in the head are refused by (1) first whatever they
        are dated.
 
-    **What the posted ledger booked in the head is NOT asked here** (ruling
+    **What the ledger books in the head is NOT asked here** (ruling
     **R-PC114**, amending R-PC109's "a balance entry the app booked").  The
     ledger files every CORRECTION dated before the first paycheck in the
     EARLIEST one (``PayCalendar.filing_period``, **R-PC53**; a cash movement
-    is filed in its row's own period), and every re-sync re-files there --
+    is filed in its row's own period), each time it is read --
     so after "Add earlier paychecks" a loan's opening dated years back sits
     in an added paycheck, and refusing on it made the
     undo die at the first loan payment (review 1 of C21, measured on the

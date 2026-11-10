@@ -29,9 +29,9 @@ would inherit the write with none of the seam's refusals.
 
 **The movement IS the money** (plan step ``balance:X-bi-4a``, ruling
 **R-BAL80**).  The fold's fact producer reads every dated movement and no row
-(``cash_ledger._events.settled_cash_facts``), the posting writer posts each
-one and nothing for the row (``posting_service.sync_transaction_postings``
-walks ``txn.entries``), and the statement matcher offers a settled row AS
+(``cash_ledger._events.settled_cash_facts``), the ledger books each one and
+nothing for the row (``ledger_lines.purchase_target``, over the owner's
+movements), and the statement matcher offers a settled row AS
 its covering movement, priced when dated at what it moves
 (``statement_match._valuation.settlement_price``, rulings **R-BAL81** and
 **R-CC43**), and values an accepted payment member at :func:`covered_cash_leg`
@@ -105,13 +105,13 @@ one figure in its own side's direction -- ``-figure`` off the from-account,
 ``+figure`` into the to-account -- through the same producer a bill's and a
 paycheck's read.
 
-**A transfer's movements POST, each as its own entry, since plan step
+**A transfer's movements BOOK, each as its own pair, since plan step
 ``balance:X-bi-6-3``** (ruling **R-BAL45**'s shape C, built under
-**R-BAL101**).  The posted ledger books each side's record on its own day
+**R-BAL101**).  The ledger books each side's record on its own day
 against the owner's Transfers-in-transit account -- ``{from-side
 account -figure, transit +figure}`` and ``{to-side account +figure, transit
--figure}`` -- through the ONE movement writer every purchase and covering
-movement posts through (``_posting_purchases``, the counter leg dispatched by
+-figure}`` -- by the ONE movement rule every purchase and covering
+movement books by (``ledger_lines.purchase_target``, the counter leg dispatched by
 the parent's shape), so the walk and the ledger read one movement each and
 nothing is mirrored between them.  Through ``X-bi-6-1b`` the ledger booked
 the pair as ONE entry off the income shadow's record and every

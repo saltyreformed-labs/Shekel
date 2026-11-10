@@ -12,8 +12,9 @@ convention, and the package's public surface hides it behind
 boundary C2-b1 shipped it behind -- the same technique C1 and C2-a used, so the
 loader was proven on its own against a real schedule rather than inside a
 commit that also moved every consumer.  **C2-d was that first consumer**: both
-anchor-correction posting writers reach it through
-:func:`app.services._posting_reconcile.filing_calendar_for`.  **C2-b2 then
+anchor-correction posting writers reached it through
+``app.services._posting_reconcile.filing_calendar_for``, until plan task
+plan#3133 deleted them.  **C2-b2 then
 brought the recurrence engine** -- its ten ``recurrence.calendar_for`` call
 sites now name this function, and the second calendar type and second loader
 they used were deleted, so ``calendar_for`` is one name under ``app.services``
@@ -224,9 +225,9 @@ def calendar_for(user_id: int) -> PayCalendar:
     # which is where the calendar is read most -- the request's transaction is
     # one ``REPEATABLE READ`` snapshot, so both reads see one state of the
     # database and no interleaving is expressible.  Inside a COMMAND they are
-    # still separate snapshots: the write doors reach here through
-    # ``_posting_reconcile.filing_calendar_for`` and through generation, and a
-    # CLI script or a deploy reconcile has no mode at all.
+    # still separate snapshots: the write doors reach here through generation
+    # and through the re-type refusal's ledger read
+    # (``ledger_lines.accounts_hold_lines``), and a CLI script has no mode at all.
     #
     # So the order below still decides who loses the race, and only a command
     # can now lose it: in this order the loser sees a cadence and fewer

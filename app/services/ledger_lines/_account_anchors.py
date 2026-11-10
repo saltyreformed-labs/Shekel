@@ -15,9 +15,10 @@ each correction books, keyed by chart key:
 plan#2525).  The counter
 line is ruling **R-FO**'s dispatch over the account's projection kind
 (:func:`~._chart.anchor_correction_counter_kind`).  The one public answer is
-:func:`account_correction_targets`, which the stored ledger's writer
-reconciles to and the worked-out read sums; it lived in the writer
-(``account_posting_service._anchors``) until plan task plan#2526 moved it here.
+:func:`account_correction_targets`, which the worked-out read sums; it lived
+in the stored ledger's writer (``account_posting_service._anchors``) until
+plan task plan#2526 moved it here, and the writer reconciled to it until plan
+task plan#3133 deleted it.
 
 **The period is DERIVED FROM THE DAY, and since plan step X-f1c3c that is the
 app's ONLY day-to-period rule** (ruling R-DH: *"an assertion's period and the
@@ -25,9 +26,8 @@ civil day it was true are two statements of one fact, and the moment they can
 be set independently they can disagree"*).  Every anchor correction, cash and
 loan alike, is filed through
 :meth:`app.services.pay_calendar.PayCalendar.filing_period` against the entry's
-own date, loaded through the one door both writers share
-(:func:`app.services.pay_calendar.calendar_for`, which the writer loads
-through ``_posting_reconcile.filing_calendar_for``).
+own date, on the owner's calendar
+(:func:`app.services.pay_calendar.calendar_for`).
 
 **That rule became ONE clamp at plan step C2-d.**  It was
 ``loan_ledger.resolve_anchor_pay_period`` -- containment, else the latest
@@ -65,9 +65,9 @@ exists.
 **What that replaced, and the two ways it was wrong** (finding N-161).  The
 key was ``(source kind, entry date)`` with the period carried alongside it in
 a parallel map, written last-fact-wins from ``account_anchor_history``'s stored
-``pay_period_id`` -- the source row's CURRENT period, verbatim what R2 forbids
-(:mod:`app.services.posting_service`: a correction "carries the PAY PERIOD of
-the postings it reverses ... never the source row's current period").  Measured
+``pay_period_id`` -- the source row's CURRENT period, verbatim what R2 forbade
+(the stored ledger's ``posting_service``: a correction "carries the PAY PERIOD
+of the postings it reverses ... never the source row's current period").  Measured
 on production data: two assertions observed 2026-06-03 whose stored periods are
 5 and 6 had posted as ``+$3,054.36`` in period 5 and ``-$2,854.36`` in period
 6 -- one key could not tell them apart, so the second reconciled as a delta
@@ -215,16 +215,14 @@ def _counter_keys(
     create form now ASKS, which is ruling R-EX's own argument about the
     registration payday applied to the other figure nobody can default.
 
-    **A key is named only where a correction really books into it, and a row
-    is minted only for a key a target names.**  A correction whose
-    ``ledger_before`` already equals its anchor balance names no key, so the
-    writer mints nothing for it
-    (:func:`app.services._posting_write.resolve_chart_targets`) and a fresh $0
-    account keeps zero ledger rows and stays hard-deletable -- which the
-    account-delete CASCADE argument rests on.  The writer resolves each key
-    once per reconcile, which is what this function's reuse of a resolved row
-    was for (the resolver issues a query and Checking carries 102
-    corrections).
+    **A key is named only where a correction really books into it.**  A
+    correction whose ``ledger_before`` already equals its anchor balance names
+    no key, so it books no line.  While the stored ledger's writer stood (until
+    plan task plan#3133), that was also why it minted no row for one
+    (``_posting_write.resolve_chart_targets``), so a fresh $0 account kept zero
+    ledger rows and stayed hard-deletable; it resolved each key once per
+    reconcile, which is what this function's reuse of a resolved row was for
+    (the resolver issued a query and Checking carried 102 corrections).
 
     Args:
         account: The non-loan :class:`~app.models.account.Account` being
@@ -240,10 +238,7 @@ def _counter_keys(
 
     Raises:
         ValueError: If the dispatch has no rule for the account's projection
-            kind.  The counter resolver's refusals (an account not the
-            owner's, or an amortizing loan -- both broken invariants at this
-            point, the walk having already classified) are the writer's, at
-            its emit step.
+            kind.
     """
     projection_kind = classify_account(account)
     counters: list[ChartKey | None] = []
@@ -271,7 +266,7 @@ def _account_anchor_correction_target(
     or ``trueup``); the COUNTER leg is its negative, so the two sum to zero and
     the linked ledger's implied balance moves from ``ledger_before`` to the
     asserted value.  A correction whose ``ledger_before`` already equals the
-    anchor balance books NOTHING -- an empty target, so no zero leg is written.
+    anchor balance books NOTHING -- an empty target, so no zero leg is booked.
 
     **The counter leg NAMES what the difference was** (ruling **R-FO**): the
     equity opening, interest income, or change in value, decided by
@@ -282,8 +277,8 @@ def _account_anchor_correction_target(
 
     Args:
         correction: The anchor correction from :func:`._account_walk.account_corrections`.
-        linked: The account's own line's chart key, built once by the
-            reconcile.
+        linked: The account's own line's chart key, built once by
+            :func:`account_correction_targets`.
         counter: This correction's counter chart key from
             :func:`_counter_keys`, or ``None`` when that function found the
             correction books nothing -- the same predicate this function
@@ -320,17 +315,19 @@ def _account_anchor_correction_targets(
     lands the ledger on the LATER value -- exactly the combined jump they
     express (each correction's delta already accounts for the prior one).  A
     correction that books nothing still creates its key with an empty leg
-    map, so an entry it previously posted (now matching) is reversed to
-    zero by the reconcile.
+    map, which books no line (the stored ledger's reconcile reversed an entry
+    it had posted under that key to zero, until plan task plan#3133 deleted
+    it).
 
     **Both key parts that identify WHEN come off the same fact**: the entry's
     date IS the assertion's ``observed_on``, and its period is the one that day
     files under (:meth:`app.services.pay_calendar.PayCalendar.filing_period`,
     the derivation the loan twin makes and the rule ruling R-DH states).  The
-    stored ``account_anchor_history.pay_period_id`` is deliberately NOT read
-    here -- it is a cache of this same derivation, and a row whose clock split
-    it from its own day would otherwise put the ledger permanently at odds
-    with the grid.  See the module docstring for the production measurement.
+    stored ``account_anchor_history.pay_period_id`` was deliberately NOT read
+    here while it stood -- it was a cache of this same derivation, and a row
+    whose clock split it from its own day would have put the ledger
+    permanently at odds with the grid; ruling R-EO deleted the column.  See
+    the module docstring for the production measurement.
 
     Args:
         corrections: The account's corrections from
@@ -342,8 +339,8 @@ def _account_anchor_correction_targets(
             refused, so this carries no precondition of its own -- an earlier
             draft claimed the loader had already checked, which was a second
             statement of one predicate and the two had drifted.
-        linked: The account's own line's chart key, built once by the
-            reconcile.
+        linked: The account's own line's chart key, built once by
+            :func:`account_correction_targets`.
         counters: One counter chart key per correction, in the SAME order, from
             :func:`_counter_keys` -- ``None`` where the correction books
             nothing.  Positional rather than keyed because which line a
@@ -384,14 +381,14 @@ def account_correction_targets(
     """Return an account's opening and true-up legs, keyed per correction.
 
     The ONE answer to "what does this account's anchor history book", which
-    the stored ledger's writer reconciles to
-    (``account_posting_service.reconcile_account_anchor_corrections``) and the
-    worked-out read sums (plan task plan#2526): each correction's two legs --
+    the worked-out read sums (plan task plan#2526; the stored ledger's writer
+    reconciled to it, ``account_posting_service.reconcile_account_anchor_corrections``,
+    until plan task plan#3133 deleted it): each correction's two legs --
     its linked leg on the account's own line and its counter leg on the line
     ruling **R-FO** names (:func:`_counter_keys`) -- merged per ``(source
     kind, pay period, entry date)`` (:func:`_account_anchor_correction_targets`).
-    A correction that books nothing keeps its key with no legs, so a writer
-    reverses what it once posted there.
+    A correction that books nothing keeps its key with no legs, which books
+    no line.
 
     Args:
         account: The non-loan account, with ``account_type`` loaded.

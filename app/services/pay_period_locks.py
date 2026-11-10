@@ -160,7 +160,7 @@ def _resolve_lock(
     correction holds no paycheck of its own: it files by its day
     (:meth:`~app.services.pay_calendar.PayCalendar.filing_period`) on whichever
     paycheck stands, so the lock guarded only the stored copy, which the next
-    re-sync rebuilds.  Measured by the ruling on the 2026-11-03 production
+    re-sync rebuilt.  Measured by the ruling on the 2026-11-03 production
     dump: 16 of 67 paychecks held a correction, each locked first by Past or
     Settled, so it decided none.
 

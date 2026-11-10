@@ -8,7 +8,7 @@ fact.*
 
 The leaf's :func:`app.services.loan_ledger.walk_loan_ledger` replays a loan's
 anchors and settled payments into per-payment splits and per-anchor corrections in
-CONTRACT-time order -- FACTS, which both the posting writer and the seam need.
+CONTRACT-time order -- FACTS, which both the ledger and the seam need.
 Turning those facts into "what is owed on date D" is what this module does, and it
 does it the way the whole arc turns on (Section 3):
 
@@ -259,11 +259,11 @@ def fold_loan_balances(
     and calls :func:`fold_from_walk` directly; this entry is the standalone form for
     a caller (B2's oracle) that holds no context.
 
-    **It reads the loan's SOURCE rows and never the postings table.**  That is the
-    whole point: the posted ledger is a PROJECTION of this fold, so an answer
-    derived independently of it is what can prove the projection faithful.  Where
-    the two disagree, the ledger is a stale cache -- a detectable, repairable
-    inconsistency -- rather than the outage a missing posting is today.
+    **It reads the loan's SOURCE rows and never the postings table.**  That was the
+    whole point while the ledger was stored: the posted ledger was a PROJECTION of
+    this fold, so an answer derived independently of it could prove the projection
+    faithful, and where the two disagreed the ledger was a stale cache.  The
+    worked-out ledger projects the same walk when it is read (plan task plan#3133).
 
     **TOTAL over every DATE and every ACCOUNT.**  There is no date it refuses and
     no account it refuses: asked about a date before any event -- or about an
@@ -291,8 +291,8 @@ def fold_loan_balances(
 
     **N-11 (a raw transaction typed onto a loan) is closed by construction (BG,
     ruling R-E), not a live gap.**  A raw settled transaction typed directly onto a
-    loan account would post onto the loan's linked ledger where the sum-of-postings
-    readers count it, while the fold -- whose payment set is transfer legs
+    loan account would book onto the loan's own ledger line where the ledger
+    counts it, while the fold -- whose payment set is transfer legs
     only (:func:`~app.services.loan_loaders.settled_income_legs`) -- would not
     see it, so the two would disagree by that transaction's amount ($300.00
     measured).  Ruling R-E FORBIDS that write at every source (the two

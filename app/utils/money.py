@@ -29,6 +29,13 @@ standards: "Construct Decimals from strings").
 ``MONTHS_PER_YEAR`` is the calendar-month denominator, and it belongs here
 because 12 is a property of the calendar rather than of any owner.
 
+**The one interest producer lives here as well** (plan step recurrence:R16-d):
+:func:`accrued_interest` prices a window under the agreement's accrual
+convention at full precision, and :func:`installment_interest` is that figure
+rounded once, a loan's per-installment charge.  It sits at this leaf for the
+reason the allocation below does: every walk that charges interest must be
+able to reach it.
+
 **The two halves of a loan payment's arithmetic BOTH live here, and plan step
 X-au-g-2c-3a is why the second one moved.** A loan payment is one CHARGE
 (:func:`accrue_monthly_interest`, what time has cost) and one ALLOCATION
@@ -61,8 +68,13 @@ that produced this paragraph still stands and is stronger: the biweekly-to-
 monthly factor has one home, and it is no longer a number this module can
 state.
 """
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
+
+from app.enums import InterestAccrualConventionEnum
+from app.utils.dates import month_ordinal
 
 CENTS = Decimal("0.01")
 ZERO = Decimal("0")
@@ -257,6 +269,152 @@ def accrue_monthly_interest(balance: Decimal, annual_rate: Decimal) -> Decimal:
     if annual_rate <= 0:
         return Decimal("0.00")
     return round_money(balance * (annual_rate / MONTHS_PER_YEAR))
+
+
+def _monthly_1_12(
+    balance: Decimal, annual_rate: Decimal, start: date, end: date,
+) -> Decimal:
+    """Return ``MONTHLY_1_12``'s interest: a twelfth of the rate per calendar month spanned.
+
+    The months are ``month_ordinal(end) - month_ordinal(start)``, so the
+    window's DAYS never enter: ``[Jan 31, Feb 28)`` and ``[Feb 28, Mar 31)``
+    are one month each, and a window opening and closing inside one month is
+    none.  Associated ``balance * (annual_rate / 12) * months`` -- see
+    :func:`accrued_interest` for why the brackets are load-bearing.
+
+    Args:
+        balance: The balance accruing (``> 0``; :func:`accrued_interest` has
+            already answered a non-positive one).
+        annual_rate: The annual rate as a decimal fraction (``> 0``).
+        start: The window's first day.
+        end: The window's EXCLUSIVE end (``> start``).
+
+    Returns:
+        The window's interest at full precision.
+    """
+    months = month_ordinal(end) - month_ordinal(start)
+    return balance * (annual_rate / MONTHS_PER_YEAR) * months
+
+
+#: Every convention's rule, keyed by its member: the dispatch IS the lookup, so
+#: a member without a rule, or a value that is not a member at all (a stored
+#: id, ``None``, the member's name string), is a ``KeyError`` at the first call
+#: rather than a silent ``0`` -- the savings producer's unrecognised-frequency
+#: arm (``interest_projection.accrued_interest``) is the shape this refuses.
+#: One entry, because the list has one member (ruling plan#3354).
+_ACCRUAL_RULES: dict[
+    InterestAccrualConventionEnum,
+    Callable[[Decimal, Decimal, date, date], Decimal],
+] = {
+    InterestAccrualConventionEnum.MONTHLY_1_12: _monthly_1_12,
+}
+
+
+def accrued_interest(
+    balance: Decimal,
+    annual_rate: Decimal,
+    start: date,
+    end: date,
+    convention: InterestAccrualConventionEnum,
+) -> Decimal:
+    """Return the interest *balance* accrues over ``[start, end)`` under *convention*, UNROUNDED.
+
+    **The ONE interest producer** (plan step recurrence:R16-d, finding **D52**;
+    rulings plan#3348 and plan#3354).  How interest accrues is a fact of the
+    agreement -- a loan's note states it, and the loan holds it as
+    ``budget.loan_params.interest_accrual_convention_id`` -- so the rule is a
+    member of :class:`~app.enums.InterestAccrualConventionEnum` passed in, never
+    a formula a caller assumes.  Its one member today:
+
+    * ``MONTHLY_1_12`` -- one twelfth of the annual rate for each calendar
+      month the window spans (:func:`_monthly_1_12`), the US fixed-rate
+      mortgage's convention and every loan's until its note says otherwise.
+
+    **Total over its inputs**: a non-positive balance, rate or window (``end <=
+    start``) accrues ``0``, so no caller guards it.  Every walk that charges a
+    loan stops at a closed balance before asking, so that arm moves nothing for
+    them; it is there so the question has an answer for every input.  The
+    convention is looked up FIRST, so a non-member is refused even where the
+    inputs would accrue nothing.
+
+    **Full precision**, because a caller that sums windows must round once, at
+    the end, rather than per window: the savings fold credits whole cents off a
+    full-precision running total (``balance_at._asset_fold``, ruling R-X) and
+    joins this producer at plan#3356.  A loan's charge rounds each installment,
+    and that is :func:`installment_interest`, the one place the rounding is
+    spelled.
+
+    **The association is load-bearing**: ``balance * (annual_rate / 12)``, not
+    ``(balance * annual_rate) / 12``.  The two are not one function -- measured
+    2026-09-02 over 500,000 randomised draws they part once, ``$271,375.20`` at
+    ``0.025`` giving ``$565.36`` against ``$565.37`` -- and the first is the
+    one every loan has been charged by since E-24.  A month's window is
+    therefore byte-identical, once rounded, to ``round_money(balance *
+    (annual_rate / 12))``, the spelling ``accrue_monthly_interest`` held until
+    this step; the multiplication by a month count of ``1`` is exact.
+
+    Args:
+        balance: The balance the interest accrues on.  ``float`` is not
+            supported; construct Decimals from strings.
+        annual_rate: The annual rate as a decimal fraction (``Decimal("0.06875")``
+            for 6.875%).
+        start: The window's first day.
+        end: The window's EXCLUSIVE end.  An installment walk's window is
+            :func:`app.services.installment_calendar.accrual_window`.
+        convention: The agreement's
+            :class:`~app.enums.InterestAccrualConventionEnum` member.  There is
+            no default: a caller that forgets it is a ``TypeError``.
+
+    Returns:
+        The window's interest at full Decimal precision, or ``Decimal("0")``
+        for a non-positive balance, rate or window.
+
+    Raises:
+        KeyError: if *convention* is not a member with a rule (a stored id, the
+            member's name string, ``None``).
+    """
+    rule = _ACCRUAL_RULES[convention]
+    if balance <= ZERO or annual_rate <= ZERO or end <= start:
+        return ZERO
+    return rule(balance, annual_rate, start, end)
+
+
+def installment_interest(
+    balance: Decimal,
+    annual_rate: Decimal,
+    start: date,
+    end: date,
+    convention: InterestAccrualConventionEnum,
+) -> Decimal:
+    """Return one installment's interest charge: :func:`accrued_interest` rounded ONCE to cents.
+
+    A loan charges interest per installment in whole cents, so each walk that
+    charges one -- the posted ledger's replay, the contractual schedule, the
+    forward projection and the payoff strategy -- asks this rather than
+    spelling ``round_money(accrued_interest(...))`` itself: one rounding of one
+    producer, in one place.  :func:`round_money`'s ``ROUND_HALF_UP`` is the
+    project's only rounding boundary, and the window rounds once, never per
+    month inside it.
+
+    Args:
+        balance: The balance the interest accrues on.
+        annual_rate: The annual rate as a decimal fraction.
+        start: The window's first day.
+        end: The window's EXCLUSIVE end, the installment's due date
+            (:func:`app.services.installment_calendar.accrual_window`).
+        convention: The loan's
+            :class:`~app.enums.InterestAccrualConventionEnum` member.
+
+    Returns:
+        The installment's interest quantized to cents; ``Decimal("0.00")`` for
+        a non-positive balance, rate or window.
+
+    Raises:
+        KeyError: as :func:`accrued_interest`.
+    """
+    return round_money(
+        accrued_interest(balance, annual_rate, start, end, convention),
+    )
 
 
 @dataclass(frozen=True)

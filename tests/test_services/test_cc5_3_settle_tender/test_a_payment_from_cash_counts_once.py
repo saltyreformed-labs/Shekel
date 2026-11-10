@@ -52,6 +52,8 @@ _OPENING = Decimal("5000.00")
 _LATER = date(2026, 5, 1)
 #: 16:00 in New York on the frozen today: the day the payment is dated.
 _TRUE_UP_AT = datetime(2026, 3, 20, 20, 0, tzinfo=timezone.utc)
+#: 16:00 in New York the day before: a true-up the payment comes after.
+_BEFORE_AT = datetime(2026, 3, 19, 20, 0, tzinfo=timezone.utc)
 
 
 def _balance(account, as_of=_LATER):
@@ -59,10 +61,15 @@ def _balance(account, as_of=_LATER):
     return balance_at.balance_at(account, BalanceContext.build(account.user_id), as_of)
 
 
-def _savings(seed_user, _periods):
-    """A Savings account holding `$5,000.00`, opened the day before the frozen today."""
+def _savings(seed_user, seed_periods):
+    """A Savings account holding `$5,000.00` from its paycheck's first day, as the HYSA does.
+
+    Opened before the day :data:`_BEFORE_AT` trues it up, so that true-up is
+    an assertion of its own rather than a second one on its opening day.
+    """
     return create_account_of_type(
         seed_user, db.session, "Savings", "SECU Savings", anchor_balance=_OPENING,
+        observed_on=seed_periods[5].start_date,
     )
 
 
@@ -161,5 +168,37 @@ class TestABillPaidFromAnotherCashAccount:
             append_balance_assertion(db.session, checking, str(checking_start), at=_TRUE_UP_AT)
             db.session.commit()
 
+            assert _balance(paying) == Decimal("4200.00")
+            assert _balance(checking) == checking_start
+
+    def test_a_true_up_before_the_payment_counts_it_once_after(
+        self, app, seed_user, seed_periods, make_account,
+    ):
+        """The bank's `$5,000.00` the day before: the payment then leaves `$4,200.00`.
+
+        Plan task plan#3295: the paying account trued up to `$5,000.00` the day
+        before the payment reads `$5,000.00 - $800.00 = $4,200.00` after it, not
+        the asserted `$5,000.00`, because a true-up does not absorb a payment
+        dated after it, so the account's own fold must count it.  Checking trued
+        up to its starting figure that day reads that figure after, not
+        `$800.00` less: the payment is not Checking's.  Unlike the half above,
+        whose true-up on the payment's own day answers whichever account the
+        fold files the movement on, this one fails with R-BAL75's predicate
+        inverted (the fold counting a movement on its row's account).
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+            paying = make_account(seed_user, seed_periods)
+            db.session.commit()
+            checking_start = _balance(checking)
+            append_balance_assertion(db.session, paying, str(_OPENING), at=_BEFORE_AT)
+            append_balance_assertion(db.session, checking, str(checking_start), at=_BEFORE_AT)
+            db.session.commit()
+            assert _balance(paying) == _OPENING
+            txn = self._bill(seed_user, seed_periods)
+
+            movement = self._paid_from(txn, paying)
+
+            assert movement.settled_on > _BEFORE_AT.date()
             assert _balance(paying) == Decimal("4200.00")
             assert _balance(checking) == checking_start

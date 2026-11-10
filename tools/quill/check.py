@@ -64,7 +64,7 @@ from collections.abc import Collection
 
 from tools.ci.arcs import ARCS
 from tools.quill._draft import Draft, Owner
-from tools.quill._fields import EFFORT, FIELDS, PRIORITY, SUGGESTED_OPTIONS
+from tools.quill._fields import EFFORT, FIELDS, PRIORITY, SUGGESTED_KINDS, SUGGESTED_OPTIONS
 from tools.quill._state import SHIPPABLE, may_own
 from tools.quill.setup_tracker import CARD_TYPES, TASK
 
@@ -84,9 +84,6 @@ TITLE_CAP = 100
 #: ``_filing._suggest`` as quill's App: a reason of 280 ASCII characters taken and read back
 #: whole.  A reason of 281, and how GitHub counts a character outside ASCII, are not measured.
 REASON_CAP = 280
-#: The kinds of card that take a suggested Priority (:func:`takes_suggestion`): a step, at the
-#: top level alone, and a question.
-SUGGESTED_KINDS = ("step", "question")
 
 #: The parts of a card a change can write, beside :data:`_fields.PRIORITY` and
 #: :data:`_fields.EFFORT`, the parts holding its Priority and Effort.
@@ -197,7 +194,9 @@ def takes_suggestion(draft: Draft) -> bool:
     they hold no Priority (ruling plan#3231); never a finding, whose owner step's Priority
     decides (ruling plan#3226), nor a leaf, which its split step's ranks (ruling plan#3229).
     The one spelling of that set, which the check holds a suggestion to and the filing
-    requires one of (``_filing``)."""
+    requires one of (``_filing``); GitHub, not quill, reads the Inbox's filter, so it spells
+    the set in the board's filter language, its kinds read from :data:`SUGGESTED_KINDS`
+    (``_board_views.INBOX``)."""
     return draft.kind in SUGGESTED_KINDS and not (draft.kind == "step"
                                                    and draft.owner is not None)
 

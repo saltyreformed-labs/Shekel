@@ -4,7 +4,8 @@ part of a card holding each and the one pairing of each part with its field (:da
 and the one read of the option a card holds in any single select of them, from a GraphQL read
 of its values (:func:`value_of`) and from GitHub's answer to a REST write of one
 (:func:`answered_value`), which :mod:`_arcs` names for the Arc.  Which kinds of card hold
-each is a rule of the plan's, so :mod:`check` holds it.
+each is a rule of the plan's, so :mod:`check` holds it; which kinds take a suggested Priority
+(:data:`SUGGESTED_KINDS`) is here, as the board's Inbox view filters on them too.
 
 A leaf: it imports no module of quill's, so :mod:`_arcs` and :mod:`setup_tracker`, which every
 other module imports, can import it.
@@ -25,6 +26,12 @@ PRIORITY_OPTIONS = (URGENT, HIGH, "Medium", "Low", ON_HOLD)
 #: The Priorities a filing may suggest for a card (``_draft.Suggestion``): each of Priority's
 #: options but On hold, as plan#2798's spec names them, Urgent, High, Medium or Low.
 SUGGESTED_OPTIONS = tuple(option for option in PRIORITY_OPTIONS if option != ON_HOLD)
+#: The kinds of card that take a suggested Priority (``check.takes_suggestion``): a step, at the
+#: top level alone, and a question, which the board's Inbox lists while they hold no Priority
+#: (``_board_views.INBOX``, ruling plan#3231).  Here, beside the options a suggestion takes, so
+#: the Inbox's filter reads the one spelling: ``check`` imports ``setup_tracker``, which reads
+#: the board's views.
+SUGGESTED_KINDS = ("step", "question")
 #: The issue field counting the sessions a card's work takes, a single select of
 #: ``setup_tracker.ISSUE_FIELDS``' options (ruling plan#2508).
 EFFORT_FIELD = "Effort"

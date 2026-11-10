@@ -45,7 +45,7 @@ from tools.quill._command import (
 )
 from tools.quill._draft import Suggestion
 from tools.quill._exits import Refused
-from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS, SUGGESTED_OPTIONS
+from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS, SUGGESTED_KINDS, SUGGESTED_OPTIONS
 from tools.quill._state import (
     OWNED,
     at_and_above,
@@ -67,7 +67,6 @@ from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import (
     HOLDERS,
     REASON_CAP,
-    SUGGESTED_KINDS,
     Draft,
     Owner,
     in_ruling_shape,
@@ -614,7 +613,7 @@ def file_parser(commands) -> None:
     (``check.HOLDERS``, ruling plan#2506), its choices the field's options
     (``setup_tracker.ISSUE_FIELDS``): a step or a finding is sized when it is filed (ruling
     plan#2492).  ``--suggest`` and ``--why`` are each kind's that takes a suggested Priority
-    (``check.SUGGESTED_KINDS``), which :func:`cmd_file` requires of a step at the top level and
+    (``_fields.SUGGESTED_KINDS``), which :func:`cmd_file` requires of a step at the top level and
     a question, as argparse cannot require them of a step without ``--parent`` alone."""
     kinds = commands.add_parser("file", help="file a step, finding, ruling, question or task")
     sub = kinds.add_subparsers(dest="kind", required=True)

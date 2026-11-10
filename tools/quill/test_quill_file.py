@@ -8,7 +8,8 @@ from __future__ import annotations
 import pytest
 import requests
 
-from tools.quill._fake import FailOnce, FakeTracker, claim, leaf_filing, run, ship
+from tools.quill._fake import (SUGGESTED, FailOnce, FakeTracker, claim, leaf_filing, run, ship,
+                              split_in_two, suggested)
 from tools.quill._tracker import Child, Edit, OutsideLink
 from tools.quill.check import ruling_body
 from tools.quill.setup_tracker import FILING, MOVES_MONEY_LABEL
@@ -53,7 +54,7 @@ def test_a_split_leaves_the_split_steps_labels_as_they_were(code, tmp_path):
     and the leaf takes labels of its own, never the split step's.  The fake applies every
     label write the tool sends, so a strip or a move would show here."""
     tracker = FakeTracker()
-    tracker.add(1, labels=("balance", MOVES_MONEY_LABEL))
+    tracker.add(1, priority="Medium", labels=("balance", MOVES_MONEY_LABEL))
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
     assert tracker.cards_by_number[1].step_children == (2,)
     assert tracker.cards_by_number[1].labels == ("balance", MOVES_MONEY_LABEL)
@@ -67,7 +68,7 @@ def test_a_leaf_takes_the_split_steps_place_and_the_next_leaf_follows_it(code, t
     spec.write_text("Build the half.")
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     args = ("file", "step", "--effort", "2", "--arc", "balance", "--parent", "plan#2",
             "--body-file", str(spec))
     assert run(tracker, code, *args, "--title", "first half") == 0
@@ -84,10 +85,10 @@ def test_a_new_step_and_a_question_go_to_the_bottom(code, tmp_path):
     text.write_text("Which day?")
     tracker = FakeTracker()
     tracker.add(1)
-    assert run(tracker, code, "file", "question", "--arc", "recurrence", "--title", "Day",
-                "--body-file", str(text)) == 0
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
-                "--body-file", str(text), "--label", "moves-money") == 0
+    assert run(tracker, code, "file", "question", *SUGGESTED, "--arc", "recurrence", "--title",
+               "Day", "--body-file", str(text)) == 0
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "salary",
+               "--title", "New", "--body-file", str(text), "--label", "moves-money") == 0
     assert tracker.board.items == [1, 2, 3]
     assert tracker.cards_by_number[3].labels == ("moves-money", "salary")
 
@@ -179,7 +180,7 @@ def test_splitting_a_blocked_step_offers_no_leaf_until_its_wait_ends(code, tmp_p
     tracker = FakeTracker()
     tracker.add(2)
     claim(code, 2)
-    tracker.add(7, blocked_by=(2,))
+    tracker.add(7, priority="Medium", blocked_by=(2,))
     assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
                "--title", "L7a", "--parent", "plan#7", "--body-file", str(spec)) == 0
     capsys.readouterr()
@@ -274,8 +275,8 @@ def test_a_matching_card_under_another_owner_or_with_other_labels_is_refused_unw
     spec = tmp_path / "spec.md"
     spec.write_text("New work.")
     tracker.add(4, body="New work.", title="New", labels=("salary",), arc="salary")
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
-               "--body-file", str(spec), "--label", "moves-money") == 1
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "salary",
+               "--title", "New", "--body-file", str(spec), "--label", "moves-money") == 1
     assert "relabel it by hand" in capsys.readouterr().err
     assert not tracker.writes
 
@@ -289,11 +290,11 @@ def test_a_top_level_card_is_added_at_the_bottom_with_one_board_write(code, tmp_
     text.write_text("Which day?")
     tracker = FakeTracker()
     tracker.add(1)
-    assert run(tracker, code, "file", "question", "--arc", "recurrence", "--title", "Day",
-               "--body-file", str(text)) == 0
+    assert run(tracker, code, "file", "question", *SUGGESTED, "--arc", "recurrence", "--title",
+               "Day", "--body-file", str(text)) == 0
     assert tracker.writes == [
         ("create", 2, "question", "Day", (FILING, "recurrence"), "recurrence"),
-        ("board_add", 2), ("unmark", 2)]
+        suggested(2), ("board_add", 2), ("unmark", 2)]
 
 
 
@@ -302,8 +303,9 @@ def test_a_label_named_twice_files_the_card_once(code, tmp_path):
     text = tmp_path / "spec.md"
     text.write_text("New work.")
     tracker = FakeTracker()
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
-               "--body-file", str(text), "--label", "moves-money", "--label", "moves-money") == 0
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "salary",
+               "--title", "New", "--body-file", str(text), "--label", "moves-money",
+               "--label", "moves-money") == 0
     assert tracker.writes[0] == ("create", 1, "step", "New", (FILING, "moves-money", "salary"),
                                  "salary")
 
@@ -314,7 +316,7 @@ def test_a_security_step_is_filed_in_the_tooling_arc_carrying_its_label(code, tm
     text = tmp_path / "spec.md"
     text.write_text("Rate-limit each client.")
     tracker = FakeTracker()
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "tooling",
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "tooling",
                "--title", "Limits", "--body-file", str(text), "--label", "security") == 0
     assert tracker.writes[0] == ("create", 1, "step", "Limits", (FILING, "security", "tooling"),
                                  "tooling")
@@ -356,7 +358,7 @@ def test_a_placement_the_board_has_not_shown_yet_is_said(code, tmp_path, capsys)
     spec = tmp_path / "spec.md"
     spec.write_text("Half.")
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add(2)
     tracker.board.lagging = True
     assert run(tracker, code, "move", "plan#2", "--top") == 0
@@ -502,7 +504,7 @@ def test_a_top_level_filing_never_finishes_a_leaf(code, tmp_path, capsys):
     tracker = FakeTracker()
     tracker.add(1, children=(Child(2, "step", True),), on_board=False)
     tracker.add(2, body="New work.", title="New", parent=1)
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance",
                "--title", "New", "--body-file", str(spec)) == 1
     err = capsys.readouterr().err
     assert "a sub-issue of plan#1, not a top-level card" in err
@@ -521,8 +523,8 @@ def test_a_card_filed_is_said_before_its_read_back(code, tmp_path, capsys, monke
         raise requests.ConnectionError("connection reset")
 
     monkeypatch.setattr(tracker, "cards", unreachable)
-    assert run(tracker, code, "file", "question", "--arc", "recurrence", "--title", "Day",
-               "--body-file", str(text)) == 2
+    assert run(tracker, code, "file", "question", *SUGGESTED, "--arc", "recurrence", "--title",
+               "Day", "--body-file", str(text)) == 2
     assert tracker.writes[0][0] == "create"
     assert capsys.readouterr().out.startswith("filed plan#1\n")
 
@@ -535,7 +537,7 @@ def test_an_open_card_of_another_kind_is_never_finished_as_this_filing(code, tmp
     text.write_text("Which day?")
     tracker = FakeTracker()
     tracker.add(1, "question", body="Which day?", title="Day")
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance",
                "--title", "Day", "--body-file", str(text)) == 0
     assert capsys.readouterr().out.startswith("filed plan#2\n")
 
@@ -549,7 +551,7 @@ def test_a_leaf_already_placed_is_left_where_the_developer_moved_it(code, tmp_pa
     spec.write_text("Half.")
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     args = ("file", "step", "--effort", "2", "--arc", "balance", "--parent", "plan#2",
             "--body-file", str(spec))
     assert run(tracker, code, *args, "--title", "first half") == 0
@@ -636,7 +638,7 @@ def test_a_leaf_whose_split_step_is_still_on_the_board_is_finished_into_its_plac
     spec.write_text("Half.")
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     FailOnce(tracker.board, "remove")
     args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "half",
             "--parent", "plan#2", "--body-file", str(spec))
@@ -705,10 +707,7 @@ def test_a_leaf_whose_move_failed_is_moved_into_its_place_by_the_same_command(co
     spec = tmp_path / "spec.md"
     spec.write_text("Build the trailer check.")
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True)), on_board=False)
-    tracker.add(2, parent=1)
-    tracker.add(3, parent=1)
-    tracker.add(4)
+    split_in_two(tracker)
     FailOnce(tracker.board, "place")
     args = ("file", "step", "--effort", "2", "--parent", "plan#1", "--arc", "balance", "--title",
             "Trailer check", "--body-file", str(spec))
@@ -734,8 +733,8 @@ def test_a_card_filed_but_not_yet_readable_is_a_failed_call_not_a_refusal(code, 
     tracker = FakeTracker()
     real = tracker.cards
     monkeypatch.setattr(tracker, "cards", lambda numbers: {} if 1 in numbers else real(numbers))
-    assert run(tracker, code, "file", "question", "--arc", "recurrence", "--title", "Day",
-               "--body-file", str(text)) == 2
+    assert run(tracker, code, "file", "question", *SUGGESTED, "--arc", "recurrence", "--title",
+               "Day", "--body-file", str(text)) == 2
     captured = capsys.readouterr()
     assert captured.out.startswith("filed plan#1\n") and "run the same command again" in (
         captured.err)
@@ -777,10 +776,7 @@ def test_a_finished_leaf_a_later_leaf_follows_is_never_moved(code, tmp_path, cap
     after a later one was filed, advised a move swapping two leaves nobody touched;
     R-BAL202: the earlier leaf's filing finished, so the re-run writes nothing."""
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True)), on_board=False)
-    tracker.add(2, parent=1)
-    tracker.add(3, parent=1)
-    tracker.add(4)
+    split_in_two(tracker)
     for name in ("first", "second"):
         spec = tmp_path / f"{name}.md"
         spec.write_text(f"Build the {name} half.")
@@ -810,7 +806,7 @@ def test_a_marked_leaf_is_moved_only_by_a_leaf_filed_before_it_on_the_board(code
     spec = tmp_path / "spec.md"
     spec.write_text("Half.")
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True),
+    tracker.add(1, priority="Medium", children=(Child(2, "step", True), Child(3, "step", True),
                              Child(5, "step", True)), on_board=False)
     tracker.add(2, parent=1, on_board=False)
     tracker.add(3, parent=1, on_board=False)
@@ -835,7 +831,8 @@ def test_a_marked_leaf_the_board_listing_does_not_show_is_never_added_again(
     spec = tmp_path / "spec.md"
     spec.write_text("Half.")
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True), Child(5, "step", True)), on_board=False)
+    tracker.add(1, children=(Child(2, "step", True), Child(5, "step", True)), on_board=False,
+                priority="Medium")
     tracker.add(2, parent=1)
     tracker.add(4)
     tracker.add(5, parent=1, body="Half.", title="half", labels=("balance", FILING),
@@ -852,7 +849,7 @@ def test_a_leaf_left_at_the_bottom_is_placed_after_the_leaves_filed_before_it(co
     spec = tmp_path / "spec.md"
     spec.write_text("Half.")
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True),
+    tracker.add(1, priority="Medium", children=(Child(2, "step", True), Child(3, "step", True),
                              Child(5, "step", True), Child(6, "step", True)), on_board=False)
     tracker.add(2, parent=1, on_board=False)
     tracker.add(3, parent=1, on_board=False)

@@ -13,7 +13,7 @@ from dataclasses import replace
 
 import pytest
 
-from tools.quill._fake import FailOnce, FakeTracker, leaf_filing, run
+from tools.quill._fake import SUGGESTED, FailOnce, FakeTracker, leaf_filing, run
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Board, Child, Tracker, TrackerError
 from tools.quill.setup_tracker import FILING, PLAN
@@ -41,7 +41,7 @@ def test_the_first_leaf_takes_its_split_steps_milestone_and_the_split_step_gives
     """Step #1 in milestone #1, split: the leaf is born in #1 (its create carries it), and #1
     leaves it after the leaf is linked and placed, before the leaf's mark comes off."""
     tracker = _in_milestones(FakeTracker(), c1=1)
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
     assert tracker.milestone_of == {2: 1}
     assert tracker.writes == [("create", 2, "step", "half", ("balance", FILING), "balance", 1),
@@ -59,7 +59,7 @@ def test_a_leaf_of_a_split_step_holding_none_is_filed_in_none_and_names_its_leav
     #2's from one carried from #1, so the new leaf takes none, and the command names #2 with
     #2 for a person to set; #1 is written nothing more (review HIGH 1: it took #2 before)."""
     tracker = _in_milestones(FakeTracker(), c2=2)
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     _split(tracker, 1, 2, 3)
     assert run(tracker, code, *leaf_filing(tmp_path, "more")) == 0
     assert tracker.milestone_of == {2: 2}
@@ -76,7 +76,7 @@ def test_a_second_leaf_after_the_first_took_the_milestone_is_filed_in_none(code,
     """#1 in #2, split twice by quill: the first leaf takes #2 and #1 gives it up, so the
     second finds #1 holding none and is filed in none."""
     tracker = _in_milestones(FakeTracker(), c1=2)
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "first half")) == 0
     made = len(tracker.writes)
     assert run(tracker, code, *leaf_filing(tmp_path, "second half")) == 0
@@ -90,7 +90,7 @@ def test_a_leaf_of_a_step_split_twice_names_the_milestone_held_below_it(
     """#1 split into #2, itself split into #3 in milestone #1 (salary X-av's shape at the
     cutover): the leaves read below #1 are nested ones too, so #3 is named with #1."""
     tracker = _in_milestones(FakeTracker(), c3=1)
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     _split(tracker, 1, 2)
     _split(tracker, 2, 3)
     assert run(tracker, code, *leaf_filing(tmp_path, "more")) == 0
@@ -103,7 +103,7 @@ def test_leaves_in_differing_milestones_file_the_leaf_in_none_and_say_which(
     """#1's leaves #2 and #3 sit in milestones #1 and #2: the leaf is filed in none and the
     command names each leaf with its milestone, for a person to set."""
     tracker = _in_milestones(FakeTracker(), c2=1, c3=2)
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     _split(tracker, 1, 2, 3)
     assert run(tracker, code, *leaf_filing(tmp_path, "third")) == 0
     assert 4 not in tracker.milestone_of
@@ -116,7 +116,7 @@ def test_a_leaf_with_no_milestone_held_anywhere_is_filed_as_before(code, tmp_pat
     """No milestone on the split step or below it: the create is the one quill always sent,
     with no milestone, the split step is written nothing more, and no milestone is named."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
     assert tracker.writes[0] == ("create", 2, "step", "half", ("balance", FILING), "balance")
     assert not tracker.milestone_of
@@ -130,7 +130,7 @@ def test_a_run_cut_before_the_clear_is_finished_by_the_same_command_filing_no_se
     leaf is still marked.  Run again, the command finds the leaf (R-BAL186), files no
     second one, and clears #1."""
     tracker = _in_milestones(FakeTracker(), c1=1)
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, "set_milestone")
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 2
     assert tracker.milestone_of == {1: 1, 2: 1}
@@ -144,9 +144,10 @@ def test_a_run_cut_before_the_clear_is_finished_by_the_same_command_filing_no_se
 
 def _cut_at(code, tmp_path, write):
     """#1 in milestone #1, split into #2 by a run whose ``write`` failed: the create carried
-    #1 onto #2, which is still marked."""
+    #1 onto #2, which is still marked; #1 holds a Priority, which ranks its leaves (ruling
+    plan#3229)."""
     tracker = _in_milestones(FakeTracker(), c1=1)
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, write)
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 2
     assert FILING in tracker.cards_by_number[2].labels
@@ -235,7 +236,7 @@ def test_sync_after_a_person_closes_a_leaf_still_being_filed_gives_its_milestone
 
 
 @pytest.mark.parametrize("argv", [
-    ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Top"),
+    ("file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance", "--title", "Top"),
     ("file", "finding", "--effort", "1", "--arc", "balance", "--title", "Twice",
      "--owner", "plan#1", "--text", "The report counts a refund twice."),
 ])

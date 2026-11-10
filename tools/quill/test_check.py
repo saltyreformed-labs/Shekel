@@ -1,14 +1,19 @@
 """The one card check: what a card may hold before anyone writes it; no GitHub calls."""
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
+from tools.quill._draft import Suggestion
+from tools.quill._fields import SUGGESTED_OPTIONS
 from tools.quill.check import (
     BODY,
     EFFORT,
     FINDING_CAP,
     OWNER,
     PRIORITY,
+    REASON_CAP,
     RULING_CAP,
     TITLE,
     TITLE_CAP,
@@ -17,6 +22,7 @@ from tools.quill.check import (
     in_ruling_shape,
     ruling_body,
     ruling_question,
+    takes_suggestion,
     violations,
 )
 
@@ -418,3 +424,92 @@ def test_a_card_with_no_type_is_named_so_by_the_field_rule():
     assert violations(Draft(None, "t", "b", (), "balance", effort="2"), {EFFORT}) == [
         "its type is None, not one of step, finding, ruling, question",
         f"{_EFFORT_RULE}; this card with no type would hold '2'"]
+
+
+# -- a suggested Priority (rulings plan#3224, plan#3226, plan#3229, plan#3236) ---------------
+
+#: A reason the check passes: one plain sentence.
+_WHY = "The grid shows a wrong balance until it is built."
+#: The holder rule's refusal, before the card it names.
+_SUGGESTION_RULE = ("a suggested Priority is held by a step at the top level or a question alone "
+                    "(rulings plan#3226, plan#3229)")
+
+
+@pytest.mark.parametrize("option", SUGGESTED_OPTIONS)
+@pytest.mark.parametrize("draft", [
+    Draft("step", "Split the walk", "Any spec at all.", (), "balance"),
+    Draft("question", "Which day?", "Which day?", (), "recurrence"),
+    Draft("question", "Which day?", "Which day?", (), "recurrence", Owner("step", True, False)),
+])
+def test_a_top_level_step_or_a_question_holds_each_suggested_option(draft, option):
+    """A question, with an owner or none, and a step at the top level take each of Urgent, High,
+    Medium and Low, and what the change writes beside it decides nothing of it."""
+    assert SUGGESTED_OPTIONS == ("Urgent", "High", "Medium", "Low")
+    suggested = dataclasses.replace(draft, suggestion=Suggestion(option, _WHY))
+    assert takes_suggestion(suggested)
+    assert not violations(suggested)
+    assert not violations(suggested, LABELS_ONLY)
+
+
+@pytest.mark.parametrize(("draft", "named"), [
+    (_finding(), "finding"),
+    (_ruling(), "ruling"),
+    (Draft("step", "A leaf", "", (), "salary", Owner("step", True, False)), "leaf"),
+    (_task(), "task"),
+    (Draft(None, "t", "b", (), "balance"), "card with no type"),
+])
+def test_a_suggestion_on_any_other_card_is_refused(draft, named):
+    """A finding's owner step's Priority decides (ruling plan#3226), a leaf's split step's
+    ranks it (ruling plan#3229), and a ruling and a task wait on nothing; whatever the change
+    names it writes, a suggestion it holds is graded."""
+    suggested = dataclasses.replace(draft, suggestion=Suggestion("High", _WHY))
+    assert not takes_suggestion(suggested)
+    problem = f"{_SUGGESTION_RULE}; this {named} would hold 'High'"
+    assert problem in violations(suggested)
+    assert problem in violations(suggested, LABELS_ONLY)
+
+
+@pytest.mark.parametrize("option", ["On hold", "high", "", "None"])
+def test_a_suggestion_is_one_of_the_four(option):
+    """On hold pauses a step, and is no filing's estimate; any other value is no option."""
+    step = Draft("step", "t", "b", (), "balance", suggestion=Suggestion(option, _WHY))
+    assert violations(step) == [
+        f"a suggested Priority is one of Urgent, High, Medium, Low; it is {option!r}"]
+
+
+@pytest.mark.parametrize(("why", "said"), [
+    ("The grid is wrong\nuntil it is built.",
+     "a suggestion's reason is one sentence, on one line"),
+    ("The grid is wrong until it is built", "a suggestion's reason is one complete sentence, "
+                                           "ending in '.', '!' or '?'"),
+    ("The grid is wrong. It stays so.", "a suggestion's reason is ONE sentence; a second begins "
+                                       "at 'It stays"),
+    ("", "a suggestion's reason is one complete sentence"),
+    ("x" * REASON_CAP + ".", f"a suggestion's reason is at most {REASON_CAP} characters "
+                             f"(GitHub's cap); it is {REASON_CAP + 1}"),
+])
+def test_a_suggestions_reason_is_one_sentence_within_githubs_cap(why, said):
+    """Its reason is one plain sentence (the card's spec) of at most 280 characters, GitHub's
+    cap on a suggestion's rationale."""
+    assert REASON_CAP == 280
+    step = Draft("step", "t", "b", (), "balance", suggestion=Suggestion("Low", why))
+    problems = violations(step)
+    assert len(problems) == 1 and problems[0].startswith(said), problems
+
+
+def test_a_reason_of_exactly_the_cap_passes():
+    """The cap is GitHub's most, which it takes."""
+    why = "x" * (REASON_CAP - 1) + "."
+    assert not violations(Draft("question", "q", "Why?", (), "balance",
+                                suggestion=Suggestion("Medium", why)))
+
+
+@pytest.mark.parametrize("draft", [
+    Draft("step", "Split the walk", "Any spec at all.", (), "balance"),
+    Draft("question", "Which day?", "Which day?", (), "recurrence"),
+])
+def test_the_check_requires_no_suggestion(draft):
+    """A card a person files by hand sets its Priority or none and suggests nothing, and the
+    check grades only what a change writes: that a filing names one is the filing's rule."""
+    assert takes_suggestion(draft)
+    assert not violations(draft)

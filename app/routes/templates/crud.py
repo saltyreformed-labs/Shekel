@@ -38,6 +38,7 @@ from app.services import (
     recurrence_engine,
     template_amount_service,
 )
+from app.services.account_resolver import resolve_grid_account
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
 from app.utils.balance_predicates import is_projected_clause
@@ -125,12 +126,20 @@ def new_template():
         default_txn_type_id = ref_cache.txn_type_id(TxnTypeEnum.INCOME)
     else:
         default_txn_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
+    # The account a new bill is paid from (or into) unless the owner picks
+    # another: their primary, the account the grid opens on, named by id
+    # rather than left to whichever account sorts first (task plan#2931,
+    # ruling plan#2926: "checking being the default for all bills").  ``None``
+    # only for an owner with no grid-eligible account, whose select then
+    # opens on its first option as it always did.
+    primary = resolve_grid_account(current_user.id, current_user.settings)
 
     return render_template(
         "templates/form.html",
         template=None,
         categories=categories,
         accounts=accounts,
+        default_account_id=primary.id if primary is not None else None,
         # Every recurrence control's starting state as ONE value, so this
         # form and the transfer form cannot come to disagree about what the
         # same rule means.  A create form opens with no cadence selected, the
@@ -252,6 +261,15 @@ def edit_template(template_id):
 
     categories = category_service.list_active_categories(current_user.id)
     accounts = account_service.list_active_accounts(current_user.id)
+    # **The bill's own account when it has since been ARCHIVED** (task
+    # plan#2931): a ``<select>`` whose stored value is missing submits its
+    # FIRST option, so an untouched Save would move the bill and its unpaid
+    # rows onto whichever account sorts first, a move nobody chose.  Offered
+    # only to keep, the shape ``render_full_edit`` gives a row's archived
+    # category; the update door admits it because it re-checks ownership and
+    # the loan refusal, never ``is_active`` (``_validation._account_refusal``).
+    if template.account not in accounts:
+        accounts.append(template.account)
     txn_types = db.session.query(TransactionType).all()
     # The form's ONE read pass (plan step R7d-f): the recurrence controls'
     # starting state and a salary profile's paycheck both read it.
@@ -279,9 +297,11 @@ def edit_template(template_id):
             template, pass_ctx, cadences_without_a_card(),
         ),
         txn_types=txn_types,
-        # Unused when editing (the form reads the template's own type), but
-        # passed so the shared template never references an undefined value.
+        # Unused when editing (the form reads the template's own type and
+        # account), but passed so the shared template never references an
+        # undefined value.
         default_txn_type_id=None,
+        default_account_id=None,
         # The amount's dated history (plan step X-au-a), precomputed into
         # display rows.  Empty for a salary-linked template, whose amount the
         # paycheck calculator derives, even where it holds a dormant series.

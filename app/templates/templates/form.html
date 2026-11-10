@@ -38,22 +38,58 @@
           <select id="transaction_type_id" name="transaction_type_id" class="form-select" required>
             {% for tt in txn_types %}
             <option value="{{ tt.id }}"
+              {%- if tt.id == TXN_TYPE_INCOME %} data-pays-into{% endif %}
               {{ 'selected' if (template and template.transaction_type_id == tt.id) or (not template and tt.id == default_txn_type_id) else '' }}>
               {{ tt.name }}
             </option>
             {% endfor %}
           </select>
         </div>
+        {#- **The account the bill is paid from, or paid into** (task plan#2931,
+            rulings plan#2926 and plan#3225): every active account is a
+            choice, and a new bill opens on the owner's primary, the account
+            the grid opens on (`default_account_id`, the route's, never the
+            list's first). The
+            label names it by the Type above, server-rendered here and kept in
+            step as the Type changes by `bill_account_label.js`. An edit says
+            what a change moves: the unpaid rows the update rebuilds, which are
+            those in paychecks ending on or after the "Amount effective from"
+            day (today's when blank or when the amount is worked out and has
+            no box; `_recurrence_common.rows_this_pass_may_maintain`). Settled
+            and cancelled rows are immutable; a row whose amount or paycheck was
+            changed by hand is skipped (`is_override`, which a typed note does
+            not set); and a moved row leaves its purchases where their money
+            moved (ruling R-CC36). -#}
+        {%- set pays_into = (template.transaction_type_id if template else default_txn_type_id) == TXN_TYPE_INCOME %}
+        {%- set dated_by_its_box = not (form_amount and form_amount.worked_out_by) %}
         <div class="col">
-          <label for="account_id" class="form-label">Account</label>
-          <select id="account_id" name="account_id" class="form-select" required>
+          <label for="account_id" class="form-label" id="account-label"
+                 data-from-label="Paid from" data-into-label="Paid into">{{ 'Paid into' if pays_into else 'Paid from' }}</label>
+          <select id="account_id" name="account_id" class="form-select" required
+                  {%- if template %} aria-describedby="account-help"{% endif %}>
             {% for acct in accounts %}
-            <option value="{{ acct.id }}" {{ 'selected' if template and template.account_id == acct.id else '' }}>
-              {{ acct.name }}
+            <option value="{{ acct.id }}" {{ 'selected' if (template and template.account_id == acct.id) or (not template and acct.id == default_account_id) else '' }}>
+              {{ acct.name }}{% if not acct.is_active %} (archived){% endif %}
             </option>
             {% endfor %}
           </select>
         </div>
+        {%- if template %}
+        <div class="col-12">
+          <div id="account-help" class="form-text">
+            {%- if dated_by_its_box %}
+            Changing this moves the unpaid entries from the paycheck holding the
+            "Amount effective from" date onward, or from today's paycheck if that
+            date is blank.
+            {%- else %}
+            Changing this moves the unpaid entries from today's paycheck onward.
+            {%- endif %}
+            Entries already paid, received or cancelled stay where they are, and so
+            do entries whose amount or paycheck you changed by hand. Purchases
+            already recorded stay on the account they were paid from.
+          </div>
+        </div>
+        {%- endif %}
       </div>
 
       <div class="mb-3">
@@ -132,4 +168,5 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/recurrence_form.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bill_account_label.js') }}"></script>
 {% endblock scripts %}

@@ -18,9 +18,9 @@ costs nothing structural -- which is the whole of R-FP.
 from __future__ import annotations
 
 from app.enums import StatementSourceEnum
-from app.exceptions import StatementParseError
 
 from . import _secu_csv
+from ._errors import StatementParseError
 from ._line import ParsedStatement
 
 #: Which parser reads which source.  A ``dict`` keyed by the ENUM MEMBER rather

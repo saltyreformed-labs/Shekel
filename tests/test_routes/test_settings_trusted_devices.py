@@ -26,6 +26,7 @@ import sqlalchemy
 from app.extensions import db
 from app.models.known_device import KnownDevice
 from app.services import known_device_service
+from tests._csrf_tokens import without_csrf_tokens
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -312,7 +313,13 @@ class TestForgetting:
     def test_another_users_device_and_a_missing_one_are_one_404(
         self, auth_client, seed_user, seed_second_user,
     ):
-        """Both refused alike and no trust forgotten; the user's own id still routes."""
+        """Both refused alike and no trust forgotten; the user's own id still routes.
+
+        "Alike" is the two pages with their CSRF tokens blanked: each token is
+        signed with the second it is minted in, so two requests that fall in
+        different seconds carry different tokens whatever the route does
+        (finding plan#3244; it refused two merge-queue runs on 2026-11-10).
+        """
         user_id = seed_user["user"].id
         mine = _trust(user_id, _FIREFOX_LINUX)
         theirs = _trust(seed_second_user["user"].id, _CHROME_WINDOWS)
@@ -323,7 +330,9 @@ class TestForgetting:
 
         assert theirs_response.status_code == 404
         assert missing_response.status_code == 404
-        assert theirs_response.get_data() == missing_response.get_data()
+        assert without_csrf_tokens(
+            theirs_response.get_data(as_text=True),
+        ) == without_csrf_tokens(missing_response.get_data(as_text=True))
         assert _is_trusted(theirs)
         assert _is_trusted(mine)
         # The pair: the same URL, with the user's own device, routes and forgets.

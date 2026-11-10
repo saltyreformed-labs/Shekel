@@ -31,7 +31,7 @@ import pytest
 
 from app import ref_cache
 from app.enums import StatementSourceEnum, StatusEnum
-from app.exceptions import StatementLineConflict, ValidationError
+from app.exceptions import ValidationError
 from app.models.statement_import import (
     AccountExternalIdentity,
     BankStatementLine,
@@ -42,9 +42,13 @@ from app.models.merchant import Merchant
 from app.models.merchant_rule import MerchantRule
 from app.models.statement_match import StatementMatch, StatementMatchMember
 from app.services import statement_match
-from app.services.statement_import import delete_import, record_statement
+from app.services.statement_import import (
+    StatementLineConflict,
+    delete_import,
+    record_statement,
+)
 from app.services.statement_import._balance import bank_levels
-from app.services.statement_match import MatchSubmission, matched_subjects
+from app.services.statement_match import matched_subjects
 
 from tests.test_services.test_statement_match._builders import (
     a_bank_line,

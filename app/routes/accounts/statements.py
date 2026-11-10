@@ -61,11 +61,7 @@ from flask import flash, redirect, render_template, request, url_for
 from flask_login import current_user
 
 from app.enums import StatementBalanceEvidenceEnum, StatementSourceEnum
-from app.exceptions import (
-    BaselineMissingError,
-    StatementImportError,
-    ValidationError,
-)
+from app.exceptions import BaselineMissingError, ValidationError
 from app.routes.accounts._bp import accounts_bp
 from app.routes.accounts._statement_doors import (
     StatementDoorContext,
@@ -80,6 +76,7 @@ from app.schemas.validation.statements import (
     StatementUploadSchema,
 )
 from app.services.statement_import import (
+    StatementImportError,
     available_sources,
     delete_import,
     import_history,

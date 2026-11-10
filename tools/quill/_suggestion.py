@@ -4,7 +4,8 @@ plan#3236), which the developer accepts or sets aside, the card's Priority blank
 
 :class:`Suggestions` reads the one quill's App made on a card (:meth:`Suggestions.pending`),
 puts one (:meth:`Suggestions.put`) and takes quill's own back (:meth:`Suggestions.withdraw`),
-each write read back.  GitHub's REST refuses a suggestion (measured 2026-11-10 on plan#3178:
+each write read back; :func:`take_back` takes back the one a card holds, for a write deciding
+its Priority.  GitHub's REST refuses a suggestion (measured 2026-11-10 on plan#3178:
 "rationale", "suggest" are not permitted keys), so the two writes are GraphQL mutations, sent
 through :meth:`Suggestions._write`, the second door beside ``_tracker.Board._write`` (ruling
 plan#3257): it names one card's node id as ``$issue``, a card the tracker read, and no other.
@@ -158,3 +159,15 @@ class Suggestions:
             raise TrackerError(f"plan#{card.number} still holds quill's pending suggestion "
                                f"{held.suggestion} after it was taken back: set it aside on "
                                "the web")
+
+
+def take_back(suggestions: Suggestions, card: BareCard) -> Pending | None:
+    """Take back quill's pending suggestion on ``card``, read back (:meth:`Suggestions.pending`,
+    :meth:`Suggestions.withdraw`): the one taken back, None when none was pending.  For a write
+    that decides the card's Priority, which GitHub's API leaves the suggestion pending beside
+    (measured 2026-11-10 on plan#3178), so a later Accept would overwrite it: ``quill
+    priority``'s set or clear, and a question's conversion into its ruling, which holds none
+    (ruling plan#2507).  ``suggestions`` is the tracker's, the tests' fake among them."""
+    if (pending := suggestions.pending(card)) is not None:
+        suggestions.withdraw(card, pending)
+    return pending

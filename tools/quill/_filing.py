@@ -62,6 +62,7 @@ from tools.quill._state import (
     release_hint,
     withdrawn_filing,
 )
+from tools.quill._suggestion import take_back
 from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import (
     HOLDERS,
@@ -909,7 +910,9 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
     is written.  ``to`` is its owner: the step ``--owner`` names, or the one the question was
     asked for (:func:`_carried_owner`), whose link the ruling keeps.  A field a ruling may not
     hold (``check.HOLDERS``) is cleared: the question's Priority (ruling plan#2507), and an
-    Effort a person set on it by hand (ruling plan#2506).
+    Effort a person set on it by hand (ruling plan#2506); and quill's pending suggestion of a
+    Priority is taken back (:func:`_suggestion.take_back`), its filing's, which a later Accept
+    would write on the ruling.
     """
     question = asked.card
     if not question.is_open or question.kind not in ("question", "ruling"):
@@ -937,6 +940,9 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
             tracker.set_field(question.number, FIELDS[part], None)
             print(f"  cleared its {FIELDS[part]}, {held!r}: a ruling holds none (ruling "
                   f"{ruling})")
+    if (pending := take_back(tracker.suggestions, question)) is not None:
+        print(f"  took back quill's suggested Priority {pending.suggestion.priority!r}: a "
+              "ruling holds no Priority (ruling plan#2507)")
     if draft.title.strip() != question.title.strip():
         tracker.retitle(question.number, draft.title)
         print(f"  retitled {draft.title!r}")

@@ -52,6 +52,7 @@ from app.services.statement_import import (
 from app.services.statement_import import _plan  # pylint: disable=protected-access
 from tests.test_services.test_statement_match._builders import (
     a_bank_line,
+    a_sighting,
     an_import,
 )
 
@@ -90,15 +91,6 @@ def _record(monkeypatch, seed_user, lines, name="feed.dat"):
             user_id=seed_user["user"].id,
             source=_SECU, file_name=name, payload=name.encode(),
         )
-
-
-def _record_csv(seed_user, entries, name="export.csv"):
-    """Record real CSV bytes -- a SECU export, which states no id."""
-    return record_statement(
-        account_id=seed_user["account"].id, user_id=seed_user["user"].id,
-        source=_SECU, file_name=name,
-        payload=build.build(build.chained("100.00", entries)),
-    )
 
 
 def _undo(seed_user, outcome):
@@ -167,18 +159,36 @@ class TestTheIdStaysWithItsLine:
     ):
         """The ruling's own example, end to end.
 
-        A $42.17 coffee is recorded on Oct 8 as ``TRN-881``; a CSV export
-        then shows the same coffee, so the one line has two imports behind
-        it.  The first import is undone: the line stays on the CSV's
-        sighting, and so does the id.  A file sending ``TRN-881`` dated Oct 9
-        is refused, so the bank side of Oct 8-9 stays $42.17 -- under the
-        rule before the key, the id went with the undone import's sighting
-        and the Oct 9 line was recorded beside the Oct 8 one: $84.34.
+        A feed records a $42.17 coffee on Oct 8 as ``TRN-881``; ANOTHER
+        source then shows the same coffee, so the one line has two imports
+        behind it, one per source.  The feed's import is undone: the line
+        stays on the other source's sighting, and so does the id, though no
+        sighting of the feed's own source shows the line any more.  A file
+        sending ``TRN-881`` dated Oct 9 is refused, so the bank side of Oct
+        8-9 stays $42.17.  Two rules would have recorded the Oct 9 line beside
+        the Oct 8 one, $84.34, and this case fails under each: the rule
+        before the key (an id held while a sighting of its source carries
+        it) and the ruling's rejected option B (an id held while a sighting
+        of its source shows the line) -- which is why the line's other import
+        is another source's.
+
+        The other source has no adapter, so its import and its sighting are
+        staged, the allowance the pairing cases below take; the record, the
+        undo and the refusal are the real doors.
         """
         first = _record(monkeypatch, seed_user, [_line("TRN-881")])
-        _record_csv(seed_user, [(_OCT_8, _COFFEE, "COFFEE")])
+        theirs = an_import(seed_user)
+        theirs.source_id = _another_source(db)
+        a_sighting(
+            seed_user, theirs, db.session.query(BankStatementLine).one(),
+            description="THEIR COFFEE",
+        )
         _undo(seed_user, first)
         assert _ids(db) == [("TRN-881", _OCT_8)]
+        assert {
+            sighting.statement_import.source_id
+            for sighting in db.session.query(StatementLineSighting)
+        } == {theirs.source_id}
 
         with pytest.raises(StatementLineIdMoved) as caught:
             _record(monkeypatch, seed_user, [_line("TRN-881", day=_OCT_9)])

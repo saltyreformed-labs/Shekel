@@ -80,6 +80,14 @@ def _trigger_count(pattern):
     )[0][0]
 
 
+def _another_source():
+    """Seed and return the id of a SECOND source, a catalogue row with no parser."""
+    return _sql(
+        "INSERT INTO ref.statement_sources (name, display_name) "
+        "VALUES ('test_other_source', 'Another adapter') RETURNING id",
+    )[0][0]
+
+
 def _an_import(account, *, file_name, window, created_at, source_id=None):
     """One import over *window*, run at *created_at* -- through the head schema.
 
@@ -167,6 +175,13 @@ class TestTheRoundTrip:
         are three different rows.  The downgrade must keep the earliest
         import's wording, which is what ``import_id`` meant.
 
+        **The later import is ANOTHER source's**, so the line's id tells the
+        two sightings apart too: since plan step plan#2232 the id is one
+        ``budget.line_source_ids`` row, and the key's downgrade writes it
+        onto every sighting of ITS source -- the earlier one alone here.  Of
+        one source, both sightings would carry ``FIT-1`` and the line's
+        ``external_id`` could not show which sighting the downgrade read.
+
         Run in the ``db`` fixture's own app context rather than a nested one,
         for the reason ``test_one_level_relation_migration`` gives.
         """
@@ -180,6 +195,7 @@ class TestTheRoundTrip:
             account, file_name="later.csv",
             window=(date(2026, 3, 15), date(2026, 4, 15)),
             created_at=datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc),
+            source_id=_another_source(),
         )
         shared = _a_line(account, day=date(2026, 3, 20), amount="-25.00")
         # The LATER import's sighting takes the lower id, deliberately.
@@ -333,10 +349,7 @@ class TestTheRoundTrip:
         cannot hold one source's id on two lines at all.)
         """
         account = seed_user["account"]
-        other_source = _sql(
-            "INSERT INTO ref.statement_sources (name, display_name) "
-            "VALUES ('test_other_source', 'Another adapter') RETURNING id",
-        )[0][0]
+        other_source = _another_source()
         csv = _an_import(
             account, file_name="csv.csv",
             window=(date(2026, 3, 1), date(2026, 3, 31)),

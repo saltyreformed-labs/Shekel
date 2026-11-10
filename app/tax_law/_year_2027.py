@@ -31,15 +31,16 @@ from app.tax_law._types import (
 )
 
 SOURCES = (
-    "IRS Rev. Proc. 2026-35, sec. 3.01 (tax rate tables), sec. 3.05 (child "
-    "tax credit $2,300; refundable $1,800 per child) and sec. 3.15 (standard "
-    "deduction)",
+    "IRS Rev. Proc. 2026-35 (the advance copy irs.gov posted 2026-11-05), "
+    "sec. 3.01 (tax rate tables), sec. 3.05 (child tax credit $2,300; "
+    "refundable $1,800 per child) and sec. 3.15 (standard deduction)",
     "IRC sec. 24(h)(4) (credit for other dependents $500, not indexed)",
     "SSA notice, Cost-of-Living Increase and Other Determinations for 2027, "
     "Docket No. SSA-2026-1024, Federal Register document 2026-21796, "
     "2026-10-26 (Social Security wage base $192,300)",
     "IRC sec. 3101(a) and (b)(1) (Social Security 6.2%, Medicare 1.45%); "
-    "sec. 3102(f) (Additional Medicare 0.9% withheld on wages over $200,000)",
+    "sec. 3101(b)(2) (Additional Medicare 0.9%) and sec. 3102(f) (withheld "
+    "on wages over $200,000)",
     "N.C.G.S. 105-153.7(a) as rewritten by S.L. 2026-41 sec. 44.1(a) (North "
     "Carolina flat rate 3.49% in 2027)",
     "N.C.G.S. 105-153.5(a)(1) and (a1) (North Carolina standard and child "

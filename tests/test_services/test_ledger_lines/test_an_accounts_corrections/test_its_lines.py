@@ -15,8 +15,15 @@ from app.enums import (
 from app.extensions import db as _db
 from app.models.account import AccountAnchorHistory
 from app.models.scenario import Scenario
-from app.services import ledger_lines, status_seam, transaction_service
+from app.services import status_seam, transaction_service
+from app.services.cash_ledger import walk_cash_ledger
 from app.services.ledger_lines import account_counter_key
+# The account walk's framing is package-private in the worked-out ledger, the
+# read's own composition over each account's walk (plan task plan#3155 deleted
+# its account door); these cases reach it by name, as ``test_the_target_rules.py``
+# reaches the account half's rules, rather than asking for a re-export that would
+# exist only for a test.
+from app.services.ledger_lines._account_walk import account_corrections
 from app.services.settle_day import record_settle_day
 from app.utils.dates import display_today, to_display_date
 from tests._ledger_reads import (
@@ -363,8 +370,8 @@ class TestASettleDayMoveAcrossAnAssertion:
 
             def read_both():
                 """Return each assertion's ledger_before from the walk, and the read's state."""
-                walked = ledger_lines.walk_account_ledger(
-                    account.id, scenario_id,
+                walked = account_corrections(
+                    walk_cash_ledger(account.id, scenario_id),
                 )
                 return (
                     [correction.ledger_before for correction in walked[1:]],
@@ -452,10 +459,15 @@ class TestEachScenarioAndALoan:
 
         The loan carries an ``AccountAnchorHistory`` row like every account,
         but its corrections belong to the loan family (``loan_opening`` /
-        ``loan_trueup``); the walk refuses a loan
-        (``TestWalkAccountLedger.test_walk_refuses_amortizing_loan``) and the
-        read books none of the account kinds on it.  The loan's own opening is
-        the control that the read did book the loan.
+        ``loan_trueup``); the read books each account's corrections off one
+        walk or the other, a loan's off its loan walk and never off its
+        records (``ledger_lines._worked_out._correction_targets``, by
+        ``_is_loan``), so it books none of the account kinds on it.  The loan's
+        own opening is the control that the read did book the loan, and since
+        plan task plan#3155 deleted the account door's own loan refusal and
+        the case that graded it, the control is what grades the dispatch: a
+        loan read as an account books no loan opening (measured with
+        ``_is_loan`` answering ``False``).
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id

@@ -20,23 +20,26 @@ of a leaf instead of a deletion in a fold.  So the replay lives HERE, beside the
 running total it is a policy about, and each fold applies what its own kind
 needs: :mod:`._cash_fold` for PLAIN, :mod:`._asset_fold` for the modelled kinds.
 
-**The POSTING writer reads this replay through the seam's public door** (plan
-task plan#2525).  Each of these corrections is what the writer books as a
-balanced journal entry, and it could not reach them here:
-``account_posting_service`` importing ``balance_at._assertions`` is a
-private-module import in every spelling (W9910,
+**The worked-out ledger reads this replay through the seam's public door**
+(:func:`app.services.ledger_lines._account_walk.account_corrections`, plan task
+plan#2648).  Each of these corrections is what that ledger books as a balanced
+correction, and it could not reach them here: ``ledger_lines`` importing
+``balance_at._assertions`` is a private-module import in every spelling (W9910,
 :mod:`tools.pylint.shekel_checkers.package_privacy` -- no allowlist, and
-``TYPE_CHECKING`` is not exempt).  So the writer kept a replay of its own,
-``walk_account_ledger``, over its own STORED postings: two statements of one
-running total, which rule 14 forbids however well they agreed.  The choice this
-paragraph left plan step X-d is made the one way that keeps a single replay --
+``TYPE_CHECKING`` is not exempt).  The stored ledger's writer met the same wall,
+so it kept a replay of its own, ``walk_account_ledger``, over its own STORED
+postings: two statements of one running total, which rule 14 forbids however
+well they agreed.  The choice this paragraph left plan step X-d was made at plan
+task plan#2525 the one way that keeps a single replay --
 :mod:`app.services.balance_at` re-exports :func:`assertion_corrections` and
-:class:`CashAnchorCorrection`, and the writer's walk is the opening plus one
-correction per element of this list.  Moving the replay DOWN into
-``cash_ledger`` was the other spelling of "reachable" and the fence refuses it:
-``balance_before`` is a balance-at-T, and that leaf's producer set is empty and
-stays empty (W9909).  The RESIDUE the writer's walk used to read is the subject
-of a paragraph in :mod:`app.services.cash_ledger._walk`.
+:class:`CashAnchorCorrection`, and the account's corrections are the opening
+plus one correction per element of this list (the writer's door
+``walk_account_ledger`` framed them so until plan task plan#3155 deleted it).
+Moving the replay DOWN into ``cash_ledger`` was the other spelling of
+"reachable" and the fence refuses it: ``balance_before`` is a balance-at-T, and
+that leaf's producer set is empty and stays empty (W9909).  The RESIDUE the
+writer's walk used to read is the subject of a paragraph in
+:mod:`app.services.cash_ledger._walk`.
 
 **It is a prefix sum, which is the other reason it is here.**
 :attr:`CashAnchorCorrection.balance_before` is the account's balance an instant
@@ -70,11 +73,12 @@ class CashAnchorCorrection:
     which is the healthy steady state -- an account whose every movement is
     recorded needs no correction at all.
 
-    On the write side each of these becomes a balanced ``account_trueup``
-    journal entry: :func:`app.services.ledger_lines.walk_account_ledger`
+    On the worked-out ledger each of these books a balanced ``account_trueup``
+    correction: :func:`app.services.ledger_lines._account_walk.account_corrections`
     wraps each one in an
     :class:`~app.services.ledger_lines.AccountAnchorCorrection`
-    behind the account's ``account_opening`` (plan task plan#2525; the module
+    behind the account's ``account_opening`` (plan task plan#2648, as the
+    stored ledger's writer framed them from plan task plan#2525; the module
     docstring says why it is reached through the seam's door).
 
     Attributes:

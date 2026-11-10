@@ -151,12 +151,11 @@ since plan step X-f3c-1: that is a policy an account's KIND decides (ruling
 **R-FO**), this package is kind-blind (ruling **R-J**), and the replay lives in
 ``balance_at._assertions`` beside the total it is a policy about.  The seam's
 read fold TAKES these facts, and since plan step X-c2b2 every cash figure on
-every screen is that fold sampled at a date.  The posting WRITER is the second
-consumer since plan task plan#2525:
-:func:`app.services.ledger_lines.walk_account_ledger` books the
-fold's own assertion replay over this walk, where it had replayed the
-assertions over its own STORED postings -- so a stale posting is a detectable
-difference from the records rather than a second opinion about them.
+every screen is that fold sampled at a date.  The worked-out ledger is the
+second consumer, as the stored ledger's writer was from plan task plan#2525:
+:func:`app.services.ledger_lines._account_walk.account_corrections` frames
+the fold's own assertion replay over this walk, where that writer had first
+replayed the assertions over its own STORED postings.
 Still-Projected rows are NOT in the walk: their effective date depends
 on the reader's as-of (ruling R-G), so they are the seam fold's tier.
 

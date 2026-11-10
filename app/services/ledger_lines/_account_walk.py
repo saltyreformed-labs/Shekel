@@ -1,15 +1,19 @@
 """Account-anchor genesis walk: the DAY-granular correction producer.
 
-The pure READ/COMPUTE half of the Build-Order Step 5 write side: one
-chronological walk (:func:`walk_account_ledger`) replays a NON-loan account's
-anchor assertions -- its :class:`~app.models.account.AccountAnchorHistory`
-rows -- against the account's settled RECORDS, and produces the balanced
-OPENING / TRUE-UP corrections that drive the ledger's running total to each
-asserted balance at its assertion moment.  What each correction books is the
-sibling rule's (:mod:`._account_anchors`), which the stored ledger's writer
-reconciles to and the worked-out read sums; this module only reads and
-computes (no writes, no commit).  It was ``account_posting_service._walk``
-until plan task plan#2526 moved it beside that rule.
+One chronological framing (:func:`account_corrections`) replays a NON-loan
+account's anchor assertions -- its
+:class:`~app.models.account.AccountAnchorHistory` rows -- against the account's
+settled RECORDS, as its :class:`~app.services.cash_ledger.CashLedgerWalk`
+holds them, and produces the balanced OPENING / TRUE-UP corrections that drive
+the ledger's running total to each asserted balance at its assertion moment.
+What each correction books is the sibling rule's (:mod:`._account_anchors`),
+which the worked-out read sums; this module only computes (no query, no
+write).  It was ``account_posting_service._walk`` until plan task plan#2526
+moved it beside that rule.  Its account door, ``walk_account_ledger``, which
+loaded the walk itself and refused a loan, was deleted at plan task plan#3155
+once the stored ledger's writer, its one caller, had gone: the read frames
+each account's walk from the owner's one load, and dispatches a loan to its
+loan walk first.
 
 **A RECORDED clearing fact where there is one, and the civil DAY where there is
 not** (ruling **R-FL**, plan step X-f3a-1).  A source names the
@@ -44,7 +48,7 @@ assertions over :func:`app.services.cash_ledger.walk_cash_ledger`
 running total, held equal by the clearing rule they shared and by the writer
 having posted each movement's leg exactly as the walk values it: agreement by
 maintenance, which is what rule 14 forbids.  So the running total is the fold's
-and this module only frames it as the writer books it -- the account's opening
+and this module only frames it as the ledger books it -- the account's opening
 equity first, then one correction per assertion.  Deleted with the loaders:
 
 * **the RESIDUE bucket** -- linked-ledger entries whose movement link was
@@ -63,27 +67,21 @@ equity first, then one correction per assertion.  Deleted with the loaders:
   carrying no ``settled_on``, a leg posted for money never seen to move.  The
   records value such a movement at nothing (it is in flight, ruling
   **R-BAL77**), so no correction can be built on the stray leg; the leg itself
-  is the source sync's to reverse, whose target for a dayless movement is
-  empty.
+  was the source sync's to reverse, whose target for a dayless movement was
+  empty, until plan task plan#3133 deleted the sync with the store's writers.
 
 The loan analogue is :mod:`app.services.loan_ledger`; loans
 never walk here (their anchors are dated ``LoanAnchorEvent`` facts replayed
-with amortization, a different mechanism), and :func:`walk_account_ledger`
-refuses an amortizing account outright.
+with amortization, a different mechanism), and the worked-out read hands
+this framing no loan's walk (:func:`._worked_out._is_loan`).
 """
 
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from app.extensions import db
-from app.models.account import Account
 from app.services import balance_at
-from app.services.account_projection import (
-    AccountProjectionKind,
-    classify_account,
-)
-from app.services.cash_ledger import CashLedgerWalk, walk_cash_ledger
+from app.services.cash_ledger import CashLedgerWalk
 
 _ZERO_MONEY = Decimal("0.00")
 
@@ -92,7 +90,7 @@ _ZERO_MONEY = Decimal("0.00")
 class AccountAnchorCorrection:
     """One correction the posted ledger owes: the OPENING, or a true-up.
 
-    The per-correction result of :func:`walk_account_ledger`.  The
+    The per-correction result of :func:`account_corrections`.  The
     linked-ledger delta is ``target_balance - ledger_before`` (its counter leg
     the negative), so the two sum to zero and the linked ledger's total lands
     exactly on the target.  A correction whose ``ledger_before`` already equals
@@ -140,94 +138,28 @@ class AccountAnchorCorrection:
     opens_the_books: bool
 
 
-def walk_account_ledger(
-    account_id: int, scenario_id: int,
-) -> list[AccountAnchorCorrection]:
-    """Replay a non-loan account's anchors into its genesis corrections.
-
-    The account's OPENING EQUITY first, then one correction per balance
-    assertion in business-date order, each carrying the records' running
-    total just before it -- the read fold's own replay
-    (:func:`app.services.balance_at.assertion_corrections`) over the account's
-    facts (:func:`app.services.cash_ledger.walk_cash_ledger`), so the posted
-    corrections and the projection are one walk rather than two held in step
-    (plan task plan#2525; the module docstring says what the replay over STORED
-    postings it replaced had read).  The corrections' cumulative effect plus
-    the cleared sources equals each asserted balance as of the day it is the
-    closing balance for, and the account's ABSOLUTE ledger total equals the
-    latest anchor plus the later source nets.
-
-    **Which assertion absorbs which source is the clearing rule's**, asked once
-    inside the replay of
-    :class:`~app.services.cash_ledger.StatementCoverage` (ruling R-FL), opening
-    and true-up alike (finding N-133 / F1).  It was asked twice -- here over
-    the stored postings, and in the fold over the records -- and moving one
-    without the other is what would have broken the equality plan step X-a
-    established; there is no second asker left to move.
-
-    Why this reproduces the go-forward chokepoint after the fact: at a
-    true-up the fresh delta equals ``asserted - the records' total before it``,
-    and the assertion history and the records are what both read, so a
-    re-walk re-derives the same deltas.  Pre-anchor settles in ANY period are
-    absorbed by the opening / true-up deltas (the DAY partition, not a period
-    one); later settles ride on top; a source reverted or re-dated after a
-    true-up leaves that true-up's records, and the next reconcile posts the
-    difference (finding N-310: what a settle-day move owes the corrections is
-    what the records now say, by construction).
-
-    Reads only (no writes, no commit).  All-scenario anchors, per-scenario
-    sources: anchor history is per-account, so the same facts walk in every
-    scenario, against that scenario's own settled rows.
-
-    Args:
-        account_id: The non-loan account whose ledger to walk.
-        scenario_id: The budget scenario whose settled rows to walk against.
-
-    Returns:
-        One :class:`AccountAnchorCorrection` for the opening, then one per
-        anchor fact, chronological.  Empty when the account row is missing or
-        carries no anchor history (fixture-only states; production accounts
-        always have both).
-
-    Raises:
-        ValueError: If the account is an amortizing loan.  Loans book their
-            anchor corrections through the loan posting package onto their
-            per-loan ``equity_opening`` account; walking one here would
-            double-book its balance across two correction families (and
-            break the loan oracle's bare-``account_id`` ledger helpers).
-        RuntimeError: If the account carries no ``AccountOpening`` row
-            (:func:`app.services.cash_ledger.account_opening_fact`) -- a
-            broken invariant, refused by the walk the read fold refuses it by.
-    """
-    account = db.session.get(Account, account_id)
-    if account is None:
-        return []
-    if classify_account(account) is AccountProjectionKind.AMORTIZING:
-        raise ValueError(
-            f"cannot walk account anchors: account id={account_id} is an "
-            f"amortizing loan (loans book their anchor corrections through "
-            f"the loan posting package, never the account walk)"
-        )
-    return account_corrections(walk_cash_ledger(account_id, scenario_id))
-
-
 def account_corrections(walk: CashLedgerWalk) -> list[AccountAnchorCorrection]:
     """Return a non-loan account's corrections, framed off its walk.
 
-    :func:`walk_account_ledger`'s framing of the read fold's replay, over a
-    walk the caller already holds: the opening equity first, then one
-    correction per assertion carrying the records' running total just
-    before it (:func:`app.services.balance_at.assertion_corrections`).  The
-    worked-out read hands it each account's walk from the owner's one load
+    The framing of the read fold's replay, over a walk the caller already
+    holds: the opening equity first, then one correction per assertion
+    carrying the records' running total just before it
+    (:func:`app.services.balance_at.assertion_corrections`).  The
+    corrections' cumulative effect plus the cleared sources equals each
+    asserted balance as of the day it is the closing balance for, and which
+    assertion absorbs which source is the clearing rule's, asked once inside
+    that replay (:class:`~app.services.cash_ledger.StatementCoverage`, ruling
+    R-FL).  An assertion is per-ACCOUNT and a source per-scenario, so the same
+    assertions frame every scenario's own walk.  The worked-out read hands it
+    each account's walk from the owner's one load
     (:func:`app.services.cash_ledger.owner_cash_records`, ruling
-    **plan#2623**), so it walks no account a second time; the account door
-    hands it the account's own.  Pure: no query.
+    **plan#2623**), so it walks no account a second time.  Pure: no query.
 
     Args:
         walk: A non-loan account's :class:`~app.services.cash_ledger.CashLedgerWalk`.
             Which kind of account walks here is the caller's dispatch: the
-            account door refuses a loan, and the worked-out read walks a
-            loan through its loan walk.
+            worked-out read walks a loan through its loan walk
+            (:func:`._worked_out._is_loan`), and this framing is kind-blind.
 
     Returns:
         The :class:`AccountAnchorCorrection` list, chronological; empty for a

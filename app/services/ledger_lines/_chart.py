@@ -121,25 +121,16 @@ _CATEGORY_CLASSES = frozenset(
     if kind is LedgerAccountKindEnum.FALLBACK
 )
 
-# The two families of kinds whose record is an ACCOUNT and that are not its own
-# line: an account's correction counters and a loan's components.  Public
-# because the stored chart's writer files the two under different columns
-# (``account_id`` against ``loan_account_id``) and resolves each family's row
-# through its own resolver; derived from the tables above so the sets and the
-# classes cannot part.
-ACCOUNT_COUNTER_KINDS = frozenset(_ACCOUNT_COUNTER_KINDS)
-LOAN_KINDS = frozenset(_LOAN_KINDS)
-
 # WHAT a TRUE-UP's difference MEANS, by the account's projection kind (ruling
 # **R-FO**).  Total over the four NON-loan kinds
 # ``app.services.account_projection.classify_account`` can return;
 # ``AMORTIZING`` is deliberately absent, because a loan's corrections are the
-# loan rules' (:mod:`._loan_anchors`), and the account walk refuses a loan
-# (:func:`._account_walk.walk_account_ledger`).  A missing key is a
-# loud refusal rather than a default, so ADDING a projection kind fails here
-# instead of quietly booking the new kind's return to equity --
-# ``TestTrueUpCounterKindIsTotal`` is what turns that into a test failure
-# rather than a production surprise.
+# loan rules' (:mod:`._loan_anchors`), and the worked-out read walks a loan
+# there rather than through the account walk (:func:`._worked_out._is_loan`).
+# A missing key is a loud refusal rather than a default, so ADDING a
+# projection kind fails here instead of quietly booking the new kind's return
+# to equity -- ``TestTrueUpCounterKindIsTotal`` is what turns that into a test
+# failure rather than a production surprise.
 #
 # ``PLAIN`` stays on equity on purpose and it is the only arm that is not
 # final: classifying an ordinary cash account's unexplained difference
@@ -198,17 +189,18 @@ def linked_ledger_class(category_id: int) -> LedgerAccountClassEnum:
 
     It was ``ledger_account_service.ledger_class_id_for_category`` until plan
     task plan#2523 moved it here, returning the member rather than its id.
-    Public because the account-type guards
-    (:mod:`app.utils.account_validation`) apply the SAME rule to a PROPOSED
-    category, to decide whether a type change would flip an account's class.
-    The Step-2 backfill migration spelled this mapping in SQL.  The question
-    it asks is also asked by
+    The account-type guards (:mod:`app.utils.account_validation`) applied the
+    SAME rule to a PROPOSED category, to tell when a type change left the
+    stored chart's linked row to re-class, until plan task plan#3076 deleted
+    that upkeep with the stored ledger's syncs; :func:`linked_key` is its
+    caller now.  The Step-2 backfill migration spelled this mapping in SQL.
+    The question it asks is also asked by
     :func:`app.services.account_category.is_liability_category`, which is
     finding N-122 (plan#1333), owned by plan step X-ab (plan#1047).
 
     Args:
-        category_id: The ``ref.account_categories`` id of an account type's
-            category (current or proposed).
+        category_id: The ``ref.account_categories`` id of an account's type's
+            category.
 
     Returns:
         :attr:`LedgerAccountClassEnum.LIABILITY` or ``.ASSET``.

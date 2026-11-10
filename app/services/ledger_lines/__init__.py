@@ -20,9 +20,9 @@ moves every reader onto it, and its third deletes the store.
   (:data:`CorrectionKey`), their shape (:data:`ChartLegMap`) and the
   same-key merge.
 * :mod:`._account_walk` and :mod:`._account_anchors` -- a non-loan account's
-  opening and true-ups: the walk over the records that frames each correction
-  (:func:`walk_account_ledger`) and the legs each books
-  (:func:`account_correction_targets`).
+  opening and true-ups: the framing of its records' walk into each correction
+  (:func:`._account_walk.account_corrections`, which the read calls) and the
+  legs each books (:func:`account_correction_targets`).
 * :mod:`._loan_anchors`, :mod:`._loan_payments` and :mod:`._loan_corrections`
   -- a loan's opening, true-ups and payment splits off its one walk
   (:func:`loan_correction_targets`).
@@ -44,10 +44,8 @@ its own.
 """
 
 from ._account_anchors import account_correction_targets
-from ._account_walk import AccountAnchorCorrection, walk_account_ledger
+from ._account_walk import AccountAnchorCorrection
 from ._chart import (
-    ACCOUNT_COUNTER_KINDS,
-    LOAN_KINDS,
     ChartKey,
     account_counter_key,
     anchor_correction_counter_kind,
@@ -75,8 +73,6 @@ from ._targets import ChartLegMap, CorrectionKey, merge_target_legs
 from ._worked_out import LedgerLine, accounts_hold_lines, worked_out_lines
 
 __all__ = [
-    "ACCOUNT_COUNTER_KINDS",
-    "LOAN_KINDS",
     "AccountAnchorCorrection",
     "ChartKey",
     "ChartLegMap",
@@ -104,6 +100,5 @@ __all__ = [
     "purchase_source",
     "purchase_target",
     "transit_key",
-    "walk_account_ledger",
     "worked_out_lines",
 ]

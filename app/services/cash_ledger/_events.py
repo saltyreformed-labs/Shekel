@@ -139,12 +139,12 @@ class CashAnchorFact:
     :class:`~._clearing.StatementCoverage` bisects it for a source no statement
     was recorded as showing, and
     :func:`app.services.balance_at.assertion_corrections` measures each
-    assertion against the one before -- the read fold's replay, and since plan
-    task plan#2525 the posting writer's too
-    (:func:`app.services.ledger_lines.walk_account_ledger` frames
-    it), where there were two replays.  So a fact list not non-decreasing in
-    :attr:`observed_on` mis-states a ``ledger_before`` the writer WRITES to the
-    general ledger as well as a balance the fold shows.  The read side used to
+    assertion against the one before -- the read fold's replay, and the
+    ledger's too (:func:`app.services.ledger_lines._account_walk.account_corrections`
+    frames it, as the stored ledger's writer did from plan task plan#2525),
+    where there were two replays.  So a fact list not
+    non-decreasing in :attr:`observed_on` mis-states a ``ledger_before`` the
+    worked-out ledger BOOKS as well as a balance the fold shows.  The read side used to
     re-sort and so self-healed it; since the one-partition step nothing does,
     because one ordering stated where the rows are read is what finding N-133 /
     R1 ruled.

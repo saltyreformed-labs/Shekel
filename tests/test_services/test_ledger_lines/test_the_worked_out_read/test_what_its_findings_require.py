@@ -32,7 +32,7 @@ from app.services.ledger_lines import (
     transit_key,
 )
 from app.services.settle_day import record_settle_day
-from app.services.transfer_legs import transfer_family_movements
+from app.services.transfer_legs import transfer_sides
 from tests._test_helpers import (
     an_entered_day,
     create_account_of_type,
@@ -373,11 +373,8 @@ class TestATransferHasOneRule:
                 seed_user, _db.session, checking, savings, seed_periods[0],
                 amount=Decimal("250.00"),
             )
-            movements = {
-                movement.account_id: movement
-                for movement, _leg in transfer_family_movements(xfer)
-            }
-            out, back = movements[checking.id], movements[savings.id]
+            out, back = (leg.record for leg in transfer_sides(xfer))
+            assert (out.account_id, back.account_id) == (checking.id, savings.id)
 
             lines = [line for line in _read(seed_user) if line.movement_id]
 

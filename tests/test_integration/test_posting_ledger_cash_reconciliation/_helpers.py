@@ -18,7 +18,12 @@ from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-from app.services.ledger_lines import ACCOUNT_COUNTER_KINDS, category_key
+from app.services.ledger_lines import category_key
+# The two families' kind tables are the chart's own, package-private since plan
+# task plan#3155 deleted their public sets (the stored chart's writer filed the
+# two under different columns); a family filter reads them by name so the fact
+# keeps one spelling.
+from app.services.ledger_lines._chart import _ACCOUNT_COUNTER_KINDS
 from app.utils.balance_predicates import balance_excluded_status_ids, settled_status_ids
 from app.services import cash_ledger
 from tests._ledger_reads import account_net, scenario_lines, trial_balance
@@ -276,7 +281,7 @@ def _assert_counter_accounts_reconcile(scenario_id: int) -> None:
     for line in scenario_lines(_db.session, scenario_id):
         if (
             line.key.kind is LedgerAccountKindEnum.LINKED
-            or line.key.kind in ACCOUNT_COUNTER_KINDS
+            or line.key.kind in _ACCOUNT_COUNTER_KINDS
         ):
             continue
         assert line.movement_id is not None, (

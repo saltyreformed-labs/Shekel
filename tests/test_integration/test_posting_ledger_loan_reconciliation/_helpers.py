@@ -16,7 +16,11 @@ from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import loan_ledger, loan_loaders, loan_resolver
 from app.services import amortization_engine
-from app.services.ledger_lines import LOAN_KINDS
+# The two families' kind tables are the chart's own, package-private since plan
+# task plan#3155 deleted their public sets (the stored chart's writer filed the
+# two under different columns); a family filter reads them by name so the fact
+# keeps one spelling.
+from app.services.ledger_lines._chart import _LOAN_KINDS
 from app.services.loan_resolver._periods import _replay_from_anchor
 from app.utils.money import round_money
 from app.utils.balance_predicates import settled_status_ids
@@ -198,7 +202,7 @@ def _settle(
 def _per_loan_correction_net(loan_account_id: int, scenario_id: int) -> Decimal:
     """Sum a loan's four component lines (interest, escrow, refund, opening equity).
 
-    Keyed on the loan's own :data:`~app.services.ledger_lines.LOAN_KINDS` keys,
+    Keyed on the loan's own :data:`~app.services.ledger_lines._chart._LOAN_KINDS` keys,
     the lines the correction backs the non-principal onto and the opening and
     true-ups' counter.  Their net is ``sum(interest + escrow + excess)`` across
     the loan's payments plus the opening-equity legs, so it is the amount moved
@@ -207,7 +211,7 @@ def _per_loan_correction_net(loan_account_id: int, scenario_id: int) -> Decimal:
     return sum(
         (
             line.amount for line in scenario_lines(_db.session, scenario_id)
-            if line.key.kind in LOAN_KINDS and line.key.record_id == loan_account_id
+            if line.key.kind in _LOAN_KINDS and line.key.record_id == loan_account_id
         ),
         Decimal("0.00"),
     )

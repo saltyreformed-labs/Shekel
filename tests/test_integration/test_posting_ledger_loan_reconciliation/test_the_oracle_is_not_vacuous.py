@@ -9,7 +9,11 @@ from decimal import Decimal
 import pytest
 
 from app.enums import LedgerAccountKindEnum
-from app.services.ledger_lines import LOAN_KINDS
+# The two families' kind tables are the chart's own, package-private since plan
+# task plan#3155 deleted their public sets (the stored chart's writer filed the
+# two under different columns); a family filter reads them by name so the fact
+# keeps one spelling.
+from app.services.ledger_lines._chart import _LOAN_KINDS
 from app.utils.money import accrue_monthly_interest
 from tests import _ledger_reads
 from tests._ledger_reads import trial_balance
@@ -61,7 +65,7 @@ class TestOracleIsNotVacuous:
 
             real_read = _ledger_reads.worked_out_lines
             monkeypatch.setattr(_ledger_reads, "worked_out_lines", lambda *args: [
-                line for line in real_read(*args) if line.key.kind not in LOAN_KINDS
+                line for line in real_read(*args) if line.key.kind not in _LOAN_KINDS
             ])
 
             assert _per_loan_correction_net(

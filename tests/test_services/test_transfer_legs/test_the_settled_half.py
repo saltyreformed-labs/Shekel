@@ -1,5 +1,5 @@
-"""The settled half: a paid leg's money through one loader, and the ledger writer's answer to what
-a movement's parent is.
+"""The settled half: a paid leg's money through one loader, and the one answer to what a movement's
+parent is.
 """
 
 from datetime import date
@@ -11,7 +11,6 @@ from app.services.transfer_legs import (
     TransferLeg,
     movement_parent,
     recorded_transfer_legs,
-    transfer_family_movements,
     transfer_movement_rows,
 )
 from tests._test_helpers import (
@@ -97,11 +96,14 @@ class TestTheSettledHalfReadsTheLegOffItsTransfer:
 class TestTheWritersParentIsTheLeg:
     """Leaf ``balance:X-bi-6-4a``'s second half: the ledger writer's parent resolution.
 
-    The writer asks ONE function what a movement's parent is
-    (``movement_parent``) and walks a transfer's family through ONE loader
-    (``transfer_family_movements``).  The answer reads the movement's side
-    links in Python (``transfer_legs._side_of``), the twin of the join's SQL
-    expressions, so these cases pin the twin to the join.  Until plan step
+    A reader holding a loaded movement asks ONE function what its parent is
+    (``movement_parent``): the purchase doors' payment-record refusal,
+    statement match and the match withdrawal, as the stored ledger's writer
+    did until plan step plan#2914 deleted it.  The answer reads the movement's
+    side links in Python (``transfer_legs._side_of``), the twin of the join's
+    SQL expressions, so these cases pin the twin to the join.  The writer
+    walked a transfer's family through a loader of its own,
+    ``transfer_family_movements``, deleted at plan task plan#3155.  Until plan step
     ``balance:X-bi-6-4d-2`` they also pinned it over a hidden shadow and a
     stray entry under a live one, and pinned the one dated-leg clause its
     three readers share (the plan half, the loan settled half and the deploy
@@ -140,16 +142,17 @@ class TestTheWritersParentIsTheLeg:
     def test_the_python_twin_agrees_with_the_join(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """``movement_parent`` against ``transfer_movement_rows`` over a whole family.
+        """``movement_parent`` against ``transfer_movement_rows`` over two whole transfers.
 
-        Two settled ``$250.00`` Checking -> Savings transfers.  The family
-        loader (``transfer_family_movements``, each movement's leg resolved
-        by ``movement_parent`` off its side links in Python) returns all four
-        movements, and the four it gives a record are exactly the four the
-        ONE join (``transfer_movement_rows``, its side read in SQL) returns,
-        each on the side the join says; the second transfer's from-side
-        movement is its leg's record, on Checking; and each family is walked
-        in movement order.  Renamed from
+        Two settled ``$250.00`` Checking -> Savings transfers.  The ONE join
+        (``transfer_movement_rows``, its transfer and side read in SQL)
+        returns their four movements, and ``movement_parent``, reading each
+        movement's side links in Python, answers the join's transfer and side
+        for every one, with the movement as its leg's record; the second
+        transfer's from-side movement is its leg's record, on Checking.  The
+        movements came from the family loader (``transfer_family_movements``)
+        until plan task plan#3155 deleted it, and its movement-order case went
+        with it.  Renamed from
         ``test_the_python_twin_agrees_with_the_join_live_and_dead_shadows_alike``:
         until plan step ``balance:X-bi-6-4d-2`` the second transfer's
         Checking shadow was soft-deleted by SQL first, and the case read
@@ -174,36 +177,28 @@ class TestTheWritersParentIsTheLeg:
             )
             db.session.commit()
             db.session.expire_all()
-            transfers = [db.session.get(Transfer, t.id) for t in (first, second)]
 
-            joined = {
-                movement.id: is_income
-                for movement, _transfer, is_income in transfer_movement_rows(
-                    Transfer.id.in_([first.id, second.id]),
-                )
-            }
-            family = [
-                pair for transfer in transfers
-                for pair in transfer_family_movements(transfer)
+            joined = transfer_movement_rows(
+                Transfer.id.in_([first.id, second.id]),
+            ).all()
+            twins = [
+                (movement, movement_parent(movement))
+                for movement, _transfer, _is_income in joined
             ]
 
-            assert (len(family), len(joined)) == (4, 4)
-            assert {
-                movement.id for movement, leg in family
-                if leg.record is movement
-            } == set(joined)
-            assert all(
-                leg.is_income == joined[movement.id]
-                for movement, leg in family if movement.id in joined
-            )
+            assert len(joined) == 4
+            assert [
+                (leg.transfer.id, leg.is_income) for _movement, leg in twins
+            ] == [
+                (transfer.id, is_income)
+                for _movement, transfer, is_income in joined
+            ]
+            assert all(leg.record is movement for movement, leg in twins)
             [(second_out, second_out_leg)] = [
-                (movement, leg) for movement, leg in family
+                (movement, leg) for movement, leg in twins
                 if leg.transfer.id == second.id and not leg.is_income
             ]
             assert (
                 second_out_leg.record, second_out_leg.is_income,
                 second_out_leg.account_id,
             ) == (second_out, False, checking.id)
-            for transfer in transfers:
-                ids = [m.id for m, _leg in transfer_family_movements(transfer)]
-                assert ids == sorted(ids), "a family is walked in movement order"

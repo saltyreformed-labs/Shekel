@@ -371,20 +371,19 @@ _FENCED_MODULE_RULINGS = {
         "loan_correction_targets",
         "merge_target_legs",
         "payment_split_targets",
-        # The account walk FRAMES the seam's own published assertion replay
-        # (``balance_at.assertion_corrections``, ruled at the seam's door):
-        # each correction's ``ledger_before`` is that replay's figure carried
-        # through unchanged, at an assertion's moment only.  It adds no reach
-        # the seam's door does not already give, and answers no balance at
-        # an arbitrary T.
-        "walk_account_ledger",
-        # Its framing over a walk the caller holds (plan task plan#2648,
-        # ruling plan#2623), so the worked-out read frames each account's
-        # walk from the owner's one load: ``walk_account_ledger``'s framing
-        # without its load, its missing-account answer or its loan refusal
-        # -- it is kind-blind, and the read's own dispatch walks a loan
-        # elsewhere -- ruled on its grounds: the replay's figure carried
-        # through, at an assertion's moment only.
+        # The account walk's framing, over a walk the caller holds (plan task
+        # plan#2648, ruling plan#2623), so the worked-out read frames each
+        # account's walk from the owner's one load.  It FRAMES the seam's own
+        # published assertion replay (``balance_at.assertion_corrections``,
+        # ruled at the seam's door): each correction's ``ledger_before`` is
+        # that replay's figure carried through unchanged, at an assertion's
+        # moment only.  It adds no reach the seam's door does not already
+        # give, and answers no balance at an arbitrary T.  It is kind-blind,
+        # and the read's own dispatch walks a loan elsewhere.  Its account
+        # door ``walk_account_ledger`` (the same framing with its own load and
+        # a loan refusal) was ruled here on these grounds until plan task
+        # plan#3155 deleted it, once its one caller, the stored ledger's
+        # writer, had gone at plan task plan#3133.
         "account_corrections",
         # The worked-out read (plan task plan#2526): every LINE of one
         # owner's ledger -- each amount on a chart account, its paycheck and

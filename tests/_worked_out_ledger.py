@@ -60,12 +60,12 @@ from app.models.ledger_account import LedgerAccount
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-from app.services.ledger_lines import (
-    ACCOUNT_COUNTER_KINDS,
-    LOAN_KINDS,
-    chart_label,
-    worked_out_lines,
-)
+from app.services.ledger_lines import chart_label, worked_out_lines
+# The two families' kind tables are the chart's own, package-private since plan
+# task plan#3155 deleted their public sets (the stored chart's writer filed the
+# two under different columns); a family filter reads them by name so the fact
+# keeps one spelling.
+from app.services.ledger_lines._chart import _ACCOUNT_COUNTER_KINDS, _LOAN_KINDS
 from app.utils.balance_predicates import settled_status_ids
 from tests._ledger_parity import ledger_parity_differences, read_parity_chart
 from tests._worked_out_excuses import (
@@ -700,7 +700,7 @@ def _report_labels(ledger, out):
     """
     kinds = {
         ref_cache.ledger_account_kind_id(member)
-        for member in ACCOUNT_COUNTER_KINDS | LOAN_KINDS
+        for member in (*_ACCOUNT_COUNTER_KINDS, *_LOAN_KINDS)
     }
     rows = [
         row for row in ledger.chart.values()

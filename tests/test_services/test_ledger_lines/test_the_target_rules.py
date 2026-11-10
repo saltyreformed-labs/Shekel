@@ -52,22 +52,25 @@ from app.services.ledger_lines import (
     payment_split_targets,
     purchase_target,
     transit_key,
-    walk_account_ledger,
     worked_out_lines,
 )
+from app.services.cash_ledger import walk_cash_ledger
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.pay_calendar import calendar_for
-from app.services.transfer_legs import movement_parent, transfer_family_movements
+from app.services.transfer_legs import movement_parent, transfer_sides
 from app.utils.dates import display_today
 # The rules under test live in the worked-out ledger since plan task plan#2526,
-# which moved them out of the writers that posted them; the account half's two
-# pieces are package-private there, and these cases reach them by name rather
-# than asking for a re-export that would exist only for a test (the posture
-# ``test_chart.py`` keeps for the report's label).
+# which moved them out of the writers that posted them; the account half's
+# pieces are package-private there -- its two rules, and since plan task
+# plan#3155 the framing of an account's walk into its corrections, which the
+# read calls over each account's walk -- and these cases reach them by name
+# rather than asking for a re-export that would exist only for a test (the
+# posture ``test_chart.py`` keeps for the report's label).
 from app.services.ledger_lines._account_anchors import (
     _account_anchor_correction_targets,
     _counter_keys,
 )
+from app.services.ledger_lines._account_walk import account_corrections
 # The split's component table, read to plant a component out of it (finding
 # plan#2972); the plant itself names the module by path.
 from app.services.ledger_lines._loan_payments import _LOAN_CORRECTION_COMPONENTS
@@ -189,8 +192,8 @@ class TestTheMovementRuleNamesKeys:
             )
 
             targets, statements = _statements_of(lambda: {
-                movement.account_id: purchase_target(movement, leg)
-                for movement, leg in transfer_family_movements(xfer)
+                leg.record.account_id: purchase_target(leg.record, leg)
+                for leg in transfer_sides(xfer)
             })
 
             assert targets == {
@@ -226,7 +229,9 @@ class TestTheAccountCorrectionRuleNamesKeys:
             account = _opened_money_market(seed_user, "Keys Money Market")
             _assert_on(account, "1150.00", days_after_opening=1, seconds=1)
             scenario_id = seed_user["scenario"].id
-            corrections = walk_account_ledger(account.id, scenario_id)
+            corrections = account_corrections(
+                walk_cash_ledger(account.id, scenario_id),
+            )
             calendar = calendar_for(seed_user["user"].id)
 
             targets, statements = _statements_of(
@@ -488,7 +493,9 @@ class TestACorrectionBooksOnlyItsOwnAccountsLines:
             checking = seed_user["account"]
             targets_by_account = [
                 (account, account_correction_targets(
-                    account, walk_account_ledger(account.id, scenario_id), calendar,
+                    account,
+                    account_corrections(walk_cash_ledger(account.id, scenario_id)),
+                    calendar,
                 ))
                 for account in (checking, *accounts)
             ]

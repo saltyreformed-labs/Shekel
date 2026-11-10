@@ -11,7 +11,8 @@ each correction books, keyed by chart key:
                           0
 
 ``ledger_before`` is the records' own running total just before the assertion
-(:func:`._account_walk.walk_account_ledger`, plan task plan#2525).  The counter
+(:func:`._account_walk.account_corrections`; the records' since plan task
+plan#2525).  The counter
 line is ruling **R-FO**'s dispatch over the account's projection kind
 (:func:`~._chart.anchor_correction_counter_kind`).  The one public answer is
 :func:`account_correction_targets`, which the stored ledger's writer
@@ -147,7 +148,7 @@ def _account_correction_kinds(
     repairs of one ordering; the third was to stop inferring the answer.*
 
     Args:
-        correction: The correction from :func:`._account_walk.walk_account_ledger`
+        correction: The correction from :func:`._account_walk.account_corrections`
             whose kinds to resolve.
 
     Returns:
@@ -172,7 +173,7 @@ def _correction_delta(correction: AccountAnchorCorrection) -> Decimal:
     spelled twice and left to drift.
 
     Args:
-        correction: The anchor correction from :func:`._account_walk.walk_account_ledger`.
+        correction: The anchor correction from :func:`._account_walk.account_corrections`.
 
     Returns:
         The signed linked-ledger delta as a ``Decimal``.
@@ -230,7 +231,7 @@ def _counter_keys(
             reconciled, with ``account_type`` loaded (the dispatch classifies
             it).
         corrections: The account's corrections from
-            :func:`._account_walk.walk_account_ledger`, chronological.
+            :func:`._account_walk.account_corrections`, chronological.
 
     Returns:
         One entry per correction, in the same order: its counter
@@ -280,7 +281,7 @@ def _account_anchor_correction_target(
     every account balance the app reports.
 
     Args:
-        correction: The anchor correction from :func:`._account_walk.walk_account_ledger`.
+        correction: The anchor correction from :func:`._account_walk.account_corrections`.
         linked: The account's own line's chart key, built once by the
             reconcile.
         counter: This correction's counter chart key from
@@ -333,7 +334,7 @@ def _account_anchor_correction_targets(
 
     Args:
         corrections: The account's corrections from
-            :func:`._account_walk.walk_account_ledger`, chronological.
+            :func:`._account_walk.account_corrections`, chronological.
         calendar: The owner's whole pay calendar, from
             :func:`app.services.pay_calendar.calendar_for`.
             :meth:`~app.services.pay_calendar.PayCalendar.filing_period` is the
@@ -395,7 +396,7 @@ def account_correction_targets(
     Args:
         account: The non-loan account, with ``account_type`` loaded.
         corrections: Its corrections from
-            :func:`._account_walk.walk_account_ledger`, chronological.
+            :func:`._account_walk.account_corrections`, chronological.
         calendar: The owner's whole pay calendar
             (:func:`app.services.pay_calendar.calendar_for`), which files each
             correction by its day (ruling plan#2519).

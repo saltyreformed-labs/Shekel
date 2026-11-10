@@ -489,7 +489,7 @@ def apply_opening_restatement(
 
     **A restatement moves more than the amount.**  ``budget.account_openings``
     is read by BOTH the balance fold and the worked-out ledger (ruling
-    **R-GX**): ``ledger_lines.walk_account_ledger`` books the
+    **R-GX**): ``ledger_lines._account_walk.account_corrections`` books the
     ``account_opening`` entry dated on ``opened_on`` and seeds every later
     correction's ``ledger_before`` from the equity, so moving either re-keys
     that entry -- ``(source kind, pay period, entry date)`` -- and changes the

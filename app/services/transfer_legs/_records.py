@@ -9,10 +9,9 @@ entry's two side links since plan step ``balance:X-bi-6-4d-2`` (ruling
 over transfer ids, and :func:`_leg_transfer_id` and :func:`_leg_is_income` say
 which transfer and which side.  Every loader in this package that asks the
 join lives here -- the settled half's
-:func:`transfer_movement_rows` / :func:`recorded_transfer_legs`, the posting
-writer's :func:`transfer_family_movements`, the pre-load of many sides'
-records (:func:`preload_side_records`, which :func:`transfer_sides` calls for
-one transfer's two), the recurrence
+:func:`transfer_movement_rows` / :func:`recorded_transfer_legs`, the pre-load
+of many sides' records (:func:`preload_side_records`, which
+:func:`transfer_sides` calls for one transfer's two), the recurrence
 engine's :func:`transfers_holding_records`, and every door's
 "this transfer holds a payment" (:func:`transfer_holds_a_movement` /
 :func:`held_transfer_entries`) -- beside :func:`movement_parent`, the join's
@@ -220,8 +219,7 @@ def _side_records() -> Query:
     (``ck_transaction_entries_one_parent``).  Every loader of legs' records
     narrows this -- the pre-load (:func:`preload_side_records`), every
     settled-half reader through
-    :func:`transfer_movement_rows`, the posting writer through
-    :func:`transfer_family_movements`, and every door's "this transfer holds a
+    :func:`transfer_movement_rows`, and every door's "this transfer holds a
     payment" through :func:`transfer_holds_a_movement` /
     :func:`held_transfer_entries` -- so the join is stated once, here.
 
@@ -603,38 +601,6 @@ def movement_parent_loads() -> tuple:
         joinedload(TransactionEntry.expense_transfer),
         joinedload(TransactionEntry.income_transfer),
     )
-
-
-def transfer_family_movements(
-    transfer: Transfer,
-) -> list[tuple[TransactionEntry, TransferLeg]]:
-    """Return every record *transfer*'s two sides hold, each with its leg.
-
-    The posting writer's pair door walks this
-    (``posting_service.sync_transfer_postings`` and its teardown twin): each
-    side's record, dated or kept un-dated, paired with the leg
-    :func:`movement_parent` books it under.  Since plan step
-    ``balance:X-bi-6-4d-2`` a transfer's family IS its sides' records -- a
-    record under a hidden transfer is unstorable, so there is no movement
-    that is no leg's record left to reverse -- and each one's transfer is
-    *transfer*, an identity-map hit, so the walk reads no relationship by a
-    query.  Moved here from ``posting_service._transfer_family_movements`` at
-    leaf ``X-bi-6-4a``.
-
-    Args:
-        transfer: The transfer, loaded.
-
-    Returns:
-        ``(movement, leg)`` pairs, ascending by movement id so a run's
-        entries are deterministic.
-    """
-    movements = (
-        _side_records()
-        .filter(_links_any((transfer.id,)))
-        .order_by(TransactionEntry.id)
-        .all()
-    )
-    return [(movement, movement_parent(movement)) for movement in movements]
 
 
 def parent_entries(movement: TransactionEntry) -> list[TransactionEntry]:

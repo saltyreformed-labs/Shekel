@@ -39,24 +39,25 @@ R-G), so they are the seam fold's tier, exactly as the loan plan's PLANNED tier
 lives in ``balance_at._plan`` and not in ``loan_ledger``.
 
 **Two consumers, one walk** (ruling R-H).  The seam's read pass folds it into a
-balance at a date, and since plan task plan#2525 the posting writer books the
-same facts' assertion corrections onto the general ledger:
-:func:`app.services.ledger_lines.walk_account_ledger` frames the
+balance at a date, and the worked-out ledger books the same facts' assertion
+corrections as its lines:
+:func:`app.services.ledger_lines._account_walk.account_corrections` frames the
 read fold's own replay over this walk
 (:func:`app.services.balance_at.assertion_corrections`, published at the seam's
-door because W9910 forbids the writer importing ``balance_at._assertions`` and
-its ``balance_before`` is a balance-at-T this package may not hold).  Until
-then they were two independent statements of what happened to an account --
-the writer's replayed its own STORED postings -- and their disagreement IS the
-defect Phase X exists to close (findings cash D1-D4).  One walk closes it by
+door because W9910 forbids ``ledger_lines`` importing ``balance_at._assertions``
+and its ``balance_before`` is a balance-at-T this package may not hold).  Until
+plan task plan#2525 they were two independent statements of what happened to
+an account -- the stored ledger's writer replayed its own STORED postings --
+and their disagreement IS the defect Phase X exists to close (findings cash
+D1-D4).  One walk closes it by
 construction rather than by a test holding two implementations in step.
 
 **Three differences from the account POSTING walk were named here, and plan
 task plan#2525 closed two.**  (1) That walk read back its own postings where
-this one reads SOURCE rows; the writer reads this walk now, the direction the
+this one reads SOURCE rows; the ledger reads this walk now, the direction the
 whole arc turns on -- the posted ledger is a projection of the facts, not a
 second opinion about them (plan Section 1, root cause 2).
-(2) It does not refuse an amortizing account.  That refusal is a WRITE concern
+(2) It does not refuse an amortizing account.  That refusal is a LEDGER concern
 (which correction family a loan's anchors book into), not a property of a fact
 stream, and the cash-flow seam view deliberately consults no kind -- its balance
 must reconcile with the transaction rows rendered beside it, whatever the
@@ -66,9 +67,10 @@ and the analytics resolver (``resolve_analytics_cash_flow_set``;
 ``resolve_analytics_account`` until plan step CC-4-3) since plan step X-a1,
 which closed the calendar door finding N-38 measured open (the Van Loan
 rendered at ``$531.94`` against ``$15,663.59`` owed).  So this walk stays total
-and kind-blind, the writer keeps
-the guard it needs, and no screen reaches a cash-basis loan balance through
-either.  (3) It sees no RESIDUE.  The posting walk read a second source bucket
+and kind-blind, the worked-out read keeps a loan out of the account framing by
+its own dispatch (``ledger_lines._worked_out._is_loan``; the writer's account
+door refused one until plan task plan#3155), and no screen reaches a cash-basis
+loan balance through either.  (3) It sees no RESIDUE.  The posting walk read a second source bucket
 beside the movement-linked one -- entries whose movement link
 (``transaction_entry_id``) was SET-NULLed by a hard
 delete -- precisely so its running total "stays equal to the live linked total
@@ -251,7 +253,7 @@ def walk_cash_ledger(account_id: int, scenario_id: int) -> CashLedgerWalk:
             Assertions are per-ACCOUNT (``AccountAnchorHistory`` carries no
             scenario), so the same assertions accompany every scenario's own
             rows -- the same split
-            :func:`app.services.ledger_lines.walk_account_ledger`
+            :func:`app.services.ledger_lines._account_walk.account_corrections`
             documents.
 
     Returns:

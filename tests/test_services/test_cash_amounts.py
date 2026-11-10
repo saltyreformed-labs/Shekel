@@ -114,7 +114,7 @@ _POSTED_ON = date(2026, 1, 21)
 # `TestARecordedClearingFactMayNotMoveALineAcrossAStatement
 # ::test_a_PURCHASE_carries_its_OWN_link_not_its_parents` on the read side, and
 # `test_ledger_lines/test_an_accounts_corrections/test_the_walk.py`'s
-# `TestWalkAccountLedger::test_a_purchases_clearing_link_is_read_off_the_PURCHASE`
+# `TestTheAccountWalk::test_a_purchases_clearing_link_is_read_off_the_PURCHASE`
 # on the account walk.  Both were ADDED at this step: the class existed for
 # transactions only, and citing it for purchases before that was an invented
 # citation an adversarial review caught.

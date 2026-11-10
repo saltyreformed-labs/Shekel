@@ -102,10 +102,11 @@ kill.
   an account's :func:`app.services.cash_ledger.walk_cash_ledger`.  It is the
   one replay the read fold applies, published rather than moved because its
   ``balance_before`` is a balance-at-T and the ``cash_ledger`` leaf's producer
-  set is empty and stays empty (W9909).  The posting writer's
-  ``ledger_lines.walk_account_ledger`` reads it (plan task
-  plan#2525), so the posted corrections and the fold's are one walk where
-  they were two: the writer had summed its own STORED postings.  See
+  set is empty and stays empty (W9909).  The worked-out ledger's
+  ``ledger_lines._account_walk.account_corrections`` frames it (plan task
+  plan#2648), as the stored ledger's writer did from plan task plan#2525, so
+  the ledger's corrections and the fold's are one walk where they were two:
+  until then that writer had summed its own STORED postings.  See
   :mod:`._assertions`.
 * The LIABILITY entry (:func:`liability_owed_at_dates`) answers what every
   debt OWES at a list of FORWARD calendar dates in one resolution pass --

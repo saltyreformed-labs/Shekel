@@ -366,12 +366,12 @@ class TestTheClosingBalancePartition:
     def test_a_settle_at_exactly_the_assertion_instant_is_absorbed(
         self, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """The boundary is ``<=``, matching the account posting walk.
+        """The boundary is ``<=``: a source on the assertion's own day is inside it.
 
         A source dated the assertion's own civil day is subsumed by its reset
-        -- the same ``fact.reconciled_through.covers(sources[i][0])`` boundary
-        ``ledger_lines.walk_account_ledger`` applies, so the read fold
-        and the posted ledger partition one boundary rather than two.
+        -- ``fact.reconciled_through.covers(sources[i][0])``, the fold's one
+        boundary, which the worked-out ledger's ``account_corrections`` frames
+        rather than restates, so the fold and the ledger partition one boundary.
         """
         account, scenario = seed_user["account"], seed_user["scenario"]
         period = seed_periods[6]

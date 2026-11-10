@@ -5,8 +5,9 @@ A NON-loan account's anchor history books on the worked-out ledger
 OPENING (its stored opening equity, ``budget.account_openings``) and a TRUE-UP
 per assertion, each a balanced correction landing the account's own line on the
 asserted balance as of the day it is the closing balance for.  The walk
-(:func:`app.services.ledger_lines.walk_account_ledger`) partitions source facts
-by their settled CIVIL DAY (the stored ``settled_on``; a transfer by its side's
+(:func:`app.services.ledger_lines._account_walk.account_corrections`, over the
+account's :func:`app.services.cash_ledger.walk_cash_ledger`) partitions source
+facts by their settled CIVIL DAY (the stored ``settled_on``; a transfer by its side's
 covering movement on the walked account) against each anchor's stored
 ``observed_on`` -- never by pay period (the plan review's CRITICAL-1) and never
 by instant, which decided the question by click order and cost production

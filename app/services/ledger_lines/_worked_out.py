@@ -355,10 +355,10 @@ def _correction_targets(
     splits come off its loan walk (*loan_walks*); every other account's
     opening and true-ups are framed off its records walk (*corrections*),
     each walk built by the owner's one load of its kind.  The dispatch is
-    :func:`_is_loan`'s, the predicate both writers split their account sets
-    by (the account walk refuses a loan by it, and the non-loan set's SQL
-    filter reads the column it maps), and the one the read chose each map's
-    accounts by.  A loan with no terms walks to nothing, as it posts nothing.
+    :func:`_is_loan`'s, the one the read chose each map's accounts by (the
+    stored ledger's two writers split their account sets by it until plan
+    task plan#3133 deleted them).  A loan with no terms walks to nothing, as
+    it posts nothing.
 
     Args:
         account: The account, with ``account_type`` loaded.

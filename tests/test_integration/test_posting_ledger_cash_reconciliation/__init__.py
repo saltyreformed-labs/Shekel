@@ -7,7 +7,14 @@ real account's linked ledger now accumulates BOTH sources at once.  Reads stay o
 the ``balance_at`` seam over ``budget.transactions`` (Step 3 changes no read
 path), so -- exactly as in Step 2 -- the ledger is validated against the SOURCE
 transaction rows, never against a displayed balance.  The invariants below are
-plan Section 6:
+plan Section 6.
+
+**The ledger they grade is the one worked out from the records since plan step
+plan#2913** (``tests/_ledger_reads.py``); they say "legs" and "postings" as they
+were written of the store.  A deleted category's lines book on the Uncategorized
+bucket there, so invariant 2's orphan is the store's alone, as are invariant 3 and
+the sweep's parity arm, each of which goes with it.
+
 
   1. **Per linked account (cash side).**  For each real account A (its linked
      ledger account), the net of A's posting legs equals
@@ -67,13 +74,13 @@ reuse the go-forward builder, so they are true by construction.  It went because
 the SQL it drove reads a column the head revision drops, not because it was
 redundant.
 
-Two adversarial cases prove the oracle is not vacuous: tampering a settled
-transaction's covering movement makes the per-account reconciliation FAIL --
-driven through the real ``_assert_full_reconciliation`` sweep helper under
-``pytest.raises``, so a regression in the helper itself is caught, not only in an
-inline re-derivation (a real ledger drift would be caught) -- and injecting one
-extra leg makes the trial balance go non-zero (the ``= 0`` assertion is a real
-check, not one the per-entry trigger makes unconditionally true).  A reverted
+Adversarial cases prove the oracle is not vacuous: a read that loses lines makes
+the per-account reconciliation and the trial balance FAIL -- driven through the
+real ``_assert_full_reconciliation`` sweep helper under ``pytest.raises``, so a
+regression in the helper itself is caught, not only in an inline re-derivation.
+Tampering a settled transaction's covering movement and injecting one extra stored
+leg are the store's own cases: the first leaves it behind the records, which the
+sweep's parity arm names, and the second unbalances it.  A reverted
 transaction reconciles at zero (original + reversal net to zero; the source-side
 query drops its kept movement once the revert UN-DATES it), proving the
 append-only correction discipline end to end.
@@ -84,13 +91,11 @@ append-only correction discipline end to end.
     arithmetic over the seeded amounts (e.g. Checking pays $50 and receives
     $2,000 of cash plus sends $350 of transfers, so its ledger MUST be exactly
     ``+1600.00``), owing nothing to either producer or any service helper;
-  * **independent cross-table queries** -- the ledger side
-    (``_independent_ledger_sum`` / ``_ledger_account_sum``) reads
-    ``account_postings`` through a different join shape than the
-    ``posting_service`` readers, and the source side
+  * **independent cross-table queries** -- the ledger side is the worked-out read
+    (``tests/_ledger_reads.py``, plan step plan#2913), and the source side
     (``_independent_combined_source_effect`` / ``_signed_cash_effect``) reads the
-    ``transactions`` and ``transaction_entries`` tables; asserting the two equal
-    reconciles what the producers WROTE against the source of truth;
+    ``transactions`` and ``transaction_entries`` tables by its own SQL; asserting
+    the two equal reconciles what the read BOOKS against the source of truth;
   * **the production service helpers** -- ``account_posting_total``,
     ``settled_transfer_effect``, and ``posted_purchase_effect`` (the readers
     Steps 4-5 will switch balances onto) must match the hand-computed literals

@@ -60,6 +60,7 @@ def _create_profile(seed_user):
     rule = make_every_period_rule(db.session, template)
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         template_id=template.id,
@@ -136,6 +137,7 @@ def _create_other_user_profile():
     rule = make_every_period_rule(db.session, template)
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=other_user.id,
         scenario_id=scenario.id,
         template_id=template.id,
@@ -366,6 +368,7 @@ def _create_second_user_salary_profile(second_user_data):
     rule = make_every_period_rule(db.session, template)
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=second_user_data["user"].id,
         scenario_id=second_user_data["scenario"].id,
         template_id=template.id,
@@ -415,6 +418,7 @@ def _create_inactive_profile(seed_user, name="Old Job"):
     # The definition first, then the cadence onto it (plan step R-F6).
     rule = make_every_period_rule(db.session, template)
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         template_id=template.id,

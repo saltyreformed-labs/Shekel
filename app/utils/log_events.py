@@ -176,7 +176,8 @@ EVT_OTHER_SESSIONS_INVALIDATED = _register(
 )
 EVT_REAUTH_FAILED = _register(
     "reauth_failed", AUTH,
-    "Step-up re-authentication failed (bad password or bad TOTP).",
+    "A signed-in password or code check refused the person (/reauth, "
+    "/change-password or /mfa/disable).",
 )
 EVT_REAUTH_SUCCESS = _register(
     "reauth_success", AUTH,
@@ -226,6 +227,11 @@ EVT_ACCOUNT_LOCKED = _register(
     "account_locked", AUTH,
     "Threshold-many consecutive failures triggered an account lockout.",
 )
+EVT_KNOWN_DEVICE_DELETED = _register(
+    "known_device_deleted", AUTH,
+    "Threshold-many consecutive wrong guesses from a known browser deleted "
+    "its record, so it is a stranger again (ruling plan#2996).",
+)
 
 
 # ── Access / authorization events (F-144 / C-14) ───────────────────
@@ -250,7 +256,7 @@ EVT_RESOURCE_NOT_FOUND = _register(
 )
 EVT_RATE_LIMIT_EXCEEDED = _register(
     "rate_limit_exceeded", ACCESS,
-    "Flask-Limiter rejected a request that exceeded its per-IP quota.",
+    "Flask-Limiter rejected a request that exceeded its quota.",
 )
 EVT_BASELINE_MISSING = _register(
     "baseline_missing", ERROR,

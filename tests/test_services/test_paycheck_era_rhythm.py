@@ -51,10 +51,11 @@ from decimal import ROUND_HALF_UP, Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import BusinessDayShiftEnum, GoalModeEnum, IncomeUnitEnum
+from app.enums import BusinessDayShiftEnum, GoalModeEnum, IncomeUnitEnum, RaiseTypeEnum
 from app.models.savings_goal import SavingsGoal
 from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
+from app.models.salary_raise import SalaryRaise
 from app.services import (
     pay_era_write,
     recurring_view,
@@ -77,10 +78,10 @@ from app.services.paycheck_calculator._calendar_questions import (
 )
 from app.services.payroll_basis import PayrollBasis
 from app.utils.dates import display_today
+from tests._stub_period import STUB_PERIOD_ENDS_DAYS_BEFORE, stub_period_on
 from tests._test_helpers import (
     era_of,
     fica_only_law,
-    make_recurring_raise,
     make_salary_profile,
 )
 from tests.test_services.test_paycheck_calculator._helpers import (
@@ -680,6 +681,7 @@ class TestTheRecurringSalaryRow:
             "pay_payday": min(
                 period.start_date for period in periods
             ).isoformat(),
+            **stub_period_on(min(period.start_date for period in periods)),
             "filing_status_id": filing.id,
             "state_code": "NC",
         }, follow_redirects=True)
@@ -718,18 +720,25 @@ class TestTheRecurringSalaryRow:
     ):
         """A day before the first saved payday prices THAT paycheck (R-SAL79).
 
-        Input: the owner above, with a made-up 10% raise from the month after
-        the first saved payday, read on the day before that payday.
+        Input: the owner above, with a made-up one-time 10% raise from the
+        first day the SECOND saved paycheck pays for -- the day after the
+        first paycheck's period ends, six days before its payday (ruling
+        plan#3096) -- read on the day before the first payday.
         Expected: Amount $1,847.00 and Monthly 1,847 x 26 / 12 = $4,001.83 --
         the first paycheck, the only one before the raise.  Every later
         SAVED paycheck is 57,200 / 26 = 2,200.00 gross less 168.30 FICA =
         $2,031.70, asserted for the SECOND and the LAST as the control so the
         case tells the FIRST paycheck from any other (an adversarial review of
         this step priced the LAST saved paycheck instead and found the first
-        draft green).  The second is asserted because the construction does
-        not guarantee it: the raise takes the month after the first payday,
-        so a first payday early in its month puts the second paycheck before
-        the raise too, and the case would stop telling the two apart.
+        draft green).  The raise took the 1st of the month after the first
+        payday until each weekday was priced at its own pay (ruling
+        plan#3089, task plan#3100), which left the second paycheck before
+        the raise or across it on most days the suite runs; dated from the
+        second paycheck's first day, every weekday it and every later one
+        pays for is at the raise, on any day.  One-time, because a recurring
+        raise may not start on February 29
+        (``ck_salary_raises_recurring_not_on_february_29``) and this day is
+        one in some leap years.
         Why: there is no paycheck today, and until R-SAL79 the row fell back
         to the stored copy at the LATEST (weekly) count: $1.00 and
         1.00 x 52 / 12 = $4.33 here.
@@ -740,16 +749,15 @@ class TestTheRecurringSalaryRow:
             )
             user_id = seed_user["user"].id
             first_payday = min(period.start_date for period in seed_periods_today)
-            raise_from = date(
-                first_payday.year + first_payday.month // 12,
-                first_payday.month % 12 + 1, 1,
+            raise_from = first_payday - timedelta(
+                days=STUB_PERIOD_ENDS_DAYS_BEFORE - 1,
             )
-            make_recurring_raise(
-                template.salary_profiles[0].id, db.session,
-                effective_year=raise_from.year,
-                effective_month=raise_from.month,
-                percentage=Decimal("0.10"),
-            )
+            db.session.add(SalaryRaise(
+                salary_profile_id=template.salary_profiles[0].id,
+                raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
+                effective_date=raise_from, percentage=Decimal("0.10"),
+                is_recurring=False,
+            ))
             db.session.commit()
             ctx = BalanceContext.build(
                 user_id, as_of=first_payday - timedelta(days=1),

@@ -174,8 +174,10 @@ class BaseConfig:
     # non-permanent so Flask-Login's ``strong`` session protection
     # (F-038 / C-07) keeps wiping the session on IP / User-Agent drift
     # -- a permanent session is exempt from that wipe.  The effective
-    # bound on an open session is therefore IDLE_TIMEOUT_MINUTES below,
-    # not this value.  Nothing signs a browser back in once its session
+    # bounds on an open session are therefore IDLE_TIMEOUT_MINUTES below
+    # and KNOWN_LIFETIME after its sign-in however active (ruling
+    # plan#3069, ``app/models/known_device.py``), not this value.
+    # Nothing signs a browser back in once its session
     # cookie is gone: plan#2173 deleted "Remember me", whose cookie could
     # not be revoked (ruling plan#2406).
     PERMANENT_SESSION_LIFETIME = timedelta(
@@ -275,7 +277,8 @@ class BaseConfig:
     # there is no fallback.
     RATELIMIT_STORAGE_URI = "memory://"
 
-    # Default per-IP ceiling applied to every route that does NOT carry
+    # Default ceiling, per known browser, else per signed-in account, else
+    # per client (``rate_limit_key``), applied to every route that does NOT carry
     # an explicit ``@limiter.limit`` decorator.  As of audit verification
     # (Phase A 2026-04-15) only 4 of ~93 mutating routes have an explicit
     # rate limit.  Without this ceiling, an authenticated attacker could
@@ -286,6 +289,15 @@ class BaseConfig:
     # ``<count> per <window>`` strings, parsed by Flask-Limiter into
     # individual Limit objects.
     RATELIMIT_DEFAULT = "200 per hour;30 per minute"
+
+    # The callers whose X-Forwarded-For the app believes, so that it sees each
+    # client's address rather than nginx's.  The same setting gunicorn reads
+    # for the forwarded scheme (gunicorn.conf.py), and it is required there, so
+    # a gunicorn process cannot reach this empty; empty here trusts no caller,
+    # so each client counts as the socket's peer: a process run directly, and
+    # the dev container, which sets no list.  Parsed and refused if malformed
+    # in ``create_app``.
+    FORWARDED_ALLOW_IPS = os.getenv("FORWARDED_ALLOW_IPS", "")
 
     # Fail-closed posture: if Valkey becomes unreachable, do NOT silently
     # drop rate-limit checks (which would let an attacker brute-force
@@ -315,9 +327,10 @@ class BaseConfig:
     # ---- Account lockout (audit finding F-033 / commit C-11) ----------
     #
     # Per-account brute-force throttling that cannot be bypassed by IP
-    # rotation.  See ``app/models/user.py`` for the column-level
-    # documentation and ``app/services/auth_service.py:authenticate``
-    # for the enforcement path.  These settings are documented here for
+    # rotation.  See ``app/models/guess_record.py`` for the column-level
+    # documentation and ``app/services/auth_service.py`` (its
+    # ``_judge_strangers_try``) for the enforcement path.  These settings
+    # are documented here for
     # operator discovery; the service itself reads ``os.getenv`` at call
     # time (matching the ``mfa_service.TOTP_ENCRYPTION_KEY`` pattern) so
     # tests can adjust thresholds via ``monkeypatch.setenv`` without
@@ -553,6 +566,10 @@ class TestConfig(BaseConfig):
     WTF_CSRF_ENABLED = False
     LOGIN_DISABLED = False
     RATELIMIT_ENABLED = False
+
+    # Production's bridge, pinned so the suite is hermetic: a test that sends
+    # a request from this range with nginx's headers is what production sees.
+    FORWARDED_ALLOW_IPS = "172.32.0.0/24"
 
     # Pin the idle window regardless of any IDLE_TIMEOUT_MINUTES in the
     # developer's shell or .env, so the suite is hermetic.  The dev

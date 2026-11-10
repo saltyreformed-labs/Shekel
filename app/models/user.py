@@ -18,42 +18,18 @@ from app.models.mixins import TimestampMixin
 class User(UserMixin, TimestampMixin, db.Model):
     """Application user.  Flask-Login's UserMixin provides is_authenticated, etc.
 
-    Account-lockout columns (see audit finding F-033 / commit C-11):
-
-      * ``failed_login_count`` -- count of consecutive bad-password
-        attempts.  Incremented inside ``auth_service.authenticate`` on
-        every failed verify, reset to ``0`` on a successful login or
-        when the threshold trips and ``locked_until`` is stamped.
-      * ``locked_until`` -- exclusive upper bound on the lockout window;
-        ``NULL`` outside lockout.  ``authenticate`` short-circuits and
-        raises ``AuthError`` without running ``verify_password`` while
-        ``locked_until > now`` so a brute-force attacker observes
-        constant-time rejections during the lockout window (no timing
-        oracle on whether the password was correct on the locked
-        account).
-
-    Together these columns implement per-account brute-force throttling
-    that does not depend on Flask-Limiter's IP-keyed storage.  IP
-    rotation (residential proxy, RFC 1918 spoofing) cannot bypass the
-    per-account counter -- only knowing the password before the
-    lockout trips can.  Threshold and duration are env-configurable
-    via ``LOCKOUT_THRESHOLD`` and ``LOCKOUT_DURATION_MINUTES``; see
-    ``BaseConfig``.
+    The account's lock is not on this row.  A stranger's wrong passwords and
+    codes count on the record of the account's email
+    (:class:`~app.models.guess_record.GuessRecord`, ruling plan#3110), which
+    an email with no account can have too, so a wrong password at a real
+    email need not cost more than one at a made-up email.  A known browser's
+    guesses count on its own record (``KnownDevice.failed_login_count``,
+    plan#2772).  Both thresholds and the lock's length are
+    ``LOCKOUT_THRESHOLD`` and ``LOCKOUT_DURATION_MINUTES`` (``BaseConfig``).
     """
 
     __tablename__ = "users"
     __table_args__ = (
-        # Defensive lower bound on the lockout counter.  The service
-        # only ever increments from a non-negative starting value, but
-        # a future raw-SQL backfill or a buggy migration that wrote a
-        # negative value would otherwise quietly invert the lockout
-        # logic (the "<= 0 means no lockout yet" branch would never
-        # trip).  The CHECK is the database-side belt to the
-        # service-side suspenders.
-        db.CheckConstraint(
-            "failed_login_count >= 0",
-            name="ck_users_failed_login_count_non_negative",
-        ),
         # ``last_security_event_kind`` is a free-text VARCHAR at the
         # SQL level so the column type stays interchangeable with any
         # future kind without an Alembic ``ALTER TYPE`` dance, but
@@ -106,26 +82,8 @@ class User(UserMixin, TimestampMixin, db.Model):
     # Timestamp of most recent "log out all sessions" or password change event.
     # The user loader compares this against the session creation time to reject stale sessions,
     # and a trusted device made before it is trusted no longer
-    # (app/services/trusted_device_service.py, plan#2173).
+    # (app/services/known_device_service.py, plan#2173).
     session_invalidated_at = db.Column(db.DateTime(timezone=True), nullable=True)
-    # Number of consecutive failed login attempts since the last
-    # successful authenticate() or lockout-trip.  NOT NULL with a
-    # server default of 0 so existing rows backfill cleanly and any
-    # raw-SQL INSERT that omits the column still produces a usable
-    # row.  See audit finding F-033 / commit C-11.
-    failed_login_count = db.Column(
-        db.Integer, nullable=False, server_default="0",
-    )
-    # Exclusive upper bound on the active lockout window, or NULL when
-    # the account is not locked.  Comparison is strict greater-than:
-    # at the instant the column equals ``now`` the lockout is over.
-    # Nullable because most rows are NOT in lockout at any given moment
-    # -- the column carries the "no active lockout" state as NULL
-    # rather than as a sentinel datetime in the past, which keeps the
-    # service-side check (``locked_until is not None and locked_until
-    # > now``) explicit about both conditions.  See audit finding
-    # F-033 / commit C-11.
-    locked_until = db.Column(db.DateTime(timezone=True), nullable=True)
     role_id = db.Column(
         db.Integer,
         db.ForeignKey("ref.user_roles.id", ondelete="RESTRICT"),

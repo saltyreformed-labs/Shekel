@@ -1565,6 +1565,7 @@ class TestThirdPaycheckDetection:
             user_id = seed_user["user"].id
             calendar = calendar_for(user_id)
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=user_id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=1,

@@ -92,8 +92,8 @@
                      value="{{ current_payday.isoformat() if current_payday else '' }}">
               <div class="form-text">
                 The payday this pay starts on, no later than your next
-                payday.  A forecast raise dated on or before it is taken to be
-                in this pay already.
+                payday.  A forecast raise dated on or before the first day
+                this paycheck pays for is taken to be in this pay already.
               </div>
             </div>
           </div>
@@ -148,6 +148,43 @@
             </select>
             <div class="form-text">The pay stub form uses this to check the Gross Pay you type.</div>
           </div>
+
+          {# The job's pay periods (plan#3048, ruling plan#3096): two dates
+             copied off the stub of any paycheck the app holds, which the app
+             keeps as how many days each period ends before its scheduled
+             payday.  The edit form shows that back as the latest payday and
+             its period end, which re-save to the same answer, a Period End
+             after its Pay Date included when the payday was paid early
+             (task plan#3124), and lists the next paychecks with the days each
+             pays for. #}
+          <div class="row mt-3">
+            <div class="col-md-6">
+              <label for="stub_pay_date" class="form-label">Pay Date on a pay stub</label>
+              <input type="date" id="stub_pay_date" name="stub_pay_date" class="form-control"
+                     {{ 'required' if not profile }}
+                     value="{{ pay_period.pay_date.isoformat() if pay_period and pay_period.pay_date else '' }}">
+            </div>
+            <div class="col-md-6">
+              <label for="stub_period_end" class="form-label">Period End on that stub</label>
+              <input type="date" id="stub_period_end" name="stub_period_end" class="form-control"
+                     {{ 'required' if not profile }}
+                     value="{{ pay_period.period_end.isoformat() if pay_period and pay_period.period_end else '' }}">
+            </div>
+          </div>
+          <div class="form-text">
+            Copy both from the pay stub of any paycheck the app holds. They tell the app which days each paycheck pays for.
+          </div>
+          {% if pay_period and pay_period.upcoming %}
+          <ul class="list-unstyled small mt-2 mb-0" id="upcoming_pay_periods">
+            {% for upcoming in pay_period.upcoming %}
+            <li>
+              Your {{ upcoming.payday.strftime('%b %-d') }} paycheck pays
+              {{ upcoming.paid_days.first.strftime('%a %b %-d') }} through
+              {{ upcoming.paid_days.last.strftime('%a %b %-d') }}
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
         </div>
       </div>
 

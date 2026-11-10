@@ -5,6 +5,7 @@ Split from ``tests/test_routes/test_salary.py`` by ``tools/split`` (ruling R-BAL
 """
 
 import re
+from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
@@ -19,6 +20,7 @@ from app.enums import WithholdingKindEnum
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
 
+from tests._stub_period import stub_period_on
 from tests._test_helpers import add_test_pay_stub, all_periods, NO_TAX_LAW, state_and_fica_law
 
 from ._helpers import _create_profile, _create_second_user_salary_profile, _capture_render
@@ -72,8 +74,7 @@ class TestSalaryNegativePaths:
                 f"/salary/{other_profile.id}/raises",
                 data={
                     "raise_type_id": raise_type.id,
-                    "effective_month": "7",
-                    "effective_year": "2026",
+                    "effective_date": "2026-07-01",
                     "percentage": "3",
                 },
                 follow_redirects=True,
@@ -126,8 +127,7 @@ class TestSalaryNegativePaths:
             salary_raise = SalaryRaise(
                 salary_profile_id=other_profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=7,
-                effective_year=2026,
+                effective_date=date(2026, 7, 1),
                 percentage=Decimal("0.0300"),
             )
             db.session.add(salary_raise)
@@ -247,6 +247,7 @@ class TestNetBiweeklyMismatchFixes:
                 "name": "Net Test Job",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2026-01-02",  # the first period's payday
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)
@@ -288,6 +289,7 @@ class TestNetBiweeklyMismatchFixes:
                 "name": "No Tax Job",
                 "pay_amount": "2307.69",  # $60,000.00 a year / 26
                 "pay_payday": "2026-01-02",  # the first period's payday
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": filing_status.id,
                 "state_code": "NC",
             }, follow_redirects=True)

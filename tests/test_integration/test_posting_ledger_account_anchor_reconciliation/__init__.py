@@ -50,13 +50,12 @@ cash oracle is (the ``test_posting_ledger_cash_reconciliation`` package):
     deltas are the test author's arithmetic over the seeded anchors and
     amounts (e.g. anchor 500, spend 200 pre-true-up, true-up to 350, spend 100
     post-true-up => linked ledger 250.00), owing nothing to any producer;
-  * **independent cross-table queries** -- the ledger side
-    (``_independent_linked_ledger_sum`` / ``_linked_ledger_sum_as_of``) reads
-    ``account_postings`` and the source side
+  * **independent cross-table queries** -- the ledger side is the worked-out read
+    (``tests/_ledger_reads.py``, plan step plan#2913) and the source side
     (``_independent_post_assertion_source_effect``) reads ``transactions`` and
     the transfers' side records with
     independently-written Python / SQL, so asserting the two reconcile checks
-    what the producers WROTE against the transaction source of truth;
+    what the read BOOKS against the transaction source of truth;
   * **the production service helpers** -- ``account_posting_total`` and
     ``settled_transfer_effect`` / ``settled_transaction_effect`` must match the
     hand-computed literals too.
@@ -72,9 +71,10 @@ regardless of the test clock or timezone -- the same technique the C5 unit suite
 uses.  Assertion instants are always built RELATIVE to the factory origination
 row's stored ``created_at`` (the one instant the test cannot choose).
 
-Two adversarial cases prove the oracle is not vacuous: tampering the latest
-anchor balance makes the per-account reconciliation FAIL under the real sweep
-helper, and injecting one extra leg makes the trial balance go non-zero.  All
-money is ``Decimal`` from strings, with the arithmetic shown per the testing
-standard.
+Adversarial cases prove the oracle is not vacuous: a read that loses lines makes
+the per-account reconciliation and the trial balance FAIL under the real sweep
+helper.  Tampering the latest anchor balance and injecting one extra stored leg are
+the store's own cases: the first leaves it behind the records, which the sweep's
+parity arm names, and the second unbalances it.  All money is ``Decimal`` from
+strings, with the arithmetic shown per the testing standard.
 """

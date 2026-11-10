@@ -74,9 +74,9 @@
     </thead>
     <tbody>
       {% for period, bd in projection_data %}
-      {% set is_raise_start = period.period_id in raise_run_start_ids %}
-      {% set is_cut = is_raise_start and bd.period.raise_event|pay_cut %}
-      <tr class="{{ ('sal-row-cut' if is_cut else 'sal-row-raise') if is_raise_start }}{{ ' sal-row-third' if bd.period.is_third_paycheck and not is_raise_start }}">
+      {% set has_banner = bd.period.raise_event|length > 0 %}
+      {% set is_cut = has_banner and bd.period.raise_event|pay_cut %}
+      <tr class="{{ ('sal-row-cut' if is_cut else 'sal-row-raise') if has_banner }}{{ ' sal-row-third' if bd.period.is_third_paycheck and not has_banner }}">
         <td>
           <a href="{{ url_for('salary.cockpit', profile=profile.id, period=period.period_id) }}">
             {{ period.label }}
@@ -85,7 +85,7 @@
         </td>
         <td class="text-end font-mono">{{ money(bd.earnings.annual_salary) }}</td>
         <td>
-          {% if is_raise_start %}
+          {% if has_banner %}
           <span class="{{ 'sal-badge-cut' if is_cut else 'sal-badge-raise' }}">{% if is_cut %}<i class="bi bi-arrow-down" aria-hidden="true"></i> {% endif %}{{ bd.period.raise_event|raise_label }}</span>
           {% endif %}
         </td>

@@ -25,22 +25,22 @@ from app.schemas.validation import (
     rhythm_to_wire,
 )
 from app.models.category import Category
+from app.models.known_device import TRUST_LIFETIME
 from app.models.ref import AccountType, AccountTypeCategory
-from app.models.trusted_device import TRUST_LIFETIME
 from app.models.user import MfaConfig, User, UserSettings
 from app.services import (
     account_resolver,
     account_service,
+    known_device_service,
     pay_period_gates,
     pay_period_locks,
     pay_schedule_service,
-    trusted_device_service,
 )
 from app.services.auth_service import hash_password
 from app.services.pay_calendar import calendar_at_schedule
 from app.utils.browser_label import browser_label
 from app.utils.dates import display_today
-from app.utils.trusted_device_cookie import device_token
+from app.utils.device_cookie import device_token
 
 logger = logging.getLogger(__name__)
 
@@ -489,8 +489,8 @@ def _load_security_context():
         .filter_by(user_id=current_user.id)
         .first()
     )
-    devices = trusted_device_service.list_live_devices(current_user.id)
-    this_browser = trusted_device_service.device_named_by(
+    devices = known_device_service.list_trusted_devices(current_user.id)
+    this_browser = known_device_service.device_named_by(
         devices, device_token(current_user.id),
     )
     return {
@@ -500,7 +500,7 @@ def _load_security_context():
                 "id": device.id,
                 "browser": browser_label(device.user_agent),
                 "trusted_at": device.trusted_at,
-                "expires_at": device.expires_at,
+                "expires_at": device.trust_expires_at,
                 "is_this_browser": device is this_browser,
             }
             for device in devices

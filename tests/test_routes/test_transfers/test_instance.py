@@ -11,17 +11,16 @@ import pytest
 from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
-from app.models.journal_entry import JournalEntry
 from app.models.transfer import Transfer
 from app.models.ref import Status
 from app.services import transfer_legs
 from app.services.pay_calendar import calendar_for
 from app.services import transfer_service
 from app.utils.dates import display_today
+from tests._ledger_reads import net_posted_by_day, transfer_family_movement_ids
 from tests._test_helpers import (
     an_entered_day,
     on_both_sides,
-    transfer_family_journal_filter,
     transfer_side_record,
 )
 from app.services.row_valuation import settled_contribution
@@ -109,14 +108,12 @@ class TestTransferInstance:
                     .settled_on
                     for account_id in sides
                 )
-                dated = sorted(
-                    e.entry_date for e in db.session.query(JournalEntry)
-                    .filter(transfer_family_journal_filter(xfer.id)).all()
-                )
+                dated = sorted(net_posted_by_day(transfer_family_movement_ids(xfer.id)))
                 return paid, dated
 
             before = _state()
             assert all(p is not None for p in before[0])
+            assert before[1] == [settled_at]
 
             response = auth_client.patch(
                 f"/transfers/instance/{xfer.id}",

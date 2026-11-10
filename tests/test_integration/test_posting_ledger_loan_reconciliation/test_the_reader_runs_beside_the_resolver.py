@@ -21,17 +21,19 @@ from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.installment_calendar import monthly_due_date
 from app.services.balance_at import BalanceContext
 from app.services.liability_sign import owed
+from tests._stored_ledger import (
+    stored_loan_balance_at,
+    stored_loan_balance_map,
+)
 from tests._test_helpers import (
-    rhythm_of,
     amount_basis_for_scenario,
     create_account_of_type,
     create_loan_account,
     create_settled_transfer,
-    freeze_today,
     derived_span,
+    freeze_today,
     last_covered_day,
-    posted_loan_balance_at,
-    posted_loan_balance_map,
+    rhythm_of,
 )
 
 from ._helpers import (
@@ -105,11 +107,10 @@ def _seed_boundary_loan(bare_user):
 class TestReaderParallelRunAgainstResolver:
     """The dated posting window reads back == the resolver.
 
-    Sections 1-6 pin the posted LEDGER against the resolver through the test's OWN
-    unbounded ``-(sum of linked postings)`` query.  This section pins the
-    ``entry_date``-BOUNDED read of those same postings -- at a point in time and
-    at every period boundary -- as a THIRD derivation run in the SAME test as the
-    resolver.  On an on-schedule
+    Sections 1-6 pin the LEDGER against the resolver through the read's unbounded
+    net of the loan's own line.  This section pins the ``entry_date``-BOUNDED read
+    of those same lines -- at a point in time and at every period boundary -- run
+    in the SAME test as the resolver.  On an on-schedule
     payment the two must agree to the penny; off-schedule they must diverge by
     exactly the extra / short principal (the reader books the REAL principal from
     the cash, the resolver only the SCHEDULED principal).
@@ -332,7 +333,7 @@ class TestReaderParallelRunAgainstResolver:
 
             # The sweep: identities, per-entry balance, trial balance, and the
             # completeness guarantee that now covers the early settle.
-            _assert_loan_reconciles(loan, scenario_id, frozen)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_scalar_reader_diverges_by_the_exact_principal_delta_off_schedule(
         self, app, db, seed_user, seed_periods,
@@ -462,7 +463,7 @@ class TestReaderParallelRunAgainstResolver:
             # The reader jumps to the verified value; the resolver reseeds to it.
             assert reader == Decimal("95000.00")
             assert reader == resolver
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_reader_bounds_confirmed_postings_at_the_year_boundary(
         self, app, db, bare_user,
@@ -515,21 +516,23 @@ class TestReaderParallelRunAgainstResolver:
             reader_both = _posted_balance(loan.id, scenario_id, _AS_OF)
             assert reader_both == _resolver_balance(loan.id, scenario_id, _AS_OF)
             assert reader_both < reader_dec
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
     def test_reader_is_scenario_scoped_and_none_when_unopened(
         self, app, db, seed_user, seed_periods,
     ):
-        """The reader reads each scenario's own balance, and None where unopened.
+        """The reader reads each scenario's own balance, and never another's.
 
         On-schedule payments net independently per scenario: the baseline gets one
         (balance 100,000 - one principal) and the what-if two (100,000 - two
         principals), each reading its OWN balance == its OWN resolver, the what-if's
         second payment lowering only the what-if (neither leaks into the other).  A
-        THIRD scenario the loan was never opened into has no OPENING posting, so the
-        reader returns ``None`` -- routing a read-switch caller to needs-setup,
-        never a misleading $0 or another scenario's balance (the M2 latent
-        multi-scenario guard, plan Section 4).
+        THIRD scenario the writers never opened holds no payment and no OPENING
+        posting.  The store's reader returns ``None`` there, the worked-out read
+        the loan's own anchor, because it answers whichever scenario it is asked
+        (``ledger_lines._worked_out`` names the difference; no route creates a
+        second scenario).  Neither is a misleading $0 or another scenario's
+        balance (the M2 latent multi-scenario guard, plan Section 4).
         """
         with app.app_context():
             baseline = seed_user["scenario"]
@@ -574,16 +577,18 @@ class TestReaderParallelRunAgainstResolver:
             assert baseline_reader == _ANCHOR_BALANCE - (
                 scheduled_pi - Decimal("500.00")
             )
-            # A scenario the loan was never opened into -> None (needs-setup),
-            # never the baseline's balance or a bare $0.  Both readers agree.
-            assert posted_loan_balance_at(
+            # A scenario the writers never opened: the store reads None, the
+            # read the $100,000.00 anchor no payment has reduced.  Neither is
+            # the baseline's balance or a bare $0.
+            assert _posted_balance(loan.id, unopened.id) == Decimal("100000.00")
+            assert stored_loan_balance_at(
                 loan.id, unopened.id, _AS_OF,
             ) is None
-            assert posted_loan_balance_map(
+            assert stored_loan_balance_map(
                 loan.id, unopened.id, seed_periods,
             ) is None
-            _assert_loan_reconciles(loan, baseline.id, _AS_OF)
-            _assert_loan_reconciles(loan, whatif.id, _AS_OF)
+            _assert_loan_reconciles(loan, baseline.id)
+            _assert_loan_reconciles(loan, whatif.id)
 
     def test_biweekly_due_month_collision_reconciles_and_only_row_dates_differ(
         self, app, db, seed_user, seed_periods,
@@ -654,13 +659,13 @@ class TestReaderParallelRunAgainstResolver:
             _settle(seed_user, loan, seed_periods[2], amount=scheduled_pi)
             db.session.commit()
 
-            # The two GENESIS producers agree, as they always must -- the posted
-            # ledger is a projection of the same walk.
+            # The whole read and the read bounded at _AS_OF: one walk, so this
+            # grades only the window's bound, which no line here is dated past.
             ledger = _ledger_balance(loan.id, scenario_id)
             resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             reader = _posted_balance(loan.id, scenario_id)
             assert ledger == reader
-            _assert_loan_reconciles(loan, scenario_id, _AS_OF)
+            _assert_loan_reconciles(loan, scenario_id)
 
             # Attribution, DISPLAY rows: the confirmed view keeps BOTH rows at the
             # true February due date; the resolver replay redistributes the second

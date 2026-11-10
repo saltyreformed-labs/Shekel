@@ -8,12 +8,8 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from app import ref_cache
-from app.enums import LedgerAccountKindEnum
 from app.extensions import db as _db
 from app.models.account import Account, AccountAnchorHistory
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.ref import AccountType
 from app.models.scenario import Scenario
 from app.models.transaction import Transaction
@@ -22,6 +18,8 @@ from app.models.transfer import Transfer
 from app.services import account_posting_service
 from app.utils.balance_predicates import settled_status_ids
 from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import account_net, trial_balance
+from tests._stored_ledger import entries_violating_balance
 from tests._test_helpers import create_settled_cash_transaction, observed_day_of
 from app.services.row_valuation import settled_contribution
 
@@ -30,15 +28,11 @@ from app.services.row_valuation import settled_contribution
 # Independent reconciliation queries (test-authored, NOT the service helpers)
 # ---------------------------------------------------------------------------
 #
-# These deliberately re-derive each side from scratch so the oracle is a genuine
-# second opinion: a bug shared by the walk and the reconcile cannot hide,
-# because the ledger side reads ``account_postings`` and the source side reads
-# ``transactions`` / the transfers' side records / ``account_anchor_history``
-# with independently-written
-# code, and both are also pinned to hand-computed literals.  Some mirror the
-# Step-2 / Step-3 oracles (``_trial_balance``, ``_entries_violating_balance``);
-# the duplication is DELIBERATE -- each oracle keeps its OWN independent queries
-# so it remains a self-contained second opinion.
+# The ledger side of this oracle is the worked-out read (``tests/_ledger_reads.py``,
+# plan step plan#2913).  The source side below re-derives each account's effect
+# from ``transactions`` / the transfers' side records / ``account_anchor_history``
+# with independently-written code, and both are also pinned to hand-computed
+# literals.
 
 
 def _as_utc(instant: datetime) -> datetime:
@@ -53,40 +47,6 @@ def _as_utc(instant: datetime) -> datetime:
     if instant.tzinfo is None:
         return instant.replace(tzinfo=timezone.utc)
     return instant.astimezone(timezone.utc)
-
-
-def _independent_linked_ledger_sum(account_id: int, scenario_id: int) -> Decimal:
-    """Sum a non-loan account's LINKED ledger legs in a scenario (independent).
-
-    Joins ``account_postings`` -> ``journal_entries`` (for the scenario) ->
-    ``ledger_accounts`` (for the real ``account_id``), summing the signed
-    ``amount`` over the LINKED kind only.  Keyed off the REAL account via
-    ``ledger_accounts.account_id`` -- a different join shape than
-    ``posting_service.account_posting_total`` (which resolves the ledger row
-    first), so the two cannot share a lookup bug.
-
-    Filtered to the LINKED kind because an anchor correction lands ``+delta``
-    on the linked row and ``-delta`` on the ``anchor_equity`` twin, which shares
-    the ``account_id`` column: a bare-``account_id`` sum would cancel the
-    correction pairwise and silently reproduce the pre-Step-5 changes-only
-    figure, making the absolute assertions vacuous.
-    """
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .select_from(Posting)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(
-            LedgerAccount.account_id == account_id,
-            LedgerAccount.kind_id == ref_cache.ledger_account_kind_id(
-                LedgerAccountKindEnum.LINKED,
-            ),
-            JournalEntry.scenario_id == scenario_id,
-        )
-        .scalar()
-    )
 
 
 def _latest_assertion(account_id: int) -> tuple[date, Decimal]:
@@ -280,39 +240,6 @@ def _independent_post_assertion_source_effect(
     )
 
 
-def _trial_balance() -> Decimal:
-    """Return ``SUM(account_postings.amount)`` over the whole ledger."""
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .scalar()
-    )
-
-
-def _entries_violating_balance() -> list[tuple[int, Decimal, int]]:
-    """Return ``(entry_id, leg_sum, leg_count)`` for every malformed entry.
-
-    A well-formed double-entry has ``leg_sum == 0`` and ``leg_count >= 2``.  Any
-    row returned here is a violation -- the per-entry invariant the deferred
-    trigger also enforces, re-checked from the ORM side.
-    """
-    rows = (
-        _db.session.query(
-            Posting.journal_entry_id,
-            _db.func.sum(Posting.amount),
-            _db.func.count(Posting.id),
-        )
-        .group_by(Posting.journal_entry_id)
-        .all()
-    )
-    return [
-        (entry_id, leg_sum, leg_count)
-        for entry_id, leg_sum, leg_count in rows
-        if leg_sum != 0 or leg_count < 2
-    ]
-
-
 # ---------------------------------------------------------------------------
 # Sweep assertions (production-wide, run after each scenario's mutations)
 # ---------------------------------------------------------------------------
@@ -323,50 +250,44 @@ def _assert_account_anchors_reconcile(
 ) -> None:
     """Assert every non-loan LINKED ledger reconciles ABSOLUTELY in *scenario_id*.
 
-    For each of the scenario owner's non-loan real accounts, the independent
-    linked-ledger sum equals the latest anchor balance plus the independent
+    For each of the scenario owner's non-loan real accounts, the worked-out net
+    of its own line equals the latest anchor balance plus the independent
     post-assertion source effect -- the Step-5 absolute invariant, holding over
     EVERY such account, not only the ones a given test hand-computes.  Amortizing
     loans are excluded: their absolute invariant couples on the amortization
-    split and is the loan oracle's job.  The per-entry balance and trial balance
-    are global self-checks (always true for a balanced ledger, asserted cheaply
-    on every sweep).  Last, the ledger worked out from the records equals this
-    stored one to the cent per (chart row, paycheck, day) (plan task
-    plan#2527), every account's opening and true-ups included.  A case whose
-    fixture wrote a record past every writer names the cells that leaves the
-    store behind on in *known_parity_differences*
-    (``tests._ledger_parity.assert_ledger_parity``).
+    split and is the loan oracle's job.  The trial balance is a global self-check
+    on the read.  Two arms grade the store and go with it: its per-entry balance,
+    and that the ledger worked out from the records equals the stored one to the
+    cent per (chart row, paycheck, day) (plan task plan#2527), every account's
+    opening and true-ups included.  A case whose fixture wrote a record past every
+    writer names the cells that leaves the store behind on in
+    *known_parity_differences* (``tests._ledger_parity.assert_ledger_parity``).
     """
     scenario_owner_id = (
         _db.session.query(Scenario.user_id)
         .filter(Scenario.id == scenario_id)
         .scalar()
     )
-    linked = (
-        _db.session.query(LedgerAccount)
-        .join(Account, LedgerAccount.account_id == Account.id)
-        .join(AccountType, Account.account_type_id == AccountType.id)
-        .filter(
-            LedgerAccount.kind_id == ref_cache.ledger_account_kind_id(
-                LedgerAccountKindEnum.LINKED,
-            ),
-            AccountType.has_amortization.is_(False),
-            Account.user_id == scenario_owner_id,
+    account_ids = [
+        account_id for (account_id,) in (
+            _db.session.query(Account.id)
+            .join(AccountType, Account.account_type_id == AccountType.id)
+            .filter(
+                AccountType.has_amortization.is_(False),
+                Account.user_id == scenario_owner_id,
+            )
         )
-        .all()
+    ]
+    # Every owner carries at least the seeded Checking, so an empty result means
+    # the query silently found nothing (a filter regression) and the loop below
+    # would pass vacuously -- assert non-empty so the sweep cannot be a no-op.
+    assert account_ids, (
+        "no non-loan accounts to reconcile -- the sweep would be vacuous "
+        "(expected at least the Checking account)"
     )
-    # Every owner carries at least the seeded Checking's linked ledger, so an
-    # empty result means the query silently found nothing (a minting or filter
-    # regression) and the loop below would pass vacuously -- assert non-empty so
-    # the sweep cannot be a no-op.
-    assert linked, (
-        "no non-loan linked ledger accounts to reconcile -- the sweep would "
-        "be vacuous (expected at least the Checking account's linked ledger)"
-    )
-    for ledger_account in linked:
-        account_id = ledger_account.account_id
+    for account_id in account_ids:
         latest_asserted_day, latest_anchor = _latest_assertion(account_id)
-        ledger = _independent_linked_ledger_sum(account_id, scenario_id)
+        ledger = account_net(_db.session, account_id, scenario_id)
         effect = _independent_post_assertion_source_effect(
             account_id, scenario_id, latest_asserted_day,
         )
@@ -375,8 +296,8 @@ def _assert_account_anchors_reconcile(
             f"{latest_anchor} + post-assertion source effect {effect} in "
             f"scenario {scenario_id}"
         )
-    assert _entries_violating_balance() == []
-    assert _trial_balance() == Decimal("0")
+    assert entries_violating_balance() == []
+    assert trial_balance(_db.session) == Decimal("0")
     assert_ledger_parity(_db.session, scenario_id, known_parity_differences)
 
 

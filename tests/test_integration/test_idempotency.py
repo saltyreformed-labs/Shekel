@@ -69,6 +69,7 @@ def _create_profile(seed_user):
     make_every_period_rule(db.session, template)
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         template_id=template.id,
@@ -169,8 +170,7 @@ class TestRaiseDoubleSubmit:
 
             data = {
                 "raise_type_id": raise_type.id,
-                "effective_month": "7",
-                "effective_year": "2026",
+                "effective_date": "2026-07-01",
                 "percentage": "3",
             }
 

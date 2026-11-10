@@ -25,10 +25,12 @@ class SalaryPayEntry(OptimisticLockMixin, TimestampMixin, db.Model):
 
     What a payday is priced at is
     :meth:`~app.services.payroll_basis.PayrollBasis.base_pay_on`'s answer, and
-    this row is read nowhere else by the engine: the latest entry on or before
-    the payday (else the first), then every forecast raise landing after that
-    entry's payday (:func:`~app.services.salary_raises.applications_between`,
-    each step rounded by :func:`~app.services.salary_raises.raise_pay`).
+    this row is read nowhere else by the engine: each weekday the paycheck
+    pays for at the pay in force that day (ruling **plan#3089**) -- the latest
+    entry whose paycheck opens on or before the day (else the first), then
+    every forecast raise landing after it opens (ruling **plan#3091**;
+    :func:`~app.services.salary_raises.applications_between`, each step
+    rounded by :func:`~app.services.salary_raises.raise_pay`).
 
     A profile holds at least one entry, and every door keeps it so: the
     create form writes the first, and no door removes the last (**R-SAL68**;
@@ -41,8 +43,9 @@ class SalaryPayEntry(OptimisticLockMixin, TimestampMixin, db.Model):
     Attributes:
         payday: The payday the entry takes effect on -- a payday on the
             owner's calendar, saved or projected, which the doors check.
-        amount: The gross base pay of one paycheck from that payday on,
-            before any forecast raise landing after it.
+        amount: The gross base pay of one paycheck from that payday on, in
+            force from the first day its paycheck pays for and before any
+            forecast raise landing after that day.
     """
 
     __tablename__ = "pay_entries"

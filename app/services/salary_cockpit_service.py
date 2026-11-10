@@ -25,7 +25,7 @@ from app.enums import PaycheckLineKindEnum
 from app.services import paycheck_line_kinds
 from app.services.pay_calendar import DerivedPeriod
 from app.services.paycheck_calculator import PaycheckBreakdown
-from app.utils.money import HUNDRED, ZERO
+from app.utils.money import HUNDRED, ZERO, round_money
 
 # The net-pay staircase chart looks back this many pay periods before the
 # period containing ``today`` and forward this many months after it, so
@@ -87,9 +87,9 @@ def _pct_of_gross(value: Decimal, gross: Decimal) -> Decimal:
 def clean_raise_label(raw_label: str) -> str:
     """Return a display-clean version of a calculator ``raise_event`` string.
 
-    :func:`app.services.salary_raises.get_raise_event` emits raw
+    :func:`app.services.salary_raises.raise_banner` emits raw
     labels in exactly two shapes, joined with ``", "`` when several raises
-    land in one period: ``"{TYPE} +{pct}%"`` (percentage, e.g.
+    first reach one paycheck: ``"{TYPE} +{pct}%"`` (percentage, e.g.
     ``"MERIT +2.5000%"`` -- the trailing places follow the stored
     ``Numeric(5, 4)`` precision) and ``"{TYPE} +${amount:,.2f}"`` (flat,
     e.g. ``"COLA +$2,000.00"``).  Since plan step salary:X-av-3a
@@ -158,108 +158,64 @@ def is_pay_cut(raw_label: str | None) -> bool:
     return bool(raw_label) and raw_label.startswith("PAY -")
 
 
-def raise_run_starts(current_raise_event: str, prev_raise_event: str | None) -> bool:
-    """Return True when a period STARTS a raise run.
+def _pay_rate(breakdown: PaycheckBreakdown) -> Decimal:
+    """Return the paycheck's pay RATE per paycheck: the pay in force on its last paid day.
 
-    The run-start seam shared by every consumer that must collapse the
-    calculator's badge-every-period behavior down to one event per raise:
-    the "next raise" chip and the chart's per-run labels (via the
-    pairs-indexed :func:`_is_raise_run_start`) and the paycheck-anatomy
-    raise banner (the cockpit route passes the focused and preceding
-    periods' raw ``raise_event`` strings directly, so the banner shows on
-    the paycheck where a raise takes effect rather than repeating on every
-    paycheck of the raise month -- P-SA1).
-
-    A period starts a run when its display-cleaned label
-    (:func:`clean_raise_label`) is non-empty AND differs from the
-    immediately-preceding period's: a label change starts a new run, a
-    no-event period ends any run, and the same label recurring after a gap
-    (next year's COLA) starts a fresh run.
+    The rate's yearly figure over the paychecks a year it is paid at
+    (:attr:`~app.services.paycheck_calculator.Earnings.annual_salary` and
+    :attr:`~app.services.paycheck_calculator.PeriodInfo.cadence`, both the
+    engine's :class:`~app.services.payroll_basis.BasePay` rate).  The engine's
+    yearly figure is the per-paycheck rate times the count, exactly, so the
+    cent this rounds to is that rate.
 
     Args:
-        current_raise_event: The period's raw ``raise_event`` string (empty
-            when it carries no raise event).
-        prev_raise_event: The immediately-preceding period's raw
-            ``raise_event`` string, or ``None`` when there is no
-            predecessor (the first period).
+        breakdown: One paycheck's breakdown.
 
     Returns:
-        True iff the period carries a raise event whose cleaned label
-        differs from the immediately-preceding period's (or it has no
-        predecessor).
+        The per-paycheck rate, to the cent.
     """
-    label = clean_raise_label(current_raise_event)
-    if not label:
-        return False
-    if prev_raise_event is None:
-        return True
-    return clean_raise_label(prev_raise_event) != label
-
-
-def _is_raise_run_start(pairs: list[PeriodPair], idx: int) -> bool:
-    """Return True when ``pairs[idx]`` is the FIRST period of a raise run.
-
-    Pairs-indexed adapter over :func:`raise_run_starts`: it lifts the
-    focused and preceding periods' ``raise_event`` strings out of the
-    ordered ``(period, breakdown)`` pairs (the predecessor is ``None`` at
-    index 0).  Used by :func:`next_raise_after` and
-    :func:`build_chart_series`, which scan the full pairs list.
-
-    Args:
-        pairs: The full ordered ``(period, breakdown)`` list.
-        idx: Index into ``pairs`` of the period under test.
-
-    Returns:
-        True iff the period at ``idx`` starts a raise run.
-    """
-    prev = pairs[idx - 1][1].period.raise_event if idx > 0 else None
-    return raise_run_starts(pairs[idx][1].period.raise_event, prev)
-
-
-def raise_run_start_period_ids(pairs: list[PeriodPair]) -> set[int]:
-    """Return the ids of the periods that START a raise run.
-
-    For a surface that renders EVERY period (the projection ledger), this
-    marks only the paycheck where each raise takes effect -- its run start
-    (:func:`_is_raise_run_start`) -- so a raise the calculator badges on
-    every period of its month is flagged once, on the step, rather than
-    repeating a badge on every paycheck of the month (P-SA1, projection
-    surface).  The template checks ``period.period_id in`` this set.
-
-    Args:
-        pairs: The full ordered ``(period, breakdown)`` list.
-
-    Returns:
-        The set of ``period.period_id`` values that start a raise run (empty
-        when no period carries a raise event).
-    """
-    return {
-        pair[0].period_id
-        for idx, pair in enumerate(pairs)
-        if _is_raise_run_start(pairs, idx)
-    }
+    return round_money(
+        breakdown.period.cadence.annual_to_per_paycheck(breakdown.earnings.annual_salary),
+    )
 
 
 def base_regular_net(pairs: list[PeriodPair], idx: int) -> Decimal:
-    """Return the net of the nearest regular paycheck at the same base pay.
+    """Return the net of the nearest regular paycheck at the same pay rate.
 
     A third-paycheck period skips the 24x deductions, so its net spikes
     above the regular per-paycheck net.  For the staircase chart line and
     the third-paycheck delta chip we need the "base" regular net at the
     same pay level: the net of the nearest NON third-paycheck period
-    sharing the period-at-``idx``'s base pay per paycheck.  Prefer the
+    whose base is the period-at-``idx``'s pay rate per paycheck.  Prefer the
     closest earlier period; fall back to the closest later one; and, in
     the degenerate case where no regular period at that pay exists, fall
     back to the period's own net.
 
-    **Keyed on BASE PAY since plan step salary:X-av-2** (ruling
-    **R-SAL70**), where it keyed on the annual salary.  The two were one
-    test while every payday divided the annual by the same count; once each
-    payday divides by its own era's, one annual salary is two paychecks
-    across a change of rhythm, and a third paycheck of a new biweekly era
-    matched against a regular WEEKLY paycheck at the same salary would show
-    the difference of the two rhythms as a third-paycheck bonus.  A raise
-    still separates the levels, because it moves the base.
+    **The third paycheck is keyed on its PAY RATE since task plan#3123**,
+    the pay in force on the last day it pays for at its own rhythm
+    (:func:`_pay_rate`).  It was keyed on its BASE until then, which is the
+    rate for every paycheck paid wholly at one pay, so those match as they
+    did.  A paycheck
+    whose pay period straddles a raise is paid a blend no other paycheck is
+    (ruling **plan#3089**), so as a third paycheck it found no regular one
+    and fell back to its own net: a delta of $0.00 and a spike on the
+    regular line.  Made-up: biweekly Thursdays, a gap of six, $2,000.00 and
+    5% from Wednesday 2027-07-14; 07-29, July's third payday, pays
+    07-10..07-23 for 2,000.00 x 2/10 + 2,100.00 x 8/10 = 2,080.00.  With a
+    $300.00 line it skips and no tax, it now compares with a regular
+    paycheck at 2,100.00, netting 1,800.00: +$280.00, what it nets above a
+    regular paycheck at the pay in force.  **A regular paycheck matches only
+    where its BASE is that rate**, what it pays rather than its own rate, so
+    a straddling one, whose rate can be the new pay while its base is still
+    the old (a raise landing on its period's last weekend, task plan#3122),
+    is passed over.
+
+    **Per paycheck at the paycheck's rhythm, never the yearly figure alone**
+    (ruling **R-SAL70**, plan step salary:X-av-2): across a change of rhythm
+    one yearly salary is two paychecks, and a third paycheck of a new
+    biweekly era matched against a regular WEEKLY paycheck at the same salary
+    would show the difference of the two rhythms as a third-paycheck bonus.
+    A raise still separates the levels, because it moves the rate.
 
     Args:
         pairs: The full ordered ``(period, breakdown)`` list.
@@ -268,46 +224,46 @@ def base_regular_net(pairs: list[PeriodPair], idx: int) -> Decimal:
     Returns:
         The base regular net pay as a :class:`~decimal.Decimal`.
     """
-    target_base = pairs[idx][1].earnings.base_biweekly
+    target_rate = _pay_rate(pairs[idx][1])
     for j in range(idx - 1, -1, -1):
         breakdown = pairs[j][1]
         if (not breakdown.period.is_third_paycheck
-                and breakdown.earnings.base_biweekly == target_base):
+                and breakdown.earnings.base_biweekly == target_rate):
             return breakdown.earnings.net_pay
     for j in range(idx + 1, len(pairs)):
         breakdown = pairs[j][1]
         if (not breakdown.period.is_third_paycheck
-                and breakdown.earnings.base_biweekly == target_base):
+                and breakdown.earnings.base_biweekly == target_rate):
             return breakdown.earnings.net_pay
     return pairs[idx][1].earnings.net_pay
 
 
 def next_raise_after(pairs: list[PeriodPair], today: date) -> dict[str, object] | None:
-    """Return the first projected raise RUN starting strictly after ``today``.
+    """Return the first paycheck after ``today`` that carries a banner.
 
-    Scans the breakdowns (reusing the calculator's ``raise_event`` string)
-    for run STARTS only (:func:`_is_raise_run_start`): the calculator
-    badges every period of a raise month, so a run whose start is on or
-    before ``today`` already landed and is skipped ENTIRELY even when its
-    tail periods start after ``today``.  Live-data shape: with today
-    07/03 and a July COLA run 07/02-07/30, the 07/16 and 07/30 tails are
-    not "the next raise" -- the honest answer is the following run (the
-    January Merit).
+    Reads the calculator's ``raise_event`` string as it is: the engine
+    badges a raise on the one paycheck it first reaches (ruling
+    **plan#3092**, :meth:`~app.services.payroll_basis.PayrollBasis
+    .pay_event_on`), so the next banner is the next raise.  Until task
+    plan#3111 this kept only the first of a run of equal labels, because the
+    engine badged every paycheck of a raise's month; that collapse was a
+    second spelling of "the first paycheck", and it hid a paycheck whose
+    label matched the one before it.  With a July 1 raise and biweekly
+    Thursday paydays, the answer on 07-03 is now 07-16, the paycheck the
+    raise first reaches; while the engine badged 07-02 too, that run had
+    started by 07-03, so the answer skipped to the raise after it.
 
     Args:
         pairs: The full ordered ``(period, breakdown)`` list.
         today: The reference date.
 
     Returns:
-        ``{"label": str, "period_start": date}`` for the next raise run's
-        first period (the label display-cleaned via
-        :func:`clean_raise_label`, e.g. ``"Merit +2.5%"``), or ``None``
-        when no raise run starts after ``today``.
+        ``{"label": str, "period_start": date}`` for that paycheck (the
+        label display-cleaned via :func:`clean_raise_label`, e.g. ``"Merit
+        +2.5%"``), or ``None`` when no paycheck after ``today`` carries one.
     """
-    for idx, (period, breakdown) in enumerate(pairs):
-        if not _is_raise_run_start(pairs, idx):
-            continue
-        if period.start_date > today:
+    for period, breakdown in pairs:
+        if period.start_date > today and breakdown.period.raise_event:
             return {
                 "label": clean_raise_label(breakdown.period.raise_event),
                 "period_start": period.start_date,
@@ -325,7 +281,7 @@ def next_third_after(pairs: list[PeriodPair], today: date) -> dict[str, object] 
     Returns:
         ``{"period_start": date, "net": Decimal, "delta": Decimal}`` where
         ``delta`` is the third-paycheck net minus the base regular net at
-        the same base pay (:func:`base_regular_net`), or ``None`` when no
+        the same pay rate (:func:`base_regular_net`), or ``None`` when no
         future third paycheck exists in the projection.
     """
     for idx, (period, breakdown) in enumerate(pairs):
@@ -560,11 +516,10 @@ def build_chart_series(pairs: list[PeriodPair], today: date) -> dict[str, object
     value (:func:`base_regular_net`) on the line, while its actual spiked
     net is emitted separately in ``thirds`` as a point event.  Raise
     events are emitted in ``raises`` with display-cleaned labels
-    (:func:`clean_raise_label`), collapsed to one entry per RUN: the
-    calculator badges every period of a raise month, so only run starts
-    (:func:`_is_raise_run_start`, judged against the FULL pairs list) are
-    emitted -- one label per raise instead of a stacked label per period.
-    A run that started before the window paints no label inside it.
+    (:func:`clean_raise_label`), one for each windowed paycheck the
+    calculator badged: it badges a raise on the paycheck the raise first
+    reaches and nowhere else (ruling **plan#3092**), so one label per raise
+    is the engine's answer and not this function's.
 
     Args:
         pairs: The full ordered ``(period, breakdown)`` list.
@@ -586,7 +541,7 @@ def build_chart_series(pairs: list[PeriodPair], today: date) -> dict[str, object
         else:
             line_net = breakdown.earnings.net_pay
         periods_series.append({"start": period.start_date, "net": line_net})
-        if _is_raise_run_start(pairs, idx):
+        if breakdown.period.raise_event:
             raises.append({
                 "start": period.start_date,
                 "label": clean_raise_label(breakdown.period.raise_event),

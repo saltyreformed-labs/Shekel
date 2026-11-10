@@ -38,13 +38,13 @@ from app.extensions import db
 from app.models.scenario import Scenario
 from app.services import balance_at, transfer_service
 from app.services.balance_at import BalanceContext
+from tests._stored_ledger import stored_loan_balance_at
 from tests._test_helpers import (
     clear_loan_ledger,
     create_loan_account,
     create_loan_with_trueup,
     create_settled_transfer,
     freeze_today,
-    posted_loan_balance_at,
     SPLIT_LOAN,
 )
 
@@ -316,7 +316,6 @@ class TestPaidInYearChips:
         its own total -- a leak would sum them (1497.50).
         """
         with app.app_context():
-            baseline = seed_user["scenario"]
             whatif = Scenario(
                 user_id=seed_user["user"].id, name="What-if", is_baseline=False,
             )
@@ -372,7 +371,7 @@ class TestPaidInYearChips:
             db.session.commit()
             # The sum-of-postings balance reader now declines -- the postings
             # genuinely no longer answer for this loan (the test's teeth).
-            assert posted_loan_balance_at(
+            assert stored_loan_balance_at(
                 loan.id, scenario_id, date(2026, 12, 31),
             ) is None
 

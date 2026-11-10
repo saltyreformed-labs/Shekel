@@ -13,78 +13,32 @@ from app import ref_cache
 from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum, TxnTypeEnum
 from app.extensions import db as _db
 from app.models.account import Account
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.ref import AccountType
 from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-from app.services import ledger_account_service
+from app.services.ledger_lines import ACCOUNT_COUNTER_KINDS, category_key
 from app.utils.balance_predicates import balance_excluded_status_ids, settled_status_ids
 from app.services import cash_ledger
 from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import account_net, scenario_lines, trial_balance
+from tests._stored_ledger import entries_violating_balance
 
 
 # ---------------------------------------------------------------------------
-# Independent reconciliation queries (test-authored, NOT the service helpers)
+# Independent source queries (test-authored, NOT the service helpers)
 # ---------------------------------------------------------------------------
 #
-# These deliberately re-derive each side from scratch so the oracle is a genuine
-# second opinion: a bug shared by the two service readers cannot hide, because
-# the ledger side here reads ``account_postings`` and the source side reads
-# ``transactions``, ``transfers`` and ``transaction_entries`` with
-# independently-written SQL/Python, and both are also
-# pinned to hand-computed literals.  (The source side necessarily restates the
-# one correct definition of a family's cash effect -- its dated non-card
-# movements, plan step ``balance:X-bi-4a`` -- so it mirrors
-# ``posted_purchase_effect``'s semantics; the hand-computed literals, not these
-# queries, are what make the oracle non-tautological -- this layer adds the
-# cross-table, whole-DB sweep the literals cannot.)
-#
-# Some of these (``_independent_ledger_sum``, ``_trial_balance``,
-# ``_entries_violating_balance``, ``_independent_transfer_shadow_effect``) mirror
-# the Step-2 oracle (``test_posting_ledger_reconciliation.py``).  The duplication
-# is DELIBERATE, not an oversight: each oracle keeps its OWN independent
-# reconciliation queries so it remains a self-contained second opinion (the
-# Step-2 module docstring states the same "re-derive from scratch" intent).
-# Genuinely shared *utilities* with no independence role (the migration loader,
-# the raw-SQL posting clear, the account-pairing lookup) live in
-# ``tests/_test_helpers.py`` instead.
-
-
-def _independent_ledger_sum(account_id: int, scenario_id: int) -> Decimal:
-    """Sum a REAL account's posting legs in a scenario (independent query).
-
-    Joins ``account_postings`` -> ``journal_entries`` (for the scenario) ->
-    ``ledger_accounts`` (for the real ``account_id``), summing the signed
-    ``amount`` over BOTH transfer and transaction legs.  Keyed off the REAL
-    account via ``ledger_accounts.account_id``, a different join shape than
-    ``posting_service.account_posting_total`` (which resolves the ledger account
-    first), so the two cannot share a lookup bug.
-
-    Filtered to the LINKED kind (Step 5): an anchor correction lands
-    ``+delta`` on the linked row and ``-delta`` on the ``anchor_equity``
-    twin, which shares the ``account_id`` column -- a bare-``account_id``
-    sum would cancel the correction pairwise and silently reproduce the
-    pre-Step-5 changes-only figure, making the absolute assertions vacuous.
-    """
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .select_from(Posting)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(
-            LedgerAccount.account_id == account_id,
-            LedgerAccount.kind_id == ref_cache.ledger_account_kind_id(
-                LedgerAccountKindEnum.LINKED,
-            ),
-            JournalEntry.scenario_id == scenario_id,
-        )
-        .scalar()
-    )
+# The ledger side of this oracle is the worked-out read (``tests/_ledger_reads.py``,
+# plan step plan#2913).  The source side below re-derives each account's effect
+# from ``transactions``, ``transfers`` and ``transaction_entries`` with
+# independently-written SQL/Python, and both are also pinned to hand-computed
+# literals.  (The source side necessarily restates the one correct definition of a
+# family's cash effect -- its dated non-card movements, plan step
+# ``balance:X-bi-4a`` -- so the hand-computed literals, not these queries, are what
+# make the oracle non-tautological; this layer adds the whole-owner sweep the
+# literals cannot.)
 
 
 def _opening_anchor(account_id: int) -> Decimal:
@@ -102,30 +56,6 @@ def _opening_anchor(account_id: int) -> Decimal:
     return cash_ledger.resolve_anchor(
         _db.session.get(Account, account_id),
     ).balance
-
-
-def _ledger_account_sum(ledger_account_id: int, scenario_id: int) -> Decimal:
-    """Sum one SPECIFIC ledger account's posting legs in a scenario.
-
-    The counter-account (category / fallback / orphan) analog of
-    :func:`_independent_ledger_sum`: keyed on the ledger account's own ``id``
-    rather than a real ``account_id``, because a non-linked Income/Expense
-    account has no ``account_id``.  Scenario-scoped via the journal entry's
-    denorm, so the same owner-scoped category account reconciles independently in
-    each scenario that booked into it.
-    """
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .select_from(Posting)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            Posting.ledger_account_id == ledger_account_id,
-            JournalEntry.scenario_id == scenario_id,
-        )
-        .scalar()
-    )
 
 
 def _independent_transfer_shadow_effect(
@@ -193,10 +123,8 @@ def _independent_movement_effect(account_id: int, scenario_id: int) -> Decimal:
     amount signed by the PARENT's type (``+`` income / ``-`` expense; plan
     step X-bi-3b, ruling **R-BAL35**), whatever the parent's STATUS: a dated
     purchase under an open envelope and a settled bill's covering movement
-    are one kind of fact.  Reads ``transaction_entries`` and ``transactions``,
-    different tables than :func:`_independent_ledger_sum`, so asserting the
-    two equal reconciles what the producers wrote against the source of
-    truth.
+    are one kind of fact.  Asserting it equal to the worked-out read reconciles
+    what the read books against the source of truth.
 
     **It replaced two helpers** that between them spelled the pre-4a rule --
     ``effective - Sigma(credit)`` over SETTLED rows, plus the purchases posted
@@ -279,299 +207,149 @@ def _signed_cash_effect(txn: Transaction) -> Decimal:
     return effect if txn.is_income else -effect
 
 
-def _trial_balance() -> Decimal:
-    """Return ``SUM(account_postings.amount)`` over the whole ledger."""
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .scalar()
-    )
-
-
-def _entries_violating_balance() -> list[tuple[int, Decimal, int]]:
-    """Return ``(entry_id, leg_sum, leg_count)`` for every malformed entry.
-
-    A well-formed double-entry has ``leg_sum == 0`` and ``leg_count >= 2``.  Any
-    row returned here is a violation -- the per-entry invariant the deferred
-    trigger also enforces, re-checked from the ORM side.
-    """
-    rows = (
-        _db.session.query(
-            Posting.journal_entry_id,
-            _db.func.sum(Posting.amount),
-            _db.func.count(Posting.id),
-        )
-        .group_by(Posting.journal_entry_id)
-        .all()
-    )
-    return [
-        (entry_id, leg_sum, leg_count)
-        for entry_id, leg_sum, leg_count in rows
-        if leg_sum != 0 or leg_count < 2
-    ]
-
-
 # ---------------------------------------------------------------------------
 # Sweep assertions (production-wide, run after each scenario's mutations)
 # ---------------------------------------------------------------------------
 
 
 def _assert_linked_accounts_reconcile(scenario_id: int) -> None:
-    """Assert every non-loan LINKED ledger reconciles ABSOLUTELY in *scenario_id*.
+    """Assert every non-loan account's own line reconciles ABSOLUTELY in *scenario_id*.
 
-    For each of the scenario owner's non-loan real accounts (its LINKED
-    ledger row), the independent ledger sum equals the account's opening
-    anchor plus the independent combined (transfer + transaction) source
-    effect -- the Step-5 absolute form (every settle in this suite is
-    stamped at server-now, after the origination assertion; every swept
-    scenario carries its owner's openings, posted in the baseline at create
-    time or into a what-if by the effect-time self-heal alongside that
-    scenario's first settle -- the latter ONLY because these fixtures
-    settle on the same UTC day the accounts were created; not a general
-    guarantee, and R8 owns the residual multi-scenario policy).  Amortizing
-    loans are excluded -- their absolute invariant couples on the
-    amortization split and is the loan oracle's job.  Holds over every such
-    account, not only the ones a given test hand-computes.
+    For each of the scenario owner's non-loan real accounts, its worked-out net
+    equals the account's opening anchor plus the independent combined (transfer +
+    transaction) source effect (every settle in this suite is stamped at
+    server-now, after the origination assertion).  Amortizing loans are excluded
+    -- their absolute invariant couples on the amortization split and is the loan
+    oracle's job.  Holds over every such account, not only the ones a given test
+    hand-computes.
     """
-    scenario_owner_id = (
-        _db.session.query(Scenario.user_id)
-        .filter(Scenario.id == scenario_id)
-        .scalar()
-    )
-    linked = (
-        _db.session.query(LedgerAccount)
-        .join(Account, LedgerAccount.account_id == Account.id)
-        .join(AccountType, Account.account_type_id == AccountType.id)
-        .filter(
-            LedgerAccount.kind_id == ref_cache.ledger_account_kind_id(
-                LedgerAccountKindEnum.LINKED,
-            ),
-            AccountType.has_amortization.is_(False),
-            Account.user_id == scenario_owner_id,
+    owner_id = _db.session.get(Scenario, scenario_id).user_id
+    account_ids = [
+        account_id for (account_id,) in (
+            _db.session.query(Account.id)
+            .join(AccountType, Account.account_type_id == AccountType.id)
+            .filter(
+                AccountType.has_amortization.is_(False),
+                Account.user_id == owner_id,
+            )
         )
-        .all()
-    )
-    # Every caller settles at least one cash movement, which mints the Checking
-    # linked ledger account, so an empty result means the query silently found
-    # nothing (a minting or filter regression) and the loop below would pass
+    ]
+    # Every owner here holds at least the seeded Checking, so an empty result
+    # means the query silently found nothing and the loop below would pass
     # vacuously -- assert non-empty so the sweep cannot be a no-op.
-    assert linked, (
-        "no linked ledger accounts to reconcile -- the linked sweep would be "
-        "vacuous (expected at least the Checking account's linked ledger)"
+    assert account_ids, (
+        "no non-loan accounts to reconcile -- the linked sweep would be vacuous "
+        "(expected at least the Checking account)"
     )
-    for ledger_account in linked:
-        ledger = _independent_ledger_sum(ledger_account.account_id, scenario_id)
-        effect = _independent_combined_source_effect(
-            ledger_account.account_id, scenario_id
-        )
-        opening = _opening_anchor(ledger_account.account_id)
+    for account_id in account_ids:
+        ledger = account_net(_db.session, account_id, scenario_id)
+        effect = _independent_combined_source_effect(account_id, scenario_id)
+        opening = _opening_anchor(account_id)
         assert ledger == opening + effect, (
-            f"account {ledger_account.account_id}: ledger {ledger} != "
+            f"account {account_id}: ledger {ledger} != "
             f"opening {opening} + combined source effect {effect} in "
             f"scenario {scenario_id}"
         )
 
 
 def _assert_counter_accounts_reconcile(scenario_id: int) -> None:
-    """Assert every COUNTER ledger account reconciles by its movements' parent linkage.
+    """Assert every COUNTER line reconciles by its movement's parent.
 
-    For each non-linked (category / fallback / orphan) ledger account CA, sum its
-    posting legs in *scenario_id* (the LHS), then -- via each leg's movement
-    (``journal_entries.transaction_entry_id``) resolved to the movement's parent
-    row, NOT a ``category_id`` match --
-    group those legs by transaction and check each transaction's net on CA equals
-    the negation of its independently-computed signed cash effect.  A transaction
-    whose net on CA is zero (reversed, or recategorized away) is excluded by the
-    non-zero-net guard, so a recategorize (which leaves a net-zero reversal pair
-    on the OLD account) reconciles; an orphan, whose transactions now read
-    ``category_id IS NULL`` and could not be found by ``category_id`` matching,
-    reconciles because the linkage still points its legs at it.
+    A counter line is one on a key with no real account's own money behind it: a
+    category, the Uncategorized bucket, Transfers in transit.  The scenario's
+    counter lines are netted per (key, parent), each parent being the row its
+    movement sits under or, for a transfer side, the side's record: the record
+    hangs off the transfer and carries no parent row.
 
-    Beyond the magnitude, a still-categorized transaction's leg is also checked
-    for correct ROUTING -- its current ``category_id`` must resolve to CA -- so a
-    same-class miscategorization (a $50 Groceries expense whose counter leg landed
-    on the Rent-Expense account: same class, same magnitude) is caught, not just a
-    wrong amount.  A NULL-category transaction skips the routing check: it resolves
-    to the fallback, but its leg may legitimately sit on an ORPHAN (its category
-    was deleted and the row never re-synced) -- precisely why the orphan is
-    reconciled by the linkage, not by re-resolving ``category_id``.
+    A row's net on its key is the negation of its independently-computed signed
+    cash effect, and the key is the one its CURRENT category and type give
+    (:func:`_assert_row_counter_net`), so a same-class miscategorization (a $50
+    Groceries expense whose counter line landed on Rent: same class, same
+    magnitude) is caught and not just a wrong amount.  A side's net is the
+    negation of its record's effect, on transit
+    (:func:`_assert_side_counter_net`).  Across a settled pair the two cancel,
+    which the trial balance reads as transit at zero.
 
-    **Every row's leg is a MOVEMENT's, resolved to its PARENT before grouping**
-    (plan step X-f3b, ruling **R-FM**): it links by ``transaction_entry_id``,
-    and the per-transaction expectation stays whole -- a row's counter net is
-    its dated movements' (the covering movement's and its purchases'), whatever
-    its status, since plan step ``balance:X-bi-4a`` (ruling **R-BAL80**).  A
-    row's OWN leg, linked by ``journal_entries.transaction_id``, was grouped
-    beside them until plan step ``balance:X-bi-6-5``'s second leaf (card
-    plan#1845) deleted that link.
-
-    A group with no parent row is a deleted movement's legs, their movement
-    link SET NULL by the movement's delete.  No row delete takes a movement
-    (``fk_transaction_entries_transaction_id`` is NO ACTION): the removal act,
-    ``movement_removal.remove_movements``, reverses each movement's postings
-    and deletes it before its row goes.  The reverse-before-delete pair MUST
-    net to zero, asserted here so a stranded (un-reversed) leg would be
-    caught.
-
-    **The owner's Transfers-in-transit account is a counter account too**
-    (plan step ``balance:X-bi-6-3``, rulings **R-BAL45** and **R-BAL101**):
-    a transfer SIDE's record books its cash leg against it, so a side's net
-    on transit is the negation of its signed cash effect by the very rule
-    every category row obeys -- the from-side record lands ``+figure`` on
-    transit, the to-side record's ``-figure`` -- and the routing check for a
-    side is that the counter IS the transit row, never a category.  Across a
-    settled pair the two nets cancel, which the trial-balance and per-linked
-    sweeps read as transit at zero.  **Each side's legs are grouped by its
-    RECORD** since plan step ``balance:X-bi-6-4d-2``: the record hangs off
-    the transfer and carries no ``transaction_id``, so resolving it to a
-    parent row would drop both sides into the hard-deleted bucket, where the
-    pair nets to zero and neither side's figure nor its routing is read.
-    They resolved to the side's SHADOW, the record's parent, until then
-    (ruling R-BAL167 class 4).
+    A line on one of these keys comes from a movement, and the sweep refuses one
+    that does not: a correction books on an account's own counters, which it
+    skips, or on a loan's components, and no case here holds a loan with terms.
     """
-    counters = (
-        _db.session.query(LedgerAccount)
-        .filter(LedgerAccount.account_id.is_(None))
-        .all()
-    )
-    for counter in counters:
-        lhs = _ledger_account_sum(counter.id, scenario_id)
-        # A row's counter leg links by its MOVEMENT's ``transaction_entry_id``
-        # (plan step X-f3b, ruling **R-FM**), so resolving it to the movement's
-        # PARENT is what keeps the per-transaction expectation whole: a row's
-        # counter net is its dated movements' (plan step ``balance:X-bi-4a``).
-        # The row's OWN ``journal_entries.transaction_id`` link was coalesced
-        # beside it until plan step ``balance:X-bi-6-5``'s second leaf (card
-        # plan#1845) deleted that link.
-        source_transaction_id = (
-            _db.session.query(TransactionEntry.transaction_id)
-            .filter(TransactionEntry.id == JournalEntry.transaction_entry_id)
-            .correlate(JournalEntry)
-            .scalar_subquery()
+    nets: dict[tuple, Decimal] = {}
+    for line in scenario_lines(_db.session, scenario_id):
+        if (
+            line.key.kind is LedgerAccountKindEnum.LINKED
+            or line.key.kind in ACCOUNT_COUNTER_KINDS
+        ):
+            continue
+        assert line.movement_id is not None, (
+            f"counter {line.key}: a line of {line.amount} on "
+            f"{line.entry_date} comes from no movement"
         )
-        # A transfer side's record carries no parent row at all (it hangs off
-        # the TRANSFER since plan step balance:X-bi-6-4d-2), so its legs group
-        # by the record itself (ruling R-BAL167 class 4).
-        side_record = (
-            _db.session.query(TransactionEntry.id)
-            .filter(
-                TransactionEntry.id == JournalEntry.transaction_entry_id,
-                _db.or_(
-                    TransactionEntry.expense_transfer_id.isnot(None),
-                    TransactionEntry.income_transfer_id.isnot(None),
-                ),
-            )
-            .correlate(JournalEntry)
-            .scalar_subquery()
+        movement = _db.session.get(TransactionEntry, line.movement_id)
+        cell = (
+            line.key, movement.transaction_id,
+            None if movement.transaction_id is not None else movement.id,
         )
-        rows = (
-            _db.session.query(
-                source_transaction_id,
-                side_record,
-                _db.func.sum(Posting.amount),
-            )
-            .select_from(Posting)
-            .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-            .filter(
-                Posting.ledger_account_id == counter.id,
-                JournalEntry.scenario_id == scenario_id,
-            )
-            .group_by(source_transaction_id, side_record)
-            .all()
-        )
-        rhs = Decimal("0")
-        for transaction_id, side_record_id, net in rows:
-            if side_record_id is not None:
-                rhs += _checked_side_counter_net(counter, side_record_id, net)
-                continue
-            if transaction_id is None:
-                # Legs whose movement was deleted (the removal act deletes
-                # it, never a cascade from its row; the link SET NULL): the
-                # reverse-before-delete pair must net to zero.
-                assert net == 0, (
-                    f"counter {counter.id}: orphaned (no parent row) "
-                    f"legs net {net}, not zero -- a delete failed to reverse"
-                )
-                continue
-            if net == 0:
-                # Reversed or recategorized-away on this account: contributes
-                # nothing, and the source row is correctly accounted elsewhere.
-                continue
-            txn = _db.session.get(Transaction, transaction_id)
-            assert txn is not None, (
-                f"counter {counter.id}: transaction {transaction_id} linked to "
-                f"a non-zero leg no longer exists (link should have SET NULL)"
-            )
-            # A non-zero net on a counter account comes from an active row
-            # with a DATED movement under it -- its covering movement or a
-            # purchase -- whatever its status (plan step ``balance:X-bi-4a``);
-            # everything else nets to zero.  A transfer side's record counts
-            # against the owner's transit row by the same rule (plan step
-            # ``balance:X-bi-6-3``), checked by ``_checked_side_counter_net``.
-            assert txn.is_deleted is False
-            expected_counter = -_signed_cash_effect(txn)
-            assert net == expected_counter, (
-                f"counter {counter.id}: transaction {transaction_id} net {net} "
-                f"!= expected counter leg {expected_counter}"
-            )
-            # Routing: a still-categorized transaction's leg must land on the
-            # account its CURRENT category resolves to (catches a same-class
-            # wrong-category post the magnitude check alone would miss).  A
-            # NULL-category transaction is skipped -- it resolves to the fallback,
-            # but its leg may legitimately sit on an orphan (deleted category).
-            if txn.category_id is not None:
-                ledger_class = (
-                    LedgerAccountClassEnum.INCOME if txn.is_income
-                    else LedgerAccountClassEnum.EXPENSE
-                )
-                assert _counter_ledger_id(
-                    txn.pay_period.user_id, ledger_class, txn.category_id,
-                ) == counter.id, (
-                    f"counter {counter.id}: transaction {transaction_id} routed "
-                    f"its counter leg to the wrong category account"
-                )
-            rhs += net
-        assert lhs == rhs, (
-            f"counter {counter.id}: ledger {lhs} != linkage-summed source "
-            f"effect {rhs} in scenario {scenario_id}"
-        )
+        nets[cell] = nets.get(cell, Decimal("0")) + line.amount
+    for (counter, transaction_id, record_id), net in nets.items():
+        if record_id is None:
+            _assert_row_counter_net(counter, transaction_id, net)
+        else:
+            _assert_side_counter_net(counter, record_id, net)
 
 
-def _checked_side_counter_net(counter, record_id: int, net: Decimal) -> Decimal:
-    """Check one transfer side's record's net on a counter account; return it.
+def _assert_row_counter_net(counter, transaction_id: int, net: Decimal) -> None:
+    """Check one plan row's net on a counter key.
 
-    The transfer-side arm of :func:`_assert_counter_accounts_reconcile`: a
-    side's net on the counter is the negation of its record's signed cash
-    effect -- the transfer's settled figure ``+figure`` on transit for a
-    from-side record (money left the account), ``-figure`` for a to-side
-    record -- or zero for a record the ledger holds no money for (an
-    un-dated record, kept across a revert whose settle and reversal cancel).
-    Routing: a side's leg lands on the transit row and nowhere else -- a
-    transfer between the owner's own accounts is neither income nor expense,
-    so a category counter here is the very mis-post ruling R-BAL45 rejected.
-    Read off the record's own columns, the side links, and the figure off the
-    TRANSFER's ``settled_figure`` column (its one home since plan step
-    ``balance:X-bi-6-4d-2``'s 4d-4 half; the record carried it until then),
-    not through ``transfer_legs``; it checked the side's SHADOW here until
-    plan step ``balance:X-bi-6-4d-2`` moved the record onto the transfer
-    (ruling R-BAL167 class 4).
+    A non-zero net comes from an active row with a DATED movement under it -- its
+    covering movement or a purchase -- whatever its status (plan step
+    ``balance:X-bi-4a``).  Routing: the key must be the one the row's CURRENT
+    category gives, the Uncategorized bucket for a row with none.
 
     Args:
-        counter: The counter :class:`LedgerAccount` the legs sit on.
-        record_id: The side's ``budget.transaction_entries`` id.
-        net: The record's legs' net on *counter* in the swept scenario.
-
-    Returns:
-        *net*, for the caller's linkage sum.
+        counter: The :class:`~app.services.ledger_lines.ChartKey` the lines sit on.
+        transaction_id: The parent row's id.
+        net: The row's lines' net on *counter* in the swept scenario.
     """
-    if net == 0:
-        # A settle and its reversal: contributes nothing.
-        return net
+    txn = _db.session.get(Transaction, transaction_id)
+    assert txn.is_deleted is False
+    expected_counter = -_signed_cash_effect(txn)
+    assert net == expected_counter, (
+        f"counter {counter}: transaction {transaction_id} net {net} "
+        f"!= expected counter leg {expected_counter}"
+    )
+    ledger_class = (
+        LedgerAccountClassEnum.INCOME if txn.is_income
+        else LedgerAccountClassEnum.EXPENSE
+    )
+    assert category_key(txn.category_id, ledger_class) == counter, (
+        f"counter {counter}: transaction {transaction_id} routed its counter "
+        f"leg to the wrong category account"
+    )
+
+
+def _assert_side_counter_net(counter, record_id: int, net: Decimal) -> None:
+    """Check one transfer side's record's net on a counter key.
+
+    A side's net on the counter is the negation of its record's signed cash
+    effect -- the transfer's settled figure ``+figure`` on transit for a from-side
+    record (money left the account), ``-figure`` for a to-side record.  Routing: a
+    side's line lands on the transit key and nowhere else -- a transfer between
+    the owner's own accounts is neither income nor expense, so a category counter
+    here is the very mis-post ruling R-BAL45 rejected.  Read off the record's own
+    columns, the side links, and the figure off the TRANSFER's ``settled_figure``
+    column (its one home since plan step ``balance:X-bi-6-4d-2``'s 4d-4 half), not
+    through ``transfer_legs`` (ruling R-BAL167 class 4).
+
+    Args:
+        counter: The :class:`~app.services.ledger_lines.ChartKey` the lines sit on.
+        record_id: The side's ``budget.transaction_entries`` id.
+        net: The record's lines' net on *counter* in the swept scenario.
+    """
     record = _db.session.get(TransactionEntry, record_id)
     assert record.settled_on is not None, (
-        f"counter {counter.id}: transfer side record {record_id} is un-dated "
-        f"but holds a non-zero net {net} -- a revert failed to reverse"
+        f"counter {counter}: transfer side record {record_id} is un-dated "
+        f"but holds a net {net} -- an un-dated record books no line"
     )
     figure = _db.session.get(
         Transfer,
@@ -583,51 +361,32 @@ def _checked_side_counter_net(counter, record_id: int, net: Decimal) -> Decimal:
         else figure
     )
     assert net == expected_counter, (
-        f"counter {counter.id}: transfer side record {record_id} net {net} "
+        f"counter {counter}: transfer side record {record_id} net {net} "
         f"!= expected counter leg {expected_counter}"
     )
-    assert counter.kind_id == ref_cache.ledger_account_kind_id(
-        LedgerAccountKindEnum.TRANSIT,
-    ), (
-        f"counter {counter.id}: transfer side record {record_id} routed its "
+    assert counter.kind is LedgerAccountKindEnum.TRANSIT, (
+        f"counter {counter}: transfer side record {record_id} routed its "
         f"counter leg to a non-transit account"
     )
-    return net
 
 
 def _assert_full_reconciliation(
     scenario_id: int, known_parity_differences: tuple = (),
 ) -> None:
-    """Assert the whole ledger reconciles: linked, counter, per-entry, trial.
+    """Assert the whole ledger reconciles: linked, counter, trial, per-entry, parity.
 
     The production-wide sweep a case runs after its mutations; not every
     case runs it (measured 2026-11-02: 13 of the 16 cash cases do).  Linked and
-    counter reconciliation are scenario-scoped; the per-entry balance and trial
-    balance are global self-checks (always true for a balanced ledger, asserted
-    cheaply on every sweep).  Last, the ledger worked out from the records
-    equals this stored one to the cent per (chart row, paycheck, day) (plan
-    task plan#2527): the stored side these oracles have just graded is the
-    second opinion the worked-out read is graded against.  A case whose
-    fixture wrote a record past every writer names the cells that leaves the
-    store behind on in *known_parity_differences*
+    counter reconciliation are scenario-scoped over the worked-out read; the trial
+    balance is its whole-ledger self-check.  Last, what grades the STORE, each of
+    which goes with it: its per-entry balance, and the worked-out ledger equal to
+    the stored one to the cent per (chart row, paycheck, day) (plan task
+    plan#2527).  A case whose fixture wrote a record past every writer names the
+    cells that leaves the store behind on in *known_parity_differences*
     (``tests._ledger_parity.assert_ledger_parity``).
     """
     _assert_linked_accounts_reconcile(scenario_id)
     _assert_counter_accounts_reconcile(scenario_id)
-    assert _entries_violating_balance() == []
-    assert _trial_balance() == Decimal("0")
+    assert trial_balance(_db.session) == Decimal("0")
+    assert entries_violating_balance() == []
     assert_ledger_parity(_db.session, scenario_id, known_parity_differences)
-
-
-def _counter_ledger_id(
-    user_id: int, ledger_class, category_id: int | None
-) -> int:
-    """Resolve the category / fallback ledger account id, mirroring the resolver.
-
-    Returns the row the go-forward reconcile created, so a leg can be hand-checked
-    against it; ``category_id=None`` resolves the per-(owner, class) Uncategorized
-    fallback.
-    """
-    return ledger_account_service.get_or_create_category_ledger_account(
-        user_id, category_id, ledger_class,
-    ).id

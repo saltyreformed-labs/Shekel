@@ -473,8 +473,9 @@ _NON_ROW_ID_INTEGERS = frozenset({
     # ``nominal_day`` below is what survives of the pair -- the 0-or-1 day a
     # short month clamped.  ``deductions_per_year`` left at plan step
     # salary:R15-b with its column: a deduction's cadence is a recurrence rule.
-    "effective_month",
-    "effective_year",
+    # ``effective_month`` and ``effective_year`` LEFT this set at plan step
+    # salary plan#3048 with the raise schema's fields: a raise states the date
+    # it starts (ruling plan#3090), a ``fields.Date``.
     "first_day_of_month",
     "grid_default_periods",
     "inflation_effective_month",

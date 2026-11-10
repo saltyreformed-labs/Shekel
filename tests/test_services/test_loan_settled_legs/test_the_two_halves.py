@@ -13,9 +13,9 @@ from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import loan_loaders, transfer_service
 from app.services.loan_ledger import walk_loan_ledger
-from app.services.loan_posting_service._linked_ledger import _movement_nets_by_date
-from app.services.posting_service import _ledger_account_for
+from app.services.ledger_lines import linked_key
 from app.services.recorded_contributions import load_transfer_contributions_for_account
+from tests._ledger_reads import movement_nets_by_date
 from tests._test_helpers import (
     basis_for,
     create_savings_account,
@@ -521,10 +521,9 @@ class TestTheLoanSidesMovementIsItsRecord:
             db.session.commit()
             transfer_id = transfer.id
             scenario_id = seed_user["scenario"].id
-            linked_id = _ledger_account_for(loan.id).id
             movement_id = transfer_side_record(
                 db.session, transfer_id, loan.id,
             ).id
-            assert _movement_nets_by_date(linked_id, scenario_id) == {
-                movement_id: {_CLOSED_ON: Decimal("1000.00")},
-            }
+            assert movement_nets_by_date(
+                db.session, [movement_id], linked_key(loan), scenario_id,
+            ) == {_CLOSED_ON: Decimal("1000.00")}

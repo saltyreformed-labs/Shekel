@@ -327,8 +327,8 @@ def test_the_run_is_the_one_the_suite_reads_argument_for_argument(docker, runtim
         "-e", "POSTGRES_USER=shekel_user", "-e", "POSTGRES_PASSWORD=shekel_pass",
         "-e", "POSTGRES_DB=postgres", "-e", "PGDATA=/pgdata-baked",
         "-v", f"{runtime / _DIRECTORY}:/sockets", _IMAGE,
-        "-c", "idle_in_transaction_session_timeout=30000", "-c", "lock_timeout=10000",
-        "-c", "statement_timeout=30000", "-c", "fsync=off", "-c", "synchronous_commit=off",
+        "-c", "lock_timeout=10000", "-c", "statement_timeout=30000",
+        "-c", "fsync=off", "-c", "synchronous_commit=off",
         "-c", "full_page_writes=off", "-c", "max_locks_per_transaction=256",
         "-c", "listen_addresses=", "-c", "unix_socket_directories=/sockets"]
 

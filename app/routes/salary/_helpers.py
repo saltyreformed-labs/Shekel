@@ -9,15 +9,15 @@ Constructed once at import time so every handler reuses the same
 instances, preserving the pre-split monolith's behaviour.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
 
-from flask import abort, flash, redirect, render_template, request, url_for
+from flask import Response, abort, flash, make_response, render_template, request
 from flask.typing import ResponseReturnValue
-from flask_login import current_user
 
 from app.utils.auth_helpers import get_or_404, log_refused_lookup
+from app.utils.error_fragments import designed_error
 from app.extensions import db
 from app.models.salary_profile import SalaryProfile
 from app.models.account import Account
@@ -26,6 +26,7 @@ from app.models.ref import (
     RaiseType,
 )
 from app.routes._recurrence_conflict_chooser import flash_retained_notice
+from app.routes._redirect_target import RedirectTarget
 from app.routes._recurrence_form_render import (
     RecurrenceEnd,
     RecurrenceStart,
@@ -40,6 +41,7 @@ from app.services import (
 )
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import PayCalendar, calendar_for
+from app.services.salary_raises import RAISE_YEAR_MAX, RAISE_YEAR_MIN
 from app.services.recurrence import (
     NEVER_ENDS,
     EndBound,
@@ -68,7 +70,7 @@ _PROFILE_UPDATE_FIELDS = {
     "stub_gross_includes_after_tax",
 }
 _RAISE_UPDATE_FIELDS = {
-    "raise_type_id", "effective_month", "effective_year",
+    "raise_type_id", "effective_date",
     "percentage", "flat_amount", "is_recurring", "terminal_year", "notes",
 }
 # ``deductions_per_year`` left this set at plan step salary:R15-b: a
@@ -85,9 +87,10 @@ _LINE_UPDATE_FIELDS = {
 # Each literal mirrors the model declaration in
 # ``app/models/salary_raise.py`` and
 # ``app/models/paycheck_line.py`` and the migration revision
-# ``a3b9c2d40e15``; renaming a constraint requires a coordinated
+# ``a3b9c2d40e15`` (the raise's, renamed with its key by ``6740ce13e174``
+# when the start became a date); renaming a constraint requires a coordinated
 # edit across all three sites.
-_SALARY_RAISES_UNIQUE_CONSTRAINT = "uq_salary_raises_profile_type_year_month"
+_SALARY_RAISES_UNIQUE_CONSTRAINT = "uq_salary_raises_profile_type_date"
 _PAYCHECK_LINES_UNIQUE_CONSTRAINT = "uq_paycheck_lines_profile_name"
 
 _create_schema = SalaryProfileCreateSchema()
@@ -156,37 +159,113 @@ def _get_owned_profile_and_period(profile_id, period_id, calendar):
     return profile, period
 
 
-def _regenerate_salary_transactions(profile):
-    """Regenerate the profile's paycheck rows and tell the owner what was kept.
+def _regenerate_salary_transactions(
+    ctx: BalanceContext, profile: SalaryProfile,
+) -> None:
+    """Regenerate the profile's paycheck rows in the door's pass, and tell the owner what was kept.
 
     The salary package's adapter over
     :func:`~app.services.salary_regeneration.regenerate_salary_transactions`,
     the ONE walk every salary write is followed by (plan step salary:S3-f-3,
     ruling **R-SAL24** -- the walk moved below the route layer so the
     ``/retirement`` rail's end-year Save could reach it too).  What is left
-    here is the Flask half the service cannot carry: this route package opens
-    the read pass for the requester, and it FLASHES the rows the pass
-    declined to touch.  The name and the signature are the pre-move ones, so
-    every call site across this package -- and the tests that patch this
-    name to simulate a stale race -- is untouched.  One thing did move: the
-    pass is built before the service's own template guard runs, one scenario
-    query for a profile without a template, a state ``create_profile`` never
-    produces.
+    here is the Flask half the service cannot carry: it FLASHES the rows the
+    pass declined to touch.
+
+    **It takes the door's read pass, and opens none, since task plan#3106.**
+    It built its own from ``current_user`` until then, so the profile update
+    door, which asks the owner's calendar whether a stub's Pay Date is a
+    payday, and the Fix door, which asks whether a changed payday is one,
+    each derived the calendar twice in one POST.  A route builds the one pass
+    and what it calls takes it as a required argument, never an optional one
+    built when absent (ruling of 2026-08-16, plan step pay_calendar:C2-f2d-1).
+    Every other door builds its pass at this call, after its write is
+    staged, which is when this adapter built it.  The two line doors and the
+    stub doors hold a pre-write pass beside that one, which is finding
+    plan#1589's.
 
     Args:
+        ctx: The door's :class:`~app.services.balance_at.BalanceContext`.
+            Its calendar, scenario and day are what the regeneration reads,
+            with the template's own placements; it prices nothing (plan step
+            X-bp), so a pass the door read its calendar from before the write
+            serves it unchanged.
         profile: The :class:`SalaryProfile` whose template prices the rows.
     """
-    retained = salary_regeneration.regenerate_salary_transactions(
-        BalanceContext.build(current_user.id), profile,
-    )
+    retained = salary_regeneration.regenerate_salary_transactions(ctx, profile)
     # **A RETAINED row is the owner's business, not just the log's** (plan
     # step R10-a, adversarial review): the service returns the ids rather
     # than dropping them, and this is where the salary page says so.
     flash_retained_notice(retained)
 
 
-def _render_raises_partial(profile):
-    """Return the raises table partial for HTMX updates."""
+def _edit_page(profile_id: int) -> RedirectTarget:
+    """Where every refused or failed line-item submission sends the user: the profile's edit page.
+
+    Twelve literal spellings of one target until plan step salary:R15-c
+    added four more; one function is the answer to a review that counted them.
+    It moved here from ``items.py`` with task plan#3136, so the responders
+    below, which spelled the target twice more, reach the one home too.
+    """
+    return RedirectTarget("salary.edit_profile", {"profile_id": profile_id})
+
+
+def _raise_form_bounds() -> dict[str, int]:
+    """The years the raise form's date and end-year controls offer.
+
+    The window's one home is ``salary_raises.RAISE_YEAR_MIN`` / ``_MAX``,
+    which the schema's ``Range`` and the columns' CHECKs are built from; the
+    template typed the same two years a second time until task plan#3125.
+    Both renders of the Raises card (the edit page and the HTMX section) hand
+    these in.
+
+    Returns:
+        ``raise_year_min`` and ``raise_year_max``, for the template.
+    """
+    return {"raise_year_min": RAISE_YEAR_MIN, "raise_year_max": RAISE_YEAR_MAX}
+
+
+@dataclass(frozen=True)
+class RefusedRaise:
+    """A refused raise form, as the Raises card redraws it (ruling plan#3134).
+
+    The card's form opens in the mode it was posted in, holding what was
+    typed, under the reason.  What was typed rides on the reason's box as
+    ``data-raise-*`` attributes, the names the row's edit button carries, and
+    ``app.js`` fills the form from the box with the one fill the edit button
+    runs (``_fillRaiseForm``).  It is never rendered as the controls'
+    ``value``: the Add Raise button resets the form with ``form.reset()``,
+    which restores RENDERED values, so a value attribute would make Add Raise
+    refill the refused raise instead of clearing the form.
+
+    Attributes:
+        message: Why, in the refusal's own words.
+        category: Its flash category, which colours the box the way the flash
+            is coloured on a plain post: ``danger``, or ``warning`` for a form
+            another action made stale.
+        posted: The form as posted (``request.form``).
+        recurring: Whether the posted Recur box reads as ticked, by the
+            schema's own ``is_recurring`` field (its ``truthy`` set), so the
+            redraw cannot read the box one way and the refusal another.
+        edit_url: The update door the form posted to, or ``None`` for an add.
+    """
+    message: str
+    category: str
+    posted: Mapping[str, str]
+    recurring: bool
+    edit_url: str | None
+
+
+def _render_raises_partial(
+    profile: SalaryProfile, refused: RefusedRaise | None = None,
+) -> str:
+    """Return the raises section partial for HTMX updates.
+
+    Args:
+        profile: The owned profile.
+        refused: A refused form to redraw open, with its reason
+            (:class:`RefusedRaise`), or ``None`` for the card after a change.
+    """
     # Refresh relationships
     db.session.refresh(profile)
     raise_types = db.session.query(RaiseType).all()
@@ -194,7 +273,8 @@ def _render_raises_partial(profile):
         "salary/_raises_section.html",
         profile=profile,
         raise_types=raise_types,
-        now_year=date.today().year,
+        refused=refused,
+        **_raise_form_bounds(),
     )
 
 
@@ -204,11 +284,65 @@ def _respond_after_raise_change(profile):
     Returns the raises-section partial for an in-page HTMX swap, or a
     full-page redirect to the profile edit view for a normal form post.
     Centralises the response branch shared by the add/update/delete raise
-    handlers so each has a single success exit point.
+    handlers so each has a single success exit point.  A refused form is
+    :class:`RaiseRefusal`'s.
     """
     if request.headers.get("HX-Request"):
         return _render_raises_partial(profile)
-    return redirect(url_for("salary.edit_profile", profile_id=profile.id))
+    return _edit_page(profile.id).to_response()
+
+
+@dataclass(frozen=True)
+class RaiseRefusal:
+    """How a raise door answers a refused form (task plan#3136, ruling plan#3134).
+
+    The raise form saves in place (``hx-target="#raises-section"``), so on an
+    htmx request the answer is the Raises card itself, at 422 and marked as a
+    designed fragment (:func:`~app.utils.error_fragments.designed_error`):
+    the reason in a box and the form open, holding what was typed
+    (:class:`RefusedRaise`).  A redirect there is followed by the browser and
+    the whole edit page it lands on is swapped INTO the card, where its flash
+    never shows.  A plain form post keeps the flash and the redirect to the
+    edit page.
+
+    Called with the sentence alone it is a
+    :data:`~app.routes._form_errors.FormRefusal`, the loader's
+    (:func:`~app.routes._form_errors.load_form_or_refuse`); the update
+    door's stale-form pre-check calls it with ``"warning"`` too.  It flashes
+    nothing on an htmx request, so the reason is not shown a second time on
+    the next page loaded.
+
+    Attributes:
+        profile: The owned profile whose card is redrawn.
+        edit_url: The update door the form posted to, so the form reopens in
+            edit mode; ``None`` for the add door.
+    """
+    profile: SalaryProfile
+    edit_url: str | None = None
+
+    def __call__(self, message: str, category: str = "danger") -> Response:
+        """Answer the refusal *message* in the request's own shape.
+
+        Args:
+            message: Why, in the refusal's own words.
+            category: The flash category: ``danger``, or ``warning`` for a
+                stale form.
+
+        Returns:
+            The card at 422 on an htmx request, else a redirect to the edit
+            page with *message* flashed.
+        """
+        if request.headers.get("HX-Request"):
+            refused = RefusedRaise(
+                message, category, request.form,
+                request.form.get("is_recurring") in _raise_schema.fields["is_recurring"].truthy,
+                self.edit_url,
+            )
+            return make_response(designed_error(
+                _render_raises_partial(self.profile, refused), 422,
+            ))
+        flash(message, category)
+        return _edit_page(self.profile.id).to_response()
 
 
 def _line_cadence_phrases(
@@ -414,7 +548,7 @@ def _respond_after_line_change(
         return _render_lines_partial(profile, notice)
     if notice is not None:
         flash(notice, "warning")
-    return redirect(url_for("salary.edit_profile", profile_id=profile.id))
+    return _edit_page(profile.id).to_response()
 
 
 def _get_investment_accounts(user_id):

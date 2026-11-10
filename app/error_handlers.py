@@ -173,9 +173,9 @@ def register_error_handlers(app):
         events the SOC dashboard already filters on.  ``path`` and
         ``remote_addr`` go into the structured payload so a Loki
         query can pivot on either; the IP comes from
-        ``request.remote_addr`` which already reflects the
-        ``ProxyFix``-resolved client address (see ``gunicorn.conf.py``
-        ``forwarded_allow_ips``).
+        ``request.remote_addr``, which is the client's own address:
+        :func:`app.utils.client_address.believe_forwarded_address_from`
+        puts it there for a caller on ``FORWARDED_ALLOW_IPS``.
         """
         log_event(
             _LOGGER,

@@ -5,6 +5,7 @@ Split from ``tests/test_services/test_savings_dashboard_service.py`` by ``tools/
 R-BAL301).
 """
 
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
@@ -76,6 +77,7 @@ class TestDTI:
         with app.app_context():
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=filing.id,
@@ -117,6 +119,7 @@ class TestDTI:
         with app.app_context():
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=filing.id,
@@ -302,6 +305,7 @@ class TestDTIRaiseAware:
         with app.app_context():
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=filing.id,
@@ -327,8 +331,7 @@ class TestDTIRaiseAware:
                 salary_profile_id=profile.id,
                 raise_type_id=merit.id,
                 percentage=Decimal("0.0300"),
-                effective_month=2,
-                effective_year=current.start_date.year,
+                effective_date=date(current.start_date.year, 2, 1),
                 is_recurring=False,
             ))
             _create_small_loan(
@@ -378,6 +381,7 @@ class TestDTIRaiseAware:
         with app.app_context():
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=filing.id,
@@ -568,6 +572,7 @@ class TestDTIRaiseAware:
         with app.app_context():
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=filing.id,
@@ -590,8 +595,7 @@ class TestDTIRaiseAware:
                 salary_profile_id=profile.id,
                 raise_type_id=merit.id,
                 percentage=Decimal("0.0300"),
-                effective_month=2,
-                effective_year=current.start_date.year,
+                effective_date=date(current.start_date.year, 2, 1),
                 is_recurring=False,
             ))
             _create_small_loan(seed_user, db.session)

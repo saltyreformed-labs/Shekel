@@ -170,7 +170,7 @@ def worked_out_lines(
     for the same reason: the income statement's route derives the owner's
     calendar for its own selector, so a read deriving another was a second
     derivation of one schedule on one render
-    (``tests/test_arch/test_one_read_pass_per_render.py``).  A caller that
+    (``tests/test_arch/test_one_read_pass_per_render/``).  A caller that
     holds a calendar hands it; one that holds none hands
     :func:`~app.services.pay_calendar.calendar_for` bound to the owner,
     still asked only when a correction is to be filed.

@@ -24,10 +24,13 @@ which deleted the re-statement (:meth:`TestTheServiceTakesThePassAndReturnsWhatI
 they read the paycheck a fresh pass prices instead.
 """
 
+import logging
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.exc import DataError
+import sqlalchemy
+from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.exceptions import RecurrenceConflict
 from app.extensions import db
@@ -187,3 +190,105 @@ class TestTheServiceTakesThePassAndReturnsWhatItKept:
                 f"profile {profile.id}" in record.getMessage()
                 for record in caplog.records
             ), "the failure was re-raised without the profile id being logged"
+
+    def test_a_lost_race_is_re_raised_and_logged_as_a_conflict(
+        self, app, db, seed_user, seed_periods_today, caplog,
+    ):
+        """A ``StaleDataError`` from the walk's flush leaves as itself, logged at INFO only.
+
+        A lost version race is not a failure of the regeneration, and the
+        calling route reports it; caught as an ``SQLAlchemyError`` it was an
+        ERROR with a traceback for every race lost inside the walk (task
+        plan#3126).  The service logs one INFO line naming the profile and
+        the error's message, which names the table that lost, and nothing
+        above INFO.  That line is written only by the arm inside the walk's
+        ``try``, so it also shows the race fired there.  The pass is built
+        before the write, as the salary update and Fix doors and the rail
+        build theirs, so the write's version-pinned UPDATE first flushes
+        inside the ``try``.  The profile's version is bumped, with autoflush
+        held off, after its rename is staged.
+        """
+        with app.app_context():
+            profile = _linked_profile(seed_user, db.session)
+            db.session.commit()
+            # Loaded now, so the walk's guard reads it without a query that
+            # would flush the rename before the ``try``.
+            assert profile.template is not None
+            ctx = BalanceContext.build(seed_user["user"].id)
+            profile.name = "Renamed Job"
+            with db.session.no_autoflush:
+                db.session.execute(sqlalchemy.text(
+                    "UPDATE salary.salary_profiles SET version_id = version_id + 1 "
+                    "WHERE id = :id"
+                ), {"id": profile.id})
+            profile_id = profile.id
+            caplog.clear()
+
+            with caplog.at_level(logging.DEBUG, logger="app.services.salary_regeneration"):
+                with pytest.raises(StaleDataError):
+                    salary_regeneration.regenerate_salary_transactions(ctx, profile)
+
+            lost = [
+                record for record in caplog.records
+                if record.getMessage().startswith("Lost a version race")
+            ]
+            assert [(record.levelno, record.exc_info) for record in lost] == [
+                (logging.INFO, None),
+            ], "the race was not logged once at INFO without a traceback"
+            assert lost[0].getMessage().startswith(
+                "Lost a version race regenerating salary transactions for profile "
+                f"{profile_id}: UPDATE statement on table 'salary_profiles' "
+            ), lost[0].getMessage()
+            assert not [
+                record.getMessage() for record in caplog.records
+                if record.levelno >= logging.WARNING
+            ], "a lost race was logged as a failure of the regeneration"
+            db.session.rollback()
+
+    def test_a_failed_flush_is_logged_with_the_profile_it_expired(
+        self, app, db, seed_user, seed_periods_today, monkeypatch, caplog,
+    ):
+        """A flush that fails inside the walk expires the profile; the log still names it.
+
+        A failed flush rolls the session back and expires every row it holds,
+        so the handler cannot read ``profile.id`` after one: that read raised
+        ``PendingRollbackError`` in place of the error it was logging (task
+        plan#3106), and the service reads the id before the walk.  A lost
+        version race graded the handler's read until task plan#3126, which
+        sends a race out by its own arm before that handler, so this case
+        grades it with a flush that fails otherwise: the engine stages its
+        template with no name and flushes, and the column's NOT NULL refuses
+        it as an ``IntegrityError``.
+        :meth:`test_a_database_error_is_logged_with_the_profile_and_re_raised`
+        raises without flushing, so its profile is never expired and cannot
+        grade the read.
+        """
+        with app.app_context():
+            profile = _linked_profile(seed_user, db.session)
+            db.session.commit()
+            profile_id = profile.id
+
+            def _a_nameless_template_flushed(template, *_args, **_kwargs):
+                template.name = None
+                db.session.flush()
+
+            monkeypatch.setattr(
+                salary_regeneration.recurrence_engine,
+                "regenerate_for_template", _a_nameless_template_flushed,
+            )
+            ctx = BalanceContext.build(seed_user["user"].id)
+
+            with caplog.at_level(logging.ERROR, logger="app.services.salary_regeneration"):
+                with pytest.raises(IntegrityError):
+                    salary_regeneration.regenerate_salary_transactions(ctx, profile)
+
+            logged = [
+                record for record in caplog.records
+                if record.getMessage()
+                == f"Failed to regenerate salary transactions for profile {profile_id}"
+            ]
+            assert len(logged) == 1, "the failed flush was not logged with the profile id"
+            assert logged[0].exc_info[0] is IntegrityError, (
+                "the record logged another error than the flush's"
+            )
+            db.session.rollback()

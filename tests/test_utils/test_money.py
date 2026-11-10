@@ -26,7 +26,14 @@ from decimal import Decimal
 
 import pytest
 
-from app.utils.money import round_money, round_money_ceiling, round_money_floor
+from app.utils.money import (
+    MONEY_COLUMN_MAX,
+    MoneyTextError,
+    money_from_text,
+    round_money,
+    round_money_ceiling,
+    round_money_floor,
+)
 
 
 class TestRoundMoney:
@@ -157,3 +164,63 @@ class TestRoundMoneyFloor:
         """
         with pytest.raises(TypeError, match="round_money_floor expects Decimal"):
             round_money_floor(2.34)
+
+
+class TestMoneyFromText:
+    """The ONE walk from a figure a source stated as text to recorded cents.
+
+    Plan step ``bank_import:X-f6b-2``: the CSV adapter, the bank feed's
+    listing and the feed's reader each spelled it, and they disagreed (the
+    listing accepted a number and a quiet ``NaN``).  Every arm here was a
+    measured hole on one of them.
+    """
+
+    def test_a_decimal_string_becomes_cents_rounded_half_up(self):
+        """Built from the string and rounded through the one rule:
+        ``-165.220000`` is SECU's own OFX precision, and ``2.345`` is the
+        half-cent that ``ROUND_HALF_EVEN`` would take down to ``2.34``."""
+        assert money_from_text("386.05") == Decimal("386.05")
+        assert money_from_text("-165.220000") == Decimal("-165.22")
+        assert money_from_text("2.345") == Decimal("2.35")
+        assert money_from_text("0.00") == Decimal("0.00")
+
+    def test_the_widest_figure_a_money_column_holds_is_recorded(self):
+        """``Numeric(12, 2)`` holds ten integer digits: ``9999999999.99``
+        either side of zero is the edge, and it is admitted."""
+        assert money_from_text("9999999999.99") == MONEY_COLUMN_MAX
+        assert money_from_text("-9999999999.99") == -MONEY_COLUMN_MAX
+
+    def test_every_refusal_names_its_reason(self):
+        """Not a string, not a number, not a real number, too large: each
+        its own reason, which the caller's sentence carries.  The column
+        edge is graded from both sides: one cent past it, and a half-cent
+        that only ROUNDS past it (``9999999999.995`` is ``10000000000.00``
+        to the cent), so the bound is checked on the figure recorded."""
+        cases = {
+            386.05: "not a decimal string",
+            386: "not a decimal string",
+            None: "not a decimal string",
+            "abc": "not an amount",
+            "": "not an amount",
+            "NaN": "not a real number",
+            "sNaN": "not a real number",
+            "Infinity": "not a real number",
+            "-Infinity": "not a real number",
+            "1E+30": "too large to record",
+            "10000000000.00": "too large to record",
+            "-10000000000.00": "too large to record",
+            "9999999999.995": "too large to record",
+        }
+        for text, reason in cases.items():
+            with pytest.raises(MoneyTextError) as caught:
+                money_from_text(text)
+            assert caught.value.reason == reason, text
+            assert repr(text) in str(caught.value), text
+
+    def test_an_exponent_the_constructor_itself_refuses_is_not_an_amount(self):
+        """``Decimal("1E+9999999999999999999")`` raises on construction
+        (past the context's exponent limit), so it is refused by the same
+        arm as text that is no number at all, and with the same class."""
+        with pytest.raises(MoneyTextError) as caught:
+            money_from_text("1E+9999999999999999999")
+        assert caught.value.reason == "not an amount"

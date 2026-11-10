@@ -173,6 +173,35 @@ class TestTheListingIsLiveAndRead:
         with pytest.raises(BridgeRefused):
             bank_feed.list_bridge_accounts(seed_user["user"].id)
 
+    def test_a_balance_that_is_not_a_recordable_decimal_string_is_refused(
+        self, app, db, seed_user, bridge,
+    ):
+        """Bridge's ``balance`` is read through the ONE walk from a source's
+        text to a figure (``money_from_text``, plan step
+        ``bank_import:X-f6b-2``), as the feed's sync reads the same field.
+        Until then the listing read ``Decimal(str(item["balance"]))``, which
+        took a JSON number (a float by the time it is parsed) and a quiet
+        ``NaN`` (which renders, then raises in the money macro).  A figure past
+        the money columns' width is refused too, though the listing stores
+        nothing: the one walk answers one way for every reader.  Each case
+        refuses the whole listing, with Bridge's shape named."""
+        _connect(seed_user, bridge)
+        db.session.flush()
+        for balance in (2073.40, "NaN", "10000000000.00"):
+            bridge.get_answer = _FakeResponse(
+                f"{_ACCESS_URL}/accounts", json_body=_listing_body(accounts=[
+                    {"id": _CHECKING, "name": "Checking (3820)",
+                     "currency": "USD", "balance": balance,
+                     "available-balance": "2073.40",
+                     "balance-date": 1789775211, "transactions": [],
+                     "holdings": []},
+                ]),
+            )
+
+            with pytest.raises(BridgeRefused) as excinfo:
+                bank_feed.list_bridge_accounts(seed_user["user"].id)
+            assert excinfo.value.error_class == "UnexpectedShape", balance
+
 
 def _declared(seed_user):
     """The owner's declared mappings as ``{external_id: account_id}``."""

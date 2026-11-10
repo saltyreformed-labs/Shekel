@@ -45,7 +45,7 @@ import base64
 import binascii
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 import requests
 from cryptography.fernet import InvalidToken
@@ -74,6 +74,7 @@ from app.services.bank_feed._bridge import (
 )
 from app.services.statement_import import record_identity
 from app.utils.field_encryption import decrypt_secret, encrypt_secret
+from app.utils.money import MoneyTextError, money_from_text
 
 #: The listing every claim and every "Map accounts" press asks for: accounts
 #: without their transactions (``balances-only``), in Bridge's v2 shape
@@ -386,8 +387,12 @@ def _account_from(item: object) -> BridgeAccount:
         external_id = str(item["id"])
         name = str(item["name"])
         currency = str(item["currency"])
-        balance = Decimal(str(item["balance"]))
-    except (KeyError, TypeError, InvalidOperation) as exc:
+        # Through the ONE walk from a source's text to a figure, as the feed's
+        # reader reads the same field: Bridge writes it as a string, and a
+        # number, a ``NaN`` or a figure past the money columns is the wrong
+        # shape here as there.
+        balance = money_from_text(item["balance"])
+    except (KeyError, TypeError, MoneyTextError) as exc:
         raise BridgeRefused(
             "Bridge's account list was not in the shape this app reads, so "
             "nothing was changed.",

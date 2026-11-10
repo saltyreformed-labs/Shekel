@@ -29,6 +29,10 @@ standards: "Construct Decimals from strings").
 ``MONTHS_PER_YEAR`` is the calendar-month denominator, and it belongs here
 because 12 is a property of the calendar rather than of any owner.
 
+``money_from_text`` is the persistence boundary's other side: the ONE walk
+from a figure a SOURCE stated as text (a bank's CSV cell, a bank feed's JSON
+string) to the cents this app records, refusing what cannot be recorded.
+
 **The two halves of a loan payment's arithmetic BOTH live here, and plan step
 X-au-g-2c-3a is why the second one moved.** A loan payment is one CHARGE
 (:func:`accrue_monthly_interest`, what time has cost) and one ALLOCATION
@@ -62,7 +66,9 @@ monthly factor has one home, and it is no longer a number this module can
 state.
 """
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
+from decimal import (
+    Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP,
+)
 
 CENTS = Decimal("0.01")
 ZERO = Decimal("0")
@@ -180,6 +186,80 @@ def round_money_floor(value: Decimal) -> Decimal:
             f"round_money_floor expects Decimal, got {type(value).__name__}: {value!r}"
         )
     return value.quantize(CENTS, rounding=ROUND_FLOOR)
+
+
+class MoneyTextError(ValueError):
+    """*text* is not a money figure this app can record.
+
+    Raised by :func:`money_from_text`; each caller wraps it in a refusal of its
+    own, with its own label for the figure.
+
+    Attributes:
+        reason: The phrase the caller's sentence carries -- ``"not a decimal
+            string"``, ``"not an amount"``, ``"not a real number"`` or ``"too
+            large to record"``.
+    """
+
+    def __init__(self, reason: str, text: object):
+        super().__init__(f"{text!r} is {reason}")
+        self.reason = reason
+
+
+def money_from_text(text: str) -> Decimal:
+    """Return a money figure a source stated as TEXT, as the cents this app records.
+
+    **The ONE walk from a source's text to a recorded money figure** -- a
+    bank's CSV cell, a bank feed's JSON string (plan step
+    ``bank_import:X-f6b-2``; rule 14: three adapters spelled it three times,
+    agreeing until one accepted a quiet ``NaN``).  Each refusal arm closes a
+    hole that was measured:
+
+    * the Decimal is built from the STRING and never from a float
+      (``docs/coding-standards.md``), so anything but a string is refused
+      unread -- a source that hands a number has already put the figure
+      through a float, or would let this one;
+    * a figure that is not FINITE is refused, because ``Decimal("NaN")``
+      raises nowhere on its own: committed into a ``Numeric(12, 2)`` column
+      it compares equal to nothing, makes every ``SUM()`` over the account
+      ``NaN``, and makes the ``money`` display macro raise on every later
+      render (found on the CSV adapter by adversarial review 2026-08-22);
+    * the rounding through :func:`round_money`, the app's one rule, is INSIDE
+      the refusal, because a finite figure with a large exponent (``1E+30``
+      and up) passes the finiteness check and then raises from ``quantize``
+      (same review);
+    * a rounded figure past :data:`MONEY_COLUMN_MAX` is refused, because it is
+      unstorable: it reached the database as ``NumericValueOutOfRange`` at the
+      flush, a 500, which is the database standing in for the check.  The
+      CSV adapter's own walk had the first three arms and not this one.
+
+    The caller cleans its own text first (a CSV's ``$`` and ``,``; nothing for
+    a feed that states a bare decimal string).
+
+    Args:
+        text: The figure as the source stated it.
+
+    Returns:
+        The figure, rounded to cents.
+
+    Raises:
+        MoneyTextError: With its reason, when *text* is not a string, not a
+            number, not a real number, or too large to record.
+    """
+    if not isinstance(text, str):
+        raise MoneyTextError("not a decimal string", text)
+    try:
+        value = Decimal(text)
+    except InvalidOperation as exc:
+        raise MoneyTextError("not an amount", text) from exc
+    if not value.is_finite():
+        raise MoneyTextError("not a real number", text)
+    try:
+        rounded = round_money(value)
+    except InvalidOperation as exc:
+        raise MoneyTextError("too large to record", text) from exc
+    if abs(rounded) > MONEY_COLUMN_MAX:
+        raise MoneyTextError("too large to record", text)
+    return rounded
 
 
 def percent_complete(total: Decimal, target: Decimal) -> Decimal:

@@ -15,12 +15,11 @@ from decimal import Decimal
 import pytest
 from marshmallow import ValidationError
 
-from app import tax_law as tax_law_module
 from app.enums import PaycheckLineKindEnum, RecurrenceUnitEnum
 from app.schemas.validation._helpers import _normalize_empty_inputs
 from app.schemas.validation.templates import A_CADENCE_IS_REQUIRED
 from tests._stub_period import stub_period_on
-from tests._test_helpers import EMPTY_TAX_LAW, cadence_payload
+from tests._test_helpers import EMPTY_TAX_LAW, cadence_payload, made_up_law
 from app.services.pay_rhythm import FixedDays
 from app.services.recurrence import MonthReading
 from app.schemas.validation import (
@@ -1557,7 +1556,7 @@ class TestSalaryProfileCreateSchemaBoundary:
             )
         assert "state_code" in exc.value.messages
 
-    def test_lowercase_state_code_refused(self):
+    def test_lowercase_state_code_refused(self, tax_law):
         """Lower-case ``nc`` is refused: the tax law lists ``NC``, and no other spelling.
 
         Until plan step salary:X-at-3 this case pinned ``nc`` as ACCEPTED,
@@ -1567,14 +1566,19 @@ class TestSalaryProfileCreateSchemaBoundary:
         X-at-3).  Ruling R-SAL78: a save naming a state the law does not list
         is refused.  The form offers the law's own codes, so a browser never
         submits ``nc``.
+
+        Under a made-up law listing NC and ZZ, so the refusal's list of states
+        is pinned as words: "NC and ZZ", the one wording of a list of states
+        (ruling plan#3202).  It read the shipped law's states joined by
+        commas until then, which no second state had yet put to the test.
         """
+        tax_law(made_up_law((2026, {"NC": "0.0399", "ZZ": "0.0500"})))
         with pytest.raises(ValidationError) as exc:
             SalaryProfileCreateSchema().load(
                 self._valid_salary_data(state_code="nc")
             )
         assert exc.value.messages["state_code"] == [
-            "Shekel has no tax rules for 'nc'; it supports "
-            f"{', '.join(tax_law_module.LAW.supported_states)}."
+            "Shekel has no tax rules for 'nc'; it supports NC and ZZ."
         ]
 
     def test_the_law_installed_when_validating_decides(self, tax_law):

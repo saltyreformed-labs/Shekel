@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import PaycheckLineKindEnum
+from app.enums import PaycheckLineKindEnum, TaxTypeEnum
 from app.services.pay_calendar import DerivedPeriod
 from tests._test_helpers import payroll_basis
 
@@ -201,20 +201,10 @@ class FakeBracketSet:
         self.brackets = brackets or []
 
 
-class FakeTaxType:
-    def __init__(self, name="flat"):
-        self.name = name
-
-
 class FakeStateTaxConfig:
-    def __init__(self, flat_rate="0.045", tax_type_name="flat"):
+    def __init__(self, flat_rate="0.045"):
         self.flat_rate = Decimal(str(flat_rate))
-        self.tax_type = FakeTaxType(tax_type_name)
-        # Resolve the integer ID from the ref_cache for ID-based lookups.
-        from app import ref_cache  # pylint: disable=import-outside-toplevel
-        from app.enums import TaxTypeEnum  # pylint: disable=import-outside-toplevel
-        _name_to_enum = {e.value: e for e in TaxTypeEnum}
-        self.tax_type_id = ref_cache.tax_type_id(_name_to_enum[tax_type_name])
+        self.tax_type = TaxTypeEnum.FLAT
 
 
 class FakeFicaConfig:

@@ -17,7 +17,6 @@ import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app import ref_cache
 from app.enums import TaxTypeEnum
 from app.services.exceptions import (
     InvalidDependentCountError,
@@ -552,11 +551,11 @@ def calculate_state_tax(annual_gross, state_config, *, additional_deduction=ZERO
     """
     if state_config is None:
         return ZERO
-    if state_config.tax_type_id == ref_cache.tax_type_id(TaxTypeEnum.NONE):
+    if state_config.tax_type is TaxTypeEnum.NONE:
         return ZERO
-    if state_config.tax_type_id != ref_cache.tax_type_id(TaxTypeEnum.FLAT):
+    if state_config.tax_type is not TaxTypeEnum.FLAT:
         raise ValueError(
-            f"no formula prices state tax type id {state_config.tax_type_id}: "
+            f"no formula prices state tax type {state_config.tax_type.value}: "
             f"only a flat rate or no income tax is priced"
         )
     if state_config.flat_rate is None:

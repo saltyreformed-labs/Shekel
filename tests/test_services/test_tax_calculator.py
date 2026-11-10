@@ -11,6 +11,7 @@ represent actual IRS publications.
 import pytest
 from decimal import Decimal
 
+from app.enums import TaxTypeEnum
 from app.services.tax_calculator import (
     AnnualFederalTax,
     W4Inputs,
@@ -29,6 +30,7 @@ from app.services.exceptions import (
     InvalidPayPeriodsError,
     InvalidFilingStatusError,
 )
+from app.services.tax_config_service import StateTaxRules
 
 
 # ── Test Fixtures ─────────────────────────────────────────────────
@@ -744,10 +746,7 @@ class _FakeStateTaxConfig:
 
     def __init__(self, flat_rate="0.045"):
         self.flat_rate = Decimal(str(flat_rate))
-        self.tax_type = type("_TT", (), {"name": "flat"})()
-        from app import ref_cache  # pylint: disable=import-outside-toplevel
-        from app.enums import TaxTypeEnum  # pylint: disable=import-outside-toplevel
-        self.tax_type_id = ref_cache.tax_type_id(TaxTypeEnum.FLAT)
+        self.tax_type = TaxTypeEnum.FLAT
 
 
 class _FakeFicaConfig:
@@ -1070,9 +1069,7 @@ class _FakeNCStateConfig:
     def __init__(self, flat_rate="0.0399", standard_deduction="12750"):
         self.flat_rate = Decimal(flat_rate)
         self.standard_deduction = Decimal(standard_deduction)
-        from app import ref_cache  # pylint: disable=import-outside-toplevel
-        from app.enums import TaxTypeEnum  # pylint: disable=import-outside-toplevel
-        self.tax_type_id = ref_cache.tax_type_id(TaxTypeEnum.FLAT)
+        self.tax_type = TaxTypeEnum.FLAT
 
 
 class TestAnnualFederalLiability:
@@ -1557,16 +1554,9 @@ class TestStateTaxTypes:
     @staticmethod
     def _rules(tax_type, flat_rate):
         """A made-up state's rules for one filing status: no deduction, no child tiers."""
-        # Pylint: import-outside-toplevel -- ref_cache answers only once the
-        # app has loaded it, which the module's other stand-ins also wait for.
-        from app import ref_cache  # pylint: disable=import-outside-toplevel
-        from app.enums import TaxTypeEnum  # pylint: disable=import-outside-toplevel
-        from app.services.tax_config_service import (  # pylint: disable=import-outside-toplevel
-            StateTaxRules,
-        )
         return StateTaxRules(
             state_code="ZZ",
-            tax_type_id=ref_cache.tax_type_id(TaxTypeEnum[tax_type]),
+            tax_type=TaxTypeEnum[tax_type],
             flat_rate=flat_rate,
             standard_deduction=Decimal("0.00"),
             child_deduction_tiers=(),
@@ -1602,7 +1592,7 @@ class TestStateTaxTypes:
         with pytest.raises(
             ValueError,
             match=(
-                rf"no formula prices state tax type id {rules.tax_type_id}: "
+                r"no formula prices state tax type bracket: "
                 r"only a flat rate or no income tax is priced"
             ),
         ):

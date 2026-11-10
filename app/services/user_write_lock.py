@@ -9,9 +9,12 @@ that take none are named below).  **Since plan step
 start of every command transaction a signed-in request opens -- before it
 reads any of the owner's data; what it reads first, none of it a row a write
 decides on, is listed in :func:`app.db_transaction._lock_the_open_transaction`
--- and at a sign-in right after the
-account is found; and this module's :func:`lock_every_user_writes`, at the
-start of each deploy reconcile.  No service takes it for itself any more, and
+-- and at a sign-in (:func:`app.db_transaction.bind_sign_in_owner`): the code
+step and a known browser's password step right after the account is found,
+before their checks, and a stranger's password step only once its check has
+committed and found the password right (ruling plan#3110); and this module's
+:func:`lock_every_user_writes`, at the start of each deploy reconcile.  No
+service takes it for itself any more, and
 ``tests/test_arch/test_the_owner_lock_has_one_home.py`` refuses one that
 tries.  **The writers that take none, each named so it is not mistaken for
 covered**: registration (``/register`` and ``scripts/seed_user.py``) writes a
@@ -130,8 +133,8 @@ cannot leak -- and a request that commits and goes on writing takes it again
 in its next transaction (:mod:`app.db_transaction`).  Re-entrant, and one
 caller relies on that: ``scripts/init_database.py`` runs the three deploy
 reconciles in ONE transaction, and each takes every owner's lock again.  A
-request's transaction takes it once: at its start, or, at a sign-in, right
-after the account is found.
+request's transaction takes it once: at its start, or, at a sign-in, where
+:func:`app.db_transaction.bind_sign_in_owner` takes it (above).
 
 Flask-isolated -- takes and returns plain data, never imports ``request`` /
 ``session``.  Takes no transaction of its own: the caller owns the boundary,

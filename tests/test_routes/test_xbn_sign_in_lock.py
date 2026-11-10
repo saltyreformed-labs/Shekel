@@ -132,7 +132,12 @@ def _post_login(client, password=SEED_USER_PASSWORD, email=SEED_USER_EMAIL):
 
 
 class TestSignInLocksBeforeItChecks:
-    """R-CC121: the account is found, the owner's lock is taken, then it is checked."""
+    """R-CC121: a known browser's or the code step's lock: after the look-up, before the check.
+
+    And a companion's sign-in takes its owner's key.  A stranger's password
+    step, the companion's here, takes it only after its check (ruling
+    plan#3110), so that case grades the key and not the order.
+    """
 
     def test_a_known_browser_s_wrong_password_locks_before_it_counts(
         self, client, seed_user,

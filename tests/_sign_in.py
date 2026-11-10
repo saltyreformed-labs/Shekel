@@ -71,9 +71,12 @@ def browser_count(user_id) -> int:
 def make_a_stranger(user_id) -> None:
     """Delete *user_id*'s browser records, so a browser signed in to it is a stranger.
 
-    A signed-in browser stays known only while its record lives; one whose
-    record aged out, or was deleted by its own ten wrong guesses, is a stranger
-    at every door (ruling plan#3034) and counts on the account.
+    A signed-in browser stays known only while its record lives.  The record
+    cannot age out while the session lives, since a session ends when its
+    sign-in is thirty days old, the instant the record stops being known
+    (ruling plan#3069); only the browser's own ten wrong guesses delete it,
+    and then it is a stranger at every door (ruling plan#3034) and counts on
+    the account.  Deleting the records here stands in for those guesses.
 
     Args:
         user_id: The user.

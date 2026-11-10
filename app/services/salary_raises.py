@@ -16,8 +16,10 @@ Pure: plain inputs, plain outputs, no Flask, no ORM, no clock, no database.
 (rulings **R-SAL59**, **R-SAL60** and **R-SAL65**).  ``apply_raises`` walked
 an ANNUAL salary through every application and rounded once at the end; the
 salary's stored fact is what one paycheck pays now
-(:class:`~app.models.salary_pay_entry.SalaryPayEntry`), so the walk lives in
-:meth:`~app.services.payroll_basis.PayrollBasis.base_pay_on`, which reads the
+(:class:`~app.models.salary_pay_entry.SalaryPayEntry`), so the walk is the
+basis's (``PayrollBasis._walk``, read through
+:meth:`~app.services.payroll_basis.PayrollBasis.pay_rate_on`, the pay in force
+on a day, since task plan#3100), which reads the
 two halves stated here: WHICH applications land between two days
 (:func:`applications_between`) and what ONE application does to a paycheck's
 pay (:func:`raise_pay`), each rounding to the cent the way a stub prints it.

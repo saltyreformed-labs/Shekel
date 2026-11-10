@@ -511,8 +511,8 @@ def recurring_raises(salary_profiles: list[SalaryProfile]) -> list[SalaryRaise]:
 
     Returns:
         The recurring :class:`~app.models.salary_raise.SalaryRaise` rows, in
-        profile then row order (the relationship's ``effective_date``
-        ordering).
+        profile then row order (the relationship's order: start date,
+        then id).
     """
     return [
         raise_obj

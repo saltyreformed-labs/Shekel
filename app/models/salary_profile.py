@@ -209,10 +209,18 @@ class SalaryProfile(
         backref=db.backref("salary_profiles", lazy="select"),
     )
     filing_status = db.relationship("FilingStatus", lazy="joined")
+    # By start date, then by id (task plan#3128): two raises of different
+    # types may start on one day, and the order they load in is the order the
+    # walk compounds them in and the banner names them in
+    # (``salary_raises.applications_between`` keeps input order within a
+    # date and a method).  By date alone, the database answered such a pair
+    # in whatever order it read them, which an edit of the first one's date
+    # or type was measured to reverse; each step rounds to the cent, so the
+    # reversal can move one.  The id is the order they were written in.
     raises = db.relationship(
         "SalaryRaise", back_populates="salary_profile",
         cascade="all, delete-orphan", lazy="select",
-        order_by="SalaryRaise.effective_date",
+        order_by="[SalaryRaise.effective_date, SalaryRaise.id]",
     )
     # The pay list (plan step salary:X-av-3a), in payday order: the engine
     # reads it as an attribute the caller loaded, as it reads ``raises`` and

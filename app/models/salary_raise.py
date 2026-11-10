@@ -181,10 +181,11 @@ class SalaryRaise(SalaryProfileScopedMixin, OptimisticLockMixin, CreatedAtMixin,
     #:
     #: **It is THE horizon, for every engine.**
     #: :func:`app.services.salary_raises.applications_between` reads it on
-    #: the pay list's walk (:meth:`app.services.payroll_basis.PayrollBasis
-    #: .base_pay_on`), which both the paycheck pipeline and the pension's
+    #: the pay list's walk, which both the paycheck pipeline and the pension's
     #: salary path (:func:`app.services.pension_calculator
-    #: .project_profile_salaries`) read since plan step salary:X-av-3a, and
+    #: .project_profile_salaries`) read since plan step salary:X-av-3a
+    #: (through :meth:`app.services.payroll_basis.PayrollBasis.pay_rate_on`
+    #: since task plan#3100), and
     #: since salary:S3-c neither invents a cutoff of its own -- so the two
     #: long-horizon salary paths that used to disagree past a global cutoff
     #: are one path.

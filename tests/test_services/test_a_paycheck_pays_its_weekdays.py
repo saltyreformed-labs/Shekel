@@ -19,6 +19,11 @@ plan#3048 owns, each pinned on a worked example, every figure made up
   day its first paycheck pays for, and every yearly figure reads the pay RATE,
   the pay in force on the last day a paycheck pays for.
 
+Task plan#3128 adds a straddle on the two rhythms that had none (twice a
+month and monthly), a raise on New Year's Day inside a December-January pay
+period, and the retirement dashboard's final paycheck, which reads the rate on
+a December 1.
+
 **The calendar**: every 14 days from Thursday 2027-01-14, so each paycheck pays
 Saturday through the Friday six days before it -- 02-25 pays 02-06..02-19,
 03-11 pays 02-20..03-05, 03-25 pays 03-06..03-19 and 07-15 pays
@@ -33,11 +38,14 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.enums import BusinessDayShiftEnum
-from app.services.pay_calendar import PayCalendar
+from app.services import paycheck_calculator, retirement_dashboard_service
+from app.services.pay_calendar import PayCadence, PayCalendar, days_paid_for
 from app.services.pay_list_service import pay_rows
-from app.services.pay_rhythm import Era, FixedDays, Rhythm
+from app.services.pay_rhythm import Era, FixedDays, Monthly, Rhythm, SemiMonthly
+from app.services.paycheck_calculator._calendar_questions import _get_cumulative_wages
 from app.services.payroll_basis import PayrollBasis, RhythmChangeWithoutPay
 from app.services.salary_raises import RaiseTerms
+from app.utils.business_days import SATURDAY
 
 _NONE = BusinessDayShiftEnum.NONE
 
@@ -598,3 +606,209 @@ class TestThePayListReadsTheRate:
         (row,) = pay_rows(basis)
         assert row.paychecks_a_year == 26
         assert row.yearly == Decimal("54600.00")
+
+
+def _semi_monthly():
+    """Paid on the 15th and the last day of every month from Friday 2027-01-15, a gap of six.
+
+    02-28 pays 02-10..02-22, 03-15 pays 02-23..03-09 and 03-31 pays
+    03-10..03-25.
+    """
+    opens = date(2027, 1, 15)
+    rhythm = Rhythm(SemiMonthly((15, 31)), _NONE)
+    return _calendar([opens], (Era(effective_from=opens, rhythm=rhythm),))
+
+
+def _monthly():
+    """Paid on the last day of every month from Sunday 2027-01-31, a gap of six.
+
+    02-28 pays 01-26..02-22, 03-31 pays 02-23..03-25 and 04-30 pays
+    03-26..04-24.
+    """
+    opens = date(2027, 1, 31)
+    rhythm = Rhythm(Monthly(31), _NONE)
+    return _calendar([opens], (Era(effective_from=opens, rhythm=rhythm),))
+
+
+def _paydays(calendar, first, last):
+    """Every payday of *calendar* from *first* through *last*, one span after another."""
+    paydays = []
+    span = calendar.span_containing(first)
+    while span.start_date <= last:
+        paydays.append(span.start_date)
+        span = calendar.span_containing(span.end_date + timedelta(days=1))
+    return paydays
+
+
+def _weekdays_paid(calendar, payday):
+    """How many weekdays *payday*'s paycheck pays for, its pay period ending six days before."""
+    paid = days_paid_for(calendar, payday, 6)
+    return sum(
+        1 for offset in range((paid.last - paid.first).days + 1)
+        if (paid.first + timedelta(days=offset)).weekday() < SATURDAY
+    )
+
+
+class TestEveryRhythmPricesItsStraddle:
+    """A raise inside a pay period is priced weekday by weekday at any rhythm (plan#3089).
+
+    Every 14 days is :class:`TestAStraddle`'s and every 7 days
+    :class:`TestARhythmSeam`'s.  A one-day rhythm pays one day a paycheck, so
+    no raise can start inside its pay period; its weekend paycheck is
+    :class:`TestAPeriodHoldingNoWeekday`'s.  These are the two month-anchored
+    rhythms, whose pay periods hold a different number of weekdays from one
+    paycheck to the next.
+    """
+
+    def test_twice_a_month(self):
+        """15th and last, $2,000.00, 5% from Wednesday 2027-03-03: 03-15 pays $2,045.46.
+
+        03-15 pays 02-23..03-09, eleven weekdays: 02-23..02-26, 03-01 and 03-02
+        before the raise (6), 03-03..03-05, 03-08 and 03-09 after it (5).
+        2,000.00 x 6/11 = 1,090.909 -> 1,090.91; 2,100.00 x 5/11 = 954.545 ->
+        954.55; 2,045.46, where the unrounded blend, 22,500.00 / 11 =
+        2,045.4545, rounds to 2,045.45.  02-28 is wholly before the raise and
+        03-31 wholly after it.
+        """
+        basis = _basis(_semi_monthly(), [(date(2027, 1, 15), "2000.00")], _WEDNESDAY_RAISE)
+        assert _pay(basis, date(2027, 2, 28)) == Decimal("2000.00")
+        assert _pay(basis, date(2027, 3, 15)) == Decimal("2045.46")
+        assert _pay(basis, date(2027, 3, 31)) == Decimal("2100.00")
+
+    def test_monthly(self):
+        """Monthly on the last day, $2,000.00, 5% from Monday 2027-03-15: 03-31 pays $2,039.13.
+
+        03-31 pays 02-23..03-25, twenty-three weekdays: 02-23..02-26,
+        03-01..03-05 and 03-08..03-12 before the raise (14), 03-15..03-19 and
+        03-22..03-25 after it (9).  2,000.00 x 14/23 = 1,217.391 -> 1,217.39;
+        2,100.00 x 9/23 = 821.739 -> 821.74; 2,039.13.  02-28 is wholly before
+        the raise and 04-30 wholly after it.
+        """
+        basis = _basis(
+            _monthly(), [(date(2027, 1, 31), "2000.00")], (_percent(date(2027, 3, 15), "0.05"),),
+        )
+        assert _pay(basis, date(2027, 2, 28)) == Decimal("2000.00")
+        assert _pay(basis, date(2027, 3, 31)) == Decimal("2039.13")
+        assert _pay(basis, date(2027, 4, 30)) == Decimal("2100.00")
+
+    def test_a_paycheck_no_raise_reaches_pays_its_pay_whatever_its_weekdays(self):
+        """With no raise each paycheck pays $2,000.00, over 9 to 12 weekdays or 20 to 23.
+
+        Each such paycheck's one share is all of its weekdays, 2,000.00 x n/n.
+        A rule pricing the weekdays rather than sharing the pay over them (a
+        tenth of the pay a weekday, say) would part from the pay on every
+        count but ten.  The counts are asserted so the case cannot pass over
+        periods that all hold one count: twice a month over a year, 2027-01-15
+        through 2028-01-15 (9 to 12), and monthly over two years, through
+        2028-12-31 (20 to 23).
+        """
+        cases = (
+            (_semi_monthly(), date(2027, 1, 15), date(2028, 1, 15), {9, 10, 11, 12}),
+            (_monthly(), date(2027, 1, 31), date(2028, 12, 31), {20, 21, 22, 23}),
+        )
+        for calendar, first, last, counts in cases:
+            basis = _basis(calendar, [(first, "2000.00")])
+            paydays = _paydays(calendar, first, last)
+            assert {_weekdays_paid(calendar, payday) for payday in paydays} == counts
+            assert {_pay(basis, payday) for payday in paydays} == {Decimal("2000.00")}
+
+
+#: 3% from Saturday 2028-01-01, inside the 2028-01-13 paycheck's 2027-12-25..2028-01-07.
+_NEW_YEARS_RAISE = (_percent(date(2028, 1, 1), "0.03"),)
+
+
+class TestARaiseOnNewYearsDay:
+    """A January 1 raise inside a pay period that opens in December."""
+
+    def test_its_paycheck_pays_each_year_s_weekdays_at_their_pay(self):
+        """$2,060.00, 3% from 2028-01-01: 2028-01-13 pays $2,090.90, and is the one badged.
+
+        2028-01-13 pays 2027-12-25..2028-01-07: five weekdays in December
+        (12-27..12-31) at 2,060.00 and five in January (01-03..01-07) at
+        2,060.00 x 1.03 = 2,121.80.  2,060.00 x 5/10 = 1,030.00; 2,121.80 x
+        5/10 = 1,060.90; 2,090.90.  2027-12-30 pays 12-11..12-24, wholly
+        before; 2028-01-27 pays 01-08..01-21, wholly after.
+        """
+        basis = _basis(_biweekly(), [(_OPENS, "2060.00")], _NEW_YEARS_RAISE)
+        paydays = (date(2027, 12, 30), date(2028, 1, 13), date(2028, 1, 27))
+        assert [_pay(basis, payday) for payday in paydays] == [
+            Decimal("2060.00"), Decimal("2090.90"), Decimal("2121.80"),
+        ]
+        assert _badges(basis, *paydays) == ["", "MERIT +3.00%", ""]
+
+    def test_its_paycheck_is_in_its_payday_s_year_to_date(self):
+        """The straddle is 2028's first paycheck, whatever year its weekdays fall in.
+
+        The year-to-date counts a paycheck by its payday
+        (``paydays_in_year_before``), so the half of 2028-01-13 paid for
+        December 2027 is in 2028's wages: 01-13's year-to-date is nothing,
+        01-27's is 2,090.90 and 02-10's is 2,090.90 + 2,121.80 = 4,212.70.
+        2027-12-30's is the 25 paychecks of 2027 before it, 01-14 through
+        12-16: 25 x 2,060.00 = 51,500.00.  No line is on the profile, so each
+        paycheck's wages are its base.
+        """
+        basis = _basis(_biweekly(), [(_OPENS, "2060.00")], _NEW_YEARS_RAISE)
+        assert [_get_cumulative_wages(basis, payday) for payday in (
+            date(2027, 12, 30), date(2028, 1, 13), date(2028, 1, 27), date(2028, 2, 10),
+        )] == [Decimal("51500.00"), Decimal("0"), Decimal("2090.90"), Decimal("4212.70")]
+
+
+class TestTheRetirementGapReadsTheRate:
+    """The retirement dashboard's final paycheck is the pay RATE on a December 1.
+
+    :func:`~app.services.retirement_dashboard_service.compute_gap_net_biweekly`
+    reads :meth:`~app.services.payroll_basis.PayrollBasis.pay_rate_on` the
+    retirement year's December 1 (task plan#3100) and scales it by the current
+    paycheck's take-home rate.  Reading ``base_pay_on`` on that day instead
+    passed every retirement case, since none put a raise near a December 1;
+    this one does.
+    """
+
+    @staticmethod
+    def _gap_net(raises):
+        """The gap's net for $2,000.00 a paycheck under *raises*, retiring 2027-12-31.
+
+        The current paycheck is handed in with a take-home rate of 1,600.00 /
+        2,000.00 = 0.80, read at 2027-03-20.
+        """
+        basis = _basis(_biweekly(), [(_OPENS, "2000.00")], raises)
+        current = paycheck_calculator.PaycheckBreakdown(
+            period=paycheck_calculator.PeriodInfo(
+                date(2027, 3, 11), period_id=1, cadence=PayCadence(FixedDays(14)),
+            ),
+            earnings=paycheck_calculator.Earnings(
+                annual_salary=Decimal("52000.00"),
+                base_biweekly=Decimal("2000.00"),
+                gross_biweekly=Decimal("2000.00"),
+                net_pay=Decimal("1600.00"),
+            ),
+        )
+        return retirement_dashboard_service.compute_gap_net_biweekly(
+            retirement_dashboard_service.GapInputs(
+                settings=None, pensions=[], salary_profiles=[basis.profile],
+                pay_cadence=PayCadence(FixedDays(14)),
+            ),
+            retirement_dashboard_service.BelievedPayroll(
+                terms_for=lambda _profile: tuple(raises), current_paycheck=current,
+            ),
+            date(2027, 12, 31), date(2027, 3, 20), basis.calendar,
+        ).net
+
+    def test_a_raise_from_december_1_is_priced_whole(self):
+        """5% from Wednesday 2027-12-01: the gap's net is 2,100.00 x 0.80 = 1,680.00.
+
+        The pay in force on 12-01 is 2,000.00 x 1.05 = 2,100.00.  The paycheck
+        paying 12-01, 12-16's (11-27..12-10), is a straddle: 2 weekdays at
+        2,000.00 and 8 at 2,100.00, 400.00 + 1,680.00 = 2,080.00, which would
+        give 1,664.00.  ``base_pay_on`` asked of 12-01 itself prices it as the
+        paycheck of 12-02, its nearest payday, whose 11-13..11-26 is wholly
+        before the raise: 2,000.00, which would give 1,600.00.
+        """
+        raise_ = (_percent(date(2027, 12, 1), "0.05"),)
+        basis = _basis(_biweekly(), [(_OPENS, "2000.00")], raise_)
+        assert _pay(basis, date(2027, 12, 16)) == Decimal("2080.00")
+        assert self._gap_net(raise_) == Decimal("1680.00")
+
+    def test_without_the_raise_it_is_the_pay(self):
+        """No raise: 2,000.00 x 0.80 = 1,600.00, the case's base line."""
+        assert self._gap_net(()) == Decimal("1600.00")

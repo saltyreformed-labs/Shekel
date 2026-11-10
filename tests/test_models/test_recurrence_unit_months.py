@@ -5,7 +5,7 @@ Ruling **plan#2748** (developer, 2026-11-03) moved the one statement of which
 recurrence units are measured in months, and how many, off a code table and
 onto ``ref.recurrence_units`` (migration ``c4e8a1f7d2b6``)::
 
-    months_per_unit   smallint NULL   1 month, 12 year, NULL period and week
+    months_per_unit   smallint NULL   1 month, 12 year, NULL period, week, due date
     has_day_of_month  boolean NOT NULL GENERATED (months_per_unit IS NOT NULL)
 
 **Four classes.**  What the rows SAY, against the two places a database is
@@ -50,12 +50,16 @@ _MIGRATION = load_migration_module(
 )
 
 #: What each unit's row must say, written out by hand: the paycheck and week
-#: units are not measured in months, a month is one, a year twelve.
+#: units are not measured in months, a month is one, a year twelve.  The
+#: due-date unit (plan step credit_card:CC-6, ruling plan#2671) is not either:
+#: its dates are the card's statements' due dates, and it names no day of the
+#: month (no nominal day, plan#2673).
 _EXPECTED = {
     "period": (None, False),
     "week": (None, False),
     "month": (1, True),
     "year": (12, True),
+    "due_date": (None, False),
 }
 
 

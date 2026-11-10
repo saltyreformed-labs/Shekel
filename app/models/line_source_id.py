@@ -14,8 +14,10 @@ re-import re-sights a line under the same id, which is two sighting rows and
 one line -- so from then until this table the rule was the record door's
 check alone (``statement_import._plan._refuse_moved_ids``).  A missed pairing
 would have recorded one bank transaction as two lines, and Books vs bank sums
-every line of a day.  The door still refuses first, with a sentence; this key
-is the backstop that refuses the state whatever wrote it.
+every line of a day.  The door still refuses each shape that would mean a
+second line under a held id, with a sentence, before it writes; this key
+refuses the state itself to any writer the door does not govern -- one
+outside it, or two imports racing through it.
 
 **The id stays with its LINE for as long as the line exists** (ruling
 **plan#2233**, 2026-11-10): the row goes only when its line does
@@ -65,9 +67,10 @@ class LineSourceId(db.Model):
     after (ruling **R-BI10**), so a line this source showed under one id can
     be paired by wording to a later file's line carrying another.  What the
     key forbids is the converse -- one id naming two lines -- which is the
-    double count.  A file stating two ids that one line already holds is
-    refused by the door (``statement_import._plan._refuse_moved_ids``),
-    because recording it would put one of them on a second line.
+    double count.  A file stating, as two lines, two ids that one line
+    already holds is refused by the door
+    (``statement_import._plan._refuse_ids_sharing_a_line``), because it
+    says the one line is two transactions.
 
     **No relationship to the line**, deliberately: the one reader joins it in
     a query (``_plan._held_ids``) through :meth:`of_its_line`, the one writer

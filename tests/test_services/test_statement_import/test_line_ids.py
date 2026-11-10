@@ -4,9 +4,10 @@ The id lives once, in ``budget.line_source_ids``, and stays with its LINE for
 as long as the line is recorded (ruling **plan#2233**).  These cases grade the
 door over that key: the writer records each id once, on the line it names; a
 re-sent id meets that line even after the import that first showed it is
-undone, while another import still shows the line; the two shapes the key
-would refuse are refused first, with a sentence, and write nothing; and the
-id is free again once every import showing its line is gone.
+undone, while another import still shows the line; the two shapes that
+would mean a second line under a held id are refused, with a sentence, and
+write nothing; and the id is free again once every import showing its line
+is gone.
 
 **The file is a stand-in, the door is real.**  The one shipped adapter
 (SECU's CSV) carries no id, so no CSV bytes can state one; each case that
@@ -307,7 +308,7 @@ class TestStepOnePairsByTheKey:
 
 
 class TestTwoIdsOneLine:
-    """``StatementLineIdsShareALine`` -- the other shape the key would refuse."""
+    """``StatementLineIdsShareALine`` -- the other shape meaning a second line under a held id."""
 
     def test_a_file_stating_both_ids_of_one_line_as_two_lines_is_refused(
         self, app, db, seed_user, monkeypatch,
@@ -316,9 +317,11 @@ class TestTwoIdsOneLine:
 
         The line holds ``TRN-881`` and, by a wording pairing, ``TRN-999``.  A
         file stating both as two coffees says they are two transactions; the
-        id step can pair only one to the line, and the other recorded beside
-        it would put a held id on a second line.  Before the key this
-        recorded the second coffee silently, with ``TRN-999`` on two lines.
+        id step pairs both to the one line, which would be two sightings of it
+        from one import, and recording either beside it would put a held id
+        on a second line.  Before the key the id step paired only
+        ``TRN-881``, and this recorded the second coffee silently, with
+        ``TRN-999`` on two lines.
         """
         _record(monkeypatch, seed_user, [_line("TRN-881")], name="one.dat")
         _record(monkeypatch, seed_user, [_line("TRN-999")], name="two.dat")

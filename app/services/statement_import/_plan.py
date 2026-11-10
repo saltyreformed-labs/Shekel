@@ -213,10 +213,14 @@ def _refuse_moved_ids(
     A source names ONE line per id, and the pairing that honours that
     (:func:`_pair_group`, step 1) works within a ``(day, amount)`` group -- so
     an id whose recorded line is in a DIFFERENT group is the one shape the
-    pairing cannot reach and recording would make two lines of.
-    ``uq_line_source_ids_account_source_external`` refuses that state as a
-    database error (plan step plan#2232); this is the same refusal, first,
-    with a sentence.
+    pairing cannot reach, and the file means a second line under it.  This
+    is the refusal of that shape, with a sentence, and the precondition step 1
+    is total on: :func:`_pair_by_id` looks a held id's line up among the
+    stated group's own recorded lines, which a moved id's line is not among.
+    ``uq_line_source_ids_account_source_external`` (plan step plan#2232)
+    refuses the state itself -- one id on two lines -- to a writer outside
+    this door and to two imports racing through it; one import alone never
+    reaches it.
 
     Args:
         lines: The file's lines.
@@ -240,14 +244,17 @@ def _refuse_ids_sharing_a_line(
 ) -> None:
     """Refuse a file that states two ids, as two lines, that one line holds.
 
-    The other shape the key would refuse (plan step plan#2232).  A line can
-    hold two ids from one source (its wording paired a new id to it), and a
-    file stating both says they are two transactions: step 1 of
-    :func:`_pair_group` pairs one of them to the line, and the other would
-    be recorded on a second line under an id the first already holds.  Run
-    after :func:`_refuse_moved_ids`, so every held id here is stated in its
-    line's own group, and after :func:`_refuse_repeated_ids`, so two stated
-    lines are two distinct ids.
+    A line can hold two ids from one source (its wording paired a new id to
+    it, plan step plan#2232), and a file stating both says they are two
+    transactions where the app holds one.  Step 1 of :func:`_pair_group`
+    would pair BOTH to that one line, and recording would write two sightings
+    of it from one import, which ``uq_statement_line_sightings_line_import``
+    refuses as a database error; recording either on a second line instead
+    would put a held id on two lines, which
+    ``uq_line_source_ids_account_source_external`` refuses.  This refuses the
+    shape first, with a sentence.  Run after :func:`_refuse_moved_ids`, so
+    every held id here is stated in its line's own group, and after
+    :func:`_refuse_repeated_ids`, so two stated lines are two distinct ids.
 
     Args:
         lines: The file's lines.

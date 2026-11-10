@@ -272,7 +272,7 @@ class TestASourceNamesOneLinePerId:
     """:func:`_held_ids` and :func:`_refuse_moved_ids` -- the door's rule."""
 
     def test_a_held_id_on_ANOTHER_day_is_refused(self, app, db, seed_user):
-        """The shape the id key refuses, refused first with a sentence."""
+        """A held id stated on another day means a second line under it: refused."""
         secu = ref_cache.statement_source_id(_SECU)
         statement = an_import(seed_user)
         line = a_bank_line(

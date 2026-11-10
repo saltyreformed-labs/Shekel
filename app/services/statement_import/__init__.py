@@ -38,7 +38,8 @@ The public surface, and what each piece is for:
 * :class:`StatementImportError` and its subclasses -- every refusal the
   import door can raise, each refusing the whole file; a route catches the
   base and renders its message.  They stood in :mod:`app.exceptions` until
-  plan step plan#2232 moved them here verbatim (ruling **R-IR**).
+  plan step plan#2232 moved them here verbatim (ruling **R-IR**), and then
+  added :class:`StatementLineIdsShareALine`, which never stood there.
 * :func:`delete_import` -- the one UNDO door, returning
   :class:`ImportRemoval`, and the only thing in this package that destroys.
   It is what finding **N-302** says a refusal owes (plan step

@@ -199,10 +199,11 @@ class StatementLineIdMoved(StatementImportError):
     this source holds that id on before it compares any wording.  That
     pairing is within a ``(day, amount)`` group, so a file stating a held id
     on a DIFFERENT day or amount is the one shape it cannot pair and must not
-    record: recording it would give this source two lines under one id, which
-    ``uq_line_source_ids_account_source_external`` refuses as a database
-    error (plan step plan#2232).  This is the same refusal, first, with a
-    sentence.
+    record: the file means a second line under an id this source holds on
+    one.  The door refuses it here, before the pairing
+    (``_plan._refuse_moved_ids``); ``uq_line_source_ids_account_source_external``
+    (plan step plan#2232) refuses the same state to a writer outside the
+    door and to two imports racing through it.
 
     Attributes:
         external_id: The id the source reused.
@@ -235,11 +236,15 @@ class StatementLineIdsShareALine(StatementImportError):
     wording of a held line was paired to that line, and the line gained the
     second id.  A later file that states BOTH ids, as two lines of one
     ``(day, amount)`` group, says the two are separate transactions where the
-    app holds one: the id step can pair only one of them to the line, and
-    recording the other anywhere else would put a held id on a second line,
-    which ``uq_line_source_ids_account_source_external`` refuses.  *Until
-    that key existed nothing refused this shape and the door recorded the
-    second id on a second line silently -- the state it existed to refuse.*
+    app holds one.  The id step pairs both to that one line, which would be
+    two sightings of it from one import
+    (``uq_statement_line_sightings_line_import``), and recording either on
+    another line would put a held id on a second line
+    (``uq_line_source_ids_account_source_external``), so the door refuses the
+    file first (``_plan._refuse_ids_sharing_a_line``).  *Until that key
+    existed the id step paired only the first, the second fell to the steps
+    after it, and the door recorded it on another line silently -- the state
+    the key exists to refuse.*
 
     **It refuses rather than moving an id to a new line**, because the app
     cannot tell which earlier pairing was the mistake, and an observation

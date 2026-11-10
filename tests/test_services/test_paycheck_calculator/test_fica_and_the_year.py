@@ -17,8 +17,8 @@ from ._helpers import (
     TWO_PLACES,
     FakeRaise,
     _period,
-    FakeStateTaxConfig,
-    FakeFicaConfig,
+    FakeStateTaxRules,
+    FakeFicaRules,
     FakeProfile,
 )
 
@@ -167,12 +167,12 @@ class TestProjectSalary:
         configs_by_year = {
             2026: {
                 "bracket_set": simple_bracket_set,
-                "state_config": FakeStateTaxConfig(flat_rate="0.045"),
+                "state_config": FakeStateTaxRules(flat_rate="0.045"),
                 "fica_config": standard_fica,
             },
             2027: {
                 "bracket_set": simple_bracket_set,
-                "state_config": FakeStateTaxConfig(flat_rate="0.090"),
+                "state_config": FakeStateTaxRules(flat_rate="0.090"),
                 "fica_config": standard_fica,
             },
         }
@@ -305,7 +305,7 @@ class TestFICADirectBoundary:
     @pytest.fixture
     def fica_config(self):
         """Standard FICA config with ss_wage_base=168600."""
-        return FakeFicaConfig()
+        return FakeFicaRules()
 
     def test_ss_at_cap_zero(self, fica_config):
         """cumulative == ss_wage_base exactly: SS = 0.00.

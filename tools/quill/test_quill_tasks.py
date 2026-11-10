@@ -139,7 +139,7 @@ def test_a_leaf_is_never_filed_under_a_step_with_a_task_still_open(code, tmp_pat
     """A split step is never shipped itself (R-BAL177), so no task under it could be done: the
     split waits until each open task is dropped; a closed one does not hold it."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add_task(2, 1)
     tracker.add_task(3, 1, is_open=False, state_reason="NOT_PLANNED", closed_by_tool=True)
     spec = tmp_path / "leaf.md"

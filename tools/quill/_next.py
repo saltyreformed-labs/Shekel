@@ -27,21 +27,28 @@ no urgency from it, and it moves up at once when the mark is lifted.
 ``--arc`` hands out the first step of that arc in the same walk, so it never hands out another
 arc's step, and a step needing one simply passes.  Split out of :mod:`_state`, which On hold would
 take past the 1,000 lines ``too-many-lines`` allows.
+
+**A piece nothing ranks is named** (ruling plan#3304): a leaf takes no suggested Priority, and
+the Inbox lists none (ruling plan#3229), so one holding no Priority at it or above (:func:`ranked`)
+would be seen nowhere; :func:`unranked_lines` names each on the board, and the step to give one.
 """
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 
+from tools.quill._command import _label
 from tools.quill._fields import HIGH, URGENT
 from tools.quill._git import Claim
 from tools.quill._state import (
     SHIPPABLE,
     above,
+    at_and_above,
     blockers,
     has_turn,
     held_at,
     is_container,
+    is_work,
     leaves,
     never_offered,
     resolved,
@@ -73,10 +80,48 @@ class NextAnswer:
     waiting: tuple[Waiting, ...]
 
 
+def ranked(card: BareCard, cards: Mapping[int, BareCard]) -> bool:
+    """Whether a Priority ranks ``card``: one held by it or by a step above it
+    (:func:`_state.at_and_above`, the walk :func:`_rank` reads), On hold among them.  The one
+    spelling of it: no leaf is filed under a step it does not hold for (ruling plan#3229,
+    ``_filing._refuse_unranked``), no clear that would leave a piece without one is taken
+    (``_arc_label._unranked_refusal``), and ``quill next`` names each piece on the board without
+    one (:func:`unranked_lines`; ruling plan#3304)."""
+    return any(step.priority is not None for step in at_and_above(card, cards))
+
+
+def is_piece(card: Card, cards: Mapping[int, Card], shipped: Iterable[int]) -> bool:
+    """Whether ``card`` is a piece of a split step still to build: an open step linked under
+    another and split into none (:func:`_state.is_work`), not yet done with
+    (:func:`_state.resolved`).  It takes no suggested Priority and the Inbox lists it not
+    (ruling plan#3229): the steps above it rank it, unless it holds one of its own."""
+    return (card.kind == "step" and card.parent is not None and card.is_open
+            and is_work(card, cards, shipped) and not resolved(card.number, cards, shipped))
+
+
+def unranked_lines(order: Iterable[int], cards: Mapping[int, Card],
+                   shipped: Iterable[int]) -> list[str]:
+    """A line for each piece on the board (:func:`is_piece`), in the board's order, that no
+    Priority ranks (:func:`ranked`), naming the step at the top of its chain to give one (ruling
+    plan#3304), so a Priority cleared on the web is seen too.  ``cards`` holds every step above
+    each (``quill next``'s read, :func:`_command.with_closure`)."""
+    shipped = set(shipped)
+    lines = []
+    for number in order:
+        card = cards.get(number)
+        if card is None or not is_piece(card, cards, shipped) or ranked(card, cards):
+            continue
+        top = list(above(card, cards))[-1].number
+        lines.append(f"{_label(card)} holds no Priority, nor does any step above it, and the "
+                     f"Inbox lists no piece of a split step (ruling plan#3304): give plan#{top} "
+                     f"one (`quill priority plan#{top} --to PRIORITY`)")
+    return lines
+
+
 def _rank(card: Card, cards: Mapping[int, Card]) -> int:
     """Where ``card``'s mark puts it among :data:`_AHEAD`: the highest of its own and each step
-    above it, and past them all with neither."""
-    marks = {step.priority for step in (card, *above(card, cards))}
+    above it (:func:`_state.at_and_above`), and past them all with neither."""
+    marks = {step.priority for step in at_and_above(card, cards)}
     return next((rank for rank, mark in enumerate(_AHEAD) if mark in marks), len(_AHEAD))
 
 

@@ -64,7 +64,6 @@ F_068_LOCKED_COLUMNS = [
     ("salary", "salary_profiles", "is_active", "true"),
     ("salary", "salary_profiles", "sort_order", "0"),
     ("salary", "salary_raises", "is_recurring", "false"),
-    ("salary", "tax_brackets", "sort_order", "0"),
 ]
 
 
@@ -78,11 +77,6 @@ F_134_RESTORED_COLUMNS = [
     # ``employer_contribution_type_id`` -- a ref FK carries no
     # server_default (an id is not a static literal), so it is no longer
     # an F-134 restored-default column.
-    ("salary", "fica_configs", "ss_rate", "0.0620"),
-    ("salary", "fica_configs", "ss_wage_base", "176100"),
-    ("salary", "fica_configs", "medicare_rate", "0.0145"),
-    ("salary", "fica_configs", "medicare_surtax_rate", "0.0090"),
-    ("salary", "fica_configs", "medicare_surtax_threshold", "200000"),
     ("salary", "pension_profiles", "name", "'Pension'"),
     ("salary", "pension_profiles", "consecutive_high_years", "4"),
     ("salary", "salary_profiles", "state_code", "'NC'"),
@@ -385,29 +379,3 @@ def test_pension_profiles_name_default_fires_on_raw_insert(db, seed_user):
     assert row.consecutive_high_years == 4
     assert row.is_active is True
 
-
-def test_fica_configs_rate_defaults_fire_on_raw_insert(db, seed_user):
-    """F-134 numeric server_defaults restore the documented FICA constants.
-
-    A raw INSERT that supplies only ``user_id`` and ``tax_year``
-    should land 6.20% / 1.45% / 0.90% / 200,000 / 176,100 in the
-    rate columns -- the rates that were the original migration's
-    defaults but had drifted off the live DB before C-25.
-    """
-    user_id = seed_user["user"].id
-    db.session.execute(db.text(
-        "INSERT INTO salary.fica_configs (user_id, tax_year) "
-        "VALUES (:user_id, 2030)"
-    ), {"user_id": user_id})
-    db.session.commit()
-    row = db.session.execute(db.text(
-        "SELECT ss_rate, ss_wage_base, medicare_rate, "
-        "       medicare_surtax_rate, medicare_surtax_threshold "
-        "FROM salary.fica_configs "
-        "WHERE user_id = :user_id AND tax_year = 2030"
-    ), {"user_id": user_id}).one()
-    assert row.ss_rate == Decimal("0.0620")
-    assert row.ss_wage_base == Decimal("176100.00")
-    assert row.medicare_rate == Decimal("0.0145")
-    assert row.medicare_surtax_rate == Decimal("0.0090")
-    assert row.medicare_surtax_threshold == Decimal("200000.00")

@@ -54,7 +54,7 @@ from app.models.loan_features import RateHistory
 from app.models.paycheck_line import PaycheckLine
 from app.models.ref import (
     AccountType, CalcMethod, PaycheckLineKind,
-    FilingStatus, RaiseType, TaxType,
+    FilingStatus, RaiseType,
 )
 from app.models.salary_profile import SalaryProfile
 from app.models.user import UserSettings
@@ -91,10 +91,6 @@ CK_DEDUCTION_INFL_RATE = "ck_paycheck_lines_valid_inflation_rate"
 CK_DEDUCTION_INFL_MONTH = "ck_paycheck_lines_valid_inflation_month"
 CK_RAISE_DATE = "ck_salary_raises_valid_effective_date"
 CK_RAISE_LEAP_DAY = "ck_salary_raises_recurring_not_on_february_29"
-CK_STATE_TAX_DEDUCTION = "ck_state_tax_configs_nonneg_standard_deduction"
-CK_STATE_TAX_YEAR = "ck_state_tax_configs_valid_tax_year"
-CK_FICA_TAX_YEAR = "ck_fica_configs_valid_tax_year"
-CK_BRACKET_TAX_YEAR = "ck_tax_bracket_sets_valid_tax_year"
 
 
 #: The shared reader, moved to ``tests/_test_helpers`` at plan step
@@ -978,103 +974,3 @@ class TestSalaryRaiseCheck:
             self._insert(profile.id, self._type_id("merit"), "DATE '2028-02-29'")
             db.session.rollback()
 
-
-class TestStateTaxConfigCheck:
-    """``salary.state_tax_configs`` CHECK constraints (F-077)."""
-
-    def test_negative_standard_deduction_rejected(self, app, seed_user):
-        """Storage rejects -1.00 via ck_state_tax_configs_nonneg_standard_deduction."""
-        with app.app_context():
-            tax_type_id = (
-                db.session.query(TaxType).filter_by(name="flat").one().id
-            )
-            with pytest.raises(IntegrityError) as info:
-                db.session.execute(
-                    text(
-                        "INSERT INTO salary.state_tax_configs "
-                        "(user_id, tax_type_id, filing_status_id, state_code, "
-                        " tax_year, flat_rate, standard_deduction, created_at) "
-                        "VALUES (:uid, :ttid, "
-                        " (SELECT id FROM ref.filing_statuses WHERE name='single'), "
-                        " 'CA', 2026, 0.05, -1.00, now())"
-                    ),
-                    {"uid": seed_user["user"].id, "ttid": tax_type_id},
-                )
-                db.session.flush()
-            db.session.rollback()
-            assert _constraint_name_from(info.value) == CK_STATE_TAX_DEDUCTION
-
-    def test_tax_year_above_2100_rejected(self, app, seed_user):
-        """Storage rejects 2200 via ck_state_tax_configs_valid_tax_year."""
-        with app.app_context():
-            tax_type_id = (
-                db.session.query(TaxType).filter_by(name="flat").one().id
-            )
-            with pytest.raises(IntegrityError) as info:
-                db.session.execute(
-                    text(
-                        "INSERT INTO salary.state_tax_configs "
-                        "(user_id, tax_type_id, filing_status_id, state_code, "
-                        " tax_year, flat_rate, created_at) "
-                        "VALUES (:uid, :ttid, "
-                        " (SELECT id FROM ref.filing_statuses WHERE name='single'), "
-                        " 'CA', 2200, 0.05, now())"
-                    ),
-                    {"uid": seed_user["user"].id, "ttid": tax_type_id},
-                )
-                db.session.flush()
-            db.session.rollback()
-            assert _constraint_name_from(info.value) == CK_STATE_TAX_YEAR
-
-
-class TestFicaConfigCheck:
-    """``salary.fica_configs.tax_year`` CHECK (F-077)."""
-
-    def test_tax_year_below_2000_rejected(self, app, seed_user):
-        """Storage rejects 1999 via ck_fica_configs_valid_tax_year."""
-        with app.app_context():
-            with pytest.raises(IntegrityError) as info:
-                db.session.execute(
-                    text(
-                        "INSERT INTO salary.fica_configs "
-                        "(user_id, tax_year, ss_rate, ss_wage_base, "
-                        " medicare_rate, medicare_surtax_rate, "
-                        " medicare_surtax_threshold, created_at) "
-                        "VALUES (:uid, 1999, 0.062, 176100, "
-                        "        0.0145, 0.009, 200000, now())"
-                    ),
-                    {"uid": seed_user["user"].id},
-                )
-                db.session.flush()
-            db.session.rollback()
-            assert _constraint_name_from(info.value) == CK_FICA_TAX_YEAR
-
-
-class TestTaxBracketSetCheck:
-    """``salary.tax_bracket_sets.tax_year`` CHECK (F-077)."""
-
-    def test_tax_year_above_2100_rejected(self, app, seed_user):
-        """Storage rejects 2200 via ck_tax_bracket_sets_valid_tax_year."""
-        with app.app_context():
-            single_id = (
-                db.session.query(FilingStatus)
-                .filter_by(name="single").one().id
-            )
-            with pytest.raises(IntegrityError) as info:
-                db.session.execute(
-                    text(
-                        "INSERT INTO salary.tax_bracket_sets "
-                        "(user_id, filing_status_id, tax_year, "
-                        " standard_deduction, child_credit_amount, "
-                        " other_dependent_credit_amount, created_at) "
-                        "VALUES (:uid, :fid, 2200, 15000.00, "
-                        "        2000.00, 500.00, now())"
-                    ),
-                    {
-                        "uid": seed_user["user"].id,
-                        "fid": single_id,
-                    },
-                )
-                db.session.flush()
-            db.session.rollback()
-            assert _constraint_name_from(info.value) == CK_BRACKET_TAX_YEAR

@@ -2,7 +2,7 @@
 Shekel Budget App -- Salary Profile Model (salary schema)
 
 A salary profile defines an income source with its pay list, filing status,
-state tax config, and links to raises and deductions for paycheck calculation.
+state, and links to raises and deductions for paycheck calculation.
 """
 
 from app.extensions import db

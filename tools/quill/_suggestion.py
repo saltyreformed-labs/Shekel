@@ -11,8 +11,10 @@ through :meth:`Suggestions._write`, the second door beside ``_tracker.Board._wri
 plan#3257): it names one card's node id as ``$issue``, a card the tracker read, and no other.
 The board needs its door because it is the organization's, which a node id can reach whatever
 the token; a card is the tracker repository's, and quill's App token is narrowed to that
-repository (``_tracker.Tracker.connect``).  ``test__board_fence.py`` holds every mutation
-quill sends to one of the two doors.
+repository (``_tracker.Tracker.connect``).  ``test__board_fence.py`` holds each mutation
+quill's source shows to one of the two doors, and names what it cannot see, a door's own
+``_write`` among them: a ``_write`` naming another ``$issue`` passes it, so a reviewer of a
+change to this one reads it.
 
 What GitHub does, measured 2026-11-10 on the task plan#3178 with the developer's go-ahead
 (rulings plan#3224, plan#3233):

@@ -114,8 +114,9 @@ _SEARCH_CAP = 1000
 #: (:meth:`Tracker.set_field`): REST's most a page, and a card holds one a field.
 _VALUES_PAGE = 100
 
-#: The board's writes, the only GraphQL mutations quill sends (a recording
-#: sends no other: ``_recorded.refusal``), each sent by :meth:`Board._write` alone.
+#: The board's writes, with the suggestion's two (``_suggestion.SUGGEST``, ``WITHDRAW``) the
+#: only GraphQL mutations quill sends (a recording sends no other: ``_recorded.refusal``), each
+#: sent by :meth:`Board._write` alone.
 #: ``$p`` is the board, ``$c`` a card's node id, ``$i`` a board item, ``$a`` the item
 #: it goes after.
 BOARD_ADD = ("mutation($p: ID!, $c: ID!) { addProjectV2ItemById(input: {projectId: $p, "

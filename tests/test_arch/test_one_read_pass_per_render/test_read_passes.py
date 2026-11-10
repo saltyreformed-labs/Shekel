@@ -98,7 +98,7 @@ class TestOneReadPassPerRender:
         )
 
     @pytest.mark.parametrize("path", ["/grid", "/"])
-    def test_a_rolling_owner_opens_TWO_passes_and_that_is_the_bound(
+    def test_a_rolling_owner_opens_two_passes_and_that_is_the_bound(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, app, db, auth_client, seed_user, seed_periods_today, path,
     ):
         """With rolling ON and the window SHORT, these renders open TWO.
@@ -131,7 +131,16 @@ class TestOneReadPassPerRender:
         ``extend_pay_periods`` and this case would silently grade the
         rolling-OFF path -- which every other test here already covers.
 
+        Pylint: ``too-many-arguments`` / ``too-many-positional-arguments``
+        (6/5) -- five fixtures, each read, and the one parametrized path.
+
         Args:
+            app: The ``app`` fixture.
+            db: The ``db`` fixture.
+            auth_client: The signed-in owner's client.
+            seed_user: The ``seed_user`` fixture.
+            seed_periods_today: The ``seed_periods_today`` fixture; the
+                rolling target is the owner's saved period count plus three.
             path: The render to count, as a URL.
         """
         with app.app_context():

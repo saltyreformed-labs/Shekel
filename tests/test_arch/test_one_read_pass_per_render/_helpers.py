@@ -5,6 +5,9 @@
 from datetime import date
 from decimal import Decimal
 
+from app.models.savings_goal import SavingsGoal
+from app.models.user import UserSettings
+from app.utils.dates import add_months, display_today
 from tests._test_helpers import create_loan_account, make_investment_account, make_salary_profile
 
 
@@ -59,10 +62,6 @@ def _seed_projecting_account(db, seed_user, seed_periods_today):
     Widening the owner is the honest way to widen the gate; the claim these
     tests make is over the state seeded HERE, not over every owner.
     """
-    # pylint: disable=import-outside-toplevel
-    from app.models.user import UserSettings
-    from app.utils.dates import add_months
-
     settings = (
         db.session.query(UserSettings)
         .filter_by(user_id=seed_user["user"].id)
@@ -108,10 +107,6 @@ def _seed_dashboard_owner(db, seed_user, seed_periods_today):
         The seeded loan :class:`~app.models.account.Account`, so a caller can
         assert the tier it feeds actually rendered.
     """
-    # pylint: disable=import-outside-toplevel
-    from app.models.savings_goal import SavingsGoal
-    from app.utils.dates import add_months, display_today
-
     _seed_projecting_account(db, seed_user, seed_periods_today)
     loan = create_loan_account(
         seed_user, db.session, name="Dashboard Mortgage",

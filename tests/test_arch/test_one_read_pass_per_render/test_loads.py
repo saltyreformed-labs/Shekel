@@ -1,5 +1,11 @@
 """What one render runs: each retirement input loaded once, and one walk per distinct plan."""
 
+from app.services import (
+    retirement_dashboard_service,
+    retirement_levers,
+    retirement_plan,
+    retirement_readiness,
+)
 from app.services.balance_at import BalanceContext
 from tests._test_helpers import counting_calls
 
@@ -49,7 +55,7 @@ class TestOneLoadPerRender:
         )
 
     def test_the_page_derives_no_plan_twice(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, db, seed_user, seed_periods_today,
     ):
         """The projection walk runs once per DISTINCT plan, never twice for one.
 
@@ -68,9 +74,6 @@ class TestOneLoadPerRender:
         """
         with app.app_context():
             _seed_projecting_account(db, seed_user, seed_periods_today)
-
-        # pylint: disable=import-outside-toplevel
-        from app.services import retirement_levers, retirement_plan, retirement_readiness
 
         with app.app_context():
             inputs = retirement_plan.load_retirement_inputs(
@@ -106,9 +109,6 @@ class TestOneLoadPerRender:
         """
         with app.app_context():
             _seed_projecting_account(db, seed_user, seed_periods_today)
-
-        # pylint: disable=import-outside-toplevel
-        from app.services import retirement_dashboard_service
 
         with counting_calls(*_ONCE_PER_RENDER) as render_only:
             assert auth_client.get("/retirement").status_code == 200

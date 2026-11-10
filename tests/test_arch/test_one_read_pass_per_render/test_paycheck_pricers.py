@@ -4,10 +4,18 @@ from datetime import date
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import EmployerContributionTypeEnum, TxnTypeEnum
+from app.enums import EmployerContributionTypeEnum, GoalModeEnum, IncomeUnitEnum, TxnTypeEnum
 from app.models.investment_params import InvestmentParams
 from app.models.salary_profile import SalaryProfile
-from tests._test_helpers import counting_calls, generate_row_of, make_every_period_rule
+from app.models.savings_goal import SavingsGoal
+from app.models.transaction_template import TransactionTemplate
+from app.utils.dates import display_today
+from tests._test_helpers import (
+    counting_calls,
+    generate_row_of,
+    make_every_period_rule,
+    make_recurring_raise,
+)
 
 from ._helpers import _CALENDAR_DOOR, _seed_projecting_account
 
@@ -88,7 +96,7 @@ class TestOnePaycheckProjectionPerProfilePerRender:
     scenario alone and had nothing to hand it (ledger row **P63**); the basis
     is built OVER the pass's pricer now, so a render that prices a salary ROW
     through the amount model and reads a payroll FEED holds one pricer for
-    both.  :meth:`test_savings_prices_a_salary_row_and_a_feed_through_ONE_pricer`
+    both.  :meth:`test_savings_prices_a_salary_row_and_a_feed_through_one_pricer`
     is the case that reads both paths and is the one C12 turned from 2 to 1;
     the three renders above it read one path each and were 1 before.  This
     class stays: it is what keeps a second source from returning.
@@ -179,9 +187,6 @@ class TestOnePaycheckProjectionPerProfilePerRender:
         and undated by hand, so the amount model dispatches it to the salary
         rule rather than to a stated figure.
         """
-        # pylint: disable=import-outside-toplevel
-        from app.models.transaction_template import TransactionTemplate
-
         profile = (
             db.session.query(SalaryProfile)
             .filter_by(user_id=seed_user["user"].id, is_active=True)
@@ -203,7 +208,7 @@ class TestOnePaycheckProjectionPerProfilePerRender:
         db.session.commit()
         return row
 
-    def test_savings_prices_a_salary_row_and_a_feed_through_ONE_pricer(
+    def test_savings_prices_a_salary_row_and_a_feed_through_one_pricer(
         self, app, db, auth_client, seed_user, seed_periods_today,
     ):
         """GET /savings builds ONE pricer when it reads BOTH paycheck paths.
@@ -280,10 +285,6 @@ class TestOnePaycheckProjectionPerProfilePerRender:
         that paycheck, so a wrong one is visible on the surface and not only
         in this counter.
         """
-        # pylint: disable=import-outside-toplevel
-        from app.enums import GoalModeEnum, IncomeUnitEnum
-        from app.models.savings_goal import SavingsGoal
-
         with app.app_context():
             _seed_projecting_account(db, seed_user, seed_periods_today)
             db.session.add(SavingsGoal(
@@ -352,10 +353,6 @@ class TestOnePaycheckProjectionPerProfilePerRender:
     @staticmethod
     def _seed_forever_raise(db, seed_user):
         """One recurring 5% January raise from next year, believed forever."""
-        # pylint: disable=import-outside-toplevel
-        from app.utils.dates import display_today
-        from tests._test_helpers import make_recurring_raise
-
         profile = (
             db.session.query(SalaryProfile)
             .filter_by(user_id=seed_user["user"].id, is_active=True)

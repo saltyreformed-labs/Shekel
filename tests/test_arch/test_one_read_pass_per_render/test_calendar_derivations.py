@@ -251,8 +251,9 @@ class TestOneCalendarDerivationPerRender:
             "list and the report"
         )
 
+    @pytest.mark.usefixtures("seed_periods_today")
     def test_the_cash_detail_page_derives_the_calendar_once(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, auth_client, seed_user,
     ):
         """GET /accounts/<id>/details derives the pay calendar exactly once.
 
@@ -319,7 +320,7 @@ class TestOneCalendarDerivationPerRender:
         )
 
     def test_the_carry_forward_preview_derives_the_calendar_once(
-        self, app, db, auth_client, seed_user, seed_periods_today,
+        self, app, auth_client, seed_periods_today,
     ):
         """GET the carry-forward modal derives the pay calendar exactly once.
 
@@ -359,7 +360,7 @@ class TestOneCalendarDerivationPerRender:
             "threads it into both period lookups and the generation seam"
         )
 
-    def test_the_salary_profile_POST_derives_the_calendar_once(
+    def test_the_salary_profile_post_derives_the_calendar_once(
         self, app, db, auth_client, seed_user, seed_periods,
     ):
         """POST /salary derives the owner's pay calendar exactly once.
@@ -424,7 +425,7 @@ class TestOneCalendarDerivationPerRender:
             f"pay list it prices"
         )
 
-    def test_the_salary_update_POST_derives_the_calendar_once(
+    def test_the_salary_update_post_derives_the_calendar_once(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, app, db, auth_client, seed_user, seed_periods, monkeypatch,
     ):
         """POST /salary/<id> with a stub's two dates derives the pay calendar once.
@@ -442,6 +443,11 @@ class TestOneCalendarDerivationPerRender:
         moving from 6 to 3, and the regeneration being reached once inside the
         window, are asserted beside the count: a door that refused, or a
         regeneration that returned early, derives one calendar too.
+
+        Pylint: ``too-many-arguments`` / ``too-many-positional-arguments``
+        (6/5) -- six fixtures, each read: the job is created through the
+        signed-in client from the saved calendar on a frozen day, and read back
+        through the session.
         """
         freeze_today(monkeypatch, date(2026, 3, 20))
         profile_id = _created_profile_id(app, db, auth_client, seed_user, seed_periods)
@@ -476,7 +482,7 @@ class TestOneCalendarDerivationPerRender:
             f"and hands it to the gap's payday check and the regeneration"
         )
 
-    def test_the_pay_entry_Fix_POST_derives_the_calendar_once(
+    def test_the_pay_entry_fix_post_derives_the_calendar_once(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, app, db, auth_client, seed_user, seed_periods, monkeypatch,
     ):
         """POST /salary/pay/<id>/fix moving an entry's payday derives the calendar once.
@@ -492,6 +498,9 @@ class TestOneCalendarDerivationPerRender:
         is not asked again (ruling R-SAL53's shape) and a Fix of the amount
         alone derives only the regeneration's calendar.  The entry moving and
         the regeneration being reached once are asserted beside the count.
+
+        Pylint: ``too-many-arguments`` / ``too-many-positional-arguments``
+        (6/5) -- six fixtures, each read, as in the update door's case above.
         """
         freeze_today(monkeypatch, date(2026, 3, 20))
         profile_id = _created_profile_id(app, db, auth_client, seed_user, seed_periods)
@@ -556,8 +565,9 @@ class TestOneCalendarDerivationPerRender:
         )
 
     @pytest.mark.parametrize("path", ["/grid", "/dashboard"])
-    def test_a_rolling_owner_derives_TWICE_and_that_is_the_bound(
-        self, app, db, auth_client, seed_user, seed_periods_today, path,
+    @pytest.mark.usefixtures("seed_periods_today")
+    def test_a_rolling_owner_derives_twice_and_that_is_the_bound(
+        self, app, db, auth_client, seed_user, path,
     ):
         """With rolling ON, ``/grid`` and ``/dashboard`` derive exactly TWICE.
 
@@ -581,6 +591,10 @@ class TestOneCalendarDerivationPerRender:
         one.  Two blindnesses, one render.
 
         Args:
+            app: The ``app`` fixture.
+            db: The ``db`` fixture.
+            auth_client: The signed-in owner's client.
+            seed_user: The ``seed_user`` fixture.
             path: The render to count, as a URL.
         """
         with app.app_context():
@@ -608,7 +622,7 @@ class TestOneCalendarDerivationPerRender:
         "/transactions/empty-cell",
     ])
     def test_the_grid_cell_fragments_derive_the_calendar_once(
-        self, app, db, auth_client, seed_user, seed_periods_today, path,
+        self, app, auth_client, seed_user, seed_periods_today, path,
     ):
         """Each grid empty-cell fragment derives the pay calendar exactly once.
 

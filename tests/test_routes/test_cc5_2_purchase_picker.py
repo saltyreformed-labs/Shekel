@@ -5,11 +5,12 @@ The purchase door took an account of its own in the first half of this step
 grades the SURFACE that writes it and the surfaces that read it:
 
 * the add-purchase form's **account picker** renders from the door's own
-  tuple (:func:`app.services.cash_flow_set.purchase_accounts`, ruling
-  **R-CC37**) on every surface that draws an envelope's entry list -- the
-  grid's inline mobile card, the HTMX refresh, the companion page and the
-  mobile-card fragment -- and only when there is a choice (ruling
-  **R-CC34**);
+  tuple (:func:`app.services.movement_account.paid_from_accounts`, ruling
+  plan#3227: the row's own account, then every cash account of the owner's,
+  never a card other than the row's own) on every surface that draws an
+  envelope's entry list -- the grid's inline mobile card, the HTMX refresh,
+  the companion page and the mobile-card fragment -- and only when there is
+  a choice (ruling **R-CC34**);
 * the entry list **names the account** a purchase moved through when it is
   not the row's own (ruling **R-CC15**);
 * the **account chip** on the desktop cell and the mobile card is ONE rule
@@ -20,8 +21,12 @@ grades the SURFACE that writes it and the surfaces that read it:
 * the chip's account read costs **no query** for a movement on a member of
   the owner's set, measured, so the grid's row query gains no eager load.
 
-Every surface test plants the same world: the owner's checking account, one
-card, one checking envelope in today's paycheck.
+Every surface test plants the same world: the owner's checking account, a
+Savings account, one card, one checking envelope in today's paycheck.  The
+card is planted so the picker's leaving it out is the rule's answer and not
+the absence of a card; the card's own control is the CC tick
+(``test_the_cc_tick_moves_a_recorded_purchase.py``).  A purchase on the card
+is recorded by that tick here.
 """
 
 from __future__ import annotations
@@ -35,8 +40,7 @@ from app.extensions import db
 from app.models.account import Account
 from app.models.transaction_entry import TransactionEntry
 from app.services import entry_service
-from app.services.account_resolver import resolve_owner_cash_flow_set
-from app.services.cash_flow_set import purchase_accounts
+from app.services.movement_account import owner_accounts, paid_from_accounts
 from app.utils.dates import display_today
 from tests._test_helpers import (
     capture_sql_statements,
@@ -57,6 +61,11 @@ def _card(seed_user, name="Rewards Card"):
     )
 
 
+def _savings(seed_user, name="Rainy Day"):
+    """An active Savings account of the owner's: cash, so "Paid from" lists it."""
+    return create_account_of_type(seed_user, db.session, "Savings", name)
+
+
 def _envelope(seed_user, period, *, companion_visible=False, account=None):
     """A ``$500`` Groceries envelope in *period*, on checking unless told."""
     template = make_expense_template(
@@ -70,13 +79,22 @@ def _envelope(seed_user, period, *, companion_visible=False, account=None):
     return row
 
 
-def _swipe(row, user_id, account_id=None, amount="60.00", description="Kroger"):
-    """Record a purchase through the door, dated today so it sits in its paycheck."""
+def _swipe(
+    row, user_id, account_id=None, amount="60.00", description="Kroger", *,
+    card=None,
+):
+    """Record a purchase through the door, dated today so it sits in its paycheck.
+
+    "Paid from" *account_id*, or the row's account; given *card*, ticked CC
+    with *card* picked, which is how a purchase goes on a card.
+    """
     return entry_service.create_entry(
         row.id, user_id,
         entry_service.EntryDetails(
             figure=typed(Decimal(amount)), description=description,
             purchased_on=display_today(), account_id=account_id,
+            on_card=card is not None,
+            card_account_id=None if card is None else card.id,
         ),
     )
 
@@ -123,99 +141,110 @@ def _options(select):
     ]
 
 
-class TestPurchaseAccountsIsTheDoorsOwnTuple:
-    """``cash_flow_set.purchase_accounts``: one spelling, the door's and the picker's."""
+class TestPaidFromAccountsIsTheDoorsOwnTuple:
+    """``movement_account.paid_from_accounts``: one spelling, the door's and the picker's."""
 
-    def test_the_rows_own_account_first_then_the_sets_other_members(
+    def test_the_rows_own_account_first_then_every_cash_account_never_a_card(
         self, app, seed_user, seed_periods_today,
     ):
-        """Checking row: (Checking, Rewards Card).  Card row: (Rewards Card, Checking)."""
+        """Checking row: (Checking, Rainy Day).  Card row: (Rewards Card, Checking, Rainy Day).
+
+        Ruling plan#3227: the row's own account, then every active account of
+        the owner's that holds cash, in account order; never a card other
+        than the row's own, which is Credit's and the CC tick's
+        (``OwnerAccounts.cards``).
+        """
         with app.app_context():
             checking = seed_user["account"]
             card = _card(seed_user)
+            savings = _savings(seed_user)
             on_checking = _envelope(seed_user, seed_periods_today[4])
             on_card = _envelope(seed_user, seed_periods_today[4], account=card)
-            owner_set = resolve_owner_cash_flow_set(seed_user["user"].id)
-            assert owner_set.member_ids == (checking.id, card.id)
+            owner = owner_accounts(seed_user["user"].id)
+            assert [a.id for a in owner.cash] == [checking.id, savings.id]
+            assert [a.id for a in owner.cards] == [card.id]
 
-            assert [a.id for a in purchase_accounts(owner_set, on_checking)] == [
-                checking.id, card.id,
+            assert [a.id for a in paid_from_accounts(on_checking, owner)] == [
+                checking.id, savings.id,
             ]
-            assert [a.id for a in purchase_accounts(owner_set, on_card)] == [
-                card.id, checking.id,
+            assert [a.id for a in paid_from_accounts(on_card, owner)] == [
+                card.id, checking.id, savings.id,
             ]
 
-    def test_a_row_outside_the_set_offers_its_own_account_then_the_set(
+    def test_a_row_on_savings_offers_its_own_account_then_the_other_cash(
         self, app, seed_user, seed_periods_today,
     ):
-        """A Savings envelope: (Savings, Checking, Rewards Card) -- what the door admits.
+        """A Savings envelope: (Rainy Day, Checking) -- what the door admits.
 
-        Ruling R-CC37's two halves in one tuple: the row's own account is
-        always admitted (first, the default), and so is every member of the
-        owner's set -- so a hotel deposit paid from checking against a
-        savings envelope can say so.  The developer confirmed this reading
-        on 2026-09-21 (ruling **R-CC39**, "Union") against R-CC34's
-        narrower parenthetical and the (1/2) handoff's "no choice outside
-        the set".  The DOOR test
-        grades the same tuple's refusals
+        The row's own account is always admitted (first, the default), and so
+        is every other cash account, so a hotel deposit paid from checking
+        against a savings envelope can say so.  The card is not offered.  The
+        DOOR test grades the same tuple's refusals
         (``test_cc5_2_purchase_account_door.py``).
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Rainy Day",
-            )
+            _card(seed_user)
+            savings = _savings(seed_user)
             row = _envelope(seed_user, seed_periods_today[4], account=savings)
-            owner_set = resolve_owner_cash_flow_set(seed_user["user"].id)
-            assert savings.id not in owner_set.member_ids
 
-            assert [a.id for a in purchase_accounts(owner_set, row)] == [
-                savings.id, checking.id, card.id,
-            ]
+            assert [
+                a.id for a in paid_from_accounts(row, owner_accounts(seed_user["user"].id))
+            ] == [savings.id, checking.id]
 
-    def test_no_set_means_the_rows_own_account_alone(
+    def test_no_other_cash_account_means_the_rows_own_account_alone(
         self, app, seed_user, seed_periods_today,
     ):
-        """An owner with no grid-eligible account: the one choice is the row's."""
+        """Checking and a card: the one choice is the row's, so no picker is drawn (R-CC34)."""
         with app.app_context():
+            _card(seed_user)
             row = _envelope(seed_user, seed_periods_today[4])
-            assert [a.id for a in purchase_accounts(None, row)] == [row.account_id]
+            assert [
+                a.id for a in paid_from_accounts(row, owner_accounts(seed_user["user"].id))
+            ] == [row.account_id]
 
     def test_the_doors_read_the_pickers_function(self, app):
-        """Source gate for rule 14: both doors test membership in ``purchase_accounts``.
+        """Source gate for rule 14: every writer asks the one gate, which reads the pickers' tuple.
 
-        The door's inline spelling (``account.id == txn.account_id or account.id
-        in cash_flow.member_ids``) and the picker's tuple AGREE today, which is
-        exactly why no behavioural test can tell one function from two
-        spellings -- so the census is of the source.  **The spelling moved at
-        plan step ``credit_card:CC-5-3``** (the census followed the leaf):
-        the ONE gate is ``movement_account.admitted_movement_account_id``,
-        which reads the tuple exactly once, and every writer of a movement
-        onto another account -- the purchase door, the settle verb's tender
-        and the settled row's "Paid from" correction -- calls it and spells
-        nothing of its own.  Delete the call from any of the three, or
-        re-spell the predicate in one, and this fails while every write
-        still lands.  The developer confirmed this re-expression on
-        2026-09-21 (rule 5): "The census follows the leaf: one shared gate,
-        both doors graded, no door spells the rule itself."
+        The door's membership test and the picker's tuple would AGREE if
+        spelled twice, which is exactly why no behavioural test can tell one
+        function from two spellings -- so the census is of the source.  **The
+        spelling moved at plan step ``credit_card:CC-5-3``** (the census
+        followed the leaf): the ONE gate is
+        ``movement_account.admitted_movement_account_id``, which reads the
+        tuple exactly once, and every writer of a movement onto another
+        account -- the purchase door, the settle verb's tender and the settled
+        row's "Paid from" correction -- calls it and spells nothing of its
+        own.  Delete the call from any of the three, or re-spell the predicate
+        in one, and this fails while every write still lands.  The developer
+        confirmed this re-expression on 2026-09-21 (rule 5): "The census
+        follows the leaf: one shared gate, both doors graded, no door spells
+        the rule itself."
 
         **It followed the leaf again at plan task plan#2930**: the purchase
         door's call moved to ``entry_service/_details.py`` with the purchase's
-        content, and the gate's module now also holds which card a CC tick or
-        a Credit press means, which reads the same tuple
-        (``movement_account.credit_cards``).  So the count is of the GATE
-        FUNCTION's own body, the one place the predicate is spelled.
+        content.  **And at plan task plan#3232** the tuple became
+        ``paid_from_accounts`` over the owner's ``owner_accounts`` (ruling
+        plan#3227), which the two pickers read too: the popover's
+        (``routes/transactions/forms.py``) and the purchase forms'
+        (``movement_account.purchase_choices``).  So the count is of the GATE
+        FUNCTION's own body, the one place the predicate is asked.
         """
         services = Path(app.root_path) / "services"
         module = (services / "movement_account.py").read_text(encoding="utf-8")
         tree = ast.parse(module)
-        gate = next(
-            ast.get_source_segment(module, node) for node in tree.body
+        bodies = {
+            node.name: ast.get_source_segment(module, node) for node in tree.body
             if isinstance(node, ast.FunctionDef)
-            and node.name == "admitted_movement_account_id"
-        )
-        assert gate.count("purchase_accounts(cash_flow, txn)") == 1
+        }
+        assert bodies["admitted_movement_account_id"].count(
+            "paid_from_accounts(txn, owner_accounts(txn.user_id))",
+        ) == 1
+        assert "paid_from_accounts(txn, owner)" in bodies["purchase_choices"]
+        forms = (
+            Path(app.root_path) / "routes/transactions/forms.py"
+        ).read_text(encoding="utf-8")
+        assert "movement_account.paid_from_accounts(txn, owner)" in forms
         writers = (
             "entry_service/_details.py",
             "transaction_service/_settle.py",
@@ -229,27 +258,24 @@ class TestPurchaseAccountsIsTheDoorsOwnTuple:
         # the rule beside the three that call the gate.
         for door in (*writers, "entry_service/_doors.py"):
             source = (services / door).read_text(encoding="utf-8")
-            assert "purchase_accounts(" not in source, door
-            assert "cash_flow.member_ids" not in source, door
+            assert "paid_from_accounts(" not in source, door
+            assert "is_liquid" not in source, door
 
     def test_the_door_admits_exactly_the_tuple(
         self, app, seed_user, seed_periods_today,
     ):
         """Every member of the tuple is writable; the door reads the same function.
 
-        The parity R-CC37 rules is graded by WRITING through the door with
-        each account the tuple names, on a row outside the set -- the case
-        where "the row's own" and "the set" are three different accounts.
+        The parity is graded by WRITING through the door with each account the
+        tuple names, on a row on Savings with Checking and an HYSA beside it,
+        so "the row's own" and "the other cash" are three accounts.
         """
         with app.app_context():
             _card(seed_user)
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Rainy Day",
-            )
+            savings = _savings(seed_user)
+            create_account_of_type(seed_user, db.session, "HYSA", "High Yield")
             row = _envelope(seed_user, seed_periods_today[4], account=savings)
-            offered = purchase_accounts(
-                resolve_owner_cash_flow_set(seed_user["user"].id), row,
-            )
+            offered = paid_from_accounts(row, owner_accounts(seed_user["user"].id))
             assert len(offered) == 3
             for account in offered:
                 written = _swipe(row, seed_user["user"].id, account_id=account.id)
@@ -264,33 +290,38 @@ class TestPurchaseAccountsIsTheDoorsOwnTuple:
 class TestThePickerRendersOnEverySurface:
     """The ``<select name="account_id">`` on the four surfaces, and its absence."""
 
-    def test_the_grids_inline_form_offers_the_card_with_the_rows_account_selected(
+    def test_the_grids_inline_form_offers_the_cash_with_the_rows_account_selected(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
+        """Checking selected, then Rainy Day; the Rewards Card is not offered."""
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            _card(seed_user)
+            savings = _savings(seed_user)
             row = _envelope(seed_user, seed_periods_today[4])
-            ids = (checking.id, card.id, row.id)
+            ids = (checking.id, savings.id, row.id)
             response = auth_client.get("/grid?periods=1&offset=0")
-        checking_id, card_id, row_id = ids
+        checking_id, savings_id, row_id = ids
         assert response.status_code == 200
         select = _picker(_inline_list(response.get_data(as_text=True), row_id))
         assert select is not None
         assert _options(select) == [
             (checking_id, True, "Checking"),
-            (card_id, False, "Rewards Card"),
+            (savings_id, False, "Rainy Day"),
         ]
 
-    def test_without_a_card_the_form_carries_no_account_control(
+    def test_without_another_cash_account_the_form_carries_no_account_control(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
         """Ruling R-CC34: one choice, no control -- the door's ``None`` arm files it.
 
-        Graded on the whole inline partial and on the HTMX refresh, so the
-        production population (no card) renders the form it always did.
+        Checking and a card: the card is not "Paid from"'s (ruling plan#3227),
+        so the one choice is checking.  Graded on the whole inline partial and
+        on the HTMX refresh, so an owner with one cash account renders the
+        form it always did, card or no card.
         """
         with app.app_context():
+            _card(seed_user)
             row = _envelope(seed_user, seed_periods_today[4])
             row_id = row.id
             page = auth_client.get("/grid?periods=1&offset=0")
@@ -307,6 +338,7 @@ class TestThePickerRendersOnEverySurface:
         """``GET /transactions/<id>/entries`` -- what replaces the list after every act."""
         with app.app_context():
             _card(seed_user)
+            _savings(seed_user)
             row = _envelope(seed_user, seed_periods_today[4])
             row_id = row.id
             page = auth_client.get("/grid?periods=1&offset=0")
@@ -320,7 +352,7 @@ class TestThePickerRendersOnEverySurface:
     def test_the_companion_page_carries_the_owners_picker(
         self, app, seed_user, seed_periods_today, companion_client,
     ):
-        """A companion records the OWNER's purchase (R-CC11): the owner's card is offered.
+        """A companion records the OWNER's purchase (R-CC11): the owner's savings is offered.
 
         The companion owns no account, so a picker resolved for the requester
         would be empty and the control would vanish; it is resolved for the
@@ -328,20 +360,21 @@ class TestThePickerRendersOnEverySurface:
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            _card(seed_user)
+            savings = _savings(seed_user)
             row = _envelope(
                 seed_user, seed_periods_today[4], companion_visible=True,
             )
-            ids = (checking.id, card.id, row.id, seed_periods_today[4].id)
+            ids = (checking.id, savings.id, row.id, seed_periods_today[4].id)
             response = companion_client.get(f"/companion/period/{ids[3]}")
-        checking_id, card_id, row_id, _ = ids
+        checking_id, savings_id, row_id, _ = ids
         assert response.status_code == 200
         html = response.get_data(as_text=True)
         select = _picker(_inline_list(html, row_id))
         assert select is not None
         assert _options(select) == [
             (checking_id, True, "Checking"),
-            (card_id, False, "Rewards Card"),
+            (savings_id, False, "Rainy Day"),
         ]
         # No balance line on this page, so no row chip -- the picker is a
         # different question and has an answer here.
@@ -358,19 +391,20 @@ class TestThePickerRendersOnEverySurface:
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            _card(seed_user)
+            savings = _savings(seed_user)
             row = _envelope(
                 seed_user, seed_periods_today[4], companion_visible=True,
             )
-            ids = (checking.id, card.id, row.id)
+            ids = (checking.id, savings.id, row.id)
             response = companion_client.get(f"/transactions/{ids[2]}/entries")
-        checking_id, card_id, _ = ids
+        checking_id, savings_id, _ = ids
         assert response.status_code == 200
         select = _picker(response.get_data(as_text=True))
         assert select is not None
         assert _options(select) == [
             (checking_id, True, "Checking"),
-            (card_id, False, "Rewards Card"),
+            (savings_id, False, "Rainy Day"),
         ]
 
     def test_on_an_outside_overrides_grid_the_picker_is_still_the_owners(
@@ -380,24 +414,21 @@ class TestThePickerRendersOnEverySurface:
 
         The page shows Savings' rows behind Savings' balance line, and its
         ``cash_flow`` is the one-account view.  A Savings envelope's picker
-        still offers (Savings, Checking, Rewards Card), because what a
-        purchase may name is the OWNER's set and the door admits exactly
-        that -- read from ``owner_cash_flow``, the same walk's other half.
-        Rendered from the view instead, the control would vanish on this
-        page and appear on the refresh.
+        still offers (Savings, Checking), because what a purchase may name is
+        read from the OWNER's accounts and the door admits exactly that --
+        ``owner_accounts``, beside the view.  Rendered from the view instead,
+        the control would vanish on this page and appear on the refresh.
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Rainy Day",
-            )
+            _card(seed_user)
+            savings = _savings(seed_user)
             row = _envelope(seed_user, seed_periods_today[4], account=savings)
-            ids = (checking.id, card.id, savings.id, row.id)
+            ids = (checking.id, savings.id, row.id)
             response = auth_client.get(
-                f"/grid?periods=1&offset=0&account_id={ids[2]}",
+                f"/grid?periods=1&offset=0&account_id={ids[1]}",
             )
-        checking_id, card_id, savings_id, row_id = ids
+        checking_id, savings_id, row_id = ids
         assert response.status_code == 200
         html = response.get_data(as_text=True)
         select = _picker(_inline_list(html, row_id))
@@ -405,7 +436,6 @@ class TestThePickerRendersOnEverySurface:
         assert _options(select) == [
             (savings_id, True, "Rainy Day"),
             (checking_id, False, "Checking"),
-            (card_id, False, "Rewards Card"),
         ]
 
     def test_the_mobile_card_fragment_carries_the_picker(
@@ -420,9 +450,10 @@ class TestThePickerRendersOnEverySurface:
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            _card(seed_user)
+            savings = _savings(seed_user)
             row = _envelope(seed_user, seed_periods_today[4])
-            ids = (checking.id, card.id, row.id)
+            ids = (checking.id, savings.id, row.id)
             response = auth_client.post(
                 f"/transactions/{ids[2]}/mark-done",
                 data={
@@ -430,7 +461,7 @@ class TestThePickerRendersOnEverySurface:
                     "can_edit": "1", "settled_amount": "-1",
                 },
             )
-        checking_id, card_id, row_id = ids
+        checking_id, savings_id, row_id = ids
         assert response.status_code == 422
         body = response.get_data(as_text=True)
         assert f'id="card-tp-{row_id}"' in body
@@ -438,21 +469,23 @@ class TestThePickerRendersOnEverySurface:
         assert select is not None
         assert _options(select) == [
             (checking_id, True, "Checking"),
-            (card_id, False, "Rewards Card"),
+            (savings_id, False, "Rainy Day"),
         ]
 
-    def test_a_purchase_posted_through_the_picker_lands_on_the_card_and_is_named(
+    def test_a_purchase_posted_through_the_picker_lands_on_savings_and_is_named(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
         """Round trip: the form's control, the door, the list's name.
 
-        The refreshed list names the card beside the swipe and nothing
-        beside a purchase on the row's own account (ruling R-CC15).
+        The refreshed list names Rainy Day beside the purchase paid from it
+        and nothing beside a purchase on the row's own account (ruling
+        R-CC15).
         """
         with app.app_context():
-            card = _card(seed_user)
+            _card(seed_user)
+            savings = _savings(seed_user)
             row = _envelope(seed_user, seed_periods_today[4])
-            ids = (card.id, row.id)
+            ids = (savings.id, row.id)
             today = display_today().isoformat()
             swipe = auth_client.post(
                 f"/transactions/{ids[1]}/entries",
@@ -468,7 +501,7 @@ class TestThePickerRendersOnEverySurface:
                     "purchased_on": today,
                 },
             )
-        card_id, row_id = ids
+        savings_id, row_id = ids
         assert swipe.status_code == 200 and own.status_code == 200
         with app.app_context():
             entries = {
@@ -478,7 +511,7 @@ class TestThePickerRendersOnEverySurface:
                 )
             }
         assert {d: a for d, (_, a) in entries.items()} == {
-            "Kroger": card_id, "Pharmacy": seed_user["account"].id,
+            "Kroger": savings_id, "Pharmacy": seed_user["account"].id,
         }
         html = own.get_data(as_text=True)
         # Each display row sliced by ITS OWN edit control: the two purchases
@@ -486,7 +519,7 @@ class TestThePickerRendersOnEverySurface:
         # their order on the page is not one this test may lean on.
         kroger = _display_row(html, row_id, entries["Kroger"][0])
         assert kroger.count(_CHIP) == 1
-        assert 'title="On Rewards Card">Rewards Card</span>' in kroger
+        assert 'title="On Rainy Day">Rainy Day</span>' in kroger
         assert _CHIP not in _display_row(html, row_id, entries["Pharmacy"][0])
 
 
@@ -499,7 +532,7 @@ class TestTheChipIsOneRuleOverTheRowAndItsMovements:
         checking = seed_user["account"]
         card = _card(seed_user)
         row = _envelope(seed_user, periods[4])
-        _swipe(row, seed_user["user"].id, account_id=card.id)
+        _swipe(row, seed_user["user"].id, card=card)
         _swipe(row, seed_user["user"].id, amount="15.00", description="Pharmacy")
         db.session.commit()
         return checking.id, card.id, row.id
@@ -579,9 +612,9 @@ class TestTheChipIsOneRuleOverTheRowAndItsMovements:
         with app.app_context():
             card = _card(seed_user)
             row = _envelope(seed_user, seed_periods_today[4])
-            _swipe(row, seed_user["user"].id, account_id=card.id)
+            _swipe(row, seed_user["user"].id, card=card)
             _swipe(
-                row, seed_user["user"].id, account_id=card.id,
+                row, seed_user["user"].id, card=card,
                 amount="20.00", description="Gas",
             )
             db.session.commit()
@@ -659,8 +692,9 @@ class TestTheChipsAccountReadCostsNoQuery:
         ``TransactionEntry.account`` is a lazy many-to-one (its ``joined``
         load widened the fold's ``_movements_of`` at CC-5-1's review).  A
         lazy many-to-one checks the identity map first, and the card is
-        already in it -- ``resolve_cash_flow_set`` loaded it for the page --
-        so the chip's ``entry.account.name`` costs nothing.  If it cost a
+        already in it -- ``resolve_cash_flow_set`` and ``owner_accounts``
+        loaded it for the page -- so the chip's ``entry.account.name`` costs
+        nothing.  If it cost a
         query the count would rise by one here, and this is what decides
         that ``routes/grid/_items.py`` gains no ``selectinload`` on the
         movement's account.
@@ -671,7 +705,7 @@ class TestTheChipsAccountReadCostsNoQuery:
             _swipe(row, seed_user["user"].id, amount="15.00", description="Pharmacy")
             db.session.commit()
             before = self._statements_for_grid(auth_client)
-            _swipe(row, seed_user["user"].id, account_id=card.id)
+            _swipe(row, seed_user["user"].id, card=card)
             db.session.commit()
             after = self._statements_for_grid(auth_client)
         assert len(after) == len(before), (
@@ -706,9 +740,9 @@ class TestTheChipsAccountReadCostsNoQuery:
             before = self._statements_for_grid(auth_client)
 
             assert auth_client.post(f"/accounts/{card_id}/unarchive").status_code == 302
-            _swipe(row, seed_user["user"].id, account_id=card_id)
+            _swipe(row, seed_user["user"].id, card=card)
             _swipe(
-                row, seed_user["user"].id, account_id=card_id,
+                row, seed_user["user"].id, card=card,
                 amount="20.00", description="Gas",
             )
             db.session.commit()

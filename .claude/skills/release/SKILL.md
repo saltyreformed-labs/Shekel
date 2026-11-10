@@ -66,6 +66,15 @@ everything with a person or a judgment in it is here.
 - The long waits (the pull request's checks and main's CI, whose test shards took 8-12 minutes on
   10-13) outrun one Bash call's 10-minute limit: run each in the background and read its file when
   it ends.
+- **A watch's exit is not its run's verdict** (finding plan#2950: on 11-05 `gh run watch
+  --exit-status` exited 1 on a GitHub 504 while its run went on to pass). Each block that watches
+  a run reads the run itself after the watch, as `<status> <conclusion>`: `completed success` is
+  green, `completed` with any other conclusion is the run's failure, and anything else (a status
+  still running, or no line, the read itself failing) means the watch ended early, so run the
+  block again. A pull request's checks are read the same way by `gh pr checks` without
+  `--watch`: exit 0 every check passed; 8 one is still pending, the watch having ended early; 1
+  one failed, as its file shows, or, with no failing check in it, the read itself failed. On 8
+  or a failed read, run the block again.
 - Production figures (counts, balances, day counts, dates measured in production) stay out of
   commit messages and rulings (R-BAL132); the record lives outside the repository.
 - Each question to Josh is an AskUserQuestion that stands alone (the text before it may never
@@ -410,7 +419,8 @@ Then, in the background (a long wait):
 gh pr checks "$PR" --watch > /dev/null 2>&1; gh pr checks "$PR" > "$R/checks_$PR.txt" 2>&1; echo "exit=$?"
 ```
 
-Read every check. A shard that fails with nothing in the diff near it (trap l): read the failed
+Read every check, by the exit step 0 says (8: run the block again). A shard that fails with
+nothing in the diff near it (trap l): read the failed
 job's log BEFORE any rerun, rerun only the failed jobs (`gh run rerun <run> --failed`), and record
 the first attempt. A failure near the diff is a STOP. Then put the pull request in `main`'s merge
 queue, the only way into `main`: ruleset `main-queue`, whose bypass list is empty, so it binds
@@ -444,10 +454,12 @@ Then, `<run>` being that id, in the background (a long wait):
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
 : "${R:?}"
-gh run watch <run> --exit-status > "$R/queue_<run>.txt" 2>&1; echo "exit=$?"
+gh run watch <run> --exit-status > "$R/queue_<run>.txt" 2>&1; echo "watch=$?"
+gh run view <run> --json status,conclusion --jq '"\(.status) \(.conclusion)"'
 ```
 
-A failed queue run takes the pull request out of the queue, and nothing reached `main`: read it as
+Its verdict is the last line, read as step 0 says, never the watch's exit. A failed queue run
+takes the pull request out of the queue, and nothing reached `main`: read it as
 trap l says above, and queue the pull request again by the merge block (a new run) only when
 nothing in the diff is near the failure; otherwise STOP. A green run lands the merge; append its
 sha as `M`:
@@ -478,7 +490,15 @@ prints one, never taking another run. Then, `<run>` being that id:
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
 : "${R:?}"
-gh run watch <run> --exit-status > "$R/build_<run>.txt" 2>&1; echo "exit=$?"
+gh run watch <run> --exit-status > "$R/build_<run>.txt" 2>&1; echo "watch=$?"
+gh run view <run> --json status,conclusion --jq '"\(.status) \(.conclusion)"'
+```
+
+Its verdict is the last line, read as step 0 says. Once it reads `completed success`:
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+: "${R:?}"
 gh run view <run> --log > "$R/build_log_<run>.txt" 2>&1; echo "exit=$?"
 echo "DIGEST=\"$(sed -n 's/.*Image digest: \(sha256:[0-9a-f]\{64\}\)$/\1/p' "$R/build_log_<run>.txt")\"" \
     >> ~/projects/shekel-handoffs/releases/current.sh
@@ -486,9 +506,30 @@ echo "DIGEST=\"$(sed -n 's/.*Image digest: \(sha256:[0-9a-f]\{64\}\)$/\1/p' "$R/
 
 The digest is the build log's own `Image digest:` line, never the first `sha256:` in the log (on
 10-13 that was a Buildx image's pull). Read `current.sh`'s new `DIGEST` line back: an empty one is a
-STOP. A failed build is a STOP: production is untouched, but a build that failed at signing has
-already pushed an unsigned `:latest`, which only `shekel-deploy`'s cosign check keeps out of
-production; say so in the report.
+STOP. A failed build is a STOP but for the one case below: production is untouched, but a build
+that failed at signing has already pushed an unsigned `:latest`, which only `shekel-deploy`'s
+cosign check keeps out of production; say so in the report.
+
+The case: a build that failed before it built anything, on an outside fault (11-05: `Install
+Cosign`'s download answered 504, and Josh's answer was to re-run). Read its steps and the failed
+step's log first, `<n>` its attempt:
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+: "${R:?}"
+gh run view <run> --attempt <n> --json jobs \
+    --jq '.jobs[] | "\(.name): \(.conclusion)", (.steps[] | "  \(.name)=\(.conclusion)")' \
+    > "$R/build_steps_<run>_attempt<n>.txt" 2>&1; echo "exit=$?"
+gh run view <run> --attempt <n> --log-failed \
+    > "$R/build_failed_<run>_attempt<n>.txt" 2>&1; echo "exit=$?"
+```
+
+Re-run its failed jobs once, `gh run rerun <run> --failed`, only when all three hold: `Build and
+push image=skipped` (it never ran, so nothing was pushed); the failed step is neither the
+`tax-law` job's nor `Is it still before the tax-law refusal?`, which refuse by design; and the
+failed step's log shows a server answering a download with a 5xx error (11-05: `curl: (22) The
+requested URL returned error: 504`). Then watch it again by the first block; the record keeps the
+failed attempt's two files. Anything else, or a second failure, is a STOP.
 
 ## 8. Bring production's checkout and dev to main
 
@@ -594,9 +635,9 @@ docker inspect "$C" --format '{{.Config.Image}} {{.State.Health.Status}} {{.Rest
 - The image reference ends in `$DIGEST`; health `healthy`; restarts 0.
 - Then tell Josh to reload and log back in, in one plain sentence of what changed.
 - Main's CI (trap v): `gh run list --workflow ci.yml --branch main --json
-  databaseId,headSha,attempt`; watch the run for `$M` into `$R/main_ci_<run>.txt` with
-  `--exit-status`, exit read. `gh run list` hides a failed first attempt: an `attempt` above 1 is
-  read with `gh run view <run> --attempt 1`.
+  databaseId,headSha,attempt`; watch the run for `$M` into `$R/main_ci_<run>.txt` as step 6
+  watches its queue run, its verdict the run's own line, read as step 0 says. `gh run list` hides
+  a failed first attempt: an `attempt` above 1 is read with `gh run view <run> --attempt 1`.
 
 ## 12. Clean up
 
@@ -636,7 +677,8 @@ a run that ended early says where and why, and names what it left open. Beside i
 `dump_err.txt`, `rows.txt`, `rows_report.txt`, `rehearsal.txt` (when a kit ran), each
 `host_<card>_<step>.txt`,
 `checks_<PR>.txt`, `checks_<RS>.txt`, each
-`queue_<run>.txt`, `build_<run>.txt`, `build_log_<run>.txt`, `dryrun.txt`, `deploy_since.txt`,
+`queue_<run>.txt`, `build_<run>.txt`, `build_log_<run>.txt`, each `build_steps_<run>_attempt<n>.txt`
+and `build_failed_<run>_attempt<n>.txt` (a build re-run), `dryrun.txt`, `deploy_since.txt`,
 `deploy.txt`, `verify.txt`, `main_ci_<run>.txt`, `cleanup.txt`.
 
 The last act of every run, however it ended, moves `current.sh` into the record, so no later block

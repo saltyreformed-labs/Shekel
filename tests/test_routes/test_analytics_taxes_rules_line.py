@@ -135,7 +135,7 @@ class TestTheStateIsNamedFromTheProfile:
     ):
         """A made-up law listing South Carolina alone: the tab says SC wherever it named NC.
 
-        Until plan step X-at-5 eight labels on the tab spelled the state as
+        Until plan step X-at-5 seven labels on the tab spelled the state as
         the literal "NC"; the law lists the states the app supports (ruling
         R-SAL78), so a second state would have been labelled North Carolina.
         ``seed_periods`` puts paydays in 2026, so Box 1 wages are above zero

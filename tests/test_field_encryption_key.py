@@ -12,10 +12,8 @@ BI-503): the key encrypts every ciphertext column the app stores, and
      refuses a missing key, the docker-secret placeholder, and a value
      Fernet cannot load (retired keys included).
   3. ``create_app`` is the door for both: it INSTANTIATES the
-     configuration class, which is what runs the refusals.  Until this
-     step the factory passed the class to ``from_object``, which reads
-     attributes and instantiates nothing, and every production refusal
-     was dead at runtime.
+     configuration class (finding plan#2652), which is what runs the
+     refusals.
   4. The cipher pair ``encrypt_secret`` / ``decrypt_secret`` and the
      ``MultiFernet`` it is built on (``get_encryption_key``): the
      primary key writes, the primary-then-retired list reads, and the
@@ -50,23 +48,27 @@ _A_PLAINTEXT = "JBSWY3DPEHPK3PXP"
 # and could not be mistaken for a secret by anyone, gitleaks included.
 _VALID_SECRET_KEY = "a" * 64
 
+# The rate-limit store's password a built ProdConfig requires (ruling
+# plan#2633); never a real one.
+_A_STORE_PASSWORD = "a-store-password"
+
 
 @pytest.fixture
 def a_valid_production_config(monkeypatch):
     """Patch ``ProdConfig`` so that ONLY the field key can refuse.
 
     The class attributes are read at import time, so the cases below
-    patch the attributes rather than the environment.  Every other
-    production refusal (SECRET_KEY, DATABASE_URL, the limiter) is
-    satisfied here; the field key is left to each case.
+    patch the attributes rather than the environment; the rate-limit
+    store's password is read when the configuration is built, so it is
+    set in the environment.  Every other production refusal (SECRET_KEY,
+    DATABASE_URL, the store's password) is satisfied here; the field key
+    is left to each case.
     """
     monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
     monkeypatch.setattr(
         ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel",
     )
-    monkeypatch.setattr(
-        ProdConfig, "RATELIMIT_STORAGE_URI", "redis://redis:6379/0",
-    )
+    monkeypatch.setenv("VALKEY_PASSWORD", _A_STORE_PASSWORD)
     monkeypatch.setattr(BaseConfig, "FIELD_ENCRYPTION_KEY_OLD", None)
 
 
@@ -269,20 +271,22 @@ class TestProductionRequiresTheFieldKey:
         config = ProdConfig()
         assert config.FIELD_ENCRYPTION_KEY == primary
 
-    def test_the_field_key_is_validated_after_the_limiter(self, monkeypatch):
+    def test_the_field_key_is_validated_after_the_store_password(
+        self, monkeypatch,
+    ):
         """The existing refusals keep their order; the field key is last.
 
         An operator misconfiguring several things sees them in the
         order the class already documented (SECRET_KEY, DATABASE_URL,
-        the limiter), and only then the field key.
+        the rate-limit store's password), and only then the field key.
         """
         monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
         monkeypatch.setattr(
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel",
         )
-        monkeypatch.setattr(ProdConfig, "RATELIMIT_STORAGE_URI", "memory://")
+        monkeypatch.delenv("VALKEY_PASSWORD", raising=False)
         monkeypatch.setattr(BaseConfig, "FIELD_ENCRYPTION_KEY", None)
-        with pytest.raises(ValueError, match="RATELIMIT_STORAGE_URI"):
+        with pytest.raises(ValueError, match="VALKEY_PASSWORD is not set"):
             ProdConfig()
 
 
@@ -290,19 +294,12 @@ class TestCreateAppInstantiatesTheConfiguration:
     """``create_app`` runs the configuration class's ``__init__``.
 
     Flask's ``from_object`` reads a class's uppercase attributes and
-    instantiates nothing.  Measured on the tree before this step:
-    ``create_app("production")`` returned an app under
-    ``SECRET_KEY=short`` and ``RATELIMIT_STORAGE_URI=memory://`` -- every
-    refusal ``ProdConfig.__init__`` states was dead at runtime, and only
-    the entrypoint's shell twin of the SECRET_KEY check stood, in the
-    container alone.  These cases open the door, not the predicate.
+    instantiates nothing, so the factory builds the configuration
+    (finding plan#2652, whose own cases in
+    ``tests/test_config.py::TestCreateAppBuildsTheConfiguration`` grade
+    that door for SECRET_KEY and the store's password).  The case here
+    grades R-BI23's refusal through it: the door, not the predicate.
     """
-
-    def test_a_short_secret_key_refuses_a_production_app(self, monkeypatch):
-        """The oldest production refusal (F-016) fires through the factory."""
-        monkeypatch.setattr(BaseConfig, "SECRET_KEY", "short")
-        with pytest.raises(ValueError, match="at least 32 characters"):
-            create_app("production", init_ref_cache=False)
 
     @pytest.mark.usefixtures("a_valid_production_config")
     def test_a_missing_field_key_refuses_a_production_app(self, monkeypatch):

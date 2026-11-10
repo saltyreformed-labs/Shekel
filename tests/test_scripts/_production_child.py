@@ -4,13 +4,16 @@ from __future__ import annotations
 import os
 import secrets
 
+from cryptography.fernet import Fernet
+
 
 def production_env(database_url: str) -> dict:
     """Build the child's environment: the production config, on *database_url*.
 
     Only what Python needs to run is inherited.  ``ProdConfig`` refuses to
-    start without a SECRET_KEY of real length and its rate-limit store's
-    password; a child that only reads and writes its database uses neither.
+    start without a SECRET_KEY of real length, its rate-limit store's
+    password and a loadable field key (ruling ``bank_import:R-BI23``); a
+    child that only reads and writes its database uses none of them.
     An explicitly EMPTY ``DATABASE_URL_APP`` (the config resolver reads it as
     unset) leaves no other database to reach.
 
@@ -32,5 +35,6 @@ def production_env(database_url: str) -> dict:
         "DATABASE_URL_APP": "",
         "SECRET_KEY": secrets.token_hex(32),
         "VALKEY_PASSWORD": secrets.token_hex(16),
+        "FIELD_ENCRYPTION_KEY": Fernet.generate_key().decode(),
     })
     return env

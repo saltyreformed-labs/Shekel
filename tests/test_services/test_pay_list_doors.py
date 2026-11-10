@@ -104,3 +104,31 @@ class TestRecordEntry:
             assert db.session.query(SalaryPayEntry).filter_by(
                 salary_profile_id=profile.id,
             ).count() == 2
+
+
+class TestRemoveEntry:
+    """``remove_entry`` never takes a profile's only entry."""
+
+    def test_the_only_entry_is_refused_before_any_write(self, app, seed_user, seed_periods):
+        """A Remove of the one entry: a ``ValidationError`` in words, nothing staged.
+
+        Input: a profile whose pay list holds $2,000.00 from 01-02 alone.
+        Expected: the door's sentence, the entry still on the profile's list
+        and not marked for deletion.
+        Why: every paycheck is priced from the pay list (ruling R-SAL68), and
+        the door's refusal is the check; the database's rule is the backstop.
+        """
+        with app.app_context():
+            profile = _profile(seed_user, seed_periods)
+            only = profile.pay_entries[0]
+
+            with pytest.raises(ValidationError) as refused:
+                pay_list_service.remove_entry(only)
+
+            assert str(refused.value) == (
+                "Your pay from 2026-01-02 is your only pay entry, and every "
+                "paycheck is priced from it, so it can't be removed.  Fix it "
+                "instead."
+            )
+            assert profile.pay_entries == [only]
+            assert only not in db.session.deleted

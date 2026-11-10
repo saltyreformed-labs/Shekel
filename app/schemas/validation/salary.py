@@ -225,6 +225,20 @@ class SalaryPayEntryFixSchema(SalaryPayEntryRecordSchema):
     version_id = RowId(required=True, validate=validate.Range(min=1))
 
 
+class SalaryPayEntryRemoveSchema(BaseSchema):
+    """Validates POST data for removing one entry of a salary's pay list.
+
+    Plan step **salary:X-av-3b**, ruling **R-SAL68** ("Remove, except the last
+    one"): the entry's optimistic-locking counter alone, so a Remove rendered
+    before another tab's Fix of the entry is refused rather than deleting pay
+    the owner has not seen.  Whether the entry is the profile's only one is
+    the service's question
+    (:func:`~app.services.pay_list_service.remove_entry`).
+    """
+
+    version_id = RowId(required=True, validate=validate.Range(min=1))
+
+
 class RaiseCreateSchema(BaseSchema):
     """Validates POST data for adding a salary raise."""
 

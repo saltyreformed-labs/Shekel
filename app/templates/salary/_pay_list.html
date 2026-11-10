@@ -1,8 +1,9 @@
 {% from "_money_macros.html" import money %}
 {# The pay list (plan step salary:X-av-3a): what one paycheck pays, from a
    dated payday on (R-SAL59), each entry beside its yearly figure (R-SAL61),
-   a Fix that changes only the paychecks it covers, and Record a pay change
-   (plan step salary:X-av-3b), which adds one from a payday the owner picks.
+   a Fix that changes only the paychecks it covers, Record a pay change
+   (plan step salary:X-av-3b), which adds one from a payday the owner picks,
+   and Remove, on every entry but an only one (R-SAL68).
    Every figure is the route's; nothing here computes. #}
 <div class="card mb-3" id="pay-section">
   <div class="card-header d-flex justify-content-between align-items-center">
@@ -51,6 +52,20 @@
                     aria-controls="fix-pay-{{ row.entry.id }}">
               <i class="bi bi-pencil" aria-hidden="true"></i> Fix
             </button>
+            {# Remove, except the last one (ruling R-SAL68): the only entry
+               prices every paycheck, so it renders no Remove at all. #}
+            {% if pay_rows|length > 1 %}
+            <form method="POST" class="d-inline"
+                  action="{{ url_for('salary.remove_pay_entry', entry_id=row.entry.id) }}"
+                  data-confirm="Remove your pay from {{ row.entry.payday.isoformat() }}? The paychecks it covers are priced from your other pay entries instead.">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="version_id" value="{{ row.entry.version_id }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger ms-1" title="Remove">
+                <i class="bi bi-trash" aria-hidden="true"></i>
+                <span class="visually-hidden">Remove</span>
+              </button>
+            </form>
+            {% endif %}
           </td>
         </tr>
         <tr class="collapse" id="fix-pay-{{ row.entry.id }}">

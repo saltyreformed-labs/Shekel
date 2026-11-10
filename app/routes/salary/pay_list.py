@@ -3,9 +3,10 @@ Shekel Budget App -- Salary route package: the pay list's doors.
 
 What one paycheck pays, from a dated payday on, is the salary's stored fact
 (rulings **R-SAL59** and **R-SAL61**), and the salary page's Pay card writes
-it through these doors: Record a pay change (plan step salary:X-av-3b) and
-Fix (plan step salary:X-av-3a, moved here from :mod:`.profiles` at X-av-3b,
-its URL and endpoint name unchanged).  The writes are
+it through these doors: Record a pay change and Remove (plan step
+salary:X-av-3b, ruling **R-SAL68** for the second) and Fix (plan step
+salary:X-av-3a, moved here from :mod:`.profiles` at X-av-3b, its URL and
+endpoint name unchanged).  The writes are
 :mod:`app.services.pay_list_service`'s; each door here is the Flask half:
 ownership, the form, the one read pass, the regeneration of the paychecks
 the write moves, and the words of each refusal.
@@ -30,7 +31,11 @@ from app.routes._form_errors import load_form_or_redirect
 from app.routes._redirect_target import RedirectTarget
 from app.routes.salary._bp import salary_bp
 from app.routes.salary._helpers import _regenerate_salary_transactions
-from app.schemas.validation import SalaryPayEntryFixSchema, SalaryPayEntryRecordSchema
+from app.schemas.validation import (
+    SalaryPayEntryFixSchema,
+    SalaryPayEntryRecordSchema,
+    SalaryPayEntryRemoveSchema,
+)
 from app.services import pay_list_service
 from app.services.balance_at import BalanceContext
 from app.utils.auth_helpers import get_or_404, get_owned_via_parent, require_owner
@@ -40,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 _pay_entry_record_schema = SalaryPayEntryRecordSchema()
 _pay_entry_fix_schema = SalaryPayEntryFixSchema()
+_pay_entry_remove_schema = SalaryPayEntryRemoveSchema()
 
 #: The pay list's one-entry-per-payday key, named for the duplicate-key
 #: report a Record or a Fix racing another onto one payday lands on.
@@ -225,4 +231,77 @@ def fix_pay_entry(entry_id):
         current_user.id, entry_id, profile.id,
     )
     flash("Pay entry fixed.", "success")
+    return edit_page.to_response()
+
+
+@salary_bp.route("/salary/pay/<int:entry_id>/remove", methods=["POST"])
+@require_owner
+def remove_pay_entry(entry_id):
+    """Remove one pay entry, never the only one, and re-price what it covered.
+
+    Plan step **salary:X-av-3b**, ruling **R-SAL68** ("Remove, except the last
+    one").  Ownership runs through the entry's profile (404 for not-found and
+    not-yours).  The form ships the entry's ``version_id``, so a Remove
+    rendered before another tab's Fix of the entry is refused with a flash;
+    a Fix or Remove landing between that check and the DELETE fails the
+    version-pinned DELETE at the guarded flush, reported the same way.  The
+    only-entry refusal is the service's, in its own words.
+    """
+    entry = get_owned_via_parent(SalaryPayEntry, entry_id, "salary_profile")
+    if entry is None:
+        abort(404)
+    profile = entry.salary_profile
+    edit_page = _edit_page(profile)
+
+    data = load_form_or_redirect(_pay_entry_remove_schema, edit_page)
+    if isinstance(data, Response):
+        return data
+
+    stale_message = (
+        "This pay entry was changed by another action.  Please reload and "
+        "try again."
+    )
+    if data["version_id"] != entry.version_id:
+        logger.info(
+            "Stale-form conflict on remove_pay_entry id=%d "
+            "(submitted=%d, current=%d)",
+            entry_id, data["version_id"], entry.version_id,
+        )
+        flash(stale_message, "warning")
+        return edit_page.to_response()
+
+    payday = entry.payday.isoformat()
+    try:
+        pay_list_service.remove_entry(entry)
+    except ValidationError as refused:
+        flash(str(refused), "danger")
+        return edit_page.to_response()
+
+    response = regenerate_commit_or_report(
+        lambda: _regenerate_salary_transactions(
+            BalanceContext.build(current_user.id), profile,
+        ),
+        stale_ctx=StaleConflictContext(
+            logger=logger,
+            log_label="remove_pay_entry",
+            log_id=entry_id,
+            flash_message=stale_message,
+            redirect=edit_page,
+        ),
+        error_ctx=DbErrorContext(
+            logger=logger,
+            log_message="user_id=%d failed to remove pay entry %d on profile %d",
+            log_args=(current_user.id, entry_id, profile.id),
+            flash_message="Failed to remove the pay entry. Please try again.",
+            redirect=edit_page,
+        ),
+    )
+    if response is not None:
+        return response
+
+    logger.info(
+        "user_id=%d removed pay entry %d on salary profile %d",
+        current_user.id, entry_id, profile.id,
+    )
+    flash(f"Your pay from {payday} is removed.", "info")
     return edit_page.to_response()

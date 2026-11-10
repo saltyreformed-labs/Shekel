@@ -8,8 +8,8 @@ form's FIRST entry (:func:`start_pay_list`), the salary page's Record a pay
 change (:func:`record_entry`, plan step salary:X-av-3b) and its Fix
 (:func:`fix_entry`).  The first entry IS a Record on an empty list, so the
 create door writes through :func:`record_entry` too: one act, one set of
-refusals.  Remove is plan step salary:X-av-3b's too (ruling **R-SAL83**), and
-never takes the last entry (**R-SAL68**).
+refusals.  Remove (:func:`remove_entry`, plan step salary:X-av-3b) takes any
+entry but the only one (ruling **R-SAL68**, "Remove, except the last one").
 
 **What the doors refuse, and whose rule each refusal is:**
 
@@ -27,7 +27,9 @@ never takes the last entry (**R-SAL68**).
 * a Record on, or a Fix moving an entry onto, a payday another of the
   profile's entries holds: one entry per payday
   (``uq_pay_entries_profile_payday``), and neither door overwrites an entry
-  unseen.  One sentence for both, :func:`_refuse_held_payday`.
+  unseen.  One sentence for both, :func:`_refuse_held_payday`;
+* a Remove of a profile's only entry: every paycheck is priced from the pay
+  list, so a profile holds at least one entry (**R-SAL68**).
 
 The amount's bounds are the schema's (``SalaryPayEntryRecordSchema`` and the
 Fix schema built on it, ``SalaryProfileCreateSchema``; one home,
@@ -39,11 +41,12 @@ the create route generates the new profile's paychecks from its new template
 
 Flask-free: ORM rows and plain values in, the row out.  Never commits -- the
 route owns the unit of work.  :func:`start_pay_list` flushes, so its caller
-prices the new entry in the same unit of work; :func:`record_entry` and
-:func:`fix_entry` only STAGE their change, so the flush that can lose a
-version race or meet ``uq_pay_entries_profile_payday`` runs inside the
-route's guard (:func:`~app.routes._commit_helpers.regenerate_commit_or_report`)
-and is reported there, never as a 500.
+prices the new entry in the same unit of work; :func:`record_entry`,
+:func:`fix_entry` and :func:`remove_entry` only STAGE their change, so the
+flush that can lose a version race or meet ``uq_pay_entries_profile_payday``
+runs inside the route's guard
+(:func:`~app.routes._commit_helpers.regenerate_commit_or_report`) and is
+reported there, never as a 500.
 """
 
 from dataclasses import dataclass
@@ -269,4 +272,40 @@ def fix_entry(
     return entry
 
 
-__all__ = ["PayRow", "fix_entry", "pay_rows", "record_entry", "start_pay_list"]
+def remove_entry(entry: SalaryPayEntry) -> None:
+    """Remove one pay entry, never the profile's only one (ruling **R-SAL68**).
+
+    "Remove, except the last one."  The paychecks the entry covered are then
+    priced from the entry before it -- or, when it was the first, from the
+    next one, which then covers the paychecks before it too (ruling
+    **R-SAL59**: "Paychecks before the first entry use it") -- with every
+    forecast raise landing after that entry's paycheck opens.
+
+    Args:
+        entry: The entry, its ownership and version already checked by the
+            route.
+
+    Returns:
+        None.  The entry leaves its profile's loaded pay list, so the
+        regeneration the route runs next prices without it, and its DELETE is
+        STAGED (the list's ``delete-orphan`` cascade), version-pinned at the
+        caller's guarded flush, where a concurrent Fix or Remove of it
+        surfaces as ``StaleDataError``.
+
+    Raises:
+        ValidationError: *entry* is its profile's only entry.
+    """
+    profile = entry.salary_profile
+    if len(profile.pay_entries) == 1:
+        raise ValidationError(
+            f"Your pay from {entry.payday.isoformat()} is your only pay "
+            f"entry, and every paycheck is priced from it, so it can't be "
+            f"removed.  Fix it instead."
+        )
+    profile.pay_entries.remove(entry)
+
+
+__all__ = [
+    "PayRow", "fix_entry", "pay_rows", "record_entry", "remove_entry",
+    "start_pay_list",
+]

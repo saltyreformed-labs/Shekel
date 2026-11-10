@@ -103,7 +103,9 @@ class TestWhichAccountAPurchaseNames:
     ):  # pylint: disable=unused-argument
         """Design 3.2's worked case, read by the readers it names.
 
-        The purchase is stored on the CARD; the envelope's spend counts it
+        Ticked CC, the way a purchase goes on a card since ruling plan#3227
+        took the cards out of "Paid from".  The purchase is stored on the
+        CARD; the envelope's spend counts it
         (``row_valuation.purchases_total``, what the grid's progress reads);
         and the card's in-flight stream carries it at `-60.00` while
         checking's carries nothing -- the fold attributes a movement to its
@@ -112,7 +114,7 @@ class TestWhichAccountAPurchaseNames:
         with app.app_context():
             card = _card(seed_user)
             row = _envelope(seed_user, seed_periods[0])
-            entry = _swipe(row, seed_user["user"].id, account_id=card.id)
+            entry = _swipe(row, seed_user["user"].id, on_card=True)
             db.session.flush()
 
             assert entry.account_id == card.id
@@ -145,7 +147,7 @@ class TestWhichAccountAPurchaseNames:
             companion_id = seed_companion["user"].id
             assert companion_id != row.user_id
 
-            entry = _swipe(row, companion_id, account_id=card.id)
+            entry = _swipe(row, companion_id, on_card=True)
             db.session.flush()
 
             assert entry.account_id == card.id
@@ -154,7 +156,7 @@ class TestWhichAccountAPurchaseNames:
 
 
 class TestWhatTheDoorRefuses:
-    """Foreign -> 404; archived, outside the picker's set, or the flag beside the card -> refused."""
+    """Foreign -> 404; archived, a card, holding no cash, or the flag beside the card -> refused."""
 
     def test_another_owners_account_is_not_found(
         self, app, db, seed_user, seed_periods, second_user,
@@ -197,26 +199,47 @@ class TestWhatTheDoorRefuses:
                 _swipe(row, seed_user["user"].id, account_id=card.id)
             assert _purchases_of(row.id) == []
 
-    def test_an_account_outside_the_pickers_set_is_refused_per_kind(
+    def test_a_card_other_than_the_rows_is_refused_naming_credit_and_cc(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """ONE predicate, the picker's (ruling **R-CC37**): a loan, a 401(k), savings, a second checking.
+        """"Paid from" never names a card other than the row's own (ruling plan#3227).
 
-        Each is the owner's, active, and not a member of the cash-flow set
-        (the primary grid account plus active cards), so each is refused by
-        the same sentence -- where the first cut admitted every non-loan
-        account and a crafted POST could file a swipe on a 401(k), whose
-        balance never folds movements.  Four kinds, one loop, so a predicate
-        that widened to "not a loan" again fails on three of them.
+        Credit puts a bill on a card and the CC tick puts a purchase on one,
+        so a hand-built post naming the card under "Paid from" is refused in
+        a sentence naming them, rather than filed on the card.
+        """
+        with app.app_context():
+            card = _card(seed_user)
+            row = _envelope(seed_user, seed_periods[0])
+            with pytest.raises(
+                ValidationError,
+                match=(
+                    r"^'Rewards Card' is a credit card, so a purchase cannot be "
+                    r"paid from it: Credit puts a bill on a card, and CC puts a "
+                    r"purchase on one\.$"
+                ),
+            ):
+                _swipe(row, seed_user["user"].id, account_id=card.id)
+            assert _purchases_of(row.id) == []
+
+    def test_an_account_that_holds_no_cash_is_refused_per_kind(
+        self, app, db, seed_user, seed_periods,
+    ):  # pylint: disable=unused-argument
+        """ONE predicate, the picker's (ruling plan#3227): a loan, a 401(k), a CD, a house.
+
+        Each is the owner's, active, and of a type ``is_liquid`` does not
+        mark, so each is refused by the same sentence -- where the first cut
+        of this door admitted every non-loan account and a crafted POST could
+        file a swipe on a 401(k), whose balance never folds movements.  A CD
+        and a house are assets, so a predicate that widened to "not a loan"
+        or to "an asset" fails on them.
         """
         with app.app_context():
             outside = [
                 create_loan_account(seed_user, db.session, name="Car Loan"),
                 create_account_of_type(seed_user, db.session, "401(k)", "Work 401k"),
-                create_account_of_type(seed_user, db.session, "Savings", "Rainy Day"),
-                create_account_of_type(
-                    seed_user, db.session, "Checking", "Second Checking",
-                ),
+                create_account_of_type(seed_user, db.session, "CD", "12-month CD"),
+                create_account_of_type(seed_user, db.session, "Property", "House"),
             ]
             row = _envelope(seed_user, seed_periods[0])
             for account in outside:
@@ -227,15 +250,51 @@ class TestWhatTheDoorRefuses:
                     _swipe(row, seed_user["user"].id, account_id=account.id)
             assert _purchases_of(row.id) == []
 
+    def test_every_account_that_holds_cash_is_admitted_per_kind(
+        self, app, db, seed_user, seed_periods,
+    ):  # pylint: disable=unused-argument
+        """Savings, an HYSA, a money market and a second checking: each files the purchase there.
+
+        Ruling plan#3227: "Paid from" lists the row's own account, then every
+        active account of the owner's that holds cash (the types
+        ``ref.account_types.is_liquid`` marks).  Until then the door refused
+        savings and a second checking as outside the cash-flow set (rulings
+        R-CC37 and R-CC39).  Each purchase is stored on the account named and
+        in flight there, and checking, the row's account, carries none.
+        """
+        with app.app_context():
+            cash = [
+                create_account_of_type(seed_user, db.session, "Savings", "Rainy Day"),
+                create_account_of_type(seed_user, db.session, "HYSA", "High Yield"),
+                create_account_of_type(
+                    seed_user, db.session, "Money Market", "Money Market",
+                ),
+                create_account_of_type(
+                    seed_user, db.session, "Checking", "Second Checking",
+                ),
+            ]
+            row = _envelope(seed_user, seed_periods[0])
+            scenario_id = seed_user["scenario"].id
+            for account in cash:
+                entry = _swipe(row, seed_user["user"].id, account_id=account.id)
+                db.session.flush()
+                assert entry.account_id == account.id
+                assert [
+                    (m.entry_id, m.delta)
+                    for m in cash_ledger.in_flight_movements(account.id, scenario_id)
+                ] == [(entry.id, Decimal("-60.00"))]
+            assert cash_ledger.in_flight_movements(
+                seed_user["account"].id, scenario_id,
+            ) == []
+
     def test_a_row_living_outside_the_set_keeps_its_purchases_on_its_own_account(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """The row's OWN account is always admitted, member of the set or not.
+        """The row's OWN account is always admitted, first in the list.
 
         A Savings envelope's purchase names Savings -- by default, and when
-        the form states it explicitly -- while the same Savings is refused for
-        a purchase under a CHECKING row (the case above).  The two halves of
-        R-CC37's predicate, graded on one account.
+        the form states it explicitly.  The first member of plan#3227's list,
+        graded on its own (the case above is the rest of it).
         """
         with app.app_context():
             savings = create_account_of_type(
@@ -308,7 +367,7 @@ class TestTheBooksBoundaryIsTheMovementsAccounts:
             # posting day before the purchase day is a different refusal).
             made_on = cards_opening - _ONE_DAY
             on_the_card = _swipe(
-                row, owner_id, account_id=card.id, purchased_on=made_on,
+                row, owner_id, on_card=True, purchased_on=made_on,
             )
             on_checking = _swipe(row, owner_id, purchased_on=made_on)
             db.session.flush()
@@ -359,7 +418,7 @@ class TestTheUpdateDoorRefusesTheSameCombination:
             card = _card(seed_user)
             row = _envelope(seed_user, seed_periods[0])
             owner_id = seed_user["user"].id
-            entry = _swipe(row, owner_id, account_id=card.id)
+            entry = _swipe(row, owner_id, on_card=True)
             db.session.flush()
 
             entry_service.update_entry(entry.id, owner_id, on_card=True)

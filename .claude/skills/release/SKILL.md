@@ -1,10 +1,10 @@
 ---
 name: release
 description: >
-  Ship dev to production on Josh's word: pin the cut, judge it with tools/release, rehearse
-  money movers and migrations on a same-day production dump, ask Josh to approve, merge into
-  main, deploy after his "Logged out, deploy now", verify, record and clean up. Invoke only
-  when Josh says to release. Not `quill release`, which deletes a card's claim.
+  Ship dev to production on Josh's word: pin the cut, judge it with tools/release, compare
+  every stored row and run each money mover's kit on a same-day production dump, ask Josh to
+  approve, merge into main, deploy after his "Logged out, deploy now", verify, record and clean
+  up. Invoke only when Josh says to release. Not `quill release`, which deletes a card's claim.
 ---
 
 # /release: ship dev to production
@@ -12,9 +12,11 @@ description: >
 Card `plan#9` (X-cx L9a). The rules are Josh's: he approves each release ONCE, by the approval
 question of step 5 (R-BAL217, R-BAL279); a deploy waits for his answer at step 10 (R-BAL279); a
 refused release names the rule and offers the newest earlier cut that passes (R-BAL280); a money
-mover or an added migration is rehearsed by its lane's kit or refused, and every other change to
-what the image ships is NAMED unrehearsed in the approval question until the general kit exists
-(R-BAL281, the interim as he confirmed it 2026-10-13). `tools/release` is this skill's tested half;
+mover is rehearsed by its card's kit or refused, and every other change to what the image ships is
+NAMED unrehearsed in the approval question until the general kit exists (R-BAL281, the interim as
+he confirmed it 2026-10-13). A migration needs no kit: every release runs production's deploy step
+and the cut's on the same-day dump and compares every stored row, which rehearses each migration
+the cut adds (rulings plan#2873, plan#3200). `tools/release` is this skill's tested half;
 everything with a person or a judgment in it is here.
 
 ## 0. Before anything
@@ -140,15 +142,15 @@ Then, line by line:
   marker the release deletes, judged as a ship is (R-BAL288): a money mover's undo needs its kit
   too. A group's way out is reverting the merge that landed each member it names, never deleting a
   marker by hand (that leaves the code in production, unseen).
-- For each card reading `moves money: yes` and each `ADDED` migration, find the rehearsal kit its
-  lane wrote: card N's is `~/projects/shekel-handoffs/kits/plan-N/`, and a migration's is the kit
-  of the card whose pull request added it, the merge on `dev`'s first-parent line that brought the
-  file naming its branch `card/N` (ruling plan#1980); a kit written before that ruling is named by
-  its lane's handoff file, `~/projects/shekel-handoffs/HANDOFF-<lane>.md`, or, once the lane
-  posted its first note, the same file under `~/projects/shekel-handoffs/archive/` (`/handoff`
-  moves it there). Append each directory found to `current.sh` as `KITS="<dir> <dir> ..."`.
-  For each with no kit, re-run with `--unrehearsed plan#N` or `--unrehearsed <revision>`; `plan`
-  then refuses the release for it.
+- For each card reading `moves money: yes`, find the rehearsal kit its lane wrote as its "Release
+  kit" task: card N's is `~/projects/shekel-handoffs/kits/plan-N/` (ruling plan#1980); a kit
+  written before that ruling is named by its lane's handoff file,
+  `~/projects/shekel-handoffs/HANDOFF-<lane>.md`, or, once the lane posted its first note, the
+  same file under `~/projects/shekel-handoffs/archive/` (`/handoff` moves it there). Append each
+  directory found to `current.sh` as `KITS="<dir> <dir> ..."`. For each with no kit, re-run with
+  `--unrehearsed plan#N`; `plan` then refuses the release for it.
+- An `ADDED` migration needs no kit: step 4's row comparison rehearses every one (ruling
+  plan#2873). `plan` takes no revision as unrehearsed: given one, it judges nothing (exit 2).
 - A refusal naming a card the tracker does not hold, a card that is no work, or an entry under
   `plan/ships/` that is no card's marker (R-BAL287, R-BAL289) is no judgment for this run to make:
   STOP and report it to Josh.
@@ -179,7 +181,10 @@ The answer moves the cut, so this comes before any rehearsal.
   and ask "Both together", "Cut before the second" (the `newest cut adding at most one migration`
   line; absent or `none`, leave the option out) or "Stop".
 
-## 4. Rehearse (a money mover or an `ADDED` migration)
+## 4. Rehearse: the row comparison, and each money mover's kit
+
+Every release takes the same-day dump and runs the row comparison on it once (ruling plan#3200); a
+release carrying a money mover runs that card's kit on the same dump too.
 
 **The same-day dump**, taken by production's own deploy script and nowhere else (never a hand
 `docker exec ... pg_dump`):
@@ -197,7 +202,53 @@ prints. Either is a STOP. A dump taken before Josh's first page load of the day 
 grade by design, as the pay-period window tops up; the kit's first page load grade covers it (trap
 i).
 
-**Each kit**, by the command its README names, on `$DUMP`, its exit read unpiped and appended:
+**The row comparison**, from production's commit to the cut, on `$DUMP` (its module docstring,
+`tools/rehearsal/rows.py`, says what it compares and what it does not):
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+: "${R:?}" "${DUMP:?}" "${BASE:?}" "${CUT:?}"
+.venv/bin/python -m tools.rehearsal.rows --dump "$DUMP" --base "$BASE" --cut "$CUT" \
+    --report "$R/rows_report.txt" > "$R/rows.txt" 2>&1; echo "exit=$?"
+```
+
+It restores the dump in a cluster of its own, runs base's deploy step on one copy and the cut's on
+another, as production's entrypoint runs it, and compares every stored row. It tears all of it down
+itself, so it makes nothing step 12 removes. Read `rows.txt`:
+
+- **Exit 2** measured nothing, and `rows.txt` names why (the docstring's exit status lists every
+  cause, a teardown that left something among them): STOP and report it.
+- **Exit 0 or 1** is a measured result only when `rows.txt` holds the `controls:` line and the
+  bench's `teardown:` timing, which prints only once a run returns. An exit without both is a
+  crash, whatever its number (a Python traceback exits 1): STOP and report it.
+- `cut's deploy refused the copy base's deployed:` (exit 1): production's deploy of the cut would
+  refuse too. A line opening `ROLLBACK FAILS` (exit 1): production's rollback from the cut would
+  fail. Either is a STOP: tell Josh.
+- The rollback's other line: `rollback: base's image knows ...` holds; `... rolling back past this
+  release is a restore` goes in the approval question, since undoing the release is then a
+  restore of the pre-deploy dump, never a re-pin.
+- **Each changed table and column** (`base against cut: <n> rows differ`, then a line per table and
+  an indented line per column; each row is in `rows_report.txt`) is traced to the change in the cut
+  that writes it: an `ADDED` migration in `plan.txt` (its `upgrade()`, `git show "$CUT":<its
+  path>`), or a pull request in `production.txt` that changes what the deploy step writes
+  (`scripts/init_database.py`: the reference rows `app/ref_seeds.py` seeds and its three deploy
+  hooks). `public.alembic_version` differs by the stamp moving from production's revision to the
+  cut's, exactly when the cut adds a migration. A `system.audit_log` row only on cut is the
+  trigger's record of a write the deploy made, traced with the table and `row_id` it names. In the
+  report a column one side lacks reads `null` on that side, so `7 -> null` can be a column the cut
+  drops and `null -> 6` one it adds and fills (its migration says which), and `null -> null` is
+  always one it adds empty or drops empty. A table the cut renames reads as rows only on base under
+  the old name and only on cut under the new. A difference no change in the cut explains is a
+  STOP: tell Josh what differs.
+- An `ADDED` migration that no line traces to moved no row (a new table, a column on an empty
+  table, a constraint): the comparison compares no table shape, so it saw nothing of it, and the
+  approval question says so.
+
+The trace, each table and column with the change that explains it, goes in the record's README
+(step 13).
+
+**Each money mover's kit**, by the command its README names, on `$DUMP`, its exit read unpiped and
+appended:
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -213,6 +264,9 @@ failing grade to the lane.
 
 **What a lane writing a kit is told:**
 
+- A kit is written only for a card that moves money, as its "Release kit" task, which `quill
+  claim` files and whose text sets the kit's limits (rulings plan#2860, plan#3201). A migration
+  needs none (ruling plan#2873).
 - The kit is the directory `~/projects/shekel-handoffs/kits/plan-N/`, N its card (ruling
   plan#1980), which no note or file need name. Its README names what it grades and its
   command, which takes the dump's path and exits 0 only when every grade passes.
@@ -263,9 +317,10 @@ Header "Release ok". The question lists, in plain words with each id after its w
 - every `APPROVAL MUST NAME` line of `plan.txt`;
 - every OTHER change to what production runs, named UNREHEARSED (R-BAL281's interim, read as
   every file production runs: the image's and those outside it that build or run it). Name each
-  pull request `production.txt` lists whose change no kit rehearsed, in plain words with how many
-  files it changes (the file, kept in the record, holds each path). Name each file under its
-  `changed by no pull request's own change` heading too, saying in plain words what
+  pull request `production.txt` lists whose change no money mover's kit rehearsed, in plain words
+  with how many files it changes (the file, kept in the record, holds each path): the row
+  comparison reads what a migration does to stored rows, never the code beside it. Name each file
+  under its `changed by no pull request's own change` heading too, saying in plain words what
   `git diff "$BASE" "$CUT" -- <file>` shows the release does to it: a merge's resolution kept or
   dropped a side there, and a hotfix a resync dropped leaves production. This skill keeps no list
   of production's files: its last one missed `docker-compose.yml`;
@@ -296,7 +351,12 @@ Header "Release ok". The question lists, in plain words with each id after its w
   what they change on the host, and that `shekel-deploy`'s own rollback cannot undo them; and each
   host copy in 2.5's table that `production.txt` lists and no such step copies, which the deploy
   leaves as it is on the host (finding plan#2567);
-- each kit's verdict, or that nothing needed rehearsal.
+- the row comparison's verdict, whatever the release carries: how many stored rows change, in
+  which tables and columns, each with the change step 4 traced it to, or that no row changes;
+  each `ADDED` migration that moved no row, in plain words, with what it changes that the
+  comparison cannot see; and, where its rollback line says so, that undoing the release is a
+  restore of the pre-deploy dump;
+- each money mover's kit verdict, or that no card the release carries moves money.
 
 Options: "Approve this release" or "Not now". "Not now" merges nothing (step 0's early end).
 
@@ -548,11 +608,12 @@ With kits, the guard names `"${KITS:?}"` too, and each directory gets a `--kit` 
 
 `$R/README.md`: the base (production's commit), the cut, the release branch, the PR, the merge
 sha, the resync PR and its merge sha (`RS`, `RM`), the image digest old -> new, the dry run's
-stamp, the dump's path, the host steps run and their snapshot (`HS`), and each verdict with its exit
-(plan, each kit, the checks, each queue run, the build, each host step, the dry run, the deploy,
-verify, main's CI, the census); a run that ended early says
-where and why, and names what it left open. Beside it: `plan.txt`, `production.txt`, `dump.txt`,
-`dump_err.txt` and `rehearsal.txt` (when rehearsed), each `host_<card>_<step>.txt`,
+stamp, the dump's path, the host steps run and their snapshot (`HS`), step 4's trace of each changed
+table and column, and each verdict with its exit (plan, the row comparison, each kit, the checks,
+each queue run, the build, each host step, the dry run, the deploy, verify, main's CI, the census);
+a run that ended early says where and why, and names what it left open. Beside it: `plan.txt`,
+`production.txt`, `dump.txt`, `dump_err.txt`, `rows.txt`, `rows_report.txt`, `rehearsal.txt`
+(when a kit ran), each `host_<card>_<step>.txt`,
 `checks_<PR>.txt`, `checks_<RS>.txt`, each
 `queue_<run>.txt`, `build_<run>.txt`, `build_log_<run>.txt`, `dryrun.txt`, `deploy_since.txt`,
 `deploy.txt`, `verify.txt`, `main_ci_<run>.txt`, `cleanup.txt`.

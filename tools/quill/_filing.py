@@ -53,9 +53,9 @@ from tools.quill._fields import (
     SUGGESTED_KINDS,
     SUGGESTED_OPTIONS,
 )
+from tools.quill._next import ranked
 from tools.quill._state import (
     OWNED,
-    at_and_above,
     done_tasks,
     filing_ended,
     filing_unfinished,
@@ -523,11 +523,11 @@ def _refuse_over_tasks(filing: _Filing) -> None:
 def _refuse_unranked(filing: _Filing) -> None:
     """Refuse to file a leaf of ``filing``'s parent -- a new one, or one's filing again -- while
     neither that parent nor any step above it holds a Priority (ruling plan#3229): a leaf holds
-    none of its own and is ranked by theirs when quill hands out work
-    (:func:`_state.at_and_above`, the walk ``_next._rank`` reads), so no leaf is left without
-    one.  The session asks the developer for the step's Priority first."""
+    none of its own and is ranked by theirs when quill hands out work (:func:`_next.ranked`,
+    the one spelling), so no leaf is left without one.  The session asks the developer for the
+    step's Priority first."""
     parent = filing.parent
-    if any(step.priority is not None for step in at_and_above(parent, filing.cards)):
+    if ranked(parent, filing.cards):
         return
     raise Refused(f"neither plan#{parent.number} nor any step above it holds a Priority, and a "
                   "leaf is ranked by its split step's (ruling plan#3229), so no leaf is filed "

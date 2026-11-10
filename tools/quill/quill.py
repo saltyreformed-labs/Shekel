@@ -170,7 +170,7 @@ from tools.quill._export import cmd_export
 from tools.quill._fields import ON_HOLD
 from tools.quill._filing import cmd_file
 from tools.quill._github import CredentialsError, GitHubError
-from tools.quill._next import next_step
+from tools.quill._next import next_step, unranked_lines
 from tools.quill._show import cmd_show
 from tools.quill._state import (
     STALE_CLAIM,
@@ -224,7 +224,9 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
     """The step :func:`_next.next_step` hands out, Urgent, then High, then the board's order, each
     step's unfinished prerequisites just ahead of it, and never one On hold; then how far ``sync``
     is behind (:func:`_sync.behind`), what it cannot offer that a person must act on, each step
-    waiting on one On hold, by name (ruling plan#1830, plan#1820's spec), whether a release is due
+    waiting on one On hold, by name (ruling plan#1830, plan#1820's spec), each piece of a split
+    step on the board that no Priority ranks (:func:`_next.unranked_lines`, ruling plan#3304),
+    whether a release is due
     for a version (:func:`_versions.due_line`, ruling plan#2829), and last,
     after every line no further read can cost, each claimed card, and each task under one,
     holding a comment of the developer's that no answer of quill's has followed (plan#1822,
@@ -248,6 +250,8 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
     for wait in answer.waiting:
         print(f"WAITING: {_label(wait.step)} needs what is {ON_HOLD}: "
               f"{' and '.join(map(_label, wait.on))}")
+    for line in unranked_lines(order, cards, shipped):
+        print(f"UNRANKED: {line}")
     for claim in stale_claims(reads.claims, datetime.now(UTC)):
         print(f"STALE CLAIM: plan#{claim.card} on {holder(claim)}: no commit for more than "
               f"{STALE_CLAIM.days} days -- {release_hint(claim)} keeps its work and frees it")

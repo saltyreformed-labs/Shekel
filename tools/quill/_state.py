@@ -280,8 +280,7 @@ def above(card: BareCard, cards: Mapping[int, BareCard]) -> Iterator[BareCard]:
 def at_and_above(card: BareCard, cards: Mapping[int, BareCard]) -> Iterator[BareCard]:
     """``card``, then the steps above it, nearest first (:func:`above`): what a leaf inherits
     from, each step's wait and Priority, nothing copied (R-BAL182).  The one walk
-    :func:`blockers`, :func:`held_at`, ``_next._rank`` and the split's refusal (``_filing``)
-    read."""
+    :func:`blockers`, :func:`held_at`, ``_next._rank`` and ``_next.ranked`` read."""
     yield card
     yield from above(card, cards)
 

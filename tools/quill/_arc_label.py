@@ -16,13 +16,16 @@ and text alone are the developer's words (R-BAL220), and on a closed card, and r
 still being filed (:func:`_filing_refusal`); ``arc`` and ``label`` refuse a task
 (:func:`_refusal`), ``priority`` and ``effort`` a value on a kind the check refuses it on
 (``check.HOLDERS``), and ``effort`` one on a step split into smaller steps, reading git only
-for a step with a step linked under it (ruling plan#2555, :func:`_split_refusal`).
+for a step with a step linked under it (ruling plan#2555, :func:`_split_refusal`), and
+``priority`` a clear that would leave a piece of a split step unranked (ruling plan#3304,
+:func:`_unranked_refusal`).
 
 Split out of the command module, which they would take past the 1,000 lines
 ``too-many-lines`` allows; their arguments are here too (:func:`add_parsers`).
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from tools.ci.arcs import ARCS
@@ -30,8 +33,15 @@ from tools.quill import _git
 from tools.quill._arcs import label_corrections, other_labels
 from tools.quill._command import _label, _one, card_number, with_closure
 from tools.quill._exits import Refused
-from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS, PRIORITY
-from tools.quill._state import filing_unfinished, has_steps_under, is_container
+from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS, PRIORITY, PRIORITY_FIELD
+from tools.quill._next import is_piece, ranked
+from tools.quill._state import (
+    at_and_above,
+    filing_unfinished,
+    has_steps_under,
+    is_container,
+    leaves_below,
+)
 from tools.quill._suggestion import take_back
 from tools.quill._tracker import Card, Tracker
 from tools.quill.check import HOLDERS, Draft, violations
@@ -128,14 +138,42 @@ def _split_refusal(tracker: Tracker, root: Path, card: Card) -> str | None:
             f"{EFFORT_FIELD} (ruling plan#2555){clear}")
 
 
+def _unranked_refusal(tracker: Tracker, root: Path, card: Card) -> str | None:
+    """Why ``card``'s Priority is not cleared: once it is, a piece of a split step still to build
+    (:func:`_next.is_piece`), ``card`` itself or one below it (:func:`_state.leaves_below`), would
+    hold no Priority at it or above (:func:`_next.ranked`, read over the cards as the clear would
+    leave them), and nothing would show it but ``quill next`` (ruling plan#3304); None when none
+    would.  Only a step of a split, linked under one or with one linked under it, ranks a piece,
+    so the cards around it and git are read for no other, nor for a card holding no Priority,
+    whose clear writes nothing."""
+    if card.priority is None or (card.parent is None and not has_steps_under(card)):
+        return None
+    cards = with_closure(tracker, {card.number: card})
+    shipped = _git.read(root).shipped.cards
+    cleared = {**cards, card.number: replace(cards[card.number], priority=None)}
+    left = [piece.number for piece in (cleared[card.number], *leaves_below(card, cards, shipped))
+            if is_piece(piece, cleared, shipped) and not ranked(cleared[piece.number], cleared)]
+    if not left:
+        return None
+    top = list(at_and_above(card, cards))[-1].number
+    give = "each of them its own" if top == card.number else f"plan#{top} one"
+    return (f"once {_label(card)}'s {PRIORITY_FIELD} is cleared, "
+            f"{', '.join(f'plan#{number}' for number in left)} would hold none, its own or a "
+            "step's above it, and a piece of a split step nothing ranks is refused (ruling "
+            f"plan#3304): give {give} first (`quill priority plan#N --to PRIORITY`), then clear "
+            "this one")
+
+
 def cmd_field(args, tracker: Tracker, root: Path) -> int:
     """``quill priority`` and ``quill effort``: set a card's Priority or Effort, the command's
     issue field (``_fields.FIELDS``, keyed by the command's name), to ``--to``, or with
     ``--clear`` clear it (:meth:`_tracker.Tracker.set_field`), after the check every written
     card passes on its type and Arc and on the kind that may hold the field
     (:func:`check.violations`, grading that part alone).  Refused, with nothing written, for
-    a card still being filed (:func:`_filing_refusal`), what the check refuses, and an Effort
-    on a step split into smaller steps (:func:`_split_refusal`), whose clear is still taken.
+    a card still being filed (:func:`_filing_refusal`), what the check refuses, an Effort
+    on a step split into smaller steps (:func:`_split_refusal`), whose clear is still taken,
+    and a Priority's clear that would leave a piece of a split step unranked
+    (:func:`_unranked_refusal`, ruling plan#3304).
     Written only when it differs from what the card holds.
 
     A Priority's set takes back quill's pending suggestion of one first
@@ -156,6 +194,8 @@ def cmd_field(args, tracker: Tracker, root: Path) -> int:
     if problems := violations(draft, frozenset({part})):
         raise Refused("not written:\n  " + "\n  ".join(problems))
     if part == EFFORT and value is not None and (why := _split_refusal(tracker, root, card)):
+        raise Refused(why)
+    if part == PRIORITY and value is None and (why := _unranked_refusal(tracker, root, card)):
         raise Refused(why)
     held = getattr(card, part)
     if (part == PRIORITY and value is not None

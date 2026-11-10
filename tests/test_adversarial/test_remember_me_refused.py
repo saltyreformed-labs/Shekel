@@ -24,9 +24,11 @@ timestamps and was signed in as the cookie's user (the 2026-10-31 review,
 measured three of three).  These tests drive the real app: a cookie minted
 exactly as Flask-Login minted every remember cookie is refused alone, before
 and after a sign-out of all sessions, and on another user's refused session;
-and a signed-in session that loses a stamp is signed out.
+a signed-in session that loses a stamp is signed out; and so is one whose
+``_session_created_at`` cannot be read, never answered with a 500.
 """
 
+import pytest
 from flask_login.config import COOKIE_NAME
 from flask_login.utils import decode_cookie, encode_cookie
 
@@ -140,7 +142,7 @@ class TestARememberCookieSignsNobodyIn:
             remembered = _remembered_client(app, seed_user["user"].id)
             _assert_signed_out(remembered.get("/dashboard"))
 
-    def test_the_signing_in_client_is_unaffected(self, app, auth_client):
+    def test_the_signing_in_client_is_unaffected(self, auth_client):
         """Control: a session the app's sign-in started still reads pages.
 
         Without it, a loader that refused EVERY session would pass both tests
@@ -159,9 +161,8 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
     user and the signed-out assertion would fail.
     """
 
-    def test_another_users_session_signed_out_elsewhere(
-        self, app, seed_user, seed_second_user,
-    ):
+    @pytest.mark.usefixtures("seed_second_user")
+    def test_another_users_session_signed_out_elsewhere(self, app, seed_user):
         """B is signed out from another browser; A's cookie on B's session is refused."""
         browser = _signed_in_client(app, _SECOND_EMAIL, _SECOND_PASSWORD)
         elsewhere = _signed_in_client(app, _SECOND_EMAIL, _SECOND_PASSWORD)
@@ -172,8 +173,9 @@ class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
         for _ in range(3):
             _assert_signed_out(browser.get("/dashboard"))
 
+    @pytest.mark.usefixtures("seed_second_user")
     def test_after_the_cookies_user_signed_out_everywhere(
-        self, app, auth_client, seed_user, seed_second_user,
+        self, app, auth_client, seed_user,
     ):
         """A signs out of every session, then B signs in: still refused.
 
@@ -245,4 +247,54 @@ class TestASessionMissingAStampIsSignedOut:
         assert auth_client.get("/dashboard").status_code == 200
         with auth_client.session_transaction() as sess:
             del sess[SESSION_USER_ID_KEY]
+        _assert_signed_out(auth_client.get("/dashboard"))
+
+
+class TestASessionWhoseCreationStampCannotBeReadIsSignedOut:
+    """A ``_session_created_at`` no sign-in writes signs the session out (plan#3157).
+
+    Before ``load_user`` read the stamp through ``session_stamp``, it parsed
+    the stamp itself, and only to compare it with ``session_invalidated_at``:
+    with a sign-out of all sessions on record, a malformed stamp raised
+    ``ValueError`` and a naive one ``TypeError`` (a 500), and with none on
+    record the stamp was never parsed and the session passed.  Each stamp is
+    driven both ways.
+    """
+
+    @pytest.mark.parametrize(
+        "stamp",
+        [
+            pytest.param("not-a-timestamp", id="malformed"),
+            pytest.param("2026-03-01T12:00:00", id="naive"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "sign_out_on_record",
+        [
+            pytest.param(False, id="no-sign-out-on-record"),
+            pytest.param(True, id="a-sign-out-on-record"),
+        ],
+    )
+    def test_signed_out_and_not_a_500(
+        self, auth_client, seed_user, stamp, sign_out_on_record,
+    ):
+        """The session answers a signed-in page before, and is bounced after.
+
+        The sign-out is the owner's own click on this session, so
+        ``session_invalidated_at`` is set as the real route sets it and this
+        session survives it until its stamp is replaced: the page's 200 after
+        the click is the control that the bounce is the stamp's alone.
+        """
+        if sign_out_on_record:
+            assert auth_client.post("/invalidate-sessions").status_code == 302
+            assert seed_user["user"].session_invalidated_at is not None, (
+                "Setup failed: the sign-out did not stamp session_invalidated_at"
+            )
+        else:
+            assert seed_user["user"].session_invalidated_at is None
+        assert auth_client.get("/dashboard").status_code == 200, (
+            "Setup failed: the session is not signed in before its stamp changes"
+        )
+        with auth_client.session_transaction() as sess:
+            sess[SESSION_CREATED_AT_KEY] = stamp
         _assert_signed_out(auth_client.get("/dashboard"))

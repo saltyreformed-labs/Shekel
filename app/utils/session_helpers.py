@@ -62,8 +62,9 @@ and the three timestamps in the request that calls ``login_user``
 (:func:`stamp_login_session`, from ``_complete_sign_in``, the one
 ``login_user`` site).  ``load_user`` reads ``_session_created_at`` only
 through :func:`sign_in_created_at`, which answers ``None`` unless the user
-stamp is the user being loaded, and refuses the session then; it reads a
-session without ``_session_last_activity_at`` as stale.
+stamp is the user being loaded and the stamp can be read, and refuses the
+session then; it reads a session without ``_session_last_activity_at`` as
+stale.
 
 What the rule exists to refuse is Flask-Login's remember-me restore.  A
 "Remember me" cookie is the same ``<id>|HMAC(SECRET_KEY, id)`` value for
@@ -227,15 +228,17 @@ def login_session_stamps(now: datetime, user_id: int) -> dict[str, str]:
 def session_stamp(key: str) -> datetime | None:
     """Return the moment this session's stamp *key* holds, or ``None``.
 
-    The one parse of a lifecycle stamp, for the checks ``load_user`` makes.
-    ``None``, never an exception, for a missing key, a value that is not an
-    ISO-8601 string and a naive one: ``flask.session`` is signed but not
-    encrypted, so a stamp that cannot be read must mean "sign in again",
-    never a 500 (commit C-10, F-006).  A stamp in the future is returned as
-    it is, for each check to say what a clock jump means to it.
+    The one parse of every ISO-8601 stamp the session holds, whichever check
+    reads it (plan#3157).  ``None``, never an exception, for a missing key, a
+    value that is not an ISO-8601 string and a naive one: ``flask.session`` is
+    signed but not encrypted, so no stamp the app never wrote may answer with
+    a 500 (commit C-10, F-006).  What ``None`` means, and what a stamp in the
+    future means, is each check's to say at its own site, so a future stamp
+    is returned as it is.
 
     Args:
-        key: One of this module's ``*_KEY`` stamp names.
+        key: The session key of a stamp the app writes as
+            ``datetime.isoformat()``.
 
     Returns:
         The stamp as a timezone-aware datetime, or ``None``.
@@ -265,27 +268,30 @@ def _stamped_as(user_id: str) -> bool:
     return flask_session.get(SESSION_USER_ID_KEY) == user_id
 
 
-def sign_in_created_at(user_id: str) -> str | None:
+def sign_in_created_at(user_id: str) -> datetime | None:
     """Return this session's ``_session_created_at`` for *user_id*, or ``None``.
 
     The ONE door ``load_user`` reads ``_session_created_at`` through: it
     answers only when the app's own sign-in of *user_id* wrote the session's
     stamps, so a session another user's sign-in stamped, or none did, reads
-    as never signed in.
+    as never signed in.  The stamp is read by :func:`session_stamp`, so a
+    stamp that is missing, not ISO-8601 or naive reads the same way: "sign
+    in again", never a 500.
 
     Args:
         user_id: The id Flask-Login asks ``load_user`` for, as a string.
 
     Returns:
-        The session's ``_session_created_at`` ISO timestamp when its user
-        stamp is *user_id*, else ``None``.
+        The session's ``_session_created_at`` as a timezone-aware datetime
+        when its user stamp is *user_id* and the stamp can be read, else
+        ``None``.
 
     Raises:
         RuntimeError: No active Flask request context.
     """
     if not _stamped_as(user_id):
         return None
-    return flask_session.get(SESSION_CREATED_AT_KEY)
+    return session_stamp(SESSION_CREATED_AT_KEY)
 
 
 def sign_in_is_live(user_id: str) -> bool:

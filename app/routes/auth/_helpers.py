@@ -58,7 +58,7 @@ from app.utils.log_events import (
     EVT_TOTP_REPLAY_REJECTED,
     log_event,
 )
-from app.utils.session_helpers import stamp_login_session
+from app.utils.session_helpers import session_stamp, stamp_login_session
 
 logger = logging.getLogger(__name__)
 
@@ -525,17 +525,19 @@ def _consume_backup_code(mfa_config, plaintext):
 def _mfa_pending_is_fresh():
     """Return True iff the session's ``_mfa_pending_at`` is recent.
 
-    Reads ``flask_session["_mfa_pending_at"]`` (an ISO-8601 string
-    written by /login when MFA is required) and compares it against
+    Reads ``_mfa_pending_at`` (an ISO-8601 string written by /login
+    when MFA is required) through
+    :func:`~app.utils.session_helpers.session_stamp`, the one parse of
+    a session stamp, and compares it against
     ``datetime.now(timezone.utc)``.  Returns False, NEVER raising,
     for any of the following adversarial conditions:
 
-      * No ``_mfa_pending_at`` key in the session -- pending state
-        was constructed without a timestamp (pre-C-08 cookie still
-        in flight, or a tampered/forged cookie missing the field).
-      * The value is not parseable as ISO-8601 -- malformed cookie.
-      * The parsed datetime is naive (no timezone) -- ill-formed
-        cookie that would otherwise raise on the comparison.
+      * No readable stamp: the key is missing (pending state was
+        constructed without a timestamp: a pre-C-08 cookie still in
+        flight, or a tampered/forged cookie missing the field), or its
+        value is not ISO-8601 or is naive, each of which
+        :func:`~app.utils.session_helpers.session_stamp` reads as
+        ``None``.
       * The pending timestamp is in the future -- clock skew or
         tampered cookie; treat as invalid rather than honouring an
         impossible state.
@@ -547,18 +549,8 @@ def _mfa_pending_is_fresh():
     acceptance is the entire F-002 finding (a stolen cookie can
     complete login weeks after the password step).
     """
-    raw = flask_session.get("_mfa_pending_at")
-    if not raw:
-        return False
-    try:
-        pending_at = datetime.fromisoformat(raw)
-    except (TypeError, ValueError):
-        return False
-    if pending_at.tzinfo is None:
-        # A naive datetime would raise on the timezone-aware
-        # subtraction below.  Reject explicitly so the failure mode
-        # is "expired pending state" (UX redirect to /login) rather
-        # than "500 from the auth route".
+    pending_at = session_stamp("_mfa_pending_at")
+    if pending_at is None:
         return False
     elapsed = datetime.now(timezone.utc) - pending_at
     if elapsed < timedelta(0):

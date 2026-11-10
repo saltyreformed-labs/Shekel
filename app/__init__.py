@@ -114,7 +114,9 @@ def create_app(config_name=None, *, init_ref_cache=True):
         Returns None (forcing re-login) for any of:
           * No sign-in of THIS user stamped the session: none at all, or
             another user's, as a remember-cookie restore lands on
-            (plan#2173; ``sign_in_created_at`` in session_helpers).
+            (plan#2173; ``sign_in_created_at`` in session_helpers), or its
+            ``_session_created_at`` is missing or cannot be read (not
+            ISO-8601, or naive), which no sign-in writes (plan#3157).
           * Unknown user ID.
           * Deactivated user (``is_active=False``).
           * Session created before the most recent
@@ -149,11 +151,11 @@ def create_app(config_name=None, *, init_ref_cache=True):
         if not user.is_active:
             return None
         # Check whether this session was created before the most recent
-        # "log out all sessions" or password change event.
+        # "log out all sessions" or password change event.  A creation stamp
+        # in the future passes, as any stamp at or after the bump does:
+        # forging one needs SECRET_KEY, with which any stamp can be minted.
         invalidated_at = user.session_invalidated_at
-        if invalidated_at is not None and (
-            datetime.fromisoformat(session_created) < invalidated_at
-        ):
+        if invalidated_at is not None and session_created < invalidated_at:
             return None
         # The two checks the session's own stamps answer, one refusal.
         # Idle timeout (commit C-10 / F-006): reject the session if

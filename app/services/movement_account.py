@@ -37,6 +37,16 @@ Savings and an HYSA at plan task plan#3232
 account plus the owner's cash-flow set (checking and its cards) until that
 task.
 
+**On money coming in the box is "Received into", and it lists the cards too**
+(ruling plan#3310, developer 2026-11-10, answer A): after the cash, every
+active card of the owner's, because Credit refuses money coming in
+(``transaction_service._credit``) and the box is then the only way to say a
+refund landed on a card.  Checking $1,000.00, the Visa owing $800.00, and a
+$25.00 Visa refund planned on Checking, marked Received into the Visa: the
+Visa owes $775.00 and Checking stays $1,000.00
+(``test_a_refund_received_into_the_card``).  A bill's "Paid from" stays cash
+only.
+
 **The gate is against the ROW's owner, never the caller** (design 3.2,
 ruling **R-CC11**): a companion reaches the row through the owner's
 accessible-transaction path and owns no account at all, so a gate on the
@@ -55,7 +65,8 @@ Credit or the CC tick, not "Paid from" (ruling plan#3225: Paid means the bill
 was paid, Credit that it went on a card), so a hand-built post naming one is
 refused rather than settled on the card; an account that is neither the
 row's nor one holding cash -- a loan, a 401(k) -- is not one money can be
-recorded as paid from.
+recorded as paid from, nor, on money coming in, received into unless it is a
+card.
 
 **The two acts that put money on a card gate their card themselves**
 (:func:`the_card`, plan task plan#3232): Credit settles through the same
@@ -100,8 +111,8 @@ leaf).  :func:`purchase_card` is what the tick reads a purchase as, and
 :func:`on_a_card` what every screen marks CC (plan task plan#3143).
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): no Flask imports;
-the gate and the card answers read the named account and the owner's set and
-write nothing; :func:`re_point_movement` mutates the movement in place, takes
+the gate and the card answers read the named account and the owner's accounts
+and write nothing; :func:`re_point_movement` mutates the movement in place, takes
 it out of its matches (which flushes) and never commits.
 """
 
@@ -138,7 +149,9 @@ class OwnerAccounts:
             (``sort_order``, then ``id``): what "Paid from" lists after the
             row's own account (ruling plan#3227).  Never a card.
         cards: The owner's ACTIVE credit cards, in the same order: what
-            Credit and the CC tick may put money on (:func:`credit_cards`).
+            Credit and the CC tick may put money on (:func:`credit_cards`),
+            and what "Received into" lists after the cash on money coming in
+            (ruling plan#3310).
     """
 
     cash: tuple[Account, ...]
@@ -181,15 +194,19 @@ def owner_accounts(owner_id: int) -> OwnerAccounts:
 def paid_from_accounts(txn: Transaction, owner: OwnerAccounts) -> tuple[Account, ...]:
     """Return the accounts "Paid from" lists for *txn*, in picker order.
 
-    **The ONE spelling of "which accounts may this row's money have been paid
-    from"** (ruling plan#3227, plan task plan#3232): the row's own account,
+    **The ONE spelling of "which accounts may this row's money have moved
+    through"** (ruling plan#3227, plan task plan#3232): the row's own account,
     then every account of the owner's that holds cash, never a card other
-    than the row's own.  Read by the full-edit popover's box
+    than the row's own; and on money coming in, where the box reads
+    "Received into", every other active card of the owner's after the cash
+    (ruling plan#3310).  Read by the full-edit popover's box
     (``routes.transactions.forms._tender_picker``), the add-purchase form's
     (:func:`purchase_choices`), and the gate both doors ask
     (:func:`admitted_movement_account_id`), so the box and the gate cannot
     part.  The first member is the forms' default: a payment or a purchase
-    naming no account is on its row's.
+    naming no account is on its row's.  A purchase is never under money
+    coming in (``entry_service._doors`` refuses one), so the add-purchase
+    form's list is always the cash one.
 
     Args:
         txn: The row, its ``account`` a joined load, so this reads no query.
@@ -197,11 +214,13 @@ def paid_from_accounts(txn: Transaction, owner: OwnerAccounts) -> tuple[Account,
 
     Returns:
         The row's own account first, then the owner's cash accounts in account
-        order; never empty.
+        order, then, on money coming in, the owner's cards in account order;
+        never empty.
     """
+    others = owner.cash + owner.cards if txn.is_income else owner.cash
     return (
         txn.account,
-        *[account for account in owner.cash if account.id != txn.account_id],
+        *[account for account in others if account.id != txn.account_id],
     )
 
 
@@ -223,7 +242,8 @@ def admitted_movement_account_id(
     Raises:
         NotFoundError: The account does not exist or is not the ROW's owner's.
         ValidationError: The account is archived, is a credit card other than
-            the row's own, or is neither the row's own nor one holding cash.
+            the row's own under money going out, or is neither the row's own
+            nor one :func:`paid_from_accounts` lists.
     """
     if account_id == txn.account_id:
         return txn.account_id
@@ -235,20 +255,27 @@ def admitted_movement_account_id(
             f"'{account.name}' is archived, so a {movement} cannot be filed "
             "on it. Unarchive the account first, or pick another."
         )
-    if is_revolving(account):
+    if is_revolving(account) and not txn.is_income:
         raise ValidationError(
             f"'{account.name}' is a credit card, so a {movement} cannot be "
             "paid from it: Credit puts a bill on a card, and CC puts a "
             "purchase on one."
         )
     admitted = paid_from_accounts(txn, owner_accounts(txn.user_id))
-    if account.id not in {a.id for a in admitted}:
+    if account.id in {a.id for a in admitted}:
+        return account.id
+    if txn.is_income:
         raise ValidationError(
-            f"'{account.name}' is not an account a {movement} can be paid "
-            "from: pick this row's own account, or one that holds cash "
-            "(checking, savings, an HYSA or a money market account)."
+            f"'{account.name}' is not an account money can be received "
+            "into: pick this row's own account, one that holds cash "
+            "(checking, savings, an HYSA or a money market account), or a "
+            "credit card."
         )
-    return account.id
+    raise ValidationError(
+        f"'{account.name}' is not an account a {movement} can be paid "
+        "from: pick this row's own account, or one that holds cash "
+        "(checking, savings, an HYSA or a money market account)."
+    )
 
 
 def re_point_movement(
@@ -392,8 +419,9 @@ def purchase_card(entry: TransactionEntry) -> Account | None:
     The one answer to "is this purchase on a card" for the edit form's tick
     (plan task plan#3142): ticked, and its "Which card" pick naming this
     card, when the purchase's money moved on a card other than the account
-    its row lives on -- a swipe ticked on, or picked under "Paid from" on the
-    add form.  The edit door reads it too, so an untouched Save posts back
+    its row lives on -- a swipe ticked CC, or one picked under "Paid from" on
+    the add form before plan task plan#3232, when that list stopped offering
+    a card (ruling plan#3227).  The edit door reads it too, so an untouched Save posts back
     what this said and moves nothing.  A purchase on the row's own account is
     on no card here even where that account IS a card: a row that lives on a
     card files every purchase there, and the tick is not drawn on it
@@ -437,9 +465,9 @@ def on_a_card(entry: TransactionEntry) -> bool:
       (``cash_ledger._cash_leg._moves_elsewhere``, the flag or an account
       other than the row's) by every purchase on an account other than its
       row's that is not a card: one paid from Checking under a row that
-      lives on a card, or under a row on Savings (ruling **R-CC39**: every
-      row's "Paid from" offers its own account, Checking and the cards).  It
-      is on no card, and badging it CC would say the opposite of its account
+      lives on a card, or under a row on Savings (ruling plan#3227: every
+      row's "Paid from" offers its own account and every account that holds
+      cash).  It is on no card, and badging it CC would say the opposite of its account
       chip.  The reconcile panel's cash figure partitions on
       ``_moves_elsewhere`` and not on this, rightly: it says what the
       panel's own statement will not show, wherever the rest went (its
@@ -503,9 +531,9 @@ def the_card(
 
     Raises:
         NotFoundError: *card_account_id* is not an account of the row's owner.
-        ValidationError: The named account is archived, outside the owner's
-            cash-flow set, or not a card; or none was named and none, or more
-            than one, could be the one meant.
+        ValidationError: The named account is archived (and not the row's
+            own) or not a card; or none was named and none, or more than
+            one, could be the one meant.
     """
     if card_account_id is not None:
         return _named_card(txn, card_account_id, what=what)

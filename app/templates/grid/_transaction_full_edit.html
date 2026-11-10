@@ -46,7 +46,7 @@
     money stays keyed on the stored status: the row has settled, so the
     Actual box and "Money moved on" correct what the card took and when, and
     the "Paid from" picker shows the card (which accounts it offers there is
-    plan task plan#2931's). -#}
+    plan task plan#3289's). -#}
 {% set drawn = drawn_status(txn) %}
 {# Whether the settle verb would HONOUR a figure or an account typed here
    (ruling R-FF, the same sentence the reconcile panel's tick obeys): a row
@@ -62,11 +62,14 @@
    box below and the "Paid from" picker's predicate next. #}
 {% set correctable = amount_correctable if amount_correctable is defined else true %}
 {# **The "Paid from" picker's ONE render predicate** (plan step
-   credit_card:CC-5-3, rulings R-CC15 / R-CC39): WHICH ACCOUNT a payment under
-   this row moved through -- the row's own, or a member of the owner's
-   cash-flow set (the add-purchase form's tuple, the one every door gates on),
-   PLUS the account the row RECORDS when that is no longer nameable (a card
-   since archived), so the preselected option always exists and an untouched
+   credit_card:CC-5-3, ruling R-CC15; the list is ruling plan#3227's): WHICH
+   ACCOUNT a payment under this row moved through -- the row's own, then
+   every account of the owner's that holds cash, then on money coming in
+   ("Received into") every card (ruling plan#3310)
+   (`movement_account.paid_from_accounts`, the add-purchase form's tuple, the
+   one every door gates on), PLUS the account the row RECORDS when that is no
+   longer nameable (an account since archived, or a card a bill was paid
+   from before plan task plan#3232), so the preselected option always exists and an untouched
    Save is the echo the door drops (`tender_accounts`, the route's
    `_tender_picker`).  Drawn only when
    there is a choice (ruling R-CC34: a one-account owner's card is

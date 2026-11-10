@@ -35,6 +35,10 @@ The public surface, and what each piece is for:
   returning :class:`ImportOutcome`.  A placed figure is a LEVEL row naming the import
   (plan step ``balance:X-bj-1``), and :func:`bank_levels` is the one read of
   which levels stand and which a release has withdrawn.
+* :class:`StatementImportError` and its subclasses -- every refusal the
+  import door can raise, each refusing the whole file; a route catches the
+  base and renders its message.  They stood in :mod:`app.exceptions` until
+  plan step plan#2232 moved them here verbatim (ruling **R-IR**).
 * :func:`delete_import` -- the one UNDO door, returning
   :class:`ImportRemoval`, and the only thing in this package that destroys.
   It is what finding **N-302** says a refusal owes (plan step
@@ -74,6 +78,15 @@ from ._balance import (
     bank_levels,
     covered_runs,
     fold_bank_balances,
+)
+from ._errors import (
+    StatementAccountMismatch,
+    StatementBalanceUnexplained,
+    StatementImportError,
+    StatementIntegrityError,
+    StatementLineConflict,
+    StatementLineIdMoved,
+    StatementParseError,
 )
 from ._integrity import (
     carries_running_balance,
@@ -119,8 +132,15 @@ __all__ = [
     "RecordedRun",
     "RecordedSpan",
     "SourceOption",
-    "StatementPlan",
+    "StatementAccountMismatch",
+    "StatementBalanceUnexplained",
+    "StatementImportError",
+    "StatementIntegrityError",
     "StatementLine",
+    "StatementLineConflict",
+    "StatementLineIdMoved",
+    "StatementParseError",
+    "StatementPlan",
     "available_sources",
     "bank_balance_on",
     "bank_daily_movements",

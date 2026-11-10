@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import logging
 
-from app.exceptions import StatementAccountMismatch
 from app.extensions import db
 from app.models.statement_import import AccountExternalIdentity, StatementImport
 from app.utils.log_events import (
@@ -31,6 +30,8 @@ from app.utils.log_events import (
     EVT_STATEMENT_IDENTITY_RECORDED,
     log_event,
 )
+
+from ._errors import StatementAccountMismatch
 
 _logger = logging.getLogger(__name__)
 

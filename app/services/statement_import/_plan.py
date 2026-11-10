@@ -33,11 +33,6 @@ from decimal import Decimal
 
 from app import ref_cache
 from app.enums import StatementSourceEnum
-from app.exceptions import (
-    StatementLineConflict,
-    StatementLineIdMoved,
-    StatementParseError,
-)
 from app.extensions import db
 from app.models.statement_import import (
     BankStatementLine,
@@ -47,6 +42,11 @@ from app.models.statement_import import (
 
 from ._adapters import parse_statement
 from ._anchor import ImportedBalance, recorded_opening_before, resolve_anchor
+from ._errors import (
+    StatementLineConflict,
+    StatementLineIdMoved,
+    StatementParseError,
+)
 from ._identity import verify_identity
 from ._integrity import verify_running_balance
 from ._line import (

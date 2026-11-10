@@ -29,11 +29,6 @@ from sqlalchemy import text
 
 from app import ref_cache
 from app.enums import StatementSourceEnum
-from app.exceptions import (
-    StatementLineConflict,
-    StatementLineIdMoved,
-    StatementParseError,
-)
 from app.extensions import db as _db
 from app.models.statement_import import (
     BankStatementLine,
@@ -42,6 +37,9 @@ from app.models.statement_import import (
 )
 from app.services.statement_import import (
     StatementLine,
+    StatementLineConflict,
+    StatementLineIdMoved,
+    StatementParseError,
     recent_lines,
     record_statement,
 )

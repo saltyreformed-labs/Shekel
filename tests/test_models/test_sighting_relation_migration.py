@@ -47,6 +47,14 @@ _MIGRATION = load_migration_module(
 _LATER = load_migration_module(
     "3ef820b7dd52_the_sighting_names_the_merchant.py",
 )
+#: The revision that moves a source's id OFF the sighting into its own key
+#: (plan step plan#2232): stepped down before ``_LATER`` and up after it, for
+#: ``_LATER``'s reason -- this revision's downgrade writes the line's
+#: ``external_id`` back from ``statement_line_sightings.external_id``, which
+#: exists only below that one.  A case states an id the way the head schema
+#: holds it, as a ``budget.line_source_ids`` row, and the key's downgrade puts
+#: it back onto every sighting its source wrote of the line.
+_ID_KEY = load_migration_module("6534c1bfeeb1_a_bank_id_names_one_line.py")
 
 
 def _sql(statement, **params):
@@ -72,12 +80,24 @@ def _trigger_count(pattern):
     )[0][0]
 
 
-def _an_import(account, *, file_name, window, created_at):
-    """One import over *window*, run at *created_at* -- through the head schema."""
+def _another_source():
+    """Seed and return the id of a SECOND source, a catalogue row with no parser."""
+    return _sql(
+        "INSERT INTO ref.statement_sources (name, display_name) "
+        "VALUES ('test_other_source', 'Another adapter') RETURNING id",
+    )[0][0]
+
+
+def _an_import(account, *, file_name, window, created_at, source_id=None):
+    """One import over *window*, run at *created_at* -- through the head schema.
+
+    From SECU's CSV unless *source_id* names another ``ref.statement_sources``
+    row.
+    """
     statement = StatementImport(
         account_id=account.id,
         user_id=account.user_id,
-        source_id=ref_cache.statement_source_id(
+        source_id=source_id or ref_cache.statement_source_id(
             StatementSourceEnum.SECU_CHECKING_CSV
         ),
         file_name=file_name,
@@ -113,8 +133,22 @@ def _sight(statement, line, **facts):
     return sighting
 
 
+def _id_of(line, statement, external_id):
+    """*statement*'s source's id for *line*, as the head schema holds it."""
+    db.session.execute(
+        text(
+            "INSERT INTO budget.line_source_ids "
+            "(account_id, source_id, external_id, line_id) "
+            "VALUES (:a, :s, :e, :l)"
+        ),
+        {"a": line.account_id, "s": statement.source_id, "e": external_id,
+         "l": line.id},
+    )
+
+
 def _down(db_session):
-    """Step the head schema down to below ``af07125d00f1``: the later revision first."""
+    """Step the head schema down to below ``af07125d00f1``: the later revisions first."""
+    _run(_ID_KEY.downgrade, db_session)
     _run(_LATER.downgrade, db_session)
     _run(_MIGRATION.downgrade, db_session)
 
@@ -141,6 +175,13 @@ class TestTheRoundTrip:
         are three different rows.  The downgrade must keep the earliest
         import's wording, which is what ``import_id`` meant.
 
+        **The later import is ANOTHER source's**, so the line's id tells the
+        two sightings apart too: since plan step plan#2232 the id is one
+        ``budget.line_source_ids`` row, and the key's downgrade writes it
+        onto every sighting of ITS source -- the earlier one alone here.  Of
+        one source, both sightings would carry ``FIT-1`` and the line's
+        ``external_id`` could not show which sighting the downgrade read.
+
         Run in the ``db`` fixture's own app context rather than a nested one,
         for the reason ``test_one_level_relation_migration`` gives.
         """
@@ -154,6 +195,7 @@ class TestTheRoundTrip:
             account, file_name="later.csv",
             window=(date(2026, 3, 15), date(2026, 4, 15)),
             created_at=datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc),
+            source_id=_another_source(),
         )
         shared = _a_line(account, day=date(2026, 3, 20), amount="-25.00")
         # The LATER import's sighting takes the lower id, deliberately.
@@ -163,8 +205,9 @@ class TestTheRoundTrip:
         )
         earlier_sighting = _sight(
             earlier, shared, description="EARLIER WORDING",
-            source_category="Food/Coffee", external_id="FIT-1",
+            source_category="Food/Coffee",
         )
+        _id_of(shared, earlier, "FIT-1")
         assert later_sighting.id < earlier_sighting.id
         only_later = _a_line(account, day=date(2026, 4, 10), amount="-5.00")
         _sight(later, only_later, description="ONLY THE LATER ONE SAW THIS")
@@ -251,6 +294,7 @@ class TestTheRoundTrip:
             "SELECT count(*) FROM pg_constraint WHERE conname = "
             "'bank_statement_lines_account_id_fkey'",
         ) == [(1,)]
+        _run(_ID_KEY.upgrade, db.session)
 
     def test_the_backfill_carries_the_merchant_WORD_from_the_merchant_row(
         self, db, seed_user,
@@ -290,18 +334,22 @@ class TestTheRoundTrip:
         ) == [("Food Lion",)]
 
         _run(_LATER.upgrade, db.session)
+        _run(_ID_KEY.upgrade, db.session)
 
     def test_the_downgrade_REFUSES_an_id_two_sources_hold_on_two_lines(
         self, db, seed_user,
     ):
         """The other state the old per-account unique index cannot hold.
 
-        Two imports (standing in for two sources) each sight their own line
-        under the id string ``FIT-1``.  The old schema keys one id per
-        account, so the downgrade names the collision up front rather than
-        raising ``IntegrityError`` from its ``create_index`` half-way.
+        Two imports from two sources each sight their own line under the id
+        string ``FIT-1``.  The old schema keys one id per account, so the
+        downgrade names the collision up front rather than raising
+        ``IntegrityError`` from its ``create_index`` half-way.  (Two SOURCES,
+        and not two imports of one: since plan step plan#2232 the head schema
+        cannot hold one source's id on two lines at all.)
         """
         account = seed_user["account"]
+        other_source = _another_source()
         csv = _an_import(
             account, file_name="csv.csv",
             window=(date(2026, 3, 1), date(2026, 3, 31)),
@@ -311,17 +359,17 @@ class TestTheRoundTrip:
             account, file_name="feed.dat",
             window=(date(2026, 3, 1), date(2026, 3, 31)),
             created_at=datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc),
+            source_id=other_source,
         )
-        _sight(
-            csv, _a_line(account, day=date(2026, 3, 2), amount="-1.00"),
-            description="X", external_id="FIT-1",
-        )
-        _sight(
-            feed, _a_line(account, day=date(2026, 3, 3), amount="-2.00"),
-            description="Y", external_id="FIT-1",
-        )
+        csv_line = _a_line(account, day=date(2026, 3, 2), amount="-1.00")
+        _sight(csv, csv_line, description="X")
+        _id_of(csv_line, csv, "FIT-1")
+        feed_line = _a_line(account, day=date(2026, 3, 3), amount="-2.00")
+        _sight(feed, feed_line, description="Y")
+        _id_of(feed_line, feed, "FIT-1")
         db.session.commit()
 
+        _run(_ID_KEY.downgrade, db.session)
         _run(_LATER.downgrade, db.session)
         with pytest.raises(RuntimeError, match="1 external id"):
             _run(_MIGRATION.downgrade, db.session)
@@ -348,6 +396,7 @@ class TestTheRoundTrip:
         )
         db.session.commit()
 
+        _run(_ID_KEY.downgrade, db.session)
         _run(_LATER.downgrade, db.session)
         with pytest.raises(RuntimeError, match="1 statement import"):
             _run(_MIGRATION.downgrade, db.session)

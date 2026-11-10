@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from app.exceptions import StatementIntegrityError, StatementParseError
+from ._errors import StatementIntegrityError, StatementParseError
 
 
 def carries_running_balance(lines: list) -> bool:

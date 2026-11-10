@@ -3,8 +3,9 @@ inside its card's one pull request, done when its file ``plan/tasks/N`` is in gi
 (``_state.done_tasks``).
 
 ``quill file task`` files one (``_filing``), on the board under a step the board holds
-(:func:`_command.on_board`, the one rule), and ``quill claim`` files a card's two finishing
-tasks (:data:`FINISHING`, ruling plan#1875).  Here are ``quill start``, which begins a piece
+(:func:`_command.on_board`, the one rule), and ``quill claim`` files a card's finishing tasks
+(:data:`FINISHING`, ruling plan#1875; a Release kit among them while it moves money, ruling
+plan#2860).  Here are ``quill start``, which begins a piece
 with a commit naming it (:func:`cmd_start`, ruling plan#1872), and which tasks are in
 progress (:func:`in_progress`); ``quill drop``'s record in git of a task begun
 (:func:`record_drop`, ruling plan#1900); ``quill task-file``, which writes a
@@ -36,20 +37,35 @@ from tools.quill.setup_tracker import TASK
 #: What a task's file says: the instant it was written (:func:`_git.instant`), so each write
 #: is a new line, as each claim's marker is.
 DONE = "done "
-#: The tasks that finish every card, last in its order, each title with what the piece is,
+#: The tasks that finish a card, last in its order, each title with what the piece is,
 #: ``{card}`` standing for the card's number (ruling plan#1875, plan#1870): a card is ready to
-#: land once both are done.  ``quill claim`` files them (:func:`finishing`), and a task filed
-#: under a card goes above the first of them still to begin that comes after it here
-#: (:func:`place`).  The suite runs green before its task begins (ruling plan#1981).  A claim
-#: cut short while one is filed under an earlier text, still marked, does not find it by its
-#: text (``_filing._same_filing``): run again, it files the task anew, and the marked one,
-#: never offered, is withdrawn with ``quill drop``, as ``quill sync``'s report of it says.
+#: land once each it files is done.  ``quill claim`` files them (:func:`finishing`): the
+#: first, :data:`RELEASE_KIT`, only for a card that moves money (rulings plan#2860, plan#2873,
+#: plan#3201), the other two for every card.  A task filed under a card goes above the first
+#: of them still to begin that comes after it here (:func:`place`).  The suite runs green
+#: before its task begins (ruling plan#1981).  A claim cut short while one is filed under an
+#: earlier text, still marked, does not find it by its text (``_filing._same_filing``): run
+#: again, it files the task anew, and the marked one, never offered, is withdrawn with
+#: ``quill drop``, as ``quill sync``'s report of it says.
 FINISHING = (
+    ("Release kit",
+     "plan#{card} moves money, so `/release` refuses a release carrying it without its kit, "
+     "and runs the kit on that day's production dump before Josh approves it (R-BAL281). The "
+     "kit is the directory `~/projects/shekel-handoffs/kits/plan-{card}/`, outside git, in "
+     "the shape `/release` section 4 says: a README naming its command, which takes the "
+     "dump's path and exits 0 only when every figure holds, and its manifest. It holds a few "
+     "figures worked by hand from the card's spec, each one that must move as the card says, "
+     "built in at most one session: no planted-defect trials, no independent recalculation "
+     "and no undo rehearsal (card plan#2858's spec, under rulings plan#2860 and plan#2873). "
+     "Done once it exits 0 at this branch's tip on a recent production dump."),
     ("Adversarial review",
      "A neutral fresh subagent reviews the design and the whole diff against the card's spec "
      "and its edits since the claim (`quill spec-history plan#{card} --since card/{card}`), "
-     "grading the change's claims about itself hardest. Each finding to fix in this pull "
-     "request is filed as a task above \"Full suite and pull request\"."),
+     "grading the change's claims about itself hardest. Where the card's \"Release kit\" is "
+     "done before it, the review grades the kit too, for correctness on production alone: "
+     "whether it tells a safe release from an unsafe one, never rare edge cases (ruling "
+     "plan#3201). Each finding to fix in this pull request is filed as a task above \"Full "
+     "suite and pull request\"."),
     ("Full suite and pull request",
      "Begun once the full suite is green (ruling plan#1981): `./scripts/test.sh`, `pylint "
      "app/` with CLAUDE.md's `--fail-on`, and the tools packages' own tests and pylint floor, "
@@ -57,15 +73,20 @@ FINISHING = (
      "Then the developer's comments read and answered, and plan#{card}'s pull request into "
      "dev, queued; a failure CI finds once it is open is a task filed then."),
 )
+#: The finishing task only a card that moves money files (:func:`finishing`).
+RELEASE_KIT = FINISHING[0][0]
 #: Each finishing task's title, with its place among them.
 _FINISHING_RANKS = {title: rank for rank, (title, _) in enumerate(FINISHING)}
 
 
-def finishing(card: int) -> tuple[tuple[str, str], ...]:
+def finishing(card: int, money: bool) -> tuple[tuple[str, str], ...]:
     """Card ``plan#<card>``'s finishing tasks (:data:`FINISHING`), each title with its body,
-    in order: each body names the card, so no two cards' finishing tasks share a title and a
-    text, a filing's identity (``_filing._same_filing``)."""
-    return tuple((title, body.format(card=card)) for title, body in FINISHING)
+    in order, :data:`RELEASE_KIT` among them only when the card moves ``money``
+    (:func:`_state.moves_money`): each body names the card, so no two cards'
+    finishing tasks share a title and a text, a filing's identity
+    (``_filing._same_filing``)."""
+    return tuple((title, body.format(card=card)) for title, body in FINISHING
+                 if money or title != RELEASE_KIT)
 
 
 def finishing_rank(title: str) -> int:
@@ -116,10 +137,11 @@ def place(tracker: Tracker, task: Card, parent: Card, before: Card | None,
     its tasks (ruling plan#1868), each write printed as it lands: above ``before`` when the
     filing names one, else above the first of ``parent``'s finishing tasks still to begin
     that comes after it in :data:`FINISHING` (:func:`finishing_rank`), so a piece goes above
-    the review, the review above the suite and pull request, and a fix the review finds, filed
-    while it is in progress or once it is done, above the suite and pull request (ruling
-    plan#1870).  Still to begin is open and neither done (:func:`_state.done_tasks`) nor in
-    progress (:func:`in_progress`) by ``reads``, the filing's read of git, never the
+    the Release kit where its card files one, else the review, the kit above the review, the
+    review above the suite and pull request, and a fix the review finds, filed while it is in
+    progress or once it is done, above the suite and pull request (ruling plan#1870).  Still
+    to begin is open and neither done (:func:`_state.done_tasks`) nor in progress
+    (:func:`in_progress`) by ``reads``, the filing's read of git, never the
     tracker's open state alone, which shows a task done in git open until ``quill sync``.  A
     task with none still to begin after it, the last finishing task always, stays where the
     link put it, last.  ``parent``'s order is its read before the link, with ``task`` last

@@ -40,6 +40,7 @@ from app.utils.log_events import (
     EVT_ENTRY_UPDATED,
     EVT_HIBP_CHECK_FAILED,
     EVT_HIBP_CHECK_REJECTED,
+    EVT_KNOWN_DEVICE_DELETED,
     EVT_LOGIN_FAILED,
     EVT_LOGIN_SUCCESS,
     EVT_LOGOUT,
@@ -278,6 +279,7 @@ class TestExpectedEventsRegistered:
         (EVT_HIBP_CHECK_FAILED, AUTH),
         (EVT_HIBP_CHECK_REJECTED, AUTH),
         (EVT_ACCOUNT_LOCKED, AUTH),
+        (EVT_KNOWN_DEVICE_DELETED, AUTH),
         # Auth (C-14 / F-085 new)
         (EVT_USER_REGISTERED, AUTH),
         # Access (C-14 / F-144 new)

@@ -5,17 +5,18 @@ import pytest
 from app.models.user import User
 from app.services import auth_service
 from app.exceptions import AuthError, ValidationError
+from tests._sign_in import stranger_signs_in
 
 
 class TestAuthenticate:
-    """Tests for the authenticate() function."""
+    """A stranger's sign-in password (``check_strangers_password``, then its confirm)."""
 
     def test_authenticate_returns_user_on_valid_credentials(
         self, app, db, seed_user
     ):
-        """authenticate() returns the User object for valid email + password."""
+        """A stranger's sign-in returns the User object for valid email + password."""
         with app.app_context():
-            user = auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass")
+            user = stranger_signs_in("test@shekel.local", "testpass")
 
             assert user.id == seed_user["user"].id
             assert user.email == "test@shekel.local"
@@ -23,18 +24,18 @@ class TestAuthenticate:
     def test_authenticate_raises_auth_error_on_wrong_email(
         self, app, db, seed_user
     ):
-        """authenticate() raises AuthError when the email does not exist."""
+        """A stranger's sign-in raises AuthError when the email does not exist."""
         with app.app_context():
             with pytest.raises(AuthError, match="Invalid email or password"):
-                auth_service.authenticate(auth_service.find_sign_in_user("nobody@shekel.local"), "testpass")
+                stranger_signs_in("nobody@shekel.local", "testpass")
 
     def test_authenticate_raises_auth_error_on_wrong_password(
         self, app, db, seed_user
     ):
-        """authenticate() raises AuthError when the password is wrong."""
+        """A stranger's sign-in raises AuthError when the password is wrong."""
         with app.app_context():
             with pytest.raises(AuthError, match="Invalid email or password"):
-                auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "wrongpass")
+                stranger_signs_in("test@shekel.local", "wrongpass")
 
     def test_authenticate_unknown_email_runs_timing_equalization_bcrypt(
         self, app, db, seed_user, monkeypatch
@@ -45,8 +46,8 @@ class TestAuthenticate:
         branch returns before any bcrypt work while the wrong-password
         branch runs a full bcrypt.checkpw, leaking account existence via
         response timing despite the constant response message.
-        authenticate() now runs one throwaway verify_password against the
-        fixed dummy hash on the no-user branch.  This pins that the dummy
+        ``check_strangers_password`` runs one throwaway verify_password
+        against the fixed dummy hash on the no-user branch.  This pins that the dummy
         verification actually happens (by spying on verify_password)
         rather than measuring wall-clock time, which would be flaky.
         """
@@ -62,7 +63,7 @@ class TestAuthenticate:
             with pytest.raises(
                 AuthError, match="Invalid email or password"
             ):
-                auth_service.authenticate(auth_service.find_sign_in_user("nobody@shekel.local"), "anypw")
+                stranger_signs_in("nobody@shekel.local", "anypw")
 
             # Exactly one dummy verification ran, using the fixed
             # timing-equalization hash and the submitted password.
@@ -90,7 +91,7 @@ class TestAuthenticate:
     def test_authenticate_raises_auth_error_on_disabled_account(
         self, app, db, seed_user
     ):
-        """authenticate() raises AuthError when the account is disabled."""
+        """A stranger's sign-in raises AuthError when the account is disabled."""
         with app.app_context():
             # Disable the user account.
             user = db.session.get(User, seed_user["user"].id)
@@ -98,7 +99,7 @@ class TestAuthenticate:
             db.session.flush()
 
             with pytest.raises(AuthError, match="Account is disabled"):
-                auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), "testpass")
+                stranger_signs_in("test@shekel.local", "testpass")
 
 
 class TestChangePassword:
@@ -108,7 +109,7 @@ class TestChangePassword:
         """change_password() updates the password hash."""
         with app.app_context():
             user = seed_user["user"]
-            auth_service.change_password(user, "testpass", "newpassword12")
+            auth_service.change_password(user, "testpass", "newpassword12", device=None)
             db.session.flush()
 
             # Verify the new password works and old one does not.
@@ -120,20 +121,20 @@ class TestChangePassword:
         with app.app_context():
             user = seed_user["user"]
             with pytest.raises(AuthError, match="Current password is incorrect"):
-                auth_service.change_password(user, "wrongpass", "newpassword12")
+                auth_service.change_password(user, "wrongpass", "newpassword12", device=None)
 
     def test_change_password_too_short_raises(self, app, db, seed_user):
         """change_password() raises ValidationError for short password."""
         with app.app_context():
             user = seed_user["user"]
             with pytest.raises(ValidationError, match="at least 12 characters"):
-                auth_service.change_password(user, "testpass", "short")
+                auth_service.change_password(user, "testpass", "short", device=None)
 
 
 class TestNegativeAndBoundaryPaths:
     """Negative-path and boundary-condition tests for auth service functions.
 
-    Covers: empty/long passwords, None inputs to authenticate, password
+    Covers: empty/long passwords, None inputs to a sign-in, password
     change boundary conditions, and bcrypt truncation behavior.
     """
 
@@ -183,22 +184,23 @@ class TestNegativeAndBoundaryPaths:
         """Authenticating with None email raises AuthError, not a TypeError.
 
         A malformed request could pass None. The service must raise AuthError,
-        not an AttributeError or TypeError. filter_by(email=None) returns None
-        (no user with email=None), which triggers the generic error.
+        not an AttributeError or TypeError. No user has email=None, and the
+        stranger's check refuses an email that is not a non-empty string
+        before computing its record's digest, with the generic error.
         """
         with app.app_context():
             with pytest.raises(AuthError, match="Invalid email or password"):
-                auth_service.authenticate(auth_service.find_sign_in_user(None), "testpass")
+                stranger_signs_in(None, "testpass")
 
     def test_authenticate_none_password(self, app, db, seed_user):
         """Authenticating with None password raises AuthError, not AttributeError.
 
         verify_password() guards against None input by returning False,
-        which causes authenticate() to raise AuthError normally.
+        which causes the sign-in to raise AuthError normally.
         """
         with app.app_context():
             with pytest.raises(AuthError, match="Invalid email or password"):
-                auth_service.authenticate(auth_service.find_sign_in_user("test@shekel.local"), None)
+                stranger_signs_in("test@shekel.local", None)
 
     def test_change_password_new_equals_old(self, app, db, seed_user):
         """Changing to the same password succeeds -- no password-history enforcement.
@@ -210,12 +212,12 @@ class TestNegativeAndBoundaryPaths:
         with app.app_context():
             user = seed_user["user"]
             # First change to a valid-length password.
-            auth_service.change_password(user, "testpass", "validpass1234")
+            auth_service.change_password(user, "testpass", "validpass1234", device=None)
             db.session.flush()
             old_hash = user.password_hash
 
             # Now change to the same password.
-            auth_service.change_password(user, "validpass1234", "validpass1234")
+            auth_service.change_password(user, "validpass1234", "validpass1234", device=None)
             db.session.flush()
 
             # The hash changed (new salt) even though the password is the same.
@@ -231,7 +233,7 @@ class TestNegativeAndBoundaryPaths:
         with app.app_context():
             user = seed_user["user"]
             # "exactly12chr" is exactly 12 characters.
-            auth_service.change_password(user, "testpass", "exactly12chr")
+            auth_service.change_password(user, "testpass", "exactly12chr", device=None)
             db.session.flush()
 
             assert auth_service.verify_password("exactly12chr", user.password_hash) is True
@@ -244,15 +246,15 @@ class TestNegativeAndBoundaryPaths:
         with app.app_context():
             user = seed_user["user"]
             with pytest.raises(ValidationError, match="at least 12 characters"):
-                auth_service.change_password(user, "testpass", "short11char")
+                auth_service.change_password(user, "testpass", "short11char", device=None)
 
     def test_authenticate_empty_string_email(self, app, db, seed_user):
         """Authenticating with empty-string email raises AuthError.
 
         Empty string is different from None. Both must be handled.
-        filter_by(email='') returns None (no user with empty email), which
-        triggers the generic AuthError.
+        No user has an empty email, and the stranger's check refuses one
+        before any check, with the generic AuthError.
         """
         with app.app_context():
             with pytest.raises(AuthError, match="Invalid email or password"):
-                auth_service.authenticate(auth_service.find_sign_in_user(""), "testpass")
+                stranger_signs_in("", "testpass")

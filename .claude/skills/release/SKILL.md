@@ -1,10 +1,10 @@
 ---
 name: release
 description: >
-  Ship dev to production on Josh's word: pin the cut, judge it with tools/release, rehearse
-  money movers and migrations on a same-day production dump, ask Josh to approve, merge into
-  main, deploy after his "Logged out, deploy now", verify, record and clean up. Invoke only
-  when Josh says to release. Not `quill release`, which deletes a card's claim.
+  Ship dev to production on Josh's word: pin the cut, judge it with tools/release, compare
+  every stored row and run each money mover's kit on a same-day production dump, ask Josh to
+  approve, merge into main, deploy after his "Logged out, deploy now", verify, record and clean
+  up. Invoke only when Josh says to release. Not `quill release`, which deletes a card's claim.
 ---
 
 # /release: ship dev to production
@@ -12,9 +12,11 @@ description: >
 Card `plan#9` (X-cx L9a). The rules are Josh's: he approves each release ONCE, by the approval
 question of step 5 (R-BAL217, R-BAL279); a deploy waits for his answer at step 10 (R-BAL279); a
 refused release names the rule and offers the newest earlier cut that passes (R-BAL280); a money
-mover or an added migration is rehearsed by its lane's kit or refused, and every other change to
-what the image ships is NAMED unrehearsed in the approval question until the general kit exists
-(R-BAL281, the interim as he confirmed it 2026-10-13). `tools/release` is this skill's tested half;
+mover is rehearsed by its card's kit or refused, and every other change to what the image ships is
+NAMED unrehearsed in the approval question until the general kit exists (R-BAL281, the interim as
+he confirmed it 2026-10-13). A migration needs no kit: every release runs production's deploy step
+and the cut's on the same-day dump and compares every stored row, which rehearses each migration
+the cut adds (rulings plan#2873, plan#3200). `tools/release` is this skill's tested half;
 everything with a person or a judgment in it is here.
 
 ## 0. Before anything
@@ -64,6 +66,15 @@ everything with a person or a judgment in it is here.
 - The long waits (the pull request's checks and main's CI, whose test shards took 8-12 minutes on
   10-13) outrun one Bash call's 10-minute limit: run each in the background and read its file when
   it ends.
+- **A watch's exit is not its run's verdict** (finding plan#2950: on 11-05 `gh run watch
+  --exit-status` exited 1 on a GitHub 504 while its run went on to pass). Each block that watches
+  a run reads the run itself after the watch, as `<status> <conclusion>`: `completed success` is
+  green, `completed` with any other conclusion is the run's failure, and anything else (a status
+  still running, or no line, the read itself failing) means the watch ended early, so run the
+  block again. A pull request's checks are read the same way by `gh pr checks` without
+  `--watch`: exit 0 every check passed; 8 one is still pending, the watch having ended early; 1
+  one failed, as its file shows, or, with no failing check in it, the read itself failed. On 8
+  or a failed read, run the block again.
 - Production figures (counts, balances, day counts, dates measured in production) stay out of
   commit messages and rulings (R-BAL132); the record lives outside the repository.
 - Each question to Josh is an AskUserQuestion that stands alone (the text before it may never
@@ -92,21 +103,42 @@ mkdir "$R" && printf 'R="%s"\nW="%s"\n' "$R" "$(git rev-parse --show-toplevel)" 
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+: "${R:?}"
 git fetch --prune origin || exit 1
 C=$(sed -n 's/^CONTAINER_NAME="\${SHEKEL_CONTAINER_NAME:-\(.*\)}"$/\1/p' ~/projects/Shekel/deploy/shekel-deploy.sh)
 P=$(docker inspect "$C" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
 echo "container=$C production=$P main=$(git rev-parse origin/main)"
-[ -n "$C" ] && [ "$P" = "$(git rev-parse origin/main)" ] \
-    && printf 'C="%s"\nBASE="%s"\nCUT="%s"\n' "$C" "$P" "$(git rev-parse origin/dev)" \
+[ -n "$C" ] && [ -n "$P" ] || { echo "no container or no label"; exit 1; }
+if [ "$P" != "$(git rev-parse origin/main)" ]; then
+    git merge-base --is-ancestor "$P" origin/main || { echo "production is not in main"; exit 1; }
+    git diff --no-renames --name-status "$P" origin/main > "$R/main_beyond_production.txt" || exit 1
+    awk -F'\t' 'NF != 2 || $1 != "A" || $2 !~ /^plan\/ships\/[0-9]+$/ {bad=1} END {exit bad}' \
+        "$R/main_beyond_production.txt" || { echo "main holds more than added done files"; exit 1; }
+    git merge-base --is-ancestor origin/main origin/dev || { echo "dev lacks main"; exit 1; }
+fi
+printf 'C="%s"\nBASE="%s"\nCUT="%s"\n' "$C" "$P" "$(git rev-parse origin/dev)" \
     >> ~/projects/shekel-handoffs/releases/current.sh; echo "pinned=$?"
 ```
 
-Production's image names the commit it was built from, and it must equal `origin/main`; only then
-are the container, the base and the cut appended (`pinned=0`). Otherwise never judge a new
-release, since `plan` would not see what `main` holds beyond production:
+Production's image names the commit it was built from, `P`. Only when it equals `origin/main`, or
+`main` beyond it is a records-only merge that `dev` holds, are the container, the base (always
+`P`, what production runs) and the cut appended (`pinned=0`). A records-only merge is R-BAL363's
+door as `tools/quill/landing.py` defines it: every entry of `P..origin/main` adds a card's done
+file, `plan/ships/<N>`, and nothing else. Josh's answer of 2026-11-04 is to judge such a release
+from production (finding plan#2899): `main_beyond_production.txt` is the proof, kept in the
+record, and `plan` then reads the cards it records as carried, their work already live. A release
+merged into `main` is never one, since each card writes its tasks' files and a release moving
+versions alone changes the lock. Otherwise never judge a new release, since `plan` would not see
+what `main` holds beyond production:
 
 - An empty `container=` or `production=` (no such container, no label, or a deploy script whose
   `CONTAINER_NAME` line changed): STOP and tell Josh.
+- `production is not in main`: STOP and tell Josh.
+- `main holds more than added done files`: `main` holds a change production lacks. The cases
+  below say which; none matching is a STOP.
+- `dev lacks main`: a records-only merge into `main` whose resync into `dev` (CLAUDE.md, Git
+  Workflow) has not landed, so step 6 would refuse the cut after the approval. STOP and tell
+  Josh: the resync lands first.
 - A release whose record ends at "Not now" at step 10: resume it at step 9 by copying its record's
   `current.sh` back.
 - The start block refused with `an unfinished run`: a run that never reached step 13 (a lost
@@ -140,15 +172,15 @@ Then, line by line:
   marker the release deletes, judged as a ship is (R-BAL288): a money mover's undo needs its kit
   too. A group's way out is reverting the merge that landed each member it names, never deleting a
   marker by hand (that leaves the code in production, unseen).
-- For each card reading `moves money: yes` and each `ADDED` migration, find the rehearsal kit its
-  lane wrote: card N's is `~/projects/shekel-handoffs/kits/plan-N/`, and a migration's is the kit
-  of the card whose pull request added it, the merge on `dev`'s first-parent line that brought the
-  file naming its branch `card/N` (ruling plan#1980); a kit written before that ruling is named by
-  its lane's handoff file, `~/projects/shekel-handoffs/HANDOFF-<lane>.md`, or, once the lane
-  posted its first note, the same file under `~/projects/shekel-handoffs/archive/` (`/handoff`
-  moves it there). Append each directory found to `current.sh` as `KITS="<dir> <dir> ..."`.
-  For each with no kit, re-run with `--unrehearsed plan#N` or `--unrehearsed <revision>`; `plan`
-  then refuses the release for it.
+- For each card reading `moves money: yes`, find the rehearsal kit its lane wrote as its "Release
+  kit" task: card N's is `~/projects/shekel-handoffs/kits/plan-N/` (ruling plan#1980); a kit
+  written before that ruling is named by its lane's handoff file,
+  `~/projects/shekel-handoffs/HANDOFF-<lane>.md`, or, once the lane posted its first note, the
+  same file under `~/projects/shekel-handoffs/archive/` (`/handoff` moves it there). Append each
+  directory found to `current.sh` as `KITS="<dir> <dir> ..."`. For each with no kit, re-run with
+  `--unrehearsed plan#N`; `plan` then refuses the release for it.
+- An `ADDED` migration needs no kit: step 4's row comparison rehearses every one (ruling
+  plan#2873). `plan` takes no revision as unrehearsed: given one, it judges nothing (exit 2).
 - A refusal naming a card the tracker does not hold, a card that is no work, or an entry under
   `plan/ships/` that is no card's marker (R-BAL287, R-BAL289) is no judgment for this run to make:
   STOP and report it to Josh.
@@ -179,7 +211,10 @@ The answer moves the cut, so this comes before any rehearsal.
   and ask "Both together", "Cut before the second" (the `newest cut adding at most one migration`
   line; absent or `none`, leave the option out) or "Stop".
 
-## 4. Rehearse (a money mover or an `ADDED` migration)
+## 4. Rehearse: the row comparison, and each money mover's kit
+
+Every release takes the same-day dump and runs the row comparison on it once (ruling plan#3200); a
+release carrying a money mover runs that card's kit on the same dump too.
 
 **The same-day dump**, taken by production's own deploy script and nowhere else (never a hand
 `docker exec ... pg_dump`):
@@ -197,7 +232,55 @@ prints. Either is a STOP. A dump taken before Josh's first page load of the day 
 grade by design, as the pay-period window tops up; the kit's first page load grade covers it (trap
 i).
 
-**Each kit**, by the command its README names, on `$DUMP`, its exit read unpiped and appended:
+**The row comparison**, from production's commit to the cut, on `$DUMP` (its module docstring,
+`tools/rehearsal/rows.py`, says what it compares and what it does not):
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+: "${R:?}" "${DUMP:?}" "${BASE:?}" "${CUT:?}"
+.venv/bin/python -m tools.rehearsal.rows --dump "$DUMP" --base "$BASE" --cut "$CUT" \
+    --report "$R/rows_report.txt" > "$R/rows.txt" 2>&1; echo "exit=$?"
+```
+
+It restores the dump in a cluster of its own, runs base's deploy step on one copy and the cut's on
+another, as production's entrypoint runs it, and compares every stored row. It tears all of it down
+itself, so it makes nothing step 12 removes. Read `rows.txt`:
+
+- **Exit 2** measured nothing, and `rows.txt` names why (the docstring's exit status lists every
+  cause, a teardown that left something among them): STOP and report it.
+- **Exit 0 or 1** is a measured result only when `rows.txt` holds the `controls:` line and the
+  bench's `teardown:` timing, which prints only once a run returns. An exit without both is a
+  crash, whatever its number (a Python traceback exits 1): STOP and report it.
+- `cut's deploy refused the copy base's deployed:` (exit 1): production's deploy of the cut would
+  refuse too. A line opening `ROLLBACK FAILS` (exit 1): production's rollback from the cut would
+  fail. Either is a STOP: tell Josh.
+- The rollback's other line: `rollback: base's image knows ...` holds; `... rolling back past this
+  release is a restore` goes in the approval question, since undoing the release is then a
+  restore of the pre-deploy dump, never a re-pin.
+- **Each changed table and column** (`base against cut: <s> s, <n> rows differ`, then a line per
+  table and an indented line per column; each row is in `rows_report.txt`) is traced to the change
+  in the cut that writes it: an `ADDED` migration in `plan.txt` (its `upgrade()`, `git show
+  "$CUT":<its path>`), or a pull request in `production.txt` that changes what the deploy step
+  writes (`scripts/init_database.py`: the reference rows `app/ref_seeds.py` seeds, and its three
+  deploy hooks with the `app/services` code they call). `public.alembic_version` differs by the
+  stamp moving from production's revision to the cut's, exactly when the cut adds a migration. A
+  `system.audit_log` row only on cut is the trigger's record of a write the deploy made, traced
+  with the table and `row_id` it names. In the report a column one side lacks reads `null` on
+  that side, so `7 -> null` can be a column the cut drops and `null -> 6` one it adds and fills
+  (its migration says which), and `null -> null` is always one it adds empty or drops empty. A
+  table the cut renames reads as rows only on base under the old name and only on cut under the
+  new. A day column that `rows.txt`'s `compared, though the server's clock fills them` line
+  names, differing because the deploys ran either side of midnight, is that line's false
+  difference. A difference no change in the cut explains is a STOP: tell Josh what differs.
+- An `ADDED` migration that no line traces to moved no row (a new table, a column on an empty
+  table, a constraint): the comparison compares no table shape, so it saw nothing of it, and the
+  approval question says so.
+
+The trace, each table and column with the change that explains it, goes in the record's README
+(step 13).
+
+**Each money mover's kit**, by the command its README names, on `$DUMP`, its exit read unpiped and
+appended:
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -213,6 +296,9 @@ failing grade to the lane.
 
 **What a lane writing a kit is told:**
 
+- A kit is written only for a card that moves money, as its "Release kit" task, which `quill
+  claim` files and whose text sets the kit's limits (rulings plan#2860, plan#3201). A migration
+  needs none (ruling plan#2873).
 - The kit is the directory `~/projects/shekel-handoffs/kits/plan-N/`, N its card (ruling
   plan#1980), which no note or file need name. Its README names what it grades and its
   command, which takes the dump's path and exits 0 only when every grade passes.
@@ -263,9 +349,10 @@ Header "Release ok". The question lists, in plain words with each id after its w
 - every `APPROVAL MUST NAME` line of `plan.txt`;
 - every OTHER change to what production runs, named UNREHEARSED (R-BAL281's interim, read as
   every file production runs: the image's and those outside it that build or run it). Name each
-  pull request `production.txt` lists whose change no kit rehearsed, in plain words with how many
-  files it changes (the file, kept in the record, holds each path). Name each file under its
-  `changed by no pull request's own change` heading too, saying in plain words what
+  pull request `production.txt` lists whose change no money mover's kit rehearsed, in plain words
+  with how many files it changes (the file, kept in the record, holds each path): the row
+  comparison reads what a migration does to stored rows, never the code beside it. Name each file
+  under its `changed by no pull request's own change` heading too, saying in plain words what
   `git diff "$BASE" "$CUT" -- <file>` shows the release does to it: a merge's resolution kept or
   dropped a side there, and a hotfix a resync dropped leaves production. This skill keeps no list
   of production's files: its last one missed `docker-compose.yml`;
@@ -296,7 +383,12 @@ Header "Release ok". The question lists, in plain words with each id after its w
   what they change on the host, and that `shekel-deploy`'s own rollback cannot undo them; and each
   host copy in 2.5's table that `production.txt` lists and no such step copies, which the deploy
   leaves as it is on the host (finding plan#2567);
-- each kit's verdict, or that nothing needed rehearsal.
+- the row comparison's verdict, whatever the release carries: how many stored rows change, in
+  which tables and columns, each with the change step 4 traced it to, or that no row changes;
+  each `ADDED` migration that moved no row, in plain words, with what it changes that the
+  comparison cannot see; and, where its rollback line says so, that undoing the release is a
+  restore of the pre-deploy dump;
+- each money mover's kit verdict, or that no card the release carries moves money.
 
 Options: "Approve this release" or "Not now". "Not now" merges nothing (step 0's early end).
 
@@ -332,7 +424,8 @@ Then, in the background (a long wait):
 gh pr checks "$PR" --watch > /dev/null 2>&1; gh pr checks "$PR" > "$R/checks_$PR.txt" 2>&1; echo "exit=$?"
 ```
 
-Read every check. A shard that fails with nothing in the diff near it (trap l): read the failed
+Read every check, by the exit step 0 says (8: run the block again). A shard that fails with
+nothing in the diff near it (trap l): read the failed
 job's log BEFORE any rerun, rerun only the failed jobs (`gh run rerun <run> --failed`), and record
 the first attempt. A failure near the diff is a STOP. Then put the pull request in `main`'s merge
 queue, the only way into `main`: ruleset `main-queue`, whose bypass list is empty, so it binds
@@ -366,10 +459,12 @@ Then, `<run>` being that id, in the background (a long wait):
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
 : "${R:?}"
-gh run watch <run> --exit-status > "$R/queue_<run>.txt" 2>&1; echo "exit=$?"
+gh run watch <run> --exit-status > "$R/queue_<run>.txt" 2>&1; echo "watch=$?"
+gh run view <run> --json status,conclusion --jq '"\(.status) \(.conclusion)"'
 ```
 
-A failed queue run takes the pull request out of the queue, and nothing reached `main`: read it as
+Its verdict is the last line, read as step 0 says, never the watch's exit. A failed queue run
+takes the pull request out of the queue, and nothing reached `main`: read it as
 trap l says above, and queue the pull request again by the merge block (a new run) only when
 nothing in the diff is near the failure; otherwise STOP. A green run lands the merge; append its
 sha as `M`:
@@ -400,7 +495,15 @@ prints one, never taking another run. Then, `<run>` being that id:
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
 : "${R:?}"
-gh run watch <run> --exit-status > "$R/build_<run>.txt" 2>&1; echo "exit=$?"
+gh run watch <run> --exit-status > "$R/build_<run>.txt" 2>&1; echo "watch=$?"
+gh run view <run> --json status,conclusion --jq '"\(.status) \(.conclusion)"'
+```
+
+Its verdict is the last line, read as step 0 says. Once it reads `completed success`:
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+: "${R:?}"
 gh run view <run> --log > "$R/build_log_<run>.txt" 2>&1; echo "exit=$?"
 echo "DIGEST=\"$(sed -n 's/.*Image digest: \(sha256:[0-9a-f]\{64\}\)$/\1/p' "$R/build_log_<run>.txt")\"" \
     >> ~/projects/shekel-handoffs/releases/current.sh
@@ -408,9 +511,30 @@ echo "DIGEST=\"$(sed -n 's/.*Image digest: \(sha256:[0-9a-f]\{64\}\)$/\1/p' "$R/
 
 The digest is the build log's own `Image digest:` line, never the first `sha256:` in the log (on
 10-13 that was a Buildx image's pull). Read `current.sh`'s new `DIGEST` line back: an empty one is a
-STOP. A failed build is a STOP: production is untouched, but a build that failed at signing has
-already pushed an unsigned `:latest`, which only `shekel-deploy`'s cosign check keeps out of
-production; say so in the report.
+STOP. A failed build is a STOP but for the one case below: production is untouched, but a build
+that failed at signing has already pushed an unsigned `:latest`, which only `shekel-deploy`'s
+cosign check keeps out of production; say so in the report.
+
+The case: a build that failed before it built anything, on an outside fault (11-05: `Install
+Cosign`'s download answered 504, and Josh's answer was to re-run). Read its steps and the failed
+step's log first, `<n>` its attempt:
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+: "${R:?}"
+gh run view <run> --attempt <n> --json jobs \
+    --jq '.jobs[] | "\(.name): \(.conclusion)", (.steps[] | "  \(.name)=\(.conclusion)")' \
+    > "$R/build_steps_<run>_attempt<n>.txt" 2>&1; echo "exit=$?"
+gh run view <run> --attempt <n> --log-failed \
+    > "$R/build_failed_<run>_attempt<n>.txt" 2>&1; echo "exit=$?"
+```
+
+Re-run its failed jobs once, `gh run rerun <run> --failed`, only when all three hold: `Build and
+push image=skipped` (it never ran, so nothing was pushed); the failed step is neither the
+`tax-law` job's nor `Is it still before the tax-law refusal?`, which refuse by design; and the
+failed step's log shows a server answering a download with a 5xx error (11-05: `curl: (22) The
+requested URL returned error: 504`). Then watch it again by the first block; the record keeps the
+failed attempt's two files. Anything else, or a second failure, is a STOP.
 
 ## 8. Bring production's checkout and dev to main
 
@@ -514,9 +638,9 @@ docker inspect "$C" --format '{{.Config.Image}} {{.State.Health.Status}} {{.Rest
 - The image reference ends in `$DIGEST`; health `healthy`; restarts 0.
 - Then tell Josh to reload and log back in, in one plain sentence of what changed.
 - Main's CI (trap v): `gh run list --workflow ci.yml --branch main --json
-  databaseId,headSha,attempt`; watch the run for `$M` into `$R/main_ci_<run>.txt` with
-  `--exit-status`, exit read. `gh run list` hides a failed first attempt: an `attempt` above 1 is
-  read with `gh run view <run> --attempt 1`.
+  databaseId,headSha,attempt`; watch the run for `$M` into `$R/main_ci_<run>.txt` as step 6
+  watches its queue run, its verdict the run's own line, read as step 0 says. `gh run list` hides
+  a failed first attempt: an `attempt` above 1 is read with `gh run view <run> --attempt 1`.
 
 ## 12. Clean up
 
@@ -548,13 +672,16 @@ With kits, the guard names `"${KITS:?}"` too, and each directory gets a `--kit` 
 
 `$R/README.md`: the base (production's commit), the cut, the release branch, the PR, the merge
 sha, the resync PR and its merge sha (`RS`, `RM`), the image digest old -> new, the dry run's
-stamp, the dump's path, the host steps run and their snapshot (`HS`), and each verdict with its exit
-(plan, each kit, the checks, each queue run, the build, each host step, the dry run, the deploy,
-verify, main's CI, the census); a run that ended early says
-where and why, and names what it left open. Beside it: `plan.txt`, `production.txt`, `dump.txt`,
-`dump_err.txt` and `rehearsal.txt` (when rehearsed), each `host_<card>_<step>.txt`,
+stamp, the dump's path, the host steps run and their snapshot (`HS`), step 4's trace of each changed
+table and column, and each verdict with its exit (plan, the row comparison, each kit, the checks,
+each queue run, the build, each host step, the dry run, the deploy, verify, main's CI, the census);
+a run that ended early says where and why, and names what it left open. Beside it:
+`main_beyond_production.txt` (when step 1 wrote it), `plan.txt`, `production.txt`, `dump.txt`,
+`dump_err.txt`, `rows.txt`, `rows_report.txt`, `rehearsal.txt` (when a kit ran), each
+`host_<card>_<step>.txt`,
 `checks_<PR>.txt`, `checks_<RS>.txt`, each
-`queue_<run>.txt`, `build_<run>.txt`, `build_log_<run>.txt`, `dryrun.txt`, `deploy_since.txt`,
+`queue_<run>.txt`, `build_<run>.txt`, `build_log_<run>.txt`, each `build_steps_<run>_attempt<n>.txt`
+and `build_failed_<run>_attempt<n>.txt` (a build re-run), `dryrun.txt`, `deploy_since.txt`,
 `deploy.txt`, `verify.txt`, `main_ci_<run>.txt`, `cleanup.txt`.
 
 The last act of every run, however it ended, moves `current.sh` into the record, so no later block

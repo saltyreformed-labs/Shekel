@@ -60,9 +60,10 @@ from app.tax_law._types import (
 )
 from app.tax_law._year_2025 import YEAR_2025
 from app.tax_law._year_2026 import YEAR_2026
+from app.tax_law._year_2027 import YEAR_2027
 
 #: Every tax year the app carries, oldest first.
-LAW = TaxLaw(years=(YEAR_2025, YEAR_2026))
+LAW = TaxLaw(years=(YEAR_2025, YEAR_2026, YEAR_2027))
 
 __all__ = [
     "LAW",

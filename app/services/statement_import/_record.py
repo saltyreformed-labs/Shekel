@@ -62,6 +62,7 @@ from app import ref_cache
 from app.enums import StatementSourceEnum
 from app.extensions import db
 from app.models.account import AccountAnchorHistory
+from app.models.line_source_id import LineSourceId
 from app.models.statement_import import (
     BankStatementLine,
     StatementImport,
@@ -188,27 +189,60 @@ def _sighting_of(
         # direction a missing fact has to fail in.
         merchant_id=merchants[line.merchant] if line.merchant else None,
         transaction_on=line.transaction_on,
-        external_id=line.external_id,
         running_balance=line.running_balance,
         source_category=line.source_category,
     )
 
 
+def _source_id_of(
+    account_id: int, source_id: int, line_id: int, line: StatementLine,
+) -> LineSourceId:
+    """Return the row that records *line*'s id as this source's name for a line.
+
+    THE one place a stated id becomes a
+    :class:`~app.models.line_source_id.LineSourceId` (plan step plan#2232),
+    for a fresh line and a held one alike, so the two halves of a pass
+    cannot record an id differently.  The caller has decided the id is NEW
+    to this source (:attr:`~._plan._Reconciled.ids_held`); one it already
+    holds is on its line already, and a second row for it is what
+    ``uq_line_source_ids_account_source_external`` refuses.
+
+    Args:
+        account_id: The account being imported into.
+        source_id: The import's source, whose id this is.
+        line_id: The recorded line the id names.
+        line: What the source stated; its ``external_id`` is set.
+
+    Returns:
+        The unstaged row.
+    """
+    return LineSourceId(
+        account_id=account_id,
+        source_id=source_id,
+        external_id=line.external_id,
+        line_id=line_id,
+    )
+
+
 def _stage_lines(
-    account_id: int, import_id: int, fresh: "list[KeyedLine]",
-    merchants: "dict[str, int]",
+    account_id: int, import_id: int, source_id: int,
+    fresh: "list[KeyedLine]", merchants: "dict[str, int]",
 ) -> None:
-    """Stage one :class:`BankStatementLine` and its sighting per fresh line.
+    """Stage one :class:`BankStatementLine`, its sighting and its id per fresh line.
 
     The line needs its id before the sighting can name it, so the lines are
     flushed once, together, between the two loops -- one round trip for the
     pass rather than one per line.  The line takes what every source agrees
     on and nothing else; the merchant the file names goes onto the sighting
-    (ruling **R-BI16**).
+    (ruling **R-BI16**), and the source's own id for the line onto the key
+    (plan step plan#2232).  **Every id a fresh line carries is new to its
+    source**: step 1 of ``_plan._pair_group`` pairs every id the source
+    holds to the line it is held on, so no held id reaches this half.
 
     Args:
         account_id: The account being imported into.
         import_id: The import that is recording them.
+        source_id: The import's source, for the ids.
         fresh: The lines to write.
         merchants: This pass's merchant rows by name, for the sightings
             (:func:`_sighting_of`).
@@ -228,10 +262,15 @@ def _stage_lines(
         _sighting_of(account_id, import_id, row.id, keyed.line, merchants)
         for row, keyed in zip(rows, fresh)
     )
+    db.session.add_all(
+        _source_id_of(account_id, source_id, row.id, keyed.line)
+        for row, keyed in zip(rows, fresh)
+        if keyed.line.external_id
+    )
 
 
 def _write_records(
-    account_id: int, import_id: int, reconciled: _Reconciled,
+    account_id: int, import_id: int, source_id: int, reconciled: _Reconciled,
 ) -> None:
     """Write everything this file adds to the record, in one merchant pass.
 
@@ -246,6 +285,9 @@ def _write_records(
     **Every line the file states gains this import's sighting** (ruling
     **R-BI10**): the held half records what this source said about a line
     the app already holds, the fresh half records the line and what was said.
+    **And every id the source does not yet hold gains its key row** (plan
+    step plan#2232): a held line paired by wording or by count records the
+    id the file states for it, and one paired by its id records nothing new.
 
     **It runs after the last refusal**, which is what the module's opening
     claim rests on: this is the first statement that INSERTS, and a file about
@@ -257,6 +299,7 @@ def _write_records(
     Args:
         account_id: The account being imported into.
         import_id: The import recording the pass.
+        source_id: The import's source, for the ids it states.
         reconciled: What :func:`_reconcile` decided this file adds and holds.
     """
     merchants = resolve_merchants(account_id, _merchant_words(reconciled))
@@ -264,7 +307,14 @@ def _write_records(
         _sighting_of(account_id, import_id, recorded.id, line, merchants)
         for line, recorded in reconciled.held
     )
-    _stage_lines(account_id, import_id, reconciled.fresh, merchants)
+    db.session.add_all(
+        _source_id_of(account_id, source_id, recorded.id, line)
+        for line, recorded in reconciled.held
+        if line.external_id and line.external_id not in reconciled.ids_held
+    )
+    _stage_lines(
+        account_id, import_id, source_id, reconciled.fresh, merchants,
+    )
     # The held lines' eager ``sightings`` collections and their two merchant
     # projections were loaded BEFORE the rows above existed, and a sighting
     # staged by its ids joins neither a loaded collection nor a loaded
@@ -318,6 +368,8 @@ def record_statement(
         StatementAccountMismatch: The file is for a different account.
         StatementLineIdMoved: This source restates a line's day or amount
             under an id it already holds.
+        StatementLineIdsShareALine: This file states, as two lines, two ids
+            this source holds on one.
         StatementLineConflict: This source restates a line's wording.
     """
     plan = plan_statement(account_id, user_id, source, payload)
@@ -351,7 +403,7 @@ def record_statement(
     # row must exist before they are staged.
     db.session.flush()
 
-    _write_records(account_id, statement_import.id, reconciled)
+    _write_records(account_id, statement_import.id, source_id, reconciled)
     # **What the import made of the claim is a LEVEL** (plan step
     # ``balance:X-bj-1``, ruling **R-IS**): the day the figure is the balance
     # for and how firmly it is held, as a row in the same relation the

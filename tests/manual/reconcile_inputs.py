@@ -22,7 +22,6 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy.orm import joinedload
 
 from app.enums import StatementSourceEnum
-from app.exceptions import StatementImportError
 from app.extensions import db
 from app.models.account import Account
 from app.models.statement_import import BankStatementLine
@@ -34,6 +33,7 @@ from app.services import (
     statement_import,
 )
 from app.services.outstanding_difference import StretchKind
+from app.services.statement_import import StatementImportError
 from app.utils.dates import days_in_range
 
 from reconcile_residue import ZERO, residue_of

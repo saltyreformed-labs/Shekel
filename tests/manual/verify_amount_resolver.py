@@ -796,8 +796,7 @@ def _apply_salary_raise(records):
         profile.raises.append(SalaryRaise(
             salary_profile_id=profile.id,
             raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.CUSTOM),
-            effective_month=month,
-            effective_year=year,
+            effective_date=date(year, month, 1),
             flat_amount=_CONTROL_RAISE,
             percentage=None,
             is_recurring=False,

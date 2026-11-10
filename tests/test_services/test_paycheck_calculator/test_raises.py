@@ -48,8 +48,8 @@ class TestRecurringRaiseCompounding:
         """A 3% raise recurring every March from 2026, on $3,846.15 a paycheck."""
         return FakeProfile(
             pay=Decimal("3846.15"), pay_from=_WALK_OPENS,  # $100,000.00 a year / 26
-            raises=[FakeRaise(percentage="0.03", effective_month=3,
-                              effective_year=2026, is_recurring=True)],
+            raises=[FakeRaise(percentage="0.03", effective_date=date(2026, 3, 1),
+                              is_recurring=True)],
         )
 
     def test_recurring_raise_not_yet_effective(self):
@@ -58,9 +58,16 @@ class TestRecurringRaiseCompounding:
         assert _walked_pay(self._march_merit(), date(2026, 2, 13)) == Decimal("3846.15")
 
     def test_recurring_raise_first_year_at_effective_month(self):
-        """In effective year at effective month, raise should apply once."""
-        # 2026-03-13, March's first payday: 3846.15 x 1.03 = 3961.5345 -> 3961.53
-        assert _walked_pay(self._march_merit(), date(2026, 3, 13)) == Decimal("3961.53")
+        """In effective year at effective month, raise should apply once.
+
+        2026-03-27 is the first paycheck paid wholly in March (03-08..03-21):
+        3846.15 x 1.03 = 3961.5345 -> 3961.53.  2026-03-13, March's first
+        payday, pays 02-22..03-07, five weekdays each side of Sunday 03-01
+        (ruling plan#3089): 3846.15 x 5/10 = 1923.075 -> 1923.08 and 3961.53
+        x 5/10 = 1980.765 -> 1980.77, 3903.85 (it read 3961.53).
+        """
+        assert _walked_pay(self._march_merit(), date(2026, 3, 27)) == Decimal("3961.53")
+        assert _walked_pay(self._march_merit(), date(2026, 3, 13)) == Decimal("3903.85")
 
     def test_recurring_raise_first_year_after_effective_month(self):
         """Later in effective year, raise should still apply once."""
@@ -90,8 +97,8 @@ class TestRecurringRaiseCompounding:
         """A non-recurring raise should only apply once."""
         profile = FakeProfile(
             pay=Decimal("3846.15"), pay_from=_WALK_OPENS,  # $100,000.00 a year / 26
-            raises=[FakeRaise(percentage="0.05", effective_month=1,
-                              effective_year=2026, is_recurring=False)],
+            raises=[FakeRaise(percentage="0.05", effective_date=date(2026, 1, 1),
+                              is_recurring=False)],
         )
         # Check in 2027 (2027-06-04) -- still just one application:
         # 3846.15 x 1.05 = 4038.4575 -> 4038.46.
@@ -107,8 +114,8 @@ class TestRecurringRaiseCompounding:
         """
         profile = FakeProfile(
             pay=Decimal("3846.15"), pay_from=_WALK_OPENS,  # $100,000.00 a year / 26
-            raises=[FakeRaise(flat_amount="5000", effective_month=1,
-                              effective_year=2026, is_recurring=True)],
+            raises=[FakeRaise(flat_amount="5000", effective_date=date(2026, 1, 1),
+                              is_recurring=True)],
         )
         # 2028-06-02: 3 applications (2026, 2027, 2028).
         assert _walked_pay(profile, date(2028, 6, 2)) == Decimal("4423.08")
@@ -120,10 +127,15 @@ class TestRecurringRaiseCompounding:
           years_passed = 2027 - 2026 = 1
           period_month (3) >= eff_month (3) → applications = 1 + 1 = 2
         This is correct because the raise applied in March 2026 AND
-        recurs again in March 2027.  On 2027-03-12, March's first payday:
-        3846.15 x 1.03 = 3961.53; x 1.03 = 4080.3759 -> 4080.38.
+        recurs again in March 2027.  On 2027-03-26, the first paycheck paid
+        wholly in March (03-07..03-20): 3846.15 x 1.03 = 3961.53; x 1.03 =
+        4080.3759 -> 4080.38.  2027-03-12, March's first payday, pays
+        02-21..03-06, five weekdays before Monday 03-01 and five after
+        (ruling plan#3089): 3961.53 x 5/10 = 1980.765 -> 1980.77 and 4080.38
+        x 5/10 = 2040.19, 4020.96 (it read 4080.38).
         """
-        assert _walked_pay(self._march_merit(), date(2027, 3, 12)) == Decimal("4080.38")
+        assert _walked_pay(self._march_merit(), date(2027, 3, 26)) == Decimal("4080.38")
+        assert _walked_pay(self._march_merit(), date(2027, 3, 12)) == Decimal("4020.96")
 
 
 class TestRaiseOrdering:
@@ -141,8 +153,8 @@ class TestRaiseOrdering:
           percentage-first:   3846.15 x 1.03 -> 3961.53; + 192.3077 = 4153.8377 -> 4153.84
         The engine must always produce the flat-first value.
         """
-        flat = FakeRaise(flat_amount="5000", effective_month=1, effective_year=2026)
-        pct = FakeRaise(percentage="0.03", effective_month=1, effective_year=2026)
+        flat = FakeRaise(flat_amount="5000", effective_date=date(2026, 1, 1))
+        pct = FakeRaise(percentage="0.03", effective_date=date(2026, 1, 1))
         as_of = date(2026, 6, 5)
         expected = Decimal("4159.61")  # (3846.15 + 5000 / 26) -> 4038.46; x 1.03
 
@@ -195,7 +207,7 @@ class TestRaiseTermination:
         ``RaiseTerms.of``, which reads ``raise_type_name`` off it.
         """
         return SalaryRaise(
-            effective_year=year, effective_month=month,
+            effective_date=date(year, month, 1),
             is_recurring=recurring, percentage=Decimal(percentage),
             flat_amount=None, terminal_year=terminal_year,
             raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
@@ -376,10 +388,10 @@ class TestChronologicalRaiseOrder:
         x 1.04 three times = 4521.08 at 2028, which credited three years of
         growth to dollars that had not arrived.
         """
-        flat = FakeRaise(flat_amount="1500", effective_month=1,
-                         effective_year=2026, is_recurring=True)
-        pct = FakeRaise(percentage="0.04", effective_month=1,
-                        effective_year=2026, is_recurring=True)
+        flat = FakeRaise(flat_amount="1500", effective_date=date(2026, 1, 1),
+                         is_recurring=True)
+        pct = FakeRaise(percentage="0.04", effective_date=date(2026, 1, 1),
+                        is_recurring=True)
         profile = self._profile([flat, pct])
         assert _walked_pay(profile, date(2026, 12, 4)) == Decimal("4059.99")
         assert _walked_pay(profile, date(2027, 12, 3)) == Decimal("4282.39")
@@ -392,10 +404,10 @@ class TestChronologicalRaiseOrder:
         row order, so the DB may return these two in either order.  Same
         2028 value as the case above.
         """
-        flat = FakeRaise(flat_amount="1500", effective_month=1,
-                         effective_year=2026, is_recurring=True)
-        pct = FakeRaise(percentage="0.04", effective_month=1,
-                        effective_year=2026, is_recurring=True)
+        flat = FakeRaise(flat_amount="1500", effective_date=date(2026, 1, 1),
+                         is_recurring=True)
+        pct = FakeRaise(percentage="0.04", effective_date=date(2026, 1, 1),
+                        is_recurring=True)
         profile = self._profile([pct, flat])
         assert _walked_pay(profile, date(2028, 12, 1)) == Decimal("4513.68")
 
@@ -414,10 +426,10 @@ class TestChronologicalRaiseOrder:
         the 10%, reaching 3961.53 x 1.10 = 4357.68 -- the extra $3.84 being
         10% of the 2028 addition, credited in 2027.
         """
-        flat = FakeRaise(flat_amount="1000", effective_month=1,
-                         effective_year=2026, is_recurring=True)
-        once = FakeRaise(percentage="0.10", effective_month=6,
-                         effective_year=2027, is_recurring=False)
+        flat = FakeRaise(flat_amount="1000", effective_date=date(2026, 1, 1),
+                         is_recurring=True)
+        once = FakeRaise(percentage="0.10", effective_date=date(2027, 6, 1),
+                         is_recurring=False)
         result = _walked_pay(self._profile([flat, once]), date(2028, 12, 1))
         assert result == Decimal("4353.84")
 
@@ -435,10 +447,10 @@ class TestChronologicalRaiseOrder:
         rounds to 4245.23.  The COUNTS are what this rule leaves unaffected;
         the pin is the date order's figure.
         """
-        merit = FakeRaise(percentage="0.03", effective_month=1,
-                          effective_year=2026, is_recurring=True)
-        cola = FakeRaise(percentage="0.02", effective_month=7,
-                         effective_year=2026, is_recurring=True)
+        merit = FakeRaise(percentage="0.03", effective_date=date(2026, 1, 1),
+                          is_recurring=True)
+        cola = FakeRaise(percentage="0.02", effective_date=date(2026, 7, 1),
+                         is_recurring=True)
         result = _walked_pay(self._profile([merit, cola]), date(2027, 12, 3))
         assert result == Decimal("4245.22")
 
@@ -471,8 +483,9 @@ class TestTheBasisNamesItsRaiseSet:
 
     **The pay entry is dated 2026-01-09**, a payday on this calendar's rhythm
     (2029-01-05 less 78 fortnights) before the raise's first landing on
-    2027-03-01: an entry replaces every raise landing on or before its payday
-    (ruling R-SAL59), so an entry on the calendar's opening 2029-01-05 would
+    2027-03-01: an entry replaces every raise dated by the first day its
+    paycheck pays for (ruling plan#3091, amending R-SAL59's "on or before its
+    payday"), so an entry on the calendar's opening 2029-01-05 would
     already hold the 2027 and 2028 applications and the rows and the terms
     would differ by one application where this class needs three against one
     (the developer's rule-5 ruling "Keep each raise working").
@@ -482,11 +495,11 @@ class TestTheBasisNamesItsRaiseSet:
     def _rows_and_terms():
         """The profile (raise believed forever) and the terms (through 2027)."""
         forever = FakeRaise(
-            percentage="0.05", effective_month=3, effective_year=2027,
+            percentage="0.05", effective_date=date(2027, 3, 1),
             is_recurring=True, terminal_year=None,
         )
         through_2027 = FakeRaise(
-            percentage="0.05", effective_month=3, effective_year=2027,
+            percentage="0.05", effective_date=date(2027, 3, 1),
             is_recurring=True, terminal_year=2027,
         )
         profile = FakeProfile(
@@ -570,14 +583,17 @@ class TestTheBasisNamesItsRaiseSet:
     ):
         """The banner announces the set the paycheck was PRICED under.
 
-        March 2029 badges the forever raise on the rows; under terms believed
-        through 2027 it moved nothing that year and must badge nothing --
+        2029-03-16, paying 02-25..03-10, is the first paycheck the 2029-03-01
+        application reaches (ruling plan#3092; it was 03-02, the first dated
+        in March, until task plan#3101, though 03-02 pays 02-11..02-24).  It
+        badges the forever raise on the rows; under terms believed through
+        2027 the raise moved nothing that year and must badge nothing --
         otherwise the surface announces a raise the gross beside it was not
         priced with, the two-walks defect ``salary_raises`` records.
         """
         profile, terms = self._rows_and_terms()
         periods = self._periods_2029()
-        march = periods[4]  # 2029-03-02
+        march = periods[5]  # 2029-03-16
         stored = payroll_basis(profile, periods)
         believed = replace(stored, raise_terms=terms)
 
@@ -595,9 +611,15 @@ class TestTheBasisNamesItsRaiseSet:
         """Site 3: the year-to-date gross sums the terms' salary.
 
         Ten prior 2029 paydays at ``$2,423.07`` sum to ``$24,230.70`` under
-        the terms.  Under the rows the January and February paydays carry two
-        applications (``$2,544.22``) and the March-May ones three
-        (``$2,671.43``): ``4 x 2,544.22 + 6 x 2,671.43 = $26,205.46``.
+        the terms.  Under the rows the paychecks paying January and February
+        carry two applications (``$2,544.22``): 01-05 through 03-02, which
+        pays 02-11..02-24.  03-16 pays 02-25..03-10, three weekdays before
+        Thursday 03-01 and seven after (ruling plan#3089): 2,544.22 x 3/10 =
+        763.266 -> 763.27 and 2,671.43 x 7/10 = 1,870.001 -> 1,870.00,
+        ``$2,633.27``.  03-30 through 05-11 carry three (``$2,671.43``):
+        ``5 x 2,544.22 + 2,633.27 + 4 x 2,671.43 = $26,040.09`` (it read
+        ``4 x 2,544.22 + 6 x 2,671.43 = $26,205.46`` when 03-02 carried the
+        whole March raise).
         """
         profile, terms = self._rows_and_terms()
         periods = self._periods_2029()
@@ -605,7 +627,7 @@ class TestTheBasisNamesItsRaiseSet:
         stored = payroll_basis(profile, periods)
         believed = replace(stored, raise_terms=terms)
 
-        assert _get_cumulative_wages(stored, eleventh.start_date) == Decimal("26205.46")
+        assert _get_cumulative_wages(stored, eleventh.start_date) == Decimal("26040.09")
         assert _get_cumulative_wages(believed, eleventh.start_date) == Decimal("24230.70"), (
             "the FICA wage-base cumulative summed the profile's rows' salary, "
             "not the raise set the basis names"
@@ -618,7 +640,8 @@ class TestTheBasisNamesItsRaiseSet:
         ten prior paydays took ``10 x round($2,423.07 x 0.10) = $2,423.10``,
         leaving ``$76.90`` of room, so the eleventh paycheck's line is
         clamped to exactly that.  Under the rows they took
-        ``4 x 254.42 + 6 x 267.14 = $2,620.52``, past the cap, so the line is
+        ``5 x 254.42 + 263.33 + 4 x 267.14 = $2,603.99`` (the case above's
+        paychecks at 10%), past the cap, so the line is
         ``$0.00`` -- which is also what a replay that read the rows while the
         live gross read the terms would produce, so ``$76.90`` pins the
         replay's raise set and not merely the paycheck's.

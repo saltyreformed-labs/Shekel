@@ -45,12 +45,12 @@ class FakeRaise:
     """
 
     def __init__(self, percentage=None, flat_amount=None,
-                 effective_month=3, effective_year=2026,
+                 effective_date=date(2026, 3, 1),
                  is_recurring=False, terminal_year=None):
         self.percentage = Decimal(str(percentage)) if percentage else None
         self.flat_amount = Decimal(str(flat_amount)) if flat_amount else None
-        self.effective_month = effective_month
-        self.effective_year = effective_year
+        #: The day the raise starts (plan step salary plan#3048).
+        self.effective_date = effective_date
         self.is_recurring = is_recurring
         #: The last year this raise is believed to happen, ``None`` for
         #: indefinitely.  Read directly by ``salary_raises._applications``.
@@ -61,10 +61,10 @@ class FakeRaise:
 
 #: The payday every fake pay list below is recorded from: one biweekly
 #: paycheck before 2026-01-02, so it precedes the first landing of every raise
-#: in this module (a raise lands on the 1st of its effective month, the
-#: earliest here 2026-01-01).  An entry REPLACES every forecast raise landing
-#: on or before its payday (ruling R-SAL59), so an entry dated after a raise's
-#: landing would hold that raise rather than exercise it.
+#: in this module (the earliest here 2026-01-01).  An entry REPLACES every
+#: forecast raise landing on or before the first day its paycheck pays for
+#: (ruling plan#3091, amending R-SAL59), 2025-11-30 for this one, so an entry
+#: dated after a raise's landing would hold that raise rather than exercise it.
 _ENTRY_PAYDAY = date(2025, 12, 19)
 
 
@@ -81,7 +81,7 @@ class FakeProfile:
 
     Plan step salary:X-av-3a replaced the yearly salary with a PAY LIST, and
     :func:`project_profile_salaries` walks it through
-    :meth:`~app.services.payroll_basis.PayrollBasis.base_pay_on`: ONE entry
+    :meth:`~app.services.payroll_basis.PayrollBasis.pay_rate_on`: ONE entry
     paying *pay* (one paycheck's gross) from :data:`_ENTRY_PAYDAY`, raised by
     *raises*.  Its ``user_id`` owns the calendar ``payroll_basis`` derives for
     it; no user row has that id, and nothing here reads one.
@@ -91,6 +91,9 @@ class FakeProfile:
         self.user_id = user_id
         self.pay_entries = [FakePayEntry(_ENTRY_PAYDAY, Decimal(pay))]
         self.raises = raises
+        #: The job's pay periods end six days before payday (ruling plan#3096),
+        #: as every profile the suite builds states.
+        self.period_end_days_before_payday = 6
 
 
 def _salary_path(pay, raises, start_year, end_year):
@@ -298,8 +301,8 @@ class TestProjectSalariesByYear:
         2028: 3,264.31 x 1.03 = 3,362.2393 -> 3,362.24; x 26 = 87,418.24
         """
         raises = [
-            FakeRaise(percentage="0.03", effective_month=3,
-                      effective_year=2026, is_recurring=True),
+            FakeRaise(percentage="0.03", effective_date=date(2026, 3, 1),
+                      is_recurring=True),
         ]
         result = _salary_path("3076.92", raises, 2026, 2028)
         # 3,169.23 x 26
@@ -323,8 +326,8 @@ class TestProjectSalariesByYear:
         highest, which is what the high-salary window must then select.
         """
         raises = [
-            FakeRaise(percentage="0.025", effective_month=1,
-                      effective_year=2026, is_recurring=True),
+            FakeRaise(percentage="0.025", effective_date=date(2026, 1, 1),
+                      is_recurring=True),
         ]
         salary_by_year = _salary_path("3461.54", raises, 2026, 2046)
         result = calculate_benefit(
@@ -373,11 +376,11 @@ class TestTheEndYearOnEachRaise:
           2030-07 8,244.59   2031-07 9,069.05 -> 2031: x 26 = 235,795.30
         """
         raises = [
-            FakeRaise(percentage="0.10", effective_month=1,
-                      effective_year=2026, is_recurring=True,
+            FakeRaise(percentage="0.10", effective_date=date(2026, 1, 1),
+                      is_recurring=True,
                       terminal_year=2028),
-            FakeRaise(percentage="0.10", effective_month=7,
-                      effective_year=2026, is_recurring=True),
+            FakeRaise(percentage="0.10", effective_date=date(2026, 7, 1),
+                      is_recurring=True),
         ]
         result = dict(_salary_path("3846.15", raises, 2026, 2031))
         # 4,653.85 x 26 (both raises applied once)
@@ -401,14 +404,29 @@ class TestTheEndYearOnEachRaise:
           2030: 6,194.28 x 26 = 161,051.28
         """
         raises = [
-            FakeRaise(percentage="0.10", effective_month=7,
-                      effective_year=2026, is_recurring=True),
+            FakeRaise(percentage="0.10", effective_date=date(2026, 7, 1),
+                      is_recurring=True),
         ]
         result = dict(_salary_path("3846.15", raises, 2026, 2030))
         assert result[2026] == Decimal("110000.02")   # 4,230.77 x 26
         assert result[2028] == Decimal("133100.24")   # 5,119.24 x 26
         assert result[2029] == Decimal("146410.16")   # 5,631.16 x 26
         assert result[2030] == Decimal("161051.28")   # 6,194.28 x 26
+
+    def test_a_year_is_the_pay_in_force_on_december_1_never_a_paycheck(self):
+        """5% from Monday 2026-11-30: 2026's salary is 2,100.00 x 26 = 54,600.00.
+
+        Task plan#3100: the pension's yearly salary is the pay in force ON
+        December 1 times the paychecks a year
+        (:meth:`~app.services.payroll_basis.PayrollBasis.pay_rate_on`).  The
+        paycheck dated nearest it, 12-04, pays 11-15..11-28, every day before
+        the raise, so its base and its rate are both 2,000.00, and either
+        times 26, 52,000.00, would miss a raise in force all December.
+        """
+        raises = [FakeRaise(percentage="0.05", effective_date=date(2026, 11, 30))]
+        assert _salary_path("2000.00", raises, 2026, 2026) == [
+            (2026, Decimal("54600.00")),
+        ]
 
     def test_the_salary_plateaus_after_the_only_raises_end_year(self):
         """One 10% raise ending 2028, and nothing else moves the salary.
@@ -421,8 +439,8 @@ class TestTheEndYearOnEachRaise:
           2030: 133,100.24 (nothing applies)
         """
         raises = [
-            FakeRaise(percentage="0.10", effective_month=1,
-                      effective_year=2026, is_recurring=True,
+            FakeRaise(percentage="0.10", effective_date=date(2026, 1, 1),
+                      is_recurring=True,
                       terminal_year=2028),
         ]
         result = dict(_salary_path("3846.15", raises, 2026, 2030))
@@ -450,8 +468,8 @@ class TestTheEndYearOnEachRaise:
         reintroduce one.
         """
         raises = [
-            FakeRaise(percentage="0.10", effective_month=7,
-                      effective_year=2031, is_recurring=True),
+            FakeRaise(percentage="0.10", effective_date=date(2031, 7, 1),
+                      is_recurring=True),
         ]
         result = dict(_salary_path("3846.15", raises, 2026, 2032))
         assert result[2028] == Decimal("99999.90")   # not live yet
@@ -493,10 +511,10 @@ class TestTheEndYearOnEachRaise:
         each of which a no-op end year fails.
         """
         raises = [
-            FakeRaise(flat_amount="1000", effective_month=1,
-                      effective_year=2026, is_recurring=True),
-            FakeRaise(percentage="0.10", effective_month=1,
-                      effective_year=2026, is_recurring=True),
+            FakeRaise(flat_amount="1000", effective_date=date(2026, 1, 1),
+                      is_recurring=True),
+            FakeRaise(percentage="0.10", effective_date=date(2026, 1, 1),
+                      is_recurring=True),
         ]
         result = dict(_salary_path("3846.15", raises, 2026, 2030))
         # Third year of the walk above: 5,259.25 x 26.
@@ -532,12 +550,12 @@ class TestTheEndYearOnEachRaise:
         as the control: a build that dropped every one-time raise, or one that
         applied the late one twice, fails one of the three.
         """
-        recurring = FakeRaise(percentage="0.03", effective_month=1,
-                              effective_year=2026, is_recurring=True)
-        within = FakeRaise(flat_amount="2000", effective_month=5,
-                           effective_year=2028, is_recurring=False)
-        late = FakeRaise(flat_amount="2000", effective_month=5,
-                         effective_year=2035, is_recurring=False)
+        recurring = FakeRaise(percentage="0.03", effective_date=date(2026, 1, 1),
+                              is_recurring=True)
+        within = FakeRaise(flat_amount="2000", effective_date=date(2028, 5, 1),
+                           is_recurring=False)
+        late = FakeRaise(flat_amount="2000", effective_date=date(2035, 5, 1),
+                         is_recurring=False)
         pay = "3846.15"
         alone = dict(_salary_path(pay, [recurring], 2026, 2035))
         with_within = dict(_salary_path(pay, [recurring, within], 2026, 2035))
@@ -579,10 +597,10 @@ class TestTheEndYearOnEachRaise:
         was never purely post-cutoff.  It reads correctly here only because
         the walk orders by date, so this case pins BOTH rules at once.
         """
-        flat = FakeRaise(flat_amount="1500", effective_month=1,
-                         effective_year=2026, is_recurring=True)
-        ending = FakeRaise(percentage="0.04", effective_month=1,
-                           effective_year=2026, is_recurring=True,
+        flat = FakeRaise(flat_amount="1500", effective_date=date(2026, 1, 1),
+                         is_recurring=True)
+        ending = FakeRaise(percentage="0.04", effective_date=date(2026, 1, 1),
+                           is_recurring=True,
                            terminal_year=2031)
         result = dict(_salary_path("3846.15", [flat, ending], 2026, 2040))
         assert result[2031] == Decimal("136878.56")
@@ -616,10 +634,10 @@ class TestTheEndYearOnEachRaise:
         both years together.
         """
         raises = [
-            FakeRaise(percentage="0.03", effective_month=7,
-                      effective_year=2026, is_recurring=True),
-            FakeRaise(percentage="0.025", effective_month=1,
-                      effective_year=2026, is_recurring=True,
+            FakeRaise(percentage="0.03", effective_date=date(2026, 7, 1),
+                      is_recurring=True),
+            FakeRaise(percentage="0.025", effective_date=date(2026, 1, 1),
+                      is_recurring=True,
                       terminal_year=2031),
         ]
         result = dict(_salary_path("3846.15", raises, 2026, 2035))

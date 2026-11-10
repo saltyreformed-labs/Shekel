@@ -39,6 +39,7 @@ from app.services.obligations_aggregator import todays_price
 from app.services.salary_paydays import paycheck_on
 from app.services.tax_report_service import compute_tax_report
 from app.tax_law import TaxLaw
+from tests._stub_period import stub_period_on
 from tests._test_helpers import (
     add_test_pay_stub,
     freeze_today,
@@ -81,7 +82,10 @@ def _profile_form(state_code):
 
 def _create_form(state_code):
     """The NEW profile form: the profile's controls plus its first pay entry."""
-    return {**_profile_form(state_code), "pay_amount": "3000.00", "pay_payday": "2026-01-02"}
+    return {
+        **_profile_form(state_code), "pay_amount": "3000.00", "pay_payday": "2026-01-02",
+        **stub_period_on("2026-01-02"),
+    }
 
 
 def _update_form(profile, state_code):

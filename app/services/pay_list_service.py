@@ -67,8 +67,13 @@ class PayRow:
             its id, payday, amount and version counter.
         paychecks_a_year: The paychecks a year of the rhythm in force on its
             payday (ruling **R-SAL66**).
-        yearly: The entry's yearly figure: its amount times that count,
-            shown and never stored (ruling **R-SAL59**).
+        yearly: The yearly figure of the entry's paycheck: its pay RATE
+            times that count, shown and never stored (ruling **R-SAL59**).
+            The rate is the pay in force on the last day the paycheck pays
+            for, which is the entry's amount unless a forecast raise lands
+            inside that paycheck's pay period after the entry opens (task
+            plan#3100); never the paycheck's base, part of a raise times the
+            count.
     """
 
     entry: SalaryPayEntry
@@ -81,10 +86,10 @@ def pay_rows(basis: PayrollBasis) -> list[PayRow]:
 
     Each entry's yearly figure is :meth:`~app.services.payroll_basis
     .PayrollBasis.base_pay_on` its own payday -- the ONE producer of a
-    yearly figure (``BasePay.annual``, rule 14), which on an entry's own
-    payday walks nothing past the entry: no raise lands in ``(payday,
-    payday]`` and the rhythm walked from is the rhythm arrived at, so it is
-    the entry's amount times the paychecks a year in force that day.
+    paycheck's yearly figure (``BasePay.annual``, rule 14), its pay rate
+    times the paychecks a year in force that day.  The rate walks from the
+    entry to the last day its paycheck pays for: the entry's amount, unless a
+    forecast raise lands in between (see :class:`PayRow`).
 
     Args:
         basis: The profile's :class:`~app.services.payroll_basis.PayrollBasis`.
@@ -127,7 +132,8 @@ def start_pay_list(
 
     Every paycheck before *payday* is priced from this entry too (ruling
     **R-SAL59**: "Paychecks before the first entry use it"), and a forecast
-    raise landing on or before it is taken to be in *amount* already.
+    raise landing on or before the first day its paycheck pays for is taken
+    to be in *amount* already (ruling **plan#3091**).
 
     Args:
         profile: The new, flushed profile.

@@ -15,6 +15,22 @@ from app.models.mixins import (
 )
 
 
+#: How many days a pay period may end before the payday payroll scheduled for
+#: it (``period_end_days_before_payday``, ruling plan#3096).  ZERO is a period
+#: that ends on its scheduled payday; below zero would be a period scheduled to
+#: be paid before it ends, which one gap cannot state for every paycheck (a
+#: month-anchored period paid on the 25th), so the job's form refuses a Period
+#: End after the payday its paycheck was scheduled for.  Not after the day it was PAID: a
+#: payday convention that pays early, by more days than the gap, pays before
+#: the period ends, and that stub is the job's to copy (task plan#3124).  A
+#: YEAR is the top: no payroll pays a period that ended over a year before,
+#: and the bound turns a mistyped year on a stub's date into a refusal rather
+#: than a stored fact.  ``ck_salary_profiles_period_end_days_range`` is built
+#: from these two, and the form's mistyped-year refusal quotes the top.
+PERIOD_END_DAYS_BEFORE_PAYDAY_MIN = 0
+PERIOD_END_DAYS_BEFORE_PAYDAY_MAX = 365
+
+
 class SalaryProfile(
     UserScopedMixin, IsActiveMixin, SortOrderMixin, OptimisticLockMixin,
     TimestampMixin, db.Model,
@@ -93,6 +109,11 @@ class SalaryProfile(
             "version_id > 0",
             name="ck_salary_profiles_version_id_positive",
         ),
+        db.CheckConstraint(
+            "period_end_days_before_payday BETWEEN "
+            f"{PERIOD_END_DAYS_BEFORE_PAYDAY_MIN} AND {PERIOD_END_DAYS_BEFORE_PAYDAY_MAX}",
+            name="ck_salary_profiles_period_end_days_range",
+        ),
         {"schema": "salary"},
     )
 
@@ -161,6 +182,15 @@ class SalaryProfile(
         db.Boolean, nullable=False, default=False,
         server_default=db.text("false"),
     )
+    # How many days each of this job's pay periods ends before the payday
+    # payroll SCHEDULED for it, the grid day before any holiday moved it
+    # (plan#3048, ruling plan#3096).  The owner never types it: the form asks
+    # one stub's Pay Date and Period End and turns them into this through the
+    # calendar's match of a paid day to its planned one
+    # (``salary_pay_period.days_before_payday``).  Read by the one producer of
+    # a paycheck's pay period, ``pay_calendar.days_paid_for``.  No default: it
+    # is a fact about the owner's employer, so every job states it.
+    period_end_days_before_payday = db.Column(db.Integer, nullable=False)
 
     # is_active + sort_order: from IsActiveMixin / SortOrderMixin.
     # version_id + its version_id_col mapper config: from OptimisticLockMixin.
@@ -179,10 +209,18 @@ class SalaryProfile(
         backref=db.backref("salary_profiles", lazy="select"),
     )
     filing_status = db.relationship("FilingStatus", lazy="joined")
+    # By start date, then by id (task plan#3128): two raises of different
+    # types may start on one day, and the order they load in is the order the
+    # walk compounds them in and the banner names them in
+    # (``salary_raises.applications_between`` keeps input order within a
+    # date and a method).  By date alone, the database answered such a pair
+    # in whatever order it read them, which an edit of the first one's date
+    # or type was measured to reverse; each step rounds to the cent, so the
+    # reversal can move one.  The id is the order they were written in.
     raises = db.relationship(
         "SalaryRaise", back_populates="salary_profile",
         cascade="all, delete-orphan", lazy="select",
-        order_by="SalaryRaise.effective_year, SalaryRaise.effective_month",
+        order_by="[SalaryRaise.effective_date, SalaryRaise.id]",
     )
     # The pay list (plan step salary:X-av-3a), in payday order: the engine
     # reads it as an attribute the caller loaded, as it reads ``raises`` and
@@ -195,10 +233,18 @@ class SalaryProfile(
     # The profile's payroll LINES -- every deduction, and from plan step
     # salary:R18-b every earning line too (ruling R-SAL38); which side a row
     # is on is its ``paycheck_line_kind_id``.  ``deductions`` until R18-a.
+    # By sort order, then by id (task plan#3148): no door sets a line's sort
+    # order, so every line holds 0 and the id, the order they were added in,
+    # is what orders them.  By sort order alone, the salary page's lines
+    # section, the pay stub form and its report listed them, and the
+    # cockpit listed lines of one kind and amount, in whatever order the
+    # database read them, which renaming a line was measured to change.  The
+    # order moves no money: each line is priced on its own and the results
+    # summed.
     lines = db.relationship(
         "PaycheckLine", back_populates="salary_profile",
         cascade="all, delete-orphan", lazy="select",
-        order_by="PaycheckLine.sort_order",
+        order_by="[PaycheckLine.sort_order, PaycheckLine.id]",
     )
     # The profile's transcribed pay stubs (plan step salary:S11-c-2c), in
     # payday order: the engine prices each paycheck's four taxes from one of

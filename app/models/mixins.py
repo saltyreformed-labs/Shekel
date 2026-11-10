@@ -214,7 +214,10 @@ class SortOrderMixin:
 
       ``sort_order`` -- INTEGER NOT NULL DEFAULT 0.  A user-assignable
                         rank used to order rows in dropdowns and lists;
-                        lower sorts first, ties broken by name.
+                        lower sorts first, each reader breaking ties its
+                        own way: salary profiles by name, a profile's
+                        lines by id, the order they were added (task
+                        plan#3148).
 
     Applied to every table whose ``sort_order`` is exactly this shape
     (accounts, categories, salary profiles, both template tables,

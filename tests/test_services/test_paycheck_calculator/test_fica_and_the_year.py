@@ -89,8 +89,8 @@ class TestProjectSalary:
         """raise_event populated at raise month."""
         profile = FakeProfile(
             pay=Decimal("2307.69"), pay_from=date(2026, 2, 13),  # $60,000.00 a year / 26
-            raises=[FakeRaise(percentage="0.03", effective_month=3,
-                              effective_year=2026, is_recurring=False)],
+            raises=[FakeRaise(percentage="0.03", effective_date=date(2026, 3, 1),
+                              is_recurring=False)],
             created_at=date(2026, 1, 1),
         )
         periods = [
@@ -116,8 +116,8 @@ class TestProjectSalary:
         """
         profile = FakeProfile(
             pay=Decimal("2307.69"), pay_from=date(2026, 2, 13),  # $60,000.00 a year / 26
-            raises=[FakeRaise(percentage="0.03", effective_month=3,
-                              effective_year=2027, is_recurring=True)],
+            raises=[FakeRaise(percentage="0.03", effective_date=date(2027, 3, 1),
+                              is_recurring=True)],
             created_at=date(2026, 1, 1),
         )
         # Before the effective year: no event anywhere in 2026, salary flat.

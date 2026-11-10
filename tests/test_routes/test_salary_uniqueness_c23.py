@@ -4,16 +4,17 @@ Shekel Budget App -- C-23 Salary Raise / Deduction Uniqueness Tests
 Verifies the composite unique constraints introduced in commit C-23
 of the 2026-04-15 security remediation plan:
 
-  - ``uq_salary_raises_profile_type_year_month`` on
+  - ``uq_salary_raises_profile_type_date`` on
     ``salary.salary_raises (salary_profile_id, raise_type_id,
-    effective_year, effective_month)`` with
-    ``NULLS NOT DISTINCT`` semantics (F-051).
+    effective_date)`` (F-051), keyed on the year and month with
+    ``NULLS NOT DISTINCT`` semantics until migrations ``c9f1a7b3d2e8``
+    (DH-#57) and ``6740ce13e174`` (plan#3048, the start became a date).
   - ``uq_paycheck_lines_profile_name`` on
     ``salary.paycheck_lines (salary_profile_id, name)`` (F-052).
 
 Coverage:
   1. Database-level enforcement (raw INSERT raises IntegrityError on
-     the named constraint, including the NULL-year case for raises).
+     the named constraint).
   2. Route-level idempotency (double-submit on add returns one row
      and a friendly flash, not a 500).
   3. Route-level update collision (renaming or re-keying to an
@@ -49,7 +50,7 @@ from tests._test_helpers import (
 # ── Fixtures and helpers ────────────────────────────────────────
 
 
-SALARY_RAISES_UNIQUE = "uq_salary_raises_profile_type_year_month"
+SALARY_RAISES_UNIQUE = "uq_salary_raises_profile_type_date"
 PAYCHECK_LINES_UNIQUE = "uq_paycheck_lines_profile_name"
 
 
@@ -100,6 +101,7 @@ def _create_profile(seed_user):
     rule = make_every_period_rule(db.session, template)
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         template_id=template.id,
@@ -113,7 +115,7 @@ def _create_profile(seed_user):
     return profile
 
 
-def _make_raise(profile, raise_type, *, year, month, percentage="0.03",
+def _make_raise(profile, raise_type, *, starts, percentage="0.03",
                 is_recurring=False, flat_amount=None):
     """Insert a SalaryRaise directly (bypasses the route layer).
 
@@ -123,8 +125,7 @@ def _make_raise(profile, raise_type, *, year, month, percentage="0.03",
     kwargs = dict(
         salary_profile_id=profile.id,
         raise_type_id=raise_type.id,
-        effective_month=month,
-        effective_year=year,
+        effective_date=starts,
         is_recurring=is_recurring,
     )
     if flat_amount is not None:
@@ -161,17 +162,16 @@ class TestSalaryRaiseUniqueConstraint:
     """Direct INSERT collisions surface IntegrityError on the C-23 constraint."""
 
     def test_duplicate_non_recurring_raise_rejected(self, app, seed_user, seed_periods):
-        """Two non-recurring raises sharing (profile, type, year, month) collide."""
+        """Two non-recurring raises sharing (profile, type, start date) collide."""
         with app.app_context():
             profile = _create_profile(seed_user)
             merit = db.session.query(RaiseType).filter_by(name="merit").one()
-            _make_raise(profile, merit, year=2026, month=7)
+            _make_raise(profile, merit, starts=date(2026, 7, 1))
 
             duplicate = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=merit.id,
-                effective_month=7,
-                effective_year=2026,
+                effective_date=date(2026, 7, 1),
                 percentage=Decimal("0.05"),
                 is_recurring=False,
             )
@@ -186,28 +186,35 @@ class TestSalaryRaiseUniqueConstraint:
                 f"constraint={getattr(getattr(excinfo.value.orig, 'diag', None), 'constraint_name', None)!r}"
             )
 
-    def test_distinct_year_or_month_or_type_allowed(
+    def test_distinct_date_or_type_allowed(
         self, app, seed_user, seed_periods,
     ):
-        """Different year, month, or type creates distinct raises."""
+        """A different year, month, day or type creates distinct raises.
+
+        The day is new since migration ``6740ce13e174`` keyed the guard on the
+        start date: two raises of one type on two days of one month are two
+        stated facts, where the month key refused the second.
+        """
         with app.app_context():
             profile = _create_profile(seed_user)
             merit = db.session.query(RaiseType).filter_by(name="merit").one()
             cola = db.session.query(RaiseType).filter_by(name="cola").one()
-            _make_raise(profile, merit, year=2026, month=7)
+            _make_raise(profile, merit, starts=date(2026, 7, 1))
             # Different year.
-            _make_raise(profile, merit, year=2027, month=7)
+            _make_raise(profile, merit, starts=date(2027, 7, 1))
             # Different month.
-            _make_raise(profile, merit, year=2026, month=8)
+            _make_raise(profile, merit, starts=date(2026, 8, 1))
+            # Different day of the same month.
+            _make_raise(profile, merit, starts=date(2026, 7, 15))
             # Different type.
-            _make_raise(profile, cola, year=2026, month=7,
+            _make_raise(profile, cola, starts=date(2026, 7, 1),
                         flat_amount="500.00")
             count = (
                 db.session.query(SalaryRaise)
                 .filter_by(salary_profile_id=profile.id)
                 .count()
             )
-            assert count == 4
+            assert count == 5
 
     def test_same_shape_on_different_profile_allowed(
         self, app, seed_user, seed_periods,
@@ -222,6 +229,7 @@ class TestSalaryRaiseUniqueConstraint:
                 db.session.query(FilingStatus).filter_by(name="single").one()
             )
             profile_b = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 template_id=None,
@@ -234,8 +242,8 @@ class TestSalaryRaiseUniqueConstraint:
             db.session.commit()
 
             merit = db.session.query(RaiseType).filter_by(name="merit").one()
-            _make_raise(profile_a, merit, year=2026, month=7)
-            _make_raise(profile_b, merit, year=2026, month=7)
+            _make_raise(profile_a, merit, starts=date(2026, 7, 1))
+            _make_raise(profile_b, merit, starts=date(2026, 7, 1))
             count = (
                 db.session.query(SalaryRaise)
                 .filter(SalaryRaise.salary_profile_id.in_(
@@ -342,8 +350,7 @@ class TestAddRaiseRoute:
             merit = db.session.query(RaiseType).filter_by(name="merit").one()
             data = {
                 "raise_type_id": merit.id,
-                "effective_month": "7",
-                "effective_year": "2026",
+                "effective_date": "2026-07-01",
                 "percentage": "3",
             }
             r1 = auth_client.post(
@@ -374,23 +381,22 @@ class TestAddRaiseRoute:
     def test_distinct_year_creates_two_rows(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """Different effective_year is a different raise -- both succeed."""
+        """A different start year is a different raise -- both succeed."""
         with app.app_context():
             profile = _create_profile(seed_user)
             merit = db.session.query(RaiseType).filter_by(name="merit").one()
             base = {
                 "raise_type_id": merit.id,
-                "effective_month": "7",
                 "percentage": "3",
             }
             r1 = auth_client.post(
                 f"/salary/{profile.id}/raises",
-                data={**base, "effective_year": "2026"},
+                data={**base, "effective_date": "2026-07-01"},
                 follow_redirects=True,
             )
             r2 = auth_client.post(
                 f"/salary/{profile.id}/raises",
-                data={**base, "effective_year": "2027"},
+                data={**base, "effective_date": "2027-07-01"},
                 follow_redirects=True,
             )
             assert r1.status_code == 200
@@ -416,8 +422,8 @@ class TestUpdateRaiseRoute:
         with app.app_context():
             profile = _create_profile(seed_user)
             merit = db.session.query(RaiseType).filter_by(name="merit").one()
-            existing = _make_raise(profile, merit, year=2026, month=7)
-            target = _make_raise(profile, merit, year=2027, month=8)
+            existing = _make_raise(profile, merit, starts=date(2026, 7, 1))
+            target = _make_raise(profile, merit, starts=date(2027, 8, 1))
             target_id = target.id
             target_version = target.version_id
 
@@ -426,8 +432,7 @@ class TestUpdateRaiseRoute:
                 f"/salary/raises/{target_id}/edit",
                 data={
                     "raise_type_id": str(merit.id),
-                    "effective_month": "7",
-                    "effective_year": "2026",
+                    "effective_date": "2026-07-01",
                     "percentage": "3",
                     "version_id": str(target_version),
                 },
@@ -439,14 +444,13 @@ class TestUpdateRaiseRoute:
             # Target row's effective date must be unchanged.
             db.session.expire_all()
             refreshed = db.session.get(SalaryRaise, target_id)
-            assert refreshed.effective_year == 2027
-            assert refreshed.effective_month == 8
+            assert refreshed.effective_date == date(2027, 8, 1)
             # And ``existing`` must still exist (not overwritten).
             assert (
                 db.session.query(SalaryRaise)
                 .filter_by(id=existing.id)
                 .one()
-                .effective_year == 2026
+                .effective_date == date(2026, 7, 1)
             )
 
 

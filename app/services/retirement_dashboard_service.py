@@ -367,8 +367,9 @@ def compute_pension_summary(
         calendar: The owner's :class:`~app.services.pay_calendar.PayCalendar`
             (the read pass's): the rhythms each profile's pay list is walked
             at, since plan step salary:X-av-3a projects the salary path
-            through :meth:`~app.services.payroll_basis.PayrollBasis
-            .base_pay_on` (ruling **R-SAL59**).
+            through the engine's walk (ruling **R-SAL59**), its pay rate
+            (:meth:`~app.services.payroll_basis.PayrollBasis.pay_rate_on`)
+            since task plan#3100.
         month_offset: Whole months added to EACH qualifying pension's
             planned retirement date before projecting (the P2b retire-later
             probes: a later retirement extends the salary path, the years
@@ -510,8 +511,8 @@ def recurring_raises(salary_profiles: list[SalaryProfile]) -> list[SalaryRaise]:
 
     Returns:
         The recurring :class:`~app.models.salary_raise.SalaryRaise` rows, in
-        profile then row order (the relationship's ``effective_year,
-        effective_month`` ordering).
+        profile then row order (the relationship's order: start date,
+        then id).
     """
     return [
         raise_obj
@@ -538,7 +539,7 @@ def resolve_recurring_raise_assumptions(
     contributes no row.  **Each row is a PROBE since plan step salary:S3-f-2b**:
     the rail renders the salary form's own end-year pair (a mode and a year,
     ruling **R-SAL13**) pre-filled from the row, and every readiness refresh
-    carries them, so the ``effective_year`` here is the floor the year input
+    carries them, so the start's year here is the floor the year input
     states and the ``raise_id`` is what names the probe's parameters.
 
     Args:
@@ -560,7 +561,7 @@ def resolve_recurring_raise_assumptions(
         One dict per recurring raise, in profile then row order, carrying
         ``raise_id``, ``profile_id``, ``profile_name``, ``raise_type`` (the
         type's DISPLAY name, off the row's own property), ``percentage``,
-        ``flat_amount``, ``effective_month``, ``effective_year`` and
+        ``flat_amount``, ``effective_date`` (the day it starts) and
         ``terminal_year`` (the last year it is believed, ``None`` for
         indefinitely).
     """
@@ -575,8 +576,7 @@ def resolve_recurring_raise_assumptions(
             "raise_type": raise_obj.raise_type_name,
             "percentage": raise_obj.percentage,
             "flat_amount": raise_obj.flat_amount,
-            "effective_month": raise_obj.effective_month,
-            "effective_year": raise_obj.effective_year,
+            "effective_date": raise_obj.effective_date,
             "terminal_year": raise_obj.terminal_year,
         }
         for raise_obj in recurring_raises(salary_profiles)
@@ -771,15 +771,16 @@ def compute_gap_net_biweekly(
     # gross the engine reports (the pre-Commit-17 ``annual_salary /
     # pay_periods`` recompute silently dropped any applicable SalaryRaise).
     effective_take_home_rate = take_home_rate_pct / _PCT_SCALE
-    # The final year's pay off the ONE walk the paychecks and the pension's
-    # salary path read (plan step salary:X-av-3a), on the December 1 the
-    # pension evaluates each year at.  It was the pension path's final
-    # yearly salary divided back into a paycheck (plan step balance:X-aw's
-    # ``gross_per_paycheck``): a division of a product the walk had already
-    # made, now read at the rate itself.
+    # The final year's pay RATE off the ONE walk the paychecks and the
+    # pension's salary path read (plan step salary:X-av-3a; a rate rather
+    # than a paycheck's base since task plan#3100, ruling plan#3089), on the
+    # December 1 the pension evaluates each year at.  It was the pension
+    # path's final yearly salary divided back into a paycheck (plan step
+    # balance:X-aw's ``gross_per_paycheck``): a division of a product the
+    # walk had already made, now read at the rate itself.
     final = PayrollBasis(
         profile, calendar, payroll.terms_for(profile),
-    ).base_pay_on(date(planned_retirement_date.year, 12, 1))
+    ).pay_rate_on(date(planned_retirement_date.year, 12, 1))
     return GapPaycheck(
         net=round_money(final.per_paycheck * effective_take_home_rate),
         cadence=final.cadence,

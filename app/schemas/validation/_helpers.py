@@ -137,6 +137,12 @@ _EFFECTIVE_DATE_RANGE = validate.Range(
 # two year fields spelled it twice already, and a third copy is the shape rule
 # 14 names.
 _RAISE_YEAR_RANGE = validate.Range(min=RAISE_YEAR_MIN, max=RAISE_YEAR_MAX)
+# The same window as the days of those years, for the raise's START DATE (plan
+# step salary plan#3048, ruling plan#3090), mirroring
+# ``ck_salary_raises_valid_effective_date``.
+_RAISE_DATE_RANGE = validate.Range(
+    min=date(RAISE_YEAR_MIN, 1, 1), max=date(RAISE_YEAR_MAX, 12, 31),
+)
 
 
 # E-28 / HIGH-06 (Commit 24): the percent-to-fraction divisor used by

@@ -433,7 +433,7 @@ class RetirementInputs:
                 )
                 continue
             try:
-                believed[raise_id] = end_year_of(mode, year, row.effective_year)
+                believed[raise_id] = end_year_of(mode, year, row.effective_date.year)
             except EndYearError as exc:
                 errors[raise_id] = (exc.field, exc.message)
         if errors:

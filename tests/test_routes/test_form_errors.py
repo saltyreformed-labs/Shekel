@@ -37,12 +37,20 @@ structurally blind to an ADDITION.
 The message arm is still hand-written, and that is correct -- an exact sentence
 cannot be derived from an AST.  What it no longer has to carry alone is
 completeness.
+
+**The raise form joined at task plan#3125**, when its doors moved onto the
+shared loader: :class:`TestEveryRaiseRefusalIsHeard` is its completeness arm,
+and its sentences are driven through the doors themselves in
+``tests/test_routes/test_salary/test_raise_form.py``.  Ruling **plan#3135**
+put marshmallow's whole-form key on the list, so the stale arm knows that one
+key is real although no schema declares it.
 """
 import ast
 from pathlib import Path
 
 import pytest
 from marshmallow import ValidationError
+from marshmallow.exceptions import SCHEMA
 
 from app import ref_cache
 from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
@@ -334,6 +342,69 @@ class TestEveryRefusalTheSchemaRaisesIsHeard:
         )
 
 
+def _fields_the_raise_schema_refuses():
+    """Return every key ``RaiseCreateSchema`` raises a refusal against.
+
+    Three spellings in the class: a literal ``field_name=`` keyword, the
+    end-year rule's ``field_name=_END_YEAR_FIELDS[...]`` (read as the values
+    of that module-level dict), and a refusal with no field name, which lands
+    under marshmallow's whole-form key.  ``RaiseUpdateSchema`` inherits every
+    one and adds none.
+
+    Returns:
+        set[str]: The keys.
+    """
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "app" / "schemas" / "validation" / "salary.py"
+    )
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    end_year_fields = next(
+        {value.value for value in node.value.values}
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(getattr(t, "id", None) == "_END_YEAR_FIELDS" for t in node.targets)
+    )
+    classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+    fields = set()
+    for node in ast.walk(classes["RaiseCreateSchema"]):
+        if not isinstance(node, ast.Call):
+            continue
+        if getattr(node.func, "id", None) != "ValidationError":
+            continue
+        named = [keyword.value for keyword in node.keywords if keyword.arg == "field_name"]
+        if not named:
+            fields.add(SCHEMA)
+        elif isinstance(named[0], ast.Constant):
+            fields.add(named[0].value)
+        elif isinstance(named[0], ast.Subscript):
+            fields |= end_year_fields
+    return fields
+
+
+class TestEveryRaiseRefusalIsHeard:
+    """The raise form's completeness arm (task plan#3125).
+
+    Every key the raise schema refuses against must be on the list, or its
+    sentence is dead copy behind the generic prompt -- which each of them was
+    until the raise doors moved onto the shared loader.
+    """
+
+    def test_the_scan_finds_the_refusals_it_is_meant_to(self):
+        """Premise: all three spellings are read, so the arm cannot pass on an empty scan."""
+        assert _fields_the_raise_schema_refuses() == {
+            "raise_end_mode", "terminal_year", SCHEMA,
+        }
+
+    def test_every_raise_refusal_is_on_the_allowlist(self):
+        """A raise refusal whose key is unlisted can never reach the owner."""
+        unheard = sorted(_fields_the_raise_schema_refuses() - set(ACTIONABLE_FLASH_FIELDS))
+        assert unheard == [], (
+            f"RaiseCreateSchema refuses these keys but ACTIONABLE_FLASH_FIELDS "
+            f"does not carry them: {unheard}"
+        )
+
+
 class TestTheAllowlistNamesRealFields:
     """Arm one: no entry can be a key nothing raises."""
 
@@ -357,9 +428,12 @@ class TestTheAllowlistNamesRealFields:
         """A key no schema declares can never match, so its slot is dead.
 
         This is the arm that fails on the R7b-2 defect: ``recurrence_pattern``
-        survived the rename here and matched nothing thereafter.
+        survived the rename here and matched nothing thereafter.  The one key
+        no schema declares and every schema can raise is marshmallow's own
+        whole-form key, :data:`~marshmallow.exceptions.SCHEMA`, where a
+        cross-field rule naming no control lands (ruling **plan#3135**).
         """
-        declared = _declared_schema_fields()
+        declared = _declared_schema_fields() | {SCHEMA}
 
         stale = sorted(set(ACTIONABLE_FLASH_FIELDS) - declared)
 
@@ -487,6 +561,21 @@ class TestEveryRecurrenceRefusalIsHeard:
             )
 
 
+    def test_the_transfer_templates_same_account_rule_is_heard(self, app):
+        """A whole-form refusal, silent until ruling plan#3135 put its key on the list."""
+        with app.app_context():
+            with pytest.raises(ValidationError) as exc_info:
+                TransferTemplateCreateSchema().load(
+                    {"from_account_id": "1", "to_account_id": "1"}, partial=True,
+                )
+
+            errors = exc_info.value.normalized_messages()
+            assert list(errors) == [SCHEMA]
+            assert flash_message_for_errors(errors) == (
+                "From and To accounts must be different."
+            )
+
+
 class TestTheGenericFallbackSurvives:
     """The negative control: not every error is worth repeating."""
 
@@ -499,8 +588,9 @@ class TestTheGenericFallbackSurvives:
         """
         with app.app_context():
             # The amount field since plan step recurrence:R5-a (``amount`` since
-            # X-bp renamed ``default_amount``).  The subject has moved three times now and for the same reason each time: this
-            # arm needs a field that is DECLARED (an unknown key is dropped by
+            # X-bp renamed ``default_amount``).  The subject has moved three
+            # times now and for the same reason each time: this arm needs a
+            # field that is DECLARED (an unknown key is dropped by
             # ``unknown = EXCLUDE`` and produces no error at all, which would
             # make the assertion below pass against an EMPTY dict -- the
             # tautology a moved subject leaves behind) and NOT allowlisted.

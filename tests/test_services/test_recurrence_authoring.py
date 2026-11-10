@@ -47,6 +47,7 @@ from app.models.recurrence_rule import RecurrenceRule
 from app.models.ref import FilingStatus
 from app.services import pay_period_admin
 from app.services.pay_calendar import calendar_for
+from tests._stub_period import stub_period_on
 from tests.oracles.recurrence_baseline import (
     BASELINE_CADENCES,
     ShapeCadence,
@@ -915,6 +916,7 @@ class TestSalaryProfileWriter:
             "name": "Day Job",
             "pay_amount": "4000.00",  # $104,000.00 a year / 26
             "pay_payday": seed_periods[0].start_date.isoformat(),
+            **stub_period_on(seed_periods[0].start_date.isoformat()),
             "filing_status_id": str(filing_status.id),
             # A state the law lists: since plan step salary:X-at-3 the create
             # door refuses any other (it posted "PA" until then).

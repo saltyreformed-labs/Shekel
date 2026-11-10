@@ -8,10 +8,12 @@ the import's family is the one cut that is a subject of its own -- raised
 only by this package, caught only by the statement routes through
 :class:`StatementImportError` -- so it lives beside the door that raises it,
 as :class:`~app.services.pay_calendar._eras.PayCalendarError` does beside
-its own.  The classes are byte-for-byte those that stood in
-:mod:`app.exceptions`; only their import site moved: a module of this
+its own.  The classes moved byte-for-byte from :mod:`app.exceptions` in a
+commit of their own, and only their import site changed: a module of this
 package reads them from here, and every other importer from
-:mod:`app.services.statement_import`.
+:mod:`app.services.statement_import`.  The same plan step then changed
+:class:`StatementLineIdMoved`'s advice and added
+:class:`StatementLineIdsShareALine`, in its own later commit.
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): no ``flask``
 import; a route renders the message.
@@ -170,24 +172,42 @@ class StatementAccountMismatch(StatementImportError):
         )
 
 
+#: What frees a held line id, said once for both refusals that name one
+#: (:class:`StatementLineIdMoved`, :class:`StatementLineIdsShareALine`).
+#: **An id is held for as long as its LINE is recorded** (ruling
+#: **plan#2233**): ``budget.line_source_ids`` goes with its line and at no
+#: other time, and a line goes when the last import showing it is deleted.
+#: So deleting the import that first showed the id is not enough while
+#: another import -- another source's, or a later one of this source's --
+#: still shows the line.  *Until plan step plan#2232 the sentence said "delete
+#: the import that recorded it", which was true while an id was held only by
+#: its own source's sightings.*
+_HELD_ID_REMEDY = (
+    "The app keeps a line id for as long as its line is recorded, even after "
+    "the import that first showed it is deleted.  If the recorded line is the "
+    "wrong one, delete every import that shows it on the statements page, "
+    "then import this file again."
+)
+
+
 class StatementLineIdMoved(StatementImportError):
     """A source's own id for a line now names a different day or amount.
 
     Plan step ``bank_import:X-f6b-1``, ruling **R-BI10**.  A source that
     carries its own line ids (an OFX ``FITID``, the feed's ``id``) has ONE
     line per id, and the reconciliation pairs an incoming line to the line
-    this source's earlier sighting carries that id on before it compares any
-    wording.  That pairing is within a ``(day, amount)`` group, so a file
-    stating a held id on a DIFFERENT day or amount is the one shape it cannot
-    pair and must not record: recording it would give this source two lines
-    under one id, which is the state ``uq_bank_statement_lines_external_id``
-    refused as a database error while the id lived on the line.  The
-    refusal is the door's now, with a sentence.
+    this source holds that id on before it compares any wording.  That
+    pairing is within a ``(day, amount)`` group, so a file stating a held id
+    on a DIFFERENT day or amount is the one shape it cannot pair and must not
+    record: recording it would give this source two lines under one id, which
+    ``uq_line_source_ids_account_source_external`` refuses as a database
+    error (plan step plan#2232).  This is the same refusal, first, with a
+    sentence.
 
     Attributes:
         external_id: The id the source reused.
-        recorded: ``(posted_on, amount)`` -- where this source's earlier
-            sighting holds the id.  The reconciliation's own group key
+        recorded: ``(posted_on, amount)`` -- the line this source holds the id
+            on.  The reconciliation's own group key
             (:func:`app.services.statement_import.group_key`), because that
             is exactly the pair the id failed to agree with.
         stated: ``(posted_on, amount)`` this file states for it.
@@ -202,9 +222,45 @@ class StatementLineIdMoved(StatementImportError):
             f"{stated[1]}, while this source has already shown that id on "
             f"{recorded[0]} for {recorded[1]}.  Nothing was imported.  A "
             f"source names one line per id, so the app will not record a "
-            f"second under it.  If the recorded line is the wrong one, delete "
-            f"the import that recorded it on the statements page and import "
-            f"this file again."
+            f"second under it.  {_HELD_ID_REMEDY}"
+        )
+
+
+class StatementLineIdsShareALine(StatementImportError):
+    """A file states two ids as two lines that this source holds on ONE line.
+
+    Plan step plan#2232.  A recorded line can hold two ids from one source:
+    the reconciliation pairs by this source's id first and by its wording
+    after (ruling **R-BI10**), so a file whose line carried a NEW id and the
+    wording of a held line was paired to that line, and the line gained the
+    second id.  A later file that states BOTH ids, as two lines of one
+    ``(day, amount)`` group, says the two are separate transactions where the
+    app holds one: the id step can pair only one of them to the line, and
+    recording the other anywhere else would put a held id on a second line,
+    which ``uq_line_source_ids_account_source_external`` refuses.  *Until
+    that key existed nothing refused this shape and the door recorded the
+    second id on a second line silently -- the state it existed to refuse.*
+
+    **It refuses rather than moving an id to a new line**, because the app
+    cannot tell which earlier pairing was the mistake, and an observation
+    quietly rewritten is what ruling **R-FL** exists to prevent.
+
+    Attributes:
+        external_ids: The two ids, in the order the file states them.
+        recorded: ``(posted_on, amount)`` -- the one line this source holds
+            both on.
+    """
+
+    def __init__(self, external_ids, recorded):
+        self.external_ids = external_ids
+        self.recorded = recorded
+        first, second = external_ids
+        super().__init__(
+            f"This file states line ids '{first}' and '{second}' as two lines "
+            f"on {recorded[0]} for {recorded[1]}, while this source has "
+            f"already shown both ids on one recorded line.  Nothing was "
+            f"imported.  A source names one line per id, so the app will not "
+            f"record a second line under either.  {_HELD_ID_REMEDY}"
         )
 
 

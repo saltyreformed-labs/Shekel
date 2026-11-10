@@ -294,8 +294,10 @@ class BankStatementLine(AccountScopedMixin, db.Model):
     **R-BI10**).  This row holds what every source agrees on -- the account,
     the day, the amount, the ordinal that tells two same-day same-amount lines
     apart -- and one :class:`StatementLineSighting` per import that showed it
-    holds that source's wording, id, stated transaction day, running balance,
-    category and the MERCHANT its word names.  A line lives while any
+    holds that source's wording, stated transaction day, running balance,
+    category and the MERCHANT its word names (the source's own id for the
+    line is a :class:`~app.models.line_source_id.LineSourceId` row, held
+    once, since plan step plan#2232).  A line lives while any
     sighting does
     (``budget.remove_line_left_unsighted``, :mod:`app.sighting_infrastructure`),
     which is what lets a second source start recording over the first's
@@ -363,9 +365,10 @@ class BankStatementLine(AccountScopedMixin, db.Model):
     and :attr:`transaction_on` is the EARLIEST day any sighting states,
     because that is the day a match writes onto a purchase's ``purchased_on``
     (ruling **R-FW**) and money cannot be spent after the earliest day a
-    source says it was.  A source's own id (``external_id``) is exposed on no
-    line property: it is corroboration this source's next import pairs on
-    (``_record``), never a fact about the line.
+    source says it was.  A source's own id for a line is neither a column
+    here nor a sighting's: it is a :class:`~app.models.line_source_id
+    .LineSourceId` row, the one home whose unique key holds a source to one
+    line per id (plan step plan#2232), and no line property exposes it.
 
     **A line's stored IDENTITY is ``(account_id, posted_on, amount,
     sequence_in_group)``**, and the ordinal is what makes that key total.  Two
@@ -597,9 +600,11 @@ class StatementLineSighting(db.Model):
     Plan step ``bank_import:X-f6b-1``, ruling **R-BI10**: *a bank line is held
     by the sightings of the imports that showed it.*  The line is the bank's
     fact -- account, day, amount, ordinal; this row is one source's account of
-    it: the wording that source wrote, the id it assigned, the day it says the
-    money was spent, the balance it stated after the line, the category it
-    filed the line under and the merchant its word names.  Two sources
+    it: the wording that source wrote, the day it says the money was spent,
+    the balance it stated after the line, the category it filed the line
+    under and the merchant its word names.  (The id the source assigned is
+    not one import's statement about the line but the source's name for it,
+    held once in :class:`~app.models.line_source_id.LineSourceId`.)  Two sources
     showing one line write two rows here and one line there, and the app
     stops calling a second wording a restatement.
 
@@ -643,15 +648,6 @@ class StatementLineSighting(db.Model):
                         ``bank_import:X-f6a-3a``): a source that does not
                         distinguish the two days says so here rather than
                         restating the clearing day.
-        external_id  -- this source's own id for the line (an OFX ``FITID``,
-                        the feed's ``id``), or ``None``.  CORROBORATION that
-                        this source's next import pairs on first
-                        (``statement_import._plan._reconcile``), never the
-                        line's identity: a source that has one still cannot
-                        claim it on two lines of one account -- the door
-                        refuses a file restating a held id on another day or
-                        amount (``_plan._refuse_moved_ids``) -- and one that
-                        has none is not thereby unidentifiable.
         running_balance -- the balance this source stated after the line, or
                         ``None`` where the export carries none.  A prefix sum
                         over the source's LISTING order, which is why two
@@ -705,7 +701,6 @@ class StatementLineSighting(db.Model):
     # which also holds the ACCOUNT equal.
     merchant_id = db.Column(db.Integer)
     transaction_on = db.Column(db.Date)
-    external_id = db.Column(db.String(64))
     running_balance = db.Column(db.Numeric(12, 2))
     source_category = db.Column(db.String(100))
 

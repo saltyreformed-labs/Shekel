@@ -13,7 +13,9 @@ a production copy before any act -- performs none of the writes.
 step ``bank_import:X-f6b-1``, ruling **R-BI10**).  A line is the bank's fact
 -- account, day, amount, ordinal -- and every import that shows it writes a
 :class:`~app.models.statement_import.StatementLineSighting` carrying its own
-wording, id, stated day, balance and category.  So the decision pairs within
+wording, stated day, balance and category; the id a source gives a line is
+held once, by :class:`~app.models.line_source_id.LineSourceId` (plan step
+plan#2232).  So the decision pairs within
 a SOURCE (:func:`_pair_group`): by the source's own id, then by its wording,
 then by count against the lines only other sources have shown; what is left
 is new.  A different wording from a different source is never a restatement
@@ -34,17 +36,15 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import StatementSourceEnum
 from app.extensions import db
-from app.models.statement_import import (
-    BankStatementLine,
-    StatementImport,
-    StatementLineSighting,
-)
+from app.models.line_source_id import LineSourceId
+from app.models.statement_import import BankStatementLine
 
 from ._adapters import parse_statement
 from ._anchor import ImportedBalance, recorded_opening_before, resolve_anchor
 from ._errors import (
     StatementLineConflict,
     StatementLineIdMoved,
+    StatementLineIdsShareALine,
     StatementParseError,
 )
 from ._identity import verify_identity
@@ -108,16 +108,38 @@ def _recorded_groups(
     return dict(groups)
 
 
+@dataclass(frozen=True)
+class _HeldId:
+    """Where this source already holds one id the file states.
+
+    Attributes:
+        line_id: The recorded line the id names (``budget.line_source_ids``).
+        group: That line's :func:`~._line.group_key` -- what the moved-id
+            refusal compares against the group the file states the id in.
+    """
+
+    line_id: int
+    group: "tuple[date, Decimal]"
+
+
 def _held_ids(
     account_id: int, source_id: int, lines: "list[StatementLine]",
-) -> "dict[str, tuple[date, Decimal]]":
+) -> "dict[str, _HeldId]":
     """Return where THIS SOURCE already holds each id the file states.
+
+    **Read from the id's one home, the key** (plan step plan#2232): a
+    :class:`~app.models.line_source_id.LineSourceId` row lives as long as its
+    line (ruling **plan#2233**), so an id stays held after the imports of its
+    own source that showed the line are deleted, while another import still
+    shows it.  Until that step this read the sightings of this source's
+    imports, which forgot an id the moment they went.
 
     ONE query over the whole account rather than over the declared window,
     because the shape it exists to refuse is an id held on a line OUTSIDE the
     window: a source restating a line's day or amount under the same id
     (:func:`_refuse_moved_ids`).  Empty for a file carrying no ids, which
-    issues no statement -- SECU's CSV carries none.
+    issues no statement -- SECU's CSV carries none.  The key holds one line
+    per id, so the map below loses no row.
 
     Args:
         account_id: The account being imported into.
@@ -125,29 +147,27 @@ def _held_ids(
         lines: The file's lines.
 
     Returns:
-        ``{external_id: (posted_on, amount)}`` for every stated id one of
-        this source's sightings carries, the line's group key beside it.
+        ``{external_id: _HeldId}`` for every stated id this source holds.
     """
     stated = {line.external_id for line in lines if line.external_id}
     if not stated:
         return {}
     rows = (
         db.session.query(
-            StatementLineSighting.external_id,
+            LineSourceId.external_id, BankStatementLine.id,
             BankStatementLine.posted_on, BankStatementLine.amount,
         )
-        .join(BankStatementLine, StatementLineSighting.of_its_line())
-        .join(StatementImport, StatementLineSighting.of_its_import())
+        .join(BankStatementLine, LineSourceId.of_its_line())
         .filter(
-            StatementLineSighting.account_id == account_id,
-            StatementImport.source_id == source_id,
-            StatementLineSighting.external_id.in_(stated),
+            LineSourceId.account_id == account_id,
+            LineSourceId.source_id == source_id,
+            LineSourceId.external_id.in_(stated),
         )
         .all()
     )
     return {
-        external_id: group_key(posted_on, amount)
-        for external_id, posted_on, amount in rows
+        external_id: _HeldId(line_id, group_key(posted_on, amount))
+        for external_id, line_id, posted_on, amount in rows
     }
 
 
@@ -186,16 +206,17 @@ def _refuse_repeated_ids(lines: "list[StatementLine]") -> None:
 
 
 def _refuse_moved_ids(
-    lines: "list[StatementLine]", held: "dict[str, tuple[date, Decimal]]",
+    lines: "list[StatementLine]", held: "dict[str, _HeldId]",
 ) -> None:
     """Refuse a file that states a held id on another day or amount.
 
     A source names ONE line per id, and the pairing that honours that
     (:func:`_pair_group`, step 1) works within a ``(day, amount)`` group -- so
     an id whose recorded line is in a DIFFERENT group is the one shape the
-    pairing cannot reach and recording would make two lines of.  While the id
-    lived on the line, ``uq_bank_statement_lines_external_id`` refused that
-    state as a database error; this is the same refusal with a sentence.
+    pairing cannot reach and recording would make two lines of.
+    ``uq_line_source_ids_account_source_external`` refuses that state as a
+    database error (plan step plan#2232); this is the same refusal, first,
+    with a sentence.
 
     Args:
         lines: The file's lines.
@@ -208,10 +229,44 @@ def _refuse_moved_ids(
     for line in lines:
         if not line.external_id:
             continue
-        recorded = held.get(line.external_id)
+        at = held.get(line.external_id)
         stated = group_key(line.posted_on, line.amount)
-        if recorded is not None and recorded != stated:
-            raise StatementLineIdMoved(line.external_id, recorded, stated)
+        if at is not None and at.group != stated:
+            raise StatementLineIdMoved(line.external_id, at.group, stated)
+
+
+def _refuse_ids_sharing_a_line(
+    lines: "list[StatementLine]", held: "dict[str, _HeldId]",
+) -> None:
+    """Refuse a file that states two ids, as two lines, that one line holds.
+
+    The other shape the key would refuse (plan step plan#2232).  A line can
+    hold two ids from one source (its wording paired a new id to it), and a
+    file stating both says they are two transactions: step 1 of
+    :func:`_pair_group` pairs one of them to the line, and the other would
+    be recorded on a second line under an id the first already holds.  Run
+    after :func:`_refuse_moved_ids`, so every held id here is stated in its
+    line's own group, and after :func:`_refuse_repeated_ids`, so two stated
+    lines are two distinct ids.
+
+    Args:
+        lines: The file's lines.
+        held: :func:`_held_ids`' answer.
+
+    Raises:
+        StatementLineIdsShareALine: On the first stated id whose line an
+            earlier stated id already holds.
+    """
+    first_on: "dict[int, str]" = {}
+    for line in lines:
+        at = held.get(line.external_id) if line.external_id else None
+        if at is None:
+            continue
+        if at.line_id in first_on:
+            raise StatementLineIdsShareALine(
+                (first_on[at.line_id], line.external_id), at.group,
+            )
+        first_on[at.line_id] = line.external_id
 
 
 def _sightings_from(row: BankStatementLine, source_id: int) -> list:
@@ -314,10 +369,16 @@ class _Reconciled:
             sighting of the recorded line, and nothing on the line.  It is a
             PAIR and not a row because what the sighting records comes from
             the incoming line.
+        ids_held: The ids the file states that this source already holds
+            (:func:`_held_ids`), each on the very line step 1 of
+            :func:`_pair_group` paired it to.  Every OTHER id the file states
+            is new, and the writer records it on the line its line becomes or
+            is paired to (plan step plan#2232).
     """
 
     fresh: "list[KeyedLine]"
     held: "list[tuple[StatementLine, BankStatementLine]]"
+    ids_held: "frozenset[str]"
 
 
 @dataclass(frozen=True)
@@ -340,58 +401,59 @@ class _GroupPairing:
 
 
 def _pair_by_id(
-    incoming: "list[StatementLine]", by_source: "list[list]", same: "list[int]",
+    incoming: "list[StatementLine]", recorded: "list[BankStatementLine]",
+    held: "dict[str, _HeldId]",
 ) -> "tuple[list[tuple[int, int]], list[int]]":
-    """Pair incoming lines carrying an id to the lines this source holds them on.
+    """Pair incoming lines carrying a held id to the line the key holds it on.
 
-    Step 1 of :func:`_pair_group`.  A source holds one line per id
-    (:func:`_refuse_moved_ids`), so the map from id to recorded index is a
-    function, and an incoming id it does not hold falls through to the
-    wording step.
+    Step 1 of :func:`_pair_group`.  **The id's line is the key's answer**
+    (plan step plan#2232, ruling **plan#2233**), whether or not a sighting
+    of this source still shows it: an id outlives the imports of its own
+    source while another import keeps its line, and a re-sent id must meet
+    that line rather than be paired by count to a neighbour.  Total by
+    construction: :func:`_refuse_moved_ids` has established that every held
+    id is held on a line of the group the file states it in, every line of
+    that group is in *recorded* (the window holds every line the file
+    states), and :func:`_refuse_ids_sharing_a_line` that no two stated ids
+    name one line -- so each pair names a distinct recorded line.  An
+    incoming id the source does not hold falls through to the wording step.
 
     Args:
         incoming: The group's incoming lines, in file order.
-        by_source: Per recorded line, its sightings by this source
-            (:func:`_sightings_from`).
-        same: The recorded indexes with at least one such sighting.
+        recorded: The group's recorded lines, in ordinal order.
+        held: :func:`_held_ids`' answer.
 
     Returns:
         ``(held, unpaired)`` -- the ``(incoming, recorded)`` index pairs, and
         the incoming indexes left for the steps after.
     """
-    id_of = {
-        sighting.external_id: index
-        for index in same
-        for sighting in by_source[index]
-        if sighting.external_id
-    }
-    held: "list[tuple[int, int]]" = []
-    claimed: "set[int]" = set()
+    index_of = {row.id: index for index, row in enumerate(recorded)}
+    pairs: "list[tuple[int, int]]" = []
     unpaired: "list[int]" = []
     for index, line in enumerate(incoming):
-        target = id_of.get(line.external_id) if line.external_id else None
-        if target is not None and target not in claimed:
-            held.append((index, target))
-            claimed.add(target)
-        else:
+        at = held.get(line.external_id) if line.external_id else None
+        if at is None:
             unpaired.append(index)
-    return held, unpaired
+        else:
+            pairs.append((index, index_of[at.line_id]))
+    return pairs, unpaired
 
 
 def _pair_group(
     incoming: "list[StatementLine]", recorded: "list[BankStatementLine]",
-    source_id: int,
+    source_id: int, held: "dict[str, _HeldId]",
 ) -> _GroupPairing:
     """Pair one ``(day, amount)`` group's incoming lines to its recorded ones.
 
     **The pairing rule of ruling R-BI10, in its four steps**, each consuming
     what the one before it left:
 
-    1. An incoming line carrying an id pairs to the recorded line a sighting
-       of THIS SOURCE already carries that id on (:func:`_pair_by_id`).  The
-       id breaks ties within the group; it is not the identity, and
-       :func:`_refuse_moved_ids` has already established that every held
-       id's line IS in this group.
+    1. An incoming line carrying an id pairs to the recorded line THIS
+       SOURCE holds that id on (:func:`_pair_by_id`, read from the key
+       since plan step plan#2232, so whether or not this source still shows
+       the line).  The id breaks ties within the group; it is not the
+       identity, and :func:`_refuse_moved_ids` has already established that
+       every held id's line IS in this group.
     2. The rest pair by WORDING against the recorded lines this source has
        sighted (:func:`~._line.pair_by_statement`, multiset, unchanged) --
        against what this source called each of them most recently.
@@ -411,35 +473,42 @@ def _pair_group(
         incoming: The file's lines in this group, in file order.
         recorded: The recorded lines in this group, in ordinal order.
         source_id: The import's source.
+        held: :func:`_held_ids`' answer, for step 1.
 
     Returns:
         The :class:`_GroupPairing`.
     """
     by_source = [_sightings_from(row, source_id) for row in recorded]
     same = [index for index, seen in enumerate(by_source) if seen]
-    held, unpaired = _pair_by_id(incoming, by_source, same)
+    pairs, unpaired = _pair_by_id(incoming, recorded, held)
     # 2. By this source's wording, among what this source has sighted and the
     # id step did not claim.
-    claimed = {recorded_index for _, recorded_index in held}
+    claimed = {recorded_index for _, recorded_index in pairs}
     same_open = [index for index in same if index not in claimed]
     pairing = pair_by_statement(
         [incoming[index].description for index in unpaired],
         [by_source[index][0].description for index in same_open],
     )
-    held.extend(
+    pairs.extend(
         (unpaired[incoming_offset], same_open[recorded_offset])
         for incoming_offset, recorded_offset in pairing.held
     )
     rest = [unpaired[offset] for offset in pairing.fresh]
     # 3. By count, in ordinal order, against what only other sources showed.
-    # ``recorded`` arrives in ordinal order, so index order is ordinal order,
-    # and neither earlier step can have claimed one of these.
-    other = [index for index in range(len(recorded)) if index not in same]
-    held.extend(zip(rest, other))
+    # ``recorded`` arrives in ordinal order, so index order is ordinal order.
+    # Step 2 cannot have claimed one of these, but step 1 can: an id is held
+    # on its line after this source's last sighting of it goes (ruling
+    # **plan#2233**), so a line no sighting of this source shows may already
+    # be this file's by id.
+    other = [
+        index for index in range(len(recorded))
+        if index not in same and index not in claimed
+    ]
+    pairs.extend(zip(rest, other))
     fresh = rest[len(other):]
     unclaimed_same = [same_open[offset] for offset in pairing.unclaimed]
     return _GroupPairing(
-        held=held,
+        held=pairs,
         fresh=fresh,
         restated=(
             by_source[unclaimed_same[0]][0].description
@@ -452,6 +521,7 @@ def _reconcile(
     lines: "list[StatementLine]",
     already: "dict[tuple[date, Decimal], list[BankStatementLine]]",
     source_id: int,
+    held_ids: "dict[str, _HeldId]",
 ) -> _Reconciled:
     """Decide what this file adds and what it re-sights, refusing a restatement.
 
@@ -475,6 +545,7 @@ def _reconcile(
         already: What is recorded over the same window, grouped by day and
             amount.
         source_id: The import's source, which is what a sighting is "from".
+        held_ids: :func:`_held_ids`' answer, behind both id refusals.
 
     Returns:
         The :class:`_Reconciled` decision.
@@ -488,6 +559,7 @@ def _reconcile(
         recorded = already.get(key, [])
         pairing = _pair_group(
             [lines[index] for index in indexes], recorded, source_id,
+            held_ids,
         )
         if pairing.restated is not None:
             _refuse_restatement(
@@ -515,6 +587,7 @@ def _reconcile(
     return _Reconciled(
         fresh=[keyed for _, keyed in sorted(fresh, key=lambda pair: pair[0])],
         held=held,
+        ids_held=frozenset(held_ids),
     )
 
 
@@ -564,9 +637,10 @@ def plan_statement(
 
     The import's refusals, in the order they have to happen: parse, verify
     the file against itself, reconcile the account identity, refuse a
-    repeated or moved line id, compare against what is already recorded, and
-    resolve the file's balance -- an unexplained balance refuses the file
-    rather than being discovered after its lines are staged.  Every step
+    repeated, moved or line-sharing id, compare against what is already
+    recorded, and resolve the file's balance -- an unexplained balance
+    refuses the file rather than being discovered after its lines are
+    staged.  Every step
     reads; none stages a row, so the session is exactly as it was however
     this returns or raises.
 
@@ -590,6 +664,8 @@ def plan_statement(
         StatementAccountMismatch: The file is for a different account.
         StatementLineIdMoved: This source restates a line's day or amount
             under an id it already holds.
+        StatementLineIdsShareALine: This file states, as two lines, two ids
+            this source holds on one.
         StatementLineConflict: This source restates a line's wording.
     """
     parsed = parse_statement(source, payload)
@@ -601,15 +677,16 @@ def plan_statement(
     )
 
     _refuse_repeated_ids(parsed.lines)
-    _refuse_moved_ids(
-        parsed.lines, _held_ids(account_id, source_id, parsed.lines),
-    )
+    held_ids = _held_ids(account_id, source_id, parsed.lines)
+    _refuse_moved_ids(parsed.lines, held_ids)
+    _refuse_ids_sharing_a_line(parsed.lines, held_ids)
     reconciled = _reconcile(
         parsed.lines,
         _recorded_groups(
             account_id, parsed.declared_start, parsed.declared_end,
         ),
         source_id,
+        held_ids,
     )
     # Read BEFORE the import row exists, so the walk sees only what was
     # recorded before this act -- and resolve the anchor here, with the other

@@ -86,6 +86,7 @@ from ._errors import (
     StatementIntegrityError,
     StatementLineConflict,
     StatementLineIdMoved,
+    StatementLineIdsShareALine,
     StatementParseError,
 )
 from ._integrity import (
@@ -139,6 +140,7 @@ __all__ = [
     "StatementLine",
     "StatementLineConflict",
     "StatementLineIdMoved",
+    "StatementLineIdsShareALine",
     "StatementParseError",
     "StatementPlan",
     "available_sources",

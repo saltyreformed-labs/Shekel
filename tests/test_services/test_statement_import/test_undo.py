@@ -48,7 +48,7 @@ from app.services.statement_import import (
     record_statement,
 )
 from app.services.statement_import._balance import bank_levels
-from app.services.statement_match import MatchSubmission, matched_subjects
+from app.services.statement_match import matched_subjects
 
 from tests.test_services.test_statement_match._builders import (
     a_bank_line,

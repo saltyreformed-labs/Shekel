@@ -24,14 +24,11 @@ from app.services import (
 from app.services.cash_ledger import account_opening_fact
 from app.services.settle_day import SettleDay
 from app.services.transaction_service import settle_transaction
-from tests._test_helpers import generate_row_of, make_income_template
-
 from tests._cards import add_savings
 
 from ._helpers import (
     _ONE_DAY,
     _HOTEL,
-    _card,
     _hotel_bill,
     _movement,
     _revert,
@@ -41,46 +38,51 @@ from ._helpers import (
 
 
 class TestTheBooksBoundaryIsTheTendersAccounts:
-    """A payment is dated against the account it books on, at the settle and at a re-point."""
+    """A payment is dated against the account it books on, at the settle and at a re-point.
 
-    def test_a_settle_dated_on_the_cards_opening_day_is_refused_for_the_card_alone(
+    The tender is Savings, whose books open after checking's: since ruling
+    plan#3227 "Paid from" names a cash account, never a card.  The card's
+    own boundary for a Credit press is ``test_credit_puts_the_row_on_the_card``'s.
+    """
+
+    def test_a_settle_dated_on_the_tenders_opening_day_is_refused_for_the_tender_alone(
         self, app, seed_user, seed_periods,
     ):
-        """The same day settles on checking and is refused on the card, by name, before any write."""
+        """The same day settles on checking and is refused on Savings, by name, before any write."""
         with app.app_context():
-            card = _card(seed_user)
-            cards_opening = account_opening_fact(card.id).opened_on
-            assert cards_opening > account_opening_fact(seed_user["account"].id).opened_on
-            that_day = SettleDay(day=cards_opening, basis=SettledDayBasisEnum.ENTERED)
+            savings = add_savings(seed_user)
+            savings_opening = account_opening_fact(savings.id).opened_on
+            assert savings_opening > account_opening_fact(seed_user["account"].id).opened_on
+            that_day = SettleDay(day=savings_opening, basis=SettledDayBasisEnum.ENTERED)
 
             on_checking = _hotel_bill(seed_user, seed_periods[0])
             settle_transaction(on_checking, settle_day=that_day)
             db.session.commit()
-            assert _movement(on_checking).settled_on == cards_opening
+            assert _movement(on_checking).settled_on == savings_opening
 
-            on_the_card = _hotel_bill(seed_user, seed_periods[0])
+            on_savings = _hotel_bill(seed_user, seed_periods[0])
             with pytest.raises(ValidationError, match=r"books open on"):
                 settle_transaction(
-                    on_the_card, settle_day=that_day, tender_account_id=card.id,
+                    on_savings, settle_day=that_day, tender_account_id=savings.id,
                 )
             db.session.rollback()
             db.session.expire_all()
-            fresh = db.session.get(Transaction, on_the_card.id)
+            fresh = db.session.get(Transaction, on_savings.id)
             assert fresh.settled_on is None
             assert fresh.covering_movements == []
 
-    def test_a_correction_cannot_move_a_dated_payment_inside_the_cards_opening(
+    def test_a_correction_cannot_move_a_dated_payment_inside_the_tenders_opening(
         self, app, seed_user, seed_periods,
     ):
         """Equal days ask no day writer, so the re-point asks the boundary itself; nothing moves."""
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
-            cards_opening = account_opening_fact(card.id).opened_on
+            savings = add_savings(seed_user)
+            savings_opening = account_opening_fact(savings.id).opened_on
             txn = _hotel_bill(seed_user, seed_periods[0])
             settle_transaction(
                 txn, settle_day=SettleDay(
-                    day=cards_opening, basis=SettledDayBasisEnum.ENTERED,
+                    day=savings_opening, basis=SettledDayBasisEnum.ENTERED,
                 ),
             )
             status_seam.record_clearing(txn, _latest_anchor(checking.id).id)
@@ -91,7 +93,7 @@ class TestTheBooksBoundaryIsTheTendersAccounts:
             with pytest.raises(ValidationError, match=r"books open on"):
                 transaction_service.apply_requested_status(
                     txn, txn.status_id,
-                    stated=transaction_service.StatedRecord(tender_account_id=card.id),
+                    stated=transaction_service.StatedRecord(tender_account_id=savings.id),
                 )
             db.session.rollback()
             db.session.expire_all()
@@ -105,20 +107,20 @@ class TestTheBooksBoundaryIsTheTendersAccounts:
     ):
         """The popover posts both; the re-point grades the ROW's new day, never the old one.
 
-        A payment dated on the card's opening day (valid on checking),
-        corrected in ONE Save to the day after AND the card: the end state
-        is valid, so it lands -- the first cut graded the movement's OLD day
-        against the card and refused a day the payment was leaving (the
+        A payment dated on Savings' opening day (valid on checking),
+        corrected in ONE Save to the day after AND Savings: the end state is
+        valid, so it lands -- the first cut graded the movement's OLD day
+        against the tender and refused a day the payment was leaving (the
         review of this leaf).  And the reverse: a payment dated after the
-        opening, moved in one Save ONTO the opening day and the card, is
+        opening, moved in one Save ONTO the opening day and Savings, is
         refused, so the new day is what is graded.
         """
         with app.app_context():
-            card = _card(seed_user)
-            cards_opening = account_opening_fact(card.id).opened_on
-            on_the_opening = SettleDay(day=cards_opening, basis=SettledDayBasisEnum.ENTERED)
+            savings = add_savings(seed_user)
+            savings_opening = account_opening_fact(savings.id).opened_on
+            on_the_opening = SettleDay(day=savings_opening, basis=SettledDayBasisEnum.ENTERED)
             the_day_after = SettleDay(
-                day=cards_opening + _ONE_DAY, basis=SettledDayBasisEnum.ENTERED,
+                day=savings_opening + _ONE_DAY, basis=SettledDayBasisEnum.ENTERED,
             )
 
             txn = _hotel_bill(seed_user, seed_periods[0])
@@ -126,11 +128,11 @@ class TestTheBooksBoundaryIsTheTendersAccounts:
             db.session.commit()
             transaction_service.apply_requested_status(
                 txn, txn.status_id, settle_day=the_day_after,
-                stated=transaction_service.StatedRecord(tender_account_id=card.id),
+                stated=transaction_service.StatedRecord(tender_account_id=savings.id),
             )
             db.session.commit()
             movement = _movement(txn)
-            assert movement.account_id == card.id
+            assert movement.account_id == savings.id
             assert movement.settled_on == txn.settled_on == the_day_after.day
 
             other = _hotel_bill(seed_user, seed_periods[0])
@@ -139,7 +141,7 @@ class TestTheBooksBoundaryIsTheTendersAccounts:
             with pytest.raises(ValidationError, match=r"books open on"):
                 transaction_service.apply_requested_status(
                     other, other.status_id, settle_day=on_the_opening,
-                    stated=transaction_service.StatedRecord(tender_account_id=card.id),
+                    stated=transaction_service.StatedRecord(tender_account_id=savings.id),
                 )
             db.session.rollback()
             db.session.expire_all()
@@ -151,14 +153,14 @@ class TestTheBooksBoundaryIsTheTendersAccounts:
 class TestTheRowsClearingLinkStaysOnTheRowsAccount:
     """A movement on another account carries its own link; the row's never reaches it."""
 
-    def test_record_clearing_links_the_row_and_not_a_card_movement(
+    def test_record_clearing_links_the_row_and_not_a_movement_elsewhere(
         self, app, seed_user, seed_periods,
     ):
+        """Checking's statement links the Checking bill, not its payment from Savings."""
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
             txn = _hotel_bill(seed_user, seed_periods[0])
-            settle_transaction(txn, tender_account_id=card.id)
+            settle_transaction(txn, tender_account_id=add_savings(seed_user).id)
             anchor_id = _latest_anchor(checking.id).id
             status_seam.record_clearing(txn, anchor_id)
             db.session.commit()
@@ -189,24 +191,24 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
             assert movement.settled_on == txn.settled_on
             assert movement.reconciled_by_id is None
 
-    def test_a_basis_rise_on_a_linked_row_does_not_copy_its_link_onto_a_card_movement(
+    def test_a_basis_rise_on_a_linked_row_does_not_copy_its_link_onto_a_movement_elsewhere(
         self, app, seed_user, seed_periods,
     ):
         """The mirror's EQUAL-days arm, the one a linked row can reach.
 
         The bank confirms the day checking's panel had bounded, the row's
         basis rises to ``observed`` and its link STANDS (the day did not
-        move); the card movement's basis rises with it and it takes NO link
-        -- the row's names checking's statement, and the movement's own key
+        move); the payment on Savings rises with it and takes NO link --
+        the row's names checking's statement, and the movement's own key
         holds a link to the movement's account.  Under the copy this arm
         made through ``CC-5-2`` the flush would meet
-        ``fk_transaction_entries_reconciled_by``.
+        ``fk_transaction_entries_reconciled_by``.  The payment was on the
+        card until ruling plan#3227 took the card out of "Paid from".
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
             txn = _hotel_bill(seed_user, seed_periods[0])
-            settle_transaction(txn, tender_account_id=card.id)
+            settle_transaction(txn, tender_account_id=add_savings(seed_user).id)
             anchor_id = _latest_anchor(checking.id).id
             status_seam.record_clearing(txn, anchor_id)
             db.session.commit()
@@ -266,44 +268,37 @@ class TestTheRowsClearingLinkStaysOnTheRowsAccount:
     ):
         """The popover shows the recorded tender even when it is no longer nameable.
 
-        A bill paid from a card the owner has since ARCHIVED: the picker
-        preselects the archived card (the route's ``_tender_picker`` appends
-        it), so the Paid button on a reverted such bill posts it -- an ECHO of
-        the record, dropped before the gate's archived refusal is asked
-        (ruling **R-CC42**: where the money moved is retained).  The first
-        cut gated it and refused a tender nobody changed (the review of this
-        leaf).  Naming the archived card for a row that does NOT record it is
-        still refused.  Re-expressed by ruling plan#3104: a revert of a
-        Checking bill paid from the card takes its payment home now, so the
-        reverted row that records the card is a REFUND received into it -- a
-        Received row is not drawn Credit, and its revert keeps the money where
-        it moved -- and the echo is its Received button's.
+        A bill paid from an account the owner has since ARCHIVED: the picker
+        preselects the archived account (the route's ``_tender_picker``
+        appends it), so the Paid button on a reverted such bill posts it --
+        an ECHO of the record, dropped before the gate's archived refusal is
+        asked (ruling **R-CC42**: where the money moved is retained).  The
+        first cut gated it and refused a tender nobody changed (the review of
+        this leaf).  Naming the archived account for a row that does NOT
+        record it is still refused.  Re-expressed by ruling plan#3104 as a
+        refund received into the card, then by ruling plan#3227, which takes
+        the card out of "Paid from": a Checking bill paid from Savings, whose
+        revert keeps its payment on Savings, Savings then archived.
         """
         with app.app_context():
-            card = _card(seed_user)
-            txn = generate_row_of(
-                make_income_template(
-                    db.session, seed_user, amount=str(_HOTEL), name="Hotel refund",
-                ),
-                seed_periods[0],
-            )
-            db.session.commit()
-            settle_transaction(txn, tender_account_id=card.id)
+            savings = add_savings(seed_user)
+            txn = _hotel_bill(seed_user, seed_periods[0])
+            settle_transaction(txn, tender_account_id=savings.id)
             db.session.commit()
             _revert(txn)
             assert (txn.account_id, _movement(txn).account_id) == (
-                seed_user["account"].id, card.id,
-            ), "precondition: a Checking refund whose kept payment is on the card"
-            card.is_active = False
+                seed_user["account"].id, savings.id,
+            ), "precondition: a Checking bill whose kept payment is on Savings"
+            savings.is_active = False
             db.session.commit()
 
-            settle_transaction(txn, tender_account_id=card.id)
+            settle_transaction(txn, tender_account_id=savings.id)
             db.session.commit()
-            assert _movement(txn).account_id == card.id
+            assert _movement(txn).account_id == savings.id
 
             other = _hotel_bill(seed_user, seed_periods[0])
             with pytest.raises(ValidationError, match=r"archived, so a payment"):
-                settle_transaction(other, tender_account_id=card.id)
+                settle_transaction(other, tender_account_id=savings.id)
 
     def test_the_matcher_never_moves_a_kept_payment(
         self, app, seed_user,

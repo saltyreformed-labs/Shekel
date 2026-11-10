@@ -233,10 +233,18 @@ class SalaryProfile(
     # The profile's payroll LINES -- every deduction, and from plan step
     # salary:R18-b every earning line too (ruling R-SAL38); which side a row
     # is on is its ``paycheck_line_kind_id``.  ``deductions`` until R18-a.
+    # By sort order, then by id (task plan#3148): no door sets a line's sort
+    # order, so every line holds 0 and the id, the order they were added in,
+    # is what orders them.  By sort order alone, the salary page's lines
+    # section, the pay stub form and its report listed them, and the
+    # cockpit listed lines of one kind and amount, in whatever order the
+    # database read them, which renaming a line was measured to change.  The
+    # order moves no money: each line is priced on its own and the results
+    # summed.
     lines = db.relationship(
         "PaycheckLine", back_populates="salary_profile",
         cascade="all, delete-orphan", lazy="select",
-        order_by="PaycheckLine.sort_order",
+        order_by="[PaycheckLine.sort_order, PaycheckLine.id]",
     )
     # The profile's transcribed pay stubs (plan step salary:S11-c-2c), in
     # payday order: the engine prices each paycheck's four taxes from one of

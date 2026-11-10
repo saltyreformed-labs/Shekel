@@ -1,15 +1,17 @@
 """Ledger-model import fence: ``shekel-ledger-model-bypass`` (W9908).
 
-Flags any module OUTSIDE the posting-ledger service allowlist that IMPORTS a
-posted-ledger row model -- ``Posting`` / ``JournalEntry`` / ``LedgerAccount``.
-The posting ledger is append-only and balances through a deferred trigger
-(``budget.assert_journal_entry_balanced``); every write goes through
-``posting_service._emit_balanced_entry`` and every confirmed read through the
-sanctioned reader packages (``posting_reads``, the loan / account posting
-packages). A consumer that holds one of these model
-classes -- or the module that defines it -- can query the ledger, or
-construct/mutate a row, OUTSIDE those seams: the exact bypass Build-Order
-Steps 2-5 built the seams to prevent (``docs/audits/balance_architecture/``).
+Flags any module OUTSIDE the models layer that IMPORTS a stored-ledger row
+model -- ``Posting`` / ``JournalEntry`` / ``LedgerAccount``.  **No module writes
+or reads the stored ledger since plan task plan#3133**, which deleted its
+writers and readers; the ledger the app reads is worked out from the records
+(``app.services.ledger_lines``), which holds no ledger model.  The tables and
+their models stand until plan step plan#2915 deletes them, and until then a
+module that holds one of these model classes -- or the module that defines it
+-- could query them, or construct a row in them, again.  *Until that task
+every write went through ``posting_service._emit_balanced_entry`` and every
+confirmed read through the sanctioned reader packages (``posting_reads``, the
+loan / account posting packages), and the fence kept every other module out
+of those seams (Build-Order Steps 2-5, ``docs/audits/balance_architecture/``).*
 The fence is the import analog of the W9907 status-write fence (and of the
 balance-producer read fence, which structure retired at plan step E1e): it binds
 at the point a model (or its module) enters a module, where the name is still
@@ -64,34 +66,22 @@ _LEDGER_LEAF_MODULE_NAMES = frozenset(
 # a relative path; an alias) -- the NAME axis, immune to a module-path rename.
 _LEDGER_MODEL_NAMES = frozenset({"Posting", "JournalEntry", "LedgerAccount"})
 
-# Modules allowed to import a ledger model directly: the posting-ledger write
-# core (``posting_service`` + its ``_posting_write`` / ``_posting_reconcile`` /
-# ``_posting_purchases`` leaves -- ``_posting_purchases`` added at plan step
-# X-f3b, which made a PURCHASE a posting source of its own; a
-# ``_posting_legacy`` leaf sat here from ``balance:X-bi-6-3`` leaf 3b until
-# ``X-bi-6-5``'s second leaf, card plan#1845, deleted it), the readers
-# (``posting_reads``, the
-# loan / account posting packages), the
-# chart-of-accounts resolver
-# (``ledger_account_service``), and the archive
-# guard that counts a linked account's postings. Fully-qualified names, matched
-# exactly or as a package prefix (the packages) via the fail-closed
-# :func:`_module_in_allowlist` -- the same match/prefix/fail-closed contract the
-# balance-producer fence relied on. ``app.models`` is listed as a package prefix ON PURPOSE:
-# a model legitimately references sibling models (relationships, FK type hints),
-# so the whole models layer governs its own internal imports; the fence keeps the
-# service / route / util layers out. Grep-verified complete against every current
-# importer under app/, so the fence ships at zero violations.
+# Modules allowed to import a ledger model directly: the models layer alone.
+# Fully-qualified names, matched exactly or as a package prefix via the
+# fail-closed :func:`_module_in_allowlist` -- the same match/prefix/fail-closed
+# contract the balance-producer fence relied on. ``app.models`` is listed as a
+# package prefix ON PURPOSE: a model legitimately references sibling models
+# (relationships, FK type hints), so the whole models layer governs its own
+# internal imports; the fence keeps the service / route / util layers out.
+# Grep-verified complete against every current importer under app/, so the
+# fence holds at zero violations.
 _LEDGER_MODEL_ALLOWLIST = frozenset({
     "app.models",
-    "app.services.posting_service",
-    "app.services.posting_reads",
-    "app.services._posting_reconcile",
-    "app.services._posting_purchases",
-    "app.services._posting_write",
-    "app.services.loan_posting_service",
-    "app.services.account_posting_service",
-    "app.services.ledger_account_service",
+    # The stored ledger's write core (``posting_service`` and its
+    # ``_posting_write`` / ``_posting_reconcile`` / ``_posting_purchases``
+    # leaves), its readers (``posting_reads``, ``loan_posting_service``,
+    # ``account_posting_service``) and the chart resolver
+    # ``ledger_account_service`` until plan task plan#3133 deleted them.
     # ``app.services.ledger_report_service`` until X-ew's second leaf (plan
     # task plan#2771) moved the statements onto the worked-out ledger
     # (``app.services.ledger_lines``), which reads no ledger model.
@@ -106,19 +96,17 @@ _LEDGER_MODEL_ALLOWLIST = frozenset({
 
 
 class ShekelLedgerModelFenceChecker(BaseChecker):
-    """Forbid importing a posted-ledger model outside the posting-ledger seams.
+    """Forbid importing a stored-ledger model outside the models layer.
 
-    Every ledger write goes through ``posting_service._emit_balanced_entry`` and
-    every confirmed read through the sanctioned reader packages; a module holding
-    ``Posting`` / ``JournalEntry`` / ``LedgerAccount`` -- or the module that
-    defines one -- can query or mutate the append-only ledger outside those
-    seams, the bypass class Build-Order Steps 2-5 exist to prevent
-    (docs/audits/balance_architecture/). This checker is the deterministic import
-    fence for that class, the ledger analog of the W9907 status-write fence.
-    Only the posting-ledger write core, its readers,
-    and the utilities that legitimately hold a model class
+    No module writes or reads the stored ledger since plan task plan#3133
+    deleted its writers and readers, and its tables stand until plan step
+    plan#2915; a module holding ``Posting`` / ``JournalEntry`` /
+    ``LedgerAccount`` -- or the module that defines one -- could query or write
+    them again (docs/audits/balance_architecture/). This checker is the
+    deterministic import fence for that class, the ledger analog of the W9907
+    status-write fence. Only the models layer
     (:data:`_LEDGER_MODEL_ALLOWLIST`) may import a ledger model; every other
-    module must reach the ledger through those services. The fence binds on the
+    module reads the ledger worked out from the records. The fence binds on the
     NAME axis (a model class is flagged wherever it is imported from -- immune to
     a module-path rename or a relative path) and the MODULE axis (binding a
     defining submodule, by ``from`` or plain ``import``), so no reachable import
@@ -130,20 +118,17 @@ class ShekelLedgerModelFenceChecker(BaseChecker):
     name = "shekel-ledger-model-fence"
     msgs = {
         "W9908": (
-            "Posted-ledger model '%s' imported outside the posting-ledger "
-            "allowlist; reach the ledger through its services instead",
+            "Stored-ledger model '%s' imported outside the models layer; "
+            "read the ledger worked out from the records (ledger_lines) instead",
             "shekel-ledger-model-bypass",
-            "The posting ledger (Posting / JournalEntry / LedgerAccount) is "
-            "append-only and balances through a deferred trigger. Every write "
-            "must go through posting_service._emit_balanced_entry and every "
-            "confirmed read through the sanctioned reader packages "
-            "(posting_reads, the loan_posting_service / account_posting_service "
-            "packages); a module that imports a ledger "
-            "model -- or its defining module -- can query or construct/mutate a "
-            "row outside those seams, the bypass class Build-Order Steps 2-5 "
-            "built the seams to prevent (docs/audits/balance_architecture/). "
-            "Only the posting-ledger write core, its readers, and "
-            "ledger_account_service may "
+            "The stored ledger (Posting / JournalEntry / LedgerAccount) has no "
+            "writer and no reader since plan task plan#3133 deleted them, and "
+            "its tables stand until plan step plan#2915. The ledger the app "
+            "reads is worked out from the records (app.services.ledger_lines), "
+            "which holds no ledger model; a module that imports a ledger "
+            "model -- or its defining module -- could query or write the "
+            "stored tables again (docs/audits/balance_architecture/). "
+            "Only the models layer may "
             "import a ledger model. The fence binds by NAME (importing Posting / "
             "JournalEntry / LedgerAccount is flagged wherever it comes from -- "
             "the app.models re-export F-1 shape, the defining submodule, a "

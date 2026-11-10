@@ -674,9 +674,6 @@ def record_match(
         ValidationError: On any of this function's refusals or a settle door's.
             A 400: every one of them is reachable by an ordinary owner working
             from a stale page.
-        PostingError: From a ledger reconcile, on a broken invariant.  Fails
-            loud rather than rendering as a designed refusal, and in a batch it
-            fails the WHOLE request rather than one item (:mod:`._batch`).
     """
     lines, rows = content.lines, content.rows
     _reject_empty_side(lines, rows)
@@ -853,7 +850,6 @@ def accept_match(
 
     Raises:
         ValidationError: On any refusal of this door's or a settle door's.
-        PostingError: From a ledger reconcile, on a broken invariant.
     """
     matched = matched_subjects(scope.account_id)
     return record_match(

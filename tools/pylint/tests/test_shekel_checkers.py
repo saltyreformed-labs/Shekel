@@ -54,9 +54,9 @@ def _fenced_module_sources(module_name: str) -> list[Path]:
     """Return every source file a fenced *module_name* scope covers.
 
     A flat module (``app.services.account_projection``) is one file.  A PACKAGE
-    (``app.services.loan_posting_service``) is every ``.py`` file inside it --
+    (``app.services.loan_ledger``) is every ``.py`` file inside it --
     because the checker scopes a package by prefix, so a producer born in ANY
-    submodule (``_sync``, ``_corrections``, ``_walk``) is in scope and must be
+    submodule (``_walk``, ``_visible``, ``_events``) is in scope and must be
     classified.  Enumerating them here is what makes the registry-vs-reality
     test see the same surface the checker does.
 
@@ -580,11 +580,11 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
             self.checker.visit_functiondef(node)
 
     def test_flags_unclassified_public_function_in_ledger_reader(self) -> None:
-        """The same completeness rule binds on a genesis loan-ledger submodule."""
+        """The same completeness rule binds on a loan-ledger submodule."""
         node = self._function_def(
             "def confirmed_loan_balance_somewhere(loan_id, scenario_id):\n"
             "    return None\n",
-            "app.services.loan_posting_service._corrections",
+            "app.services.loan_ledger._walk",
         )
         with self.assertAddsMessages(
             MessageTest(
@@ -800,8 +800,8 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
         sitting a few lines from the entries they cover -- the residue of
         PUBLIC balance-ingredient packages W9910 cannot protect:
 
-        * ``_LOAN_LEDGER_DEFINING_MODULES`` (``loan_ledger``, ``loan_posting_service``
-          and ``loan_walk_reads``: the walk, its writers, the page's reads of it)
+        * ``_LOAN_LEDGER_DEFINING_MODULES`` (``loan_ledger`` and ``loan_walk_reads``:
+          the walk and the page's reads of it; its writers went at plan#3133)
         * ``_CASH_LEDGER_MODULES`` (``cash_ledger``, D1a then D1c)
         * ``_ROW_VALUATION_MODULES`` (``row_valuation``, X-au-c2 -- the
           producer-free valuation arms, extracted BELOW ``cash_ledger`` so the
@@ -846,7 +846,7 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
             "app.services.cash_ledger",
             "app.services.row_valuation",
             "app.services.loan_ledger",
-            "app.services.loan_posting_service", "app.services.loan_walk_reads",
+            "app.services.loan_walk_reads",
             "app.services.loan_payment_service",
             "app.services.loan_resolver",
             "app.services.recurring_transfer_query",
@@ -1523,13 +1523,13 @@ class TestShekelTransactionStatusBypassChecker(CheckerTestCase):
 
 
 class TestShekelLedgerModelFenceChecker(CheckerTestCase):
-    """``shekel-ledger-model-bypass``: ledger models imported only via the seams.
+    """``shekel-ledger-model-bypass``: ledger models imported only by the models.
 
-    Every posted-ledger row model (``Posting`` / ``JournalEntry`` /
-    ``LedgerAccount``) may be imported only by the posting-ledger write core, its
-    readers, and the two utilities that legitimately hold a model class
-    (:data:`_LEDGER_MODEL_ALLOWLIST`); every other module must reach the
-    append-only ledger through those services. Like the W9907 status fence the
+    Every stored-ledger row model (``Posting`` / ``JournalEntry`` /
+    ``LedgerAccount``) may be imported only by the models layer
+    (:data:`_LEDGER_MODEL_ALLOWLIST`; the posting-ledger write core and its
+    readers until plan task plan#3133 deleted them); every other module reads
+    the ledger worked out from the records instead. Like the W9907 status fence the
     rule keys off the ENCLOSING module (``node.root().name``), so each snippet is
     parsed inside a named module via :func:`astroid.parse` (``module_name=``).
     Both fence axes are exercised: the NAME axis (a model class imported from the
@@ -1761,7 +1761,7 @@ class TestShekelLedgerModelFenceChecker(CheckerTestCase):
         ``Posting`` wherever it is imported from.
         """
         node = self._importfrom_node(
-            "from app.services.posting_reads import Posting", "app.routes.grid",
+            "from app.services.cash_ledger import Posting", "app.routes.grid",
         )
         with self.assertAddsMessages(
             MessageTest(
@@ -1875,12 +1875,12 @@ class TestShekelLedgerModelFenceChecker(CheckerTestCase):
         """A same-BASENAME module in a non-allowlisted package is still flagged.
 
         The allowlist matches the FULL module path, so a hypothetical
-        ``app/routes/posting_service.py`` -- basename ``posting_service``, which
-        IS an allowlisted name under ``app.services`` -- must NOT be exempted by
+        ``app/routes/models.py`` -- basename ``models``, which IS the
+        allowlisted name ``app.models`` -- must NOT be exempted by
         the collision. This is the false-negative a basename-only match allows.
         """
         node = self._importfrom_node(
-            "from app.models import Posting", "app.routes.posting_service",
+            "from app.models import Posting", "app.routes.models",
         )
         with self.assertAddsMessages(
             MessageTest(
@@ -1897,7 +1897,7 @@ class TestShekelLedgerModelFenceChecker(CheckerTestCase):
 
         Binds the exemption to :data:`_LEDGER_MODEL_ALLOWLIST` itself, so
         narrowing the set surfaces here rather than as a surprise W9908 on a
-        posting-ledger service.
+        model module.
         """
         for module_name in sorted(_LEDGER_MODEL_ALLOWLIST):
             node = self._importfrom_node(
@@ -1927,18 +1927,18 @@ class TestShekelLedgerModelFenceChecker(CheckerTestCase):
     def test_allows_import_from_allowlisted_package_submodule(self) -> None:
         """A submodule of an allowlisted PACKAGE stays inside the fence (prefix match).
 
+        The models layer is allowlisted by prefix, so its submodules must
+        remain exempt -- the package-prefix arm of :func:`_module_in_allowlist`.
         The loan / account posting packages and the chart resolver package
-        are allowlisted by prefix, so their submodules (``_corrections`` /
-        ``_sync`` / ``_linked``) must remain exempt -- the package-prefix arm of
-        :func:`_module_in_allowlist`.  The report package was the third
-        example until plan task plan#2771 moved the statements onto the
-        worked-out ledger and the fence tightened past it
+        were the examples until plan task plan#3133 deleted them, and the
+        report package one until plan task plan#2771 moved the statements onto
+        the worked-out ledger and the fence tightened past it
         (:meth:`test_flags_the_report_package_since_it_reads_lines`).
         """
         for module_name in (
-            "app.services.loan_posting_service._corrections",
-            "app.services.account_posting_service._sync",
-            "app.services.ledger_account_service._linked",
+            "app.models.ledger_account",
+            "app.models.account",
+            "app.models.transaction_entry",
         ):
             node = self._importfrom_node(
                 "from app.models.journal_entry import Posting, JournalEntry",

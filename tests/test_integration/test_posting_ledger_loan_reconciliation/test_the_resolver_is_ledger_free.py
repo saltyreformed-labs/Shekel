@@ -1,5 +1,5 @@
-"""The resolver reads no posted ledger: its import closure and its call qualifiers, against the
-ledger fence's allowlist.
+"""The resolver reads no ledger: its import closure and its call qualifiers, against the
+worked-out ledger it is graded beside.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from ._helpers import _resolver_balance
 #
 # The parallel run (Sections 1 / 7) is honest ONLY because the un-seeded resolver
 # derives its balance from the schedule and the transaction source, never from the
-# posted ledger it is meant to cross-check.  Review finding M4: that independence
+# worked-out ledger it is meant to cross-check.  Review finding M4: that independence
 # was convention-only -- a future refactor letting a resolver input loader consult
 # the ledger would silently collapse the parallel run to a tautology and nothing
 # would fail.  These guards make it mechanical.
@@ -33,31 +33,21 @@ from ._helpers import _resolver_balance
 # forged stored leg is a state only the store can hold; it never moved the
 # worked-out read the parallel run now compares against.
 #
-# **The static check is defence in depth, and it is now NARROW because a
-# stronger gate already owns most of it.**  The production checker W9908
-# (``shekel-ledger-model-bypass``, a hard ``--fail-on`` in CI and in the
-# per-edit hook) forbids importing a posted-ledger model outside a 12-entry
-# allowlist, on the module axis AND on the rename-immune NAME axis.  For every
-# module outside that allowlist a ledger import is therefore already
-# impossible, and restating it here bought nothing.  What is left is the
-# question W9908 cannot ask: **does the resolver reference reach a ledger SEAM
-# at all?**  The check below asserts exactly that, and it READS the checker's
-# own constant rather than copying it, so the two cannot drift.
-#
-# **Re-measured 2026-09-09 (plan step balance:X-bl-2b), and the figure this
-# paragraph used to quote was not one this code produces.**  It read "of the
-# reference's 91-module import closure, 21 are inside W9908's allowlist and
-# every one of those is ``app.models.*``".  ZERO modules of the closure are
-# allowlist members, then or now: the allowlist holds the bare name
-# ``app.models`` (the package) and this check tests literal membership, so
-# ``app.models.account`` is not in it.  21 was the count of ``app.models.*``
-# modules -- 22 on the pre-step closure, 14 on this one -- which is a different
-# set.  The ``app.models`` exclusion below is therefore inert TODAY and kept
-# deliberately: the allowlist is read from the checker at run time, so a model
-# module added to it would land here, and a model legitimately references
-# sibling models.  What gives this check its teeth is not the exclusion but
-# ``test_the_closure_is_transitive_and_the_check_bites``, which plants a real
-# seam two hops out and asserts the closure reaches it.
+# **The static check guards the read the parallel run compares against**
+# (ruling plan#3154).  The parallel run grades the resolver against the
+# WORKED-OUT ledger, ``app.services.ledger_lines`` (read through
+# ``tests/_ledger_reads.py``), so the question is whether the resolver
+# reference can reach that package at all.  It is named once, in
+# :data:`_WORKED_OUT_LEDGER`, rather than derived from that helper, which also
+# imports ``balance_at._fold`` and ``pay_calendar`` -- modules the resolver may
+# share.  What gives the check its teeth is
+# ``test_the_closure_is_transitive_and_the_check_bites``, which plants an
+# import of it two hops out and runs the same predicate over the result.
+# *From plan step balance:X-bl-2b until plan task plan#3133 it read W9908's
+# ``_LEDGER_MODEL_ALLOWLIST`` and failed on any member outside ``app.models``:
+# the stored ledger's seams.  That task deleted them, leaving the allowlist
+# holding only the models package the check skipped, so it guarded nothing,
+# and it had never guarded the worked-out read, which is not on that list.*
 #
 # **Three hand-maintained lists were deleted to get here and none was
 # replaced**: a 12-token module-name DENYLIST (``_LEDGER_IMPORT_TOKENS``), a
@@ -69,18 +59,27 @@ from ._helpers import _resolver_balance
 # the ledger passed.  A first draft of this step replaced them with a
 # whole-closure ledger-model check that carried its own two-name constant --
 # and an adversarial review showed that RENAMING ``app/models/journal_entry.py``
-# made it vacuous with all four of its controls still green.  Reading W9908's
-# allowlist instead is what removes the last copied list.
+# made it vacuous with all four of its controls still green.  The one name the
+# check holds now is the package it guards, and the bites control refuses a
+# tree without it, so a rename fails rather than going quiet.
 #
 # **What a closure CANNOT see, stated because a guard that overstates itself is
 # worse than one that does not exist.**  Import reachability over-approximates
 # IMPORTS; it is orthogonal to value flow.  A module in the closure can reach a
-# posted-ledger value with no import edge at all -- ``cash_ledger._books``
-# already issues raw SQL through ``db.session.execute(text(...))`` and argues
-# for it in its own docstring, and ``app.models.account`` is in the closure, so
-# a ``backref`` on ``ledger_account`` would put every posting one attribute
-# away.  Neither exists today; both are why a VALUE control is the stronger
-# one and this is not.
+# stored-ledger value with no import edge at all: ``app.models.account`` is in
+# the closure, so a ``backref`` on ``ledger_account`` would put every posting
+# one attribute away, and raw SQL through ``db.session.execute(text(...))``
+# needs no import of a model.  Neither exists today.  *A VALUE control that
+# moved the stored ledger and re-read the resolver covered both until
+# plan#2914 (the block above).*
+#
+# **And it runs one way.**  It keeps the resolver from importing the
+# worked-out ledger, never the reverse: measured 2026-11-10, the closure of
+# ``app.services.ledger_lines`` holds all four roots below, through
+# ``balance_at``, ``loan_ledger`` and ``loan_loaders``.  The two sides share
+# their loaders, the loan walk's installments and the resolver's rate
+# periods, so a defect there moves both alike and the comparison cannot see
+# it; the package's hand-computed literals are what grade those.
 #
 # **The reference's dependency was far larger than its arithmetic, and plan
 # step balance:X-bl-2b closed that** (finding **N-432**).
@@ -109,8 +108,9 @@ _RESOLVER_REFERENCE_ROOTS = (
 )
 
 
-#: Where the production ledger-model fence keeps its allowlist.
-_LEDGER_FENCE_SOURCE = "tools/pylint/shekel_checkers/ledger_model_fence.py"
+#: The worked-out ledger the parallel run grades the resolver against (ruling
+#: plan#3154): a package, so each of its submodules is it too.
+_WORKED_OUT_LEDGER = "app.services.ledger_lines"
 
 
 def _repo_root() -> str:
@@ -118,53 +118,25 @@ def _repo_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(app.services.__file__)))
 
 
-def _ledger_seam_allowlist() -> frozenset:
-    """Return W9908's ``_LEDGER_MODEL_ALLOWLIST``, read from the checker's source.
+def _worked_out_ledger_reached(closure: "dict[str, list[str]]") -> "dict[str, str]":
+    """Return each module of :data:`_WORKED_OUT_LEDGER` *closure* reaches, with its path.
 
-    **Read, never copied.**  A second copy of that set here would be a list to
-    keep in step by hand -- exactly what this rewrite deleted three of, and
-    exactly how the first draft of it went vacuous under a module rename.
-    Parsed out of the source with ``ast`` rather than imported, so this test
-    needs neither ``pylint`` nor ``astroid`` on its path and cannot be
-    perturbed by plugin load order.
+    The one predicate both checks below run, so the control that plants an
+    import grades the very test the guard makes rather than only the closure.
+
+    Args:
+        closure: ``{module: path}``, from :func:`_import_closure`.
 
     Returns:
-        The fully-qualified module names allowed to import a posted-ledger
-        model.
-
-    Raises:
-        AssertionError: When the constant is absent, or is no longer a
-            ``frozenset({...})`` of string literals, or parses EMPTY.  Loud in
-            every case, because a silently empty allowlist would make the check
-            below pass over anything.
+        ``{module: "root -> ... -> module"}`` for the package and each of its
+        submodules in *closure*; empty when the resolver reaches none.
     """
-    path = os.path.join(_repo_root(), _LEDGER_FENCE_SOURCE)
-    with open(path, encoding="utf-8") as handle:
-        tree = ast.parse(handle.read())
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        if not any(
-            isinstance(target, ast.Name)
-            and target.id == "_LEDGER_MODEL_ALLOWLIST"
-            for target in node.targets
-        ):
-            continue
-        call = node.value
-        assert isinstance(call, ast.Call) and call.args, (
-            "W9908's _LEDGER_MODEL_ALLOWLIST is no longer frozenset({...}); "
-            "this reader must be updated with it"
-        )
-        names = frozenset(ast.literal_eval(call.args[0]))
-        assert names, (
-            "W9908's allowlist parsed EMPTY -- this check would pass over "
-            "anything"
-        )
-        return names
-    raise AssertionError(
-        f"_LEDGER_MODEL_ALLOWLIST not found in {_LEDGER_FENCE_SOURCE} -- the "
-        "production ledger-model fence moved or was renamed"
-    )
+    return {
+        module: " -> ".join(path)
+        for module, path in closure.items()
+        if module == _WORKED_OUT_LEDGER
+        or module.startswith(f"{_WORKED_OUT_LEDGER}.")
+    }
 
 
 def _module_sources() -> "dict[str, str]":
@@ -319,7 +291,7 @@ def _reference_call_qualifiers() -> set:
 
 
 class TestResolverIsLedgerFree:
-    """The resolver reference reads NONE of the posted ledger -- mechanically.
+    """The resolver reference reads NONE of the ledger -- mechanically.
 
     **The VALUE control that perturbed the stored ledger went at plan#2914**
     with the suite's grading of the store (the block above
@@ -331,39 +303,28 @@ class TestResolverIsLedgerFree:
     call them, and the third read the store, which no door writes.
 
     The static checks are deliberately narrow: the
-    reference reaches no ledger SEAM (the question the production W9908 fence
-    cannot ask), and its roots are read off ``_resolver_balance`` itself rather
-    than maintained beside it.  See the block above
+    reference reaches no module of the worked-out ledger it is graded beside
+    (ruling plan#3154), and its roots are read off ``_resolver_balance`` itself
+    rather than maintained beside it.  See the block above
     :data:`_RESOLVER_REFERENCE_ROOTS` for why three hand-maintained lists were
     deleted to get here, and for what a closure cannot see.
     """
 
     def test_the_reference_reaches_no_ledger_seam(self):
-        """No module the reference can reach may import a posted-ledger model.
+        """No module the reference can reach is the worked-out ledger.
 
-        The static half, and it is one line of logic because W9908 owns the
-        rest: outside that checker's allowlist a ledger-model import is already
-        a hard CI failure, so the only modules in the reference's closure that
-        COULD hold one are the allowlisted ones.  Of those, ``app.models.*`` is
-        allowlisted on purpose (a model references sibling models); anything
-        else is a ledger SEAM and has no business on this path.
-
-        The allowlist is READ from the checker's source, never copied, so this
-        cannot drift from the gate it defers to -- and cannot be made vacuous by
-        renaming a model module, which is how the first draft of this check
-        failed an adversarial review.
+        The parallel run compares the resolver's balance with the one
+        :data:`_WORKED_OUT_LEDGER` works out, so a resolver that imported that
+        package could read its own answer key, and the comparison would grade
+        nothing (ruling plan#3154).  *It failed on a stored-ledger seam, read
+        off W9908's allowlist, until plan task plan#3133 deleted the seams.*
         """
-        closure = _import_closure(_RESOLVER_REFERENCE_ROOTS)
-        seams = {
-            module: " -> ".join(closure[module])
-            for module in closure
-            if module in _ledger_seam_allowlist()
-            and module != "app.models"
-            and not module.startswith("app.models.")
-        }
-        assert not seams, (
-            f"the resolver reference reaches a posted-ledger seam: {seams} -- "
-            f"the parallel run would become a tautology (review M4 / M-1)"
+        reached = _worked_out_ledger_reached(
+            _import_closure(_RESOLVER_REFERENCE_ROOTS),
+        )
+        assert not reached, (
+            f"the resolver reference reaches the worked-out ledger: {reached} "
+            f"-- the parallel run would become a tautology (review M4 / M-1)"
         )
 
     def test_the_roots_cover_what_the_reference_calls(self):
@@ -379,8 +340,7 @@ class TestResolverIsLedgerFree:
 
         A qualifier that resolves into ``tests`` rather than ``app`` is named
         explicitly rather than ignored: the closure walks ``app/`` only, so a
-        producer living in the suite is outside every static check here and its
-        independence rests on the VALUE control above.
+        producer living in the suite is outside every static check here.
         """
         qualifiers = _reference_call_qualifiers()
         assert qualifiers, "no calls found -- this control is reading nothing"
@@ -401,7 +361,7 @@ class TestResolverIsLedgerFree:
         }
 
     def test_the_closure_is_transitive_and_the_check_bites(self):
-        """A ledger SEAM import two hops from the roots is caught, by the closure.
+        """An import of the worked-out ledger two hops from the roots is caught.
 
         **This mutates the GRAPH, not a string.**  An earlier draft spliced
         source into ``_imports_a_ledger_model`` and asserted the detector fired,
@@ -410,8 +370,13 @@ class TestResolverIsLedgerFree:
         now, so the real builder runs against a hypothetical tree.
 
         The plant is two edges out (no module of the roots names it directly)
-        and the assertion is that the closure REACHES the seam and reports the
-        chain.
+        and the assertion is that the guard's own predicate,
+        :func:`_worked_out_ledger_reached`, finds the package through the planted
+        edge and reports the chain.  A second plant imports one submodule alone,
+        which reaches its code without the package's ``__init__``, so only the
+        predicate's prefix arm can see it.  *The plant was an import of
+        ``posting_service``, a stored-ledger seam, until plan task plan#3133
+        deleted it (ruling plan#3154).*
 
         **The plant MOVED at plan step balance:X-bl-2b, and the old one failing
         is what said so.**  It was ``cash_ledger._amounts``, reached only
@@ -425,21 +390,40 @@ class TestResolverIsLedgerFree:
         sources = _module_sources()
         planted = "app.ref_cache._accessors"
         assert planted in sources
+        assert _WORKED_OUT_LEDGER in sources, (
+            f"{_WORKED_OUT_LEDGER} is not a module of app/ -- the guard names "
+            f"a package that moved, and would pass over anything"
+        )
         clean = _import_closure(_RESOLVER_REFERENCE_ROOTS, sources)
         assert planted in clean and len(clean[planted]) > 2, (
             f"the transitivity control is measuring nothing: {clean.get(planted)}"
         )
-        assert "app.services.posting_service" not in clean
+        assert not _worked_out_ledger_reached(clean)
 
+        package, leaf = _WORKED_OUT_LEDGER.rsplit(".", 1)
         mutated = dict(sources)
-        mutated[planted] += "\nfrom app.services import posting_service\n"
-        after = _import_closure(_RESOLVER_REFERENCE_ROOTS, mutated)
-        assert "app.services.posting_service" in after, (
-            "the closure did not follow an import two hops from the roots"
+        mutated[planted] += f"\nfrom {package} import {leaf}\n"
+        after = _worked_out_ledger_reached(
+            _import_closure(_RESOLVER_REFERENCE_ROOTS, mutated),
         )
-        assert "app.services.posting_service" in _ledger_seam_allowlist(), (
-            "posting_service is not a ledger seam by W9908's own allowlist, so "
-            "this control plants something the check would not object to"
+        assert after.get(_WORKED_OUT_LEDGER, "").endswith(
+            f"{planted} -> {_WORKED_OUT_LEDGER}",
+        ), f"the closure did not follow an import two hops from the roots: {after}"
+
+        # A SUBMODULE import reaches the package's code without its
+        # ``__init__``, so only the predicate's prefix arm sees it.
+        submodule = min(
+            name for name in sources if name.startswith(f"{_WORKED_OUT_LEDGER}.")
+        )
+        mutated = dict(sources)
+        mutated[planted] += f"\nimport {submodule}\n"
+        after = _worked_out_ledger_reached(
+            _import_closure(_RESOLVER_REFERENCE_ROOTS, mutated),
+        )
+        assert _WORKED_OUT_LEDGER not in after and after.get(
+            submodule, "",
+        ).endswith(f"{planted} -> {submodule}"), (
+            f"a plant of {submodule} was not reported on its own: {after}"
         )
 
     def test_the_graph_does_not_collapse_through_the_app_package(self):

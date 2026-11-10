@@ -35,28 +35,34 @@ most, plus three that plan step ``credit_card:CC-5-4a-4`` put inside
 ``balance:X-bn``), each taking it at its own point in the transaction, which
 is what made the deadlock below reachable.*
 
-Two families of write are why the lock exists at all, and they need the SAME
-lock because the second reads the first's output:
+Two kinds of write are why the lock exists, each a read the write then acts
+on:
 
 * **The structural pay-period mutations** -- top-up / extend / truncate, and so
   regenerate and reset, which are compositions of those.  Each counts or
   classifies the user's periods and then appends or deletes against that count.
-* **Every posting-ledger RECONCILE** -- the cash anchor reconcile
-  (:mod:`app.services.account_posting_service`) and the loan reconcile
-  (:mod:`app.services.loan_posting_service`).  Each reads what the ledger has
-  posted, subtracts it from what the account's facts say it should hold, and
-  writes the difference.
+* **The assertion doors' governing read** (ruling **R-EQ**) -- the cash
+  door (:func:`app.services.anchor_service.stage_anchor_true_up`) and the loan
+  door (:mod:`app.services.loan_anchor_service`) each read the assertion that
+  currently GOVERNS the submitted day and append only when the submission
+  differs.  Two doors interleaved would both read the same governing state and
+  both append.
 
-**Why one lock and not two.**  A reconcile does not only read the account's
-ledger: it derives each correction's pay period from the OWNER'S CALENDAR
-(:meth:`app.services.pay_calendar.PayCalendar.filing_period`, loaded through
-:func:`app.services._posting_reconcile.filing_calendar_for`), and
-``journal_entries.pay_period_id`` is an ``ON DELETE CASCADE`` FK.  So a
-concurrent truncate can delete the very period a reconcile is filing under, and
-the correction it just wrote goes with it.  The consistency boundary of a
-reconcile is therefore the user's ledger AND the calendar it keys on -- the
-union, which is exactly this lock's subject.  It is also one KEY per user, so
-no transaction has to order two of them against each other.
+It is one KEY per user, so no transaction has to order two of them against
+each other.
+
+*The second kind was every posting-ledger RECONCILE until plan step plan#2914*
+stopped the doors and the deploy calling them, and plan task plan#3133 deleted
+them: the cash anchor reconcile
+(``account_posting_service``) and the loan reconcile
+(``loan_posting_service``), each reading what the ledger had posted,
+subtracting it from what the account's facts said it should hold, and writing
+the difference.  They needed the SAME lock as the pay-period mutations because
+a reconcile derived each correction's pay period from the OWNER'S CALENDAR
+(:meth:`app.services.pay_calendar.PayCalendar.filing_period`) and
+``journal_entries.pay_period_id`` is an ``ON DELETE CASCADE`` FK, so a
+concurrent truncate could delete the very period a reconcile was filing under,
+and the correction it had just written went with it.
 
 **Deadlock: what one key does and does not buy, corrected on evidence.**  An
 earlier version of this docstring said deadlock was "structurally impossible on
@@ -102,17 +108,20 @@ than shipping the silent ledger divergence it replaced; shipping it with a
 docstring claiming the deadlock impossible was not, which is why this
 paragraph said so until the step that made it so.
 
-**Why a lock at all, rather than a constraint.**  A reconcile emits the
-DIFFERENCE between target and posted, and repeated deltas under one key are the
-design (a correction whose basis moves is adjusted by a further entry, never
-edited -- the ledger is append-only).  No unique index can distinguish a
-legitimate second delta from a racing duplicate.  Nor can the read take a row
-lock: when nothing is posted yet there are no rows to lock, which is the
-classic phantom.  A predicate lock is what is wanted, and in PostgreSQL that is
-either SERIALIZABLE isolation with a retry loop in every route, or an advisory
-lock.  This is the advisory lock.
+**Why a lock at all, rather than a constraint.**  A transport retry and a
+deliberate re-assertion are byte-identical by construction, so no unique index
+over an assertion's own values can tell them apart: ruling R-EQ deleted the
+two content keys that tried (``uq_anchor_history_account_period_balance_day``
+and ``uq_loan_anchor_events_acct_date_bal_day``).  Nor can the read
+take a row lock: when nothing governs the day yet there are no rows to lock,
+which is the classic phantom.  A predicate lock is what is wanted, and in
+PostgreSQL that is either SERIALIZABLE isolation with a retry loop in every
+route, or an advisory lock.  This is the advisory lock.  *The same argument
+held for the posting reconciles while they lived: each emitted the DIFFERENCE
+between target and posted, repeated deltas under one key being the design.*
 
-**Why the reconcile ever appeared to be safe.**  Until plan step X-f1c3c a cash
+**Why the reconcile ever appeared to be safe** (a record of the cash and loan
+reconciles plan task plan#3133 deleted).  Until plan step X-f1c3c a cash
 true-up also UPDATEd ``accounts``, and that UPDATE autoflushed and took a row
 lock BEFORE the walk -- serialising the reconcile by accident, through a column
 that had nothing to do with it.  Ruling R-EN deleted the column and with it the
@@ -121,9 +130,10 @@ concurrent true-ups on an account reconciled at ``$4,000.00`` both answer 200,
 and the account's linked ledger settles at ``$1,000.00`` while its resolved
 assertion reads ``$2,000.00`` -- both sides wrong, trial balance still
 ``$0.00`` because the anchor-equity leg mirrors the error, so nothing fails
-loudly.  The LOAN reconcile never had even the accident: it is fed by an
-append-only event table, so it has carried the same race since Commit 16, and
-ruling R-EN cited it as the precedent to copy.
+loudly.  The LOAN reconcile never had even the accident: it was fed by an
+append-only event table, so it carried the same race from Commit 16 until
+plan step X-f1c3c put this lock inside it, and ruling R-EN cited it as the
+precedent to copy.
 
 Transaction-scoped: PostgreSQL releases the lock at COMMIT or ROLLBACK, so it
 cannot leak -- and a request that commits and goes on writing takes it again
@@ -180,10 +190,12 @@ def take_owner_write_lock(connection: Connection, owner_id: int) -> None:
     The lock is not a substitute for the constraints underneath it: a duplicate
     PAYDAY is still forbidden by ``uq_pay_periods_user_start``.  The lock is
     what a writer has instead of such a constraint when the quantity it must
-    protect is something it READ rather than a row it is about to write -- a
-    posted SUM for the reconciles, and since ruling **R-EQ** (plan step
-    X-f1c4b) the governing assertion for the two anchor doors, whose duplicate
-    rule moved out of a unique index for exactly that reason.
+    protect is something it READ rather than a row it is about to write -- the
+    period count for the pay-period mutations, and since ruling **R-EQ** (plan
+    step X-f1c4b) the governing assertion for the two anchor doors, whose
+    duplicate rule moved out of a unique index for exactly that reason (a
+    posted SUM for the ledger reconciles, until plan step plan#2914 stopped
+    calling them).
 
     Args:
         connection: The connection whose transaction takes the lock.

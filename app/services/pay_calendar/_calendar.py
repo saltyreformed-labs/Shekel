@@ -594,8 +594,8 @@ class PayCalendar:
             raise PayCalendarError(
                 f"user {self.user_id} has no materialised pay period, so a "
                 f"record dated {day.isoformat()} has no paycheck to file "
-                f"under.  journal_entries.pay_period_id is NOT NULL and this "
-                f"calendar holds {len(self.periods)} payday(s), none of them "
+                f"under.  Every ledger line names the paycheck it files in and "
+                f"this calendar holds {len(self.periods)} payday(s), none of them "
                 f"saved, so there is no id to point at -- a broken invariant "
                 f"rather than an input this can clamp."
             )

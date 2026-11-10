@@ -409,7 +409,6 @@ def delete_transaction(
             :class:`~app.exceptions.PageOutOfDate` when the row holds other
             purchases than *purchases_named* (ruling **R-CC131**), before
             anything is written.
-        PostingError: From the ledger reconcile, on a broken invariant.
     """
     if txn.user_id != owner_id:
         raise NotFoundError(f"Transaction {txn.id} not found.")

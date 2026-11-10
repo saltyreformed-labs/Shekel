@@ -621,12 +621,6 @@ def file_new_swipes(scope: ReviewScope, import_id: int) -> RuleFiling:
 
     Returns:
         The :class:`RuleFiling`.
-
-    Raises:
-        PostingError: From a ledger reconcile, on a broken invariant.  Fails
-            the whole request loud rather than being reported as one line's
-            refusal -- :func:`~._batch.apply_reviewed`'s own rule, unchanged
-            because this door is the same door.
     """
     # **TWO exact short-circuits, before the pass is derived at all.**  A
     # re-import of an overlapping span records no fresh line, and an account

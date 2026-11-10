@@ -734,7 +734,6 @@ def mint(
         record it as a member exactly like every other one.
 
     Raises:
-        PostingError: From the ledger reconcile, on a broken invariant.
         RuntimeError: When the candidate constructor refuses the row just
             created, which is the shared writer's contract.
     """

@@ -348,7 +348,6 @@ def _release_matches(
         ValidationError: From a release -- a match gone since it was read, or
             one whose created row the owner has edited.  It takes the whole
             delete with it rather than leaving an import half undone.
-        PostingError: From reversing a created row's postings.
     """
     # The SAME read the page previews with, so a confirmation cannot count
     # differently from the act it confirms.

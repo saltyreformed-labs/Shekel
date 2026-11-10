@@ -712,7 +712,6 @@ def _remove(row: PlannedRemoval, owner_id: int) -> None:
             rather than omitted because ``run_statement_door`` catches only
             ``ValidationError`` and ``SQLAlchemyError``, so were the invariant
             ever to break this door would 500 rather than refuse.
-        PostingError: From a ledger reconcile, on a broken invariant.
         ValidationError: From the purchase door, which this step's own rule
             has already been asked (:func:`planned_removals` reads the same
             state) -- reachable only if the row moved between the two.  The
@@ -757,8 +756,6 @@ def release_match(
             :func:`planned_removals`' two refusals: a created row the owner has
             edited since, and one the door that removes it would refuse anyway.
             **Both fire before anything is written.**
-        PostingError: From reversing a created row's postings, on a broken
-            ledger invariant.
     """
     match = (
         db.session.query(StatementMatch)

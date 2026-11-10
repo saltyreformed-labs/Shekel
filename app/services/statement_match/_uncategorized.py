@@ -165,7 +165,6 @@ def mint_uncategorized(
         record it as a match member exactly like every other one.
 
     Raises:
-        PostingError: From the ledger reconcile, on a broken invariant.
         RuntimeError: When the candidate constructor refuses the row this
             function has just created -- a broken contract rather than anything
             an owner did, so it fails the request loud.

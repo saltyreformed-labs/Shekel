@@ -133,7 +133,6 @@ def _apply_day(
     Raises:
         ValidationError: From a settle door -- a future day, a posting day
             before its purchase, an illegal transition.  Surfaced to the owner.
-        PostingError: From a ledger reconcile.  Fails loud.
     """
     # **"unchanged" requires the row to be SETTLED as well as correctly
     # dated.**  Deciding on the day alone would let a Projected row carrying
@@ -301,7 +300,6 @@ def move_members(
     Raises:
         ValidationError: From a settle door -- a future day, a posting day
             before its purchase, an illegal transition.
-        PostingError: From a ledger reconcile.  Fails loud.
     """
     ordered = sorted(
         rows, key=lambda row: (row.kind is not RowKind.PURCHASE, row.row_id),

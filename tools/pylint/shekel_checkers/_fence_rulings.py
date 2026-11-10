@@ -100,11 +100,12 @@ _SEAM_PRIVATE_CONTEXT_MODULES = frozenset({
 })
 _LOAN_LEDGER_DEFINING_MODULES = frozenset({
     "app.services.loan_ledger",
-    "app.services.loan_posting_service",
     # The loan detail page's two surfaces, read off the walk: they were the
     # posting package's ``_display`` until plan task plan#3133 moved them
     # here, and the scope moved with them, so a balance-at-T reader born
-    # beside them errors at its definition as it did there.
+    # beside them errors at its definition as it did there.  The posting
+    # package itself (``app.services.loan_posting_service``), its writers,
+    # was scoped here until that task deleted it.
     "app.services.loan_walk_reads",
 })
 # The loan-payment LOADER module (plan step D3, from its adversarial review).
@@ -610,10 +611,11 @@ _FENCED_MODULE_RULINGS = {
             # The walk's events re-keyed by their visible dates (plan step
             # E1a): what ONE event contributed and when it counts -- dated
             # FACTS a consumer can already read off the public splits and
-            # corrections.  Shared by the seam's fold AND the posting writer's
-            # checked-projection assert precisely so neither carries its own
-            # copy of the one clock; the prefix-sum that turns the list into a
-            # balance-at-T stays seam-private (``balance_at._fold``).
+            # corrections.  Read by the seam's fold, so the one clock has one
+            # statement (the posting writer's checked-projection assert shared
+            # it until plan task plan#3093 deleted the assert); the prefix-sum
+            # that turns the list into a balance-at-T stays seam-private
+            # (``balance_at._fold``).
             "dated_deltas",
             # A date-bounded loader of settled payments -- their transfers' legs
             # since plan step balance:X-bi-6-4b.  It selects records, and
@@ -634,37 +636,10 @@ _FENCED_MODULE_RULINGS = {
             "payment_installments",
         }),
     ),
-    # The genesis loan-ledger package.  Scoped WHOLE, not one submodule: a new
-    # balance-at-T reader born in any of its modules would reproduce exactly the hole
-    # this check exists to kill.  Its producer set is EMPTY as of plan step E1e,
-    # which DELETED the two sum-of-postings balance readers that were the last
-    # public producers outside the seam anywhere in ``app/`` (see the header
-    # comment); this package is the general ledger -- balance sheet, statements,
-    # attribution -- and never the answer to "what do I owe" (plan Section 3).
-    "app.services.loan_posting_service": (
-        frozenset(), frozenset({
-            # (The payment-history table and the anchor-event rows were ruled
-            # here until plan task plan#3133 moved them to
-            # ``app.services.loan_walk_reads``, ruled below; the scenario
-            # enumeration went to ``app.services.loan_loaders``, which no
-            # scope covers, as ids and never a balance.)
-            # WRITERS.  Everything below emits or reconciles postings; a writer
-            # is not a balance reader, and the ledger-write path has its own
-            # seams (``posting_service._emit_balanced_entry``).  The two
-            # single-half syncs, the per-half reconciles and the delete-side
-            # split reversal went at plan step ``balance:X-bi-6-3`` (ruling
-            # **R-BAL102**): ONE reconcile over the walk, driven by the one
-            # sync, and a split keyed by no row to reverse ahead of a delete.
-            "reconcile_loan_corrections",
-            # (The two TARGET builders that reconcile consumes moved into the
-            # worked-out ledger at plan task plan#2526 and are ruled under
-            # ``app.services.ledger_lines`` below.)
-            "sync_loan_postings",
-            "sync_loan_postings_all_scenarios",
-            "sync_all_scenarios_or_duplicate",
-            "resync_user_loan_postings",
-        }),
-    ),
+    # (The genesis loan-ledger package ``app.services.loan_posting_service``
+    # was ruled here, its producer set EMPTY since plan step E1e and its
+    # non-producers the stored ledger's loan writers, until plan task
+    # plan#3133 deleted it; its two page reads are ruled below.)
     # The loan detail page's two surfaces, read off the loan's walk (plan task
     # plan#3133 moved them from the posting package's ``_display``).
     "app.services.loan_walk_reads": (

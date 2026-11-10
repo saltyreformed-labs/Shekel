@@ -160,7 +160,7 @@ def _fenced_module_ruling(
     Matches the enclosing module's fully-qualified name against
     :data:`_FENCED_MODULE_RULINGS` exactly, or as a package prefix -- so a fenced
     module split into a package (or a package's submodules, e.g.
-    ``loan_posting_service._corrections``) stays scoped.  Returns ``None`` when the
+    ``loan_ledger._walk``) stays scoped.  Returns ``None`` when the
     module defines no fenced producer, in which case the completeness check does
     not apply to it.
 
@@ -207,8 +207,8 @@ class ShekelBalanceSeamChecker(BaseChecker):
             "silent) and was re-measured four more times during Phase D "
             "(findings N-28 / N-31). This check inverts the default for the "
             "PUBLIC balance-ingredient packages the package-privacy gate W9910 "
-            "cannot protect (the loan_ledger and loan_posting_service "
-            "packages, the cash_ledger leaf and the row_valuation tier below "
+            "cannot protect (the loan_ledger package and the loan page's "
+            "reads of it, the cash_ledger leaf and the row_valuation tier below "
             "it, the pure loan_resolver tier, and "
             "the account_projection classifier): every public top-level "
             "function or public method "

@@ -34,7 +34,7 @@ Rules implemented:
 * ``shekel-unclassified-fenced-export`` (W9909, :mod:`.balance_seam`): the
   fail-closed classification of new public exports in the PUBLIC
   balance-ingredient packages W9910 cannot protect (``loan_ledger``,
-  ``loan_posting_service``, ``cash_ledger``, ``loan_resolver``,
+  ``loan_walk_reads``, ``cash_ledger``, ``loan_resolver``,
   ``loan_payment_service``, ``account_projection``, plus
   the seam-private ``balance_at._context`` and ``balance_at._recurrence_memos``
   (its mixin), whose publicly re-exported ``BalanceContext`` W9910 cannot see
@@ -72,12 +72,11 @@ Rules implemented:
   step E1e once structure made it unnecessary -- the status seam has no such
   structural boundary, so this name fence stays.
 * ``shekel-ledger-model-bypass`` (W9908, :mod:`.ledger_model_fence`): flags any
-  module OUTSIDE the posting-ledger allowlist that IMPORTS a posted-ledger row
-  model (``Posting`` / ``JournalEntry`` / ``LedgerAccount``). The append-only
-  ledger is written only through ``posting_service._emit_balanced_entry`` and
-  read only through the sanctioned reader packages; a module holding a model
-  class -- or its defining module -- can query or mutate a row outside those
-  seams, the bypass class Build-Order Steps 2-5 built the seams to prevent
+  module OUTSIDE the models layer that IMPORTS a stored-ledger row model
+  (``Posting`` / ``JournalEntry`` / ``LedgerAccount``). No module writes or
+  reads the stored ledger since plan task plan#3133 deleted its writers and
+  readers, and its tables stand until plan step plan#2915; a module holding a
+  model class -- or its defining module -- could query or write them again
   (``docs/audits/balance_architecture/``). The fence binds on the NAME axis
   (importing ``Posting`` / ``JournalEntry`` / ``LedgerAccount`` is flagged
   wherever it comes from -- the ``from app.models import Posting`` F-1 re-export,

@@ -77,8 +77,11 @@ as the Step-2 / Step-3 oracles.  The SPLIT VALUES are pinned by the first and th
     proves the walk seeds from the trueup anchor.  These, and the resolver below,
     are what pin the posted interest / principal;
   * **the resolver as an independent oracle** -- the parallel run pits the posted
-    ledger against a producer that shares none of its code path and never reads
-    the ledger, so an on-schedule agreement / off-schedule divergence pins the
+    ledger against a producer that never reads the ledger and does its own
+    amortization; it shares the loaders, the loan walk's installments and the
+    rate periods (measured 2026-11-10, ``TestResolverIsLedgerFree``'s block),
+    which the literals above grade, so an on-schedule agreement / off-schedule
+    divergence pins the
     split VALUE that the internal reconciliation identities (structural, see
     ``_assert_loan_reconciles``) cannot; and
   * **independent cross-table queries** -- the ledger side is the worked-out read

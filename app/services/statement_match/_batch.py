@@ -33,9 +33,12 @@ REQUEST is still the transaction and the route still owns the commit, so a
 batch that dies part-way commits nothing at all -- the savepoint bounds a
 DESIGNED refusal, never a failure.
 
-**A ``PostingError`` is not a refusal and is not caught.**  It means a ledger
-invariant is broken, which is a fact about the account rather than about the
-item, so it fails the whole request loud (``CLAUDE.md`` rule 4).
+**A broken invariant is not a refusal and is not caught.**  The
+``RuntimeError`` a walk raises on one (``cash_ledger``'s readers, for
+instance) is a fact about the account rather than about the item, so it fails
+the whole request loud (``CLAUDE.md`` rule 4).  *It was the stored ledger's
+``PostingError``, from a door's ledger reconcile, until plan step plan#2914
+stopped the doors reconciling that ledger.*
 
 **Order: every match, then every create, then every income, then every skip,
 each in the order it was submitted** -- which is the order the screen renders
@@ -370,8 +373,8 @@ def _run(tally: Tally, line_ids: "tuple[int, ...]", act) -> object:
     2026-08-19.
 
     Anything else propagates and fails the whole request, which is the right
-    answer for a ``PostingError`` (a broken ledger invariant is a fact about
-    the account, not about this item) and for a database error.
+    answer for a broken invariant (a fact about the account, not about this
+    item) and for a database error.
 
     Args:
         tally: The running receipt.
@@ -625,11 +628,6 @@ def apply_reviewed(batch: ReviewedBatch, scope: ReviewScope) -> BatchOutcome:
 
     Returns:
         The :class:`~._outcome.BatchOutcome`.
-
-    Raises:
-        PostingError: From a ledger reconcile, on a broken invariant.  Fails
-            the whole request loud rather than being reported as one item's
-            refusal.
     """
     # **EVERY ROW LOCK FIRST, in one order** (plan step ``bank_import:X-gi-5``,
     # finding **N-471**; the argument is :func:`~._resolve.lock_lines`'s).

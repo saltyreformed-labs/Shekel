@@ -134,6 +134,62 @@ class ProfileTaxSeries:
     fica_configs: "dict[int, FicaRules]"
 
 
+@dataclass(frozen=True)
+class TaxLawBasis:
+    """Which year of the law priced each part of one tax year (ruling **R-SAL75**).
+
+    The resolver's own answer, kept rather than thrown away: each part is
+    resolved on its own series (:class:`ProfileTaxSeries`), so each carries
+    its own year.  It is DERIVED on every resolution and stored nowhere, so it
+    cannot go stale when a release adds a year.  Ruling **R-SAL76** keeps a
+    missing year on the nearest year's rules unchanged; this is the label that
+    makes that substitution visible (plan steps salary:X-at-5, the Taxes tab,
+    and X-at-6, the salary pages).
+
+    A part's year is ``None`` only when the law resolves no rules for it at
+    all, which is the same condition its rules are ``None`` under
+    (:func:`load_tax_configs_for_year`).
+
+    Attributes:
+        tax_year: The year whose rules were asked for.
+        federal_year: The year whose federal income-tax rules applied.
+        state_year: The year whose state rules applied.
+        fica_year: The year whose Social Security and Medicare rules applied.
+    """
+
+    tax_year: int
+    federal_year: int | None
+    state_year: int | None
+    fica_year: int | None
+
+    @property
+    def substituted(self) -> bool:
+        """Whether any part was priced on rules other than its own year's.
+
+        Returns:
+            ``True`` when a part's year is not :attr:`tax_year`, a part with
+            no rules at all included.
+        """
+        return any(
+            year != self.tax_year
+            for year in (self.federal_year, self.state_year, self.fica_year)
+        )
+
+    @property
+    def rules_year(self) -> int | None:
+        """The one year whose rules priced every part, or ``None`` when they differ.
+
+        A screen says "2028 on 2027's tax rules" when every part shares one
+        year, and names each part's year when they do not -- a year may ship
+        before one of its states (ruling **R-SAL86**).
+
+        Returns:
+            That year: :attr:`tax_year` itself when nothing was substituted.
+        """
+        years = {self.federal_year, self.state_year, self.fica_year}
+        return years.pop() if len(years) == 1 else None
+
+
 def profile_tax_series(profile) -> ProfileTaxSeries:
     """Return the law's three series for *profile*: every year, sliced to its status and state.
 
@@ -287,39 +343,46 @@ def _configs_from_series(series: ProfileTaxSeries, tax_year: int) -> dict:
     :func:`configs_by_year`, so the multi-year caller slices the law ONCE and
     every year after the first is pure computation.
 
-    A substitution is logged at DEBUG rather than INFO because it is the
+    **Each kind's resolved year is handed back as the set's ``basis``**
+    (:class:`TaxLawBasis`, ruling **R-SAL75**): the one record of which year's
+    rules priced a figure, which a screen prints rather than working it out
+    itself.  Until plan step salary:X-at-5 the years were thrown away here and
+    only a DEBUG line kept them, so every surface showed a substituted year's
+    figures as plain dollar amounts (finding **N-235**).
+
+    A substitution is still logged at DEBUG rather than INFO because it is the
     STEADY STATE, not an event: every projected period beyond the newest year
     the law carries resolves this way, on every read, until that year is
-    published.  What is not yet recorded anywhere a user can see is that a
-    figure was computed against another year's rules -- an approximation the
-    surfaces present as a plain dollar amount (ruling **R-SAL75**, plan steps
-    salary:X-at-5 and X-at-6).
+    published.  The line reads the basis, so "was a part substituted" has one
+    spelling.
 
     Args:
         series: The profile's :class:`ProfileTaxSeries`.
         tax_year: The tax year whose rules are wanted.
 
     Returns:
-        dict: Keys ``bracket_set``, ``state_config``, ``fica_config``; each
-            value is the applicable rules, or ``None`` when that kind has no
-            entries.
+        dict: Keys ``bracket_set``, ``state_config``, ``fica_config`` -- each
+            value the applicable rules, or ``None`` when that kind has no
+            entries -- and ``basis``, the :class:`TaxLawBasis` naming the year
+            each of the three was resolved on.
     """
-    picked = {
-        "bracket_set": _pick(series.bracket_sets, tax_year),
-        "state_config": _pick(series.state_configs, tax_year),
-        "fica_config": _pick(series.fica_configs, tax_year),
+    federal_year, bracket_set = _pick(series.bracket_sets, tax_year)
+    state_year, state_config = _pick(series.state_configs, tax_year)
+    fica_year, fica_config = _pick(series.fica_configs, tax_year)
+    basis = TaxLawBasis(
+        tax_year=tax_year,
+        federal_year=federal_year,
+        state_year=state_year,
+        fica_year=fica_year,
+    )
+    if basis.substituted:
+        logger.debug("Tax year %d is not wholly in the law; applying %s", tax_year, basis)
+    return {
+        "bracket_set": bracket_set,
+        "state_config": state_config,
+        "fica_config": fica_config,
+        "basis": basis,
     }
-    substituted = {
-        kind: resolved
-        for kind, (resolved, _rules) in picked.items()
-        if resolved is not None and resolved != tax_year
-    }
-    if substituted:
-        logger.debug(
-            "Tax year %d is not in the law for %s; applying %s",
-            tax_year, sorted(substituted), substituted,
-        )
-    return {kind: rules for kind, (_resolved, rules) in picked.items()}
 
 
 def load_tax_configs_for_year(profile, tax_year):
@@ -345,7 +408,9 @@ def load_tax_configs_for_year(profile, tax_year):
             and never because a SIBLING kind lacks that year.  Since plan step
             salary:X-at-3 that is only the federal and state rules of a filing
             status the law does not model: a law with no year lists no state,
-            so it refuses every profile below.
+            so it refuses every profile below.  And ``basis``, the
+            :class:`TaxLawBasis` naming the year each of the three was
+            resolved on (plan step salary:X-at-5).
 
     Raises:
         UnsupportedStateError: The law does not list the profile's state
@@ -382,7 +447,7 @@ def configs_by_year(series: ProfileTaxSeries, tax_years) -> dict:
         tax_years: The tax years wanted -- any iterable; duplicates collapse.
 
     Returns:
-        dict: ``{tax_year: {bracket_set, state_config, fica_config}}``, one
-            entry per distinct year asked for, empty for an empty ask.
+        dict: ``{tax_year: {bracket_set, state_config, fica_config, basis}}``,
+            one entry per distinct year asked for, empty for an empty ask.
     """
     return {year: _configs_from_series(series, year) for year in set(tax_years)}

@@ -169,6 +169,13 @@ _REF_TABLE_SEEDS = (
     # the promotion migration backfills name->id 1:1.
     ("EmployerContributionType", ["none", "flat_percentage", "match"]),
     ("CompoundingFrequency", ["daily", "monthly", "quarterly"]),
+    # ``InterestAccrualConvention`` -- how interest accrues over a window, the
+    # list behind ``budget.loan_params.interest_accrual_convention_id`` (plan
+    # step recurrence:R16-d).  ONE row until a member's first consumer adds
+    # the next (ruling plan#3354).  Its migration inline-seeds the same row
+    # (the dual-seed pattern), so a freshly upgraded database resolves the
+    # enum before this idempotent reseed runs.
+    ("InterestAccrualConvention", ["monthly_1_12"]),
     # Posting-ledger ref tables (Build-Order Step 2, Commit 1; extended in
     # Step 3, Commit 1 and Step 4, Commit 1).  ``LedgerAccountClass`` carries
     # the logic-bearing ``is_debit_normal`` boolean (TRUE for Asset/Expense,

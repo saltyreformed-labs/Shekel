@@ -469,6 +469,31 @@ class CompoundingFrequencyEnum(enum.Enum):
     QUARTERLY = "quarterly"
 
 
+class InterestAccrualConventionEnum(enum.Enum):
+    """HOW interest accrues on a balance over a window (plan step **recurrence:R16-d**).
+
+    A loan's convention is a fact of its NOTE, so it is a value on the loan
+    (``budget.loan_params.interest_accrual_convention_id``, finding **D52**)
+    rather than a formula the app assumes.  The one producer,
+    :func:`app.utils.money.accrued_interest`, prices a window under a member::
+
+        monthly_1_12 -- one twelfth of the annual rate for each calendar month
+                        the window spans, whatever its days: the US
+                        fixed-rate mortgage's convention, and every loan's
+                        until its note says otherwise.
+
+    **One member, and that is a ruling** (developer, plan#3354): a member joins
+    with the first thing that uses it, so no loan can name a convention the app
+    cannot honour.  ``daily_actual_365`` arrives with the card's finance charge
+    (``credit_card:CC-3i``) or a loan's daily accrual (plan#3355), and the
+    savings account's compounding rules join at plan#3356 (plan#3348).  Values
+    match ``ref.interest_accrual_conventions.name``; resolved through
+    ``ref_cache`` and compared as members or ids, never by name.
+    """
+
+    MONTHLY_1_12 = "monthly_1_12"
+
+
 class LedgerAccountClassEnum(enum.Enum):
     """Ledger account class values for the double-entry posting ledger.
 

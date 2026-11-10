@@ -92,6 +92,21 @@ class LoanParams(AccountScopedUniqueMixin, TimestampMixin, db.Model):
     is_arm = db.Column(db.Boolean, nullable=False, server_default=db.text("false"))
     arm_first_adjustment_months = db.Column(db.Integer, nullable=True)
     arm_adjustment_interval_months = db.Column(db.Integer, nullable=True)
+    # HOW the note accrues interest (plan step recurrence:R16-d, finding D52):
+    # a fact of the loan, so a value on it, read by every walk through the one
+    # producer ``app.utils.money.accrued_interest``.  NOT NULL with no server
+    # default because an FK id is not a static literal: the setup door states
+    # it, and the R16-d migration backfilled every existing loan to
+    # ``monthly_1_12``, the list's one member (ruling plan#3354).
+    interest_accrual_convention_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "ref.interest_accrual_conventions.id",
+            ondelete="RESTRICT",
+            name="fk_loan_params_interest_accrual_convention",
+        ),
+        nullable=False,
+    )
 
     # Relationships
     account = db.relationship(

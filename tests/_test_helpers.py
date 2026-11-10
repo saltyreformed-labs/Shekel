@@ -1197,7 +1197,7 @@ def create_loan_account(
     # avoidance as the loan helpers above; these pull the models/services
     # package, which must not load at tests/_test_helpers import time.
     from app import ref_cache
-    from app.enums import AcctTypeEnum
+    from app.enums import AcctTypeEnum, InterestAccrualConventionEnum
     from app.models.loan_params import LoanParams
     from app.services import account_service
 
@@ -1264,6 +1264,9 @@ def create_loan_account(
     params = LoanParams(
         account_id=account.id,
         original_principal=principal,
+        interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        ),
         term_months=term,
         origination_date=origination_date,
         payment_day=payment_day,

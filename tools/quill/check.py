@@ -82,7 +82,11 @@ TITLE_CAP = 100
 #: suggestion's rationale (its GraphQL schema, ``IssueFieldCreateOrUpdateInput.rationale``,
 #: read 2026-11-10: "Max 280 characters.").  Measured 2026-11-10 16:21 UTC on plan#3178 by
 #: ``_filing._suggest`` as quill's App: a reason of 280 ASCII characters taken and read back
-#: whole.  A reason of 281, and how GitHub counts a character outside ASCII, are not measured.
+#: whole.  Measured 2026-11-10 19:28 UTC with the developer's token (``recorded/reasons.json``,
+#: ``test__suggestion_reasons.py``): GitHub counts characters, not bytes, so 280 holding two
+#: outside ASCII, 283 bytes, is taken, and 281 refused, "rationale is too long (maximum is
+#: 280)"; and it keeps a reason as written, a run of two spaces too.  A character outside the
+#: Basic Multilingual Plane, two in UTF-16, is not measured.
 REASON_CAP = 280
 
 #: The parts of a card a change can write, beside :data:`_fields.PRIORITY` and

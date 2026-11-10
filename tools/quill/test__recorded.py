@@ -422,15 +422,17 @@ def test_a_create_github_refused_counts_nothing_as_scratch():
 #: Every recording in ``recorded/``, and whether it read the real cards (it must then hold a
 #: redacted title on a card node): ``tracker.json`` and ``export.json`` read them;
 #: ``label_missing.json`` read only its scratch card, and ``blocking.json``, ``show.json``,
-#: ``status.json``, ``priority.json``, ``comment_lookup.json`` and ``suggestion.json`` only their
-#: scratch cards on the throwaway ``plan-views-demo`` (R-BAL395, plan#1925, plan#2798;
+#: ``status.json``, ``priority.json``, ``comment_lookup.json``, ``suggestion.json`` and
+#: ``reasons.json`` only their scratch cards on the throwaway ``plan-views-demo`` (R-BAL395,
+#: plan#1925, plan#2798;
 #: ``show.json``'s and ``status.json``'s
 #: board reads
 #: hold item numbers, no title).  A recording added or removed must be named here (the next
 #: test).
 RECORDINGS_READ_REAL_CARDS = {"blocking": False, "comment_lookup": False, "comments": False,
                               "export": True, "label_missing": False, "priority": False,
-                              "show": False, "status": False, "suggestion": False,
+                              "reasons": False, "show": False, "status": False,
+                              "suggestion": False,
                               "tracker": True, "twice": False, "unlink": False}
 #: The recordings that hold no title at all (ruling plan#1952): ``comment_lookup.json`` reads
 #: only comments (``Tracker.comments_of``, plan#1925).  The census holds each to more than a

@@ -277,7 +277,7 @@ Security response rule: 404 for both "not found" and "not yours." Structured log
 `log_event()`. Dependencies are declared in `pyproject.toml` and locked in `uv.lock` -- no new
 packages without approval.
 
-**Reference tables: IDs for logic, strings for display only.** Enums in `app/enums.py`, cached in
+**Reference tables: IDs for logic, strings for display only.** Enums in `app/enums/`, cached in
 `app/ref_cache/`. NEVER compare against string `name` columns in Python or Jinja (gate:
 `shekel-refname-compare` for Python; the template hook for Jinja).
 

@@ -583,31 +583,6 @@ def transfer_family_movement_ids(transfer_id):
     ]
 
 
-def transfer_side_movement_ids(transfer_id, account_id):
-    """Return the id of the record of ONE side of a transfer, as a list.
-
-    The per-side twin of :func:`transfer_family_movement_ids`: a side's record
-    is on its endpoint (the side keys), so the side on *account_id* is the
-    linked record on that account.
-
-    Args:
-        transfer_id: The ``budget.transfers`` id.
-        account_id: The account the side is on.
-
-    Returns:
-        The movement ids, empty for a side holding no record.
-    """
-    return [
-        movement_id for (movement_id,) in db.session.query(TransactionEntry.id).filter(
-            db.or_(
-                TransactionEntry.expense_transfer_id == transfer_id,
-                TransactionEntry.income_transfer_id == transfer_id,
-            ),
-            TransactionEntry.account_id == account_id,
-        )
-    ]
-
-
 def period_nets_of_movements(movement_ids, scenario_id):
     """Return ``{budgeted_period_id: {chart key: net}}`` over the lines of *movement_ids*.
 
@@ -715,8 +690,7 @@ def net_posted_by_day(movement_ids):
 
     Args:
         movement_ids: The source's movements (:func:`family_movement_ids`,
-            :func:`transfer_family_movement_ids`,
-            :func:`transfer_side_movement_ids`).
+            :func:`transfer_family_movement_ids`).
 
     Returns:
         ``{entry_date: Decimal}``, only days carrying a non-zero net.

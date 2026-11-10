@@ -61,22 +61,11 @@ is checked at source level here, matching the ``ledger_accounts`` backfill
 suite's rationale (a ``DROP TABLE`` needs an ACCESS EXCLUSIVE lock that
 conflicts with the session-scoped ``ref_cache`` refresh in an xdist worker).
 """
-# pylint: disable=redefined-outer-name
-# Rationale: ``redefined-outer-name`` is the canonical pytest fixture
-# pattern; bodies bind fixtures by name.
 from __future__ import annotations
 
 import pathlib
 
-import pytest
-
-from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
-from tests._stored_ledger import ledger_accounts_for_account
-from tests._test_helpers import (
-    create_account_of_type,
-    load_migration_module,
-)
+from tests._test_helpers import load_migration_module
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +76,8 @@ from tests._test_helpers import (
 # ``_MIGRATIONS_DIR`` / ``_MIGRATION_FILENAME`` are retained for the
 # source-level downgrade check (``TestDowngradeReversible``), which reads the
 # migration file's TEXT rather than loading it as a module.  Loading the module
-# (to invoke its backfill) goes through the shared ``load_migration_module``.
+# (for its revision pair) goes through the shared ``load_migration_module``;
+# the helpers that invoked its backfill went with the cases that called them.
 _MIGRATIONS_DIR = (
     pathlib.Path(__file__).resolve().parents[2] / "migrations" / "versions"
 )
@@ -95,63 +85,6 @@ _MIGRATION_FILENAME = (
     "db239773c2fd_create_journal_entries_account_postings_.py"
 )
 _MIGRATION = load_migration_module(_MIGRATION_FILENAME)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _run_backfill():
-    """Execute the migration's idempotent backfill on the test session."""
-    posted = _MIGRATION._backfill_settled_transfers(_db.session)
-    _db.session.commit()
-    return posted
-
-
-def _entry_for_transfer(transfer_id):
-    """Return the single journal entry for *transfer_id*, or None."""
-    return (
-        _db.session.query(JournalEntry)
-        .filter_by(transfer_id=transfer_id)
-        .one_or_none()
-    )
-
-
-def _legs_by_ledger(entry_id):
-    """Return ``{ledger_account_id: amount}`` for an entry's legs."""
-    return {
-        leg.ledger_account_id: leg.amount
-        for leg in _db.session.query(Posting).filter_by(
-            journal_entry_id=entry_id,
-        ).all()
-    }
-
-
-def _ledger_id(account):
-    """Return the linked ledger account id for *account*."""
-    return ledger_accounts_for_account(_db.session, account.id)[0].id
-
-
-@pytest.fixture()
-def savings(app, db, seed_user):  # pylint: disable=unused-argument
-    """A second (Savings) account so transfers have a destination.
-
-    Created in the ``db`` fixture's app context (no nested context) so the
-    returned :class:`Account` stays bound to the live session the test runs
-    in -- the same pattern ``seed_user`` uses.  A nested context here would
-    pop on return and detach the object.
-    """
-    acct = create_account_of_type(
-        seed_user, _db.session, "Savings", "Backfill Savings",
-    )
-    _db.session.commit()
-    return acct
-
-
-# ---------------------------------------------------------------------------
-# Backfill: one balanced entry per settled transfer
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

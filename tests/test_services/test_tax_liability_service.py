@@ -202,6 +202,37 @@ class TestConfigYearSelection:
         assert r2025.federal.liability != r2026.federal.liability
 
 
+class TestHeadOfHouseholdBoundary2026:
+    """2026's head-of-household 24% / 32% boundary is $201,750 (finding SAL-577)."""
+
+    def test_income_past_the_boundary_is_taxed_at_32_from_201750(
+        self, app, db, seed_user,
+    ):
+        """Head of household, 2026, wages 260,000, nothing pre-tax, no 4(a).
+
+        Rev. Proc. 2025-32 sec. 4.01 Table 2 (std ded 24,150, sec. 4.14):
+          taxable  = 260000 - 24150 = 235,850.00
+          brackets = 17700*0.10                 =  1,770.00
+                   + (67450-17700)*0.12         =  5,970.00
+                   + (105700-67450)*0.22        =  8,415.00
+                   + (201750-105700)*0.24       = 23,052.00
+                   + (235850-201750)*0.32       = 10,912.00
+                   = 50,119.00  (the table: 39,207 + 32% of the 34,100 over 201,750)
+        On the $201,775 the ladder carried until plan step salary:X-at-7 the
+        24% rung ran 25 dollars longer: 23,058.00 + 10,904.00, so 50,117.00 --
+        $2.00 short.
+        """
+        profile = _committed_profile(
+            seed_user, filing_status_name="head_of_household",
+        )
+        result = compute_annual_liability(
+            profile, 2026, Decimal("260000.00"), Decimal("0.00"),
+        )
+
+        assert result.federal.taxable == Decimal("235850.00")
+        assert result.federal.liability == Decimal("50119.00")
+
+
 class TestDependentCredits:
     """Dependent counts flow off the profile into the nonrefundable credit."""
 

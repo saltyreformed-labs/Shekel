@@ -1,12 +1,12 @@
 """The 2026 tax law, transcribed from the documents :data:`SOURCES` names.
 
-**One figure here is known to be wrong, and it stands as transcribed.**  Rev.
-Proc. 2025-32 sec. 4.01 Table 2 puts the head-of-household 24% / 32% bracket
-boundary at $201,750; the ladder below carries $201,775, the single filer's
-figure, which is what the app has priced 2026 on since it was first seeded.
-Plan step salary:X-at-1 moved the law into this module without changing a
-figure, so the correction is finding **salary:SAL-577**'s, not a side effect of
-the move.
+**The head-of-household 24% / 32% boundary is $201,750** (Rev. Proc. 2025-32
+sec. 4.01 Table 2), and Pub 15-T (2026)'s head-of-household annual table agrees
+($217,300 less its $15,550 zero-rate row).  From the app's first seeding until
+plan step salary:X-at-7 the ladder carried $201,775, the single filer's figure,
+which taxed up to $25 of a head of household's income at 24% that the law
+taxes at 32%: $2.00 a year once taxable income passes $201,775 (finding
+**salary:SAL-577**).
 
 North Carolina's standard deduction is the enacted, unindexed statutory amount;
 re-verify it against the 2026 Form D-401 instructions when NCDOR posts them.
@@ -91,8 +91,8 @@ _FEDERAL = {
             ("0.00", "17700.00", "0.1000"),
             ("17700.00", "67450.00", "0.1200"),
             ("67450.00", "105700.00", "0.2200"),
-            ("105700.00", "201775.00", "0.2400"),
-            ("201775.00", "256200.00", "0.3200"),
+            ("105700.00", "201750.00", "0.2400"),
+            ("201750.00", "256200.00", "0.3200"),
             ("256200.00", "640600.00", "0.3500"),
             ("640600.00", None, "0.3700"),
         ),

@@ -2253,11 +2253,12 @@ class TestAnUntouchedSaveDoesNotLaunderTheDaysBASIS:
 class TestTheAddFormNamesAnAccount:
     """POST ``account_id`` (plan step ``credit_card:CC-5-2``, ruling **R-CC15**).
 
-    The form posts the control only when the owner has a card to choose
-    (ruling **R-CC34**), so the payloads above, which post none, are the
-    byte-identical case.  Here the field is posted: the card is written, a
-    foreign account answers the security response rule's 404 as a designed
-    fragment, and the ``CC`` box beside the card is the door's refusal at 400.
+    The form posts the control only when the owner has another cash account
+    to choose (rulings **R-CC34**, plan#3227), so the payloads above, which
+    post none, are the byte-identical case.  Here the field is posted: Savings
+    is written, a foreign account answers the security response rule's 404 as
+    a designed fragment, and the ``CC`` box beside the card is the door's
+    refusal at 400.
     Through ``CC-5-1`` no ``NotFoundError`` could reach this route's handler
     at all, so the status it now answers is asserted rather than assumed.
     """
@@ -2269,12 +2270,14 @@ class TestTheAddFormNamesAnAccount:
             anchor_balance=Decimal("-500.00"),
         )
 
-    def test_a_swipe_posted_on_the_card_is_stored_on_the_card(
+    def test_a_purchase_posted_paid_from_savings_is_stored_on_savings(
         self, app, auth_client, seed_user, seed_periods, seed_entry_template,
     ):
-        """The written purchase names the card; its row stays on checking."""
+        """The written purchase names Savings; its row stays on checking."""
         with app.app_context():
-            card = self._card(seed_user)
+            savings = create_account_of_type(
+                seed_user, db.session, "Savings", "Rainy Day",
+            )
             db.session.commit()
             txn = seed_entry_template["transaction"]
             resp = auth_client.post(
@@ -2283,7 +2286,7 @@ class TestTheAddFormNamesAnAccount:
                     "amount": "60.00",
                     "description": "Kroger",
                     "purchased_on": "2026-01-05",
-                    "account_id": str(card.id),
+                    "account_id": str(savings.id),
                 },
             )
             assert resp.status_code == 200
@@ -2291,7 +2294,7 @@ class TestTheAddFormNamesAnAccount:
             entry = db.session.query(TransactionEntry).filter_by(
                 transaction_id=txn.id,
             ).one()
-            assert entry.account_id == card.id
+            assert entry.account_id == savings.id
             assert entry.transaction.account_id == seed_user["account"].id
 
     def test_another_owners_account_is_404_as_a_designed_fragment(

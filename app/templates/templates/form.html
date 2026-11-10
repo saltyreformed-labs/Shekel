@@ -97,7 +97,7 @@
         <select id="category_id" name="category_id" class="form-select" required>
           {% for cat in categories %}
           <option value="{{ cat.id }}" {{ 'selected' if template and template.category_id == cat.id else '' }}>
-            {{ cat.display_name }}
+            {{ cat.display_name }}{% if not cat.is_active %} (archived){% endif %}
           </option>
           {% endfor %}
         </select>

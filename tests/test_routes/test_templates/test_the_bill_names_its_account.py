@@ -4,7 +4,8 @@ Task plan#2931 (rulings plan#2926, plan#3225): the form's account box says it is
 the account the bill is "Paid from" ("Paid into" for income), a new bill opens on
 the owner's primary account rather than whichever account sorts first, an edit
 says what a change of account moves, and a bill whose account was archived keeps
-it on an untouched save.
+it on an untouched save.  Task plan#3267 is the category's twin of that last
+case: a bill whose category was archived keeps it, and so do its unpaid rows.
 """
 
 import re
@@ -12,10 +13,12 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from werkzeug.datastructures import MultiDict
 
 from app import ref_cache
 from app.enums import StatusEnum, TxnTypeEnum
 from app.extensions import db
+from app.models.category import Category
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from app.services import recurrence_engine
@@ -31,20 +34,22 @@ from tests._test_helpers import (
     settle_cash_row,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
+from tests.test_routes._statement_forms import form_fields
 
 from ._helpers import _TODAYS_PERIOD_INDEX, _create_template
 
 
-def _account_options(html):
-    """Return ``[(id, selected, text)]`` for the bill form's account select.
+def _select_options(html, select_id):
+    """Return ``[(id, selected, text)]`` for one of the bill form's selects.
 
     Args:
         html: The rendered form.
+        select_id: The select's ``id``: ``account_id`` or ``category_id``.
 
     Returns:
-        One tuple per ``<option>`` of ``<select id="account_id">``, in order.
+        One tuple per ``<option>`` of ``<select id="{select_id}">``, in order.
     """
-    start = html.index('<select id="account_id"')
+    start = html.index(f'<select id="{select_id}"')
     select = html[start:html.index("</select>", start)]
     return [
         (int(value), "selected" in rest, " ".join(text.split()))
@@ -81,7 +86,7 @@ class TestANewBillOpensOnThePrimary:
             db.session.commit()
             savings_id = savings.id
             html = auth_client.get("/templates/new").get_data(as_text=True)
-        options = _account_options(html)
+        options = _select_options(html, "account_id")
         assert [account_id for account_id, _, _ in options] == [savings_id, checking]
         assert [account_id for account_id, selected, _ in options if selected] == [checking]
         assert _account_label(html) == "Paid from"
@@ -102,7 +107,9 @@ class TestANewBillOpensOnThePrimary:
             db.session.commit()
             html = auth_client.get("/templates/new").get_data(as_text=True)
         assert [
-            account_id for account_id, selected, _ in _account_options(html) if selected
+            account_id
+            for account_id, selected, _ in _select_options(html, "account_id")
+            if selected
         ] == [second_id]
 
     @pytest.mark.usefixtures("seed_user")
@@ -144,7 +151,9 @@ class TestTheEditFormSaysWhatAMoveDoes:
             ).get_data(as_text=True)
         assert _account_label(html) == "Paid from"
         assert [
-            account_id for account_id, selected, _ in _account_options(html) if selected
+            account_id
+            for account_id, selected, _ in _select_options(html, "account_id")
+            if selected
         ] == [checking]
         assert 'aria-describedby="account-help"' in html
         note = " ".join(
@@ -217,7 +226,7 @@ class TestTheEditFormSaysWhatAMoveDoes:
             db.session.commit()
             tid, savings_id = template.id, savings.id
             html = auth_client.get(f"/templates/{tid}/edit").get_data(as_text=True)
-            options = _account_options(html)
+            options = _select_options(html, "account_id")
             assert (savings_id, True, "Old Savings (archived)") in options
             assert [account_id for account_id, selected, _ in options if selected] == [
                 savings_id,
@@ -349,3 +358,66 @@ class TestTheMoveDoesWhatTheNoteSays:
             assert {
                 rows[p.id].account_id for p in seed_periods_today[today + 2:]
             } == {savings}, "a row from the dated paycheck on stayed"
+
+
+class TestAnArchivedCategoryIsKept:
+    """GET then an untouched POST of the edit form, on a bill whose category was archived."""
+
+    def test_an_untouched_save_keeps_the_archived_category_on_the_bill_and_its_rows(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """The bill's archived category is offered as itself, selected, and kept on Save.
+
+        The seeded categories order as Auto: Car Payment, Credit Card: Payback,
+        Family: Groceries, Home: Rent, Income: Salary, so with Rent archived
+        and missing from the options a browser submits Car Payment, and an
+        untouched Save re-filed the bill there and the regeneration
+        re-categorized every unpaid row from today's paycheck on (task
+        plan#3267).  The POST is the whole rendered form as a browser sends
+        it (``form_fields``: an unselected select sends its FIRST option), so
+        the POST half fails with the GET half rather than posting a value
+        the test chose.
+        """
+        with app.app_context():
+            tid = _generated_every_paycheck(seed_user).id
+            rent = db.session.get(Category, seed_user["categories"]["Rent"].id)
+            rent.is_active = False
+            # A second archived category, NOT the bill's, which the form must
+            # still leave out.
+            groceries = db.session.get(
+                Category, seed_user["categories"]["Groceries"].id,
+            )
+            groceries.is_active = False
+            db.session.commit()
+            groceries_id = groceries.id
+            rent_id = rent.id
+            from_today = [
+                period.id for period in seed_periods_today[_TODAYS_PERIOD_INDEX:]
+            ]
+            assert {
+                row.category_id for pid, row in _rows_by_paycheck(tid).items()
+                if pid in from_today
+            } == {rent_id}
+
+            html = auth_client.get(f"/templates/{tid}/edit").get_data(as_text=True)
+            options = _select_options(html, "category_id")
+            assert (rent_id, True, "Home: Rent (archived)") in options
+            assert [cid for cid, selected, _ in options if selected] == [rent_id]
+            # Only the bill's own archived category is added: another
+            # archived category is not offered.
+            assert groceries_id not in [cid for cid, _, _ in options]
+            assert [text for _, _, text in options if "(archived)" in text] == [
+                "Home: Rent (archived)",
+            ]
+
+            resp = auth_client.post(
+                f"/templates/{tid}",
+                data=MultiDict(form_fields(html, f"/templates/{tid}")),
+            )
+            assert resp.status_code == 302, resp.get_data(as_text=True)
+            db.session.expire_all()
+            assert db.session.get(TransactionTemplate, tid).category_id == rent_id
+            rows = _rows_by_paycheck(tid)
+            assert {rows[pid].category_id for pid in from_today} == {rent_id}, (
+                "an untouched Save re-categorized the bill's unpaid rows"
+            )

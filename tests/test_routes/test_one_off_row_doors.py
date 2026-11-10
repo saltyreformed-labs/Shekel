@@ -561,7 +561,7 @@ class TestTheItemIsEditedOnTheDefinition:
         """An archived category is not offered, unless it is the row's own.
 
         The list is the definition's own edit form's
-        (``list_active_categories``); a first draft copied the transfer
+        (``list_categories_for_edit``); a first draft copied the transfer
         branch's raw query and offered archived ones (adversarial review).
         The row's own archived category stays so an untouched save posts
         the category the row has rather than a browser's first option.

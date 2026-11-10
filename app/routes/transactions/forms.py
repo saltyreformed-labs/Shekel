@@ -186,21 +186,21 @@ def render_full_edit(txn, *, page_refusal):
     periods = period_move_options(calendar, txn.pay_period_id)
     amounts = fragment_amounts(txn)
     # A PLACED row's item is edited HERE (ruling **R-BAL23**; the controls
-    # **R-BAL36**): its category select offers the owner's ACTIVE categories
-    # -- the definition's own edit form's list (``list_active_categories``:
-    # an archived category is not a selectable target), plus the row's own
-    # category when THAT is archived, so an untouched save posts the category
-    # the row has rather than the first option a browser selects when the
-    # rendered one is missing.  A first draft copied the transfer branch's
+    # **R-BAL36**): its category select offers the definition's own edit
+    # form's list (``list_categories_for_edit``): the owner's ACTIVE
+    # categories, an archived one not being a selectable target, plus the
+    # row's own category when THAT is archived, so an untouched save posts
+    # the category the row has rather than the first option a browser selects
+    # when the rendered one is missing.  A first draft copied the transfer branch's
     # raw query above and offered archived categories; found by adversarial
     # review.  Loaded only for such a row; every other row's category is its
     # definition's (edited on the template form) or, until the family's
     # cutover, a legacy row's own, which the popover has never offered.
     categories = []
     if txn.is_placed:
-        categories = category_service.list_active_categories(current_user.id)
-        if txn.category is not None and txn.category not in categories:
-            categories.append(txn.category)
+        categories = category_service.list_categories_for_edit(
+            current_user.id, txn.category,
+        )
     # The two ``is_last_row_of_its_definition`` readers below share ONE read:
     # the refusal's merchant-rule arm and the dialog's pair sentence want the
     # same answer, and the delete verb threads it the same way.

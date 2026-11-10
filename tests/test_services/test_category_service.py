@@ -7,7 +7,10 @@ consistent with the categories settings page.
 """
 
 from app.models.category import Category
-from app.services.category_service import list_active_categories
+from app.services.category_service import (
+    list_active_categories,
+    list_categories_for_edit,
+)
 
 
 class TestListActiveCategories:
@@ -57,3 +60,47 @@ class TestListActiveCategories:
 
         groups = {c.group_name for c in list_active_categories(user_id)}
         assert "Archived" not in groups
+
+
+class TestListCategoriesForEdit:
+    """``list_categories_for_edit``: the active list, plus the record's own if archived."""
+
+    def test_an_archived_own_category_is_appended_after_the_active_ones(
+        self, db, seed_user,
+    ):
+        """The record's archived category comes last, after the active order.
+
+        Task plan#3267: an edit form's select needs the stored value among
+        its options, or a browser submits the first one.  The archived one
+        is appended rather than sorted in, so the active order is unchanged.
+        """
+        user_id = seed_user["user"].id
+        rent = seed_user["categories"]["Rent"]
+        rent.is_active = False
+        db.session.flush()
+
+        offered = list_categories_for_edit(user_id, rent)
+        assert offered == [*list_active_categories(user_id), rent]
+        assert rent not in list_active_categories(user_id)
+
+    def test_an_active_own_category_is_not_offered_twice(self, seed_user):
+        """An active category is already in the list, so nothing is appended."""
+        user_id = seed_user["user"].id
+        rent = seed_user["categories"]["Rent"]
+
+        offered = list_categories_for_edit(user_id, rent)
+        assert offered == list_active_categories(user_id)
+        assert offered.count(rent) == 1
+
+    def test_no_own_category_is_the_active_list(self, db, seed_user):
+        """A record with no category yet is offered the active list alone."""
+        user_id = seed_user["user"].id
+        db.session.add(Category(
+            user_id=user_id, group_name="Archived",
+            item_name="Gone", is_active=False, sort_order=200,
+        ))
+        db.session.flush()
+
+        assert list_categories_for_edit(user_id, None) == list_active_categories(
+            user_id,
+        )

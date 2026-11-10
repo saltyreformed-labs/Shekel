@@ -259,7 +259,15 @@ def edit_template(template_id):
     if template is None:
         abort(404)
 
-    categories = category_service.list_active_categories(current_user.id)
+    # **The bill's own category when it has since been ARCHIVED** (task
+    # plan#3267), offered only to keep, as its account is below: without it
+    # an untouched Save re-files the bill under whichever category sorts
+    # first, and the regeneration re-categorizes its unpaid rows.  The update
+    # door admits it because it re-checks ownership, never ``is_active``
+    # (``_validation.validate_template_form``).
+    categories = category_service.list_categories_for_edit(
+        current_user.id, template.category,
+    )
     accounts = account_service.list_active_accounts(current_user.id)
     # **The bill's own account when it has since been ARCHIVED** (task
     # plan#2931): a ``<select>`` whose stored value is missing submits its

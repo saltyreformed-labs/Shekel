@@ -56,7 +56,7 @@ Two design points make the scan precise:
 
 The dual seed has three legs, each guarded by a distinct layer:
 
-  1. the enum (``app/enums.py``) is the source of truth for valid values;
+  1. the enum (``app/enums/``) is the source of truth for valid values;
   2. the migration inline-seed (the bare-``flask db upgrade`` path) -- the
      ``TestRefInlineSeedParity`` scan below asserts every enum member
      is INSERTed by some migration;

@@ -608,11 +608,12 @@ class TestTransferMaintain:
     ):
         """Re-running a pass over rows already equal to their definition is silent.
 
-        ``update_transfer`` reconciles the posting ledger, re-derives a loan's
-        genesis when an endpoint is one, moves the pair's optimistic-lock
-        counter and emits an audit row -- so calling it for a row that already
-        matches is that whole cost, per row, for nothing.  Measured on a
-        production clone: all 99 sweepable rows across the four live recurring
+        ``update_transfer`` moves the pair's optimistic-lock counter and emits
+        an audit row (and reconciled the posting ledger, re-deriving a loan's
+        genesis when an endpoint was one, until plan task plan#3075) -- so
+        calling it for a row that already matches is that whole cost, per row,
+        for nothing.  Measured on a production clone while it still reconciled:
+        all 99 sweepable rows across the four live recurring
         templates came back with zero fields differing, and the two loan
         templates' passes fell from 1.58 s and 1.14 s to about 4 ms each.
 

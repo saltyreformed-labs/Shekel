@@ -105,11 +105,11 @@ def _create_mortgage_account_with_params(seed_user):
 
     Routes through the ONE shared loan builder
     (:func:`tests._test_helpers.create_loan_account`), which inserts the
-    ``LoanParams``, the origination anchor event and rate the resolver
-    requires, AND opens the loan's genesis posting ledger in the same
+    ``LoanParams`` and the origination rate the resolver requires in one
     transaction -- exactly as ``loan.create_params`` does in production.
-    The hand-rolled block this replaced never opened that ledger, so the
-    escrow route ran against a loan in a state production cannot produce.
+    *The hand-rolled block this replaced never opened the stored ledger's
+    genesis postings, which the factory did until plan task plan#3132, so the
+    escrow route ran against a loan in a state production could not produce.*
 
     Returns:
         ``(account, params)`` -- the $200,000 mortgage originated

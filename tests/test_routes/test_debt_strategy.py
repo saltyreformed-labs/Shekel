@@ -38,11 +38,10 @@ def _create_debt_account(user, db_session, account_type, name, principal,
     debt-strategy balance by $5,000.
 
     Routes through :func:`tests._test_helpers.create_loan_account` (the ONE
-    shared loan builder), so the loan's genesis posting ledger is opened in
-    the same transaction as its ``LoanParams`` -- exactly what
-    ``loan.create_params`` does in production.  The hand-rolled block this
-    replaced never opened one, so every debt here silently exercised the
-    no-ledger fallback that production never takes.
+    shared loan builder), which writes the loan as ``loan.create_params``
+    does in production.  *The hand-rolled block this replaced never opened
+    the stored ledger's genesis postings, which the factory did until plan
+    task plan#3132, so every debt here exercised a no-ledger fallback.*
 
     Args:
         user: The owning :class:`~app.models.user.User`.

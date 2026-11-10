@@ -146,7 +146,7 @@ def _history_rows_from_walk(
     * ``interest_rate`` -- the split's governing period ``annual_rate`` (the SAME
       period its ``interest`` accrued at, carried on the split -- plan step E1c).
 
-    Event ORDER mirrors the write walk exactly: payments by DUE date, anchors by
+    Event ORDER mirrors the walk exactly: payments by DUE date, anchors by
     their own date, a payment BEFORE a same-date anchor, ties within a type keeping
     the walk's ``(pay_period.start_date, id)`` order via a stable sort.  A row
     is NAMED by its installment but ORDERED by its due date, because the

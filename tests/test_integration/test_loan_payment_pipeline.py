@@ -74,10 +74,9 @@ class TestLoanPaymentPipeline:
             periods = seed_periods
 
             # Step 1: Create mortgage account.  The shared factory routes the
-            # account through ``account_service.create_account``, inserts the
-            # LoanParams + origination RateHistory the resolver needs, and OPENS
-            # the loan's genesis posting ledger in the same transaction -- the
-            # dance every production loan-write path performs
+            # account through ``account_service.create_account`` and inserts
+            # the LoanParams + origination RateHistory the resolver needs --
+            # the dance every production loan-write path performs
             # (``app/routes/loan/params.py``).
             mortgage = create_loan_account(
                 seed_user, db.session, name="Pipeline Mortgage",

@@ -171,11 +171,11 @@ def _create_mortgage(
 
     Routes through the shared :func:`create_loan_account` factory (Mortgage
     account via ``account_service.create_account``, the matching
-    :class:`LoanParams`, the origination :class:`RateHistory` / anchor the
-    resolver requires, and the loan's GENESIS POSTING LEDGER -- opened in the
-    same transaction, exactly as ``app/routes/loan/params.py`` does on every
-    production loan write).  The old hand-rolled block here omitted the ledger,
-    so its loans exercised the no-ledger fallback production never takes.
+    :class:`LoanParams` and the origination :class:`RateHistory` / anchor the
+    resolver requires, written as ``app/routes/loan/params.py`` writes them on
+    every production loan write).  *The factory also opened the loan's genesis
+    postings in the stored ledger until plan task plan#3132; the hand-rolled
+    block it replaced did not, so its loans ran on a no-ledger fallback.*
 
     Args:
         seed_user: The ``seed_user`` fixture dict (supplies owner + scenario).

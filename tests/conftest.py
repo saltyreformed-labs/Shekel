@@ -2634,10 +2634,9 @@ def _unseeded_replay_balance(loan_id, scenario_id, as_of):
 def cross_page_loan_off_schedule_ctx(db, seed_user):
     """A GENESIS loan with an OFF-SCHEDULE confirmed payment (the read switch).
 
-    Unlike ``cross_page_loan_ctx`` -- which posts no genesis and so resolves via
-    the anchor-replay fallback -- this loan is OPENED in the ledger (a settled
-    payment fires the genesis sync: opening + true-up corrections + the payment
-    split) and its one confirmed payment pays cash far above the scheduled P&I,
+    Unlike ``cross_page_loan_ctx``, whose loan holds no payment, this loan's
+    walk splits a confirmed payment beside its opening and true-up corrections,
+    and that one payment pays cash far above the scheduled P&I,
     so the REAL principal it books down diverges from the schedule replay.  The
     read switch (plan Section 8) makes the SCALAR surfaces -- the /savings tile
     (``_compute_loan_account``) and the loan-detail page (the ``balance_at``

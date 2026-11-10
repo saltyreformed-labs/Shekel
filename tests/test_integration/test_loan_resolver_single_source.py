@@ -94,10 +94,10 @@ def _create_fixed_loan(seed_user):
     """Materialise the canonical fixed-rate $300k mortgage.
 
     Routes through the shared :func:`create_loan_account` factory, which builds
-    the :class:`Account`, the :class:`LoanParams`, the origination
-    :class:`RateHistory` / anchor, AND the loan's genesis posting ledger in one
-    transaction -- the same dance ``app/routes/loan/params.py`` performs on every
-    production loan write.  Commits.  Returns the account.
+    the :class:`Account`, the :class:`LoanParams` and the origination
+    :class:`RateHistory` / anchor in one transaction -- the same dance
+    ``app/routes/loan/params.py`` performs on every production loan write.
+    Commits.  Returns the account.
 
     Args:
         seed_user: The ``seed_user`` fixture dict.

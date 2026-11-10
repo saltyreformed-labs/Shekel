@@ -112,9 +112,9 @@ def _create_fixed_loan(seed_user, period, *, name="C17 Mortgage"):
     Mirrors ``test_loan_resolver_single_source._create_fixed_loan``
     (same arithmetic, same anchor) so the assertions in the two files
     reinforce each other: both route through the shared
-    :func:`create_loan_account` factory, which opens the loan's genesis
-    posting ledger in the same transaction as the ``LoanParams`` insert --
-    what every production loan write does (``app/routes/loan/params.py``).
+    :func:`create_loan_account` factory, which writes the ``LoanParams`` and
+    its origination rate in one transaction -- what every production loan
+    write does (``app/routes/loan/params.py``).
 
     Args:
         seed_user: The ``seed_user`` fixture dict.

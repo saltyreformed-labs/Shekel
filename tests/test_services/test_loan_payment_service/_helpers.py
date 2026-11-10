@@ -57,11 +57,10 @@ def _create_loan_account(seed_user):
     It existed so that ``original_principal`` and ``current_principal`` would
     DIFFER (250,000 against 200,000) and a producer reading the wrong one be
     visible; plan step R20 dropped that column, so no producer can read it and
-    the account's cash anchor (200,000) is the one remaining decoy.  What still
-    tells the two factories apart is that this one does NOT open the loan's
-    genesis posting ledger -- the shared one always does -- and moving this
-    suite onto the shared factory is a change to what its producers read, not
-    a tidy-up, so it is left as it was.
+    the account's cash anchor (200,000) is the one remaining decoy.  *What also
+    told the two factories apart, until plan task plan#3132, was that the
+    shared one opened the loan's genesis postings in the stored ledger and this
+    one did not; neither opens anything now, so the decoy is the reason left.*
 
     Returns:
         Account: the mortgage account.

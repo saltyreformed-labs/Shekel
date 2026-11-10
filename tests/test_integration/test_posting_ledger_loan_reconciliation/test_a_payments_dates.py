@@ -321,7 +321,7 @@ class TestDueDateEditReconcilesTheLedger:
     """Editing a loan payment's due_date re-derives the posted ledger.
 
     ``due_date`` became a POSTING INPUT with the installment-basis fix: the
-    genesis write walk orders payments by it and applies its strict
+    genesis walk orders payments by it and applies its strict
     ``anchor_date < due_date`` post-anchor boundary against it, so moving it
     changes which payments an anchor SUBSUMES and therefore the POSTED balance.
 

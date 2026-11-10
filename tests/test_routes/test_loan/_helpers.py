@@ -87,15 +87,15 @@ def _create_loan_account(seed_user, db_session, account_type, name, principal,
     every other refinance / debt-card test needs.
 
     Routes through :func:`tests._test_helpers.create_loan_account` (the ONE
-    shared loan builder), so the assertion is reconciled into the loan's
-    genesis posting ledger in the same transaction that writes it -- exactly
-    what ``loan.create_params`` does in production.  ``is_arm`` is set after:
+    shared loan builder), so the assertion is written in the same
+    transaction as the loan -- exactly what ``loan.create_params`` does in
+    production.  ``is_arm`` is set after:
     the flag alone moves no posting, since the rate-period engine's ARM
     branch fires only on a first-adjustment count this helper never sets
     (``rate_period_engine.py``, the ``terms.is_arm and first is not None``
-    condition), and the origination rate row holds either way.  The
-    hand-rolled block this replaced opened no ledger at all, so every loan
-    here exercised the no-ledger fallback production never takes.
+    condition), and the origination rate row holds either way.  *The
+    hand-rolled block this replaced opened no stored ledger, which the factory
+    did until plan task plan#3132, so every loan here then ran on a fallback.*
 
     Args:
         seed_user: The ``seed_user`` (or ``seed_second_user``) fixture dict.
@@ -164,7 +164,7 @@ def _create_other_loan(second_user, db_session,
     A $20,000 loan (the origination anchor -- the hand-rolled block this
     replaced wrote no trueup, so the origination principal IS the resolved
     balance) at 4% over 48 months, originated 2024-06-01.  Built through the
-    shared factory, so its genesis posting ledger is opened with it.
+    shared factory.
     """
     return create_loan_account(
         second_user, db_session, name="Other Loan",
@@ -379,8 +379,8 @@ def _create_loan_account_exact(seed_user, db_session, account_type, name,
     ``original_principal`` regardless.  The parameter is gone rather than
     kept as a decorative no-op.)
 
-    Routes through the shared factory, so the loan's genesis posting ledger is
-    opened in the same transaction as its ``LoanParams``.
+    Routes through the shared factory, which writes the loan's ``LoanParams``
+    and origination rate in one transaction.
 
     Args:
         seed_user: The ``seed_user`` fixture dict.
@@ -473,8 +473,8 @@ def _create_exact_mortgage(seed_user, db_session):
     P=200000, r=0.065/12, n=360.  Origination today so remaining
     months = 360.
 
-    Built through the shared factory, so the loan's genesis posting ledger is
-    opened with it (as production's ``loan.create_params`` does).
+    Built through the shared factory, which writes the loan as production's
+    ``loan.create_params`` does.
     """
     return create_loan_account(
         seed_user, db_session, name="Exact Test Mortgage",

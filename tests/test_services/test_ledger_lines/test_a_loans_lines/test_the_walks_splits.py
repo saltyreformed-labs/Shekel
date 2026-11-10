@@ -435,7 +435,7 @@ class TestComputeLoanPaymentSplits:
 
 
 # ---------------------------------------------------------------------------
-# the write walk reads no clock -- A3
+# the walk reads no clock -- A3
 # ---------------------------------------------------------------------------
 
 

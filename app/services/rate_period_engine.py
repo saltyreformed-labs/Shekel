@@ -264,7 +264,7 @@ def is_confirmed_payment_eligible(
 
     The due date is PASSED IN, never re-derived here from a pay period: it comes
     from :func:`app.services.loan_loaders.loan_payment_due_date` (the shadow's
-    own stored ``due_date``), the same derivation the genesis write walk uses.
+    own stored ``due_date``), the same derivation the genesis walk uses.
     A payment settled LATE sits in a pay period that no longer contains its due
     date, so re-deriving the due date from that period would report the NEXT
     month's installment -- and the walk and the replay would then disagree on
@@ -775,7 +775,7 @@ def replay_schedule(
     from one another: a payment settled late sits in a period that no longer
     contains its due date, so deriving the due date from the period start would
     credit it to the NEXT month's installment and desync this replay from the
-    genesis write walk, which reads the payment's stored due date.
+    genesis walk, which reads the payment's stored due date.
 
     Args:
         periods: Non-empty list from :func:`build_rate_periods`.
@@ -822,7 +822,7 @@ def replay_schedule(
     #     bound above and the payoff break below drop candidates the plan does
     #     not take back, because both are already accounted for.  See the
     #     docstring; "exact complements" is the thing this is NOT.
-    # Walked in DUE-date order, matching the genesis write walk's own event
+    # Walked in DUE-date order, matching the genesis walk's own event
     # merge, so the two consume the payments in ONE ORDER -- and only order:
     # they deliberately differ on the RATE key (see the loop below).
     eligible = sorted(

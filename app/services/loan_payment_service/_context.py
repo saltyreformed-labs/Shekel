@@ -379,7 +379,7 @@ def get_payment_history(
     :class:`~app.services.loan_ledger.PaymentInstallment` and derived nowhere
     near here: ``period_start`` is the pay-period start (the funding basis),
     ``due_date`` is its own due date, from the ONE derivation the
-    genesis write walk also uses
+    genesis walk also uses
     (:func:`app.services.loan_loaders.loan_payment_due_date`), and
     ``settled_on`` is the day the cash moved, from the ONE derivation the
     genesis fold dates that payment's principal by

@@ -74,8 +74,8 @@ def _create_loan_account(seed_user, db_session, *,
     Deliberately NOT routed through ``_test_helpers.create_loan_account``, unlike
     every other loan builder in the suite.  These are MODEL tests (the append-only
     ``before_update`` / ``before_delete`` listeners and the same-day unique
-    index).  They never read a balance through the ``balance_at`` seam, so the
-    genesis posting ledger the factory opens is irrelevant to them -- they assert
+    index).  They never read a balance through the ``balance_at`` seam, so what
+    the factory sets up for a balance read is irrelevant to them -- they assert
     on table rows, not on money.  (A second reason, a ``current_principal``
     DIFFERING from ``original_principal``, died with that column at plan step
     R20; the account's cash anchor still differs, as a decoy.)

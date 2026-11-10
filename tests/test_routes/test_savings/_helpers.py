@@ -88,11 +88,11 @@ def _create_small_loan(seed_user, name="Test Loan",
     Routes through the ONE shared loan builder
     (:func:`tests._test_helpers.create_loan_account`), whose defaults are this
     loan: an Auto Loan originated 2026-01-01 with payment_day 1, so remaining
-    months is comfortably positive (~21 from April 2026).  The factory opens
-    the loan's genesis posting ledger in the same transaction as its
-    ``LoanParams``, exactly as ``loan.create_params`` does in production; the
-    hand-rolled block this replaced never did, so these cards rendered a loan
-    in a state production cannot produce.
+    months is comfortably positive (~21 from April 2026).  The factory writes
+    the loan as ``loan.create_params`` does in production.  *The hand-rolled
+    block this replaced never opened the stored ledger's genesis postings,
+    which the factory did until plan task plan#3132, so these cards rendered a
+    loan in a state production could not produce.*
     """
     return create_loan_account(
         seed_user, db.session, name=name, principal=principal,

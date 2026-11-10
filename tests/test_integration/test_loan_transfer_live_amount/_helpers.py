@@ -97,11 +97,11 @@ def _build_derived_loan_transfer(
     can prove the live override, not the stated price, drives the
     result.
 
-    The loan is built by the shared :func:`create_loan_account` factory, so it
-    carries the genesis posting ledger every production loan-write path opens in
-    the same transaction as the ``LoanParams`` insert (``routes/loan/params.py``)
-    -- a hand-rolled ``LoanParams`` insert would leave it on the no-ledger
-    fallback production never takes.
+    The loan is built by the shared :func:`create_loan_account` factory, which
+    writes the rows every production loan-write path writes
+    (``routes/loan/params.py``).  *It also opened the loan's genesis postings in
+    the stored ledger until plan task plan#3132, which a hand-rolled
+    ``LoanParams`` insert did not.*
     """
     user = seed_user["user"]
     scenario_id = seed_user["scenario"].id

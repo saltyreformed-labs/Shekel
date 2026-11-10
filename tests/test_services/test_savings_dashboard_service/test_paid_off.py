@@ -278,8 +278,8 @@ class TestPaidOffReadsTheLedgerNotTheReplay:
 
         with app.app_context():
             acct = _create_small_loan(seed_user, db.session)
-            # The production settle chokepoint, so the payment posts its REAL
-            # split to the genesis ledger exactly as a live settle does.  Settled
+            # The production settle chokepoint, so the payment is settled as a
+            # live settle does and the genesis walk splits its REAL principal.  Settled
             # on the current period's start (a past date), so it is visible today
             # under C2's settled-date clock regardless of the UTC/display offset.
             create_settled_transfer(

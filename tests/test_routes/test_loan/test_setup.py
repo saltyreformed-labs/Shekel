@@ -209,11 +209,11 @@ class TestLoanSetup:
 
         The read switch's final commit retired the origination event write:
         the origination anchor is synthesized from the immutable LoanParams,
-        so setup leaves the event table EMPTY and instead posts the genesis
-        OPENING (-original_principal on the loan's linked ledger, so the
+        so setup leaves the event table EMPTY, and the worked-out ledger opens
+        the loan from it (-original_principal on the loan's own line, so the
         confirmed-balance reader answers the full $30,000 owed).  The
-        dashboard must still resolve and render -- the resolver's replay
-        fallback runs on the synthesized facts, never a stored row.
+        dashboard must still resolve and render -- the resolver runs on the
+        synthesized facts, never a stored row.
 
         The balance is stated for the ORIGINATION day, so the setup door's
         own write (plan step R20: a ``tracking_start`` for a balance stated
@@ -259,8 +259,8 @@ class TestLoanSetup:
             .count()
         ) == 0
 
-        # The genesis OPENING posted instead: the postings sum to the full
-        # original principal owed in the baseline scenario.
+        # The genesis OPENING is worked out instead: the loan's lines sum to
+        # the full original principal owed in the baseline scenario.
         assert posted_loan_balance_at(
             account.id, seed_user["scenario"].id, date.today(),
         ) == Decimal("30000.00")
@@ -280,7 +280,7 @@ class TestLoanSetup:
         origination day, so the setup door records nothing -- plan step
         R20), then a $25,000 true-up
         asserted through the dashboard form.  The true-up appends the ONE
-        ``user_trueup`` event (the source document), the genesis sync books
+        ``user_trueup`` event (the source document), the genesis walk books
         its TRUEUP correction so the confirmed-balance reader answers the
         asserted $25,000 (opening -30,000 + correction +5,000, negated), and
         the dashboard card renders it -- proving a loan that never had an
@@ -495,7 +495,7 @@ class TestLoanSetup:
         loan originating 2025-01-01, set up on the frozen 2026-03-20 with
         "balance today" $25,000 as of 2026-02-15: the door appends exactly
         one ``tracking_start`` at (2026-02-15, $25,000) in the same
-        transaction as the params, the genesis ledger reconciles to it, and
+        transaction as the params, the genesis walk resets to it, and
         the dashboard reads $25,000 with the row labelled a tracking start.
         Until R20 the $25,000 landed in ``LoanParams.current_principal`` and
         the loan read as unpaid since 2025 (the R-R71 calendar).

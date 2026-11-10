@@ -7,7 +7,7 @@ date its ``effective_date`` names -- the door creates that version or corrects
 the one already on that date (plan#2331, ruling **plan#2333**: the terms are a
 dated series).  There is no
 create / update pair here on purpose -- the loan has two because its CREATE
-also seeds a rate row and posts a genesis ledger, and the interest door's
+also seeds a rate row, and the interest door's
 every-field-optional shape needs a "required when configuring for the first
 time" branch that restates the NOT NULL rule the database already holds.  The
 effective date and the five NOT NULL terms are REQUIRED, ``cashback_rate``

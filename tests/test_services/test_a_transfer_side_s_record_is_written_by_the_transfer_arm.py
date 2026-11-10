@@ -99,11 +99,11 @@ def _transfer(seed_user, *, due_date=None):
     savings = _savings(seed_user)
     for decoy in (Decimal("7.00"), Decimal("8.00")):
         create_transfer(
-            seed_user, db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_user["bootstrap_period"], decoy,
         )
     xfer = create_transfer(
-        seed_user, db.session, seed_user["account"], savings,
+        seed_user, seed_user["account"], savings,
         seed_user["bootstrap_period"], _AMOUNT, due_date=due_date,
     )
     db.session.commit()

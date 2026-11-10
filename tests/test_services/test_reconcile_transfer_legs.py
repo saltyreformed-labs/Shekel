@@ -134,7 +134,7 @@ def _transfer_numbered_like(seed_user, period, row_id, to_account):
         {"v": row_id},
     )
     transfer = create_transfer(
-        seed_user, db.session, seed_user["account"], to_account, period,
+        seed_user, seed_user["account"], to_account, period,
         amount=Decimal("75.00"),
     )
     db.session.commit()
@@ -233,7 +233,7 @@ class TestTheOfferableLegLoader:
         with app.app_context():
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -259,11 +259,11 @@ class TestTheOfferableLegLoader:
         with app.app_context():
             savings = _savings(seed_user)
             inside = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             later = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[1],
             )
             db.session.commit()
@@ -306,7 +306,7 @@ class TestTheOfferableLegLoader:
         with app.app_context():
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -352,7 +352,7 @@ class TestTheOfferableLegLoader:
         with app.app_context():
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("75.00"),
             )
             db.session.commit()
@@ -405,7 +405,7 @@ class TestATickStatesItsOwnSide:
         with app.app_context():
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("75.00"),
             )
             db.session.commit()
@@ -446,7 +446,7 @@ class TestTheBlockReadsTheLeg:
         with app.app_context():
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -479,7 +479,7 @@ class TestTheBlockReadsTheLeg:
         with app.app_context():
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -510,7 +510,7 @@ class TestTheBlockReadsTheLeg:
         with app.app_context():
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("500.00"),
             )
             db.session.commit()
@@ -549,7 +549,7 @@ class TestTheBlockReadsTheLeg:
             _bill(seed_user, seed_periods[0])
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("500.00"),
             )
             db.session.commit()
@@ -585,11 +585,11 @@ class TestCarryForwardWalksTransfers:
             savings = _savings(seed_user)
             brokerage = _savings(seed_user, name="Brokerage")
             first = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("40.00"),
             )
             second = create_transfer(
-                seed_user, db.session, brokerage, seed_user["account"],
+                seed_user, brokerage, seed_user["account"],
                 seed_periods[0], amount=Decimal("60.00"),
             )
             db.session.commit()

@@ -125,7 +125,7 @@ class TestATransferWrittenSince:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("90.00"),
             )
             db.session.commit()
@@ -165,7 +165,7 @@ class TestATransferWrittenSince:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -198,11 +198,11 @@ class TestATransferWrittenSince:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             typed = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("100.00"),
             )
             born = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[1], amount=Decimal("100.00"),
             )
             db.session.commit()
@@ -235,7 +235,7 @@ class TestATransferWrittenSince:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("100.00"),
             )
             db.session.commit()
@@ -263,7 +263,7 @@ class TestATransferWrittenSince:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("20.00"),
             )
             db.session.commit()
@@ -288,7 +288,7 @@ class TestATransferWrittenSince:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -317,7 +317,7 @@ class TestATransferWrittenSince:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -369,7 +369,7 @@ class TestATransferWrittenSince:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -403,7 +403,7 @@ class TestATransferWrittenSince:
         with app.app_context():
             savings, van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -439,7 +439,7 @@ class TestAKeptValueThatNoLongerFits:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -484,7 +484,7 @@ class TestAKeptValueThatNoLongerFits:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -521,7 +521,7 @@ class TestAKeptValueThatNoLongerFits:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -582,7 +582,7 @@ class TestAKeptValueThatNoLongerFits:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -641,7 +641,7 @@ class TestAKeptValueThatNoLongerFits:
         with app.app_context():
             savings = _accounts(seed_user)[0]
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -721,7 +721,7 @@ class TestAKeptValueThatNoLongerFits:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -782,7 +782,7 @@ class TestAKeptValueThatNoLongerFits:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()

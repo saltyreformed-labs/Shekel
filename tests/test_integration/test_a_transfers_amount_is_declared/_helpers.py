@@ -36,7 +36,7 @@ def _plain_transfer(seed_user, seed_periods, amount="250.00"):
     )
     _db.session.flush()
     xfer = create_transfer(
-        seed_user, _db.session, seed_user["account"], savings,
+        seed_user, seed_user["account"], savings,
         seed_periods[0], amount=Decimal(amount),
     )
     _db.session.flush()

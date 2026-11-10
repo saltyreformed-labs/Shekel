@@ -322,7 +322,7 @@ class TestATransfersTwoSidesAreOnePress:
             observed_on=seed_user["bootstrap_period"].start_date,
         )
         xfer = create_transfer(
-            seed_user, db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_user["bootstrap_period"], Decimal("500.00"),
         )
         db.session.commit()

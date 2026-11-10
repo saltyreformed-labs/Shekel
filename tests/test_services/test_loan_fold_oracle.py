@@ -490,7 +490,7 @@ class TestRawLoanTransactionIsTheOnlyDivergence:
             assert before_fold == before_read  # agree before the raw txn
 
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[1], Decimal("300.00"),
+                seed_user, seed_periods[1], Decimal("300.00"),
                 account=loan, name="Typed On Loan",
                 settled_on=seed_periods[1].start_date,
             )

@@ -302,11 +302,11 @@ class TestTransferResolveConflicts:
                 anchor_balance=Decimal("500.00"),
             )
             live = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             gone = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[1],
             )
             transfer_service.delete_transfer(gone.id, seed_user["user"].id, soft=True)

@@ -137,7 +137,7 @@ class TestEveryScopePartOnBothTables:
             rows = {
                 "projected": _row(seed_user, here, "Projected"),
                 "paid": create_settled_cash_transaction(
-                    seed_user, db.session, here, Decimal("20.00"), name="Paid",
+                    seed_user, here, Decimal("20.00"), name="Paid",
                 ),
                 "cancelled": _row(
                     seed_user, here, "Cancelled", status=StatusEnum.CANCELLED,
@@ -153,11 +153,11 @@ class TestEveryScopePartOnBothTables:
 
             transfers = {
                 "out": create_transfer(
-                    seed_user, db.session, checking, savings, here,
+                    seed_user, checking, savings, here,
                     amount=Decimal("101.00"),
                 ),
                 "in": create_transfer(
-                    seed_user, db.session, savings, checking, here,
+                    seed_user, savings, checking, here,
                     amount=Decimal("102.00"),
                 ),
                 "paid": create_settled_transfer(
@@ -169,19 +169,19 @@ class TestEveryScopePartOnBothTables:
                 ),
             }
             deleted = create_transfer(
-                seed_user, db.session, checking, savings, here,
+                seed_user, checking, savings, here,
                 amount=Decimal("105.00"),
             )
             create_transfer(
-                seed_user, db.session, checking, savings, later,
+                seed_user, checking, savings, later,
                 amount=Decimal("106.00"),
             )
             create_transfer(
-                seed_user, db.session, checking, savings, here,
+                seed_user, checking, savings, here,
                 amount=Decimal("107.00"), scenario=what_if,
             )
             create_transfer(
-                seed_user, db.session, savings, other, here,
+                seed_user, savings, other, here,
                 amount=Decimal("108.00"),
             )
             db.session.commit()
@@ -264,15 +264,15 @@ class TestTheAttributionSpan:
             early_row = _row(seed_user, early, "Due late", due_date=inside_day)
             _row(seed_user, late, "Due early", due_date=early.start_date)
             early_transfer = create_transfer(
-                seed_user, db.session, checking, savings, early,
+                seed_user, checking, savings, early,
                 amount=Decimal("201.00"), due_date=inside_day,
             )
             create_transfer(
-                seed_user, db.session, checking, savings, late,
+                seed_user, checking, savings, late,
                 amount=Decimal("202.00"), due_date=early.start_date,
             )
             undated = create_transfer(
-                seed_user, db.session, checking, savings, late,
+                seed_user, checking, savings, late,
                 amount=Decimal("203.00"),
             )
             db.session.commit()
@@ -312,7 +312,7 @@ class TestTheAttributionSpan:
             )
             late = seed_periods[2]
             strayed = create_transfer(
-                seed_user, db.session, checking, savings, late,
+                seed_user, checking, savings, late,
                 amount=Decimal("204.00"),
             )
             db.session.commit()
@@ -386,11 +386,11 @@ class TestTheListsOrder:
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )
             first = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[0],
+                seed_user, checking, savings, seed_periods[0],
                 amount=Decimal("301.00"),
             )
             second = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[0],
+                seed_user, checking, savings, seed_periods[0],
                 amount=Decimal("302.00"),
             )
             db.session.commit()

@@ -271,7 +271,7 @@ class TestTheDatabaseLocksTheTransfer:
         )
         _db.session.commit()
         xfer = create_transfer(
-            seed_user, _db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_user["bootstrap_period"], amount=Decimal("500.00"),
         )
         _db.session.commit()

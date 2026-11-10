@@ -179,7 +179,7 @@ class TestReferentialIntegrity:
         )
         db.session.commit()
         transfer = create_transfer(
-            seed_user, db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_periods[0],
         )
         transfer_service.update_transfer(

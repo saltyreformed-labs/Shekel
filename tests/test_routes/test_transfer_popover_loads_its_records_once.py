@@ -45,7 +45,7 @@ def test_the_popover_loads_the_legs_records_once(
         )
         open_books_before_the_first_assertion(db.session, savings)
         xfer = create_transfer(
-            seed_user, db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_periods_today[3], amount=Decimal("300.00"),
         )
         db.session.commit()

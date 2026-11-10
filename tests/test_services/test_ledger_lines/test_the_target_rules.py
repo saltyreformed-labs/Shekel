@@ -156,7 +156,7 @@ class TestTheMovementRuleNamesKeys:
         with app.app_context():
             groceries = seed_user["categories"]["Groceries"]
             txn = create_settled_cash_transaction(
-                seed_user, _db.session, seed_periods[0], Decimal("40.00"),
+                seed_user, seed_periods[0], Decimal("40.00"),
                 category=groceries,
             )
             (movement,) = txn.entries

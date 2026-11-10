@@ -448,7 +448,7 @@ def _build_baseline_less_owner(db):
         category_key="Groceries",
     )
     transfer = create_transfer(
-        seed_user, db.session, seed_user["account"], hysa, anchor,
+        seed_user, seed_user["account"], hysa, anchor,
         Decimal("50.00"), name="Policy Transfer",
     )
     db.session.flush()

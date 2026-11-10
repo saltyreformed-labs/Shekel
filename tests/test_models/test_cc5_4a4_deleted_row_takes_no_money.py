@@ -280,7 +280,7 @@ class TestARowCannotBeHiddenHoldingMoney:
         """
         with app.app_context():
             row = create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("40.00"), settled_on=_day(seed_user),
             )
             db.session.commit()

@@ -38,7 +38,7 @@ class TestOracleIsNotVacuous:
             scenario_id = seed_user["scenario"].id
             checking = seed_user["account"]
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("100.00"), category=seed_user["categories"]["Groceries"],
             )
             db.session.commit()
@@ -66,7 +66,7 @@ class TestOracleIsNotVacuous:
         """
         with app.app_context():
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("100.00"), category=seed_user["categories"]["Groceries"],
             )
             db.session.commit()

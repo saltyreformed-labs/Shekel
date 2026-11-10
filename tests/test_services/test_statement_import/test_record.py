@@ -547,7 +547,7 @@ class TestItMovesNoMoney:
     def money_on_the_books(self, db, seed_user, seed_periods):
         """Settle a real transaction so there is something to move."""
         txn = create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("125.00"),
+            seed_user, seed_periods[0], Decimal("125.00"),
             settled_on=date(2026, 3, 3), name="Groceries",
         )
         db.session.flush()

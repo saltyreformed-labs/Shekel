@@ -86,24 +86,24 @@ class TestRichFixtureStatements:
             db.session.commit()
 
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("3000.00"), account=checking, is_income=True,
                 category=seed_user["categories"]["Salary"],
                 settled_on=date(_Y, 3, 10),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("400.00"), account=checking,
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 3, 15),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("50.00"), account=checking, category=None,
                 settled_on=date(_Y, 3, 20),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("120.00"), account=card,
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 3, 16),
@@ -237,7 +237,7 @@ class TestLoanInterestEscrowInStatements:
             db.session.flush()
 
             create_settled_cash_transaction(
-                seed_user, db.session, pay_period, Decimal("2000.00"),
+                seed_user, pay_period, Decimal("2000.00"),
                 account=checking, is_income=True,
                 category=seed_user["categories"]["Salary"],
                 settled_on=date(_Y, 2, 5),

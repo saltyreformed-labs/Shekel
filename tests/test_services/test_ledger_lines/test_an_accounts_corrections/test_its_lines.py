@@ -438,7 +438,7 @@ class TestEachScenarioAndALoan:
             account = _make_account_as_created(seed_user, "500.00")
             origin = _origin_day(account)
             txn = create_settled_cash_transaction(
-                seed_user, _db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("40.00"), account=account, scenario=what_if,
             )
             record_settle_day(txn, an_entered_day(origin + timedelta(days=1)))

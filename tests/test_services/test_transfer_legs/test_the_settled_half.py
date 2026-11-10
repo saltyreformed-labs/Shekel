@@ -44,7 +44,7 @@ class TestTheSettledHalfReadsTheLegOffItsTransfer:
                 settled_on=date(2026, 2, 3),
             )
             create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[3],
+                seed_user, checking, savings, seed_periods[3],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -122,7 +122,7 @@ class TestTheWritersParentIsTheLeg:
                 amount=_AMOUNT, settled_on=date(2026, 2, 3),
             )
             row = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[2], Decimal("30.00"),
+                seed_user, seed_periods[2], Decimal("30.00"),
                 account=checking, name="a row",
             )
             db.session.commit()

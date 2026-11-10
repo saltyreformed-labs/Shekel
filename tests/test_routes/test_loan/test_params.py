@@ -537,7 +537,7 @@ class TestRecordTrackingStartRoute:
         from tests._test_helpers import create_transfer
         acct = _create_auto_loan(seed_user, db.session)
         create_transfer(
-            seed_user, db.session, seed_user["account"], acct,
+            seed_user, seed_user["account"], acct,
             seed_periods[3], amount=Decimal("500.00"),
             due_date=date(2026, 2, 15),
         )

@@ -65,7 +65,7 @@ class TestTheBoundaryIsInclusive:
         (date(2026, 4, 1), False),    # the first contractual installment
     ])
     def test_the_guard_matches_what_the_fold_erases(
-        self, app, db, seed_user, seed_periods, loan_and_checking, due, erased,
+        self, app, seed_user, seed_periods, loan_and_checking, due, erased,
     ):
         """The rejection boundary IS the erasure boundary, swept day by day.
 
@@ -83,13 +83,13 @@ class TestTheBoundaryIsInclusive:
             if erased:
                 with pytest.raises(ValidationError) as excinfo:
                     create_transfer(
-                        seed_user, db.session, checking, acct, seed_periods[5],
+                        seed_user, checking, acct, seed_periods[5],
                         amount=Decimal("1200.00"), due_date=due,
                     )
                 assert "before it originates" in str(excinfo.value)
             else:
                 xfer = create_transfer(
-                    seed_user, db.session, checking, acct, seed_periods[5],
+                    seed_user, checking, acct, seed_periods[5],
                     amount=Decimal("1200.00"), due_date=due,
                 )
                 assert xfer.due_date == due
@@ -146,7 +146,7 @@ class TestNoDueDateUsesThePeriodFallback:
     """The ad-hoc shape FU-5 was originally found in."""
 
     def test_an_ad_hoc_transfer_with_no_due_date_is_still_caught(
-        self, app, db, seed_user, seed_periods, loan_and_checking,
+        self, app, seed_user, seed_periods, loan_and_checking,
     ):
         """A transfer carrying NO due date is keyed on its pay-period start.
 
@@ -168,13 +168,13 @@ class TestNoDueDateUsesThePeriodFallback:
             ) <= ORIGINATION
             with pytest.raises(ValidationError) as excinfo:
                 create_transfer(
-                    seed_user, db.session, checking, acct, seed_periods[2],
+                    seed_user, checking, acct, seed_periods[2],
                     amount=Decimal("1200.00"),
                 )
             assert "2026-02-01" in str(excinfo.value)
 
     def test_a_later_period_with_no_due_date_is_allowed(
-        self, app, db, seed_user, seed_periods, loan_and_checking,
+        self, app, seed_user, seed_periods, loan_and_checking,
     ):
         """The same shape after origination writes normally.
 
@@ -184,7 +184,7 @@ class TestNoDueDateUsesThePeriodFallback:
         acct, checking = loan_and_checking
         with app.app_context():
             xfer = create_transfer(
-                seed_user, db.session, checking, acct, seed_periods[8],
+                seed_user, checking, acct, seed_periods[8],
                 amount=Decimal("1200.00"),
             )
             assert xfer.id is not None
@@ -209,7 +209,7 @@ class TestTheEditPathIsGuardedToo:
         acct, checking = loan_and_checking
         with app.app_context():
             xfer = create_transfer(
-                seed_user, db.session, checking, acct, seed_periods[8],
+                seed_user, checking, acct, seed_periods[8],
                 amount=Decimal("1200.00"), due_date=date(2026, 5, 1),
             )
             db.session.commit()
@@ -248,7 +248,7 @@ class TestTheEditPathIsGuardedToo:
         acct, checking = loan_and_checking
         with app.app_context():
             xfer = create_transfer(
-                seed_user, db.session, checking, acct, seed_periods[8],
+                seed_user, checking, acct, seed_periods[8],
                 amount=Decimal("1200.00"), due_date=date(2026, 5, 1),
             )
             db.session.commit()
@@ -282,7 +282,7 @@ class TestTheEditPathIsGuardedToo:
         acct, checking = loan_and_checking
         with app.app_context():
             xfer = create_transfer(
-                seed_user, db.session, checking, acct, seed_periods[8],
+                seed_user, checking, acct, seed_periods[8],
                 amount=Decimal("1200.00"),
             )
             db.session.commit()
@@ -309,7 +309,7 @@ class TestTheEditPathIsGuardedToo:
             # Build the legacy row the only way still possible: create it
             # legally, then plant the pre-origination date underneath the guard.
             xfer = create_transfer(
-                seed_user, db.session, checking, acct, seed_periods[8],
+                seed_user, checking, acct, seed_periods[8],
                 amount=Decimal("1200.00"), due_date=date(2026, 5, 1),
             )
             db.session.commit()
@@ -328,7 +328,7 @@ class TestWhatMustStayAllowed:
     """The guard is about the loan's EXISTENCE, not its schedule."""
 
     def test_a_payment_between_origination_and_the_first_installment(
-        self, app, db, seed_user, seed_periods, loan_and_checking,
+        self, app, seed_user, seed_periods, loan_and_checking,
     ):
         """An early extra payment is legitimate and must not be refused.
 
@@ -342,7 +342,7 @@ class TestWhatMustStayAllowed:
         acct, checking = loan_and_checking
         with app.app_context():
             xfer = create_transfer(
-                seed_user, db.session, checking, acct, seed_periods[5],
+                seed_user, checking, acct, seed_periods[5],
                 amount=Decimal("500.00"), due_date=date(2026, 3, 15),
             )
             assert xfer.id is not None
@@ -362,7 +362,7 @@ class TestWhatMustStayAllowed:
             )
             db.session.commit()
             xfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[0],
+                seed_user, checking, savings, seed_periods[0],
                 amount=Decimal("100.00"), due_date=date(2026, 1, 5),
             )
             assert xfer.id is not None
@@ -392,7 +392,7 @@ class TestWhatMustStayAllowed:
             assert loan_loaders.load_loan_params(bare_loan.id) is None
 
             xfer = create_transfer(
-                seed_user, db.session, checking, bare_loan, seed_periods[0],
+                seed_user, checking, bare_loan, seed_periods[0],
                 amount=Decimal("100.00"), due_date=date(2026, 1, 5),
             )
             assert xfer.id is not None

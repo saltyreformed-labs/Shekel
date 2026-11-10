@@ -493,7 +493,7 @@ class TestTheProjectionIgnoresTheOrderOfABookkeepingSession:
             _db.session.flush()
             for index, amount in enumerate(cleared):
                 create_settled_cash_transaction(
-                    seed_user, _db.session, period, amount,
+                    seed_user, period, amount,
                     account=anchor_first, name=f"A cleared {index}",
                     settled_on=observed_day_of(noon),
                 )
@@ -501,7 +501,7 @@ class TestTheProjectionIgnoresTheOrderOfABookkeepingSession:
             # ORDER B: the same two payments are ticked BEFORE the anchor.
             for index, amount in enumerate(cleared):
                 create_settled_cash_transaction(
-                    seed_user, _db.session, period, amount,
+                    seed_user, period, amount,
                     account=settles_first, name=f"B cleared {index}",
                     settled_on=observed_day_of(noon),
                 )

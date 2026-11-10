@@ -71,7 +71,7 @@ def _mistaken_card(seed_user):
         seed_user, "HYSA", "Mistaken Card", ("-500.00", "-530.00"),
     )
     create_settled_cash_transaction(
-        seed_user, db.session, seed_user["bootstrap_period"], Decimal("70.00"),
+        seed_user, seed_user["bootstrap_period"], Decimal("70.00"),
         account=account, category=seed_user["categories"]["Groceries"],
         settled_on=display_today(),
     )

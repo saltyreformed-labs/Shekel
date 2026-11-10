@@ -393,7 +393,7 @@ class TestFarLegsOf:
             checking = seed_user["account"]
             card = _card(seed_user)
             payment = create_transfer(
-                seed_user, db.session, checking, card, seed_periods_today[3],
+                seed_user, checking, card, seed_periods_today[3],
                 amount=Decimal("165.00"),
             )
             paid = create_settled_transfer(
@@ -405,7 +405,7 @@ class TestFarLegsOf:
                 seed_user, db.session, "Savings", Decimal("5000.00"),
             )
             create_transfer(
-                seed_user, db.session, savings, card, seed_periods_today[3],
+                seed_user, savings, card, seed_periods_today[3],
                 amount=Decimal("300.00"),
             )
             db.session.commit()
@@ -439,7 +439,7 @@ class TestFarLegsOf:
             checking = seed_user["account"]
             card = _card(seed_user)
             create_transfer(
-                seed_user, db.session, checking, card, seed_periods_today[3],
+                seed_user, checking, card, seed_periods_today[3],
                 amount=Decimal("165.00"),
             )
             db.session.commit()

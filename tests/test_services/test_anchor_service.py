@@ -935,12 +935,12 @@ class TestBackDatedCashTrueUp:
             # Without both, a fold that swallowed everything and a fold that
             # swallowed nothing would answer identically.
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods_today[0],
+                seed_user, seed_periods_today[0],
                 Decimal("25.00"), account=account,
                 settled_on=opening + timedelta(days=5), name="before",
             )
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods_today[0],
+                seed_user, seed_periods_today[0],
                 Decimal("40.00"), account=account,
                 settled_on=opening + timedelta(days=15), name="after",
             )

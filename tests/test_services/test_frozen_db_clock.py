@@ -145,7 +145,7 @@ class TestTheDatabaseClockIsTheTestClock:
         """
         with app.app_context():
             txn = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[5], Decimal("25.00"),
+                seed_user, seed_periods[5], Decimal("25.00"),
                 name="N-65: settled at the frozen now",
             )
             db.session.commit()
@@ -169,7 +169,7 @@ class TestTheDatabaseClockIsTheTestClock:
         """
         with app.app_context():
             txn = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[5], Decimal("40.00"),
+                seed_user, seed_periods[5], Decimal("40.00"),
                 name="N-65: onupdate",
             )
             db.session.commit()
@@ -196,7 +196,7 @@ class TestTheDatabaseClockIsTheTestClock:
         """
         with app.app_context():
             txn = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[5], Decimal("55.00"),
+                seed_user, seed_periods[5], Decimal("55.00"),
                 name="N-65: bulk",
             )
             db.session.commit()
@@ -251,7 +251,7 @@ class TestTheDatabaseClockIsTheTestClock:
         """
         with app.app_context():
             txn = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[5], Decimal("30.00"),
+                seed_user, seed_periods[5], Decimal("30.00"),
                 name="N-65: raw text default",
             )
             entry = TransactionEntry(

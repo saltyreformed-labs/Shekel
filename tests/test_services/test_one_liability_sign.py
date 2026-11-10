@@ -219,7 +219,7 @@ class TestAnArchivedDebtShowsWhatItOwesToday:
             )
             db.session.flush()
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[7], Decimal("200.00"),
+                seed_user, seed_periods[7], Decimal("200.00"),
                 account=visa, name="Purchase",
             )
             visa.is_active = False

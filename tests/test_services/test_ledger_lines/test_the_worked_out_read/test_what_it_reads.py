@@ -71,7 +71,7 @@ class TestTheReadWritesNothing:
         """
         with app.app_context():
             create_settled_cash_transaction(
-                seed_user, _db.session, seed_periods[0], Decimal("40.00"),
+                seed_user, seed_periods[0], Decimal("40.00"),
                 category=seed_user["categories"]["Groceries"],
             )
             savings = create_account_of_type(
@@ -239,10 +239,10 @@ class TestWhoseRecordsItReads:
         """
         with app.app_context():
             create_settled_cash_transaction(
-                seed_user, _db.session, seed_periods[0], Decimal("11.11"),
+                seed_user, seed_periods[0], Decimal("11.11"),
             )
             create_settled_cash_transaction(
-                seed_second_user, _db.session, seed_second_periods[0],
+                seed_second_user, seed_second_periods[0],
                 Decimal("77.77"),
             )
             other_savings = create_account_of_type(
@@ -298,7 +298,7 @@ class TestItsStatementsDoNotGrowWithItsSources:
                 """One settled bill, transfer and loan payment per period."""
                 for period in periods:
                     create_settled_cash_transaction(
-                        seed_user, _db.session, period, Decimal("40.00"),
+                        seed_user, period, Decimal("40.00"),
                     )
                     create_settled_transfer(
                         seed_user, _db.session, checking, savings, period,

@@ -133,7 +133,7 @@ class TestTheOneClause:
         """A Projected transfer never paid holds no entry: the control."""
         with app.app_context():
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"],
+                seed_user, seed_user["account"],
                 _savings(seed_user, seed_periods_today), seed_periods_today[5],
                 amount=Decimal("500.00"),
             )
@@ -293,7 +293,7 @@ class TestTheLockReadsTheTransfersOwnStatus:
         with app.app_context():
             period = seed_periods_today[4]
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"],
+                seed_user, seed_user["account"],
                 _savings(seed_user, seed_periods_today), period,
                 amount=Decimal("500.00"),
             )

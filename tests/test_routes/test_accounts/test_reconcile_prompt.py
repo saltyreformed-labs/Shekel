@@ -441,7 +441,7 @@ class TestTheTransferArmThroughItsROUTE:
         # and the route would answer 400 rather than the tick it is grading.
         open_books_before_the_first_assertion(db.session, savings)
         transfer = create_transfer(
-            seed_user, db.session, seed_user["account"], savings, period,
+            seed_user, seed_user["account"], savings, period,
             amount=Decimal(amount),
         )
         db.session.commit()

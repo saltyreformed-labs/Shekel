@@ -646,11 +646,11 @@ class TestIncomeStatementTab:
         """
         with app.app_context():
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("2000.00"),
+                seed_user, seed_periods[0], Decimal("2000.00"),
                 is_income=True, name="Paycheck",
             )
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("300.00"),
+                seed_user, seed_periods[0], Decimal("300.00"),
                 is_income=False, name="Groceries",
             )
             db.session.commit()
@@ -969,7 +969,7 @@ class TestBalanceSheetTab:
         """
         with app.app_context():
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("500.00"),
+                seed_user, seed_periods[0], Decimal("500.00"),
                 is_income=True, name="Paycheck",
                 settled_on=date(2026, 2, 15),
             )
@@ -1692,7 +1692,7 @@ class TestCalendarFlowStrip:
             from tests._test_helpers import create_settled_cash_transaction
 
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("600.00"),
+                seed_user, seed_periods[0], Decimal("600.00"),
                 name="Trough Expense",
                 settled_on=date(2026, 1, 5),
             )
@@ -1742,7 +1742,7 @@ class TestCalendarFlowStrip:
             from tests._test_helpers import create_settled_cash_transaction
 
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("1600.00"),
+                seed_user, seed_periods[0], Decimal("1600.00"),
                 name="Overdraft Expense",
                 settled_on=date(2026, 1, 5),
             )

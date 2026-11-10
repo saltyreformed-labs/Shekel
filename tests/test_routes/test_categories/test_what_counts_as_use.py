@@ -531,7 +531,7 @@ class TestATransferAnswersForItsOwnCategoryAndAccounts:
         )
         db.session.commit()
         transfer = create_transfer(
-            owner, db.session, source, destination,
+            owner, source, destination,
             owner["bootstrap_period"],
         )
         db.session.commit()
@@ -632,7 +632,7 @@ class TestATransferAnswersForItsOwnCategoryAndAccounts:
             template.category_id = category.id
             db.session.commit()
             transfer = create_transfer(
-                seed_second_user, db.session, seed_second_user["account"],
+                seed_second_user, seed_second_user["account"],
                 savings, seed_second_user["bootstrap_period"],
             )
             transfer.category_id = category.id

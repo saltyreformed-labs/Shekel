@@ -67,7 +67,7 @@ def _accounts(seed_user):
 def _transfer(seed_user, from_account, to_account):
     """A Projected $500.00 transfer between the two accounts, committed."""
     xfer = create_transfer(
-        seed_user, _db.session, from_account, to_account,
+        seed_user, from_account, to_account,
         seed_user["bootstrap_period"], amount=Decimal("500.00"),
     )
     _db.session.commit()

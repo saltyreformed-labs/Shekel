@@ -159,7 +159,7 @@ def _plain_transfer(
     # asserts -- the owner's today -- and this suite settles on or before it.
     open_books_before_the_first_assertion(db.session, savings)
     return create_transfer(
-        seed_user, db.session, seed_user["account"], savings,
+        seed_user, seed_user["account"], savings,
         seed_periods[0], amount=Decimal(amount),
     )
 

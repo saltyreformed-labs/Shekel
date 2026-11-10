@@ -48,6 +48,7 @@ this revision would have to plant it.
 from __future__ import annotations
 
 from decimal import Decimal
+from functools import partial
 
 import pytest
 from sqlalchemy import text
@@ -180,7 +181,11 @@ def _rule_triggers():
 
 
 def _pair(seed_user, build):
-    """Two transfers on two accounts, each made by *build*, committed; returns ``(a, b)``."""
+    """Two transfers on two accounts, each made by *build*, committed; returns ``(a, b)``.
+
+    *build* is a transfer builder bound to the owner, called with the two
+    accounts, the paycheck and the amount.
+    """
     savings = create_account_of_type(
         seed_user, _db.session, "Savings", "Migration Savings",
     )
@@ -189,11 +194,11 @@ def _pair(seed_user, build):
     )
     _db.session.commit()
     first = build(
-        seed_user, _db.session, seed_user["account"], savings,
+        seed_user["account"], savings,
         seed_user["bootstrap_period"], amount=Decimal("500.00"),
     )
     second = build(
-        seed_user, _db.session, savings, van,
+        savings, van,
         seed_user["bootstrap_period"], amount=Decimal("120.00"),
     )
     _db.session.commit()
@@ -202,7 +207,9 @@ def _pair(seed_user, build):
 
 def _settled_pair(seed_user):
     """Two Paid transfers on two accounts, committed; returns ``(a, b)``."""
-    return _pair(seed_user, create_settled_transfer)
+    return _pair(
+        seed_user, partial(create_settled_transfer, seed_user, _db.session),
+    )
 
 
 def _settle_at_this_revision(seed_user, xfer, **figure):
@@ -726,7 +733,7 @@ class TestTheDowngradeRefuses:
         )
         _db.session.commit()
         xfer = create_transfer(
-            seed_user, _db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_user["bootstrap_period"], amount=Decimal("75.00"),
         )
         _db.session.commit()
@@ -773,7 +780,7 @@ class TestTheDowngradeRefusesADriftedTwin:
         app's own door (:func:`_settle_at_this_revision`).
         """
         del app
-        first, second = _pair(seed_user, create_transfer)
+        first, second = _pair(seed_user, partial(create_transfer, seed_user))
         _twins_built()
         for xfer in (first, second):
             _settle_at_this_revision(seed_user, xfer)
@@ -811,11 +818,11 @@ class TestTheDowngradeRefusesADriftedTwin:
         del app
         first, _second = _settled_pair(seed_user)
         live = create_transfer(
-            seed_user, _db.session, seed_user["account"], first.to_account,
+            seed_user, seed_user["account"], first.to_account,
             seed_user["bootstrap_period"], amount=Decimal("75.00"),
         )
         hidden = create_transfer(
-            seed_user, _db.session, seed_user["account"], first.to_account,
+            seed_user, seed_user["account"], first.to_account,
             seed_user["bootstrap_period"], amount=Decimal("80.00"),
         )
         _db.session.commit()
@@ -873,7 +880,7 @@ class TestTheDowngradeRefusesADriftedTwin:
         )
         _db.session.commit()
         xfer = create_transfer(
-            seed_user, _db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_user["bootstrap_period"], amount=Decimal("90.00"),
         )
         _db.session.commit()
@@ -900,7 +907,7 @@ class TestTheDowngradeRefusesADriftedTwin:
         )
         _db.session.commit()
         xfer = create_transfer(
-            seed_user, _db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_user["bootstrap_period"], amount=Decimal("60.00"),
         )
         _db.session.commit()

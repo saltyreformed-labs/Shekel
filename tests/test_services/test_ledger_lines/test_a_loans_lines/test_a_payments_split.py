@@ -332,7 +332,7 @@ class TestAPaymentBooksItsSplit:
 
             # The row settled: the loan line -25.00.
             row = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[_P1], Decimal("25.00"),
+                seed_user, seed_periods[_P1], Decimal("25.00"),
                 account=loan,
                 settled_on=_loan_side_movement(xfer, loan).settled_on,
             )

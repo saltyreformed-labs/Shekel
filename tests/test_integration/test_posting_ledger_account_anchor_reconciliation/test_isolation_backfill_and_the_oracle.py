@@ -96,7 +96,7 @@ class TestScenarioAndOwnerIsolation:
             db.session.commit()
 
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("70.00"), account=checking, scenario=whatif,
                 settled_on=date(2026, 3, 3),
             )
@@ -133,11 +133,11 @@ class TestScenarioAndOwnerIsolation:
             db.session.commit()
 
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("40.00"), account=checking, scenario=baseline,
             )
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("70.00"), account=checking, scenario=whatif,
             )
             db.session.commit()
@@ -175,11 +175,11 @@ class TestScenarioAndOwnerIsolation:
             )
             db.session.commit()
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("60.00"), account=savings1,
             )
             create_settled_cash_transaction(
-                seed_second_user, db.session,
+                seed_second_user,
                 seed_second_user["bootstrap_period"],
                 Decimal("80.00"), account=savings2,
             )

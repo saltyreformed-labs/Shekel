@@ -119,19 +119,19 @@ class TestIncomeStatementCalendarWindow:
             checking = seed_user["account"]
             period = seed_user["bootstrap_period"]
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("2000.00"),
+                seed_user, period, Decimal("2000.00"),
                 account=checking, is_income=True,
                 category=seed_user["categories"]["Salary"],
                 settled_on=date(2026, 3, 10),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("300.00"),
+                seed_user, period, Decimal("300.00"),
                 account=checking,
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(2026, 3, 15),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("50.00"),
+                seed_user, period, Decimal("50.00"),
                 account=checking, category=None,
                 settled_on=date(2026, 3, 20),
             )
@@ -174,13 +174,13 @@ class TestIncomeStatementCalendarWindow:
             checking = seed_user["account"]
             period = seed_user["bootstrap_period"]
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("300.00"),
+                seed_user, period, Decimal("300.00"),
                 account=checking,
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(2026, 3, 15),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("800.00"),
+                seed_user, period, Decimal("800.00"),
                 account=checking, category=seed_user["categories"]["Rent"],
                 settled_on=date(2026, 4, 15),
             )
@@ -226,12 +226,12 @@ class TestIncomeStatementPayPeriodWindow:
             db.session.flush()
 
             create_settled_cash_transaction(
-                seed_user, db.session, period1, Decimal("100.00"),
+                seed_user, period1, Decimal("100.00"),
                 account=checking,
                 category=seed_user["categories"]["Groceries"],
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period2, Decimal("200.00"),
+                seed_user, period2, Decimal("200.00"),
                 account=checking, category=seed_user["categories"]["Rent"],
             )
             db.session.commit()
@@ -343,7 +343,7 @@ class TestDisplayTimezoneAttribution:
         with app.app_context():
             user_id = seed_user["user"].id
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("500.00"), account=seed_user["account"],
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(2026, 12, 31),
@@ -612,12 +612,12 @@ class TestBalanceSheetPosition:
             checking = seed_user["account"]
             period = seed_user["bootstrap_period"]
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("2000.00"),
+                seed_user, period, Decimal("2000.00"),
                 account=checking, is_income=True,
                 category=seed_user["categories"]["Salary"],
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("300.00"),
+                seed_user, period, Decimal("300.00"),
                 account=checking,
                 category=seed_user["categories"]["Groceries"],
             )
@@ -684,7 +684,7 @@ class TestBalanceSheetPosition:
         with app.app_context():
             user_id = seed_user["user"].id
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("100.00"), account=seed_user["account"],
                 category=seed_user["categories"]["Groceries"],
                 settled_on=_RIDES_ON_TOP,
@@ -756,7 +756,7 @@ class TestDisplayLabels:
         with app.app_context():
             user_id = seed_user["user"].id
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("100.00"), account=seed_user["account"],
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(2026, 3, 15),
@@ -805,7 +805,7 @@ class TestDisplayLabels:
             db.session.add(doomed)
             db.session.flush()
             txn = create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("100.00"),
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(2026, 3, 15),

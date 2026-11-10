@@ -47,7 +47,7 @@ class TestEachKindOfRecordMakesALine:
             account = _empty_account(seed_user)
             assert accounts_hold_lines([account]) is False
             create_settled_cash_transaction(
-                seed_user, _db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("70.00"), account=account,
                 category=seed_user["categories"]["Groceries"],
             )
@@ -115,7 +115,7 @@ class TestALineMustBeTheAccountsOwn:
             _db.session.add(category)
             _db.session.flush()
             create_settled_cash_transaction(
-                seed_user, _db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("70.00"), category=category,
             )
             assert accounts_hold_lines([account]) is False
@@ -134,7 +134,7 @@ class TestEveryScenarioIsAsked:
             _db.session.add(whatif)
             _db.session.flush()
             create_settled_cash_transaction(
-                seed_user, _db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("70.00"), account=account, scenario=whatif,
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(2024, 1, 5),

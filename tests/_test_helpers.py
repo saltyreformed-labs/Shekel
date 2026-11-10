@@ -2879,7 +2879,7 @@ def seam_cash_balance_at(account, scenario_id, as_of):
 
 
 def create_transfer(
-    seed_user, db_session, from_account, to_account, period,
+    seed_user, from_account, to_account, period,
     amount=Decimal("100.00"), *, due_date=None, name=None, scenario=None,
 ):
     """Create a PROJECTED transfer via the real service; it is one row.
@@ -2898,13 +2898,13 @@ def create_transfer(
     the write is even allowed (ruling R-C, plan step C9b) and which installment
     the fold splits it against.
 
-    Flushes via the service; the caller commits.
+    Flushes via the service; the caller commits.  It took the test
+    ``db.session`` as its second argument until plan task plan#3084, and read
+    nothing of it: the service owns the session.
 
     Args:
         seed_user: The ``seed_user`` fixture dict (supplies ``user_id`` and the
             baseline scenario).
-        db_session: The test ``db.session`` (unused directly -- the service owns
-            the session -- but accepted so call sites read uniformly).
         from_account: The account money leaves (the from-side).
         to_account: The account money enters (the to-side).
         period: The :class:`~app.models.pay_period.PayPeriod` to place the
@@ -3045,7 +3045,7 @@ def create_settled_transfer(
     from app.services.transfer_service import _status as transfer_status
 
     transfer = create_transfer(
-        seed_user, db_session, from_account, to_account, period,
+        seed_user, from_account, to_account, period,
         amount=amount, name=name, scenario=scenario, due_date=due_date,
     )
     update_kwargs = {"status_id": ref_cache.status_id(StatusEnum.DONE)}
@@ -3092,7 +3092,7 @@ def create_settled_transfer(
 
 
 def create_settled_cash_transaction(  # pylint: disable=too-many-arguments
-    seed_user, db_session, period, amount,
+    seed_user, period, amount,
     *, account=None, scenario=None, is_income=False,
     category=None, settled_amount=None, name="Cash Txn",
     settled_on=_UNSET_SETTLED_ON,
@@ -3110,12 +3110,12 @@ def create_settled_cash_transaction(  # pylint: disable=too-many-arguments
     dated), exactly as production produces it when a user marks a
     transaction Paid / Received.
 
-    Flushes; the caller commits.
+    Flushes; the caller commits.  It took the test ``db.session`` as its
+    second argument until plan task plan#3084, and read nothing of it.
 
     Args:
         seed_user: The ``seed_user`` (or ``seed_second_user``) fixture dict --
             supplies the default account / scenario and the owning ``user_id``.
-        db_session: The test ``db.session``.
         period: The :class:`~app.models.pay_period.PayPeriod` to place the
             transaction in.
         amount: The definition's price (Decimal) -- the confirmed effect when
@@ -4034,10 +4034,9 @@ def transfer_side_record(db_session, transfer_id, account_id):
     ruling **R-BAL88**): it hangs off the TRANSFER by ``expense_transfer_id``
     / ``income_transfer_id``, on its endpoint, at most one per side.  It hung
     off the side's shadow row until then (``shadow.covering_movements``).
-    The row-shaped twin of :func:`transfer_side_journal_filter`, and
-    independent SQL over the side links for that helper's reason (ruling
-    **R-BAL167** class 4): a test reading a side's record through
-    ``transfer_legs``, the producer it grades, could not catch its fault.
+    Independent SQL over the side links (ruling **R-BAL167** class 4): a test
+    reading a side's record through ``transfer_legs``, the producer it
+    grades, could not catch its fault.
 
     Args:
         db_session: The test ``db.session``.
@@ -4348,40 +4347,6 @@ def add_txn(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     if settled_on is not None:
         cover_bare_settled_row(db_session, txn, amount, settled_amount)
     return txn
-
-
-def independent_settled_figure():
-    """Return a SQL expression for a row's settled figure, spelled independently.
-
-    **An oracle's spelling of the record, for the integration suites that
-    reconcile the posted ledger against the transaction source of truth**
-    (``test_posting_ledger_*_reconciliation``).  The record is the row's
-    entries since plan step ``balance:X-bi-4b-2`` deleted the row's own
-    ``settled_amount`` (ruling **R-BAL80**), which those oracles read through
-    ``COALESCE(settled_amount, estimated_amount)`` before; the app's own SQL
-    twin was ``posting_reads.settled_figure_clause`` until plan task plan#3133
-    deleted it, and an oracle calling it graded one producer against itself,
-    so this is a spelling of its own ON PURPOSE -- a correlated sum over
-    ``budget.transaction_entries`` written here, and nowhere in ``app/``.  ``COALESCE`` to
-    zero: a settled row with no entry is the ``$0.00`` record (R-BAL82).
-
-    Returns:
-        A correlated scalar subquery over :class:`TransactionEntry`, to be
-        used inside a query whose FROM clause holds ``Transaction``.
-    """
-    # pylint: disable=import-outside-toplevel  -- the module convention.
-    from sqlalchemy import func, select
-
-    from app.models.transaction import Transaction
-    from app.models.transaction_entry import TransactionEntry
-
-    total = (
-        select(func.sum(TransactionEntry.amount))
-        .where(TransactionEntry.transaction_id == Transaction.id)
-        .correlate(Transaction)
-        .scalar_subquery()
-    )
-    return func.coalesce(total, Decimal("0"))
 
 
 def cover_bare_settled_row(db_session, txn, amount, submitted=None):
@@ -7317,10 +7282,9 @@ def capture_sql_statements(fn):
 
     The statement-capture idiom the advisory-lock suites grade against: it is
     the only way to assert, at the unit level, that a given path DOES or does
-    NOT take a lock, and -- since plan step X-f1c3c -- that it takes it BEFORE
-    the read it protects.  Ordering is the half a presence check cannot see: a
-    lock taken after the reconcile has already read what is posted serialises
-    nothing.
+    NOT take a lock.  *It graded the ORDER too, the lock taken before the read
+    it protects, through ``advisory_lock_precedes``, which plan task plan#3084
+    deleted once no test called it.*
 
     It lived as a private ``_capture_statements`` in
     ``tests/test_services/test_pay_period_topup.py`` until the ledger reconciles
@@ -7409,44 +7373,6 @@ def advisory_lock_keys(statements):
             values = list(params or ())
         keys.append(tuple(values))
     return keys
-
-
-def advisory_lock_precedes(statements, *table_names):
-    """Return whether the write lock was taken BEFORE any of *table_names* was read.
-
-    The ordering half of the lock assertion.  A reconcile that takes its lock
-    after reading what is posted has serialised nothing: the second transaction
-    has already read the same pre-state and will compute the same delta against
-    it.  Grading presence alone would pass such a build.
-
-    Args:
-        statements: The statement list from :func:`capture_sql_statements`.
-        *table_names: Substrings identifying the tables whose first read must
-            come after the lock, e.g. ``"journal_entries"``.  Matched as
-            substrings of the emitted SQL, so a bare table name is enough and a
-            schema-qualified one also works.
-
-    Returns:
-        ``True`` when a ``pg_advisory_xact_lock`` statement is emitted and every
-        named table's FIRST appearance is at a later index; ``False`` when the
-        lock is absent, or when any named table was read first.  A table that
-        is never read does not falsify the ordering -- there is nothing to
-        order against -- so callers assert the read happened separately.
-    """
-    texts = [text for text, _params in statements]
-    lock_at = next(
-        (i for i, text in enumerate(texts) if "pg_advisory_xact_lock" in text),
-        None,
-    )
-    if lock_at is None:
-        return False
-    for table in table_names:
-        read_at = next(
-            (i for i, text in enumerate(texts) if table in text), None,
-        )
-        if read_at is not None and read_at < lock_at:
-            return False
-    return True
 
 
 #: How long an acquisition the test EXPECTS to be blocked waits before

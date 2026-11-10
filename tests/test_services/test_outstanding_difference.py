@@ -82,11 +82,11 @@ def _difference(seed_user, account=None):
 
 
 def _settle(
-    seed_user, db, period, amount, day, *, is_income=False, account=None,
+    seed_user, period, amount, day, *, is_income=False, account=None,
 ):
     """Settle one ordinary cash row on *day* through the production door."""
     return create_settled_cash_transaction(
-        seed_user, db.session, period, Decimal(str(amount)),
+        seed_user, period, Decimal(str(amount)),
         is_income=is_income, settled_on=day, name=f"row {day}",
         account=account,
     )
@@ -204,7 +204,7 @@ class TestTheFigureIsTheDeclarationLessTheBooks:
         recorded put there.
         """
         with app.app_context():
-            _settle(seed_user, db, seed_periods[4], "150.00", date(2026, 3, 3))
+            _settle(seed_user, seed_periods[4], "150.00", date(2026, 3, 3))
             _assert_balance(
                 seed_user, db, "1000.00", date(2026, 3, 3),
             )
@@ -251,12 +251,12 @@ class TestTheFigureIsTheDeclarationLessTheBooks:
         difference stays ``$150.00`` rather than becoming ``-$150.00``.
         """
         with app.app_context():
-            _settle(seed_user, db, seed_periods[4], "150.00", date(2026, 3, 3))
+            _settle(seed_user, seed_periods[4], "150.00", date(2026, 3, 3))
             _assert_balance(
                 seed_user, db, "1000.00", date(2026, 3, 3),
             )
             _settle(
-                seed_user, db, seed_periods[5], "300.00", date(2026, 3, 16),
+                seed_user, seed_periods[5], "300.00", date(2026, 3, 16),
                 is_income=True,
             )
             db.session.commit()
@@ -297,12 +297,12 @@ class TestItIsOneFigureAndNotThePerAssertionPlug:
         ``+$1,000.00``.
         """
         with app.app_context():
-            _settle(seed_user, db, seed_periods[4], "500.00", date(2026, 3, 2))
+            _settle(seed_user, seed_periods[4], "500.00", date(2026, 3, 2))
             _assert_balance(
                 seed_user, db, "1500.00", date(2026, 3, 2),
             )
             _settle(
-                seed_user, db, seed_periods[4], "200.00", date(2026, 3, 4),
+                seed_user, seed_periods[4], "200.00", date(2026, 3, 4),
                 is_income=True,
             )
             _assert_balance(
@@ -338,7 +338,7 @@ class TestTheBooksSideIsNotTheShippingFOLD:
         ``opening + SUM(postings)``, which on this day is ``$150.00`` lower.
         """
         with app.app_context():
-            _settle(seed_user, db, seed_periods[4], "150.00", date(2026, 3, 3))
+            _settle(seed_user, seed_periods[4], "150.00", date(2026, 3, 3))
             _assert_balance(
                 seed_user, db, "1000.00", date(2026, 3, 3),
             )
@@ -420,7 +420,7 @@ class TestTheFigureIsScopedToItsOwnAccount:
         foreign account where it memoizes.
         """
         with app.app_context():
-            _settle(seed_user, db, seed_periods[4], "150.00", date(2026, 3, 3))
+            _settle(seed_user, seed_periods[4], "150.00", date(2026, 3, 3))
             _assert_balance(
                 seed_user, db, "1000.00", date(2026, 3, 3),
             )
@@ -501,11 +501,11 @@ class TestWhetherAStatementReconcilesTheSPAN:
                        (date(2026, 3, 4), "-25.00")],
             )
             _settle(
-                seed_user, db, seed_periods[4], "50.00", date(2026, 3, 2),
+                seed_user, seed_periods[4], "50.00", date(2026, 3, 2),
                 account=account,
             )
             _settle(
-                seed_user, db, seed_periods[4], "25.00", date(2026, 3, 4),
+                seed_user, seed_periods[4], "25.00", date(2026, 3, 4),
                 account=account,
             )
             _assert_balance(
@@ -545,15 +545,15 @@ class TestWhetherAStatementReconcilesTheSPAN:
                        (date(2026, 3, 4), "-25.00")],
             )
             _settle(
-                seed_user, db, seed_periods[4], "50.00", date(2026, 3, 2),
+                seed_user, seed_periods[4], "50.00", date(2026, 3, 2),
                 account=account,
             )
             _settle(
-                seed_user, db, seed_periods[4], "10.00", date(2026, 3, 3),
+                seed_user, seed_periods[4], "10.00", date(2026, 3, 3),
                 account=account,
             )
             _settle(
-                seed_user, db, seed_periods[4], "25.00", date(2026, 3, 4),
+                seed_user, seed_periods[4], "25.00", date(2026, 3, 4),
                 account=account,
             )
             _assert_balance(
@@ -614,7 +614,7 @@ class TestWhetherAStatementReconcilesTheSPAN:
                 (date(2026, 3, 5), "25.00"), (date(2026, 3, 6), "10.00"),
             ):
                 _settle(
-                    seed_user, db, seed_periods[4], amount, day,
+                    seed_user, seed_periods[4], amount, day,
                     account=account,
                 )
             _assert_balance(
@@ -671,7 +671,7 @@ class TestWhetherAStatementReconcilesTheSPAN:
                        (date(2026, 3, 19), "-15.00")],
             )
             _settle(
-                seed_user, db, seed_periods[5], "15.00", date(2026, 3, 19),
+                seed_user, seed_periods[5], "15.00", date(2026, 3, 19),
                 account=late,
             )
             db.session.commit()
@@ -726,8 +726,8 @@ class TestWhetherAStatementReconcilesTheSPAN:
                        (date(2026, 3, 2), "-50.00"),
                        (date(2026, 3, 3), "-25.00")],
             )
-            _settle(seed_user, db, seed_periods[4], "50.00", date(2026, 3, 2))
-            _settle(seed_user, db, seed_periods[4], "25.00", date(2026, 3, 3))
+            _settle(seed_user, seed_periods[4], "50.00", date(2026, 3, 2))
+            _settle(seed_user, seed_periods[4], "25.00", date(2026, 3, 3))
             db.session.commit()
 
             over = _resolved(seed_user).reconciliation
@@ -794,7 +794,7 @@ class TestWhetherAStatementReconcilesTheSPAN:
         the first would tell an owner their books had been checked.
         """
         with app.app_context():
-            _settle(seed_user, db, seed_periods[4], "150.00", date(2026, 3, 3))
+            _settle(seed_user, seed_periods[4], "150.00", date(2026, 3, 3))
             _assert_balance(
                 seed_user, db, "1000.00", date(2026, 3, 3),
             )
@@ -870,7 +870,7 @@ class TestTheStatesADVERSARIALReviewAskedFor:
         not ``$50.00``.
         """
         with app.app_context():
-            _settle(seed_user, db, seed_periods[4], "150.00", date(2026, 3, 3))
+            _settle(seed_user, seed_periods[4], "150.00", date(2026, 3, 3))
             _assert_balance(
                 seed_user, db, "900.00", date(2026, 3, 3),
             )
@@ -914,7 +914,7 @@ class TestTheStatesADVERSARIALReviewAskedFor:
                 anchor_balance=Decimal("-200.00"),
             )
             _settle(
-                seed_user, db, seed_periods[5], "50.00", date(2026, 3, 20),
+                seed_user, seed_periods[5], "50.00", date(2026, 3, 20),
                 account=card,
             )
             _assert_balance(

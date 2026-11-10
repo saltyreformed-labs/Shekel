@@ -159,7 +159,7 @@ class TestTheRulingsWorkedExample:
             rows.append((seed_periods[4], "120.00", date(2026, 3, 5)))
         rows.append((seed_periods[6], "5.00", date(2026, 3, 31)))
         for period, amount, day in rows:
-            _settle(seed_user, db, period, amount, day, account=account)
+            _settle(seed_user, period, amount, day, account=account)
         _assert_balance(
             seed_user, db, "475.00" if reconciled else "480.00",
             date(2026, 3, 31), account=account,
@@ -355,7 +355,7 @@ class TestDaysNoStatementCovers:
                 (date(2026, 3, 5), "25.00"), (date(2026, 3, 6), "10.00"),
             ):
                 _settle(
-                    seed_user, db, seed_periods[4], amount, day,
+                    seed_user, seed_periods[4], amount, day,
                     account=account,
                 )
             _assert_balance(
@@ -428,7 +428,7 @@ class TestEveryImportedDayTheBooksCoverIsCompared:
                        (date(2026, 3, 19), "-15.00")],
             )
             _settle(
-                seed_user, db, seed_periods[5], "15.00", date(2026, 3, 19),
+                seed_user, seed_periods[5], "15.00", date(2026, 3, 19),
                 account=late,
             )
             db.session.commit()
@@ -481,11 +481,11 @@ class TestEveryImportedDayTheBooksCoverIsCompared:
                        (date(2026, 3, 19), "-15.00")],
             )
             _settle(
-                seed_user, db, seed_periods[0], "40.00", date(2026, 1, 10),
+                seed_user, seed_periods[0], "40.00", date(2026, 1, 10),
                 account=late,
             )
             _settle(
-                seed_user, db, seed_periods[5], "15.00", date(2026, 3, 19),
+                seed_user, seed_periods[5], "15.00", date(2026, 3, 19),
                 account=late,
             )
             db.session.commit()
@@ -529,7 +529,7 @@ class TestEveryImportedDayTheBooksCoverIsCompared:
                        (date(2026, 2, 4), "-40.00")],
             )
             _settle(
-                seed_user, db, seed_periods[2], "40.00", date(2026, 2, 4),
+                seed_user, seed_periods[2], "40.00", date(2026, 2, 4),
                 account=account,
             )
             _assert_balance(
@@ -690,7 +690,7 @@ class TestNoListWhereThereIsNoVerdict:
     ):
         """Nobody imported a statement: an absence, not an empty list."""
         with app.app_context():
-            _settle(seed_user, db, seed_periods[4], "150.00", date(2026, 3, 3))
+            _settle(seed_user, seed_periods[4], "150.00", date(2026, 3, 3))
             _assert_balance(seed_user, db, "1000.00", date(2026, 3, 3))
             db.session.commit()
 

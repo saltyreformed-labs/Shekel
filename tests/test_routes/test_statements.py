@@ -1893,7 +1893,7 @@ class TestTheDeletePost:
         _upload(auth_client, seed_user["account"].id, _payload())
         line = db.session.query(BankStatementLine).first()
         txn = create_settled_cash_transaction(
-            seed_user, db.session, seed_user["bootstrap_period"],
+            seed_user, seed_user["bootstrap_period"],
             Decimal("25.00"), settled_on=line.posted_on, name="Coffee",
         )
         db.session.flush()

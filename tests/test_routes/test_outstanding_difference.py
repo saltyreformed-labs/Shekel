@@ -50,7 +50,7 @@ def _build_a_difference(seed_user, seed_periods):
     ``1000.00``.  Outstanding difference: ``$150.00``.
     """
     create_settled_cash_transaction(
-        seed_user, db.session, seed_periods[4], Decimal("150.00"),
+        seed_user, seed_periods[4], Decimal("150.00"),
         settled_on=_ON, name="Groceries",
     )
     append_balance_assertion(
@@ -86,7 +86,7 @@ def _reconciled_account(seed_user, seed_periods):
         lines=[(date(2026, 3, 2), "-50.00")],
     )
     create_settled_cash_transaction(
-        seed_user, db.session, seed_periods[4], Decimal("50.00"),
+        seed_user, seed_periods[4], Decimal("50.00"),
         settled_on=date(2026, 3, 2), name="Groceries", account=account,
     )
     append_balance_assertion(
@@ -344,7 +344,7 @@ class TestTheFooterSaysWhatHasCheckedTheDays:
         with app.app_context():
             account = _reconciled_account(seed_user, seed_periods)
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[4], Decimal("10.00"),
+                seed_user, seed_periods[4], Decimal("10.00"),
                 settled_on=date(2026, 3, 2), name="Cash out", account=account,
             )
             db.session.commit()
@@ -397,7 +397,7 @@ class TestTheFooterSaysWhatHasCheckedTheDays:
                 (date(2026, 3, 5), "25.00"), (date(2026, 3, 6), "10.00"),
             ):
                 create_settled_cash_transaction(
-                    seed_user, db.session, seed_periods[4], Decimal(amount),
+                    seed_user, seed_periods[4], Decimal(amount),
                     settled_on=day, name=f"row {day}", account=account,
                 )
             append_balance_assertion(
@@ -451,7 +451,7 @@ class TestTheFooterSaysWhatHasCheckedTheDays:
             for day, amount in ((date(2026, 3, 2), "50.00"),
                                 (date(2026, 3, 3), "25.00")):
                 create_settled_cash_transaction(
-                    seed_user, db.session, seed_periods[4], Decimal(amount),
+                    seed_user, seed_periods[4], Decimal(amount),
                     settled_on=day, name=f"row {day}",
                 )
             db.session.commit()

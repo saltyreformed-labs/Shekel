@@ -241,7 +241,7 @@ class TestACardGoalKeepsTheStartItRecorded:
                 start_owed=Decimal("1200.00"),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[3], Decimal("300.00"),
+                seed_user, seed_periods[3], Decimal("300.00"),
                 account=visa, is_income=True, name="Card payment",
                 settled_on=date(2026, 2, 20),
             )
@@ -454,7 +454,7 @@ class TestTheProjectedDateIsTheTilesFirstDayUnder:
         with app.app_context():
             loan = _zero_rate_loan(seed_user)
             create_transfer(
-                seed_user, db.session, seed_user["account"], loan,
+                seed_user, seed_user["account"], loan,
                 seed_periods[4], amount=Decimal("1000.00"),
                 due_date=date(2026, 3, 1),
             )

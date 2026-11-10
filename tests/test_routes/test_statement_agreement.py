@@ -298,9 +298,9 @@ class TestThePageReportsForItsOwner:
             db, late, lines=[(date(2026, 1, 20), "-15.00")],
             file_name="b.csv",
         )
-        _settle(seed_user, db, seed_periods[0], "30.00", date(2026, 1, 10),
+        _settle(seed_user, seed_periods[0], "30.00", date(2026, 1, 10),
                 account=late)
-        _settle(seed_user, db, seed_periods[1], "15.00", date(2026, 1, 20),
+        _settle(seed_user, seed_periods[1], "15.00", date(2026, 1, 20),
                 account=late)
         db.session.commit()
 
@@ -848,7 +848,7 @@ class TestRecordsPastTheLastStatementAreListed:
             effective_on=date(2026, 2, 2), evidence=_FILE_CHAIN,
             lines=[(date(2026, 2, 2), "-20.00")],
         )
-        _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 2, 15))
+        _settle(seed_user, seed_periods[4], "40.00", date(2026, 2, 15))
         db.session.commit()
 
         body = auth_client.get(_url(seed_user["account"].id)).data.decode()

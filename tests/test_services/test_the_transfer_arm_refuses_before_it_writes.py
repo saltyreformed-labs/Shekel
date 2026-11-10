@@ -108,11 +108,11 @@ def _transfer(seed_user, *, due_date=None):
     """
     savings = _account(seed_user, "Savings", "Cp2b Savings")
     create_transfer(
-        seed_user, db.session, seed_user["account"], savings,
+        seed_user, seed_user["account"], savings,
         seed_user["bootstrap_period"], Decimal("7.00"),
     )
     xfer = create_transfer(
-        seed_user, db.session, seed_user["account"], savings,
+        seed_user, seed_user["account"], savings,
         seed_user["bootstrap_period"], _AMOUNT, due_date=due_date,
     )
     db.session.commit()
@@ -592,7 +592,7 @@ class TestTheBandRuleRefusesAWriterAroundTheDoors:
             xfer = _transfer(seed_user)
             owner = _owner(seed_user)
             other = create_transfer(
-                seed_user, db.session, seed_user["account"],
+                seed_user, seed_user["account"],
                 db.session.get(Transfer, xfer.id).to_account,
                 seed_user["bootstrap_period"], Decimal("9.00"),
             )

@@ -74,7 +74,7 @@ def _closed_at_zero(seed_user, session, period):
     checking = seed_user["account"]
     savings = _savings(seed_user)
     closed = create_transfer(
-        seed_user, session, checking, savings, period, amount=_AMOUNT,
+        seed_user, checking, savings, period, amount=_AMOUNT,
     )
     session.commit()
     settle_transfer(
@@ -124,7 +124,7 @@ class TestALegsRecordIsItsCoveringMovement:
                 settled_on=date(2026, 2, 3),
             )
             projected = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[3],
+                seed_user, checking, savings, seed_periods[3],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -216,7 +216,7 @@ class TestTheGridLoaderDrawsTheSetsSide:
             checking = seed_user["account"]
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -240,7 +240,7 @@ class TestTheGridLoaderDrawsTheSetsSide:
             checking = seed_user["account"]
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             elsewhere = _savings(seed_user, name="Elsewhere")
@@ -280,7 +280,7 @@ class TestTheGridLoaderDrawsTheSetsSide:
             card_a = _savings(seed_user, name="Card A")
             card_b = _savings(seed_user, name="Card B")
             payment = create_transfer(
-                seed_user, db.session, checking, card_b, seed_periods[2],
+                seed_user, checking, card_b, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -304,7 +304,7 @@ class TestTheLegMapProducers:
             checking = seed_user["account"]
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -442,7 +442,7 @@ class TestALegIsValuedAsItsParent:
             checking = seed_user["account"]
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -566,7 +566,7 @@ class TestALegsSettleDayAndTimeliness:
             checking = seed_user["account"]
             savings = _savings(seed_user)
             planned = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT, due_date=date(2026, 2, 6),
             )
             undated = create_settled_transfer(
@@ -600,11 +600,11 @@ class TestTheSetsTransferHalf:
             savings = _savings(seed_user)
             other = _savings(seed_user, name="Other")
             touching = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             elsewhere = create_transfer(
-                seed_user, db.session, savings, other, seed_periods[2],
+                seed_user, savings, other, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -639,7 +639,7 @@ class TestTheSetsTransferHalf:
                 transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
             )
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -669,7 +669,7 @@ class TestTheSetsTransferHalf:
             checking = seed_user["account"]
             card = _savings(seed_user, name="Card")
             payment = create_transfer(
-                seed_user, db.session, checking, card, seed_periods[2],
+                seed_user, checking, card, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -703,11 +703,11 @@ class TestTheSetsTransferHalf:
             )
             savings = _savings(seed_user)
             into_card = create_transfer(
-                seed_user, db.session, savings, card, seed_periods[2],
+                seed_user, savings, card, seed_periods[2],
                 amount=Decimal("300.00"),
             )
             into_savings = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -738,11 +738,11 @@ class TestTheSetsTransferHalf:
             checking = seed_user["account"]
             savings = _savings(seed_user)
             in_window = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[4],
+                seed_user, checking, savings, seed_periods[4],
                 amount=_AMOUNT,
             )
             # A second endpoint: ``uq_transfers_adhoc_dedupe`` refuses two

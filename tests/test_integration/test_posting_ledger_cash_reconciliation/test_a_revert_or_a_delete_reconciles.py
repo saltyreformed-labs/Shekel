@@ -236,7 +236,7 @@ class TestRevertedTransactionReconcilesAtZero:
             period = seed_user["bootstrap_period"]
 
             txn = create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("50.00"),
+                seed_user, period, Decimal("50.00"),
                 category=seed_user["categories"]["Groceries"],
             )
             db.session.commit()

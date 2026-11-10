@@ -106,7 +106,7 @@ class TestMoneyDatedInsideTheHead:
         )
         open_books_before_the_first_assertion(_db.session, savings)
         xfer = create_transfer(
-            seed_user, _db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_periods[0], amount=Decimal("300.00"), due_date=due_date,
         )
         _db.session.commit()

@@ -587,7 +587,7 @@ class TestTheChargeCalendarIsTheContracts:
             if p.covers(date(2026, 5, 20))
         )
         create_transfer(
-            seed_user, db.session, seed_user["account"], account,
+            seed_user, seed_user["account"], account,
             db.session.get(PayPeriod, may.period_id),
             amount=Decimal("2000.00"), due_date=date(2026, 5, 20),
         )
@@ -692,7 +692,7 @@ class TestTheChargeCalendarIsTheContracts:
             amount=_LEVEL, settled_on=date(2026, 4, 1), due_date=date(2026, 4, 1),
         )
         create_transfer(
-            seed_user, db.session, seed_user["account"], account,
+            seed_user, seed_user["account"], account,
             db.session.get(
                 PayPeriod, calendar.span_containing(date(2026, 4, 10)).period_id,
             ),

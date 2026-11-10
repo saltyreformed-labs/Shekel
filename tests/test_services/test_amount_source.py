@@ -985,7 +985,7 @@ class TestWhatEachRuleAnswers:
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
         xfer = create_transfer(
-            seed_user, db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_periods[0], amount=Decimal("75.00"),
         )
         expense_leg, _income_leg = _legs_of(xfer)
@@ -1006,7 +1006,7 @@ class TestTheTransferRule:
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
         xfer = create_transfer(
-            seed_user, db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_periods[0], amount=Decimal("75.00"),
         )
         assert resolve_transfer_amount(xfer, _basis_for(seed_user)) == Decimal("75.00")
@@ -1212,7 +1212,7 @@ class TestEveryRefusalFires:
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
         xfer = create_transfer(
-            seed_user, db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_periods[0], amount=Decimal("75.00"),
         )
         with db.session.no_autoflush:

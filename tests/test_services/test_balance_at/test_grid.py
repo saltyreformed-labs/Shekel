@@ -890,7 +890,7 @@ class TestTheRemainderIsWhatTheRowsCannotExplain:
             periods = all_periods(user_id)
             account = seed_user["account"]
             create_settled_cash_transaction(
-                seed_user, db.session, periods[1], Decimal("300.00"),
+                seed_user, periods[1], Decimal("300.00"),
                 settled_on=periods[3].start_date,
                 name="paid two columns late",
             )

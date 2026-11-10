@@ -1523,7 +1523,7 @@ class TestTheReportReadsTheCashFlowSet:
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )
             out_of_card = create_transfer(
-                seed_user, db.session, helper, seed_user["account"],
+                seed_user, helper, seed_user["account"],
                 seed_periods[0], amount=Decimal("40.00"),
             )
             db.session.flush()
@@ -1611,7 +1611,7 @@ class TestATransferIsALegOfItsParent:
             # A still-planned transfer is not spend; a settled transfer INTO
             # checking is its income leg on this set, not spend either.
             create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[0],
+                seed_user, checking, savings, seed_periods[0],
                 amount=Decimal("75.00"),
             )
             create_settled_transfer(
@@ -1709,7 +1709,7 @@ class TestATransferIsALegOfItsParent:
                 amount=Decimal("250.00"), settled_amount=Decimal("240.00"),
             )
             planned = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[1],
+                seed_user, checking, savings, seed_periods[1],
                 amount=Decimal("75.00"),
             )
             db.session.commit()

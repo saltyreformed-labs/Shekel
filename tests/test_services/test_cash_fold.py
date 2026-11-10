@@ -301,7 +301,7 @@ class TestTheOpeningEquityIsTheSeed:
         db.session.flush()
         with pytest.raises(ValidationError) as exc:
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("500.00"),
+                seed_user, seed_periods[0], Decimal("500.00"),
                 settled_on=date(2026, 1, 15), name="pre-opening",
             )
         message = str(exc.value)
@@ -336,7 +336,7 @@ class TestTheOpeningEquityIsTheSeed:
         db.session.flush()
         with pytest.raises(ValidationError):
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("500.00"),
+                seed_user, seed_periods[0], Decimal("500.00"),
                 settled_on=date(2026, 1, 31), name="on-the-opening-day",
             )
         db.session.rollback()
@@ -344,7 +344,7 @@ class TestTheOpeningEquityIsTheSeed:
             account, _instant(2026, 2, 1), books_open_on=date(2026, 1, 31),
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("500.00"),
+            seed_user, seed_periods[0], Decimal("500.00"),
             settled_on=date(2026, 2, 1), name="the-first-recordable-day",
         )
         db.session.commit()
@@ -391,7 +391,7 @@ class TestTheOpeningEquityIsTheSeed:
             (Decimal("1500.00"), 23, False),
         ):
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[7], amount,
+                seed_user, seed_periods[7], amount,
                 account=account, is_income=is_income,
                 settled_on=date(2026, 4, day), name=f"apr-{day}",
             )
@@ -446,7 +446,7 @@ class TestTheOpeningEquityIsTheSeed:
         )
         _opened_at(account, _instant(2026, 3, 26))
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[6], Decimal("500.00"),
+            seed_user, seed_periods[6], Decimal("500.00"),
             account=account, is_income=True,
             settled_on=date(2026, 3, 27), name="deposit",
         )
@@ -498,7 +498,7 @@ class TestTheOpeningEquityIsTheSeed:
         account, scenario = seed_user["account"], seed_user["scenario"]
         _opened_at(account, _instant(2026, 2, 1), books_open_on=_BOOKS_OPEN_ON)
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("500.00"),
+            seed_user, seed_periods[0], Decimal("500.00"),
             settled_on=date(2026, 1, 15), name="between-books-and-assertion",
         )
         append_balance_assertion(
@@ -506,7 +506,7 @@ class TestTheOpeningEquityIsTheSeed:
             _instant(2026, 3, 1),
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[6], Decimal("250.00"),
+            seed_user, seed_periods[6], Decimal("250.00"),
             settled_on=date(2026, 4, 1), name="post",
         )
         db.session.commit()
@@ -645,7 +645,7 @@ class TestSettledMoneyRidesOnTheAssertionItFollowed:
         account, scenario = seed_user["account"], seed_user["scenario"]
         _opened_at(account, _instant(2026, 1, 1))
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[4], Decimal("50.00"),
+            seed_user, seed_periods[4], Decimal("50.00"),
             settled_on=date(2026, 3, 1), name="earlier",
         )
         append_balance_assertion(
@@ -679,7 +679,7 @@ class TestSettledMoneyRidesOnTheAssertionItFollowed:
         account, scenario = seed_user["account"], seed_user["scenario"]
         _opened_at(account, _instant(2026, 1, 1))
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[4], Decimal("40.00"),
+            seed_user, seed_periods[4], Decimal("40.00"),
             settled_on=date(2026, 3, 1), name="before",
         )
         append_balance_assertion(
@@ -687,7 +687,7 @@ class TestSettledMoneyRidesOnTheAssertionItFollowed:
             _instant(2026, 3, 1, 12, 57, 8),
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[4], Decimal("60.00"),
+            seed_user, seed_periods[4], Decimal("60.00"),
             settled_on=date(2026, 3, 1), name="after",
         )
         db.session.commit()
@@ -719,7 +719,7 @@ class TestEveryAssertionIsReplayed:
         account, scenario = seed_user["account"], seed_user["scenario"]
         _opened_at(account, _instant(2026, 1, 1))
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[2], Decimal("200.00"),
+            seed_user, seed_periods[2], Decimal("200.00"),
             settled_on=date(2026, 2, 1), name="feb spend",
         )
         append_balance_assertion(
@@ -727,7 +727,7 @@ class TestEveryAssertionIsReplayed:
             _instant(2026, 3, 1),
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[6], Decimal("300.00"),
+            seed_user, seed_periods[6], Decimal("300.00"),
             settled_on=date(2026, 4, 1), name="apr spend",
         )
         append_balance_assertion(
@@ -785,7 +785,7 @@ class TestThePlannedTier:
             _instant(2026, 4, 2, 12, 57, 8),
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[6], Decimal("108.15"),
+            seed_user, seed_periods[6], Decimal("108.15"),
             settled_on=date(2026, 4, 2), name="settled late",
         )
         add_txn(
@@ -1170,7 +1170,7 @@ class TestTotality:
         account, scenario = seed_user["account"], seed_user["scenario"]
         _opened_at(account, _instant(2026, 2, 1), books_open_on=_BOOKS_OPEN_ON)
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("500.00"),
+            seed_user, seed_periods[0], Decimal("500.00"),
             settled_on=date(2026, 1, 15), name="between-books-and-assertion",
         )
         db.session.commit()
@@ -1267,7 +1267,7 @@ class TestTotality:
         )
         _opened_at(card, _instant(2026, 1, 1))
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[4], Decimal("75.00"),
+            seed_user, seed_periods[4], Decimal("75.00"),
             account=card, settled_on=date(2026, 3, 1), name="charge",
         )
         db.session.commit()
@@ -1471,11 +1471,11 @@ def _build_drift_shape(db_session, seed_user, periods):
         period = periods[index]
         income_day, expense_day = _drift_settle_days(period, index)
         create_settled_cash_transaction(
-            seed_user, db_session, period, _DRIFT_INCOME, is_income=True,
+            seed_user, period, _DRIFT_INCOME, is_income=True,
             name=f"paycheck p{index}", settled_on=income_day,
         )
         create_settled_cash_transaction(
-            seed_user, db_session, period, _DRIFT_EXPENSE,
+            seed_user, period, _DRIFT_EXPENSE,
             name=f"rent p{index}", settled_on=expense_day,
             settled_amount=(
                 _DRIFT_ACTUAL_EXPENSE if index == _DRIFT_ACTUAL_INDEX else None

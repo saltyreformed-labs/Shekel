@@ -91,7 +91,7 @@ class TestTheTransferArm:
         since then (ruling R-BAL167 class 4).
         """
         transfer = create_transfer(
-            seed_user, db.session, seed_user["account"],
+            seed_user, seed_user["account"],
             cls._savings(seed_user), seed_periods[0],
             amount=Decimal(amount), due_date=due_date,
         )
@@ -264,7 +264,7 @@ class TestTheTransferArm:
         with app.app_context():
             savings = self._savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("75.00"),
             )
             db.session.commit()
@@ -322,7 +322,7 @@ class TestTheTransferArm:
             source = self._savings(seed_user, name="Second Checking")
             target = self._savings(seed_user, name="Third Checking")
             transfer = create_transfer(
-                seed_user, db.session, source, target, seed_periods[0],
+                seed_user, source, target, seed_periods[0],
                 amount=Decimal("75.00"),
             )
             db.session.commit()

@@ -165,7 +165,7 @@ class TestTheSettledHalfComplementsThePlanHalf:
 
             def projected(amount):
                 transfer = create_transfer(
-                    seed_user, db.session, checking, loan, period,
+                    seed_user, checking, loan, period,
                     amount=Decimal(amount), due_date=_DUE,
                 )
                 db.session.commit()
@@ -375,7 +375,7 @@ class TestTheSettledHalfComplementsThePlanHalf:
         with app.app_context():
             loan = _loan(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], loan,
+                seed_user, seed_user["account"], loan,
                 seed_periods[_PERIOD], amount=Decimal("1000.00"), due_date=_DUE,
             )
             db.session.commit()
@@ -425,7 +425,7 @@ class TestTheContributionFeedCountsADriftOnce:
                 seed_user, db.session, "Drift Savings", Decimal("0.00"),
             )
             create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[_PERIOD], amount=Decimal("250.00"),
             )
             db.session.commit()
@@ -456,7 +456,7 @@ class TestTheContributionFeedCountsADriftOnce:
                 seed_user, db.session, "Drift Savings", Decimal("0.00"),
             )
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[_PERIOD], amount=Decimal("250.00"),
             )
             db.session.commit()

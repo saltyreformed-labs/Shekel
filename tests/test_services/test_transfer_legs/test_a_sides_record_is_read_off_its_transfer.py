@@ -87,7 +87,7 @@ class TestASideReadsItsRecordOffItsTransfer:
             checking = seed_user["account"]
             savings = _savings(seed_user)
             planned = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -117,7 +117,7 @@ class TestThePreloadReadsEverySideInOneStatement:
                 amount=_AMOUNT, settled_on=date(2026, 2, 3),
             )
             planned = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[3],
+                seed_user, checking, savings, seed_periods[3],
                 amount=_AMOUNT,
             )
             db.session.commit()

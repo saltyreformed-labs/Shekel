@@ -275,7 +275,7 @@ class TestASettledRowMovesEveryCashAnswerTogether:
             periods = all_periods(user_id)
             account = seed_user["account"]
             create_settled_cash_transaction(
-                seed_user, db.session, periods[4], Decimal("250.00"),
+                seed_user, periods[4], Decimal("250.00"),
                 name="settled after the anchor",
                 # The DAY is PASSED, not left to the status seam: this test
                 # needs the settle on a specific day (one after the anchor's
@@ -321,7 +321,7 @@ class TestASettledRowMovesEveryCashAnswerTogether:
             periods = all_periods(user_id)
             hysa = _make_hysa(db, seed_user, periods[0], Decimal("50000.00"))
             create_settled_cash_transaction(
-                seed_user, db.session, periods[4], Decimal("2000.00"),
+                seed_user, periods[4], Decimal("2000.00"),
                 account=hysa, name="settled after the anchor",
                 # Pinned for the reason the sibling test above documents.
                 settled_on=periods[4].start_date + timedelta(days=1),
@@ -537,7 +537,7 @@ class TestTheSubtotalsAreThePaychecksAcrossTheSet:
             transaction_type_id=expense,
         )
         create_transfer(
-            seed_user, db.session, checking, card, paycheck,
+            seed_user, checking, card, paycheck,
             amount=self._PAYMENT,
         )
         db.session.commit()
@@ -634,7 +634,7 @@ class TestTheSubtotalsAreThePaychecksAcrossTheSet:
                 seed_user, db.session, "Savings", Decimal("5000.00"),
             )
             create_transfer(
-                seed_user, db.session, savings, card, paycheck,
+                seed_user, savings, card, paycheck,
                 amount=Decimal("300.00"),
             )
             db.session.commit()

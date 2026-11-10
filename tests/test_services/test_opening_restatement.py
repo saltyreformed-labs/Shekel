@@ -479,7 +479,7 @@ class TestTheDaysItRefuses:
         with app.app_context():
             account = _cash_account(seed_user, "OnTheMovement")
             txn = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[1], Decimal("25.00"),
+                seed_user, seed_periods[1], Decimal("25.00"),
                 account=account, name="A movement",
             )
             db.session.flush()
@@ -497,7 +497,7 @@ class TestTheDaysItRefuses:
         with app.app_context():
             account = _cash_account(seed_user, "JustBefore")
             txn = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[1], Decimal("25.00"),
+                seed_user, seed_periods[1], Decimal("25.00"),
                 account=account, name="A movement",
             )
             db.session.flush()
@@ -634,7 +634,7 @@ def _deleted_as_the_door_leaves_it(seed_user, db, period, account, name):
         The hidden row, holding nothing.
     """
     txn = create_settled_cash_transaction(
-        seed_user, db.session, period, Decimal("25.00"),
+        seed_user, period, Decimal("25.00"),
         account=account, name=name,
     )
     movement_removal.remove_movements(
@@ -716,7 +716,7 @@ class TestTheTwoTiersAgree:
             account = _cash_account(seed_user, "PostedPurchase")
             opened_on = account_opening_fact(account.id).opened_on
             parent = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[1], Decimal("40.00"),
+                seed_user, seed_periods[1], Decimal("40.00"),
                 account=account, name="Envelope",
                 settled_on=opened_on + timedelta(days=5),
             )
@@ -802,7 +802,7 @@ class TestTheTwoTiersAgree:
         with app.app_context():
             account = _cash_account(seed_user, "ServiceFirst")
             txn = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[1], Decimal("25.00"),
+                seed_user, seed_periods[1], Decimal("25.00"),
                 account=account, name="A movement",
             )
             db.session.flush()

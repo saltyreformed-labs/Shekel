@@ -566,7 +566,7 @@ class TestAnAssertionAlwaysWins:
             books_open_on=date(2026, 1, 19),
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[1], Decimal("5000.00"),
+            seed_user, seed_periods[1], Decimal("5000.00"),
             account=account, is_income=True,
             settled_on=date(2026, 1, 20), name="contribution",
         )

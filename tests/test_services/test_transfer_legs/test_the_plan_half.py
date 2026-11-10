@@ -53,7 +53,7 @@ class TestTransferLegs:
             checking = seed_user["account"]
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -91,11 +91,11 @@ class TestTransferLegs:
             )
             _cancelled_transfer(seed_user, checking, savings, seed_periods[2])
             deleted = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[3],
+                seed_user, checking, savings, seed_periods[3],
                 amount=_AMOUNT,
             )
             live = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[4],
+                seed_user, checking, savings, seed_periods[4],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -137,7 +137,7 @@ class TestTheCashFoldReadsTheParent:
             checking = seed_user["account"]
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -162,7 +162,7 @@ class TestTheCashFoldReadsTheParent:
             checking_before = _balance_on(checking, scenario, before)
             savings_before = _balance_on(savings, scenario, before)
             create_transfer(
-                seed_user, db.session, checking, savings, period,
+                seed_user, checking, savings, period,
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -208,7 +208,7 @@ class TestTheCashFoldReadsTheParent:
             opening = _balance_on(checking, scenario, parents_day)
             savings_opening = _balance_on(savings, scenario, parents_day)
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, period,
+                seed_user, checking, savings, period,
                 amount=_AMOUNT, due_date=parents_day,
             )
             db.session.commit()
@@ -238,7 +238,7 @@ class TestTheCashFoldReadsTheParent:
             savings = _savings(seed_user)
             for period in seed_periods[2:5]:
                 create_transfer(
-                    seed_user, db.session, checking, savings, period,
+                    seed_user, checking, savings, period,
                     amount=_AMOUNT,
                 )
             db.session.commit()
@@ -270,7 +270,7 @@ class TestSumProjectedOverLegs:
             checking = seed_user["account"]
             savings = _savings(seed_user)
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[2],
+                seed_user, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -322,7 +322,7 @@ class TestTheContributionFeedsReadTheParent:
                 seed_user, db.session, period, Decimal("1000.00"), name="401k",
             )
             create_transfer(
-                seed_user, db.session, seed_user["account"], account, period,
+                seed_user, seed_user["account"], account, period,
                 amount=_AMOUNT,
             )
             db.session.commit()
@@ -452,7 +452,7 @@ class TestATransferClosedAtZeroIsCountedByNeitherHalf:
             checking_before = _balance_on(checking, scenario, day)
             savings_before = _balance_on(savings, scenario, day)
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, period,
+                seed_user, checking, savings, period,
                 amount=_AMOUNT,
             )
             db.session.commit()

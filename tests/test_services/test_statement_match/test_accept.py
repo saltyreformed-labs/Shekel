@@ -1025,7 +1025,7 @@ class TestATransferIsMatchedThroughItsService:
         # so those settles are inside it.
         open_books_before_the_first_assertion(db.session, destination)
         transfer = create_transfer(
-            seed_user, db.session, seed_user["account"], destination,
+            seed_user, seed_user["account"], destination,
             seed_user["bootstrap_period"], amount=Decimal(amount),
         )
         if settled:
@@ -2057,7 +2057,7 @@ class TestARedatedSettleLeavesNoPostingBehind:
         guessed = period.start_date + timedelta(days=1)
         bank_day = guessed + timedelta(days=4)
         txn = create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("180.00"),
+            seed_user, period, Decimal("180.00"),
             settled_on=guessed, name="Electricity",
         )
         db.session.flush()
@@ -2094,7 +2094,7 @@ class TestARedatedSettleLeavesNoPostingBehind:
         guessed = period.start_date + timedelta(days=1)
         bank_day = guessed + timedelta(days=4)
         txn = create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("180.00"),
+            seed_user, period, Decimal("180.00"),
             settled_on=guessed, name="Electricity",
         )
         db.session.flush()

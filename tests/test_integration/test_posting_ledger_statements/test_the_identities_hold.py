@@ -75,14 +75,14 @@ class TestAccountingIdentityAtMultipleAsOf:
             db.session.commit()
 
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("200.00"), account=savings,
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 6, 5),
             )
             _true_up_at(savings, "350.00", _noon(_Y, 6, 10))
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("100.00"), account=savings,
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 6, 15),
@@ -159,13 +159,13 @@ class TestArticulation:
             checking = seed_user["account"]
 
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("800.00"), account=checking, is_income=True,
                 category=seed_user["categories"]["Salary"],
                 settled_on=date(_Y, 5, 1),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("300.00"), account=checking,
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 5, 2),
@@ -226,13 +226,13 @@ class TestPeriodVsCalendarAgreement:
             db.session.flush()
 
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("500.00"),
+                seed_user, period, Decimal("500.00"),
                 account=seed_user["account"], is_income=True,
                 category=seed_user["categories"]["Salary"],
                 settled_on=date(_Y, 3, 5),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("200.00"),
+                seed_user, period, Decimal("200.00"),
                 account=seed_user["account"],
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 3, 10),

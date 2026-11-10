@@ -547,7 +547,7 @@ class TestWhatTheCardSAYS:
             ))
             db.session.flush()
             txn = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[1], Decimal("25.00"),
+                seed_user, seed_periods[1], Decimal("25.00"),
                 account=account, name="Bounding movement",
             )
             db.session.commit()
@@ -789,7 +789,7 @@ class TestTheCeilingNamesTheBoundThatBinds:
             # A settled movement well AFTER the matched line, so the movement
             # bound is the looser of the two and must not win.
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[1], Decimal("25.00"),
+                seed_user, seed_periods[1], Decimal("25.00"),
                 settled_on=early + timedelta(days=40),
                 name="later-than-the-matched-line", account=account,
             )
@@ -829,7 +829,7 @@ class TestTheCeilingNamesTheBoundThatBinds:
             account = seed_user["account"]
             first_assertion = cash_ledger.earliest_assertion_day(account.id)
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[1], Decimal("25.00"),
+                seed_user, seed_periods[1], Decimal("25.00"),
                 settled_on=first_assertion + timedelta(days=60),
                 name="later-than-the-assertion",
             )

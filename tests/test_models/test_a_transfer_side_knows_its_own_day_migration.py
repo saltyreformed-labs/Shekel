@@ -107,7 +107,7 @@ def _transfer(seed_user, period, name):
     )
     open_books_before_the_first_assertion(db.session, savings)
     xfer = create_transfer(
-        seed_user, db.session, seed_user["account"], savings, period,
+        seed_user, seed_user["account"], savings, period,
         amount=_AMOUNT, name=name,
     )
     db.session.commit()

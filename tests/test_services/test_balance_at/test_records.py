@@ -78,7 +78,7 @@ class TestRecordsBalanceAt:
             day = last_covered_day(periods[1])
 
             create_settled_cash_transaction(
-                seed_user, db.session, periods[1], Decimal("125.00"),
+                seed_user, periods[1], Decimal("125.00"),
                 account=account, name="Recorded spend",
                 settled_on=periods[1].start_date,
             )
@@ -222,7 +222,7 @@ class TestCashAnchorHistory:
             periods = all_periods(user_id)
 
             create_settled_cash_transaction(
-                seed_user, db.session, periods[1], Decimal("125.00"),
+                seed_user, periods[1], Decimal("125.00"),
                 account=account, name="Recorded spend",
                 settled_on=periods[1].start_date,
             )
@@ -339,7 +339,7 @@ class TestCashAnchorHistory:
             # books can hold.
             with pytest.raises(ValidationError):
                 create_settled_cash_transaction(
-                    seed_user, db.session, periods[0], Decimal("300.00"),
+                    seed_user, periods[0], Decimal("300.00"),
                     account=later, is_income=True, name="Pre-opening income",
                     settled_on=periods[0].start_date,
                 )
@@ -351,7 +351,7 @@ class TestCashAnchorHistory:
                 observed_on=periods[2].start_date,
             )
             create_settled_cash_transaction(
-                seed_user, db.session, periods[3], Decimal("300.00"),
+                seed_user, periods[3], Decimal("300.00"),
                 account=later, is_income=True, name="Income after the books",
                 settled_on=periods[3].start_date,
             )

@@ -175,7 +175,7 @@ class TestTheCashFigureBesideTheBookedOne:
             )
             db.session.flush()
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("75.00"),
             )
             db.session.commit()

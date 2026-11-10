@@ -217,7 +217,7 @@ class TestEveryFindingIsClosedAtTheSeam:
             _instant(2026, 3, 1),
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[6], Decimal("2000.00"),
+            seed_user, seed_periods[6], Decimal("2000.00"),
             settled_on=date(2026, 4, 1), name="the transfer out",
         )
         db.session.commit()

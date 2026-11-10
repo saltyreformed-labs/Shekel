@@ -70,7 +70,7 @@ class TestDisplayLabels:
             user_id = seed_user["user"].id
             checking = seed_user["account"]
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("100.00"), account=checking,
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 3, 15),
@@ -127,7 +127,7 @@ class TestScenarioAndOwnerIsolation:
             db.session.add(whatif)
             db.session.commit()
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("70.00"), account=seed_user["account"], scenario=whatif,
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 9, 1),
@@ -156,13 +156,13 @@ class TestScenarioAndOwnerIsolation:
             user1 = seed_user["user"].id
             user2 = seed_second_user["user"].id
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("60.00"), account=seed_user["account"],
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 10, 1),
             )
             create_settled_cash_transaction(
-                seed_second_user, db.session,
+                seed_second_user,
                 seed_second_user["bootstrap_period"], Decimal("80.00"),
                 account=seed_second_user["account"],
                 category=seed_second_user["categories"]["Groceries"],
@@ -210,7 +210,7 @@ class TestScenarioAndOwnerIsolation:
         with app.app_context():
             theirs_id = seed_second_user["categories"]["Rent"].id
             purchase = create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("60.00"), account=seed_user["account"],
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 10, 1),
@@ -254,7 +254,7 @@ class TestTheLabelsReadOneStatementPerTable:
         def _settle(item):
             """Settle a purchase on the seeded Checking under the category *item*."""
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("10.00"), account=seed_user["account"],
                 category=seed_user["categories"][item], settled_on=date(_Y, 10, 1),
             )

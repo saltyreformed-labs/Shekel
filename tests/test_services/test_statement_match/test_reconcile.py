@@ -1372,7 +1372,7 @@ class TestTheHeroReportsADayBOTHRecordsCanSpeakFor:
                             ("5.00", date(2026, 2, 6)),
                             ("5.00", date(2026, 2, 7))):
             _settle(
-                seed_user, db, seed_periods[2], amount, day, account=account,
+                seed_user, seed_periods[2], amount, day, account=account,
             )
         db.session.commit()
         agreement = bank_agreement.bank_agreement(

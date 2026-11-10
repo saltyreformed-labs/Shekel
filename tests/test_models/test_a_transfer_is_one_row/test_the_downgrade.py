@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
+from functools import partial
 
 import pytest
 from sqlalchemy import text
@@ -125,7 +126,7 @@ class TestTheDowngrade:
         with app.app_context():
             savings, van = _accounts(seed_user)
             planned = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("100.00"),
             )
             paid = create_settled_transfer(
@@ -133,7 +134,7 @@ class TestTheDowngrade:
                 amount=Decimal("80.00"),
             )
             hidden = create_transfer(
-                seed_user, db.session, seed_user["account"], van,
+                seed_user, seed_user["account"], van,
                 seed_periods[1], amount=Decimal("40.00"),
             )
             db.session.commit()
@@ -188,7 +189,7 @@ class TestTheDowngrade:
         with app.app_context():
             savings, van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("120.00"),
             )
             db.session.commit()
@@ -282,11 +283,11 @@ class TestTheDowngrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             other = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[1],
             )
             db.session.commit()
@@ -311,7 +312,7 @@ class TestTheDowngrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("75.00"),
             )
             db.session.commit()
@@ -365,11 +366,11 @@ class TestTheDowngrade:
         with app.app_context():
             savings, van = _accounts(seed_user)
             early = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             late = create_transfer(
-                seed_user, db.session, seed_user["account"], van,
+                seed_user, seed_user["account"], van,
                 seed_periods[0],
             )
             db.session.commit()
@@ -410,11 +411,11 @@ class TestTheDowngrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             gone = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             kept = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[1],
             )
             db.session.commit()
@@ -444,7 +445,7 @@ class TestTheDowngrade:
         with app.app_context():
             savings, van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             _db.session.commit()
@@ -501,7 +502,7 @@ class TestTheDowngrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("35.00"),
             )
             db.session.commit()
@@ -596,7 +597,7 @@ class TestTheDowngrade:
             ids = []
             for period in seed_periods[:3]:
                 ids.append(create_transfer(
-                    seed_user, db.session, seed_user["account"], savings,
+                    seed_user, seed_user["account"], savings,
                     period,
                 ).id)
                 db.session.commit()
@@ -744,10 +745,10 @@ def test_the_revision_below_takes_what_this_downgrade_writes(
         seed_periods[1], amount=Decimal("45.00"),
     )
     gone = create_transfer(
-        seed_user, _db.session, seed_user["account"], savings, seed_periods[2],
+        seed_user, seed_user["account"], savings, seed_periods[2],
     )
     zero = create_transfer(
-        seed_user, _db.session, seed_user["account"], van, seed_periods[2],
+        seed_user, seed_user["account"], van, seed_periods[2],
     )
     _db.session.commit()
     ids = {"moved": moved.id, "hidden": hidden.id, "reverted": reverted.id,
@@ -837,10 +838,12 @@ def test_a_database_the_app_wrote_below_takes_that_revisions_way_down(
         seed_user, _db.session, "Savings", "Status Act Savings",
     )
     _db.session.commit()
-    make = create_settled_transfer if born_settled else create_transfer
+    make = (
+        partial(create_settled_transfer, seed_user, _db.session) if born_settled
+        else partial(create_transfer, seed_user)
+    )
     xfer_id = make(
-        seed_user, _db.session, seed_user["account"], savings,
-        seed_periods[0], amount=Decimal("50.00"),
+        seed_user["account"], savings, seed_periods[0], amount=Decimal("50.00"),
     ).id
     _db.session.commit()
     _downgrade()

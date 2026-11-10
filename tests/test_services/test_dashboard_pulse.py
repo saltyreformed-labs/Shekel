@@ -134,7 +134,7 @@ def _undated_transfer_out(db_session, seed_user, period, to_account_name, amount
         seed_user, db_session, to_account_name, Decimal("500.00"),
     )
     xfer = create_transfer(
-        seed_user, db_session, seed_user["account"], savings, period,
+        seed_user, seed_user["account"], savings, period,
         amount=Decimal(str(amount)),
     )
     db_session.flush()
@@ -1153,14 +1153,14 @@ class TestTheBillsAreThePaychecksAcrossTheSet:
             card = self._card(seed_user, db.session)
             period = seed_periods[_CURRENT_IDX]
             payment = create_transfer(
-                seed_user, db.session, seed_user["account"], card, period,
+                seed_user, seed_user["account"], card, period,
                 amount=Decimal("165.00"), due_date=date(2026, 3, 24),
             )
             helper = create_savings_account(
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )
             out_of_card = create_transfer(
-                seed_user, db.session, helper, seed_user["account"], period,
+                seed_user, helper, seed_user["account"], period,
                 amount=Decimal("40.00"), due_date=date(2026, 3, 21),
             )
             db.session.flush()
@@ -1251,7 +1251,7 @@ class TestTheBillsAreLegsReadOffTheParent:
                 seed_user, period, checking, "Rent", "300.00", date(2026, 3, 22),
             )
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, period,
+                seed_user, checking, savings, period,
                 amount=Decimal("400.00"), due_date=date(2026, 3, 24),
             )
             db.session.commit()
@@ -1287,7 +1287,7 @@ class TestTheBillsAreLegsReadOffTheParent:
                 seed_user, db.session, "Sweep Target", Decimal("0.00"),
             )
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, period,
+                seed_user, checking, savings, period,
                 amount=Decimal("400.00"), due_date=date(2026, 3, 24),
             )
             db.session.commit()
@@ -1318,7 +1318,7 @@ class TestTheBillsAreLegsReadOffTheParent:
                 seed_user, db.session, "Sweep Target", Decimal("0.00"),
             )
             deleted = create_transfer(
-                seed_user, db.session, checking, savings, period,
+                seed_user, checking, savings, period,
                 amount=Decimal("400.00"), due_date=date(2026, 3, 24),
             )
             db.session.commit()
@@ -1350,7 +1350,7 @@ class TestTheBillsAreLegsReadOffTheParent:
                 seed_user, db.session, "Savings", Decimal("900.00"),
             )
             create_transfer(
-                seed_user, db.session, savings, checking, period,
+                seed_user, savings, checking, period,
                 amount=Decimal("250.00"), due_date=date(2026, 3, 24),
             )
             db.session.commit()

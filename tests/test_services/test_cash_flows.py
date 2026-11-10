@@ -403,7 +403,7 @@ class TestTheReductionIsAdditiveOverRows:
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )
             transfer = create_transfer(
-                seed_user, db.session,
+                seed_user,
                 from_account=seed_user["account"], to_account=savings,
                 period=seed_periods[1], amount=Decimal("200.00"),
             )

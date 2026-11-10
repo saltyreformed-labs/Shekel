@@ -636,7 +636,7 @@ class TestEveryOFFEREDRowCanCarryItsOwnTokenBack:
         # The fourth kind (leaf ``balance:X-bi-6-4c-1``): a still-planned
         # transfer is offered as its LEG, keyed by the transfer.
         create_transfer(
-            seed_user, db.session, seed_user["account"],
+            seed_user, seed_user["account"],
             create_account_of_type(
                 seed_user, db.session, "Savings", "Savings",
                 anchor_balance=Decimal("100.00"),

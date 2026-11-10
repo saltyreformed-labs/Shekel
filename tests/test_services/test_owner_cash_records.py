@@ -93,7 +93,7 @@ def _owner_with_records(seed_user, seed_periods):
     ))
     period = seed_periods[1]
     create_settled_cash_transaction(
-        seed_user, _db.session, period, Decimal("40.00"),
+        seed_user, period, Decimal("40.00"),
     )
     create_settled_transfer(
         seed_user, _db.session, checking, savings, period,
@@ -172,7 +172,7 @@ class TestEachWalkIsItsAccountsOwn:
                 source=AccountOpeningSourceEnum.USER_DECLARED,
             )
             create_settled_cash_transaction(
-                seed_user, _db.session, seed_periods[1], Decimal("40.00"),
+                seed_user, seed_periods[1], Decimal("40.00"),
                 account=account,
             )
             _db.session.commit()
@@ -207,7 +207,7 @@ class TestEachWalkIsItsAccountsOwn:
                 seed_user, seed_periods,
             )
             create_settled_cash_transaction(
-                seed_second_user, _db.session, seed_second_periods[1],
+                seed_second_user, seed_second_periods[1],
                 Decimal("75.00"),
             )
             _db.session.commit()

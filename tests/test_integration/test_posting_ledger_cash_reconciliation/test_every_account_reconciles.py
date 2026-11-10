@@ -129,11 +129,11 @@ class TestPerLinkedAccountReconciliation:
                 amount=Decimal("250.00"),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("50.00"),
+                seed_user, period, Decimal("50.00"),
                 category=seed_user["categories"]["Groceries"],
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("2000.00"),
+                seed_user, period, Decimal("2000.00"),
                 is_income=True, category=seed_user["categories"]["Salary"],
             )
             db.session.commit()
@@ -202,15 +202,15 @@ class TestPerCounterAccountReconciliation:
             period = seed_user["bootstrap_period"]
 
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("50.00"),
+                seed_user, period, Decimal("50.00"),
                 category=seed_user["categories"]["Groceries"],
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("30.00"),
+                seed_user, period, Decimal("30.00"),
                 category=None,
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("2000.00"),
+                seed_user, period, Decimal("2000.00"),
                 is_income=True, category=seed_user["categories"]["Salary"],
             )
             db.session.commit()
@@ -353,11 +353,11 @@ class TestPerEntryAndTrialBalance:
                 amount=Decimal("100.00"),
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("50.00"),
+                seed_user, period, Decimal("50.00"),
                 category=seed_user["categories"]["Groceries"],
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("2000.00"),
+                seed_user, period, Decimal("2000.00"),
                 is_income=True, category=seed_user["categories"]["Salary"],
             )
             db.session.commit()
@@ -393,11 +393,11 @@ class TestEverySettledTransactionPosts:
             period = seed_user["bootstrap_period"]
 
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("50.00"),
+                seed_user, period, Decimal("50.00"),
                 category=seed_user["categories"]["Groceries"],
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("40.00"),
+                seed_user, period, Decimal("40.00"),
                 category=seed_user["categories"]["Rent"],
             )
             # An all-credit envelope: settled from a card purchase, zero effect.
@@ -457,11 +457,11 @@ class TestMultiScenarioIsolation:
             db.session.commit()
 
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("100.00"),
+                seed_user, period, Decimal("100.00"),
                 category=seed_user["categories"]["Groceries"], scenario=baseline,
             )
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("70.00"),
+                seed_user, period, Decimal("70.00"),
                 category=seed_user["categories"]["Groceries"], scenario=whatif,
             )
             db.session.commit()
@@ -506,13 +506,13 @@ class TestOwnerIsolationViaJournalEntry:
         """
         with app.app_context():
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("100.00"),
                 category=seed_user["categories"]["Groceries"],
             )
             db.session.commit()
             create_settled_cash_transaction(
-                seed_second_user, db.session,
+                seed_second_user,
                 seed_second_user["bootstrap_period"], Decimal("200.00"),
                 category=seed_second_user["categories"]["Groceries"],
             )

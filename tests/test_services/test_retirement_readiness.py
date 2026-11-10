@@ -353,7 +353,7 @@ class TestComputeReadinessData:
             acct = _build_scenario(db, seed_user)
             period = seed_periods_today[0]
             transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], acct, period,
+                seed_user, seed_user["account"], acct, period,
                 amount=Decimal("400.00"),
             )
             cancelled_id = ref_cache.status_id(StatusEnum.CANCELLED)

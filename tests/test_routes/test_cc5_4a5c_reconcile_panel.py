@@ -303,7 +303,7 @@ class TestAZeroBoxIsRefused:
                 anchor_balance=Decimal("2000.00"),
             )
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods_today[0], Decimal("500.00"),
             )
             db.session.commit()
@@ -373,7 +373,7 @@ class TestAZeroDepositIsRefusedAsADeposit:
                 anchor_balance=Decimal("2000.00"),
             )
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods_today[0], Decimal("500.00"),
             )
             db.session.commit()

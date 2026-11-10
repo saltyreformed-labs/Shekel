@@ -130,7 +130,7 @@ class TestTheGridReadsCheckingAndItsCards:
             transaction_type_id=expense,
         )
         create_transfer(
-            seed_user, db.session, checking, card, paycheck,
+            seed_user, checking, card, paycheck,
             amount=Decimal("165.00"), name="Card payment",
         )
         db.session.commit()

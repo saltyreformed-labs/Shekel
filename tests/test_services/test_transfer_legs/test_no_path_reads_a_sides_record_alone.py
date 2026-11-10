@@ -341,7 +341,7 @@ class TestNoPageReadsASideAlone:
                 _paid(seed_user, checking, savings, seed_periods_today[index], amount)
             for index, amount in ((4, "140.00"), (5, "150.00")):
                 create_transfer(
-                    seed_user, db.session, checking, savings,
+                    seed_user, checking, savings,
                     seed_periods_today[index], amount=Decimal(amount),
                 )
             db.session.commit()
@@ -381,7 +381,7 @@ class TestNoPageReadsASideAlone:
                 )
             for amount in ("140.00", "150.00"):
                 create_transfer(
-                    seed_user, db.session, checking, savings,
+                    seed_user, checking, savings,
                     seed_periods_today[3], amount=Decimal(amount), due_date=due,
                 )
             db.session.commit()
@@ -418,7 +418,7 @@ class TestNoPageReadsASideAlone:
                 )
             for index in (6, 7):
                 create_transfer(
-                    seed_user, db.session, seed_user["account"], loan,
+                    seed_user, seed_user["account"], loan,
                     seed_periods[index], amount=Decimal("1000.00"),
                 )
             db.session.commit()
@@ -475,7 +475,7 @@ class TestNoReaderReadsASideAlone:
             savings = _a_savings_account(seed_user)
             for index, amount in ((2, "140.00"), (3, "150.00")):
                 create_transfer(
-                    seed_user, db.session, checking, savings,
+                    seed_user, checking, savings,
                     seed_periods_today[index], amount=Decimal(amount),
                 )
                 _paid(seed_user, checking, savings, seed_periods_today[index], "1" + amount)
@@ -509,7 +509,7 @@ class TestNoReaderReadsASideAlone:
             savings = _a_savings_account(seed_user)
             for index, amount in ((2, "140.00"), (3, "150.00")):
                 create_transfer(
-                    seed_user, db.session, checking, savings,
+                    seed_user, checking, savings,
                     seed_periods_today[index], amount=Decimal(amount),
                 )
                 _paid(seed_user, checking, savings, seed_periods_today[index], "1" + amount)
@@ -547,7 +547,7 @@ class TestNoReaderReadsASideAlone:
             ))
             for index, amount in ((2, "140.00"), (3, "150.00")):
                 planned = create_transfer(
-                    seed_user, db.session, checking, savings,
+                    seed_user, checking, savings,
                     seed_periods_today[index], amount=Decimal(amount),
                 )
                 db.session.commit()
@@ -587,7 +587,7 @@ class TestNoActReadsASideAlone:
         with app.app_context():
             checking = seed_user["account"]
             planned = create_transfer(
-                seed_user, db.session, checking, _a_savings_account(seed_user),
+                seed_user, checking, _a_savings_account(seed_user),
                 seed_periods_today[4], amount=Decimal("120.00"),
             )
             db.session.commit()
@@ -618,7 +618,7 @@ class TestNoActReadsASideAlone:
         with app.app_context():
             checking = seed_user["account"]
             planned = create_transfer(
-                seed_user, db.session, checking, _a_savings_account(seed_user),
+                seed_user, checking, _a_savings_account(seed_user),
                 seed_periods_today[4], amount=Decimal("120.00"),
             )
             db.session.commit()
@@ -683,7 +683,7 @@ class TestNoActReadsASideAlone:
             savings = _a_savings_account(seed_user)
             ticked = {
                 create_transfer(
-                    seed_user, db.session, checking, savings,
+                    seed_user, checking, savings,
                     seed_periods_today[index], amount=Decimal(amount),
                 ).id
                 for index, amount in ((2, "140.00"), (3, "150.00"))
@@ -754,7 +754,7 @@ class TestAMoveThatReadsNoRecordFetchesNone:
         with app.app_context():
             checking = seed_user["account"]
             planned = create_transfer(
-                seed_user, db.session, checking, _a_savings_account(seed_user),
+                seed_user, checking, _a_savings_account(seed_user),
                 seed_periods_today[4], amount=Decimal("120.00"),
             )
             db.session.commit()
@@ -793,7 +793,7 @@ class TestAPaymentActFetchesItsTransfersRecordsOnce:
         with app.app_context():
             checking = seed_user["account"]
             planned = create_transfer(
-                seed_user, db.session, checking, _a_savings_account(seed_user),
+                seed_user, checking, _a_savings_account(seed_user),
                 seed_periods_today[4], amount=Decimal("120.00"),
             )
             db.session.commit()
@@ -851,7 +851,7 @@ class TestAReconcileFetchesItsTransfersRecordsOnce:
         savings = _a_savings_account(seed_user)
         ticked = {
             create_transfer(
-                seed_user, db.session, checking, savings,
+                seed_user, checking, savings,
                 seed_periods_today[index], amount=Decimal(amount),
             ).id
             for index, amount in ((1, "130.00"), (2, "140.00"), (3, "150.00"))

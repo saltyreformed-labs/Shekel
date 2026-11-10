@@ -96,7 +96,7 @@ class TestTheRowsRefusalsApplyToItsPayment:
                 observed_on=seed_user["bootstrap_period"].start_date,
             )
             transfer = create_transfer(
-                seed_user, db.session, checking, savings,
+                seed_user, checking, savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
             )
             transfer_service.settle_transfer(

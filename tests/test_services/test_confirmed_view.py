@@ -1119,7 +1119,7 @@ class TestRawLoanTransactionIsInvisibleToTheWalk:
             )
 
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[_P1], Decimal("300.00"),
+                seed_user, seed_periods[_P1], Decimal("300.00"),
                 account=loan, name="Typed On Loan",
                 settled_on=seed_periods[_P1].start_date,
             )

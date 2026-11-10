@@ -4864,7 +4864,7 @@ class TestTheHeroSaysHowFarTheRecordsRun:
                    (date(2026, 2, 2), "-10.00")],
         )
         if late is not None:
-            _settle(seed_user, db, seed_periods[4], "40.00", late,
+            _settle(seed_user, seed_periods[4], "40.00", late,
                     account=account)
         db.session.commit()
         response = auth_client.get(_url(account.id))

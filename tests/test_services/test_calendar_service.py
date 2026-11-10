@@ -347,7 +347,7 @@ class TestDayAssignment:
                 seed_user, db.session, "Jar", Decimal("500.00"),
             )
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], jar, p0,
+                seed_user, seed_user["account"], jar, p0,
                 amount=Decimal("50.00"),
             )
             db.session.commit()
@@ -796,7 +796,7 @@ class TestTheCalendarReadsTheCashFlowSet:
         with app.app_context():
             card = self._card(seed_user, db.session)
             create_transfer(
-                seed_user, db.session, seed_user["account"], card,
+                seed_user, seed_user["account"], card,
                 seed_periods[6], amount=Decimal("165.00"),
                 due_date=date(2026, 4, 8),
             )
@@ -1779,7 +1779,7 @@ class TestEdgeCases:
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[0],
+                seed_user, checking, savings, seed_periods[0],
                 amount=Decimal("500.00"), due_date=date(2026, 1, 5),
             )
             db.session.commit()
@@ -1839,7 +1839,7 @@ class TestATransferIsALegOfItsParent:
                 due_date=date(2026, 1, 5),
             )
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[0],
+                seed_user, checking, savings, seed_periods[0],
                 amount=Decimal("250.00"), due_date=date(2026, 1, 6),
             )
             db.session.commit()
@@ -1920,7 +1920,7 @@ class TestATransferIsALegOfItsParent:
                 seed_user, db.session, "Savings", Decimal("900.00"),
             )
             transfer = create_transfer(
-                seed_user, db.session, savings, card, seed_periods[0],
+                seed_user, savings, card, seed_periods[0],
                 amount=Decimal("300.00"), due_date=date(2026, 1, 6),
             )
             db.session.commit()
@@ -1960,7 +1960,7 @@ class TestATransferIsALegOfItsParent:
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )
             transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[0],
+                seed_user, checking, savings, seed_periods[0],
                 amount=Decimal("250.00"), due_date=date(2026, 1, 6),
             )
             db.session.commit()

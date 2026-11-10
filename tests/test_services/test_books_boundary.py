@@ -231,7 +231,7 @@ class TestTheOneOrmWriter:
             account = seed_user["account"]
             opened_on = _books_open_on(account)
             row = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=opened_on + _ONE_DAY, name="dated-probe",
             )
             before = (row.settled_on, row.settled_day_basis_id)
@@ -252,7 +252,7 @@ class TestTheOneOrmWriter:
         with app.app_context():
             account = seed_user["account"]
             parent = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=_books_open_on(account) + _ONE_DAY, name="parent",
             )
             entry = TransactionEntry(
@@ -283,7 +283,7 @@ class TestTheOneOrmWriter:
         with app.app_context():
             account = seed_user["account"]
             row = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=_books_open_on(account) + _ONE_DAY, name="revert-probe",
             )
             record_settle_day(row, None)
@@ -354,7 +354,7 @@ class TestTheBulkWriterAsksForItself:
             account = seed_user["account"]
             opened_on = _books_open_on(account)
             parent = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("40.00"),
+                seed_user, seed_periods[0], Decimal("40.00"),
                 settled_on=opened_on + timedelta(days=5), name="envelope",
             )
             entry = TransactionEntry(
@@ -409,7 +409,7 @@ class TestTheDatabaseSeesWhatTheOrmCannot:
         with app.app_context():
             account = seed_user["account"]
             row = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=_books_open_on(account) + _ONE_DAY,
                 name="bulk-probe",
             )
@@ -435,7 +435,7 @@ class TestTheDatabaseSeesWhatTheOrmCannot:
             account = seed_user["account"]
             moved_on = _books_open_on(account) + _ONE_DAY
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=moved_on, name="in-the-way",
             )
             db.session.commit()
@@ -484,7 +484,7 @@ class TestTheDatabaseSeesWhatTheOrmCannot:
             account = seed_user["account"]
             opened_on = _books_open_on(account)
             row = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=opened_on + _ONE_DAY, name="moves-with-the-books",
             )
             db.session.commit()
@@ -532,7 +532,7 @@ class TestTheDatabaseSeesWhatTheOrmCannot:
             account = seed_user["account"]
             opened_on = _books_open_on(account)
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=opened_on + _ONE_DAY, name="after-the-books",
             )
             db.session.commit()
@@ -611,7 +611,7 @@ class TestAnUnsettledRowDoesNotRESERVETheTable:
         with app.app_context():
             account = seed_user["account"]
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=_books_open_on(account) + _ONE_DAY,
                 name="settled-probe",
             )
@@ -655,7 +655,7 @@ class TestTheGoverningRowIsWhatIsGraded:
             restatement_id = account_opening_fact(account.id).opening_id
 
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=original - timedelta(days=5),
                 name="inside-the-older-books",
             )
@@ -752,7 +752,7 @@ class TestTheGoverningRowIsWhatIsGraded:
                 db.session, account, _books_open_on(account) - timedelta(days=5),
             )
             movement = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=_books_open_on(account) + _ONE_DAY,
                 account=account, name="on-the-books",
             )
@@ -837,7 +837,7 @@ class TestTheGoverningRowIsWhatIsGraded:
             db.session.commit()
             moved_id = account_opening_fact(donor.id).opening_id
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("25.00"),
+                seed_user, seed_periods[0], Decimal("25.00"),
                 settled_on=original - timedelta(days=5),
                 name="held-by-the-restatement",
             )
@@ -889,7 +889,7 @@ class TestTheGoverningRowIsWhatIsGraded:
             account = seed_user["account"]
             opened_on = _books_open_on(account)
             parent = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("40.00"),
+                seed_user, seed_periods[0], Decimal("40.00"),
                 settled_on=opened_on + timedelta(days=5), name="envelope",
             )
             entry = TransactionEntry(

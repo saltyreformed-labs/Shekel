@@ -122,7 +122,7 @@ class TestTheUpgrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             planned = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("100.00"),
             )
             paid = create_settled_transfer(
@@ -166,7 +166,7 @@ class TestTheUpgrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -192,7 +192,7 @@ class TestTheUpgrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -232,7 +232,7 @@ class TestTheUpgrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -273,7 +273,7 @@ class TestTheUpgrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -394,7 +394,7 @@ class TestTheUpgrade:
             savings, _van = _accounts(seed_user)
             _downgrade()
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             db.session.commit()
@@ -429,7 +429,7 @@ class TestTheUpgrade:
         with app.app_context():
             savings, van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             _db.session.commit()
@@ -491,7 +491,7 @@ class TestTheUpgrade:
         with app.app_context():
             savings = _accounts(seed_user)[0]
             xfer = create_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             _db.session.commit()
@@ -563,7 +563,7 @@ class TestTheUpgrade:
         )
         _db.session.commit()
         xfer_id = create_transfer(
-            seed_user, _db.session, seed_user["account"], savings,
+            seed_user, seed_user["account"], savings,
             seed_periods[0],
         ).id
         _db.session.commit()
@@ -609,7 +609,7 @@ class TestTheUpgrade:
         with app.app_context():
             savings, van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             _db.session.commit()
@@ -660,7 +660,7 @@ class TestTheUpgrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             _db.session.commit()
@@ -731,7 +731,7 @@ class TestTheUpgrade:
             second = seed_second_user["user"].id
             rent = seed_user["categories"]["Rent"].id
             xfer = create_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             _db.session.commit()
@@ -794,7 +794,7 @@ class TestTheUpgrade:
             if state == "twinless":
                 _downgrade()
             xfer = create_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             _db.session.commit()
@@ -840,11 +840,11 @@ class TestTheUpgrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("12.00"),
+                seed_user, seed_periods[0], Decimal("12.00"),
             )
             db.session.commit()
             assert db.session.execute(text(
@@ -869,11 +869,11 @@ class TestTheUpgrade:
         with app.app_context():
             savings, _van = _accounts(seed_user)
             xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, seed_user["account"], savings,
                 seed_periods[0],
             )
             ordinary = create_settled_cash_transaction(
-                seed_user, db.session, seed_periods[0], Decimal("12.00"),
+                seed_user, seed_periods[0], Decimal("12.00"),
             )
             db.session.commit()
             ordinary_id = ordinary.id

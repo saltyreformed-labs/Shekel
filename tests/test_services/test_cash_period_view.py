@@ -187,11 +187,11 @@ class TestTheSubtotalsCountEveryAttributedRow:
         """
         account, scenario = seed_user["account"], seed_user["scenario"]
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[2], Decimal("500.00"),
+            seed_user, seed_periods[2], Decimal("500.00"),
             is_income=True, settled_on=date(2026, 2, 3), name="paycheck",
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[2], Decimal("200.00"),
+            seed_user, seed_periods[2], Decimal("200.00"),
             settled_on=date(2026, 2, 5), name="rent",
         )
         add_txn(db.session, seed_user, seed_periods[2], "bill", "75.00")
@@ -426,7 +426,7 @@ class TestTheRemainderHoldsWhatTheSubtotalsCannot:
         """
         account, scenario = seed_user["account"], seed_user["scenario"]
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[3], Decimal("300.00"),
+            seed_user, seed_periods[3], Decimal("300.00"),
             settled_on=date(2026, 3, 20), name="late rent",
         )
         db.session.commit()
@@ -530,7 +530,7 @@ class TestTheRemainderHoldsWhatTheSubtotalsCannot:
         # needs on the day it names, which is what an owner does.
         reassert_balance_on(db.session, account, _instant(2026, 1, 5))
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("400.00"),
+            seed_user, seed_periods[0], Decimal("400.00"),
             settled_on=date(2026, 1, 3), name="pre-assertion spend",
         )
         db.session.commit()
@@ -625,15 +625,15 @@ class TestTheIdentityHoldsOnEveryPeriod:
         # is half of what this shape exists to exercise.
         reassert_balance_on(db.session, account, _instant(2026, 1, 5))
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("400.00"),
+            seed_user, seed_periods[0], Decimal("400.00"),
             settled_on=date(2026, 1, 3), name="pre-assertion spend",
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[2], Decimal("1800.00"),
+            seed_user, seed_periods[2], Decimal("1800.00"),
             is_income=True, settled_on=date(2026, 2, 3), name="paycheck",
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[3], Decimal("300.00"),
+            seed_user, seed_periods[3], Decimal("300.00"),
             settled_on=date(2026, 3, 20), name="late rent",
         )
         append_balance_assertion(
@@ -806,7 +806,7 @@ class TestTheIdentityHoldsOnEveryPeriod:
         """
         account, scenario = seed_user["account"], seed_user["scenario"]
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("250.00"),
+            seed_user, seed_periods[0], Decimal("250.00"),
             settled_on=date(2026, 1, 6), name="settled in its own period",
         )
         db.session.commit()
@@ -872,7 +872,7 @@ class TestTheIdentityHoldsOnEveryPeriod:
         account, scenario = seed_user["account"], seed_user["scenario"]
         as_of = date(2026, 4, 2)
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[2], Decimal("250.00"),
+            seed_user, seed_periods[2], Decimal("250.00"),
             settled_on=date(2026, 3, 20), name="cleared after the tail was cut",
         )
         add_txn(
@@ -958,7 +958,7 @@ class TestTheIdentityHoldsOnEveryPeriod:
         """
         account, scenario = seed_user["account"], seed_user["scenario"]
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("180.00"),
+            seed_user, seed_periods[0], Decimal("180.00"),
             settled_on=date(2026, 2, 5), name="budgeted two columns back",
         )
         db.session.commit()
@@ -1037,7 +1037,7 @@ class TestAStoredScheduleHoleNoLongerBreaksTheIdentity:
         """
         account, scenario = seed_user["account"], seed_user["scenario"]
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("250.00"),
+            seed_user, seed_periods[0], Decimal("250.00"),
             settled_on=date(2026, 1, 20), name="settled inside the hole",
         )
         db.session.commit()

@@ -67,7 +67,7 @@ def _transfer(seed_user):
         observed_on=seed_user["bootstrap_period"].start_date,
     )
     xfer = create_transfer(
-        seed_user, _db.session, seed_user["account"], savings,
+        seed_user, seed_user["account"], savings,
         seed_user["bootstrap_period"], amount=Decimal("500.00"),
     )
     _db.session.commit()

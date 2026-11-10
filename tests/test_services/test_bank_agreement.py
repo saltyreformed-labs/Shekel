@@ -397,8 +397,8 @@ class TestTheDrawnDaysRunToTheBooksLastRecord:
                 db, seed_user, (date(2026, 1, 30), "-10.00"),
                 (self._LAST_LINE, "-20.00"),
             )
-            _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 2, 15))
-            _settle(seed_user, db, seed_periods[4], "60.00", date(2026, 2, 23))
+            _settle(seed_user, seed_periods[4], "40.00", date(2026, 2, 15))
+            _settle(seed_user, seed_periods[4], "60.00", date(2026, 2, 23))
             db.session.commit()
 
             agreement = self._agreement_at(seed_user, self._NOW)
@@ -479,7 +479,7 @@ class TestTheDrawnDaysRunToTheBooksLastRecord:
                 db, seed_user, (self._LAST_LINE, "-20.00"),
                 (date(2026, 2, 25), "-5.00"),
             )
-            _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 2, 15))
+            _settle(seed_user, seed_periods[4], "40.00", date(2026, 2, 15))
             db.session.commit()
 
             agreement = self._agreement_at(seed_user, self._NOW)
@@ -502,8 +502,8 @@ class TestTheDrawnDaysRunToTheBooksLastRecord:
         """
         with app.app_context():
             self._statement(db, seed_user, (self._LAST_LINE, "-20.00"))
-            _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 2, 15))
-            _settle(seed_user, db, seed_periods[4], "60.00", date(2026, 2, 23))
+            _settle(seed_user, seed_periods[4], "40.00", date(2026, 2, 15))
+            _settle(seed_user, seed_periods[4], "60.00", date(2026, 2, 23))
             db.session.commit()
 
             agreement = self._agreement_at(seed_user, date(2026, 2, 20))
@@ -576,7 +576,7 @@ class TestTheDrawnDaysRunToTheBooksLastRecord:
                 db, seed_user, (date(2024, 1, 10), "-10.00"),
                 (date(2026, 3, 20), "-20.00"),
             )
-            _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 4, 19))
+            _settle(seed_user, seed_periods[4], "40.00", date(2026, 4, 19))
             db.session.commit()
 
             agreement = self._agreement_at(seed_user, date(2026, 5, 1))
@@ -598,7 +598,7 @@ class TestTheDrawnDaysRunToTheBooksLastRecord:
         """
         with app.app_context():
             self._statement(db, seed_user, (date(2024, 1, 10), "-10.00"))
-            _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 4, 19))
+            _settle(seed_user, seed_periods[4], "40.00", date(2026, 4, 19))
             db.session.commit()
 
             agreement = self._agreement_at(seed_user, date(2026, 5, 1))
@@ -729,7 +729,7 @@ class TestTheComparisonStartsTheDayAfterTheBooksOpen:
                        (date(2026, 2, 4), "-40.00")],
             )
             _settle(
-                seed_user, db, seed_periods[2], "40.00", date(2026, 2, 4),
+                seed_user, seed_periods[2], "40.00", date(2026, 2, 4),
                 account=account,
             )
             db.session.commit()
@@ -776,7 +776,7 @@ class TestTheComparisonStartsTheDayAfterTheBooksOpen:
                        (date(2026, 1, 3), "-10.00")],
             )
             _settle(
-                seed_user, db, seed_periods[0], "10.00", date(2026, 1, 3),
+                seed_user, seed_periods[0], "10.00", date(2026, 1, 3),
                 account=late,
             )
             db.session.commit()
@@ -912,7 +912,7 @@ class TestTheBooksStateABalanceFromTheirOpeningDay:
         with app.app_context():
             account = self._first_import(seed_user, db, "510.00")
             _settle(
-                seed_user, db, seed_periods[2], "40.00", date(2026, 2, 3),
+                seed_user, seed_periods[2], "40.00", date(2026, 2, 3),
                 account=account,
             )
             _seed_import(
@@ -953,7 +953,7 @@ class TestTheBooksStateABalanceFromTheirOpeningDay:
             for amount, day in (("40.00", date(2026, 2, 3)),
                                 ("5.00", date(2026, 2, 6))):
                 _settle(
-                    seed_user, db, seed_periods[2], amount, day,
+                    seed_user, seed_periods[2], amount, day,
                     account=account,
                 )
             _seed_import(
@@ -1023,7 +1023,7 @@ class TestTheOpeningDifferencePlusEveryDaysMovementIsTheClosingDifference:
             for day, amount in ((date(2026, 2, 3), "40.00"),
                                 (date(2026, 2, 5), "5.00")):
                 _settle(
-                    seed_user, db, seed_periods[2], amount, day,
+                    seed_user, seed_periods[2], amount, day,
                     account=account,
                 )
             _assert_balance(
@@ -1107,7 +1107,7 @@ class TestADayNoImportCoversIsNotCompared:
                 (seed_periods[0], "30.00", date(2026, 1, 10)),
                 (seed_periods[1], "15.00", date(2026, 1, 20)),
             ):
-                _settle(seed_user, db, period, amount, day, account=late)
+                _settle(seed_user, period, amount, day, account=late)
             db.session.commit()
 
             agreement = bank_agreement.bank_agreement(

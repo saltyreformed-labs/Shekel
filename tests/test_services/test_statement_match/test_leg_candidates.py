@@ -102,7 +102,7 @@ def _a_transfer(seed_user, savings=None, amount=_AMOUNT):
     """Return a Projected transfer (``$250.00`` by default) from the seeded checking account to *savings*."""
     savings = savings or _savings(seed_user)
     transfer = create_transfer(
-        seed_user, db.session, seed_user["account"], savings,
+        seed_user, seed_user["account"], savings,
         seed_user["bootstrap_period"], amount=amount,
     )
     db.session.flush()
@@ -677,7 +677,7 @@ class TestAStaleFormIsRefused:
         """The screen's account IS the leg's (R-BAL159): another account's transfer is not found."""
         other = _savings(seed_user)
         elsewhere = create_transfer(
-            seed_user, db.session, other,
+            seed_user, other,
             account_service.create_account(
                 account_service.AccountSpec(
                     user_id=seed_user["user"].id,

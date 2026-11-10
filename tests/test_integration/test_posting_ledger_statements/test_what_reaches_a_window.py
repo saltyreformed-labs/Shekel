@@ -47,7 +47,7 @@ class TestRevertAndResidueDropped:
             user_id = seed_user["user"].id
             scenario_id = seed_user["scenario"].id
             txn = create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("400.00"), account=seed_user["account"],
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(_Y, 7, 1),
@@ -100,7 +100,7 @@ class TestAttributionEdgeCases:
         with app.app_context():
             user_id = seed_user["user"].id
             create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
+                seed_user, seed_user["bootstrap_period"],
                 Decimal("500.00"), account=seed_user["account"],
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(2098, 12, 31),
@@ -149,7 +149,7 @@ class TestAttributionEdgeCases:
             db.session.add(period)
             db.session.flush()
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("150.00"),
+                seed_user, period, Decimal("150.00"),
                 account=seed_user["account"],
                 category=seed_user["categories"]["Groceries"],
                 settled_on=period.start_date,
@@ -196,7 +196,7 @@ class TestAttributionEdgeCases:
             db.session.add(future_period)
             db.session.flush()
             create_settled_cash_transaction(
-                seed_user, db.session, future_period, Decimal("250.00"),
+                seed_user, future_period, Decimal("250.00"),
                 account=seed_user["account"],
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(2099, 11, 20),

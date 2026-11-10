@@ -213,7 +213,7 @@ def _a_transfer(seed_user, *, amount="100.00"):
     )
     db.session.flush()
     transfer = create_transfer(
-        seed_user, db.session, seed_user["account"], destination,
+        seed_user, seed_user["account"], destination,
         seed_user["bootstrap_period"], amount=Decimal(amount),
     )
     db.session.flush()

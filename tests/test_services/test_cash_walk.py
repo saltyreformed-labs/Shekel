@@ -330,7 +330,7 @@ class TestTheClosingBalancePartition:
         # is what partitions, and the recording minute is not a fact about money.
         for amount in (Decimal("108.15"), Decimal("131.60")):
             create_settled_cash_transaction(
-                seed_user, db.session, period, amount,
+                seed_user, period, amount,
                 settled_on=date(2026, 7, 24),
             )
         db.session.commit()
@@ -353,7 +353,7 @@ class TestTheClosingBalancePartition:
         asserted_at = _instant(2026, 7, 24, 12, 57, 8)
         _assert_balance(account, Decimal("2932.41"), asserted_at)
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("50.00"),
+            seed_user, period, Decimal("50.00"),
             settled_on=date(2026, 7, 24),
         )
         db.session.commit()
@@ -379,7 +379,7 @@ class TestTheClosingBalancePartition:
         asserted_at = _instant(2026, 7, 24, 12, 57, 8)
         _assert_balance(account, Decimal("2932.41"), asserted_at)
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("77.00"),
+            seed_user, period, Decimal("77.00"),
             settled_on=asserted_at.astimezone(DISPLAY_TIMEZONE).date(),
         )
         db.session.commit()
@@ -413,11 +413,11 @@ class TestTheClosingBalancePartition:
         asserted_at = _instant(2026, 7, 24, 12, 57, 8)
         _assert_balance(account, Decimal("2932.41"), asserted_at)
         earlier = create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("40.00"),
+            seed_user, period, Decimal("40.00"),
             settled_on=date(2026, 7, 24), name="before",
         )
         later = create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("60.00"),
+            seed_user, period, Decimal("60.00"),
             settled_on=date(2026, 7, 24), name="after",
         )
         db.session.commit()
@@ -471,13 +471,13 @@ class TestEveryAssertionIsReplayed:
         account, scenario = seed_user["account"], seed_user["scenario"]
         period = seed_periods[0]
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("200.00"),
+            seed_user, period, Decimal("200.00"),
             settled_on=date(2026, 2, 1), name="feb spend",
         )
         march = _instant(2026, 3, 1)
         _assert_balance(account, Decimal("900.00"), march)
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("300.00"),
+            seed_user, period, Decimal("300.00"),
             settled_on=date(2026, 4, 1), name="apr spend",
         )
         may = _instant(2026, 5, 1)
@@ -517,11 +517,11 @@ class TestSourceFactValuation:
         period = seed_periods[0]
         _opened_at(account, _instant(2026, 1, 1))
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("250.00"),
+            seed_user, period, Decimal("250.00"),
             is_income=True, settled_on=date(2026, 2, 1), name="pay",
         )
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("75.00"),
+            seed_user, period, Decimal("75.00"),
             settled_on=date(2026, 2, 2), name="spend",
         )
         db.session.commit()
@@ -540,7 +540,7 @@ class TestSourceFactValuation:
         period = seed_periods[0]
         _opened_at(account, _instant(2026, 1, 1))
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("100.00"),
+            seed_user, period, Decimal("100.00"),
             settled_amount=Decimal("84.20"),
             settled_on=date(2026, 2, 1), name="spend",
         )
@@ -765,7 +765,7 @@ class TestAttributionIsOneKey:
         )
 
         txn = create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("5.00"),
+            seed_user, period, Decimal("5.00"),
         )
         db.session.commit()
 
@@ -898,7 +898,7 @@ class TestTheWalkSeesOnlyItsOwnRows:
         db.session.add(other)
         db.session.flush()
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("400.00"),
+            seed_user, period, Decimal("400.00"),
             scenario=other, settled_on=date(2026, 2, 1), name="what-if spend",
         )
         db.session.commit()
@@ -920,7 +920,7 @@ class TestTheWalkSeesOnlyItsOwnRows:
             seed_user, db.session, "Savings", Decimal("50.00"),
         )
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("25.00"),
+            seed_user, period, Decimal("25.00"),
             account=savings, settled_on=date(2026, 2, 1), name="other acct",
         )
         db.session.commit()
@@ -954,7 +954,7 @@ class TestTheWalkSeesOnlyItsOwnRows:
             observed_on=seed_periods[0].start_date,
         )
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("75.00"),
+            seed_user, period, Decimal("75.00"),
             account=card, settled_on=date(2026, 2, 1), name="charge",
         )
         db.session.commit()
@@ -1001,7 +1001,7 @@ class TestASourceCannotPredateTheBooks:
         db.session.flush()
         with pytest.raises(ValidationError) as exc:
             create_settled_cash_transaction(
-                seed_user, db.session, period, Decimal("500.00"),
+                seed_user, period, Decimal("500.00"),
                 settled_on=date(2026, 1, 15), name="pre-opening",
             )
         assert "2026-01-15" in str(exc.value)
@@ -1040,11 +1040,11 @@ class TestASourceCannotPredateTheBooks:
             account, _instant(2026, 2, 1), books_open_on=date(2026, 1, 31),
         )
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("500.00"),
+            seed_user, period, Decimal("500.00"),
             settled_on=date(2026, 2, 5), name="after-the-books",
         )
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("120.00"),
+            seed_user, period, Decimal("120.00"),
             settled_on=date(2026, 2, 20), name="later-still",
         )
         db.session.commit()
@@ -1076,7 +1076,7 @@ class TestTheWalkReadsNoClock:
         period = seed_periods[0]
         _opened_at(account, _instant(2026, 1, 1))
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("42.00"),
+            seed_user, period, Decimal("42.00"),
             settled_on=date(2026, 2, 1),
         )
         db.session.commit()
@@ -1173,14 +1173,14 @@ class TestTheStepsReconstructTheReplay:
         period = seed_periods[0]
         _opened_at(account, _instant(2026, 1, 1))
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("100.00"),
+            seed_user, period, Decimal("100.00"),
             settled_on=date(2026, 2, 1), name="pre",
         )
         _assert_balance(
             account, Decimal("2000.00"), _instant(2026, 3, 1),
         )
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("250.00"),
+            seed_user, period, Decimal("250.00"),
             settled_on=date(2026, 4, 1), name="post",
         )
         db.session.commit()
@@ -1234,7 +1234,7 @@ class TestTheStepsReconstructTheReplay:
         period = seed_periods[0]
         _opened_at(account, _instant(2026, 1, 1))
         create_settled_cash_transaction(
-            seed_user, db.session, period, Decimal("30.00"),
+            seed_user, period, Decimal("30.00"),
             settled_on=date(2026, 3, 1), name="morning",
         )
         _assert_balance(
@@ -1483,7 +1483,7 @@ class TestARecordedClearingFactMayNotMoveALineAcrossAStatement:
         account, scenario = seed_user["account"], seed_user["scenario"]
         _opened_at(account, _instant(2026, 1, 1))
         txn = create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("100.00"),
+            seed_user, seed_periods[0], Decimal("100.00"),
             settled_on=date(2026, 2, 10), name="late-posting debit",
         )
         first_at = _instant(2026, 2, 15, 9, 0, 0)
@@ -1528,7 +1528,7 @@ class TestARecordedClearingFactMayNotMoveALineAcrossAStatement:
         account, scenario = seed_user["account"], seed_user["scenario"]
         _opened_at(account, _instant(2026, 1, 1))
         txn = create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("100.00"),
+            seed_user, seed_periods[0], Decimal("100.00"),
             settled_on=date(2026, 2, 10), name="ticked on the 28th",
         )
         ticked = _assert_balance(
@@ -1581,7 +1581,7 @@ class TestARecordedClearingFactMayNotMoveALineAcrossAStatement:
         account, scenario = seed_user["account"], seed_user["scenario"]
         _opened_at(account, _instant(2026, 1, 1))
         txn = create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("100.00"),
+            seed_user, seed_periods[0], Decimal("100.00"),
             settled_on=date(2026, 2, 10), name="ticked on the second reading",
         )
         first_at = _instant(2026, 2, 15, 9, 0, 0)
@@ -1775,11 +1775,11 @@ class TestTheSourceOrderIsLoadBearing:
         account, scenario = seed_user["account"], seed_user["scenario"]
         _opened_at(account, _instant(2026, 1, 1))
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("50.00"),
+            seed_user, seed_periods[0], Decimal("50.00"),
             settled_on=date(2026, 2, 20), name="recorded first",
         )
         create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("100.00"),
+            seed_user, seed_periods[0], Decimal("100.00"),
             settled_on=date(2026, 2, 10), name="recorded second",
         )
         asserted_at = _instant(2026, 2, 15, 9, 0, 0)
@@ -1831,7 +1831,7 @@ class TestTheSameDayTieBreakIsTheMovementId:
             transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         )
         settled_first = create_settled_cash_transaction(
-            seed_user, db.session, seed_periods[0], Decimal("40.00"),
+            seed_user, seed_periods[0], Decimal("40.00"),
             settled_on=date(2026, 2, 10), name="Water",
         )
         settle_cash_row(first_created, settled_on=date(2026, 2, 10))

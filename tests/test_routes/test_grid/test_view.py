@@ -311,7 +311,7 @@ class TestBalanceRow:
                 create_settled_cash_transaction,
             )
             create_settled_cash_transaction(
-                seed_user, db.session, seed_periods_today[2],
+                seed_user, seed_periods_today[2],
                 Decimal("1200.00"), name="Paid Rent",
             )
             db.session.commit()

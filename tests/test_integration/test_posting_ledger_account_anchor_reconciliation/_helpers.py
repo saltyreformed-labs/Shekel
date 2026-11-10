@@ -350,6 +350,6 @@ def _settle_expense(seed_user, account, amount, settled_on):
     until plan step X-f1 removed both the derivation and the fallback.
     """
     return create_settled_cash_transaction(
-        seed_user, _db.session, seed_user["bootstrap_period"],
+        seed_user, seed_user["bootstrap_period"],
         Decimal(str(amount)), account=account, settled_on=settled_on,
     )

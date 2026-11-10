@@ -1167,7 +1167,7 @@ class TestAContributionIsValuedAndScreenedAtTheBoundary:
                 name=f"401k-{period.id}-{estimated}",
             )
         transfer = create_transfer(
-            seed_user, db_session, seed_user["account"], account, period,
+            seed_user, seed_user["account"], account, period,
             amount=Decimal(str(estimated)),
         )
         if settled:

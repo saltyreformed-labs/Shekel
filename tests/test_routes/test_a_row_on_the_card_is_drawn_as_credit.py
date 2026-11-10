@@ -27,7 +27,7 @@ from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import status_seam, transaction_service
 from app.utils.dates import display_today
-from tests._cards import add_card
+from tests._cards import add_card, add_savings
 from tests._legacy_credit import plant_old_credit
 from tests._test_helpers import add_txn
 from tests.test_routes._statement_forms import ReconcileFormReader
@@ -328,8 +328,15 @@ class TestThePopover:
     def test_a_row_paid_from_checking_keeps_paid_and_its_picker(
         self, auth_client, seed_user, seed_periods_today,
     ):
-        """The control: Paid on checking selects Paid, draws the picker, offers no Undo CC."""
+        """The control: Paid on checking selects Paid, draws the picker, offers no Undo CC.
+
+        A Savings account is planted so the picker has a choice: the Visa is
+        none since ruling plan#3227 (plan task plan#3232), so with checking
+        and the Visa alone no picker is drawn.
+        """
         row = _paid_on_checking(seed_user, seed_periods_today)
+        add_savings(seed_user)
+        db.session.commit()
 
         html = _popover(auth_client, row.id)
 

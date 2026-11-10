@@ -358,12 +358,14 @@ class TestThePopoversPaidPostsWhatItsCaptionNamed:
         Review finding M2 (MF): on this row the "Paid from" caption is the
         card's ONLY caption -- the typed $120.00 outranks the $125.00
         estimate, so neither Paid's $0.00 arm nor the Estimated box's
-        (ruling R-CC129) applies -- and Paid must still post its line.
+        (ruling R-CC129) applies -- and Paid must still post its line.  The
+        other account was a card until plan task plan#3232, which made it
+        Savings: "Paid from" lists no card since ruling plan#3227.
         """
         with app.app_context():
-            card = create_account_of_type(
-                seed_user, db.session, "Credit Card", "Rewards Card",
-                anchor_balance=Decimal("-500.00"),
+            savings = create_account_of_type(
+                seed_user, db.session, "Savings", "Rainy Day",
+                anchor_balance=Decimal("500.00"),
             )
             txn = a_transaction(seed_user, name="Hotel", amount="125.00")
             db.session.commit()
@@ -385,14 +387,14 @@ class TestThePopoversPaidPostsWhatItsCaptionNamed:
 
             response = auth_client.post(
                 f"/transactions/{txn.id}/mark-done",
-                data={**vals, "tender_account_id": str(card.id)},
+                data={**vals, "tender_account_id": str(savings.id)},
             )
 
             assert response.status_code == 200
             _committed()
             assert not _claimed(seed_user, line)
             (movement,) = db.session.get(Transaction, txn.id).covering_movements
-            assert movement.account_id == card.id
+            assert movement.account_id == savings.id
             assert movement.amount == Decimal("120.00")
 
 

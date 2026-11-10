@@ -33,11 +33,15 @@ from tests.test_services.test_statement_match._builders import (
 )
 
 
-def _card(seed_user):
-    """A card, so the picker has a choice to offer (ruling R-CC34)."""
+def _savings(seed_user):
+    """A Savings account, so the picker has a choice to offer (ruling R-CC34).
+
+    A card until plan task plan#3232: "Paid from" lists no card since ruling
+    plan#3227, so a card is no choice on a bill.
+    """
     return create_account_of_type(
-        seed_user, db.session, "Credit Card", "Rewards Card",
-        anchor_balance=Decimal("-500.00"),
+        seed_user, db.session, "Savings", "Rainy Day",
+        anchor_balance=Decimal("500.00"),
         observed_on=seed_user["bootstrap_period"].start_date,
     )
 
@@ -55,7 +59,7 @@ class TestThePickerSaysWhatADifferentPickWithdraws:
         self, app, auth_client, seed_user,
     ):
         with app.app_context():
-            _card(seed_user)
+            _savings(seed_user)
             bank_day = seed_user["bootstrap_period"].start_date + timedelta(days=1)
             txn = a_transaction(seed_user, name="Hotel", amount="120.00")
             db.session.commit()
@@ -89,7 +93,7 @@ class TestThePickerSaysWhatADifferentPickWithdraws:
         self, app, auth_client, seed_user,
     ):
         with app.app_context():
-            _card(seed_user)
+            _savings(seed_user)
             txn = a_transaction(seed_user, name="Hotel", amount="120.00")
             db.session.commit()
             settle_transaction(txn)
@@ -105,7 +109,7 @@ class TestThePickerSaysWhatADifferentPickWithdraws:
         self, app, auth_client, seed_user,
     ):
         with app.app_context():
-            _card(seed_user)
+            _savings(seed_user)
             txn = a_transaction(seed_user, name="Hotel", amount="120.00")
             db.session.commit()
 

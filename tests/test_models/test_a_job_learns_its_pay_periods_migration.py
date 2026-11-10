@@ -4,13 +4,15 @@ Plan step salary plan#3048 (task plan#3099), ruling plan#3096.  The revision
 adds ``salary.salary_profiles.period_end_days_before_payday``, fills every
 existing job with the developer's 6 (his 07-16 stub: Pay Date 07-16, Period
 End 07-10), makes it NOT NULL and bounds it to 0..365.  Its downgrade drops
-the bound and the column.
+the bound and the column, and refuses, naming the jobs, while any job states
+a gap other than the 6 a later upgrade fills (task plan#3127).
 
 * :class:`TestTheRevision` -- where it sits.
 * :class:`TestTheRefusal` -- the three-step rule's NULL check, through a stub
   bind with no database.
 * :class:`TestTheRoundTrip` -- both directions RUN on this test's own
-  database: the column goes and comes back holding 6, whatever the job had.
+  database: a job at 6 goes and comes back at 6, and jobs at 3 and 7 refuse
+  the downgrade, each by name, with nothing dropped.
 * :class:`TestTheRange` -- the CHECK refuses one past each end.
 * :class:`TestTheTable` -- the migrated table matches the model.
 """
@@ -82,6 +84,21 @@ class TestTheRefusal:
         assert f"WHERE {_COLUMN} IS NULL" in message
 
 
+def _gap_of(profile_id: int) -> int:
+    """The job's stated gap, asked of PostgreSQL."""
+    return db.session.execute(sqlalchemy.text(
+        f"SELECT {_COLUMN} FROM salary.salary_profiles WHERE id = :id"
+    ), {"id": profile_id}).scalar()
+
+
+def _range_check_present() -> bool:
+    """Whether ``ck_salary_profiles_period_end_days_range`` exists."""
+    return db.session.execute(sqlalchemy.text(
+        "SELECT count(*) FROM pg_constraint "
+        "WHERE conname = 'ck_salary_profiles_period_end_days_range'"
+    )).scalar() == 1
+
+
 def _gap_column():
     """``(is_nullable, column_default)`` of the column, or ``None`` when absent."""
     row = db.session.execute(sqlalchemy.text(
@@ -96,27 +113,69 @@ def _gap_column():
 class TestTheRoundTrip:
     """Both directions run on this test's own database (the ``db`` fixture's clone)."""
 
-    def test_down_drops_it_and_up_fills_every_job_with_six(self, app, seed_user):
-        """A job stating 3 comes back stating 6: the upgrade fills, it does not keep.
+    def test_a_job_at_six_goes_and_comes_back_at_six(self, app, seed_user):
+        """A job stating 6 round-trips exactly: the downgrade loses nothing the upgrade fills.
 
-        The downgrade has nowhere to keep the 3, so the upgrade's backfill is
-        what every job then holds -- the developer's gap, the one job
-        production has.
+        The downgrade drops the column and its bound; the upgrade's backfill
+        is 6 for every job, which is what this job stated.
         """
         with app.app_context():
             profile = make_salary_profile(seed_user, db.session)
-            profile.period_end_days_before_payday = 3
-            db.session.commit()
+            assert profile.period_end_days_before_payday == 6
             profile_id = profile.id
 
             run_migration_callable(_MIGRATION.downgrade, db.session)
             assert _gap_column() is None
+            assert not _range_check_present()
 
             run_migration_callable(_MIGRATION.upgrade, db.session)
             assert _gap_column() == ("NO", None)
-            assert db.session.execute(sqlalchemy.text(
-                f"SELECT {_COLUMN} FROM salary.salary_profiles WHERE id = :id"
-            ), {"id": profile_id}).scalar() == 6
+            assert _range_check_present()
+            assert _gap_of(profile_id) == 6
+
+    def test_a_job_at_another_gap_refuses_the_downgrade(self, app, seed_user):
+        """Jobs at 3 and 7 are each named and the job at 6 is not; nothing is dropped.
+
+        The older schema has no place for a 3 or a 7, and a later upgrade
+        would fill 6, moving the days those jobs' paychecks pay for (task
+        plan#3127).  A gap on either side of 6 is refused.  The column and its
+        bound are asked for BEFORE the rollback, so they grade that the
+        refusal runs ahead of the drops rather than that PostgreSQL rolls a
+        dropped bound back; the gaps are asked again after it.
+        """
+        with app.app_context():
+            gaps = {3: None, 6: None, 7: None}
+            for gap in gaps:
+                profile = make_salary_profile(
+                    seed_user, db.session, name=f"Job at {gap}",
+                )
+                profile.period_end_days_before_payday = gap
+                db.session.commit()
+                gaps[gap] = profile.id
+            user_id = seed_user["user"].id
+
+            with pytest.raises(RuntimeError) as refused:
+                run_migration_callable(_MIGRATION.downgrade, db.session)
+            assert _gap_column() == ("NO", None)
+            assert _range_check_present()
+            db.session.rollback()
+
+            message = str(refused.value)
+            assert message.startswith("Cannot downgrade: 2 salary profile(s) ")
+            assert (
+                f"(id={gaps[3]} user_id={user_id} {_COLUMN}=3, "
+                f"id={gaps[7]} user_id={user_id} {_COLUMN}=7)"
+            ) in message
+            assert f"id={gaps[6]} " not in message
+            assert "plan#3096" in message
+            assert "Restore a dump taken at or before revision 6740ce13e174 instead." in message
+            assert (
+                f"UPDATE salary.salary_profiles SET {_COLUMN} = 6 "
+                f"WHERE id IN ({gaps[3]}, {gaps[7]});"
+            ) in message
+            assert {gap: _gap_of(profile_id) for gap, profile_id in gaps.items()} == {
+                3: 3, 6: 6, 7: 7,
+            }
 
 
 @pytest.mark.usefixtures("db")

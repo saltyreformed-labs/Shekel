@@ -10,7 +10,8 @@ from one stub's two dates"), ruling **plan#3096**::
 before the payday payroll SCHEDULED for it, the grid day before any holiday
 moved it.  The job's form asks one stub's Pay Date and Period End and turns
 them into this; ``pay_calendar.days_paid_for`` reads it for the days each
-paycheck pays for.  Nothing priced reads it at this revision.
+paycheck pays for.  The paycheck pricer reads those days from task plan#3100
+on (``payroll_basis``).
 
 **The backfill is 6, for every existing job, and the derivation is one stub.**
 Production holds one salary profile, the developer's.  His 2026-07-16 stub
@@ -26,9 +27,17 @@ column is added nullable, every row is set to 6, and a row still NULL is
 refused by id before the column is made NOT NULL.  The CHECK comes last, over
 filled rows.
 
-The downgrade drops the CHECK and the column, losing each job's stated gap;
-the older schema has no place for it and nothing at that revision reads it.
-Additive DDL with a plain reversal: no ``Review:`` line is owed.
+**The downgrade drops the CHECK and the column, and REFUSES, naming the jobs,
+while any job states a gap other than 6.**  The older schema has no place for
+a gap, and a later upgrade fills 6 for every job, so a job stating another
+gap would come back stating the wrong one.  That moves the days its paychecks
+pay for, and with them its prices: the day each recorded pay opens, and so
+whether a raise dated near it is already in that pay or applied on top; the
+weekdays a paycheck that straddles a raise pays at each rate; and the day a
+change of pay rhythm takes effect.  A job at 6 round-trips exactly.  The
+sibling ``6740ce13e174`` refuses its downgrade the same way where a stated day
+would be lost.  With the refusal, the downgrade drops only what the upgrade
+restores, so it loses no stated fact: no ``Review:`` line is owed.
 
 Revision ID: 0fe9c332b9b0
 Revises: 6740ce13e174
@@ -84,6 +93,41 @@ def refuse_unfilled_profiles(bind) -> None:
         )
 
 
+def refuse_gaps_the_upgrade_would_not_restore(bind) -> None:
+    """Raise when any job states a gap other than the 6 a later upgrade fills.
+
+    Args:
+        bind: The migration's connection.
+
+    Raises:
+        RuntimeError: Naming every such job with its gap, which the downgrade
+            would otherwise lose, and the two ways through: restore a dump
+            taken at or before the older revision (what a genuine downgrade
+            means, ``deploy/shekel-deploy.sh``), or set each job to 6 in
+            place, by the UPDATE the message gives, and re-enter its gap after
+            upgrading again.
+    """
+    rows = bind.execute(sa.text(
+        f"SELECT id, user_id, {_COLUMN} AS gap FROM {_SCHEMA}.{_TABLE} "
+        f"WHERE {_COLUMN} <> {_BACKFILL_DAYS} ORDER BY id"
+    )).all()
+    if rows:
+        named = ", ".join(
+            f"id={row.id} user_id={row.user_id} {_COLUMN}={row.gap}" for row in rows
+        )
+        ids = ", ".join(str(row.id) for row in rows)
+        raise RuntimeError(
+            f"Cannot downgrade: {len(rows)} salary profile(s) state a pay-period "
+            f"gap other than the {_BACKFILL_DAYS} days a later upgrade fills "
+            f"({named}), and the schema this downgrade restores has no place for "
+            "it (ruling plan#3096).  Restore a dump taken at or before revision "
+            f"{down_revision} instead.  Or, to downgrade in place, first run "
+            f"UPDATE {_SCHEMA}.{_TABLE} SET {_COLUMN} = {_BACKFILL_DAYS} WHERE id "
+            f"IN ({ids}); which moves the days those jobs' paychecks pay for "
+            "until each gap named here is entered again after upgrading."
+        )
+
+
 def upgrade():
     """Add the gap, fill every existing job with the developer's 6, then bound it."""
     bind = op.get_bind()
@@ -103,6 +147,7 @@ def upgrade():
 
 
 def downgrade():
-    """Drop the bound and the gap; nothing at the older revision reads it."""
+    """Drop the bound and the gap, refusing while a job states one no upgrade restores."""
+    refuse_gaps_the_upgrade_would_not_restore(op.get_bind())
     op.drop_constraint(_CHECK, _TABLE, type_="check", schema=_SCHEMA)
     op.drop_column(_TABLE, _COLUMN, schema=_SCHEMA)

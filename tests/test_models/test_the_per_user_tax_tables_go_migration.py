@@ -14,9 +14,13 @@ empty), stores the rows it grades, then runs the real upgrade.
 
 The rows stored are the law's own, written from the revision's frozen record
 (:func:`_store_the_law`), and each refusal case changes one of them the way a
-Settings edit could have.  The frozen record itself is graded against figures
-read off the published sources by hand (:class:`TestTheFrozenLaw`), never
-against ``app.tax_law``, which plan step salary:X-at-7 changes on purpose.
+Settings edit could have.  The frozen record itself is graded here only by its
+row count per table and six of its rows, spelled by hand from the seed
+constants it was transcribed from (:class:`TestTheFrozenLaw`); that every row
+equals those constants and ``app.tax_law`` was measured on 2026-11-10, and the
+revision's docstring records the measurement.  No test grades it against
+``app.tax_law``: plan step salary:X-at-7 changes 2025's standard deductions
+and 2026's head-of-household boundary there on purpose.
 """
 from __future__ import annotations
 
@@ -449,23 +453,38 @@ class TestChaining:
 
 
 class TestTheFrozenLaw:
-    """The revision's copy of the law as X-at-1 left it, graded figure by figure.
+    """The revision's copy of the law as X-at-1 left it: its size and six of its rows.
 
-    Each expected figure is read off its published source, not off the record
-    or ``app.tax_law``: the 2026 head-of-household boundary is the figure the
-    app seeded ($201,775), which plan step salary:X-at-7 corrects in the code
-    and must not correct here.
+    Not every figure: a typo in a row these do not name passes them.  Each
+    expected figure is one the app seeded, copied by hand from the seed
+    constants at ``2ceedf9e4^`` (``app/services/tax_seed_data.py``), not off
+    the record or ``app.tax_law``.  Two are not today's law, as the code's
+    own year modules say: 2025's single standard deduction ($15,000, Rev.
+    Proc. 2024-40's, which P.L. 119-21 raised to $15,750) and 2026's
+    head-of-household 24% ceiling ($201,775, the single filer's, where Rev.
+    Proc. 2025-32 puts $201,750).  Plan step salary:X-at-7 corrects both in
+    the code and must not correct them here.
     """
 
     def test_each_table_has_the_law_s_row_count(self):
-        """8 bracket sets (2 years x 4 statuses), 56 rungs (8 x 7), 8 state rows, 2 FICA, 56 tiers."""
+        """The record holds the law's row count in each table.
+
+        8 bracket sets (2 years x 4 statuses), 56 rungs (8 x 7), 8 state rows
+        (2 x 4), 2 FICA rows and 56 tiers (2 x 4 x 7).
+        """
         assert {table: len(rows) for table, rows in _MIGRATION.law_rows().items()} == {
             "tax_bracket_sets": 8, "tax_brackets": 56, "state_tax_configs": 8,
             "fica_configs": 2, "state_child_deductions": 56,
         }
 
     def test_the_figures_the_app_seeded(self):
-        """Spot figures across every table, both years and an edge of each ladder."""
+        """One row of each table and a second rung, from both years.
+
+        The rungs are 2026 head of household's 24% rung, which ends at the
+        seeded $201,775, and the open top of 2026's joint ladder; the tier is
+        the open top of 2026's married-filing-separately table: two of the
+        eight ladders and one of the eight tier tables.
+        """
         law = _MIGRATION.law_rows()
         assert (
             2025, "single", Decimal("15000.00"), Decimal("2200.00"), Decimal("500.00"),

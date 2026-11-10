@@ -4,9 +4,11 @@ Read on production, read-only, on 2026-11-10 at revision ``897a6663d221``, the
 oracle the revision's downgrade is graded against
 (``test_the_per_user_tax_tables_go_migration.py``, ruling plan#3211: "in
 production's exact shape").  Spelled here as read, never from the revision, so
-the grade cannot echo what it grades.  A chain-built database differs in two
-places, which the revision's docstring names: ``state_tax_configs``' and
-``tax_bracket_sets``' column order, and the two credit columns' ``DEFAULT 0``.
+the grade cannot echo what it grades.  Its columns were re-read on production
+the same day at ``3748145b83e3`` and were unchanged.  A database built from the
+chain differs from it in three things, which the revision's docstring states
+in full: ``state_tax_configs``' column order, ``tax_bracket_sets``' column
+order, and ``DEFAULT 0`` on that table's two credit columns.
 """
 
 #: Each table's columns in production's order: name, type, numeric precision and

@@ -40,12 +40,18 @@ the calculator now compares itself (plan#2025's amendment to the card, ruling
 because the law in the code moves: plan step salary:X-at-7 (plan#1143) corrects
 2025's federal standard deductions ($15,000 to $15,750 for a single filer) and
 2026's head-of-household 24% / 32% boundary ($201,775 to $201,750), and a
-comparison against the code would then refuse rows nobody touched.  No 2025 or
-2026 figure has changed since X-at-1 (``app/tax_law/_year_2025.py``,
-``_year_2026.py`` and ``_north_carolina.py`` each have one commit on ``dev``,
-X-at-1's ``2ceedf9e4``, checked at ``7c8ccff82`` on 2026-11-10), so the frozen
-copy equals the code today; it is a copy because a migration imports nothing from the app.
-The 2027 law (plan#1141) adds no stored row.  Each table is compared on the
+comparison against the code would then refuse rows nobody touched.  It is a
+copy because a migration imports nothing from the app.  **Measured on
+2026-11-10** (plan#3274): its 130 rows (8 bracket sets, 56 brackets, 8 state
+rows, 2 FICA rows and 56 child-deduction tiers) equal row for row, on the
+columns below, both ``app.tax_law``'s 2025 and 2026 at ``dev``'s ``2df736ba1``
+and the seed constants signup copied, ``app/services/tax_seed_data.py`` at
+``adceff2ed`` (``2ceedf9e4^``, before X-at-1 deleted it), each mapped to rows
+as signup's ``_seed_tax_data_for_user`` and the seed's row builders mapped it:
+no row on one side only, and a figure planted in the code's copy was found.
+At ``2df736ba1``, ``app/tax_law/_year_2025.py``, ``_year_2026.py`` and
+``_north_carolina.py`` each have one commit, X-at-1's ``2ceedf9e4``.  The 2027
+law (plan#1141) adds no stored row.  Each table is compared on the
 columns that state law, with its filing status and tax type by their ``ref``
 names:
 
@@ -68,11 +74,18 @@ scale (``15000`` beside ``15000.00``) is the same figure.
 **Measured on production, read-only, 2026-11-10, stamped ``897a6663d221``**:
 260 rows -- 16 bracket sets, 112 brackets, 16 state rows, 4 FICA rows and 112
 child-deduction tiers, two users' 2025 and 2026 -- every one a row of the law,
-so this revision drops them.  The change log (``system.audit_log``) holds 64
-writes to the tables, all at 2026-07-07 17:30 UTC, the minute one migration
-(``b7f3a2c1d4e5``) backfilled them: 12 state rows inserted, 4 given a filing
-status, and 16 bracket sets' child credit and refundable cap each raised.  No
-write by hand.
+so this revision drops them.  **The change log** (``system.audit_log``,
+re-counted on production, read-only, 2026-11-10 at 18:14 UTC, stamped
+``3748145b83e3``) holds 48 writes to the five tables, all in one minute,
+2026-07-07 17:30 UTC, all by the owner role ``shekel_user``: 12 inserts and 4
+updates of ``state_tax_configs`` (each update its ``filing_status_id``), and
+32 updates of ``tax_bracket_sets`` (16 its ``child_credit_amount``, 16 its
+``child_credit_refundable_cap``) -- the writes ``b7f3a2c1d4e5``'s backfill
+makes on two users' rows.  It holds no delete, none by the app's role
+``shekel_app``, and none to ``tax_brackets``, ``fica_configs`` or
+``state_child_deductions``: that migration inserted the 112 tiers before it
+attached their trigger.  The log begins 2026-05-06, so it says nothing of a
+write before that day; the comparison above is what grades the rows.
 
 **No money moves.**  Nothing has read the tables since X-at-1, so the drop
 changes no figure.
@@ -94,9 +107,32 @@ tables EMPTY, in production's exact shape** (ruling plan#3211), read off
 production's catalogue at ``897a6663d221`` on 2026-11-10: every column in
 production's order with its type, nullability and default, and every key,
 CHECK and index under production's name.  That shape is not quite the one the
-chain builds: production's ``state_tax_configs`` holds ``tax_year`` fifth and
-its ``tax_bracket_sets`` holds the two credit columns sixth and seventh, with
-no default, where a chain-built database has them later with ``DEFAULT 0``.
+chain builds.  Measured on 2026-11-10 on a database built from the empty chain
+to ``0fe9c332b9b0``, against production's catalogue as this revision's tests
+hold it (read at ``897a6663d221``; its columns re-read that day at
+``3748145b83e3`` and unchanged): every key, CHECK and index of the six tables
+is the same, and so is every column of ``ref.tax_types``, ``tax_brackets``,
+``fica_configs`` and ``state_child_deductions``.  These differ, and nothing
+else:
+
+* ``state_tax_configs``' column order.  Production's is ``id``, ``user_id``,
+  ``tax_type_id``, ``state_code``, ``tax_year``, ``flat_rate``,
+  ``standard_deduction``, ``created_at``, ``filing_status_id``.  The chain's
+  is ``id``, ``user_id``, ``tax_type_id``, ``state_code``, ``flat_rate``,
+  ``created_at``, ``standard_deduction``, ``tax_year``, ``filing_status_id``:
+  ``22b3dd9d9ed3`` creates the table through ``created_at``, then
+  ``02b1ff12b08c`` adds ``standard_deduction`` and ``7abcbf372fff``
+  ``tax_year``.  ``tax_year`` is fifth in production and eighth in the chain,
+  ``flat_rate`` sixth and fifth, ``created_at`` eighth and sixth;
+  ``standard_deduction`` is seventh in both, after ``flat_rate`` in production
+  and after ``created_at`` in the chain.
+* ``tax_bracket_sets``' column order.  Production holds
+  ``child_credit_amount`` and ``other_dependent_credit_amount`` sixth and
+  seventh, before ``description`` and ``created_at``; the chain holds them
+  eighth and ninth, after those two, where ``b4c7d8e9f012`` adds them.
+* Those two credit columns' default: none in production, ``DEFAULT 0`` in the
+  chain (``b4c7d8e9f012``).
+
 Production's is what is rebuilt; a migration below this one names columns,
 never positions, and nothing writes the tables.  The ids of
 ``ref.tax_types``' rows come from its sequence, in the seed list's order; the

@@ -32,6 +32,7 @@ from tools.quill._tracker import (
     BOARD_STATUS_SET,
     BOARD_TOP,
 )
+from tools.quill._suggestion import SUGGEST, WITHDRAW
 from tools.quill.setup_tracker import FILING, PLAN, REHEARSAL
 
 #: The real tracker's ``owner/name``, as every recording here names it.
@@ -112,6 +113,24 @@ def test_a_cards_comments_are_its_own_text():
     for private in ("secret comment", "secret parent comment"):
         assert private not in kept, private
     for public in ("scratch comment", "shekel-quill", "SaltyReformed"):
+        assert public in kept, public
+
+
+def test_a_cards_pending_suggestions_are_its_own_text():
+    """plan#2798: a card's pending suggestions, each a suggested Priority and its reason, are
+    its own text (``_recorded._OWN_CONTENT``): kept for a scratch card, redacted for any
+    other; the suggester's login is a kept key, whoever's card."""
+    def read(number, value, why):
+        return _graphql({"data": {"repository": {"issue": {"number": number,
+                                                           "pendingSuggestions": [
+            {"__typename": "PendingFieldSuggestion",
+             "actor": {"login": "shekel-quill", "id": "BOT_1"}, "suggestedValue": value,
+             "rationale": why}]}}}}, {"number": number})
+    kept = json.dumps(redacted([read(2, "Urgent", "secret reason."),
+                                read(11, "Low", "scratch reason.")], _scratch(11)))
+    for private in ("Urgent", "secret reason."):
+        assert private not in kept, private
+    for public in ("Low", "scratch reason.", "shekel-quill"):
         assert public in kept, public
 
 
@@ -252,6 +271,16 @@ _REFS = f"https://api.github.com/repos/{TRACKER}/git/refs"
     ("POST", "https://api.github.com/graphql",
      {"query": BOARD_ADD + ' b: updateIssue(input: {id: "I_2", body: "x"}) { issue { id } }',
       "variables": {"p": "PVT_1", "c": "S_11"}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": SUGGEST, "variables": {"issue": "I_a_real_card", "field": "IFSS_1",
+                                      "option": "IFSSO_1", "why": "x."}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": WITHDRAW, "variables": {"issue": "SI_11", "actor": "BOT_1", "field": "IFSS_1"}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": SUGGEST, "variables": {"field": "IFSS_1", "option": "IFSSO_1", "why": "x."}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": SUGGEST + ' b: updateIssue(input: {id: "I_2", body: "x"}) { issue { id } }',
+      "variables": {"issue": "S_11", "field": "IFSS_1", "option": "IFSSO_1", "why": "x."}}),
     ("POST", f"{_ISSUES}/11/sub_issues", {"sub_issue_id": 911, "replace_parent": True}),
     ("POST", f"{_ISSUES}/11/comments", {"body": "b", "title": "x"}),
     ("POST", f"{_REFS[:-5]}/commits", {"message": "m", "tree": "t", "parents": ["p"]}),
@@ -333,10 +362,16 @@ def test_a_write_that_is_not_a_known_write_to_a_scratch_card_is_refused(method, 
                                                "o": "f75ad846"}}),
     ("POST", "https://api.github.com/graphql",
      {"query": BOARD_STATUS_CLEAR, "variables": {"p": "PVT_1", "i": "SI_11", "f": "PVTSSF_1"}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": SUGGEST, "variables": {"issue": "S_11", "field": "IFSS_1", "option": "IFSSO_1",
+                                      "why": "x."}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": WITHDRAW, "variables": {"issue": "S_11", "actor": "BOT_1", "field": "IFSS_1"}}),
     ("GET", f"{_ISSUES}/2", None),
 ])
 def test_a_known_write_to_a_scratch_card_or_any_read_is_sent(method, url, body):
-    """Each route the recording sessions take, to a scratch card; and every read."""
+    """Each route the recording sessions take, to a scratch card, the suggestion's two writes
+    among them (ruling plan#3257); and every read."""
     assert refusal(method, url, body, _scratch(11)) is None
 
 
@@ -387,15 +422,16 @@ def test_a_create_github_refused_counts_nothing_as_scratch():
 #: Every recording in ``recorded/``, and whether it read the real cards (it must then hold a
 #: redacted title on a card node): ``tracker.json`` and ``export.json`` read them;
 #: ``label_missing.json`` read only its scratch card, and ``blocking.json``, ``show.json``,
-#: ``status.json``, ``priority.json`` and ``comment_lookup.json`` only their scratch cards on the
-#: throwaway ``plan-views-demo`` (R-BAL395, plan#1925; ``show.json``'s and ``status.json``'s
+#: ``status.json``, ``priority.json``, ``comment_lookup.json`` and ``suggestion.json`` only their
+#: scratch cards on the throwaway ``plan-views-demo`` (R-BAL395, plan#1925, plan#2798;
+#: ``show.json``'s and ``status.json``'s
 #: board reads
 #: hold item numbers, no title).  A recording added or removed must be named here (the next
 #: test).
 RECORDINGS_READ_REAL_CARDS = {"blocking": False, "comment_lookup": False, "comments": False,
                               "export": True, "label_missing": False, "priority": False,
-                              "show": False, "status": False, "tracker": True, "twice": False,
-                              "unlink": False}
+                              "show": False, "status": False, "suggestion": False,
+                              "tracker": True, "twice": False, "unlink": False}
 #: The recordings that hold no title at all (ruling plan#1952): ``comment_lookup.json`` reads
 #: only comments (``Tracker.comments_of``, plan#1925).  The census holds each to more than a
 #: title census could: every card in it is one of its own scratch cards, so every word of a

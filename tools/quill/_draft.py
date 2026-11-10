@@ -1,6 +1,6 @@
-"""A card as a change would leave it (:class:`Draft`) and its owner (:class:`Owner`): what
-:mod:`check` grades, and what :meth:`_tracker.Tracker.create` then files, the one
-description of a card both read.
+"""A card as a change would leave it (:class:`Draft`), its owner (:class:`Owner`) and the
+Priority its filing suggests (:class:`Suggestion`): what :mod:`check` grades, and what
+:meth:`_tracker.Tracker.create` then files, the one description of a card both read.
 
 A leaf: it imports no module of quill's, so :mod:`_tracker`, which :mod:`check` reads through
 :mod:`_state`, can import it.  Moved out of :mod:`check` at plan#1811, whose create files the
@@ -23,6 +23,18 @@ class Owner:
     kind: str | None
     live: bool
     split: bool
+
+
+@dataclass(frozen=True)
+class Suggestion:
+    """The Priority a filing session suggests for a card, and ``why``: one plain sentence
+    saying what goes wrong for the developer if the card is never built, or for a question
+    what waits on its answer (rulings plan#3224, plan#3236).  GitHub holds it as a pending
+    suggestion on the card's issue field Priority, ``why`` its reason, the Priority itself
+    blank until the developer accepts it or sets another (``_suggestion``)."""
+
+    priority: str
+    why: str
 
 
 @dataclass(frozen=True)

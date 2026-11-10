@@ -81,6 +81,7 @@ from tools.quill._github import (
     paged,
     reading,
 )
+from tools.quill._suggestion import Suggestions
 from tools.quill.setup_tracker import (
     APP_LOGIN,
     FILING,
@@ -599,7 +600,9 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
 
     ``github`` is any object with :class:`_github.GitHub`'s ``rest``,
     ``graphql`` and ``graphql_lookup``.  The tracker's :class:`setup_tracker.Place`
-    is its board's (:attr:`Board.location`), its one home.
+    is its board's (:attr:`Board.location`), its one home.  ``suggestions`` are its cards'
+    suggested Priorities (:class:`_suggestion.Suggestions`), apart as the board is, with their
+    own door (ruling plan#3257).
     """
 
     def __init__(self, github: GitHub, board: Board, app_login: str) -> None:
@@ -607,6 +610,7 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         super().__init__(github, board.location, app_login)
         self.board = board
         self.board_id = board.board_id
+        self.suggestions = Suggestions(github, board.location, app_login)
 
     @classmethod
     def connect(cls, place: Place) -> Tracker:

@@ -1,17 +1,22 @@
-"""Every GraphQL mutation quill's App sends goes through :meth:`_tracker.Board._write`.
+"""Every GraphQL mutation quill's App sends goes through one of its two doors:
+:meth:`_tracker.Board._write`, or :meth:`_suggestion.Suggestions._write` (ruling plan#3257).
 
 ``Board._write`` names the place's board as ``$p`` and no other, the fence that keeps a
 write aimed at one tracker off another's board (``_tracker``'s module docstring).  It was
 a fence by CONVENTION: a raw ``mutation`` string sent from :class:`_tracker.Tracker`, or
 from a method of the board that bypasses ``_write``, passed every test (review of X-cx L7
-A2, L2).  This test reads the source instead.
+A2, L2).  This test reads the source instead.  ``Suggestions._write`` names one card's node
+id as ``$issue``: GitHub writes a card's suggested Priority only through GraphQL (measured
+2026-11-10), and a card is the tracker repository's, which the App's token is narrowed to,
+where the board is the organization's (``_suggestion``'s module docstring).
 
 **What it checks is a mutation spelled as a string literal that begins with
-``mutation``** (any case), and its scope is the App's writes.  ``_tracker`` is the one
-module that speaks to the tracker as the App, so every such literal it holds must be the
-value of a module-level constant (assigned plainly or with a type) whose every use in it
-is the first argument of ``self._write`` inside :class:`_tracker.Board`, and no call there
-hands ``graphql`` or ``graphql_lookup`` one; every other module of the tool holds none.
+``mutation``** (any case), and its scope is the App's writes.  ``_tracker`` and
+``_suggestion`` are the modules that send the tracker the App's GraphQL writes (:data:`_DOORS`),
+so every such literal each holds must be the value of a module-level constant (assigned
+plainly or with a type) whose every use in it is the first argument of ``self._write`` inside
+its door's class, :class:`_tracker.Board` or :class:`_suggestion.Suggestions`, and no call
+there hands ``graphql`` or ``graphql_lookup`` one; every other module of the tool holds none.
 ``setup_tracker`` is the one module outside that scope: it configures the tracker as the
 DEVELOPER (``main`` connects with ``user_token()``), so its mutations are his login's
 writes, which this fence was never about (``_github``'s module docstring: the two
@@ -33,8 +38,10 @@ from pathlib import Path
 QUILL = Path(__file__).resolve().parent
 #: A GraphQL mutation's text: the operation keyword first, in any case.
 _MUTATION = re.compile(r"^\s*mutation\b", re.IGNORECASE)
-#: The module that sends the App's writes, and the one that writes as the developer.
-_TRACKER, _DEVELOPERS = "_tracker.py", "setup_tracker.py"
+#: The modules that send the App's GraphQL writes, the one that writes as the developer, and
+#: each sending module's door, the class whose ``self._write`` sends them (ruling plan#3257).
+_TRACKER, _SUGGESTION, _DEVELOPERS = "_tracker.py", "_suggestion.py", "setup_tracker.py"
+_DOORS = {_TRACKER: "Board", _SUGGESTION: "Suggestions"}
 _SENDS = {"graphql", "graphql_lookup"}
 
 
@@ -79,7 +86,8 @@ def _inside(node: ast.AST, parents: dict, kind: type, name: str) -> bool:
 
 
 def fence_breaches(name: str, tree: ast.Module) -> list[str]:
-    """Each way module ``name`` sends, or could send, a mutation around ``Board._write``.
+    """Each way module ``name`` sends, or could send, a mutation around its door's ``_write``
+    (:data:`_DOORS`).
 
     Args:
         name: The module's file name.
@@ -94,31 +102,34 @@ def fence_breaches(name: str, tree: ast.Module) -> list[str]:
     parents = _parents(tree)
     constants = [node for node in ast.walk(tree)
                  if isinstance(node, ast.Constant) and _is_mutation(node)]
-    if name != _TRACKER:
-        return [f"{name}:{node.lineno} holds a mutation outside {_TRACKER}" for node in constants]
+    if name not in _DOORS:
+        return [f"{name}:{node.lineno} holds a mutation outside {' and '.join(_DOORS)}"
+                for node in constants]
+    door = _DOORS[name]
     named = set(_constants(tree))
     breaches = [f"{name}:{node.lineno} holds a mutation that is no module-level constant"
                 for node in constants
                 if not isinstance(parents.get(_statement(node, parents)), ast.Module)]
     for node in ast.walk(tree):
         if (isinstance(node, ast.Name) and node.id in named and isinstance(node.ctx, ast.Load)
-                and not _board_writes(node, parents)):
+                and not _door_writes(node, parents, door)):
             breaches.append(f"{name}:{node.lineno} uses the mutation {node.id} other than "
-                            "as self._write's first argument inside Board")
+                            f"as self._write's first argument inside {door}")
         if _sends_mutation(node, named):
             breaches.append(f"{name}:{node.lineno} hands {node.func.attr} a mutation directly")
     return breaches
 
 
-def _board_writes(name: ast.Name, parents: dict) -> bool:
-    """Whether ``name`` is the first argument of a ``self._write(...)`` call inside ``Board``."""
+def _door_writes(name: ast.Name, parents: dict, door: str) -> bool:
+    """Whether ``name`` is the first argument of a ``self._write(...)`` call inside the class
+    ``door``."""
     call = parents.get(name)
     if not (isinstance(call, ast.Call) and call.args and call.args[0] is name):
         return False
     method = call.func
     return (isinstance(method, ast.Attribute) and method.attr == "_write"
             and isinstance(method.value, ast.Name) and method.value.id == "self"
-            and _inside(name, parents, ast.ClassDef, "Board"))
+            and _inside(name, parents, ast.ClassDef, door))
 
 
 def _sends_mutation(node: ast.AST, named: set[str]) -> bool:
@@ -138,16 +149,18 @@ def _statement(node: ast.AST, parents: dict) -> ast.AST:
     return node
 
 
-def test_every_mutation_the_app_sends_goes_through_board_write():
+def test_every_mutation_the_app_sends_goes_through_one_of_its_two_doors():
     """The tool as committed keeps the fence, and it HAS mutations to keep it on: the
     board's six, its four moves and its two Status writes (rulings plan#1873, plan#1905),
-    each a module-level constant of ``_tracker``."""
+    each a module-level constant of ``_tracker``, and the suggestion's two, its put and its
+    take-back (ruling plan#3257), each one of ``_suggestion``."""
     modules = _modules()
     assert {name: fence_breaches(name, tree) for name, tree in modules.items()
             if fence_breaches(name, tree)} == {}
     assert sorted(_constants(modules[_TRACKER])) == [
         "BOARD_ADD", "BOARD_AFTER", "BOARD_REMOVE", "BOARD_STATUS_CLEAR", "BOARD_STATUS_SET",
         "BOARD_TOP"]
+    assert sorted(_constants(modules[_SUGGESTION])) == ["SUGGEST", "WITHDRAW"]
 
 
 _PLANTED = '''
@@ -185,7 +198,7 @@ def test_a_planted_raw_mutation_is_a_breach_and_board_write_is_not():
         "inside Board",
     ]
     assert fence_breaches("quill.py", ast.parse('Q = "mutation { x }"')) == [
-        "quill.py:1 holds a mutation outside _tracker.py"]
+        "quill.py:1 holds a mutation outside _tracker.py and _suggestion.py"]
 
 
 _TYPED = '''
@@ -208,4 +221,37 @@ def test_a_typed_constant_or_an_upper_case_keyword_is_seen_too():
         "inside Board",
     ]
     assert fence_breaches("quill.py", ast.parse('Q = "MUTATION { x }"')) == [
-        "quill.py:1 holds a mutation outside _tracker.py"]
+        "quill.py:1 holds a mutation outside _tracker.py and _suggestion.py"]
+
+
+_CARD_DOOR = '''
+SUGGEST = "mutation($issue: ID!) { setIssueFieldValue(input: {issueId: $issue}) { x } }"
+
+class Suggestions:
+    def _write(self, mutation, card, **variables):
+        return self.github.graphql(mutation, issue=card.node_id, **variables)
+
+    def put(self, card):
+        self._write(SUGGEST, card)
+
+class Board:
+    def _write(self, mutation, **variables):
+        return self.github.graphql(mutation, p=self.board_id, **variables)
+
+    def suggest(self, card):
+        return self._write(SUGGEST, card)
+'''
+
+
+def test_the_card_door_holds_its_own_writes_and_no_other_class_sends_them():
+    """The second door (ruling plan#3257), proven on planted source: in ``_suggestion`` a
+    mutation sent through ``Suggestions._write`` is no breach, and the same constant sent
+    through another class's ``_write`` is one, as a board write sent from outside ``Board`` is
+    in ``_tracker``; and ``_tracker``'s door is ``Board`` alone, so a constant sent through
+    ``Suggestions._write`` there is a breach."""
+    assert fence_breaches(_SUGGESTION, ast.parse(_CARD_DOOR)) == [
+        "_suggestion.py:16 uses the mutation SUGGEST other than as self._write's first "
+        "argument inside Suggestions"]
+    assert fence_breaches(_TRACKER, ast.parse(_CARD_DOOR)) == [
+        "_tracker.py:9 uses the mutation SUGGEST other than as self._write's first argument "
+        "inside Board"]

@@ -200,11 +200,19 @@ def test_an_unrehearsed_mover_refuses_every_earlier_cut_carrying_it(repo):
     assert judged.passing is None
 
 
-def test_an_earlier_cut_adding_a_migration_the_cut_does_not_is_offered(repo):
+#: Why the cut after ``aa`` is refused once dev deleted ``aa``: what it would stamp
+#: production at.
+_AA_DELETED = (f"it adds migration aa ({VERSIONS}/aa_first.py), which the release's cut no "
+               "longer carries, so production would be stamped at a revision dev cannot "
+               "resolve")
+
+
+def test_an_earlier_cut_adding_a_migration_the_cut_does_not_is_refused(repo):
     """dev took aa, then deleted it, took bb under a new id and shipped #40, a money mover
-    with no kit.  The cut is refused for #40 alone, and the cut after aa is offered: once
-    the developer takes it, it is the cut, and the row comparison rehearses aa (ruling
-    plan#2873), so no rehearsal of it is left unjudged."""
+    with no kit.  The cut is refused for #40 alone.  The cut after aa is no cut to offer,
+    though no rehearsal refuses it (ruling plan#2873): taken, it would stamp production at
+    aa, which no later cut of dev carries, so the next release's deploy could not resolve
+    production's revision."""
     base = repo.commit("base")
     first = repo.merge(base, repo.commit("add aa", {f"{VERSIONS}/aa_first.py":
                                                     migration("aa", None)}, parents=(base,)))
@@ -215,8 +223,23 @@ def test_an_earlier_cut_adding_a_migration_the_cut_does_not_is_offered(repo):
     tracker = _tracker(40)
     judged = judge(repo, base, cut, tracker, ["plan#40"])
     assert judged.verdict.refusals == ("plan#40 moves money and has no rehearsal kit",)
-    assert judged.passing is not None and judged.passing.cut == first
-    assert [m.revision for m in judged.passing.added] == ["aa"]
+    assert judged.passing is None
     candidate = Judge(repo.root, base, cut, Inputs(connect=lambda: tracker)).verdict(
         first, "add aa")
-    assert (candidate.status, candidate.refusals) == (CLEAN, ())
+    assert (candidate.status, candidate.refusals) == (REFUSED, (_AA_DELETED,))
+
+
+def test_a_cut_before_the_second_never_adds_a_migration_the_cut_deleted(repo):
+    """dev took aa, then deleted it and took bb and cc.  The cut adds two migrations, so
+    the cut before the second is looked for, and the cut after aa adds one: but it is
+    refused for aa, so no cut before the second is offered."""
+    base = repo.commit("base")
+    first = repo.merge(base, repo.commit("add aa", {f"{VERSIONS}/aa_first.py":
+                                                    migration("aa", None)}, parents=(base,)))
+    cut = repo.merge(first, repo.commit("redo as bb, cc", {
+        f"{VERSIONS}/aa_first.py": None, f"{VERSIONS}/bb_first.py": migration("bb", None),
+        f"{VERSIONS}/cc_second.py": migration("cc", "bb")}, parents=(first,)))
+    judged = judge(repo, base, cut, FakeTracker())
+    assert [m.revision for m in judged.verdict.added] == ["bb", "cc"]
+    assert judged.verdict.status == NEEDS_APPROVAL
+    assert judged.one_migration is None

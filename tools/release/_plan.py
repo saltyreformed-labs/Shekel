@@ -37,8 +37,8 @@ branch's own commits, and an offered cut can hold a leaf's code without its clai
 first-parent line names (every candidate's), read from the tracker once, so a card the
 cut reads as a money mover is one at every candidate.  A name the skill gave as
 unrehearsed refuses every candidate carrying it.  A candidate adding a migration the cut
-does not add is judged as any other: once the developer takes it, it is the cut, and the
-row comparison rehearses what it adds (ruling plan#2873).
+does not add is refused: ``dev`` has since deleted that migration or re-made it under a new
+revision, so production would be stamped at a revision the next cut cannot resolve.
 """
 from __future__ import annotations
 
@@ -160,9 +160,14 @@ def _split(group: Group) -> str | None:
     return why + "; the group ships whole"
 
 
-def _refusals(found: Carried, unrehearsed: Collection[str]) -> list[str]:
-    """Why a cut carrying ``found`` is refused; empty when it is not.  No migration refuses
-    one: the row comparison rehearses whatever the cut settled on adds (ruling plan#2873)."""
+def _refusals(found: Carried, changed: tuple[Migration, ...], unrehearsed: Collection[str],
+              cut_adds: Collection[str]) -> list[str]:
+    """Why a cut carrying ``found`` and changing the migrations ``changed`` is refused; empty
+    when it is not.  ``cut_adds`` holds the revisions the release's own cut adds: an earlier
+    cut adding any other ships a migration ``dev`` has since deleted or re-made under a new
+    revision, so production would be stamped at a revision the next cut cannot resolve.  No
+    migration needs a kit: the row comparison rehearses whatever the cut settled on adds
+    (ruling plan#2873)."""
     reasons = list(found.unreadable)
     movers = [step.key for step in found.steps if step.money]
     if len(movers) > 1:
@@ -171,6 +176,9 @@ def _refusals(found: Carried, unrehearsed: Collection[str]) -> list[str]:
     reasons += [why for why in map(_split, found.groups) if why]
     reasons += [f"{key} moves money and has no rehearsal kit" for key in movers
                 if key in unrehearsed]
+    reasons += [f"it adds migration {m.revision} ({m.path}), which the release's cut no longer "
+                "carries, so production would be stamped at a revision dev cannot resolve"
+                for m in _added(changed) if m.revision not in cut_adds]
     return reasons
 
 
@@ -205,6 +213,8 @@ class Judge:
             raise ReleaseError(f"{self.cut[:12]}'s work is the tracker's cards, and no way to "
                                "reach the tracker was given")
         self._known = _cards.read(root, self.base, self.cut, inputs.connect())
+        self._cut_adds = frozenset(m.revision for m in _added(migrations(root, self.base,
+                                                                         self.cut)))
 
     def verdict(self, cut: str, subject: str) -> Verdict:
         """``cut`` (the release's, or an earlier one) judged; ``subject`` is its commit's
@@ -212,7 +222,8 @@ class Judge:
         found = _cards.carried(self.root, self.base, cut, self._known)
         changed = migrations(self.root, self.base, cut)
         return Verdict(cut, subject, found, changed,
-                       tuple(_refusals(found, self.unrehearsed)), tuple(_approvals(changed)))
+                       tuple(_refusals(found, changed, self.unrehearsed, self._cut_adds)),
+                       tuple(_approvals(changed)))
 
     def line(self, cut: str) -> list[tuple[str, str]]:
         """``(sha, subject)`` for each cut ``dev`` stood at in ``<base>..<cut>``, newest

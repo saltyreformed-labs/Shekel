@@ -188,15 +188,15 @@ class SalaryProfileUpdateSchema(BaseSchema):
     version_id = RowId(validate=validate.Range(min=1))
 
 
-class SalaryPayEntryFixSchema(BaseSchema):
-    """Validates POST data for fixing one entry of a salary's pay list.
+class SalaryPayEntryRecordSchema(BaseSchema):
+    """Validates POST data for recording a pay change on a salary's pay list.
 
-    Plan step **salary:X-av-3a**, ruling **R-SAL61**: "'Fix' edits one" --
-    its amount, its payday, or both.  Whether the payday is a payday, and
-    whether another entry already holds it, are the service's questions
-    (:func:`~app.services.pay_list_service.fix_entry`).  ``version_id`` is
-    the entry's optimistic-locking counter; see
-    :class:`TransactionUpdateSchema` for the contract.
+    Plan step **salary:X-av-3b**, ruling **R-SAL61**: "'Record a pay change'
+    adds one from a payday you pick" -- what one paycheck pays, and the
+    payday it pays it from.  Whether the payday is a payday, is not later
+    than the owner's next one, and is not one another entry already holds,
+    are the service's questions
+    (:func:`~app.services.pay_list_service.record_entry`).
     """
 
     @pre_load
@@ -208,6 +208,20 @@ class SalaryPayEntryFixSchema(BaseSchema):
         required=True, places=2, as_string=True, validate=_PAY_AMOUNT_RANGE,
     )
     payday = fields.Date(required=True, validate=_PAYDAY_RANGE)
+
+
+class SalaryPayEntryFixSchema(SalaryPayEntryRecordSchema):
+    """Validates POST data for fixing one entry of a salary's pay list.
+
+    Plan step **salary:X-av-3a**, ruling **R-SAL61**: "'Fix' edits one" --
+    its amount, its payday, or both: the two fields a Record states, so they
+    are inherited rather than spelled again.  Whether a CHANGED payday is a
+    payday, and whether another entry already holds it, are the service's
+    questions (:func:`~app.services.pay_list_service.fix_entry`).
+    ``version_id`` is the entry's optimistic-locking counter; see
+    :class:`TransactionUpdateSchema` for the contract.
+    """
+
     version_id = RowId(required=True, validate=validate.Range(min=1))
 
 

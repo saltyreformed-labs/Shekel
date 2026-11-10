@@ -1,12 +1,17 @@
 {% from "_money_macros.html" import money %}
 {# The pay list (plan step salary:X-av-3a): what one paycheck pays, from a
-   dated payday on (R-SAL59), each entry beside its yearly figure (R-SAL61)
-   and a Fix that changes only the paychecks it covers.  Record a pay change
-   and Remove are X-av-3b's.  Every figure is the route's; nothing here
-   computes. #}
+   dated payday on (R-SAL59), each entry beside its yearly figure (R-SAL61),
+   a Fix that changes only the paychecks it covers, and Record a pay change
+   (plan step salary:X-av-3b), which adds one from a payday the owner picks.
+   Every figure is the route's; nothing here computes. #}
 <div class="card mb-3" id="pay-section">
-  <div class="card-header">
+  <div class="card-header d-flex justify-content-between align-items-center">
     <h6 class="mb-0"><i class="bi bi-cash-stack" aria-hidden="true"></i> Pay</h6>
+    <button type="button" class="btn btn-sm btn-outline-primary"
+            data-bs-toggle="collapse" data-bs-target="#record-pay"
+            aria-expanded="false" aria-controls="record-pay">
+      <i class="bi bi-plus" aria-hidden="true"></i> Record a pay change
+    </button>
   </div>
   <div class="card-body">
     {# A change of rhythm no pay is recorded from is priced by carrying the
@@ -81,9 +86,38 @@
       </tbody>
     </table>
     </div>
-    <p class="form-text mb-0">
-      A fix corrects an entry and moves only the paychecks it covers.
-      Paychecks before your first entry are paid at it.
+    {# Record a pay change (ruling R-SAL61, "adds one from a payday you pick
+       (like the stub screen)"): the payday is stated, never defaulted, as the
+       stub screen asks for it. #}
+    <div class="collapse mt-3" id="record-pay">
+      <form method="POST" class="row g-2 align-items-end"
+            action="{{ url_for('salary.record_pay_entry', profile_id=profile.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="col-sm-5">
+          <label for="record-pay-payday" class="form-label small">From payday</label>
+          <input type="date" class="form-control form-control-sm"
+                 id="record-pay-payday" name="payday" required>
+        </div>
+        <div class="col-sm-5">
+          <label for="record-pay-amount" class="form-label small">A paycheck</label>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text">$</span>
+            <input type="number" step="0.01" min="0.01" class="form-control"
+                   id="record-pay-amount" name="amount" required>
+          </div>
+        </div>
+        <div class="col-sm-2">
+          <button type="submit" class="btn btn-sm btn-primary w-100">Record</button>
+        </div>
+      </form>
+      <p class="form-text mb-0">
+        Record the pay on the payday it starts, up to your next payday.
+      </p>
+    </div>
+    <p class="form-text mb-0 mt-2">
+      A fix corrects an entry and moves only the paychecks it covers; a pay
+      change records new pay from its payday on.  Paychecks before your first
+      entry are paid at it.
     </p>
   </div>
 </div>

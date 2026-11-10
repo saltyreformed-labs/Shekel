@@ -3,9 +3,10 @@
 Rulings **R-SAL59** (the stored fact is what one paycheck pays from a dated
 payday on) and **R-SAL61** ("'Fix' edits one": an entry's amount, its payday,
 or both).  Every POST here is what the page RENDERS, read off the page by
-:class:`_FormReader` -- a hand-written payload is written by the same author
-as the template and agrees with it about a mistake as readily as about the
-truth.  Every figure is made up.
+the shared :func:`tests._form_controls.rendered_form_controls` (this file's
+own reader until plan step salary:X-av-3b, finding SAL-593) -- a hand-written
+payload is written by the same author as the template and agrees with it
+about a mistake as readily as about the truth.  Every figure is made up.
 
 * create: the form's pay a paycheck and its payday become the first entry;
 * Fix: the amount, the payday, both; a payday that is not one, or that another
@@ -27,15 +28,17 @@ next.
 
 from datetime import date, timedelta
 from decimal import Decimal
-from html.parser import HTMLParser
+from unittest.mock import patch
 
 import pytest
+import sqlalchemy
 
 from app.extensions import db
 from app.models.ref import FilingStatus
 from app.models.salary_pay_entry import SalaryPayEntry
 from app.models.salary_profile import SalaryProfile
-from app.services import pay_era_write
+from app.services import pay_era_write, pay_list_service
+from tests._salary_forms import create_through_the_form, rendered_page_form
 from tests._stub_period import stub_period_on
 from tests._test_helpers import era_of, freeze_today, start_test_pay_list
 
@@ -46,79 +49,6 @@ def _freeze_today(monkeypatch):
     freeze_today(monkeypatch, date(2026, 3, 20))
 
 
-class _FormReader(HTMLParser):
-    """Collect the controls of the ONE form whose ``action`` is *action*, at their rendered values.
-
-    An ``<input>`` submits its ``value``; a ``<select>`` submits the option
-    carrying ``selected``, else its first.  A page carries several forms and a
-    browser posts one, so only the named form's controls are kept.
-    """
-
-    def __init__(self, action):
-        super().__init__()
-        self.action = action
-        self.controls = {}
-        self.found = False
-        self._inside = False
-        self._select = None
-        self._first = None
-
-    def handle_starttag(self, tag, attrs):
-        """Open the form, record an input, or open a select and read its options."""
-        attributes = dict(attrs)
-        if tag == "form":
-            self._inside = attributes.get("action") == self.action
-            self.found = self.found or self._inside
-            return
-        if not self._inside:
-            return
-        name = attributes.get("name")
-        if tag == "input" and name:
-            self.controls[name] = attributes.get("value", "")
-        elif tag == "select" and name:
-            self._select, self._first = name, None
-        elif tag == "option" and self._select is not None:
-            value = attributes.get("value", "")
-            if self._first is None:
-                self._first = value
-            if "selected" in attributes:
-                self.controls[self._select] = value
-
-    def handle_endtag(self, tag):
-        """Close a select (defaulting to its first option) or the form."""
-        if tag == "select" and self._select is not None:
-            self.controls.setdefault(self._select, self._first or "")
-            self._select = None
-        elif tag == "form":
-            self._inside = False
-
-
-def _rendered_form(client, page, action):
-    """Return the controls the form posting to *action* on *page* submits."""
-    response = client.get(page)
-    assert response.status_code == 200
-    reader = _FormReader(action)
-    reader.feed(response.get_data(as_text=True))
-    assert reader.found, f"{page} renders no form posting to {action}"
-    return reader.controls
-
-
-def _create_through_the_form(client, seed_user, pay, payday):
-    """POST the create form as ``salary/form.html`` renders it, typing *pay* and *payday*."""
-    controls = _rendered_form(client, "/salary/new", "/salary")
-    # The owner types the name and pay and PICKS the state: the form opens on
-    # "Choose your state" and chooses none (plan step salary:X-at-3).
-    controls.update({
-        "name": "Day Job", "pay_amount": pay, "pay_payday": payday,
-        "state_code": "NC", **stub_period_on(payday),
-    })
-    response = client.post("/salary", data=controls)
-    assert response.status_code == 302, response.get_data(as_text=True)
-    return db.session.query(SalaryProfile).filter_by(
-        user_id=seed_user["user"].id, name="Day Job",
-    ).one()
-
-
 def _fix_url(entry):
     """The Fix door's URL for *entry*."""
     return f"/salary/pay/{entry.id}/fix"
@@ -126,7 +56,7 @@ def _fix_url(entry):
 
 def _fix_form(client, entry):
     """The Fix form of *entry* as the salary page renders it."""
-    return _rendered_form(
+    return rendered_page_form(
         client, f"/salary/{entry.salary_profile_id}/edit", _fix_url(entry),
     )
 
@@ -146,7 +76,7 @@ class TestCreateByPayPerPaycheck:
     ):
         """``$2,000.00`` from 2026-01-16's payday: one entry, exactly that."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[1].start_date.isoformat(),
             )
             assert [
@@ -164,9 +94,9 @@ class TestCreateByPayPerPaycheck:
         again on top.
         """
         with app.app_context():
-            controls = _rendered_form(auth_client, "/salary/new", "/salary")
+            controls = rendered_page_form(auth_client, "/salary/new", "/salary")
             assert date(2026, 3, 13) in {period.start_date for period in seed_periods}
-            assert controls["pay_payday"] == "2026-03-13"
+            assert controls["pay_payday"] == ["2026-03-13"]
             assert "pay_amount" in controls
 
     def test_a_day_that_is_not_a_payday_creates_nothing(
@@ -174,7 +104,7 @@ class TestCreateByPayPerPaycheck:
     ):
         """2026-01-03 is the day after a payday: refused with the stub door's words."""
         with app.app_context():
-            controls = _rendered_form(auth_client, "/salary/new", "/salary")
+            controls = rendered_page_form(auth_client, "/salary/new", "/salary")
             controls.update({
                 "name": "Day Job", "pay_amount": "2000.00",
                 "pay_payday": "2026-01-03", "state_code": "NC",
@@ -208,7 +138,7 @@ class TestUpToTheNextPayday:
     ):
         """04-10 has not been paid yet on 03-20: the pay doors' words; no profile."""
         with app.app_context():
-            controls = _rendered_form(auth_client, "/salary/new", "/salary")
+            controls = rendered_page_form(auth_client, "/salary/new", "/salary")
             controls.update({
                 "name": "Day Job", "pay_amount": "2000.00",
                 "pay_payday": "2026-04-10", "state_code": "NC",
@@ -229,7 +159,7 @@ class TestUpToTheNextPayday:
     ):
         """03-27 is the next payday: the first entry is written on it."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", "2026-03-27",
             )
             assert [entry.payday for entry in profile.pay_entries] == [
@@ -241,7 +171,7 @@ class TestUpToTheNextPayday:
     ):
         """A Fix to 04-10 on 03-20 is refused; the entry is untouched."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -264,7 +194,7 @@ class TestFix:
     def test_fix_the_amount(self, app, auth_client, seed_user, seed_periods):
         """``$2,000.00`` -> ``$2,070.00``; the page shows the new yearly ``$53,820.00`` (x 26)."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -283,7 +213,7 @@ class TestFix:
     def test_fix_the_payday(self, app, auth_client, seed_user, seed_periods):
         """Moved to the third payday: the amount stays, the day moves."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -301,7 +231,7 @@ class TestFix:
     ):
         """2026-01-03: the stub door's words, and the entry is untouched."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -321,7 +251,7 @@ class TestFix:
     ):
         """Two entries; moving the second onto the first's payday is refused by name."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             later = SalaryPayEntry(
@@ -353,14 +283,14 @@ class TestFix:
         a payday it does not change.
         """
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
             entry.payday = date(2026, 1, 3)
             db.session.commit()
             controls = _fix_form(auth_client, entry)
-            assert controls["payday"] == "2026-01-03"
+            assert controls["payday"] == ["2026-01-03"]
             controls["amount"] = "2070.00"
 
             auth_client.post(_fix_url(entry), data=controls)
@@ -370,7 +300,7 @@ class TestFix:
     def test_a_stale_form_is_refused(self, app, auth_client, seed_user, seed_periods):
         """A form rendered before another tab's Fix is refused; that Fix stands."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -400,15 +330,8 @@ class TestFix:
         bumping the version with autoflush held off, right after the service
         stages its change.
         """
-        # pylint: disable=import-outside-toplevel  -- the one patch target here.
-        from unittest.mock import patch
-
-        import sqlalchemy
-
-        from app.services import pay_list_service
-
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -442,7 +365,7 @@ class TestFix:
     ):
         """``0.00`` is refused by the schema; nothing moves."""
         with app.app_context():
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             )
             entry = profile.pay_entries[0]
@@ -480,7 +403,7 @@ class TestOwnership:
             )
             db.session.commit()
             before = _state(theirs.id)
-            mine = _create_through_the_form(
+            mine = create_through_the_form(
                 auth_client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
             ).pay_entries[0]
             controls = _fix_form(auth_client, mine)
@@ -509,22 +432,27 @@ class TestOwnership:
 class TestACutReadsAsACut:
     """A recorded pay cut renders amber with a down arrow; an increase stays green (R-SAL85).
 
-    The second entry is planted through the model: in this leaf no door
-    records a second entry (plan step salary:X-av-3b's "Record a pay
-    change" will), and the screens read the pay list whichever door wrote it.
-    Made-up: $2,000.00 from 2026-01-02, then $1,930.00 (a cut) or $2,070.00
-    (an increase) from 2026-02-13, the fourth seeded payday.
+    The second entry is recorded through the Record door's rendered form
+    (plan step salary:X-av-3b; planted through the model until that door
+    existed).  Made-up: $2,000.00 from 2026-01-02, then $1,930.00 (a cut) or
+    $2,070.00 (an increase) from 2026-02-13, the fourth seeded payday.
     """
 
     def _profile_changing_to(self, client, seed_user, seed_periods, amount):
-        """The profile, its first entry through the form, the second planted."""
-        profile = _create_through_the_form(
+        """The profile, its first entry through the create form, the second through Record."""
+        profile = create_through_the_form(
             client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
         )
-        profile.pay_entries.append(SalaryPayEntry(
-            payday=seed_periods[3].start_date, amount=Decimal(amount),
-        ))
-        db.session.commit()
+        record = f"/salary/{profile.id}/pay"
+        controls = rendered_page_form(client, f"/salary/{profile.id}/edit", record)
+        controls.update({
+            "payday": seed_periods[3].start_date.isoformat(), "amount": amount,
+        })
+        assert client.post(record, data=controls).status_code == 302
+        db.session.expire_all()
+        assert [entry.amount for entry in profile.pay_entries] == [
+            Decimal("2000.00"), Decimal(amount),
+        ]
         return profile
 
     def test_the_projection_row_and_badge_of_a_cut_are_amber_with_a_down_arrow(
@@ -597,7 +525,7 @@ class TestTheRhythmNotice:
             switch = max(period.start_date for period in seed_periods) + timedelta(days=28)
             pay_era_write.mint_era(seed_user["user"].id, era_of(switch, 7))
             db.session.commit()
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", "2026-03-13",
             )
 
@@ -623,7 +551,7 @@ class TestTheRhythmNotice:
             switch = max(period.start_date for period in seed_periods) + timedelta(days=28)
             pay_era_write.mint_era(seed_user["user"].id, era_of(switch, 7))
             db.session.commit()
-            profile = _create_through_the_form(
+            profile = create_through_the_form(
                 auth_client, seed_user, "2000.00", "2026-03-13",
             )
             profile.pay_entries.append(SalaryPayEntry(

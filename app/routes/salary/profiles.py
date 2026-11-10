@@ -12,11 +12,10 @@ from flask_login import current_user
 from markupsafe import Markup
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.utils.auth_helpers import get_or_404, get_owned_via_parent, require_owner
+from app.utils.auth_helpers import get_or_404, require_owner
 from app.utils.dates import display_today
 from app.exceptions import ValidationError
 from app.extensions import db
-from app.models.salary_pay_entry import SalaryPayEntry
 from app.models.salary_profile import SalaryProfile
 from app.models.transaction_template import TransactionTemplate
 from app.models.category import Category
@@ -41,12 +40,10 @@ from app.services.obligations_aggregator import todays_price
 from app.services.pay_calendar import PayCadence
 from app.services.payroll_basis import PayrollBasis
 from app.services.recurrence import RecurrenceSpec, author_rule
-from app.schemas.validation import SalaryPayEntryFixSchema
 from app.services.generation_schedule import GenerationSchedule
 from app.routes._commit_helpers import (
     DbErrorContext,
     StaleConflictContext,
-    UniqueViolationContext,
     commit_or_handle_stale,
     handle_db_error,
     regenerate_commit_or_report,
@@ -64,12 +61,6 @@ from app.routes.salary._helpers import (
 )
 
 logger = logging.getLogger(__name__)
-
-_pay_entry_fix_schema = SalaryPayEntryFixSchema()
-
-#: The pay list's one-entry-per-payday key, named for the duplicate-key
-#: report a Fix racing another onto one payday lands on.
-_PAY_ENTRIES_UNIQUE_CONSTRAINT = "uq_pay_entries_profile_payday"
 
 
 def _paychecks_per_year() -> "int | None":
@@ -561,100 +552,6 @@ def update_profile(profile_id):
     logger.info("user_id=%d updated salary profile %d", current_user.id, profile_id)
     flash(f"Salary profile '{profile.name}' updated.", "success")
     return redirect(url_for("salary.edit_profile", profile_id=profile_id))
-
-
-@salary_bp.route("/salary/pay/<int:entry_id>/fix", methods=["POST"])
-@require_owner
-def fix_pay_entry(entry_id):
-    """Correct one pay entry's amount or payday, and re-price what it covers.
-
-    Plan step **salary:X-av-3a**, ruling **R-SAL61** ("'Fix' edits one").
-    Ownership runs through the entry's profile (404 for not-found and
-    not-yours).  Optimistic locking as the raise edit does it: the form ships
-    the entry's ``version_id``; a stale one short-circuits with a flash, and a
-    flush-time ``StaleDataError`` is caught by the same guard.  A Fix racing
-    another onto one payday lands on ``uq_pay_entries_profile_payday`` and is
-    reported as the recoverable warning it is.
-    """
-    entry = get_owned_via_parent(SalaryPayEntry, entry_id, "salary_profile")
-    if entry is None:
-        abort(404)
-    profile = entry.salary_profile
-    edit_page = RedirectTarget("salary.edit_profile", {"profile_id": profile.id})
-
-    errors = _pay_entry_fix_schema.validate(request.form)
-    if errors:
-        flash("Please correct the highlighted errors and try again.", "danger")
-        return redirect(url_for("salary.edit_profile", profile_id=profile.id))
-    data = _pay_entry_fix_schema.load(request.form)
-
-    stale_message = (
-        "This pay entry was changed by another action while you were "
-        "editing.  Please reload and try again."
-    )
-    if data["version_id"] != entry.version_id:
-        logger.info(
-            "Stale-form conflict on fix_pay_entry id=%d "
-            "(submitted=%d, current=%d)",
-            entry_id, data["version_id"], entry.version_id,
-        )
-        flash(stale_message, "warning")
-        return redirect(url_for("salary.edit_profile", profile_id=profile.id))
-
-    # ONE read pass for the POST (task plan#3106): the calendar a changed
-    # payday is checked against and the regeneration after the Fix are one
-    # value.  ``fix_entry`` reads only the calendar off it, which a Fix does
-    # not move, so the regeneration may take it.
-    ctx = BalanceContext.build(current_user.id)
-    try:
-        pay_list_service.fix_entry(
-            entry, ctx, data["amount"], data["payday"], display_today(),
-        )
-    except ValidationError as refused:
-        db.session.rollback()
-        flash(str(refused), "danger")
-        return redirect(url_for("salary.edit_profile", profile_id=profile.id))
-
-    response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(ctx, profile),
-        stale_ctx=StaleConflictContext(
-            logger=logger,
-            log_label="fix_pay_entry",
-            log_id=entry_id,
-            flash_message=stale_message,
-            redirect=edit_page,
-        ),
-        error_ctx=DbErrorContext(
-            logger=logger,
-            log_message="user_id=%d failed to fix pay entry %d on profile %d",
-            log_args=(current_user.id, entry_id, profile.id),
-            flash_message="Failed to fix the pay entry. Please try again.",
-            redirect=edit_page,
-        ),
-        on_integrity=UniqueViolationContext(
-            logger=logger,
-            constraint=_PAY_ENTRIES_UNIQUE_CONSTRAINT,
-            log_message=(
-                "Duplicate-key conflict on fix_pay_entry id=%d "
-                "(another entry already holds that payday)"
-            ),
-            log_args=(entry_id,),
-            flash_message=(
-                "Another pay entry already starts on that payday.  Fix that "
-                "entry instead."
-            ),
-            redirect=edit_page,
-        ),
-    )
-    if response is not None:
-        return response
-
-    logger.info(
-        "user_id=%d fixed pay entry %d on salary profile %d",
-        current_user.id, entry_id, profile.id,
-    )
-    flash("Pay entry fixed.", "success")
-    return redirect(url_for("salary.edit_profile", profile_id=profile.id))
 
 
 @salary_bp.route("/salary/<int:profile_id>/delete", methods=["POST"])

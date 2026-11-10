@@ -28,6 +28,9 @@ Module map:
 * :mod:`app.routes.salary.profiles` -- salary-profile CRUD
   (``new_profile``, ``create_profile``, ``edit_profile``,
   ``update_profile``, ``delete_profile``, ``reactivate_profile``).
+* :mod:`app.routes.salary.pay_list` -- the pay list's doors (plan steps
+  salary:X-av-3a and X-av-3b): Record a pay change (``record_pay_entry``)
+  and Fix (``fix_pay_entry``, here from ``profiles`` since X-av-3b).
 * :mod:`app.routes.salary.items` -- raise and deduction add/edit/delete
   (the two parallel salary line-item families, co-located).
 * :mod:`app.routes.salary.views` -- projection view + retired-breakdown
@@ -55,6 +58,7 @@ from app.routes.salary._bp import salary_bp
 # on what is, by design, a deferred-import side-effect registration.
 from app.routes.salary import cockpit  # noqa: F401, E402
 from app.routes.salary import profiles  # noqa: F401, E402
+from app.routes.salary import pay_list  # noqa: F401, E402
 from app.routes.salary import items  # noqa: F401, E402
 from app.routes.salary import views  # noqa: F401, E402
 from app.routes.salary import checkpoint  # noqa: F401, E402

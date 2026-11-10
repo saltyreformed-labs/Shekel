@@ -53,6 +53,15 @@ class FakeBracketSet:
         self.child_credit_refundable_cap = child_credit_refundable_cap
         self.brackets = brackets or []
 
+    @property
+    def withholding_rules(self):
+        """The rules withholding prices on: these, as the fake states no withholding figure.
+
+        Mirrors :attr:`app.tax_law.FederalRules.withholding_rules`, which the
+        withholding formula reads (ruling plan#3213).
+        """
+        return self
+
 
 def _single_brackets():
     """Test fixture: simplified progressive bracket structure."""

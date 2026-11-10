@@ -41,6 +41,9 @@ from app.exceptions import AuthError, ConflictError, ValidationError
 from app.rate_limits import limiter
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
+    _MFA_PENDING_AT_KEY,
+    _MFA_PENDING_NEXT_KEY,
+    _MFA_PENDING_USER_ID_KEY,
     _browser_standing,
     _complete_sign_in,
     _first_validation_message,
@@ -224,10 +227,10 @@ def login():
                     )
                     return response
                 # Store pending auth state in session (user is NOT logged in yet).
-                flask_session["_mfa_pending_user_id"] = user.id
+                flask_session[_MFA_PENDING_USER_ID_KEY] = user.id
                 # Validate the next parameter at storage time (defense in depth).
                 pending_next = request.args.get("next")
-                flask_session["_mfa_pending_next"] = (
+                flask_session[_MFA_PENDING_NEXT_KEY] = (
                     pending_next if _is_safe_redirect(pending_next) else None
                 )
                 # Stamp the pending state with a timestamp so /mfa/verify
@@ -235,7 +238,7 @@ def login():
                 # Without this, a captured session cookie remains a valid
                 # MFA pending state for the entire 31-day default Flask
                 # session lifetime -- audit finding F-002.
-                flask_session["_mfa_pending_at"] = (
+                flask_session[_MFA_PENDING_AT_KEY] = (
                     datetime.now(timezone.utc).isoformat()
                 )
                 return redirect(url_for("auth.mfa_verify"))

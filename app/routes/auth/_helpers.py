@@ -85,13 +85,17 @@ _MFA_PENDING_MAX_AGE = timedelta(minutes=5)
 
 # Session-cookie keys used to carry MFA pending state across the two
 # halves of the login flow (password POST -> /mfa/verify POST).
-# Centralised here so the login route, the verify route, and the
-# pending-state helpers below stay in sync; a typo on any one key
-# would silently break the flow.
+# Each is named once here, and the login route, the verify route and
+# the pending-state helpers below read and write it only by that name:
+# a key misspelt at one site would read ``None`` and silently break the
+# flow, where a misspelt name is an undefined variable pylint refuses.
+_MFA_PENDING_USER_ID_KEY = "_mfa_pending_user_id"
+_MFA_PENDING_NEXT_KEY = "_mfa_pending_next"
+_MFA_PENDING_AT_KEY = "_mfa_pending_at"
 _MFA_PENDING_KEYS = (
-    "_mfa_pending_user_id",
-    "_mfa_pending_next",
-    "_mfa_pending_at",
+    _MFA_PENDING_USER_ID_KEY,
+    _MFA_PENDING_NEXT_KEY,
+    _MFA_PENDING_AT_KEY,
 )
 
 
@@ -549,7 +553,7 @@ def _mfa_pending_is_fresh():
     acceptance is the entire F-002 finding (a stolen cookie can
     complete login weeks after the password step).
     """
-    pending_at = session_stamp("_mfa_pending_at")
+    pending_at = session_stamp(_MFA_PENDING_AT_KEY)
     if pending_at is None:
         return False
     elapsed = datetime.now(timezone.utc) - pending_at

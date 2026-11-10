@@ -45,6 +45,8 @@ from app.rate_limits import limiter
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     MFA_SETUP_PENDING_TTL,
+    _MFA_PENDING_NEXT_KEY,
+    _MFA_PENDING_USER_ID_KEY,
     _clear_mfa_pending_state,
     _complete_sign_in,
     _consume_backup_code,
@@ -180,7 +182,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     no longer suppressed -- the TOTP/backup-code branching was extracted to
     :func:`_check_mfa_code`.)
     """
-    pending_user_id = flask_session.get("_mfa_pending_user_id")
+    pending_user_id = flask_session.get(_MFA_PENDING_USER_ID_KEY)
     if not pending_user_id:
         # No pending state at all -- silently redirect.  This is the
         # normal case for a user who navigated directly to /mfa/verify
@@ -316,7 +318,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     # is refused.
     trust = verify_data["trust_device"] and not used_backup_code
     response = _complete_sign_in(
-        user, flask_session.get("_mfa_pending_next"),
+        user, flask_session.get(_MFA_PENDING_NEXT_KEY),
         checked=reading.held, trust=trust,
     )
 

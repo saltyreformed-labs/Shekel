@@ -1,7 +1,7 @@
 """a card payment works out its amount
 
 Revision ID: d1f4a7c2b8e5
-Revises: 4d4eb9cd3850
+Revises: 5f2c46a35a79
 Create Date: 2026-11-03
 
 Plan step **credit_card:CC-6**, its first task (plan#2672), of
@@ -67,7 +67,12 @@ from app.card_payment_infrastructure import (
 
 # Revision identifiers, used by Alembic.
 revision = 'd1f4a7c2b8e5'
-down_revision = '4d4eb9cd3850'
+# The head of ``dev`` when ``card/1033`` took it in, measured 2026-11-10 at
+# ``fd3f17810`` (one head; ``4d4eb9cd3850`` at authoring, before nine
+# revisions landed on ``dev``).  Another lane landing a revision first makes
+# two heads, which git merges cleanly and ``flask db upgrade`` refuses:
+# re-point this at the measured head as the last edit before the pull request.
+down_revision = '5f2c46a35a79'
 branch_labels = None
 depends_on = None
 

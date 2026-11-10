@@ -14,8 +14,11 @@ date")::
 statement's due date, worked out from the card's dated terms on every read
 (:mod:`app.services.card_statement`), so no column names a day and no rule
 row changes here.  ``budget.recurrence_rules.unit_id`` already references
-this table under ``RESTRICT``, and every CHECK on the rule table states its
-unit rule over ids the application compares, so nothing on the table moves.
+this table under ``RESTRICT``, so nothing on the rule table moves.  The row
+states no ``months_per_unit`` (migration ``c4e8a1f7d2b6``): the unit is not
+measured in months, so its generated ``has_day_of_month`` is false, and the
+rule table's CHECKs over the flag a rule carries (``9b3e6d1f4a27``) refuse a
+nominal day beside it (none, plan#2673) and a weekday reading (``897a6663d221``).
 
 **Inline seed rationale.**  The row is seeded here so ``ref_cache.init()``
 resolves :class:`~app.enums.RecurrenceUnitEnum`'s new member immediately

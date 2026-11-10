@@ -11,9 +11,8 @@ and falling due on the 27th, so the Jan 5 statement is valued at the end of Jan 
 and falls due Jan 27.  **Paydays are Jan 2, Jan 16, Jan 30, Feb 13 and Feb 27.**
 Checking opens at $1,000.00.
 
-**A purchase goes on the card through the settle writer the Credit press will
-use** (:func:`_on_the_card`): the row stays on checking, its movement is on the
-card, on the day it was bought.
+**A purchase goes on the card by a Credit press** (:func:`_on_the_card`): the
+row stays on checking, its movement is on the card, on the day it was bought.
 """
 
 from datetime import date, datetime, timezone
@@ -22,15 +21,13 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import (
     CardPaymentModeEnum,
-    SettledDayBasisEnum,
     StatusEnum,
 )
 from app.extensions import db
 from app.services.balance_at import BalanceContext, balance_at, cash_balance_at
 from app.services.balance_at._cash_fold import assembled_fold
 from app.services.balance_at._cash_periods import period_view_of
-from app.services.settle_day import SettleDay
-from app.services.transaction_service import settle_transaction
+from app.services.transaction_service import mark_as_credit
 from tests._test_helpers import (
     add_txn,
     append_balance_assertion,
@@ -55,16 +52,16 @@ _FEB_27 = date(2026, 2, 27)
 
 
 def _on_the_card(seed_user, card, period, amount, on, *, name="Groceries"):
-    """A row in *period* bought on *card* on *on*, by the writer Credit will use."""
+    """A row in *period* bought on *card* on *on*, by a Credit press.
+
+    The row is dated *on*, so the press puts it on the card that day
+    (``transaction_service.credit_day``: the row's own date once it has come).
+    """
     row = add_txn(
         db.session, seed_user, period, name, Decimal(amount), due_date=on,
     )
     db.session.commit()
-    settle_transaction(
-        row,
-        settle_day=SettleDay(day=on, basis=SettledDayBasisEnum.ENTERED),
-        tender_account_id=card.id,
-    )
+    mark_as_credit(row, card_account_id=card.id)
     db.session.commit()
     return row
 

@@ -64,9 +64,9 @@ class TestWhatItRefuses:
 
         **This is the misfiling R-II exists to prevent.**  Recording it here
         would book a refund as income -- grossing up both sides of the income
-        statement, and, because ``posting_service._settled_target`` takes its
-        ledger class from the transaction TYPE, minting an INCOME-class ledger
-        account for what is really a contra to a spending category.
+        statement, and, because the worked-out ledger books a counter line in
+        its parent's class (``ledger_lines.purchase_target``), booking an
+        INCOME-class line for what is really a contra to a spending category.
 
         The screen renders no income control for such a line, so this fires on
         a stale page or a crafted body -- which is exactly when a refusal has

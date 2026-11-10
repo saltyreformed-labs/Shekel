@@ -447,12 +447,12 @@ class TestCancelPostsNothing:
 
 
 # ---------------------------------------------------------------------------
-# Envelopes: debit-only effect + entry-mutation re-sync; toggle_cleared no-op
+# Envelopes: debit-only effect + what an entry change moves; toggle_cleared no-op
 # ---------------------------------------------------------------------------
 
 
 class TestEnvelopePostingLifecycle:
-    """An envelope posts ``effective - Sigma(credit)`` and re-syncs on entry edits."""
+    """An envelope books ``effective - Sigma(credit)``, and an entry edit moves it."""
 
     def test_envelope_mark_done_posts_debit_only(
         self, app, auth_client, seed_user, seed_periods,
@@ -510,7 +510,7 @@ class TestEnvelopePostingLifecycle:
         """Attach a purchase the bank has TAKEN, and return it.
 
         Two acts because the entry doors are two: the purchase is recorded, then
-        the day it posted is.  Both fire the reconcile under test.
+        the day it posted is.  Both move what the case grades.
         """
         entry = _add_purchase(seed_user, txn, amount, is_credit=is_credit)
         db.session.flush()
@@ -519,14 +519,14 @@ class TestEnvelopePostingLifecycle:
             settle_day=an_entered_day(txn.pay_period.start_date + timedelta(days=1)),
         )
 
-    def test_entry_create_on_a_posted_envelope_resyncs(
+    def test_entry_create_on_a_posted_envelope_books_the_purchase(
         self, app, auth_client, seed_user, seed_periods,
     ):
         """Adding a purchase the bank took grows the envelope's posted outflow.
 
         Arithmetic: one $40 debit purchase, posted the day after the opening
-        assertion, books -40 / +40.  A late $30 posted purchase reconciles the
-        +30 delta -> net cash -70.00 / Groceries +70.00, i.e. checking 930.00.
+        assertion, books -40 / +40.  A late $30 posted purchase books its own
+        -30 / +30 -> net cash -70.00 / Groceries +70.00, i.e. checking 930.00.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -561,7 +561,7 @@ class TestEnvelopePostingLifecycle:
             ) == Decimal("930.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
 
-    def test_entry_credit_flip_on_a_posted_envelope_resyncs(
+    def test_entry_credit_flip_on_a_posted_envelope_takes_its_cash_line_off(
         self, app, auth_client, seed_user, seed_periods,
     ):
         """Flipping a posted purchase to credit reverses its checking outflow.
@@ -594,13 +594,13 @@ class TestEnvelopePostingLifecycle:
             ) == Decimal("1000.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
 
-    def test_entry_delete_on_a_posted_envelope_resyncs(
+    def test_entry_delete_on_a_posted_envelope_takes_its_lines_off(
         self, app, auth_client, seed_user, seed_periods,
     ):
         """Deleting a posted purchase shrinks the envelope's posted outflow.
 
         Arithmetic: two posted debits 40 + 30 book -70 / +70.  Deleting the $30
-        reconciles the -30 delta -> net cash -40.00 / Groceries +40.00, i.e.
+        takes its -30 / +30 off -> net cash -40.00 / Groceries +40.00, i.e.
         checking 960.00.
         """
         with app.app_context():

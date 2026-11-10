@@ -2002,11 +2002,11 @@ def _reset_seed_calendar(owner, first_payday, num_periods, cadence_days):
 
     **The application already has a door that does that job**:
     ``pay_period_admin.reset_pay_periods``, the settings-page correction that
-    wipes every period, rebuilds the schedule from a new opening payday and
-    re-syncs the loan genesis postings and the account anchor corrections onto
-    what it built.  It is not "exactly" the hand-rolled sequence -- it does
-    strictly MORE, and the extra is one of the three differences below.  Each
-    difference was a defect in the hand-rolled version:
+    wipes every period and rebuilds the schedule from a new opening payday
+    (re-syncing the loan genesis postings and the account anchor corrections
+    onto it, until plan task plan#3076).  It was not "exactly" the hand-rolled
+    sequence -- it did strictly MORE, and the extra was one of the three
+    differences below.  Each difference was a defect in the hand-rolled version:
 
     * it renumbered ``period_index`` ITSELF -- a fixture computing by hand the
       derived column this arc exists to delete, in raw SQL the ORM cannot see;

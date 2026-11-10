@@ -45,9 +45,10 @@ def _on_account(account_id: int) -> ColumnElement[bool]:
     were held equal by ``fk_transaction_entries_parent_account`` until plan
     step ``credit_card:CC-5-1`` dropped it (ruling **R-BAL76**) ahead of the
     card's doors, which write the first movements whose account is not their
-    parent's; the posted ledger already attributes by the movement
-    (``ledger_lines.purchase_target``), so the fold, the ledger and the
-    anchor self-heal read one predicate rather than agreeing by a key.
+    parent's; the ledger already attributes by the movement
+    (``ledger_lines.purchase_target``), so the fold and the ledger read one
+    predicate rather than agreeing by a key (and so did the stored ledger's
+    anchor self-heal, until plan task plan#3133 deleted it).
 
     Args:
         account_id: The account the movements are ON.

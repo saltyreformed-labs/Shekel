@@ -288,10 +288,12 @@ class TestTransferSettleDayEditDoor:
 
         The gate ruling R-ED names for this half in terms: a test that EDITS a
         settled row's day and asserts the LEDGER followed.  Both sides' payment
-        records take the corrected day (the posting writer files each side's
-        entry under that side's covering movement's day since plan step
-        ``balance:X-bi-6-3``), and the reconcile reverses the stale-dated
-        entries and re-posts at the corrected day (finding **N-13**).  The
+        records take the corrected day, and the worked-out ledger books each
+        side's line on that side's covering movement's day, so nothing is left
+        at the old one (finding **N-13**).  *Until plan task plan#3075 the
+        posting writer filed each side's entry so (since plan step
+        ``balance:X-bi-6-3``) and its reconcile reversed the stale-dated entries
+        and re-posted them at the corrected day.*  The
         record hangs off the transfer, not its twin (ruling R-BAL167 class 1,
         plan step balance:X-bi-6-4d-2).
         """

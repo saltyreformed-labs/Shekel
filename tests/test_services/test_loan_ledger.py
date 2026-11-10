@@ -212,8 +212,8 @@ class TestFoldIsTotal:
         poison installed before setup grades the fixture.  *A third binding,
         ``_posting_reconcile``'s by-name import that the stored ledger's anchor
         writers called to file a correction, went at plan task plan#3132 with
-        the suite's last writer call; nothing the fold can reach imports that
-        module.*
+        the suite's last writer call, and the module itself at plan task
+        plan#3133.*
 
         This is not every route to a calendar: ``recurrence._authoring``'s own
         ``calendar_for`` and ``pay_period_service.get_all_periods`` are two
@@ -253,8 +253,10 @@ class TestTheFoldTakesNoCalendarAndThePackageHoldsNone:
     **The three calendar names are GONE as of pay-calendar plan step C2-d.**
     ``owner_pay_periods``, ``find_period_containing_date`` and
     ``resolve_anchor_pay_period`` had one consumer left between them -- the two
-    anchor-posting writers -- and those now file through
-    ``pay_calendar.PayCalendar.filing_period``.  The tests that pinned the
+    anchor-posting writers -- and those filed through
+    ``pay_calendar.PayCalendar.filing_period`` after it, as the worked-out
+    ledger's account and loan anchors do (the writers went at plan task
+    plan#3133).  The tests that pinned the
     locator's three branches went with it, because the branches themselves did:
     that chain is one clamp now, proven equal to it over 1,800 (shape, day) pairs
     in ``test_pay_calendar_value.py`` and re-measured against production at the
@@ -547,8 +549,9 @@ class TestFoldCountsAnEventOnTheDayItHappened:
         """An anchor before period 0 counts from its own date -- one clock, no calendar.
 
         The origination is 2025-01-01, a year before the user's first pay period.
-        ``journal_entries.pay_period_id`` is NOT NULL, so the writer files the
-        opening under the EARLIEST period (2026-01-02) -- which, read by a
+        The ledger files the opening under the EARLIEST period (2026-01-02,
+        ``PayCalendar.filing_period``'s clamp; the stored writer did too, its
+        ``journal_entries.pay_period_id`` being NOT NULL) -- which, read by a
         period-bounded reader, would push a 2025 fact into 2026 and report the loan
         owing NOTHING for all of 2025.  The one clock counts the anchor from its
         OWN civil date instead, so the fold reports $250,000.00 from 2025-01-01
@@ -741,8 +744,7 @@ class TestTheSettledWalkChargesOncePerInstallment:
             assert _fold(loan, seed_user, [on])[on] == Decimal("98600.00")
             # THE POSTED MONEY.  The corrections are a projection of this walk,
             # so the general ledger moves with it -- and the second payment's
-            # correction is EMPTY (an all-principal payment owes none), which is
-            # a path the writer already supported.
+            # correction is EMPTY (an all-principal payment owes none).
             assert posted_loan_balance_at(
                 loan.id, seed_user["scenario"].id, on,
             ) == Decimal("98600.00")

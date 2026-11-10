@@ -397,12 +397,12 @@ class TestTheDoor:
         this path silently would now break a prescribed procedure.
 
         **What it does NOT keep**, said because an earlier draft of this
-        docstring claimed it did: ``_non_loan_accounts_id_query`` in
-        ``account_posting_service/_sync.py`` is deliberately un-filtered on
-        ``is_active``, and this case does not grade that decision.  The door
-        calls ``sync_account_anchor_postings_all_scenarios(account.id)`` with an
-        explicit id, so it never reaches that enumerator; only the all-owners
-        sweep and the per-user resync do.
+        docstring claimed it did: the worked-out read walks every account the
+        owner holds, archived ones included (``ledger_lines.worked_out_lines``),
+        and this case does not grade that decision.  *Until plan task plan#3133
+        the decision was the stored ledger's enumerator,
+        ``account_posting_service``'s ``_non_loan_accounts_id_query``, which
+        the door never reached: it re-synced its one account by id.*
 
         No other case anywhere in ``tests/`` archives an account and restates
         it: ``test_opening_restatement.py`` mentions neither ``is_active`` nor

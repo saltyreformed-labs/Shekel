@@ -22,14 +22,13 @@ Nine contracts, one class each:
 * the DOOR (``pay_period_admin.remove_earlier_pay_periods``) -- what it
   removes, where it moves the phase, and that the paycheck it starts from
   stays;
-* an ADD UNDONE -- add N with C18-b's door, re-sync the ledger, remove them
-  with this one, template rows and a recurring transfer included: paydays,
-  eras, rows and both ledgers' totals come back (the test names what it
-  compares);
+* an ADD UNDONE -- add N with C18-b's door, remove them with this one,
+  template rows and a recurring transfer included: paydays, eras, rows and
+  every worked-out total come back (the test names what it compares);
 * WHAT A PAYCHECK MAY HOLD (R-PC109's filed half), one case per kind;
-* the STORE RE-FILED (R-PC114) -- an account's and a loan's opening filed
-  in an added paycheck go back, a self-cancelling pair goes, and an entry no
-  re-sync rebuilds goes too, unrefused (plan#2517);
+* an OPENING RE-FILED (R-PC114) -- an account's and a loan's opening filed
+  in an added paycheck go back (the store's cases beside them went at plan
+  step plan#2914);
 * NO WORKED-OUT TOTAL MOVES (plan#2517) -- openings and a loan's planned
   payments in the head, every total per chart key equal before and after;
 * MONEY DATED inside the removed span (R-PC109's dated half), one case per

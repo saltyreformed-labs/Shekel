@@ -27,8 +27,9 @@ bucket.
      ruling **R-BAL80**: a plan row posts nothing of its own).  Through
      ``X-bi-3e`` the second term was ``settled_transaction_effect``, the signed
      ``effective - Sigma(credit entries)`` (``+`` income / ``-`` expense), where
-     ``effective`` was what the row RECORDED as having moved
-     (``posting_reads.settled_figure_clause``) -- it was
+     ``effective`` was what the row RECORDED as having moved (in SQL,
+     ``posting_reads.settled_figure_clause``, deleted at plan task plan#3133)
+     -- it was
      ``COALESCE(actual_amount, estimated_amount)`` until plan step X-au-c3 made
      a settled row's figure its own record rather than a fallback to its plan.
   2. **Per counter account (category / fallback / orphan).**  For each non-linked
@@ -65,11 +66,11 @@ compared the ``posting_service`` Python builder against the raw-SQL Commit-7
 migration backfill on one transaction.  **Losing it lost something real and
 saying so is the point**: it was the only check that an INDEPENDENT
 implementation of the sign / amount / date rules agreed with the go-forward
-builder, and the two surviving "backfill == go-forward" tests elsewhere
-(``test_posting_ledger_account_backfill.py``, ``test_loan_posting_backfill.py``)
-reuse the go-forward builder, so they are true by construction.  It went because
-the SQL it drove reads a column the head revision drops, not because it was
-redundant.
+builder, and the two "backfill == go-forward" tests left elsewhere
+(``test_posting_ledger_account_backfill.py``, ``test_loan_posting_backfill.py``,
+both deleted with the store's writers at plan step plan#2914) reused the
+go-forward builder, so they were true by construction.  It went because the SQL
+it drove reads a column the head revision drops, not because it was redundant.
 
 Adversarial cases prove the oracle is not vacuous: a read that loses lines makes
 the per-account reconciliation and the trial balance FAIL -- driven through the

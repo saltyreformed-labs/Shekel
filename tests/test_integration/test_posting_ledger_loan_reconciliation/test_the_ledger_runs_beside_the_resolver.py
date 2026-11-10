@@ -372,8 +372,8 @@ class TestSupersedesCashInvariantForLoans:
         """Once a correction exists, the loan nets to principal, not to the cash.
 
         The Step-2 / Step-3 oracle's per-account invariant is
-        ``account_posting_total(A) == settled_transfer_effect(A) +
-        settled_transaction_effect(A)``.  For this loan after one $1,000 payment
+        ``account_net(A) == settled_transfer_effect(A) +
+        posted_purchase_effect(A)``.  For this loan after one $1,000 payment
         the settled transfer effect (cash in) is +1,000 and there are no ordinary
         transactions, so the cash invariant would demand the ledger net +1,000 --
         but under genesis the loan-linked ledger nets -99500 (the $500 interest

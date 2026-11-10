@@ -163,9 +163,9 @@ class TestEveryDoorThatCreatesAPeriodPopulatesIt:
         """POST /pay-periods/reset fills every period of the new schedule.
 
         The reset is the door whose populate moved FURTHEST at R-R38: it used
-        to run between the rebuild and the two posting re-syncs and now runs
-        after both, so this case is also what grades that reordering through
-        the real door.
+        to run between the rebuild and the two posting re-syncs, and ran after
+        both until plan task plan#3076 deleted them, so this case also graded
+        that reordering through the real door.
         """
         with app.app_context():
             _future_periods(db.session, seed_user, count=4)

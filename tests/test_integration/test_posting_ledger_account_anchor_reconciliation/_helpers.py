@@ -146,7 +146,7 @@ def _independent_transfer_side_effects(
     state the database refuses, so a missing day is REFUSED here as
     :func:`_source_settled_day` refuses one.  The transfer's status and the
     side links are read by this oracle's own SQL, never through
-    ``transfer_legs``, the producer the posting writer joins: the record hangs
+    ``transfer_legs``, the producer the worked-out ledger joins: the record hangs
     off the transfer since plan step ``balance:X-bi-6-4d-2``, and this read
     the side's shadow's status, day and figure until then (ruling R-BAL167
     class 4).

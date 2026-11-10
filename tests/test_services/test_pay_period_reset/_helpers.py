@@ -40,7 +40,8 @@ def _seed_old_schedule(db_session, seed_user, count=5):
 def _reset_and_populate(user_id, **kwargs):
     """Run BOTH halves of a reset, exactly as the route does.
 
-    ``reset_pay_periods`` wipes, rebuilds and re-syncs both posting families;
+    ``reset_pay_periods`` wipes and rebuilds the schedule (and re-synced both
+    posting families, until plan task plan#3076);
     ``populate_new_periods`` opens the generate pass afterwards and fills the
     rebuilt schedule.  Ruling **R-R38**: the pass may only be opened above the
     service layer, and only after the write.

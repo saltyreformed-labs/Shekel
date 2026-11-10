@@ -16,10 +16,11 @@ since ``X-bi-3e-2``).
 **The reader reads the row's ENTRIES** -- ``row_valuation.settled_figure`` --
 and a settled row holding none is the ``$0.00`` record (ruling **R-BAL82**): a
 movement of nothing is not one, so a close of nothing has no entry.  Its SQL
-twin, ``posting_reads.settled_figure_clause``, had no reader in ``app/`` since
-leaf ``balance:X-bi-6-4a``, and its parity class here
-(``TestTheSQLTierReadsTheSameHomeAsPython``) went at plan step plan#2914 with
-the stored ledger's readers.  The cases that read a figure lay the movement
+twin, ``posting_reads.settled_figure_clause``, had no reader in ``app/`` from
+leaf ``balance:X-bi-6-4a`` until plan task plan#3133 deleted it, and its parity
+class here (``TestTheSQLTierReadsTheSameHomeAsPython``) went at plan step
+plan#2914 with the stored ledger's readers.  The cases that read a figure lay
+the movement
 (:func:`~tests._test_helpers.cover_bare_settled_row`), and the case that once
 graded the reader's REFUSAL of a settled row recording nothing grades its
 answer.

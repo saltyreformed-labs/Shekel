@@ -18,8 +18,8 @@ Two row provenances are recorded via the ``source_id`` FK into
   they are value-identical append-only history, kept, never read.
 * ``user_trueup`` -- appended by the loan dashboard's balance-edit
   flow (Commit 16, decision D-C) whenever the operator asserts a new
-  dated balance: the operator's SOURCE DOCUMENT, from which the genesis
-  ledger's self-healing TRUEUP correction is derived and re-derived.
+  dated balance: the operator's SOURCE DOCUMENT, from which the loan
+  ledger's TRUEUP correction is worked out on every read (``ledger_lines``).
   Mirrors the checking-account ``AccountAnchorHistory``
   UX so the mental model is consistent across account types.
 

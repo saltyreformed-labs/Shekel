@@ -247,10 +247,11 @@ class TestBackDatedTrueUpReBasesTheLedger:
     Plan step X-f1c4c made that reachable for the first time: every cash true-up
     stamped ``display_today()`` before it, so an assertion could only ever be
     appended at or after every existing one.  Inserting one BETWEEN two others
-    is therefore a new input shape for
-    ``account_posting_service.sync_account_anchor_postings_all_scenarios`` --
-    an already-posted correction has to be ADJUSTED rather than posted fresh,
-    and the entry's source kind can flip.
+    is therefore a new input shape for the account's corrections
+    (``ledger_lines``' account anchors): the correction after it re-bases, and
+    a correction's source kind can flip.  (For the stored ledger's reconcile,
+    ``account_posting_service``, it meant ADJUSTING an already-posted
+    correction rather than posting one fresh, until plan task plan#3133.)
 
     **Three independent reviews of that step all found the posted ledger
     ungraded for it**, and one demonstrated the gap by removing the re-sync
@@ -261,7 +262,8 @@ class TestBackDatedTrueUpReBasesTheLedger:
     rather than the service's own helpers.
 
     Both go through ``anchor_service.apply_anchor_true_up`` -- the production
-    door, with its lock, its duplicate rule and its re-sync -- not the
+    door, with its lock and its duplicate rule (and its re-sync, until plan
+    task plan#3076) -- not the
     deterministic ``_assert_balance_at`` stand-in the older classes use, because
     the door is what the step changed.
     """

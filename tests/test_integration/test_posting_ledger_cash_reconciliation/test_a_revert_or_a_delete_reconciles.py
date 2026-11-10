@@ -357,10 +357,11 @@ class TestAPostedPurchaseReconcilesUnderAnUnsettledParent:
 class TestACancelledEnvelopesDatedPurchaseReconcilesAtZero:
     """The contributing gate, graded on the per-row twin and the sweep.
 
-    The writer posts a dated purchase only under a contributing parent
-    (``purchase_posts``, ruling **R-FM**): cancelling the envelope reverses
-    the purchase's leg.  The SQL oracle filters the same gate; the per-row
-    twin the counter arm uses must too, or a writer that dropped the term
+    The worked-out ledger books a dated purchase only under a contributing
+    parent (``ledger_lines.purchase_posts``, ruling **R-FM**): cancelling the
+    envelope takes the purchase's line off.  The SQL oracle filters the same
+    gate; the per-row twin the counter arm uses must too, or a read that
+    dropped the term
     would leave ``+40`` on the Groceries counter that the twin's ``-40``
     exactly explains, and only the linked arm would fire (the X-bi-4a M1
     fix's review, 2026-09-18).  So the twin is asserted at ``0`` DIRECTLY
@@ -371,7 +372,7 @@ class TestACancelledEnvelopesDatedPurchaseReconcilesAtZero:
         """A $40 dated purchase under a $100 envelope, then the envelope Cancelled.
 
         Arithmetic: the purchase posts ``Checking -40.00 / Groceries +40.00``
-        on its bank day; the cancel reverses the pair (Checking back to its
+        on its bank day; the cancel takes the pair off (Checking back to its
         $1000.00 opening, Groceries 0.00).  The purchase keeps its
         ``settled_on``; the parent's exclusion is what makes the family worth
         ``0`` -- on the SQL oracle, on the per-row twin, and in the sweep.

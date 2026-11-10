@@ -154,8 +154,8 @@ class TestWhoseRecordsItReads:
         There is nothing to book and no correction to file, so the read asks
         no pay calendar -- which this owner could not answer: holding no pay
         schedule, :func:`calendar_for` refuses them (the control, so the case
-        reads the owner it is about).  The writers load the calendar only
-        when a correction is to be filed, and so does the read.  The owner
+        reads the owner it is about).  The read loads the calendar only when a
+        correction is to be filed, as the stored ledger's writers did.  The owner
         holds its baseline scenario alone, the one it is read in.
         """
         with app.app_context():

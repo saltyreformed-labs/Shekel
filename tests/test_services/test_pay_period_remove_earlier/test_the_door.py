@@ -385,7 +385,7 @@ class TestAnAddUndoneLeavesNothingBehind:
     did, until plan task plan#3132.)
     """
 
-    def test_paydays_eras_rows_and_the_posted_ledger_come_back(
+    def test_paydays_eras_rows_and_the_worked_out_totals_come_back(
         self, app, db, seed_user, seed_periods,
     ):
         """Add 3, remove them.

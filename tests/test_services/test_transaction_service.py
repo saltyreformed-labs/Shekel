@@ -1703,11 +1703,6 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
                 "a figure correction moved the settle day"
             )
             # The worked-out ledger: what the row's records book, per day.
-            # ``posting_service.settled_transaction_effect`` is NOT an oracle
-            # here: it queries ``budget.transactions`` through
-            # ``posting_reads.settled_figure_clause``, the query-tier twin of
-            # ``row_valuation.settled_figure``, so asserting on it is the line
-            # above restated in SQL.
             assert net_posted_by_day(
                 family_movement_ids(txn),
             ) == {day: Decimal("87.10")}

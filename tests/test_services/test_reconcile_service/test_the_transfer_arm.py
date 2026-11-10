@@ -442,7 +442,7 @@ class TestTheTransferArm:
             # Savings' opening is dated on its books' day, 2026-01-01 (the day
             # before the first pay period), and its assertion's correction on
             # the suite's frozen today, 2026-03-20.  Not
-            # ``account_posting_total``: an assertion absorbs a movement dated
+            # ``account_net``: an assertion absorbs a movement dated
             # before it, so Savings, asserted after the statement day, totals
             # its $100.00 whatever its leg booked.
             scenario_id = seed_user["scenario"].id

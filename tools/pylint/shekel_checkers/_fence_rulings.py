@@ -49,8 +49,8 @@ from ._fence_rulings_cash_ledger import CASH_LEDGER_NON_PRODUCERS
 # inside ``balance_at`` as a private submodule instead.
 #
 # Scope (the D3 residue): the PUBLIC packages that hold balance INGREDIENTS
-# outside W9910's protection -- the genesis loan-ledger packages (the walk,
-# the posting writers and the loan page's reads of the walk), the cash ledger
+# outside W9910's protection -- the genesis loan-ledger packages (the walk
+# and the loan page's reads of it), the cash ledger
 # leaf, the loan resolver tier and its db-facing seeding module, and the
 # account-kind classifier.  The ``balance_at`` seam package is deliberately NOT
 # scoped: its public functions ARE the seam entries every consumer is supposed
@@ -434,7 +434,7 @@ _FENCED_MODULE_RULINGS = {
             # at plan step D-fold.  So a consumer holding a walk cannot reach a
             # balance from a public leaf name, and the walk needs no fence -- it was
             # fenced only while the fold was one call away in the same leaf.  Both
-            # sides take it: the posting writer projects it into corrections, the
+            # sides take it: the worked-out ledger books corrections off it, the
             # seam's read pass folds it.
             "walk_loan_ledger",
             # The same walk for many loans (plan task plan#2649, ruling

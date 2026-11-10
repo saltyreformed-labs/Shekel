@@ -2456,7 +2456,7 @@ class TestASettledRowMayStillGAINAPurchase:
         covering movement carries the whole close and the illegal purchase's
         own movement is counted BESIDE it (ruling **R-BAL80**), `$600.00` of
         spending the close never held.  Every reader of the family -- the fold
-        (``settled_cash_facts``) and the ledger writer -- sees the double
+        (``settled_cash_facts``) and the worked-out ledger -- sees the double
         count; the row's own valuation does not move (ruling **R-BAL81**: it
         is worth its covering movement, still `-500.00`), which is why the
         matcher alone would be blind to it.

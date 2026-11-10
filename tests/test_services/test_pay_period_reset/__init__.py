@@ -11,19 +11,17 @@ assertion a ``pay_period_id``, so the reset had to delete the anchor period
 and re-point every account inside ONE transaction with the FK deferred to
 commit (``SET CONSTRAINTS ... DEFERRED``).  Both columns are deleted.  A
 balance assertion is now untouchable by a schedule operation, so the reset
-deletes periods, rebuilds, and re-derives the postings -- there is no window
-in which the schema is inconsistent and nothing to defer.
+deletes periods and rebuilds -- there is no window in which the schema is
+inconsistent and nothing to defer (and nothing to re-derive since plan task
+plan#3076: the worked-out ledger reads the rebuilt schedule as it stands).
 
 Bounded for safety: it refuses if the user has ANY settled transaction.
 
 **It does NOT repopulate the rebuilt schedule; the ROUTE does, and that is
-ruling R-R38** (plan step R7d-c-1).  The door wipes, rebuilds and re-syncs
-both posting families, then returns EMPTY periods; the caller opens the
-generate pass and fills them, which is why the populate now runs AFTER both
-re-syncs rather than between the rebuild and them.  That order is safe because
-every read either re-sync makes of ``budget.transactions`` or
-``budget.transfers`` is keyed on a set of ids taken from the POSTED ledger, and
-a freshly generated row is ``Projected`` and posts nothing.  A case here that
+ruling R-R38** (plan step R7d-c-1).  The door wipes and rebuilds, then
+returns EMPTY periods; the caller opens the generate pass and fills them.
+(The door re-synced both posting families before it returned until plan task
+plan#3076, which is why the populate was ordered AFTER both re-syncs.)  A case here that
 asserts recurring ROWS runs ``_reset_and_populate``; ``POST
 /pay-periods/reset`` is graded in the
 ``tests/test_routes/test_pay_period_admin/`` package.

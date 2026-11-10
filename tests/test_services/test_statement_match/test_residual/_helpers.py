@@ -98,8 +98,8 @@ def _uncategorized_net(seed_user, ledger_class):
 
     **The proof is over the LEDGER and not over the row**, because the row
     carrying no category is only half the claim: what makes ruling **R-FN**'s
-    mechanism real is that ``posting_service`` routes such a row's counter leg
-    to the fallback account.  Measured 2026-08-23 on a production clone, no
+    mechanism real is that the worked-out ledger books such a row's counter
+    line on the fallback account.  Measured 2026-08-23 on a production clone, no
     fallback account existed and no transaction carried a NULL category, so
     this door is the first writer of both and nothing else in the app would
     notice if the routing were wrong.

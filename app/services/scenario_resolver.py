@@ -94,8 +94,7 @@ def require_baseline_scenario(user_id: int) -> Scenario:
             f"(registration_service.register_user) and nothing deletes one, so "
             f"reaching this means the data was changed outside the app, or "
             f"the user is a companion (who owns no budget rows by design): "
-            f"POST /grid/create-baseline repairs it, together with both "
-            f"posting ledgers",
+            f"POST /grid/create-baseline repairs it",
             user_id=user_id,
         )
     return scenario

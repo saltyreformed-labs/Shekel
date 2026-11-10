@@ -198,7 +198,7 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # here from ``posting_service._signed_cash_leg`` -- stood here as a
     # non-producer until plan step ``balance:X-bi-4a`` deleted it under
     # ruling **R-BAL81**: a settled row is worth what its covering movement
-    # moves, ``status_seam.covered_cash_leg``, and the walk and the writer
+    # moves, ``status_seam.covered_cash_leg``, and the walk and the ledger
     # read movements alone.  The two terms below outlive it for the reconcile
     # panel.)
     # One TERM of that rule -- ``Sigma(credit entry amounts)`` for one

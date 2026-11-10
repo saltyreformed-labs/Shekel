@@ -329,7 +329,7 @@ class TestTransferActualBox:
             # either ledger is dated that day: Checking's opening and
             # origination are dated in 2024 (the seed's bootstrap), and
             # Savings opened at $0.00, which books no entry, and asserts today.
-            # Not ``account_posting_total``: an assertion absorbs a movement
+            # Not ``account_net``: an assertion absorbs a movement
             # dated before it, so Savings, asserted today, totals $0.00
             # whatever its leg booked.
             scenario_id = seed_user["scenario"].id
@@ -556,7 +556,7 @@ class TestTransferActualBox:
             # posting on either ledger is dated that day: Checking's opening
             # and origination are dated in 2024 (the seed's bootstrap), and
             # Savings opened at $0.00, which books no entry, and asserts
-            # today.  Not ``account_posting_total``: an assertion absorbs a
+            # today.  Not ``account_net``: an assertion absorbs a
             # movement dated before it, so Savings, asserted today, totals
             # $0.00 whatever its leg booked.
             for side, account_id, posted in (

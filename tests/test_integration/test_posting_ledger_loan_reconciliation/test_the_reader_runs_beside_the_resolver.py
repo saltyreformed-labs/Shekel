@@ -520,7 +520,7 @@ class TestReaderParallelRunAgainstResolver:
         (balance 100,000 - one principal) and the what-if two (100,000 - two
         principals), each reading its OWN balance == its OWN resolver, the what-if's
         second payment lowering only the what-if (neither leaks into the other).  A
-        THIRD scenario the writers never opened holds no payment.  The
+        THIRD scenario holds no payment.  The
         worked-out read answers the loan's own anchor there, because it answers
         whichever scenario it is asked (``ledger_lines._worked_out``; no route
         creates a second scenario): not a misleading $0 or another scenario's
@@ -569,7 +569,7 @@ class TestReaderParallelRunAgainstResolver:
             assert baseline_reader == _ANCHOR_BALANCE - (
                 scheduled_pi - Decimal("500.00")
             )
-            # A scenario the writers never opened: the read answers the
+            # A scenario holding no payment: the read answers the
             # $100,000.00 anchor no payment has reduced -- not the baseline's
             # balance or a bare $0.
             assert _posted_balance(loan.id, unopened.id) == Decimal("100000.00")

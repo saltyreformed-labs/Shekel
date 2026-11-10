@@ -1492,19 +1492,19 @@ class TestTheReportReadsTheCashFlowSet:
         INTO checking (allowed), its source re-pointed onto the card by
         assignment, and only THEN settled through ``update_transfer`` -- the
         settle half of ``create_settled_transfer``, split out because the
-        order decides where the POSTINGS land.  A side's payment record
+        order decided where the POSTINGS landed.  A side's payment record
         follows its endpoint whenever the endpoint moves
         (``fk_transaction_entries_expense_side`` is ON UPDATE CASCADE, ruling
-        R-BAL168), but the settle books each record's postings on that
-        record's account as it stands at the settle
+        R-BAL168), and until plan task plan#3075 the settle also booked each
+        record's postings on that record's account as it stood at the settle
         (``_posting_purchases``'s ``_ledger_account_for(entry.account_id)``),
-        and a re-point by assignment passes no door that books them again:
-        settled first, the card side's record follows the source onto the
-        card while its postings stay on the helper's ledger.  Measured 10-15
-        both ways; in this order the card side's record and its postings are
-        on the card, checking's on checking, and the helper holds none.
-        Neither reader here reads postings; the order is kept so the planted
-        state is whole.  The re-point moved the transfer's expense
+        which a re-point by assignment never booked again: settled first, the
+        card side's record followed the source onto the card while its postings
+        stayed on the helper's ledger.  Measured 10-15 both ways; in this order
+        the card side's record and its postings were on the card, checking's on
+        checking, and the helper held none.  Neither reader here reads postings,
+        and the worked-out ledger reads each record where it stands, so the
+        order is kept as it was.  The re-point moved the transfer's expense
         shadow row too until plan step balance:X-bi-6-4d-2 made a transfer
         one row (ruling R-BAL258); the transfer is the whole plant now
         (ruling R-BAL167 class 1).  The savings account is not a member of

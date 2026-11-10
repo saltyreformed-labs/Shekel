@@ -340,8 +340,11 @@ def reconciled_through(account_id: int) -> ReconciledThrough:
     The boundary every "is this already inside the balance the user declared"
     question is asked through
     (:meth:`~app.services.cash_ledger.ReconciledThrough.covers`), for the
-    callers that do NOT already hold a walk: the posting self-heal's skip
-    predicate, the entry list's reconciled indicator, and the reconcile panel.
+    callers that do NOT already hold a walk: in ``app/``, the dashboard's pulse
+    (``dashboard_service._pulse``) alone.  The posting self-heal's skip
+    predicate read it too until plan task plan#3133 deleted the self-heal, and
+    the entry list's indicator and the reconcile panel named here call it no
+    longer.
     One indexed lookup (``idx_anchor_history_account`` leads on
     ``account_id``), no rows materialised, no anchor resolution.
 

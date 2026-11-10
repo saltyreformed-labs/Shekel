@@ -4,7 +4,7 @@ Grades ``app.services.cash_ledger.walk_cash_ledger`` and its visible-day re-key
 ``dated_deltas``, and the fold-side assertion replay that left it at plan step
 X-f3c-1 (``balance_at._assertions.assertion_corrections``) -- the facts a cash
 account's balance folds over (step X-b)
-and the posting writer will project (step X-d).  The walk is ADDITIVE at X-a: no
+and the worked-out ledger books (``ledger_lines``).  The walk is ADDITIVE at X-a: no
 production surface reads it yet, so nothing here can move a shipped balance.
 
 Every expected figure below is HAND-COMPUTED and written out in the test that
@@ -1269,9 +1269,9 @@ class TestTheTwoStatementsOfTheLatestAssertedDay:
       the last element of a list the walk already holds, so the seam's cash fold
       pays no query for a day it is standing on; and
     * :func:`~app.services.cash_ledger.reconciled_through` is one indexed
-      ``MAX`` for the callers that hold no walk -- the posting self-heal's skip
-      predicate, the entry list's reconciled indicator, and the reconcile panel,
-      none of which should walk an account to render one row.
+      ``MAX`` for a caller that holds no walk -- the dashboard's pulse, which
+      should not walk an account to render one row (the posting self-heal's
+      skip predicate was one more until plan task plan#3133).
 
     **A THIRD statement is what this pins against.**  ``account_posting_service``
     grew its own (``MAX(created_at)`` as an instant, compared against a civil

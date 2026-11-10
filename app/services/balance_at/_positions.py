@@ -20,9 +20,9 @@ fold over the loan's SOURCE events, which step B2 proves equal to the postings
 on every day (``tests/test_services/test_loan_fold_oracle.py``): the postings
 become a checked projection of the fold (asserted at write time from plan step
 E1a until plan task plan#3093), not the answer to "what do I owe".  A loan
-whose POSTING ledger is missing (a cache miss) still folds correctly from its
-source facts, so the read is no longer an outage when the cache is cold -- it
-is a repairable inconsistency (B-8).
+whose POSTING ledger was missing (a cache miss) folded correctly from its
+source facts, so the read stopped being an outage when the cache was cold
+(B-8); no door writes that ledger since plan step plan#2914.
 
 **The future is the same fold, over the plan's outcomes behind the facts
 (step C6b, merged at recurrence:R16-c-1).**  The loan's

@@ -45,10 +45,10 @@ Key differences from transaction recurrence:
   - EVERY write goes through ``transfer_service`` -- create, update and delete
     alike -- as ``CLAUDE.md`` (Architecture) requires of every write of a
     transfer: a write anywhere else skips its refusals and the copies it keeps
-    in step, the posted ledger's among them.  That is also why the maintain pass
-    sends only the fields that actually DIFFER: the update door reconciles the
-    posting ledger and emits an audit row per call, so a pass that changes
-    nothing must call it for nothing.
+    in step (the posted ledger's among them until plan task plan#3075).  That is
+    also why the maintain pass sends only the fields that actually DIFFER: the
+    update door bumps the row's lock counter and emits an audit row per call,
+    so a pass that changes nothing must call it for nothing.
 """
 
 import logging
@@ -504,9 +504,10 @@ def regenerate_for_template(template, schedule, scenario_id, effective_from=None
 
     **Only the fields that actually differ are sent, and the pass is silent when
     none do.**  ``update_transfer`` is a heavier door than an ORM assignment: it
-    reconciles the posting ledger, re-derives a loan's genesis when either
-    endpoint is one, bumps the pair's optimistic-lock counter and emits an audit
-    row.  On the two live loan-payment templates the old sweep spent 1.58 s and
+    bumps the pair's optimistic-lock counter and emits an audit row (and, until
+    plan task plan#3075, reconciled the posting ledger and re-derived a loan's
+    genesis when either endpoint was one).  On the two live loan-payment
+    templates the old sweep spent 1.58 s and
     1.14 s doing that work twice per row -- once to reverse the deleted payment
     and once to post its replacement -- for an edit that moved no figure at all.
 
@@ -721,8 +722,9 @@ def _apply_maintain_work(work, derived, template, scenario_id, projected_id):
     The only writer in this engine's maintain path, and every one of its three
     arms goes through ``transfer_service``, which ``CLAUDE.md`` (Architecture)
     sends every write of a transfer through: a maintain pass that assigned to a
-    transfer's columns would skip its refusals and the copies it keeps in step,
-    the posted ledger's among them.  That is the difference from the
+    transfer's columns would skip its refusals and the copies it keeps in step
+    (the posted ledger's among them until plan task plan#3075).  That is the
+    difference from the
     transaction twin's applier, which assigns fields itself.
 
     **One field's derived value can disagree with what the CREATE path stored,
@@ -736,9 +738,10 @@ def _apply_maintain_work(work, derived, template, scenario_id, projected_id):
     what would make it structural.
 
     **The update arm sends the fields that DIFFER, and skips a row entirely when
-    none do.**  ``update_transfer`` reconciles the posting ledger, re-derives a
-    loan's genesis when an endpoint is one, moves the pair's optimistic-lock
-    counter and emits an audit row, so calling it for a row already equal to its
+    none do.**  ``update_transfer`` moves the pair's optimistic-lock counter and
+    emits an audit row (and reconciled the posting ledger and re-derived a
+    loan's genesis, until plan task plan#3075), so calling it for a row already
+    equal to its
     definition is not a cheap no-op -- it is all of that work, per row, for
     nothing.  On a production clone every one of the 99 sweepable rows across
     the four live templates came back with zero fields differing.

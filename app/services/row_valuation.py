@@ -364,8 +364,9 @@ def settled_contribution(parent: PlanParent) -> Decimal:
     """Return what a parent that has SETTLED contributes, refusing one that has not.
 
     The cheap accessor for a reader whose rows have ALL settled -- the loan
-    replay, the loan posting sync and its confirmed history, the settled-spend
-    metric and the spending report.  **All six load their rows with
+    replay and its confirmed history, the settled-spend metric and the
+    spending report (and the loan posting sync, until plan task plan#3133
+    deleted it).  **Each loads its rows with
     ``status_id.in_(settled_status_ids())`` in SQL**, so building an amount
     basis for them would run the paycheck engine to re-derive a figure the
     row already recorded.  A seventh, ``cash_ledger.settled_cash_leg`` -- the

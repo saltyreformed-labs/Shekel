@@ -23,8 +23,8 @@ direction are the transfer's own.
 
 *They lived in ``app/services/posting_reads.py`` (re-exported by
 ``posting_service``) until plan task plan#3132 moved them here: only tests
-called them, and the stored ledger's writers that module served are deleted
-after it.*
+called them, and the stored ledger's writers that module served went after
+it, at plan task plan#3133.*
 """
 
 from decimal import Decimal

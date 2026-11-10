@@ -190,12 +190,13 @@ def _signed_cash_effect(txn: Transaction) -> Decimal:
     a plan row posts nothing of its own since plan step ``balance:X-bi-4a``
     (ruling **R-BAL80**), so its family's whole effect is its movements'; and
     a soft-deleted or balance-excluded parent's family is worth ``0`` whatever
-    it holds, as the writer posts nothing for it (``purchase_posts``'s first
-    term, ruling **R-FM**).  The gate is restated here from the same
-    primitive the SQL twin filters on, not imported from the writer.  (It was
-    ``settled_contribution - Sigma(credit)`` for a settled row through
-    ``X-bi-3e``.)  Independent of ``posting_service`` and ``cash_ledger`` (it
-    imports neither producer); the counter leg the ledger should hold for
+    it holds, as the worked-out ledger books nothing for it
+    (``ledger_lines.purchase_posts``' first term, ruling **R-FM**).  The gate
+    is restated here from the same primitive the SQL twin filters on, not
+    imported from the ledger.  (It was ``settled_contribution - Sigma(credit)``
+    for a settled row through ``X-bi-3e``.)  Independent of ``ledger_lines``
+    and ``cash_ledger`` (it calls neither producer); the counter leg the
+    ledger should hold for
     *txn* is the negation of this.
     """
     if txn.is_deleted or txn.status_id in balance_excluded_status_ids():

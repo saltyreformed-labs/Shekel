@@ -143,8 +143,8 @@ class TestFoldMatchesPostingsAcrossTheShapeMatrix:
         """A mid-life import: origination opening + a tracking-start assertion (C1).
 
         ``load_loan_anchor_facts`` opens at the 2025-01-01 origination and loads
-        the tracking-start as an ordinary assertion, and
-        ``insert_tracking_start_event`` re-syncs the posted ledger to match -- so
+        the tracking-start as an ordinary assertion, and the worked-out lines
+        derive from the same walk -- so
         both producers open at ORIGINATION and read the $250,000 principal held
         FLAT across the pre-tracking window (the honest plateau that replaces the
         old false pre-opening zero, B-11), then reset at the tracking-start.  They

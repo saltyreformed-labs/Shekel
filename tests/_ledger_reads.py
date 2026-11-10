@@ -5,8 +5,9 @@ Every figure a test asserts about the ledger is read here, off
 :func:`app.services.ledger_lines.worked_out_lines` (plan step plan#2913): a net,
 a balance, a total, "this account holds no line".  The stored journal is not
 asked; what still reads it grades the store's own machinery, through
-``tests/_stored_ledger.py``, ``posting_service.account_posting_total`` or the
-store's own models, and goes with the store.
+``tests/_stored_ledger.py`` or the store's own models, and goes with the store
+(``posting_service.account_posting_total`` was a third, until plan task
+plan#3133 deleted it).
 
 **A chart account is a** :class:`~app.services.ledger_lines.ChartKey`, built by
 its constructor (``linked_key``, ``category_key``, ``account_counter_key``,

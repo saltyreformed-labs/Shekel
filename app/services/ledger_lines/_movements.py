@@ -268,7 +268,7 @@ def purchase_target(entry, parent: PlanItem) -> dict[ChartKey, Decimal]:
         entry: The purchase.  Its ``account_id`` is the account its money
             moved THROUGH -- its own, and free to differ from its parent's
             since plan step ``credit_card:CC-5-1`` (ruling **R-BAL75**: the
-            ledger, the fold and the self-heal all read the movement's) --
+            ledger and the fold both read the movement's) --
             so the cash account is read straight off it: by the COLUMN,
             never the ``account`` relationship, because the seam re-points a
             covering movement by its column alone

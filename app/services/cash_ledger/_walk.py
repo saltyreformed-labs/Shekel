@@ -442,7 +442,8 @@ def dated_deltas(walk: CashLedgerWalk) -> list[tuple[date, Decimal]]:
     balance closes and only the balance sheet is upside down.
 
     That equality is why the re-key lives on the LEAF: it had two consumers,
-    the fold and the posting writer, and one derivation.  A third statement of
+    the fold and the posting writer (until plan task plan#3133), and one
+    derivation.  A third statement of
     "which day does this event count from, and for how much" is precisely how
     the fold and the posted ledger drift apart
     (plan step E1a's finding, on the loan side).

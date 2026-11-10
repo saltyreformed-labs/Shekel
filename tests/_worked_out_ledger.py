@@ -343,8 +343,8 @@ def _holds_a_dated_debit_movement():
     (``app.services._posting_purchases.posted_purchase_exists_clause``) so it
     could not grade a copy of its own; the resync went at plan task plan#3077
     and left the clause no reader in ``app/``, so plan task plan#3132 gave this
-    comparison its own spelling, the one that stays once the app's goes with
-    the writers.
+    comparison its own spelling, the one that stayed when the app's went with
+    the writers at plan task plan#3133.
 
     Returns:
         A SQLAlchemy ``EXISTS`` clause, correlated to ``Transaction``.

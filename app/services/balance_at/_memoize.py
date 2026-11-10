@@ -221,7 +221,6 @@ def require_scenario(ctx: "BalanceContext") -> None:
             "none, so no balance can be answered for them. Every owner gets one "
             "at registration (registration_service.register_user) and nothing deletes "
             "one, so reaching this means the data was changed outside the app: "
-            "POST /grid/create-baseline repairs it, together with both posting "
-            "ledgers",
+            "POST /grid/create-baseline repairs it",
             user_id=ctx.user_id,
         )

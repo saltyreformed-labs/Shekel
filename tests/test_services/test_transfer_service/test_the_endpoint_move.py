@@ -61,10 +61,12 @@ class TestMovingATransferBetweenAccounts:
         """Create a second savings account for this owner.
 
         Through ``account_service.create_account`` rather than an ``Account``
-        insert, because that factory is what PAIRS the account with its
-        chart-of-accounts ledger -- and an endpoint move posts to that ledger,
-        so a hand-rolled row fails the move with a missing-pairing
-        ``PostingError`` rather than exercising it.
+        insert, because that factory is the real door: it stages the account's
+        origination assertion and its books' opening, the bound the transfer
+        arm reads (below).  *It also PAIRED the account with its
+        chart-of-accounts row until plan task plan#3133, and a hand-rolled row
+        failed a move with a missing-pairing ``PostingError`` rather than
+        exercising it.*
 
         *observed_on* is the day its books open (today when ``None``).  A
         case that moves money SETTLED today onto it opens them a day earlier

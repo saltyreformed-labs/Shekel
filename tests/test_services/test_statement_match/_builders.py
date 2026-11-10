@@ -796,13 +796,13 @@ def filed_acts(seed_user, how_many, *, by_rule):
     rather than twice because the two cases differ only in which tier they
     then read -- the service's page value, or the rendered route.
 
-    **Each act gets an envelope of its own, and that is a MEASUREMENT rather
+    **Each act gets an envelope of its own, and that was a MEASUREMENT rather
     than a style choice.**  ``posting_service.sync_transaction_postings``
     reconciled a transaction's whole purchase FAMILY on every entry change
     (ruling **R-FM**) until plan task plan#3097 took it out of the entry
     doors, so filing the *k*-th purchase into an envelope that
-    already holds *k-1* of them called
-    :func:`~app.services._posting_purchases.emit_purchase_deltas` *k* times --
+    already held *k-1* of them called
+    ``_posting_purchases.emit_purchase_deltas`` *k* times --
     quadratic in the number of acts.  Measured 2026-08-31 on this box, 51
     acts: **1,326 emit calls (51x52/2) and 4.50 s into one envelope, against
     51 calls and 1.13 s spread across 51**.  CI then pinned ``-n 12`` on a
@@ -810,7 +810,7 @@ def filed_acts(seed_user, how_many, *, by_rule):
     since ``bank_import:X-gy``), and that oversubscription multiplied
     the concentrated shape past ``pytest.ini``'s 30 s per-test budget: four
     cases timed out at 28.94-29.03 s having taken 4.7 s here.  **The app's
-    quadratic is real and is NOT this fixture's to fix** -- it is finding
+    quadratic was real and was NOT this fixture's to fix** -- it is finding
     **N-406**, filed with this measurement -- but an envelope holding 51
     purchases in one pay period is a shape the app does not produce either:
     measured on a clone of the developer's own database 2026-08-31, the

@@ -23,7 +23,7 @@ What these cases pin, and each is a thing that could ship wrong on its own:
   the balance sheet still ties out, which are the two ways this change could
   have gone silently wrong (counted as earnings, or left out of equity).
 
-The oracle is deliberately independent of the writer: every assertion reads
+The oracle is deliberately the suite's own: every assertion reads
 the worked-out ledger (``tests/_ledger_reads.py``) back through test-authored
 queries, and the statement cases read the public report functions rather than
 the chart.
@@ -424,12 +424,13 @@ class TestThePostedLedgerSelfMigrates:
     ):
         """The true-up moves to the gain line and the linked leg does not move.
 
-        The upgrade path this step ships with: the migration seeds ref rows and
-        moves no leg, because the reconcile reads back EVERY leg of a
-        correction key and drives it to the new target.  Reproduced by posting
-        the true-up while the account still classifies as Checking, re-typing
-        it to a Roth IRA, and re-syncing -- which is exactly the state every
-        production modelled account is in the moment this code deploys.
+        The upgrade path this step shipped with: the migration seeds ref rows
+        and moves no leg, because the stored ledger's reconcile read back EVERY
+        leg of a correction key and drove it to the new target (until plan task
+        plan#3076).  Reproduced by booking the true-up while the account still
+        classifies as Checking, then re-typing it to a Roth IRA -- which is
+        exactly the state every production modelled account was in the moment
+        this code deployed.
 
         Two things are asserted because either alone would pass a broken
         implementation: the true-up's $150.00 leaves equity for the gain line, and
@@ -640,7 +641,7 @@ class TestTheDispatchIsNotVacuous:
         # Pylint: ``import-outside-toplevel`` -- lazy app import, as above.
         # pylint: disable=import-outside-toplevel
         # The dispatch table lives in the worked-out chart since plan task
-        # plan#2526 (it was ``ledger_account_service._counters``'), so the
+        # plan#2526 (it was ``ledger_account_service._counters``), so the
         # planted regression is planted there.
         from app.services.ledger_lines import _chart
 

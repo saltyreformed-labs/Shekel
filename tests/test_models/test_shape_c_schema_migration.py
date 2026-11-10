@@ -21,7 +21,7 @@ schema.  These tests assert, without re-executing DDL in the worker:
     ``credit_card:CC-5-1``'s ``9900b309f0b0``, the head production carried
     when this step's release was cut);
   * the two reference rows exist and resolve through ``ref_cache`` to the
-    enum members the writer and the chart resolver name;
+    enum members the worked-out ledger names (``ledger_lines``);
   * the ``downgrade`` tears down in the only order the balanced-entry
     invariant and the RESTRICT keys permit -- the ``loan_payment`` entries
     WHOLE (the old image's loan hook re-posts them keyed by shadow), the

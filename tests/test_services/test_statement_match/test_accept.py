@@ -2020,9 +2020,9 @@ class TestARedatedSettleLeavesNoPostingBehind:
 
     **The remedy is a fixture built through the REAL settle door**
     (``tests._test_helpers.create_settled_cash_transaction``, which drives
-    ``status_seam.apply_status_change`` and
-    ``posting_service.sync_transaction_postings`` in the order the mark-done
-    route does), and an assertion about the OLD day rather than only the new
+    ``status_seam.apply_status_change`` as the mark-done route does, and drove
+    ``posting_service.sync_transaction_postings`` after it until plan task
+    plan#3132), and an assertion about the OLD day rather than only the new
     one.  It sits beside the ORM-built cases rather than replacing them,
     because the two grade different things.
 

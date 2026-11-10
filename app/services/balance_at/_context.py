@@ -34,8 +34,9 @@ four producers agreeing.
 
 **Read pass, not request.**  This is deliberately NOT a request-scoped cache
 (``flask.g``), for two reasons.  It would break the Flask-free service boundary
-(``CLAUDE.md``), and -- the load-bearing one -- it would go STALE: the loan write
-paths (``loan_recurrence_sync``, the transfer posting sync) resolve loans in the
+(``CLAUDE.md``), and -- the load-bearing one -- it would go STALE: a loan write
+path (``loan_recurrence_sync``; the transfer posting sync too, until plan task
+plan#3075) resolves loans in the
 middle of a mutation, and a request that writes and then re-renders must see the
 post-write loan.  A context is a plain value the caller constructs, so a write
 path simply builds a fresh one after its write.  There is no cache-invalidation

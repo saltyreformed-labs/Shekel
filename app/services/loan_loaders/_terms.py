@@ -97,8 +97,8 @@ class LoanAnchorFact:
       is a separate ESTIMATED tier).
     * **A user true-up is a real stored fact** (the ``user_trueup``
       :class:`LoanAnchorEvent` the balance-edit flow appends): the operator's
-      dated balance assertion, the source document the self-healing TRUEUP
-      correction is derived from and re-derived against.  Also an
+      dated balance assertion, the source document the loan ledger's TRUEUP
+      correction is worked out from on every read.  Also an
       ``is_opening=False`` assertion (``is_tracking_start=False``).
 
     Attributes:

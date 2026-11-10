@@ -192,7 +192,7 @@ class TestTheCashFigureBesideTheBookedOne:
         Both come from ``cash_ledger.credit_entry_sum``, and this grades that
         by settling the row and comparing against what its family's
         movements move through this account -- ``movement_cash_leg``, the one
-        valuation the ledger writer and the cash walk post through (ruling
+        valuation the worked-out ledger and the cash walk book through (ruling
         **R-BAL80**): the debit purchase its own `$40.00`, the card purchase
         nothing, and the row itself nothing (a ``purchases`` close has no
         covering movement, ruling **R-BAL81**).  Two numbers that agree by

@@ -263,7 +263,7 @@ class TestTheAccountCorrectionRuleNamesKeys:
 
 
 class TestTheLoanRulesNameKeys:
-    """A loan's split and anchor targets, by key (``loan_posting_service``)."""
+    """A loan's split and anchor targets, by key (``ledger_lines``' loan rules)."""
 
     @pytest.fixture(autouse=True)
     def _freeze_today(self, monkeypatch):

@@ -4244,21 +4244,21 @@ def add_txn(  # pylint: disable=too-many-arguments,too-many-positional-arguments
 
     It stays a BARE builder -- it does not route through
     ``status_seam.apply_status_change`` -- because that is its purpose: several
-    suites need "a settled row the posting writer has never seen", and the seam
-    would additionally refuse ``Projected -> Settled``, which is not a legal
-    transaction transition but is a legitimate STARTING state for a fixture.
+    suites need a row that STARTS settled, and the seam would refuse
+    ``Projected -> Settled``, which is not a legal transaction transition but
+    is a legitimate STARTING state for a fixture.  (They needed one the posting
+    writer had never seen too, until plan task plan#3097 deleted the syncs.)
     What it may not produce is an INCOHERENT row: a settled row with no settle
     day is the state ``balance_predicates.settled_day`` refuses, and every
     reader of it would raise -- **and since plan step ``balance:X-bi-4a`` a
     settled row with no COVERING MOVEMENT is one too** (ruling **R-BAL80**):
-    the fold and the posting writer read a settled row's money as its
+    the fold and the worked-out ledger read a settled row's money as its
     movements alone, so a bare row carrying only the record columns would be
     money no reader can see, the pre-``X-bi-3d`` shape the cutover migration
     exists to end.  So a settled row built here also carries the covering
     movement the seam would have written for it, through the seam's own
     writer (``sync_covering_movement``, the ONE producer of the mirror) and
-    not a fixture's restatement; the writer has still never seen it, which is
-    what the suites that need that state rely on.
+    not a fixture's restatement.
 
     Args:
         db_session: The test ``db.session``.
@@ -4359,10 +4359,10 @@ def independent_settled_figure():
     entries since plan step ``balance:X-bi-4b-2`` deleted the row's own
     ``settled_amount`` (ruling **R-BAL80**), which those oracles read through
     ``COALESCE(settled_amount, estimated_amount)`` before; the app's own SQL
-    twin is ``posting_reads.settled_figure_clause``, and an oracle that
-    called it would grade one producer against itself, so this is a second
-    spelling ON PURPOSE -- a correlated sum over ``budget.transaction_entries``
-    written here, in the suite, and nowhere in ``app/``.  ``COALESCE`` to
+    twin was ``posting_reads.settled_figure_clause`` until plan task plan#3133
+    deleted it, and an oracle calling it graded one producer against itself,
+    so this is a spelling of its own ON PURPOSE -- a correlated sum over
+    ``budget.transaction_entries`` written here, and nowhere in ``app/``.  ``COALESCE`` to
     zero: a settled row with no entry is the ``$0.00`` record (R-BAL82).
 
     Returns:
@@ -4580,8 +4580,8 @@ def one_off_row_of(  # pylint: disable=too-many-arguments
     The row is placed PROJECTED, which is the only state the producer
     writes.  A fixture wanting a SETTLED row settles this one as the app
     does (``status_seam.apply_status_change``; :func:`add_txn` lays a bare
-    settled state on for the suites that need a row the posting writer has
-    never seen), and one wanting it soft-deleted or annotated sets
+    settled state on for the suites that need a row that STARTS settled),
+    and one wanting it soft-deleted or annotated sets
     ``is_deleted`` / ``notes`` on the returned row: those are the row's own
     columns, not the definition's.
 

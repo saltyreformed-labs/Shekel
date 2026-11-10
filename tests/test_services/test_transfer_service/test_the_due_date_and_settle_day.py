@@ -120,10 +120,11 @@ class TestTheDueDateAndEachSidesSettleDay:
         statement and the money left the source account on a day other than
         the one Paid was pressed on.  They correct that side; the other side
         holds no day of its own -- a Paid press states none -- so it BORROWS
-        the corrected day, and both sides' payment records land on it.  Since
-        plan step ``balance:X-bi-6-3`` the posting writer files each side's
-        entry under that side's own covering movement's day, so the two land
-        together.  Each side's day is its RECORD's since plan step
+        the corrected day, and both sides' payment records land on it.  The
+        worked-out ledger books each side's line on that side's own covering
+        movement's day, so the two land together (the posting writer filed its
+        entries so from plan step ``balance:X-bi-6-3`` until plan task
+        plan#3075).  Each side's day is its RECORD's since plan step
         ``balance:X-bi-6-4d-2``; the shadows carried it until then (ruling
         R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """

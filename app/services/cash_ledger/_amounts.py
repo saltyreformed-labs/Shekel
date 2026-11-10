@@ -170,9 +170,9 @@ class ReconciledThrough:
     What is left here is the case R-FL calls not an exception -- a payroll
     contribution (R-Z) and a modelled accrual (R-L / R-Y) are not lines anyone
     can tick, so the assertion legitimately outranks the model and the question
-    really is "is this payday after the latest assertion" -- plus the posted
-    self-heal's cost guard, which grades journal-entry DATES rather than lines
-    and says so at its own site.
+    really is "is this payday after the latest assertion".  (The posted
+    self-heal's cost guard, which graded journal-entry DATES rather than lines,
+    was one more until plan task plan#3133 deleted the self-heal.)
 
     An adversarial review once found a seventh statement of the rule hiding
     behind a loose date (``balance_at._asset_contributions``: a payroll

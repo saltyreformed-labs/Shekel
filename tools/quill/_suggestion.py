@@ -27,6 +27,12 @@ What GitHub does, measured 2026-11-10 on the task plan#3178 with the developer's
 - While it is pending the card's Priority holds nothing.  The developer setting another
   Priority on GitHub's own screen cleared it; the same set through the API left it pending
   beside the value, so a write setting a Priority takes quill's back.
+- A board row's own Priority cell clears it too, measured 2026-11-10 20:14 and 20:36 UTC on
+  plan#3302 in the board's Inbox view (rulings plan#3305, plan#3314): the developer set
+  Medium there once over quill's suggested Medium and once over its test suggestion of Low,
+  and after each the card held Medium and no suggestion.  So quill reads no card for a
+  suggestion left beside a Priority.  Not measured: any other way of setting one, a paste
+  into many rows among them.
 - Once set aside, a suggestion left nothing in the card's timeline (ruling plan#3236: quill
   keeps no copy).
 """

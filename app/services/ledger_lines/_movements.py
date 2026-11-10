@@ -10,7 +10,8 @@ in transit (rulings **R-FM**, **R-BAL35**, **R-BAL45**, **R-BAL101**).  This
 module is that rule:
 
 * :func:`purchase_posts` -- whether the movement books at all (its parent
-  contributes, it is not a card purchase, its bank day is recorded);
+  contributes, its bank day is recorded; a card purchase never reaches it,
+  as the read's loader leaves it out);
 * :func:`purchase_target` -- its two legs, keyed by
   :class:`~._chart.ChartKey`;
 * :func:`purchase_source` and :func:`posting_kind_of` -- the source kind and
@@ -141,20 +142,35 @@ def purchase_source(parent: PlanItem) -> PostingSourceEnum:
 def purchase_posts(parent: PlanItem, entry) -> bool:
     """Return whether *entry* books a cash leg of its own -- ruling **R-FM**.
 
-    The ONE statement of "is this purchase in the ledger", read by the
-    worked-out read (it was the stored ledger's writer's,
-    ``_posting_purchases.purchase_posts``, until plan task plan#2526 moved it
-    here, and the writer read it here until plan task plan#3133 deleted
-    it), and the twin of the cash fold's own three narrowings
-    (:func:`app.services.cash_ledger._events.settled_cash_facts`).  All
-    three are load-bearing and each is stated there in full:
+    "Is this purchase in the ledger", read by the worked-out read (it was
+    the stored ledger's writer's, ``_posting_purchases.purchase_posts``,
+    until plan task plan#2526 moved it here, and the writer read it here
+    until plan task plan#3133 deleted it).  Two terms:
 
     * the PARENT contributes to a balance at all (not soft-deleted, not Credit
       or Cancelled) -- :func:`~app.services.cash_ledger.movement_cash_leg`'s
       totality rule, the family's since ruling **R-FM**;
-    * the purchase is a DEBIT -- a card purchase leaves through its own CC
-      Payback sibling and never touches this account;
     * its bank posting day is RECORDED -- the trigger itself.
+
+    **Both restate a narrowing the read's loader already made**, and finding
+    **plan#3294** holds that: its one caller hands it only the movements
+    :func:`app.services.cash_ledger.owner_cash_records` returns, which the
+    cash fold's own clause set narrowed by the day on both arms and by the
+    gate on a plan row's (``cash_ledger._movement_scope._dated_arms``, the
+    narrowings :func:`app.services.cash_ledger._events.settled_cash_facts`
+    reads too).  The terms stood here while the stored ledger's writer
+    called this on movements no loader had narrowed.
+
+    **A card purchase is no longer a term, because none reaches here**
+    (ruling **plan#3292**).  The loader's ``is_credit IS FALSE`` keeps it out
+    of the fold and the read alike: it leaves through its own CC Payback
+    sibling and never touches this account.  A third term here said so
+    again until that ruling deleted it.  The rule is still stated twice on
+    the read's path, by that clause and by
+    :func:`~app.services.cash_ledger.movement_cash_leg`, which prices a card
+    purchase at ``0.00`` for the readers outside the loader (the statement
+    matcher's accepted register and its release among them); plan step
+    ``credit_card:CC-7`` deletes the flag and both (finding **plan#2975**).
 
     It reads no status of the parent beyond the contributing gate, deliberately:
     a purchase against a still-PROJECTED envelope has left the bank exactly as
@@ -185,11 +201,7 @@ def purchase_posts(parent: PlanItem, entry) -> bool:
     Returns:
         True when the ledger should hold a cash leg for *entry*.
     """
-    return (
-        is_balance_contributing(parent)
-        and not entry.is_credit
-        and entry.settled_on is not None
-    )
+    return is_balance_contributing(parent) and entry.settled_on is not None
 
 
 def purchase_target(entry, parent: PlanItem) -> dict[ChartKey, Decimal]:

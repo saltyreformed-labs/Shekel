@@ -54,10 +54,11 @@ def settled_transfer_effect(account_id: int, scenario_id: int) -> Decimal:
     movement and adds nothing (ruling **R-BAL82**).
 
     **The narrowings are the posting rule, restated** (leaf ``X-bi-6-4a``):
-    ``ledger_lines.purchase_posts`` books a movement iff it is dated, a debit,
-    and its parent contributes, whatever the parent's status (ruling
-    **R-BAL101**) -- and, for a transfer leg, iff it is the leg's RECORD,
-    which the join this reads returns alone.
+    the worked-out ledger books a movement iff it is dated, a debit, and its
+    parent contributes, whatever the parent's status (ruling **R-BAL101**),
+    by its loader's clauses (``cash_ledger._movement_scope._dated_arms``)
+    and ``ledger_lines.purchase_posts`` -- and, for a transfer leg, iff it
+    is the leg's RECORD, which the join this reads returns alone.
 
     **The parent's live and contributing gate is not restated, because no
     dated record can fail it** (finding **BAL-534**): a record cannot arrive

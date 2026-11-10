@@ -89,8 +89,8 @@ class TestPostedPurchaseEffect:
         Arithmetic: a settled envelope with $60 + $50 debit purchases, both
         dated, and a $40 card purchase.  The two debit movements are -110.00
         of expense; the card purchase leaves through its CC Payback and is
-        excluded by its own ``is_credit`` flag, exactly as
-        ``purchase_posts`` leaves it out of the read.
+        excluded by its own ``is_credit`` flag, exactly as the read's loader
+        leaves it out (``cash_ledger._movement_scope._dated_arms``).
         """
         with app.app_context():
             period = seed_user["bootstrap_period"]

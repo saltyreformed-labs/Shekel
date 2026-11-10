@@ -39,12 +39,13 @@ in it is a read-only view; no year skipped between two the law carries
 **The attribute names are the calculator's.**  :mod:`app.services.tax_calculator`
 reads ``standard_deduction``, ``brackets`` (each ``min_income`` / ``max_income``
 / ``rate`` / ``sort_order``), the three credit amounts and the five FICA
-figures off whatever it is handed; these carry exactly those names, so the
+figures off whatever it is handed -- the withholding formula off the federal
+rules' ``withholding_rules`` -- and these carry exactly those names, so the
 calculator prices the law without knowing where it came from.
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from types import MappingProxyType
 
@@ -118,11 +119,34 @@ def ladder(*rungs: tuple[str, str | None, str]) -> tuple[Bracket, ...]:
 class FederalRules:
     """One filing status's federal income-tax rules for one tax year.
 
-    What :func:`app.services.tax_calculator.calculate_federal_withholding` and
-    :func:`~app.services.tax_calculator.calculate_annual_federal_liability`
-    read: the standard deduction, the bracket ladder, the per-child and
-    per-other-dependent credits and the refundable Additional Child Tax Credit
-    cap per child.
+    What :func:`app.services.tax_calculator.calculate_annual_federal_liability`
+    reads -- the tax RETURN's figures: the standard deduction, the bracket
+    ladder, the per-child and per-other-dependent credits and the refundable
+    Additional Child Tax Credit cap per child -- and, through
+    :attr:`withholding_rules`, what
+    :func:`~app.services.tax_calculator.calculate_federal_withholding` reads.
+
+    **A paycheck withholds on the year's withholding documents, which can
+    print other figures than the return's** (ruling plan#3213, plan step
+    salary:X-at-7).  The employer withholds on IRS Publication 15-T and the
+    employee's Form W-4, both printed before the year starts.  P.L. 119-21
+    (signed 2025-07-04) raised 2025's standard deduction and child credit, and
+    the IRS left that year's withholding tables and W-4 on the old figures
+    (IR-2025-82), so 2025's paychecks withheld on a smaller standard
+    deduction and child credit than its return allows, and the difference
+    came back as a refund.
+    ``withholding_standard_deduction`` and ``withholding_child_credit_amount``
+    state a withholding figure where it DIFFERS from the return's, and are
+    ``None`` where the withholding documents print the return's figure.
+    ``None`` is the one way to write a figure the two share: stating it again
+    would be a second spelling that a later edit could part from the first, so
+    a stated figure equal to the return's is refused.  The law states no
+    withholding copy of the other two figures the formula reads.  The
+    other-dependent credit has not differed.  The ladder has, for one filing
+    status: Pub 15-T has no married-filing-separately table and withholds on
+    the single filer's ladder, whose 35% rung runs past the return's 37%
+    threshold for married filing separately, and the formula withholds on
+    the return's ladder (finding plan#3243, step plan#3241).
     """
 
     standard_deduction: Decimal
@@ -130,9 +154,11 @@ class FederalRules:
     other_dependent_credit_amount: Decimal
     child_credit_refundable_cap: Decimal
     brackets: tuple[Bracket, ...]
+    withholding_standard_deduction: Decimal | None = None
+    withholding_child_credit_amount: Decimal | None = None
 
     def __post_init__(self):
-        """Refuse a negative amount, or brackets that are not one ladder from zero."""
+        """Refuse a negative amount, a broken ladder, or a withholding figure as the return's."""
         _require_amount(self.standard_deduction, "federal standard_deduction")
         _require_amount(self.child_credit_amount, "federal child_credit_amount")
         _require_amount(
@@ -147,6 +173,50 @@ class FederalRules:
         _require_climb(
             [(rung.min_income, rung.max_income) for rung in self.brackets],
             "a bracket ladder",
+        )
+        _require_withholding_figure(
+            self.withholding_standard_deduction, self.standard_deduction,
+            "federal withholding_standard_deduction",
+        )
+        _require_withholding_figure(
+            self.withholding_child_credit_amount, self.child_credit_amount,
+            "federal withholding_child_credit_amount",
+        )
+
+    @property
+    def withholding_rules(self) -> "FederalRules":
+        """Return the rules federal WITHHOLDING prices on (ruling plan#3213).
+
+        The ONE producer of them:
+        :func:`app.services.tax_calculator.calculate_federal_withholding`
+        reads it off the rules it is handed, so no caller can withhold on the
+        return's figures where the year states others.  These rules
+        themselves when the year states no withholding figure; otherwise a
+        copy with each stated figure in place of the return's, stating none
+        itself (it is already what withholding prices on).
+
+        Returns:
+            The :class:`FederalRules` the withholding formula prices on.
+        """
+        if (
+            self.withholding_standard_deduction is None
+            and self.withholding_child_credit_amount is None
+        ):
+            return self
+        return replace(
+            self,
+            standard_deduction=(
+                self.standard_deduction
+                if self.withholding_standard_deduction is None
+                else self.withholding_standard_deduction
+            ),
+            child_credit_amount=(
+                self.child_credit_amount
+                if self.withholding_child_credit_amount is None
+                else self.withholding_child_credit_amount
+            ),
+            withholding_standard_deduction=None,
+            withholding_child_credit_amount=None,
         )
 
 
@@ -519,6 +589,38 @@ def _require_rate(value, what: str) -> None:
     if not _ZERO <= value <= _ONE:
         raise ValueError(f"{what} {value} is not a fraction between 0 and 1")
     _require_fit(value, what, _RATE_DIGITS)
+
+
+def _require_withholding_figure(
+    value, returns: Decimal, what: str,
+) -> None:
+    """Raise unless *value* is ``None`` or an amount other than the return's figure.
+
+    A withholding figure is stated only where the year's withholding documents
+    part from the return (ruling plan#3213; :class:`FederalRules`), so one
+    equal to *returns* is a second spelling of the return's figure and is
+    refused, as a flat 0% state is refused beside the one spelling of no
+    income tax (:class:`StateYearLaw`).
+
+    Args:
+        value: The stated withholding figure, or ``None`` where withholding
+            uses the return's.
+        returns: The return's figure it stands beside, already checked.
+        what: What the figure is, for the error message.
+
+    Raises:
+        ValueError: If *value* is not an amount to the cent at least zero, or
+            equals *returns*.
+    """
+    if value is None:
+        return
+    _require_amount(value, what)
+    if value == returns:
+        raise ValueError(
+            f"{what} {value} is the return's figure: a withholding figure is "
+            "stated only where it differs, and is None where the withholding "
+            "documents print the return's"
+        )
 
 
 def _require_upper_bound(low: Decimal, high: Decimal | None, what: str) -> None:

@@ -3,7 +3,16 @@
 Split from ``tests/test_routes/test_salary.py`` by ``tools/split`` (ruling R-BAL301).
 """
 
-from tests._test_helpers import bracket_set_law, state_and_fica_law
+import dataclasses
+from decimal import Decimal
+
+from app.tax_law import TaxLaw
+from tests._test_helpers import (
+    bracket_set_law,
+    made_up_federal,
+    made_up_year,
+    state_and_fica_law,
+)
 
 
 # ── Tax Config ─────────────────────────────────────────────────────
@@ -128,6 +137,41 @@ class TestTaxConfigLayout:
             # Older year (2025) should be collapsed.
             assert 'class="collapse" id="federal-brackets-2025"' in html
             assert 'class="collapse show" id="federal-brackets-2025"' not in html
+
+    def test_a_year_stating_withholding_figures_shows_them(
+        self, app, auth_client, seed_user, tax_law,
+    ):
+        """A year whose withholding documents print other figures shows them (ruling plan#3213).
+
+        The made-up 2025 states a 13,850.00 withholding deduction and a
+        1,800.00 withholding child credit beside the return's 14,600.00 and
+        2,000.00, for every filing status; the made-up 2026 states none, so its
+        card shows no withholding line.
+        """
+        stating = dataclasses.replace(
+            made_up_federal(),
+            withholding_standard_deduction=Decimal("13850.00"),
+            withholding_child_credit_amount=Decimal("1800.00"),
+        )
+        tax_law(TaxLaw(years=(
+            made_up_year(2025, federal=stating),
+            made_up_year(2026, federal=made_up_federal()),
+        )))
+        with app.app_context():
+            response = auth_client.get("/settings?section=tax")
+            html = response.data.decode()
+
+        # Newest year first: the 2026 card, then the 2025 card.
+        start_2026 = html.index('id="federal-brackets-2026"')
+        start_2025 = html.index('id="federal-brackets-2025"')
+        card_2026 = html[start_2026:start_2025]
+        card_2025 = html[start_2025:]
+        assert "Paychecks withhold on" not in card_2026
+        assert card_2025.count("Paychecks withhold on (Pub 15-T and Form W-4):") == 4
+        assert card_2025.count("$13,850.00") == 4
+        assert card_2025.count("$1,800.00") == 4
+        # The return's figures still head each status.
+        assert card_2025.count("(Std. Deduction: $14,600.00)") == 4
 
     def test_tax_config_page_renders_without_errors(self, app, auth_client, seed_user):
         """Tax config page renders 200 with no template errors."""

@@ -26,10 +26,12 @@ the calculator now compares itself (plan#2025's amendment to the card, ruling
   1. **It refuses, writing nothing** (:func:`refuse_a_row_the_law_lacks`), while
      any stored row of the five tables is not a row of :data:`FEDERAL`,
      :data:`FICA`, :data:`STATES`, :data:`NC_STANDARD_DEDUCTION` and
-     :data:`NC_CHILD_TIERS`, naming each such row: a figure the app never
-     seeded, or a year, state or filing status it never had (ruling
-     **plan#3210**).  A row the law has and a table lacks refuses nothing:
-     its absence throws no figure away.
+     :data:`NC_CHILD_TIERS`, naming each such row (rulings **plan#3210** and
+     **plan#3285**): a row passes only when it is exactly one of the law's,
+     so a figure the app never seeded, a year, state or filing status it
+     never had, or the law's own figure on another row refuses.  A row the
+     law has and a table lacks refuses nothing: its absence throws no figure
+     away.
   2. It prints how many rows it found in each table, each a row of the law.
   3. It drops the five tables' audit triggers by name, then the tables, the
      brackets before their sets, then ``ref.tax_types``.
@@ -462,9 +464,9 @@ def rows_the_law_lacks(stored: dict[str, list[sa.engine.Row]]) -> list[str]:
 def refuse_a_row_the_law_lacks(stored: dict[str, list[sa.engine.Row]]) -> None:
     """Refuse, naming each, while a stored row is not a row of the law X-at-1 left.
 
-    Ruling plan#3210: a figure the app never seeded, or a year, state or
-    filing status it never had, may be one someone typed, so the tables are
-    not deleted while one is stored.
+    Rulings plan#3210 and plan#3285: a row that is not exactly one of the
+    law's may be one someone typed, so the tables are not deleted while one
+    is stored.
 
     Args:
         stored: :func:`stored_rows`.
@@ -479,7 +481,8 @@ def refuse_a_row_the_law_lacks(stored: dict[str, list[sa.engine.Row]]) -> None:
         f"X-at-2 refuses: {len(lacking)} stored row(s) of the five per-user tax "
         "tables are not rows of the tax law as plan step salary:X-at-1 left it "
         "(a figure the app never seeded, or a year, state or filing status it "
-        "never had), so the tables cannot be deleted yet (ruling plan#3210): "
+        "never had), so the tables cannot be deleted yet (rulings plan#3210 and "
+        "plan#3285): "
         + "; ".join(lacking)
         + ".  Nothing has read these tables since X-at-1, so no figure here "
         "prices anything; the developer rules what happens to each row.  "

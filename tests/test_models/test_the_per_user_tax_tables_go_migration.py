@@ -85,33 +85,13 @@ def _store_the_law(session, user_id: int) -> dict[str, int]:
         reach one ladder's rungs.
     """
     set_ids = {}
-    for (year, status), (deduction, child, other, cap, ladder) in _MIGRATION.FEDERAL.items():
-        set_id = session.execute(text(
-            "INSERT INTO salary.tax_bracket_sets (user_id, filing_status_id, tax_year, "
-            " standard_deduction, child_credit_amount, other_dependent_credit_amount, "
-            " child_credit_refundable_cap, description) "
-            "VALUES (:u, (SELECT id FROM ref.filing_statuses WHERE name = :status), :year, "
-            " :deduction, :child, :other, :cap, :label) RETURNING id"
-        ), {
-            "u": user_id, "status": status, "year": year, "deduction": deduction,
-            "child": child, "other": other, "cap": cap, "label": f"{year} Federal",
-        }).scalar_one()
+    for (year, status), (*figures, ladder) in _MIGRATION.FEDERAL.items():
+        set_id = _store_set(session, user_id, year, status, figures)
         set_ids[f"{year} {status}"] = set_id
-        for position, (floor, ceiling, rate) in enumerate(ladder):
-            session.execute(text(
-                "INSERT INTO salary.tax_brackets "
-                "(bracket_set_id, min_income, max_income, rate, sort_order) "
-                "VALUES (:s, :floor, :ceiling, :rate, :position)"
-            ), {
-                "s": set_id, "floor": floor, "ceiling": ceiling, "rate": rate,
-                "position": position,
-            })
+        for position, rung in enumerate(ladder):
+            _store_rung(session, set_id, position, rung)
     for year, figures in _MIGRATION.FICA.items():
-        session.execute(text(
-            "INSERT INTO salary.fica_configs (user_id, tax_year, ss_rate, ss_wage_base, "
-            " medicare_rate, medicare_surtax_rate, medicare_surtax_threshold) "
-            "VALUES (:u, :year, :a, :b, :c, :d, :e)"
-        ), {"u": user_id, "year": year, **dict(zip("abcde", figures))})
+        _store_fica(session, user_id, year, figures)
     for (year, state), (tax_type, rate) in _MIGRATION.STATES.items():
         for status, deduction in _MIGRATION.NC_STANDARD_DEDUCTION.items():
             _store_state_row(session, user_id, state, year, status, tax_type, rate, deduction)
@@ -119,6 +99,49 @@ def _store_the_law(session, user_id: int) -> dict[str, int]:
             for floor, ceiling, per_child in tiers:
                 _store_tier(session, user_id, state, year, status, (floor, ceiling, per_child))
     return set_ids
+
+
+def _store_set(session, user_id, year, status, figures) -> int:
+    """Store one ``tax_bracket_sets`` row; return its id.
+
+    Args:
+        session: The test session, after the downgrade.
+        user_id: The owner of the row.
+        year: Its tax year.
+        status: Its filing status, by ``ref`` name.
+        figures: ``(standard deduction, child credit, other-dependent credit,
+            refundable cap)``, as :data:`FEDERAL` states them.
+    """
+    deduction, child, other, cap = figures
+    return session.execute(text(
+        "INSERT INTO salary.tax_bracket_sets (user_id, filing_status_id, tax_year, "
+        " standard_deduction, child_credit_amount, other_dependent_credit_amount, "
+        " child_credit_refundable_cap, description) "
+        "VALUES (:u, (SELECT id FROM ref.filing_statuses WHERE name = :status), :year, "
+        " :deduction, :child, :other, :cap, :label) RETURNING id"
+    ), {
+        "u": user_id, "status": status, "year": year, "deduction": deduction,
+        "child": child, "other": other, "cap": cap, "label": f"{year} Federal",
+    }).scalar_one()
+
+
+def _store_rung(session, set_id: int, position: int, rung) -> None:
+    """Store one ``tax_brackets`` rung ``(floor, ceiling, rate)`` at *position* of *set_id*."""
+    floor, ceiling, rate = rung
+    session.execute(text(
+        "INSERT INTO salary.tax_brackets "
+        "(bracket_set_id, min_income, max_income, rate, sort_order) "
+        "VALUES (:s, :floor, :ceiling, :rate, :position)"
+    ), {"s": set_id, "floor": floor, "ceiling": ceiling, "rate": rate, "position": position})
+
+
+def _store_fica(session, user_id: int, year: int, figures) -> None:
+    """Store one ``fica_configs`` row of *figures*, in :data:`FICA`'s order."""
+    session.execute(text(
+        "INSERT INTO salary.fica_configs (user_id, tax_year, ss_rate, ss_wage_base, "
+        " medicare_rate, medicare_surtax_rate, medicare_surtax_threshold) "
+        "VALUES (:u, :year, :a, :b, :c, :d, :e)"
+    ), {"u": user_id, "year": year, **dict(zip("abcde", figures))})
 
 
 def _store_state_row(session, user_id, state, year, status, tax_type, rate, deduction) -> int:
@@ -154,6 +177,256 @@ def _rung_id(session, set_id: int, position: int) -> int:
     return session.execute(text(
         "SELECT id FROM salary.tax_brackets WHERE bracket_set_id = :s AND sort_order = :p"
     ), {"s": set_id, "p": position}).scalar_one()
+
+
+def _relabel_set(session, user_id: int, set_ids: dict[str, int]) -> None:
+    """Replace 2026 head of household's bracket set with 2026 single's figures under its label.
+
+    The table holds one set per year and status, so the law's own goes first,
+    its rungs with it (a missing row refuses nothing).
+    """
+    session.execute(text("DELETE FROM salary.tax_bracket_sets WHERE id = :id"), {
+        "id": set_ids["2026 head_of_household"],
+    })
+    _store_set(
+        session, user_id, 2026, "head_of_household", _MIGRATION.FEDERAL[(2026, "single")][:4],
+    )
+
+
+def _relabel_state_row(session, user_id: int, _set_ids) -> None:
+    """Replace 2026 head of household's NC row with the single filer's figures under its label."""
+    session.execute(text(
+        "DELETE FROM salary.state_tax_configs WHERE tax_year = 2026 AND filing_status_id = "
+        "       (SELECT id FROM ref.filing_statuses WHERE name = 'head_of_household')"
+    ))
+    tax_type, rate = _MIGRATION.STATES[(2026, "NC")]
+    _store_state_row(
+        session, user_id, "NC", 2026, "head_of_household", tax_type, rate,
+        _MIGRATION.NC_STANDARD_DEDUCTION["single"],
+    )
+
+
+def _relabel_tier(session, user_id: int, _set_ids) -> None:
+    """Replace 2026 joint filers' lowest NC tier with the single filer's lowest under its label."""
+    session.execute(text(
+        "DELETE FROM salary.state_child_deductions WHERE tax_year = 2026 AND agi_min = 0 "
+        "   AND filing_status_id = "
+        "       (SELECT id FROM ref.filing_statuses WHERE name = 'married_jointly')"
+    ))
+    _store_tier(
+        session, user_id, "NC", 2026, "married_jointly", _MIGRATION.NC_CHILD_TIERS["single"][0],
+    )
+
+
+def _update(statement: str):
+    """Return a move that runs one UPDATE on the stored law, given the 2026 single set's id.
+
+    Args:
+        statement: The UPDATE, which may name ``:single_2026``, the id of the
+            2026 single filer's bracket set.
+
+    Returns:
+        A move, ``(session, user_id, set_ids) -> None``.
+    """
+    def move(session, _user_id, set_ids):
+        session.execute(text(statement), {"single_2026": set_ids["2026 single"]})
+    return move
+
+
+#: The 2026 single filer's federal figures, NC rate and tier, and 2026's FICA,
+#: as the frozen law states them: the rows the cases below copy.
+_SINGLE_2026 = _MIGRATION.FEDERAL[(2026, "single")]
+_NC_2026 = _MIGRATION.STATES[(2026, "NC")]
+_NC_SINGLE_DEDUCTION = _MIGRATION.NC_STANDARD_DEDUCTION["single"]
+_NC_SINGLE_TIER = _MIGRATION.NC_CHILD_TIERS["single"][0]
+
+#: One case for each compared column that no named case of
+#: :class:`TestTheRefusal` moves alone: a move ``(session, user_id, set_ids)``
+#: that changes ONLY that column of one row of the law, or stores a copy of a
+#: row with only it changed, and the moved row's columns as the refusal names
+#: them, whole.  Where the law holds another value in the column, the move uses it, so
+#: a comparison that skipped the column, or matched it against any row's, lets
+#: the row through and the case fails.  Ruling plan#3285: a row is the law's
+#: only when it is exactly one of the law's rows.
+_ONE_COLUMN_MOVED = (
+    pytest.param(
+        lambda s, u, _: _store_set(s, u, 2027, "single", _SINGLE_2026[:4]),
+        "tax_year 2027, filing_status single, standard_deduction 16100.00, "
+        "child_credit_amount 2200.00, other_dependent_credit_amount 500.00, "
+        "child_credit_refundable_cap 1700.00",
+        id="bracket set tax_year: a 2027 set holding 2026's",
+    ),
+    pytest.param(
+        _relabel_set,
+        "tax_year 2026, filing_status head_of_household, standard_deduction 16100.00, "
+        "child_credit_amount 2200.00, other_dependent_credit_amount 500.00, "
+        "child_credit_refundable_cap 1700.00",
+        id="bracket set filing_status: single's figures as head of household",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.tax_bracket_sets SET standard_deduction = 32200.00 "
+            " WHERE id = :single_2026"
+        ),
+        "tax_year 2026, filing_status single, standard_deduction 32200.00, "
+        "child_credit_amount 2200.00, other_dependent_credit_amount 500.00, "
+        "child_credit_refundable_cap 1700.00",
+        id="bracket set standard_deduction: joint's $32,200 on single",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.tax_bracket_sets SET other_dependent_credit_amount = 400.00 "
+            " WHERE id = :single_2026"
+        ),
+        "tax_year 2026, filing_status single, standard_deduction 16100.00, "
+        "child_credit_amount 2200.00, other_dependent_credit_amount 400.00, "
+        "child_credit_refundable_cap 1700.00",
+        id="bracket set other_dependent_credit_amount",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.tax_bracket_sets SET child_credit_refundable_cap = 1600.00 "
+            " WHERE id = :single_2026"
+        ),
+        "tax_year 2026, filing_status single, standard_deduction 16100.00, "
+        "child_credit_amount 2200.00, other_dependent_credit_amount 500.00, "
+        "child_credit_refundable_cap 1600.00",
+        id="bracket set child_credit_refundable_cap",
+    ),
+    pytest.param(
+        lambda s, _, sets: _store_rung(
+            s, sets["2026 single"], 1, _MIGRATION.FEDERAL[(2025, "single")][4][1],
+        ),
+        "tax_year 2026, filing_status single, sort_order 1, min_income 11925.00, "
+        "max_income 48475.00, rate 0.1200",
+        id="rung tax_year: 2025 single's second rung in 2026's ladder",
+    ),
+    pytest.param(
+        lambda s, _, sets: _store_rung(s, sets["2026 married_jointly"], 1, _SINGLE_2026[4][1]),
+        "tax_year 2026, filing_status married_jointly, sort_order 1, min_income 12400.00, "
+        "max_income 50400.00, rate 0.1200",
+        id="rung filing_status: single's second rung in the joint ladder",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.tax_brackets SET min_income = 50400.00 "
+            " WHERE bracket_set_id = :single_2026 AND sort_order = 3"
+        ),
+        "tax_year 2026, filing_status single, sort_order 3, min_income 50400.00, "
+        "max_income 201775.00, rate 0.2400",
+        id="rung min_income: the third rung's floor on the fourth",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.tax_brackets SET rate = 0.2200 "
+            " WHERE bracket_set_id = :single_2026 AND sort_order = 1"
+        ),
+        "tax_year 2026, filing_status single, sort_order 1, min_income 12400.00, "
+        "max_income 50400.00, rate 0.2200",
+        id="rung rate: the third rung's 22% on the second",
+    ),
+    pytest.param(
+        lambda s, u, _: _store_state_row(
+            s, u, "NC", 2027, "single", *_NC_2026, _NC_SINGLE_DEDUCTION,
+        ),
+        "state_code NC, tax_year 2027, filing_status single, tax_type flat, "
+        "flat_rate 0.0399, standard_deduction 12750.00",
+        id="state row tax_year: a 2027 row holding 2026's",
+    ),
+    pytest.param(
+        _relabel_state_row,
+        "state_code NC, tax_year 2026, filing_status head_of_household, tax_type flat, "
+        "flat_rate 0.0399, standard_deduction 12750.00",
+        id="state row filing_status: single's deduction as head of household",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.state_tax_configs SET flat_rate = 0.0425 "
+            " WHERE tax_year = 2026 AND filing_status_id = "
+            "       (SELECT id FROM ref.filing_statuses WHERE name = 'single')"
+        ),
+        "state_code NC, tax_year 2026, filing_status single, tax_type flat, "
+        "flat_rate 0.0425, standard_deduction 12750.00",
+        id="state row flat_rate: 2025's rate in 2026",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.state_tax_configs SET standard_deduction = 12750.00 "
+            " WHERE tax_year = 2026 AND filing_status_id = "
+            "       (SELECT id FROM ref.filing_statuses WHERE name = 'married_jointly')"
+        ),
+        "state_code NC, tax_year 2026, filing_status married_jointly, tax_type flat, "
+        "flat_rate 0.0399, standard_deduction 12750.00",
+        id="state row standard_deduction: single's $12,750 on joint (SAL-574)",
+    ),
+    pytest.param(
+        _update("UPDATE salary.fica_configs SET ss_rate = 0.0630 WHERE tax_year = 2026"),
+        "tax_year 2026, ss_rate 0.0630, ss_wage_base 184500.00, medicare_rate 0.0145, "
+        "medicare_surtax_rate 0.0090, medicare_surtax_threshold 200000.00",
+        id="FICA ss_rate",
+    ),
+    pytest.param(
+        _update("UPDATE salary.fica_configs SET medicare_rate = 0.0150 WHERE tax_year = 2026"),
+        "tax_year 2026, ss_rate 0.0620, ss_wage_base 184500.00, medicare_rate 0.0150, "
+        "medicare_surtax_rate 0.0090, medicare_surtax_threshold 200000.00",
+        id="FICA medicare_rate",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.fica_configs SET medicare_surtax_rate = 0.0100 WHERE tax_year = 2026"
+        ),
+        "tax_year 2026, ss_rate 0.0620, ss_wage_base 184500.00, medicare_rate 0.0145, "
+        "medicare_surtax_rate 0.0100, medicare_surtax_threshold 200000.00",
+        id="FICA medicare_surtax_rate",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.fica_configs SET medicare_surtax_threshold = 250000.00 "
+            " WHERE tax_year = 2026"
+        ),
+        "tax_year 2026, ss_rate 0.0620, ss_wage_base 184500.00, medicare_rate 0.0145, "
+        "medicare_surtax_rate 0.0090, medicare_surtax_threshold 250000.00",
+        id="FICA medicare_surtax_threshold",
+    ),
+    pytest.param(
+        lambda s, u, _: _store_tier(s, u, "SC", 2026, "single", _NC_SINGLE_TIER),
+        "state_code SC, tax_year 2026, filing_status single, agi_min 0.00, "
+        "agi_max 20000.00, deduction_per_child 3000.00",
+        id="tier state_code: NC's lowest single tier filed under SC",
+    ),
+    pytest.param(
+        lambda s, u, _: _store_tier(s, u, "NC", 2027, "single", _NC_SINGLE_TIER),
+        "state_code NC, tax_year 2027, filing_status single, agi_min 0.00, "
+        "agi_max 20000.00, deduction_per_child 3000.00",
+        id="tier tax_year: a 2027 tier holding 2026's",
+    ),
+    pytest.param(
+        _relabel_tier,
+        "state_code NC, tax_year 2026, filing_status married_jointly, agi_min 0.00, "
+        "agi_max 20000.00, deduction_per_child 3000.00",
+        id="tier filing_status: single's lowest tier as joint",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.state_child_deductions SET agi_min = 20000.00 "
+            " WHERE tax_year = 2026 AND agi_min = 30000 AND filing_status_id = "
+            "       (SELECT id FROM ref.filing_statuses WHERE name = 'head_of_household')"
+        ),
+        "state_code NC, tax_year 2026, filing_status head_of_household, agi_min 20000.00, "
+        "agi_max 45000.00, deduction_per_child 2500.00",
+        id="tier agi_min",
+    ),
+    pytest.param(
+        _update(
+            "UPDATE salary.state_child_deductions SET agi_max = 20000.00 "
+            " WHERE tax_year = 2026 AND agi_min = 0 AND filing_status_id = "
+            "       (SELECT id FROM ref.filing_statuses WHERE name = 'head_of_household')"
+        ),
+        "state_code NC, tax_year 2026, filing_status head_of_household, agi_min 0.00, "
+        "agi_max 20000.00, deduction_per_child 3000.00",
+        id="tier agi_max: single's lowest ceiling on head of household's",
+    ),
+)
 
 
 class TestChaining:
@@ -393,9 +666,9 @@ class TestTheRefusal:
     def test_a_hand_typed_correct_figure_refuses(self, db, seed_user):
         """The ruling's example: 2026 head-of-household's 24% rung typed as $201,750.
 
-        The IRS figure, and the one X-at-7 gives the code, but not one the app
-        seeded, so it may be someone's and is not thrown away unseen (ruling
-        plan#3210's correction to its question).
+        The IRS figure, and the one X-at-7 gives the code, but the row is not a
+        row of the law the app seeded, so it may be someone's and is not thrown
+        away unseen (ruling plan#3285, which settled the question's example).
         """
         _run(db.session, "downgrade")
         user_id = seed_user["user"].id
@@ -424,14 +697,15 @@ class TestTheRefusal:
         ) in self._refusal(db.session)
 
     def test_an_extra_rung_refuses(self, db, seed_user):
-        """An eighth rung on 2026 single's seven-rung ladder."""
+        """An eighth rung on 2026 single's ladder: its top rung's figures, at position 7.
+
+        Only its position differs from a row of the law, so the case grades
+        the comparison's ``sort_order``.
+        """
         _run(db.session, "downgrade")
         set_ids = _store_the_law(db.session, seed_user["user"].id)
-        db.session.execute(text(
-            "INSERT INTO salary.tax_brackets (bracket_set_id, min_income, max_income, rate, "
-            " sort_order) VALUES (:s, 900000.00, NULL, 0.3900, 7)"
-        ), {"s": set_ids["2026 single"]})
-        assert "sort_order 7, min_income 900000.00, max_income None, rate 0.3900" in (
+        _store_rung(db.session, set_ids["2026 single"], 7, _SINGLE_2026[4][6])
+        assert "sort_order 7, min_income 640600.00, max_income None, rate 0.3700" in (
             self._refusal(db.session)
         )
 
@@ -448,18 +722,36 @@ class TestTheRefusal:
         ) in self._refusal(db.session)
 
     def test_a_state_the_law_never_had_refuses(self, db, seed_user):
-        """A South Carolina row: a state the app never carried."""
+        """A South Carolina row holding North Carolina's 2026 single figures exactly.
+
+        Only its state differs from a row of the law, so the case grades the
+        comparison's ``state_code``.
+        """
         _run(db.session, "downgrade")
         user_id = seed_user["user"].id
         _store_the_law(db.session, user_id)
         row = _store_state_row(
-            db.session, user_id, "SC", 2026, "single", "flat", "0.0620", "14600.00",
+            db.session, user_id, "SC", 2026, "single", *_NC_2026, _NC_SINGLE_DEDUCTION,
         )
         assert (
             f"salary.state_tax_configs row {row} (user {user_id}): state_code SC, "
-            "tax_year 2026, filing_status single, tax_type flat, flat_rate 0.0620, "
-            "standard_deduction 14600.00"
+            "tax_year 2026, filing_status single, tax_type flat, flat_rate 0.0399, "
+            "standard_deduction 12750.00"
         ) in self._refusal(db.session)
+
+    @pytest.mark.parametrize(("move", "fields"), _ONE_COLUMN_MOVED)
+    def test_one_column_moved_alone_refuses(self, db, seed_user, move, fields):
+        """Each compared column the named cases do not move alone, moved alone, refuses.
+
+        With the named cases, every column of :data:`FIELDS` is moved alone by
+        one case, so a comparison narrowed to some of the columns, or one that
+        matched a figure against any row's, fails a case here (ruling plan#3285).
+        """
+        _run(db.session, "downgrade")
+        user_id = seed_user["user"].id
+        set_ids = _store_the_law(db.session, user_id)
+        move(db.session, user_id, set_ids)
+        assert f"(user {user_id}): {fields}.  " in self._refusal(db.session)
 
     def test_a_filing_status_the_law_never_had_refuses(self, db, seed_user):
         """A tier under a fifth filing status the law does not model."""

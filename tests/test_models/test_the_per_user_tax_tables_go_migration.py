@@ -424,7 +424,7 @@ class TestChaining:
     def test_revision_and_down_revision(self):
         """revision / down_revision pin the migration into the chain."""
         assert _MIGRATION.revision == "5f2c46a35a79"
-        assert _MIGRATION.down_revision == "0fe9c332b9b0"
+        assert _MIGRATION.down_revision == "6534c1bfeeb1"
 
     def test_it_is_reviewed(self):
         """A destructive migration carries the ``Review:`` line, naming its two rulings.

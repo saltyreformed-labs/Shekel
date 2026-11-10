@@ -63,9 +63,10 @@ class UserScopedMixin:
         tables whose ``user_id`` carries ``unique=True``.
       * ``budget.transactions`` -- the FK is ``ON DELETE RESTRICT``; see
         below.
-      * ``auth.trusted_devices`` -- its migration named the FK
-        ``fk_trusted_devices_user_id``, so the mixin's default-named FK
-        would diverge.
+      * ``auth.known_devices`` -- its migrations named the FK
+        ``fk_known_devices_user_id`` (``b7e4c19a2d60`` renamed
+        ``fk_trusted_devices_user_id`` with its table), so the mixin's
+        default-named FK would diverge.
 
     ``Transaction`` HAS a ``user_id`` since plan step
     ``pay_calendar:C13-a`` (ruling **R-PC32**) -- until then it had none

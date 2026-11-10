@@ -1,7 +1,7 @@
 """the per-user tax tables go: five salary tax tables and ref.tax_types are dropped
 
 Revision ID: 5f2c46a35a79
-Revises: 0fe9c332b9b0
+Revises: 6534c1bfeeb1
 Create Date: 2026-11-10
 Review: developer, 2026-11-10 (rulings plan#3210 and plan#3211, card plan#1142,
 answered "1A 2A 3A": the delete checks the rows against "the law as it stood
@@ -107,13 +107,14 @@ tables EMPTY, in production's exact shape** (ruling plan#3211), read off
 production's catalogue at ``897a6663d221`` on 2026-11-10: every column in
 production's order with its type, nullability and default, and every key,
 CHECK and index under production's name.  That shape is not quite the one the
-chain builds.  Measured on 2026-11-10 on a database built from the empty chain
-to ``0fe9c332b9b0``, against production's catalogue as this revision's tests
-hold it (read at ``897a6663d221``; its columns re-read that day at
-``3748145b83e3`` and unchanged): every key, CHECK and index of the six tables
-is the same, and so is every column of ``ref.tax_types``, ``tax_brackets``,
-``fica_configs`` and ``state_child_deductions``.  These differ, and nothing
-else:
+chain builds.  Measured on 2026-11-10 on two databases built from the empty
+chain, to ``0fe9c332b9b0`` and to this revision's ``down_revision``,
+``6534c1bfeeb1``, which came out the same, against production's catalogue as
+this revision's tests hold it (read at ``897a6663d221``; its columns re-read
+that day at ``3748145b83e3`` and unchanged): every key, CHECK and index of the
+six tables is the same, and so is every column of ``ref.tax_types``,
+``tax_brackets``, ``fica_configs`` and ``state_child_deductions``.  These
+differ, and nothing else:
 
 * ``state_tax_configs``' column order.  Production's is ``id``, ``user_id``,
   ``tax_type_id``, ``state_code``, ``tax_year``, ``flat_rate``,
@@ -154,11 +155,12 @@ import sqlalchemy as sa
 
 # Revision identifiers, used by Alembic.
 revision = '5f2c46a35a79'
-# The head of ``dev`` at authoring, measured (231 revisions, one head).
-# Another lane landing a revision first makes two heads, which git merges
-# cleanly and ``flask db upgrade`` refuses: re-point this at the measured head
-# as the last edit before the pull request.
-down_revision = '0fe9c332b9b0'
+# The head of ``dev`` when it was last taken in, measured on 2026-11-10 at
+# ``2df736ba1`` (234 revisions, one head; 235 with this one).  Another lane
+# landing a revision first makes two heads, which git merges cleanly and
+# ``flask db upgrade`` refuses: re-point this at the measured head as the last
+# edit before the pull request.
+down_revision = '6534c1bfeeb1'
 branch_labels = None
 depends_on = None
 

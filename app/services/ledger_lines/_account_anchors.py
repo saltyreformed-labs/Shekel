@@ -27,7 +27,11 @@ be set independently they can disagree"*).  Every anchor correction, cash and
 loan alike, is filed through
 :meth:`app.services.pay_calendar.PayCalendar.filing_period` against the entry's
 own date, on the owner's calendar
-(:func:`app.services.pay_calendar.calendar_for`).
+(:func:`app.services.pay_calendar.calendar_for`).  **The reader that windows by
+paycheck files it, never this rule** (finding plan#2875,
+:meth:`app.services.ledger_lines.LedgerLine.filed_period_id`): a correction's
+line names no paycheck, so the balance sheet and the re-type refusal, which
+read none, ask no calendar.
 
 **That rule became ONE clamp at plan step C2-d.**  It was
 ``loan_ledger.resolve_anchor_pay_period`` -- containment, else the latest
@@ -102,9 +106,9 @@ measurement in prose (finding N-169's other half).  A mis-filed row is a defect
 in the ROW (finding N-168), repaired at its source -- and until it is, the
 ledger states the day's truth rather than inheriting the row's error.
 
-Two same-day assertions always share a containing period, so they still merge
-into one entry; separating THOSE needs an identity the ledger does not carry
-yet (plan step X-ai-s).
+Two same-day assertions always share a key, the day alone saying WHEN, so they
+still merge into one entry; separating THOSE needs an identity the ledger does
+not carry yet (plan step X-ai-s).
 """
 
 from decimal import Decimal
@@ -113,7 +117,6 @@ from app import ref_cache
 from app.enums import PostingKindEnum, PostingSourceEnum
 from app.models.account import Account
 from app.services.account_projection import classify_account
-from app.services.pay_calendar import PayCalendar
 
 from ._account_walk import AccountAnchorCorrection
 from ._chart import (
@@ -302,16 +305,16 @@ def _account_anchor_correction_target(
 
 def _account_anchor_correction_targets(
     corrections: list[AccountAnchorCorrection],
-    calendar: PayCalendar,
     linked: ChartKey,
     counters: list[ChartKey | None],
 ) -> dict[CorrectionKey, ChartLegMap]:
-    """Merge an account's corrections into per-(source, period, date) targets.
+    """Merge an account's corrections into per-(source, day) targets.
 
-    Groups every correction by its ``(source_kind_id, pay_period_id, civil
-    entry_date)`` key and sums the legs within each group
+    Groups every correction by its ``(source_kind_id, None, civil
+    entry_date)`` key -- a correction is budgeted in no paycheck
+    (:data:`._targets.CorrectionKey`) -- and sums the legs within each group
     (:func:`._targets.merge_target_legs`), so two
-    anchors sharing all three key parts net to a single balanced target that
+    anchors sharing their kind and day net to a single balanced target that
     lands the ledger on the LATER value -- exactly the combined jump they
     express (each correction's delta already accounts for the prior one).  A
     correction that books nothing still creates its key with an empty leg
@@ -319,26 +322,20 @@ def _account_anchor_correction_targets(
     it had posted under that key to zero, until plan task plan#3133 deleted
     it).
 
-    **Both key parts that identify WHEN come off the same fact**: the entry's
-    date IS the assertion's ``observed_on``, and its period is the one that day
-    files under (:meth:`app.services.pay_calendar.PayCalendar.filing_period`,
-    the derivation the loan twin makes and the rule ruling R-DH states).  The
-    stored ``account_anchor_history.pay_period_id`` was deliberately NOT read
-    here while it stood -- it was a cache of this same derivation, and a row
-    whose clock split it from its own day would have put the ledger
-    permanently at odds with the grid; ruling R-EO deleted the column.  See
-    the module docstring for the production measurement.
+    **WHEN is ONE fact**: the entry's date IS the assertion's
+    ``observed_on``, and the paycheck a reader files it in is the one that day
+    files under (:meth:`app.services.ledger_lines.LedgerLine.filed_period_id`,
+    the derivation the loan twin's lines take too and the rule ruling R-DH
+    states).  The key carried that paycheck, derived here, until finding
+    plan#2875.  The stored ``account_anchor_history.pay_period_id`` was
+    deliberately NOT read here while it stood -- it was a cache of this same
+    derivation, and a row whose clock split it from its own day would have put
+    the ledger permanently at odds with the grid; ruling R-EO deleted the
+    column.  See the module docstring for the production measurement.
 
     Args:
         corrections: The account's corrections from
             :func:`._account_walk.account_corrections`, chronological.
-        calendar: The owner's whole pay calendar, from
-            :func:`app.services.pay_calendar.calendar_for`.
-            :meth:`~app.services.pay_calendar.PayCalendar.filing_period` is the
-            one place the "is there a period to point at" question is asked and
-            refused, so this carries no precondition of its own -- an earlier
-            draft claimed the loader had already checked, which was a second
-            statement of one predicate and the two had drifted.
         linked: The account's own line's chart key, built once by
             :func:`account_correction_targets`.
         counters: One counter chart key per correction, in the SAME order, from
@@ -348,7 +345,7 @@ def _account_anchor_correction_targets(
             (the first booking opens the books), not of anything on the row.
 
     Returns:
-        ``{(source_kind_id, pay_period_id, entry_date): {chart key: (amount,
+        ``{(source_kind_id, None, entry_date): {chart key: (amount,
         kind_id)}}``.
     """
     targets: dict[CorrectionKey, ChartLegMap] = {}
@@ -361,11 +358,7 @@ def _account_anchor_correction_targets(
         # ``cash_anchor_facts`` already resolves -- and one that put a
         # late-evening Eastern true-up on the next day's entry.
         observed_on = correction.observed_on
-        key = (
-            ref_cache.posting_source_id(source_enum),
-            calendar.filing_period(observed_on).period_id,
-            observed_on,
-        )
+        key = (ref_cache.posting_source_id(source_enum), None, observed_on)
         merge_target_legs(
             targets.setdefault(key, {}),
             _account_anchor_correction_target(correction, linked, counter),
@@ -376,7 +369,6 @@ def _account_anchor_correction_targets(
 def account_correction_targets(
     account: Account,
     corrections: list[AccountAnchorCorrection],
-    calendar: PayCalendar,
 ) -> dict[CorrectionKey, ChartLegMap]:
     """Return an account's opening and true-up legs, keyed per correction.
 
@@ -386,7 +378,7 @@ def account_correction_targets(
     until plan task plan#3133 deleted it): each correction's two legs --
     its linked leg on the account's own line and its counter leg on the line
     ruling **R-FO** names (:func:`_counter_keys`) -- merged per ``(source
-    kind, pay period, entry date)`` (:func:`_account_anchor_correction_targets`).
+    kind, entry date)`` (:func:`_account_anchor_correction_targets`).
     A correction that books nothing keeps its key with no legs, which books
     no line.
 
@@ -394,24 +386,17 @@ def account_correction_targets(
         account: The non-loan account, with ``account_type`` loaded.
         corrections: Its corrections from
             :func:`._account_walk.account_corrections`, chronological.
-        calendar: The owner's whole pay calendar
-            (:func:`app.services.pay_calendar.calendar_for`), which files each
-            correction by its day (ruling plan#2519).
 
     Returns:
-        ``{(source_kind_id, pay_period_id, entry_date): {chart key: (amount,
+        ``{(source_kind_id, None, entry_date): {chart key: (amount,
         posting_kind_id)}}``.
 
     Raises:
         ValueError: If the counter dispatch has no rule for the account's
             projection kind.
-        PayCalendarError: From
-            :meth:`~app.services.pay_calendar.PayCalendar.filing_period`, when
-            the owner has no materialised pay period to file a correction in.
     """
     return _account_anchor_correction_targets(
         corrections,
-        calendar,
         linked_key(account),
         _counter_keys(account, corrections),
     )

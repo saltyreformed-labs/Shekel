@@ -10,20 +10,26 @@ bounding balance sheets, with no reconciliation code).
 **The ledger is the one worked out from the records** (balance:X-ew's second
 leaf, plan task plan#2771): every :class:`~app.services.ledger_lines.LedgerLine`
 of the owner's baseline (:func:`app.services.ledger_lines.worked_out_lines`),
-each an amount on a chart account, filed in a paycheck and dated by a civil
-day.  The stored journal (``budget.journal_entries`` and its postings) is still
-written while it lives, and nothing here reads it; X-ew's third leaf deletes it.
+each an amount on a chart account, dated by a civil day and carrying the
+paycheck its record names.  The stored journal (``budget.journal_entries``
+and its postings) is written no more since plan task plan#3133 deleted its
+writers, nothing here reads it, and X-ew's third leaf deletes its tables.
 
 **The reader contract (M3), restated over lines.**
 
 * **Whole entries in** (C-1): every leg of one booking shares its line's
   paycheck and its day -- a movement's two legs its parent's paycheck and its
   own ``settled_on``, a correction's legs the ``(kind, paycheck, day)`` its
-  target is keyed by -- so a window by paycheck or by day takes a booking
+  target is keyed by, an opening's or true-up's paycheck ``None`` and filed
+  by that shared day -- so a window by paycheck or by day takes a booking
   whole or not at all, and the trial balance closes over every window.
-* **A pay-period window takes the lines filed in that paycheck** (C-2): a
-  movement's its parent's paycheck, a correction's by its day on the owner's
-  calendar as it is read (ruling plan#2519).
+* **A pay-period window takes the lines filed in that paycheck** (C-2,
+  :meth:`~app.services.ledger_lines.LedgerLine.filed_period_id`): a
+  movement's its parent's paycheck, a loan payment split's its payment's, an
+  opening's or true-up's by its day on the owner's calendar as the window
+  asks (ruling plan#2519).  Only that window asks a calendar (finding
+  plan#2875), so the balance sheet reads an owner whose calendar could file
+  nothing.
 * **A calendar window and an as-of date take the lines by their day** (C-3):
   a movement's ``settled_on``, which IS the owner's civil day (the decided L9
   rule -- an 8:05pm-Eastern Dec-31 settle attributes to Dec 31, not the Jan 1
@@ -45,7 +51,7 @@ category's lines, whose rows read no category, are the Uncategorized bucket's.
 """
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -61,7 +67,6 @@ from app.services.ledger_lines import (
     chart_record_type,
     worked_out_lines,
 )
-from app.services.pay_calendar import PayCalendar
 from app.services.scenario_resolver import require_baseline_scenario
 
 from ._types import StatementLine, StatementSection
@@ -84,9 +89,7 @@ class StatementLedger:
     labels: dict[ChartKey, str]
 
 
-def read_statement_ledger(
-    user_id: int, calendar_source: Callable[[], PayCalendar],
-) -> StatementLedger:
+def read_statement_ledger(user_id: int) -> StatementLedger:
     """Return *user_id*'s worked-out baseline ledger and its chart's labels.
 
     The one read both statements make: the baseline scenario's lines
@@ -96,9 +99,6 @@ def read_statement_ledger(
 
     Args:
         user_id: The owner whose ledger to read.
-        calendar_source: Answers the owner's
-            :class:`~app.services.pay_calendar.PayCalendar`, asked by the read
-            only when a correction is to be filed.
 
     Returns:
         The :class:`StatementLedger`.
@@ -107,11 +107,9 @@ def read_statement_ledger(
         BaselineMissingError: The owner has no baseline scenario, so there is
             no ledger to read (from
             :func:`app.services.scenario_resolver.require_baseline_scenario`).
-        PayCalendarError: A correction is to be filed and the owner's
-            calendar cannot file it (from the read).
     """
     scenario = require_baseline_scenario(user_id)
-    lines = worked_out_lines(user_id, scenario.id, calendar_source)
+    lines = worked_out_lines(user_id, scenario.id)
     return StatementLedger(
         lines=lines,
         labels=_chart_labels(user_id, {line.key for line in lines}),

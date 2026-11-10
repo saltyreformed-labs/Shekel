@@ -16,8 +16,9 @@ plan#3133 deleted the writers.  Three kinds of line:
   pay_calendar:R-PC53 measured off its date 105 times;
 * **the account corrections**: each non-loan account's opening and true-ups
   from the one records walk (:func:`._account_walk.account_corrections`,
-  :func:`._account_anchors.account_correction_targets`), each filed by its
-  day on the paychecks the owner has when it is read (ruling plan#2519);
+  :func:`._account_anchors.account_correction_targets`), naming no paycheck:
+  a reader windowing by paycheck files each by its day on the paychecks the
+  owner has when it asks (ruling plan#2519, :meth:`LedgerLine.filed_period_id`);
 * **the loan lines**: each loan's opening, true-ups and settled payment
   splits off its one walk (:func:`._loan_corrections.loan_correction_targets`).
 
@@ -47,15 +48,21 @@ its terms, statements, rate history, escrow lines and settled payments
 each loaded once for all of the owner's loans.  So the read's statements do not grow with
 the number of accounts, loans or movements: they depend only on which kinds of
 record the owner holds (an escrow line's versions, a settled payment's
-paychecks, a $0.00 close's records are each one statement when any exists,
-and the owner's pay calendar is loaded when any correction is to be filed).
+paychecks, a $0.00 close's records are each one statement when any exists).
+
+**It asks no pay calendar** (finding plan#2875): a line carries the paycheck
+its record names, a movement's parent's or a loan payment's, and an opening
+or true-up names none.  Filing that kind by its day is the concern of a reader
+that windows by paycheck (:meth:`LedgerLine.filed_period_id`), so a reader
+that asks a line's key, day and amount alone (the balance sheet, the re-type
+refusal's :func:`accounts_hold_lines`) answers for an owner whose calendar
+could file nothing.
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from functools import cache, partial
 
 from app import ref_cache
 from app.extensions import db
@@ -68,7 +75,7 @@ from app.services.account_projection import (
 )
 from app.services.cash_ledger import owner_cash_records
 from app.services.loan_ledger import LoanLedgerWalk, walk_loan_ledgers
-from app.services.pay_calendar import PayCalendar, calendar_for
+from app.services.pay_calendar import PayCalendar
 from app.services.transfer_legs import PlanItem
 
 from ._account_anchors import account_correction_targets
@@ -90,16 +97,27 @@ class LedgerLine:
 
     The worked-out twin of one stored posting with its journal header's
     filing (``budget.account_postings`` under ``budget.journal_entries``):
-    what a statement nets by key, paycheck and day.  A line of ``$0.00`` is
-    never one -- the stored ledger's writers posted no zero leg and the read
-    keeps that rule, and a merged correction key can hold one (two same-day
-    true-ups that cancel).
+    what a statement nets by key and day, and by paycheck through
+    :meth:`filed_period_id`.  A line of ``$0.00`` is never one -- the stored
+    ledger's writers posted no zero leg and the read keeps that rule, and a
+    merged correction key can hold one (two same-day true-ups that cancel).
+
+    **A line carries the paycheck its RECORD names, and only that**
+    (finding plan#2875).  The stored journal's ``NOT NULL pay_period_id``
+    made every line name one, so the read filed each opening and true-up by
+    its day as it read, and asked the owner's pay calendar to do it, though
+    the balance sheet and the re-type refusal read no paycheck at all.  An
+    opening or true-up names none now, and a reader that windows by paycheck
+    files it by its day when it asks (:meth:`filed_period_id`).
 
     Attributes:
         key: The chart account the line is booked on (ruling plan#2518).
-        pay_period_id: The paycheck it is filed in: a movement's parent's
-            own, a correction's by its day (ruling plan#2519), a loan payment
-            split's its payment's.
+        budgeted_period_id: The paycheck the owner budgeted the line's record
+            in, the owner's budgeting choice (ruling pay_calendar:R-PC53): a
+            movement's parent's, a loan payment split's payment's.  ``None``
+            for an opening or true-up, which no paycheck budgets.  A reader
+            asking which paycheck a line files in asks
+            :meth:`filed_period_id`, never this.
         entry_date: The civil day: a movement's ``settled_on``, an
             assertion's ``observed_on``, an opening's ``opened_on``, a loan
             anchor's date, a loan payment's visible day.
@@ -114,19 +132,46 @@ class LedgerLine:
     """
 
     key: ChartKey
-    pay_period_id: int
+    budgeted_period_id: int | None
     entry_date: date
     amount: Decimal
     source_kind_id: int
     posting_kind_id: int
     movement_id: int | None
 
+    def filed_period_id(self, calendar: PayCalendar) -> int:
+        """Return the paycheck a reader windowing by paycheck files this line in.
 
-def worked_out_lines(
-    owner_id: int,
-    scenario_id: int,
-    calendar_source: Callable[[], PayCalendar],
-) -> list[LedgerLine]:
+        The paycheck the line's record names where it names one
+        (:attr:`budgeted_period_id`); else, for an opening or true-up, the one
+        its day files under on *calendar* (ruling plan#2519,
+        :meth:`~app.services.pay_calendar.PayCalendar.filing_period`), so it
+        follows the paychecks the owner holds when it is asked.  The one
+        statement of that rule, which the read applied to every correction
+        as it read until finding plan#2875 moved it here.  Every leg of one
+        booking shares its record's paycheck or its day, so a window by
+        paycheck takes a booking whole.
+
+        Args:
+            calendar: The line's owner's whole pay calendar.  The line names
+                no owner, so a caller handed another owner's would file it in
+                that owner's paychecks, and refuses one
+                (:func:`app.services.ledger_report_service.compute_income_statement`).
+
+        Returns:
+            The ``budget.pay_periods`` id.
+
+        Raises:
+            PayCalendarError: An opening or true-up, and a calendar holding no
+                materialised paycheck to file it in (from
+                :meth:`~app.services.pay_calendar.PayCalendar.filing_period`).
+        """
+        if self.budgeted_period_id is not None:
+            return self.budgeted_period_id
+        return calendar.filing_period(self.entry_date).period_id
+
+
+def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
     """Return every line of *owner_id*'s ledger in *scenario_id*, worked out.
 
     The movement lines first, ascending by movement id, then each account's
@@ -148,44 +193,24 @@ def worked_out_lines(
     (:func:`app.services.loan_ledger.walk_loan_ledgers`), the loans' terms
     in one statement by their ids.
 
-    **The owner's pay calendar is asked of *calendar_source* only when a
-    correction is to be filed** (an account framed a correction, or a loan's
-    walk is not :attr:`~app.services.loan_ledger.LoanLedgerWalk.is_empty`):
-    an owner with no correction to file asks it nothing, so one holding neither a pay
-    schedule (which :func:`~app.services.pay_calendar.calendar_for` refuses)
-    nor a correction reads its ledger rather than that refusal.
-
-    **It takes a SOURCE rather than deriving its own** (plan task plan#2771),
-    the shape :func:`~app.services.income_service.paycheck_pricing` takes
-    for the same reason: the income statement's route derives the owner's
-    calendar for its own selector, so a read deriving another was a second
-    derivation of one schedule on one render
-    (``tests/test_arch/test_one_read_pass_per_render.py``).  A caller that
-    holds a calendar hands it; one that holds none hands
-    :func:`~app.services.pay_calendar.calendar_for` bound to the owner,
-    still asked only when a correction is to be filed.
+    **It asks no pay calendar** (finding plan#2875): an opening or true-up
+    names no paycheck (:attr:`LedgerLine.budgeted_period_id`), so an owner
+    holding a correction and no pay schedule, which
+    :func:`~app.services.pay_calendar.calendar_for` refuses, reads its
+    ledger.  It took a calendar SOURCE from plan task plan#2771 until then,
+    asked only when a correction was to be filed.
 
     Args:
         owner_id: The owner whose ledger to read.
         scenario_id: The budget scenario to read it in.
-        calendar_source: A zero-argument callable answering *owner_id*'s
-            :class:`~app.services.pay_calendar.PayCalendar`, which files each
-            correction by its day; called at most once.
 
     Returns:
         The :class:`LedgerLine` list, no line of ``$0.00`` in it; empty for an
         owner with no records.
 
     Raises:
-        PayCalendarError: A correction is to be filed and the owner holds no
-            pay schedule (from :func:`app.services.pay_calendar.calendar_for`
-            behind *calendar_source*), or a correction has no materialised
-            paycheck to file in (from
-            :meth:`~app.services.pay_calendar.PayCalendar.filing_period`).
-        ValueError: *calendar_source* answered another owner's calendar,
-            whose paychecks would file this owner's corrections; or an
-            account whose projection kind has no true-up counter rule
-            (:func:`._chart.anchor_correction_counter_kind`).
+        ValueError: An account whose projection kind has no true-up counter
+            rule (:func:`._chart.anchor_correction_counter_kind`).
     """
     accounts = (
         db.session.query(Account)
@@ -204,20 +229,10 @@ def worked_out_lines(
         for account_id, walk in cash.walks.items()
     }
     lines = _movement_lines(cash.movements)
-    if any(corrections.values()) or not all(
-        walk.is_empty for walk in loan_walks.values()
-    ):
-        calendar = calendar_source()
-        if calendar.user_id != owner_id:
-            raise ValueError(
-                f"the worked-out read of user {owner_id}'s ledger was handed "
-                f"user {calendar.user_id}'s pay calendar: a correction is "
-                f"filed in its owner's own paychecks"
-            )
-        for account in accounts:
-            lines.extend(_correction_lines(
-                _correction_targets(account, calendar, corrections, loan_walks),
-            ))
+    for account in accounts:
+        lines.extend(_correction_lines(
+            _correction_targets(account, corrections, loan_walks),
+        ))
     return [line for line in lines if line.amount != 0]
 
 
@@ -232,7 +247,9 @@ def accounts_hold_lines(accounts: Iterable[Account]) -> bool:
     so a settle and its revert leave an account holding none.
 
     Each owner's ledger is read once per scenario, by the one read the statements
-    fold (:func:`worked_out_lines`), and its calendar loaded at most once.
+    fold (:func:`worked_out_lines`).  A line's key decides, never its paycheck,
+    so it asks no pay calendar (finding plan#2875): it refused an owner holding
+    a correction and no pay schedule until then.
 
     Args:
         accounts: The accounts to ask about, with ``account_type`` loaded.
@@ -240,12 +257,6 @@ def accounts_hold_lines(accounts: Iterable[Account]) -> bool:
     Returns:
         ``True`` when one of them holds a line in any scenario of its owner;
         ``False`` for an empty *accounts*.
-
-    Raises:
-        PayCalendarError: From :func:`worked_out_lines`, when a correction has
-            no paycheck to file in.  No door leaves an owner there: an account
-            is refused until its owner has paychecks, and no schedule change
-            leaves none.
     """
     account_ids_by_owner: dict[int, set[int]] = {}
     for account in accounts:
@@ -266,13 +277,12 @@ def _holds_a_line_on(owner_id: int, account_ids: set[int]) -> bool:
     Returns:
         ``True`` at the first line found on one of them.
     """
-    calendar_source = cache(partial(calendar_for, owner_id))
     scenario_ids = db.session.query(Scenario.id).filter_by(user_id=owner_id).all()
     return any(
         chart_record_type(line.key) is Account
         and line.key.record_id in account_ids
         for (scenario_id,) in scenario_ids
-        for line in worked_out_lines(owner_id, scenario_id, calendar_source)
+        for line in worked_out_lines(owner_id, scenario_id)
     )
 
 
@@ -320,7 +330,7 @@ def _movement_lines(
         lines.extend(
             LedgerLine(
                 key=key,
-                pay_period_id=parent.pay_period_id,
+                budgeted_period_id=parent.pay_period_id,
                 entry_date=entry.settled_on,
                 amount=amount,
                 source_kind_id=source_kind_id,
@@ -334,7 +344,6 @@ def _movement_lines(
 
 def _correction_targets(
     account: Account,
-    calendar: PayCalendar,
     corrections: dict[int, list[AccountAnchorCorrection]],
     loan_walks: dict[int, LoanLedgerWalk],
 ) -> dict[CorrectionKey, ChartLegMap]:
@@ -351,8 +360,6 @@ def _correction_targets(
 
     Args:
         account: The account, with ``account_type`` loaded.
-        calendar: The owner's whole pay calendar, which files each anchor
-            correction by its day.
         corrections: Each non-loan account's corrections, by account id,
             framed off its walk
             (:attr:`app.services.cash_ledger.OwnerCashRecords.walks`,
@@ -361,20 +368,18 @@ def _correction_targets(
             (:func:`app.services.loan_ledger.walk_loan_ledgers`).
 
     Returns:
-        ``{(source_kind_id, pay_period_id, entry_date): {chart key: (amount,
-        posting_kind_id)}}``.
+        ``{(source_kind_id, budgeted_period_id, entry_date): {chart key:
+        (amount, posting_kind_id)}}``.
     """
     if _is_loan(account):
-        return loan_correction_targets(loan_walks[account.id], account, calendar)
-    return account_correction_targets(
-        account, corrections[account.id], calendar,
-    )
+        return loan_correction_targets(loan_walks[account.id], account)
+    return account_correction_targets(account, corrections[account.id])
 
 
 def _correction_lines(
     targets: dict[CorrectionKey, ChartLegMap],
 ) -> list[LedgerLine]:
-    """Return a correction target's legs as lines, each filed by its key.
+    """Return a correction target's legs as lines, each carrying its key's paycheck and day.
 
     Args:
         targets: One account's correction legs (:func:`_correction_targets`).
@@ -385,13 +390,13 @@ def _correction_lines(
     return [
         LedgerLine(
             key=key,
-            pay_period_id=pay_period_id,
+            budgeted_period_id=budgeted_period_id,
             entry_date=entry_date,
             amount=amount,
             source_kind_id=source_kind_id,
             posting_kind_id=posting_kind_id,
             movement_id=None,
         )
-        for (source_kind_id, pay_period_id, entry_date), legs in targets.items()
+        for (source_kind_id, budgeted_period_id, entry_date), legs in targets.items()
         for key, (amount, posting_kind_id) in legs.items()
     ]

@@ -20,6 +20,7 @@ from app.services import pay_period_admin, status_seam, transfer_service
 from app.services.ledger_lines import linked_key
 from app.models.amount_ownership import AmountOwnership
 from tests._ledger_reads import (
+    filed_period_id,
     owner_worked_out_lines,
     source_lines,
     worked_out_totals,
@@ -55,7 +56,8 @@ def _source_nets_by_period(scenario_id, account, source):
     """
     nets = {}
     for line in source_lines(_db.session, linked_key(account), scenario_id, source):
-        nets[line.pay_period_id] = nets.get(line.pay_period_id, Decimal("0.00")) + line.amount
+        filed = filed_period_id(line, account.user_id)
+        nets[filed] = nets.get(filed, Decimal("0.00")) + line.amount
     return {period_id: net for period_id, net in nets.items() if net != 0}
 
 
@@ -467,7 +469,9 @@ class TestNoWorkedOutTotalMoves:
                 filed = {}
                 for _scenario_id, line in owner_worked_out_lines(_db.session, user_id):
                     if line.source_kind_id in openings:
-                        filed.setdefault(line.pay_period_id, set()).add(line.source_kind_id)
+                        filed.setdefault(
+                            filed_period_id(line, user_id), set(),
+                        ).add(line.source_kind_id)
                 return filed
 
             assert _filed_openings() == {head[0].id: openings}

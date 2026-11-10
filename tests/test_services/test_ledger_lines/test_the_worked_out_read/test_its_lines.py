@@ -51,7 +51,10 @@ class TestTheLinesAreTheRules:
         ``purchase`` source and the ``expense`` leg kind, filed in the ROW's
         January paycheck and dated the movement's own May 15 -- the paycheck
         is the owner's budgeting choice, never the day's (ruling
-        pay_calendar:R-PC53), and the day is when the money moved.
+        pay_calendar:R-PC53), and the day is when the money moved.  A reader
+        windowing by paycheck files both in January too
+        (:meth:`~app.services.ledger_lines.LedgerLine.filed_period_id`), where
+        May 15's own paycheck is the last one.
         """
         with app.app_context():
             groceries = seed_user["categories"]["Groceries"]
@@ -77,6 +80,11 @@ class TestTheLinesAreTheRules:
                     expense, movement.id,
                 ),
             ]
+            calendar = calendar_for(seed_user["user"].id)
+            assert calendar.filing_period(_TODAY).period_id == seed_periods[-1].id
+            assert [line.filed_period_id(calendar) for line in lines] == [
+                seed_periods[0].id, seed_periods[0].id,
+            ]
 
     def test_an_opening_and_a_true_up_are_filed_by_their_days(
         self, app, db, seed_user,
@@ -89,8 +97,10 @@ class TestTheLinesAreTheRules:
         ``1,150.00 - 1,000.00 = +150.00`` and ``-150.00`` on Interest Income,
         a Money Market's true-up being interest (ruling R-FO).  The May 12
         assertion books ``1,000.00 - 1,000.00 = 0.00`` and so is no line.
-        Each is filed in the paycheck its DAY files in on the owner's
-        calendar as it is read (ruling plan#2519) and comes from no movement.
+        Each is budgeted in no paycheck and comes from no movement, and a
+        reader windowing by paycheck files each in the paycheck its DAY files
+        in on the owner's calendar (ruling plan#2519,
+        :meth:`~app.services.ledger_lines.LedgerLine.filed_period_id`).
         """
         with app.app_context():
             asserted_on = _TODAY - timedelta(days=3)
@@ -124,25 +134,28 @@ class TestTheLinesAreTheRules:
             trued_in = calendar.filing_period(trued_on).period_id
             assert lines == [
                 LedgerLine(
-                    linked_key(account), opened_in, opened_on,
+                    linked_key(account), None, opened_on,
                     Decimal("1000.00"), *opening, None,
                 ),
                 LedgerLine(
                     account_counter_key(
                         LedgerAccountKindEnum.ANCHOR_EQUITY, account.id,
                     ),
-                    opened_in, opened_on, Decimal("-1000.00"), *opening, None,
+                    None, opened_on, Decimal("-1000.00"), *opening, None,
                 ),
                 LedgerLine(
-                    linked_key(account), trued_in, trued_on,
+                    linked_key(account), None, trued_on,
                     Decimal("150.00"), *trueup, None,
                 ),
                 LedgerLine(
                     account_counter_key(
                         LedgerAccountKindEnum.INTEREST_INCOME, account.id,
                     ),
-                    trued_in, trued_on, Decimal("-150.00"), *trueup, None,
+                    None, trued_on, Decimal("-150.00"), *trueup, None,
                 ),
+            ]
+            assert [line.filed_period_id(calendar) for line in lines] == [
+                opened_in, opened_in, trued_in, trued_in,
             ]
 
     def test_two_cancelling_same_day_true_ups_are_no_line(
@@ -219,8 +232,6 @@ class TestTheLinesAreTheRules:
                 seed_user, _db.session, seed_user["account"], loan,
                 seed_periods[1], amount=Decimal("1000.00"),
             )
-            calendar = calendar_for(seed_user["user"].id)
-
             lines = [
                 line for line in _read(seed_user)
                 if line.key.record_id == loan.id and line.movement_id is None
@@ -228,7 +239,7 @@ class TestTheLinesAreTheRules:
 
             split = _source(PostingSourceEnum.LOAN_PAYMENT)
             assert lines == [
-                *_loan_anchor_lines(loan, calendar),
+                *_loan_anchor_lines(loan),
                 LedgerLine(
                     linked_key(loan), seed_periods[1].id, _TODAY,
                     Decimal("-500.00"), split, _kind(PostingKindEnum.PRINCIPAL),

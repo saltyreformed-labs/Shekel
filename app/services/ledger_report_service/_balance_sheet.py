@@ -21,11 +21,9 @@ Flask-isolated, read-only.
 
 from datetime import date
 from decimal import Decimal
-from functools import partial
 
 from app.enums import LedgerAccountClassEnum
 from app.services.ledger_lines import ChartKey
-from app.services.pay_calendar import calendar_for
 
 from ._attribution import (
     build_section,
@@ -54,10 +52,11 @@ def compute_balance_sheet(user_id: int, as_of: date) -> BalanceSheetReport:
     earnings, and the accumulated change in value where there is one (ruling
     **R-FO**) -- and reports the two-part tie-out.
 
-    **It holds no pay calendar, so the read derives the owner's** when a
-    correction is to be filed (:func:`~app.services.pay_calendar.calendar_for`
-    bound to the owner, plan task plan#2771): its route renders no paycheck,
-    and an owner with no correction to file is asked no calendar.
+    **It asks no pay calendar** (finding plan#2875): it folds each line by its
+    key, day and amount, never its paycheck, so an owner holding a correction
+    and no pay schedule gets a sheet.  Until that finding the read filed
+    every correction in a paycheck and derived the owner's calendar to do it,
+    so that owner got the pay-calendar recovery page here.
 
     Args:
         user_id: The owner whose balance sheet to compute.
@@ -76,10 +75,8 @@ def compute_balance_sheet(user_id: int, as_of: date) -> BalanceSheetReport:
             X-v2's adversarial review; the same fabrication ruling R-CA deleted
             from the net-worth hero, one screen over).  A statement that cannot
             be produced is not a statement of zeros.
-        PayCalendarError: A correction is to be filed and the owner holds no
-            pay schedule, or no paycheck to file it in (from the read).
     """
-    ledger = read_statement_ledger(user_id, partial(calendar_for, user_id))
+    ledger = read_statement_ledger(user_id)
     cumulative = nets_by_key(
         line for line in ledger.lines if line.entry_date <= as_of
     )

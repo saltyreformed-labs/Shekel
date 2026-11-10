@@ -56,7 +56,6 @@ from app.services.ledger_lines import (
 )
 from app.services.cash_ledger import walk_cash_ledger
 from app.services.loan_ledger import walk_loan_ledger
-from app.services.pay_calendar import calendar_for
 from app.services.transfer_legs import movement_parent, transfer_sides
 from app.utils.dates import display_today
 # The rules under test live in the worked-out ledger since plan task plan#2526,
@@ -232,11 +231,10 @@ class TestTheAccountCorrectionRuleNamesKeys:
             corrections = account_corrections(
                 walk_cash_ledger(account.id, scenario_id),
             )
-            calendar = calendar_for(seed_user["user"].id)
 
             targets, statements = _statements_of(
                 lambda: _account_anchor_correction_targets(
-                    corrections, calendar, linked_key(account),
+                    corrections, linked_key(account),
                     _counter_keys(account, corrections),
                 ),
             )
@@ -295,13 +293,10 @@ class TestTheLoanRulesNameKeys:
                 seed_periods[1], amount=Decimal("1000.00"),
             )
             walk = walk_loan_ledger(loan.id, seed_user["scenario"].id)
-            calendar = calendar_for(seed_user["user"].id)
 
             (splits, anchors), statements = _statements_of(lambda: (
                 payment_split_targets(walk.settled_splits, loan),
-                anchor_correction_targets(
-                    walk.anchor_corrections, loan, calendar,
-                ),
+                anchor_correction_targets(walk.anchor_corrections, loan),
             ))
 
             own = linked_key(loan)
@@ -488,19 +483,17 @@ class TestACorrectionBooksOnlyItsOwnAccountsLines:
                 seed_user, _db.session, seed_user["account"], loan,
                 seed_periods[1], amount=Decimal("1000.00"),
             )
-            calendar = calendar_for(owner_id)
 
             checking = seed_user["account"]
             targets_by_account = [
                 (account, account_correction_targets(
                     account,
                     account_corrections(walk_cash_ledger(account.id, scenario_id)),
-                    calendar,
                 ))
                 for account in (checking, *accounts)
             ]
             targets_by_account.append((loan, loan_correction_targets(
-                walk_loan_ledger(loan.id, scenario_id), loan, calendar,
+                walk_loan_ledger(loan.id, scenario_id), loan,
             )))
 
             for account, targets in targets_by_account:
@@ -521,7 +514,7 @@ class TestACorrectionBooksOnlyItsOwnAccountsLines:
                 for key, (amount, _kind) in legs.items()
             ) == _sorted_lines(
                 (line.key, line.amount)
-                for line in worked_out_lines(owner_id, scenario_id, lambda: calendar)
+                for line in worked_out_lines(owner_id, scenario_id)
                 if line.movement_id is None
             )
 

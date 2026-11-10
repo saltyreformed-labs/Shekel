@@ -4,21 +4,26 @@ or loans.
 """
 
 from decimal import Decimal
-from functools import partial
 
 import pytest
 
 from app.enums import PostingKindEnum, PostingSourceEnum
 from app.extensions import db as _db
-from app.models.account import AccountAnchorHistory
+from app.models.account import Account, AccountAnchorHistory
 from app.models.scenario import Scenario
-from app.services.ledger_lines import LedgerLine, linked_key, worked_out_lines
+from app.services.ledger_lines import (
+    LedgerLine,
+    accounts_hold_lines,
+    linked_key,
+    worked_out_lines,
+)
 from app.services.pay_calendar import PayCalendarError, calendar_for
 from tests._test_helpers import (
     capture_sql_statements,
     create_account_of_type,
     create_settled_cash_transaction,
     create_settled_transfer,
+    strip_owner_schedule,
 )
 
 from ._helpers import (
@@ -38,11 +43,7 @@ def _captured_read(seed_user):
     refresh of an expired fixture row is not counted as the read's own.
     """
     owner_id, scenario_id = seed_user["user"].id, seed_user["scenario"].id
-    return capture_sql_statements(
-        lambda: worked_out_lines(
-            owner_id, scenario_id, partial(calendar_for, owner_id),
-        ),
-    )
+    return capture_sql_statements(lambda: worked_out_lines(owner_id, scenario_id))
 
 
 def _writes_in(statements):
@@ -112,8 +113,9 @@ class TestTheReadWritesNothing:
         read's first query autoflushes it: the one statement among the
         read's that is not a SELECT is that row's INSERT, and the read
         issues no write of its own.  Its lines read the check as flushed --
-        a true-up of ``1,100.00 - 1,000.00 = +100.00`` on Checking, filed by
-        today -- so a balance check a write has staged is read, not missed.
+        a true-up of ``1,100.00 - 1,000.00 = +100.00`` on Checking, dated
+        today and budgeted in no paycheck -- so a balance check a write has
+        staged is read, not missed.
         """
         with app.app_context():
             _db.session.commit()
@@ -129,17 +131,14 @@ class TestTheReadWritesNothing:
             assert pending in _db.session.new
 
             lines, statements = capture_sql_statements(
-                lambda: worked_out_lines(
-                    owner_id, scenario_id, partial(calendar_for, owner_id),
-                ),
+                lambda: worked_out_lines(owner_id, scenario_id),
             )
 
             (write,) = _writes_in(statements)
             assert write.startswith("INSERT INTO budget.account_anchor_history")
             assert pending not in _db.session.new
-            filed_in = calendar_for(owner_id).filing_period(_TODAY).period_id
             assert LedgerLine(
-                linked_key(checking), filed_in, _TODAY, Decimal("100.00"),
+                linked_key(checking), None, _TODAY, Decimal("100.00"),
                 _source(PostingSourceEnum.ACCOUNT_TRUEUP),
                 _kind(PostingKindEnum.TRUEUP), None,
             ) in lines
@@ -151,12 +150,10 @@ class TestWhoseRecordsItReads:
     def test_an_owner_with_no_records_reads_nothing(self, app, db, bare_user):
         """An owner holding no account, no paycheck and no pay schedule: no line.
 
-        There is nothing to book and no correction to file, so the read asks
-        no pay calendar -- which this owner could not answer: holding no pay
-        schedule, :func:`calendar_for` refuses them (the control, so the case
-        reads the owner it is about).  The read loads the calendar only when a
-        correction is to be filed, as the stored ledger's writers did.  The owner
-        holds its baseline scenario alone, the one it is read in.
+        There is nothing to book.  The owner holds no pay schedule, so
+        :func:`calendar_for` refuses them (the control, so the case reads the
+        owner it is about), and the read asks no calendar.  The owner holds
+        its baseline scenario alone, the one it is read in.
         """
         with app.app_context():
             owner_id = bare_user["user"].id
@@ -166,21 +163,17 @@ class TestWhoseRecordsItReads:
             with pytest.raises(PayCalendarError):
                 calendar_for(owner_id)
 
-            assert worked_out_lines(
-                owner_id, scenario.id, partial(calendar_for, owner_id),
-            ) == []
+            assert worked_out_lines(owner_id, scenario.id) == []
 
     def test_an_owner_whose_one_account_is_a_loan_reads_its_loan_lines(
         self, app, db, bare_user, bare_periods,
     ):
         """An owner holding only a 6% loan trued up to $100,000.00: four lines.
 
-        No account but the loan, so no account has a correction and the
-        loan's walk alone has one to file: the owner's pay calendar is loaded
-        for it (``LoanLedgerWalk.is_empty`` is false), and the read is the
-        loan's opening and true-up lines (:func:`_loan_anchor_lines`).  An
-        owner can hold this: a fresh $0 Checking can be deleted, and a loan
-        added after it.
+        No account but the loan, so the loan's walk alone has corrections, and
+        the read is the loan's opening and true-up lines
+        (:func:`_loan_anchor_lines`).  An owner can hold this: a fresh $0
+        Checking can be deleted, and a loan added after it.
         """
         with app.app_context():
             owner_id = bare_user["user"].id
@@ -188,40 +181,44 @@ class TestWhoseRecordsItReads:
             _db.session.add(scenario)
             _db.session.flush()
             loan = _trued_up_loan(bare_user, "Only Loan")
-            calendar = calendar_for(owner_id)
 
-            lines = worked_out_lines(owner_id, scenario.id, lambda: calendar)
+            lines = worked_out_lines(owner_id, scenario.id)
 
-            assert lines == _loan_anchor_lines(loan, calendar)
+            assert lines == _loan_anchor_lines(loan)
 
-    def test_another_owners_calendar_is_refused(
-        self, app, db, seed_user, seed_periods, seed_second_user,
-        seed_second_periods,
+    def test_an_owner_holding_a_correction_and_no_pay_schedule_reads_it(
+        self, app, seed_user,
     ):
-        """A correction to file and the second owner's calendar: refused.
+        """Checking opened at $1,000.00, and the owner's schedule stripped: two lines.
 
-        The seed owner's Checking opening is a correction, filed in a
-        paycheck of the calendar the read is handed (plan task plan#2771):
-        handed the second owner's, it would file the first owner's opening
-        in the second owner's paycheck.  The read refuses, naming both
-        owners.  The CONTROL: handed the owner's own calendar, the same read
-        answers lines, so the refusal is the pairing's.
+        The owner finding plan#2875 names: a correction (Checking's opening)
+        and no pay schedule, which :func:`calendar_for` refuses (the control).
+        The read answered that refusal while it filed each correction in a
+        paycheck; it asks no calendar now, so it reads the opening's two lines,
+        ``+1,000.00`` on Checking's own line and ``-1,000.00`` on its equity
+        twin, each budgeted in no paycheck.  The re-type refusal's question
+        reads the same lines (:func:`accounts_hold_lines`), and Checking holds
+        one.
         """
         with app.app_context():
             owner_id = seed_user["user"].id
-            other_id = seed_second_user["user"].id
-            scenario_id = seed_user["scenario"].id
+            checking = _db.session.get(Account, seed_user["account"].id)
+            strip_owner_schedule(_db.session, owner_id)
+            _db.session.commit()
+            with pytest.raises(PayCalendarError):
+                calendar_for(owner_id)
 
-            assert worked_out_lines(
-                owner_id, scenario_id, partial(calendar_for, owner_id),
-            )
-            with pytest.raises(
-                ValueError,
-                match=f"user {owner_id}'s ledger was handed user {other_id}'s",
-            ):
-                worked_out_lines(
-                    owner_id, scenario_id, partial(calendar_for, other_id),
-                )
+            lines = _read(seed_user)
+
+            assert sorted(
+                (line.key == linked_key(checking), line.amount,
+                 line.budgeted_period_id)
+                for line in lines
+            ) == [
+                (False, Decimal("-1000.00"), None),
+                (True, Decimal("1000.00"), None),
+            ]
+            assert accounts_hold_lines([checking]) is True
 
     def test_another_owners_movements_are_never_read(
         self, app, seed_user, seed_periods, seed_second_user,
@@ -266,18 +263,14 @@ class TestWhoseRecordsItReads:
 
             # The bill's -77.77 / +77.77; each transfer side's -250.00 and
             # +250.00 against the owner's Transfers in transit.
-            assert _moved(worked_out_lines(
-                other_id, other_scenario_id, partial(calendar_for, other_id),
-            )) == [
+            assert _moved(worked_out_lines(other_id, other_scenario_id)) == [
                 Decimal("-250.00"), Decimal("-250.00"), Decimal("-77.77"),
                 Decimal("77.77"), Decimal("250.00"), Decimal("250.00"),
             ]
             assert _moved(_read(seed_user)) == [
                 Decimal("-11.11"), Decimal("11.11"),
             ]
-            assert _moved(worked_out_lines(
-                owner_id, other_scenario_id, partial(calendar_for, owner_id),
-            )) == []
+            assert _moved(worked_out_lines(owner_id, other_scenario_id)) == []
 
 
 class TestItsStatementsDoNotGrowWithItsSources:

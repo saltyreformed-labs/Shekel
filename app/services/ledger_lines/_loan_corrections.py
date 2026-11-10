@@ -17,7 +17,6 @@ Pure over the walk it is handed: no query, no write.
 
 from app.models.account import Account
 from app.services.loan_ledger import LoanLedgerWalk
-from app.services.pay_calendar import PayCalendar
 
 from ._loan_anchors import anchor_correction_targets
 from ._loan_payments import payment_split_targets
@@ -25,33 +24,26 @@ from ._targets import ChartLegMap, CorrectionKey
 
 
 def loan_correction_targets(
-    walk: LoanLedgerWalk, loan: Account, calendar: PayCalendar,
+    walk: LoanLedgerWalk, loan: Account,
 ) -> dict[CorrectionKey, ChartLegMap]:
     """Return a loan's opening, true-up and payment-split legs, keyed per correction.
 
-    The anchors' targets (each filed by its day,
-    :meth:`~app.services.pay_calendar.PayCalendar.filing_period`, ruling
-    plan#2519) and the splits' (each in its payment's own pay period), in one
-    map.  The two share no key: the split's carries the ``loan_payment``
-    source kind and the anchors' the opening / true-up kinds, so a plain
-    update merges them (ruling **R-BAL102**).
+    The anchors' targets (each keyed by its day alone, a reader windowing by
+    paycheck filing it by that day, ruling plan#2519) and the splits' (each
+    in its payment's own pay period), in one map.  The two share no key: the
+    split's carries the ``loan_payment`` source kind and the anchors' the
+    opening / true-up kinds, so a plain update merges them (ruling
+    **R-BAL102**).
 
     Args:
         walk: The loan's :class:`~app.services.loan_ledger.LoanLedgerWalk`
             -- its ``anchor_corrections`` and ``settled_splits``, whole.
         loan: The loan the walk is of, with ``account_type`` loaded.
-        calendar: The owner's whole pay calendar
-            (:func:`app.services.pay_calendar.calendar_for`).
 
     Returns:
-        ``{(source_kind_id, pay_period_id, entry_date): {chart key: (amount,
-        posting_kind_id)}}``.
-
-    Raises:
-        PayCalendarError: From
-            :meth:`~app.services.pay_calendar.PayCalendar.filing_period`, when
-            an anchor has no materialised pay period to file in.
+        ``{(source_kind_id, budgeted_period_id, entry_date): {chart key:
+        (amount, posting_kind_id)}}``: ``None`` for an anchor's paycheck.
     """
-    target = anchor_correction_targets(walk.anchor_corrections, loan, calendar)
+    target = anchor_correction_targets(walk.anchor_corrections, loan)
     target.update(payment_split_targets(walk.settled_splits, loan))
     return target

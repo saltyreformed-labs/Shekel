@@ -163,20 +163,6 @@ class LoanLedgerWalk:
             outcome for outcome in self.payment_splits if outcome.is_projected
         ]
 
-    @property
-    def is_empty(self) -> bool:
-        """Whether the walk holds no anchor and no payment, so books nothing.
-
-        The ONE statement of the empty walk, the one a loan with no
-        ``LoanParams`` walks to (the N1 guard): the worked-out read asks it
-        of each loan to decide whether the
-        owner's pay calendar is loaded (``ledger_lines.worked_out_lines``).
-        The loan page's two measured surfaces hid on it too, until ruling
-        plan#2917 had a loan with no terms read their empty list instead
-        (plan task plan#3081).
-        """
-        return not self.anchor_corrections and not self.payment_splits
-
 
 def replay_loan_stream(
     stream: LoanEventStream, extra_per_period: Decimal = _ZERO_MONEY,

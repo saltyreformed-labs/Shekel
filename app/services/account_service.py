@@ -66,16 +66,21 @@ def _require_pay_period_schedule(user_id: int) -> None:
     **Its stated reason was already false when it moved.**  It read "so the
     account's anchor has a period to reference", which ruling R-EO falsified by
     deleting ``account_anchor_history.pay_period_id`` -- an assertion references
-    no period.  The live reason is the worked-out ledger: it files the
-    account's opening correction into the pay period containing the day it
-    asserts (:func:`app.services.ledger_lines.account_correction_targets`,
-    through :meth:`~app.services.pay_calendar.PayCalendar.filing_period`), and
-    raises when the owner's calendar is empty (finding **N-192**), so an account
-    created without one would fail the first statement read that reaches it.
-    Refusing here turns that 500 into a ``ValidationError`` the route can route
-    to the generate-periods page.  *Until plan task plan#3076 the reason was the
+    no period.  The reason it then had was the worked-out ledger: its read
+    filed the account's opening correction into the pay period containing the
+    day it asserts, through
+    :meth:`~app.services.pay_calendar.PayCalendar.filing_period`, and raised
+    when the owner's calendar was empty (finding **N-192**), so an account
+    created without one failed the first statement read that reached it, and
+    refusing here turned that 500 into a ``ValidationError`` the route sends to
+    the generate-periods page.  *Until plan task plan#3076 the reason was the
     tail of :func:`create_account` itself, whose anchor sync posted that
     correction into the stored ledger and derived its period the same way.*
+    **Finding plan#2875 took that filing off the read**: only a reader
+    windowing by paycheck files a correction now
+    (:meth:`app.services.ledger_lines.LedgerLine.filed_period_id`), and an
+    owner with no paycheck has no paycheck window to ask.  What the refusal
+    still guards is unmeasured, finding plan#3283's question.
 
     Args:
         user_id: The prospective account owner.

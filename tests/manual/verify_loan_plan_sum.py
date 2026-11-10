@@ -254,9 +254,7 @@ def _ledger_lines(label, account):
     )
     _target_lines(
         label, "POST-ANCHOR", account,
-        anchor_correction_targets(
-            walk.anchor_corrections, account, calendar_for(USER_ID),
-        ),
+        anchor_correction_targets(walk.anchor_corrections, account),
     )
 
 

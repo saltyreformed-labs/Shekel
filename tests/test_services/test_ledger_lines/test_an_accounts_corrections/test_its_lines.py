@@ -28,6 +28,7 @@ from app.services.settle_day import record_settle_day
 from app.utils.dates import display_today, to_display_date
 from tests._ledger_reads import (
     account_net,
+    filed_period_id,
     ledger_net,
     linked_key_of,
     scenario_lines,
@@ -95,7 +96,7 @@ class TestTheCorrectionsBookTheAssertedBalance:
             ):
                 assert [
                     (line.amount, line.posting_kind_id, line.entry_date,
-                     line.pay_period_id)
+                     filed_period_id(line, account.user_id))
                     for line in source_lines(
                         _db.session, key, scenario_id,
                         PostingSourceEnum.ACCOUNT_OPENING,

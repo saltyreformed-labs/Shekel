@@ -48,6 +48,7 @@ from scripts.integrity_check import (
     check_referential_integrity,
 )
 from tests._ledger_reads import (
+    filed_period_id,
     owner_worked_out_lines,
     worked_out_totals,
 )
@@ -100,7 +101,7 @@ def _openings_filed_on(db_session, user_id, day):
         if line.source_kind_id in openings and line.entry_date == day
     ]
     assert {line.source_kind_id for line in lines} == openings
-    return {line.pay_period_id for line in lines}
+    return {filed_period_id(line, user_id) for line in lines}
 
 
 def _count_periods(db_session, user_id):

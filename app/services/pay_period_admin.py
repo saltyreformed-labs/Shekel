@@ -252,8 +252,9 @@ def remove_earlier_pay_periods(user_id: int, start_from_period_id: int) -> int:
       only if a record holding money goes.  The delete reaches only rows,
       transfers and journal entries, the three tables keyed to a paycheck,
       and the gate refuses a row or a transfer holding money.  An opening or
-      a true-up holds no paycheck of its own: the ledger files one dated
-      before the first paycheck in the earliest, so an added paycheck can
+      a true-up holds no paycheck of its own: a reader windowing the ledger
+      by paycheck files one dated before the first paycheck in the earliest
+      (``ledger_lines.LedgerLine.filed_period_id``), so an added paycheck can
       hold a loan's opening from years back, and once that paycheck goes it
       files in the new first one.  *Until plan task plan#3076 this door also
       kept the stored ledger up: its delete took the stored entries the head

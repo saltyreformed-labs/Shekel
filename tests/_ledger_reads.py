@@ -25,7 +25,6 @@ Underscore-prefixed module name keeps pytest from collecting it.
 
 from datetime import date, timedelta
 from decimal import Decimal
-from functools import partial
 
 from app import ref_cache
 from app.enums import PostingKindEnum, PostingSourceEnum
@@ -56,7 +55,7 @@ def scenario_lines(db_session, scenario_id):
         The :class:`~app.services.ledger_lines.LedgerLine` list.
     """
     owner_id = db_session.get(Scenario, scenario_id).user_id
-    return worked_out_lines(owner_id, scenario_id, partial(calendar_for, owner_id))
+    return worked_out_lines(owner_id, scenario_id)
 
 
 def owner_worked_out_lines(db_session, owner_id):
@@ -72,9 +71,7 @@ def owner_worked_out_lines(db_session, owner_id):
     return [
         (scenario_id, line)
         for (scenario_id,) in db_session.query(Scenario.id).filter_by(user_id=owner_id)
-        for line in worked_out_lines(
-            owner_id, scenario_id, partial(calendar_for, owner_id),
-        )
+        for line in worked_out_lines(owner_id, scenario_id)
     ]
 
 
@@ -97,6 +94,23 @@ def worked_out_totals(db_session, owner_id):
         key = (scenario_id, line.key)
         totals[key] = totals.get(key, _ZERO) + line.amount
     return {key: total for key, total in totals.items() if total != 0}
+
+
+def filed_period_id(line, owner_id):
+    """Return the paycheck a reader windowing by paycheck files *line* in.
+
+    :meth:`~app.services.ledger_lines.LedgerLine.filed_period_id` on the
+    owner's calendar as it stands: a movement's or a loan split's own
+    paycheck, an opening's or true-up's by its day.
+
+    Args:
+        line: The :class:`~app.services.ledger_lines.LedgerLine`.
+        owner_id: Its owner, whose calendar files it.
+
+    Returns:
+        The ``budget.pay_periods`` id.
+    """
+    return line.filed_period_id(calendar_for(owner_id))
 
 
 def linked_key_of(db_session, account_id):
@@ -218,7 +232,9 @@ def correction_net_in_period(db_session, key, scenario_id, source_enum, period_i
     The per-paycheck reading ruling R2 is about: what a period holds is what
     the surviving facts say, with nothing filed against another period.
     :func:`ledger_net` is the scalar counterpart and :func:`linked_net_by_date`
-    the per-day one.
+    the per-day one.  Each line is filed as a reader windowing by paycheck
+    files it (:meth:`~app.services.ledger_lines.LedgerLine.filed_period_id`),
+    on its owner's calendar: an opening or true-up by its day.
 
     Args:
         db_session: The test ``db.session``.
@@ -231,11 +247,12 @@ def correction_net_in_period(db_session, key, scenario_id, source_enum, period_i
     Returns:
         The signed net as a ``Decimal``; ``$0.00`` when the period holds none.
     """
+    calendar = calendar_for(db_session.get(Scenario, scenario_id).user_id)
     return sum(
         (
             line.amount
             for line in source_lines(db_session, key, scenario_id, source_enum)
-            if line.pay_period_id == period_id
+            if line.filed_period_id(calendar) == period_id
         ),
         _ZERO,
     )
@@ -463,7 +480,8 @@ def loan_correction_lines_at(
         db_session: The test ``db.session``.
         loan_account_id: The loan, whose keys scope the read.
         scenario_id: The scenario.
-        period_id: The key's paycheck.
+        period_id: The key's paycheck, the payment's own (a split line's
+            ``budgeted_period_id``).
         day: The key's day.
 
     Returns:
@@ -474,7 +492,7 @@ def loan_correction_lines_at(
     return [
         line for line in scenario_lines(db_session, scenario_id)
         if line.source_kind_id == source_kind_id
-        and line.pay_period_id == period_id
+        and line.budgeted_period_id == period_id
         and line.entry_date == day
         and chart_record_type(line.key) is Account
         and line.key.record_id == loan_account_id
@@ -591,7 +609,11 @@ def transfer_side_movement_ids(transfer_id, account_id):
 
 
 def period_nets_of_movements(movement_ids, scenario_id):
-    """Return ``{pay_period_id: {chart key: net}}`` over the lines of *movement_ids*.
+    """Return ``{budgeted_period_id: {chart key: net}}`` over the lines of *movement_ids*.
+
+    A movement line's paycheck is its parent's own
+    (:attr:`~app.services.ledger_lines.LedgerLine.budgeted_period_id`), never
+    ``None``.
 
     The read holds no ``$0.00`` line, so a reverted row's paycheck is simply
     absent: what the store held as a pair netting to nothing there.  Lines that
@@ -610,7 +632,7 @@ def period_nets_of_movements(movement_ids, scenario_id):
     nets = {}
     for line in scenario_lines(db.session, scenario_id):
         if line.movement_id in wanted:
-            per_key = nets.setdefault(line.pay_period_id, {})
+            per_key = nets.setdefault(line.budgeted_period_id, {})
             per_key[line.key] = per_key.get(line.key, _ZERO) + line.amount
     return nets
 

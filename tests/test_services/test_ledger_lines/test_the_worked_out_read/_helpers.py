@@ -6,13 +6,11 @@ moved here, and the one builder of the loan their figures were computed from
 
 from datetime import date
 from decimal import Decimal
-from functools import partial
 
 from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingKindEnum, PostingSourceEnum
 from app.extensions import db as _db
 from app.services.ledger_lines import LedgerLine, linked_key, loan_key, worked_out_lines
-from app.services.pay_calendar import calendar_for
 from tests._test_helpers import create_loan_with_trueup
 
 
@@ -24,10 +22,7 @@ _TODAY = date(2026, 5, 15)
 
 def _read(seed_user):
     """Return the seed owner's worked-out lines in the baseline scenario."""
-    owner_id = seed_user["user"].id
-    return worked_out_lines(
-        owner_id, seed_user["scenario"].id, partial(calendar_for, owner_id),
-    )
+    return worked_out_lines(seed_user["user"].id, seed_user["scenario"].id)
 
 
 def _lines_of(lines, movement_id):
@@ -64,15 +59,15 @@ def _trued_up_loan(owner, name, *, escrow_annual=None):
     )
 
 
-def _loan_anchor_lines(loan, calendar):
+def _loan_anchor_lines(loan):
     """Return the opening and true-up lines of the suite's trued-up loan.
 
     The loan :func:`_trued_up_loan` builds, from a $250,000.00 principal
     originated 2025-01-01 and trued up to $100,000.00 on 2026-01-10: the
     opening ``-250,000.00`` owed on its own line against ``+250,000.00`` on
     its opening equity, then the true-up ``250,000.00 - 100,000.00 =
-    +150,000.00`` and ``-150,000.00`` (no payment falls before it), each filed
-    by its day on *calendar* and from no movement.
+    +150,000.00`` and ``-150,000.00`` (no payment falls before it), each
+    budgeted in no paycheck and from no movement.
     """
     own = linked_key(loan)
     equity = loan_key(LedgerAccountKindEnum.EQUITY_OPENING, loan.id)
@@ -85,20 +80,8 @@ def _loan_anchor_lines(loan, calendar):
         _source(PostingSourceEnum.LOAN_TRUEUP), _kind(PostingKindEnum.TRUEUP),
     )
     return [
-        LedgerLine(
-            own, calendar.filing_period(opened).period_id, opened,
-            Decimal("-250000.00"), *opening, None,
-        ),
-        LedgerLine(
-            equity, calendar.filing_period(opened).period_id, opened,
-            Decimal("250000.00"), *opening, None,
-        ),
-        LedgerLine(
-            own, calendar.filing_period(trued).period_id, trued,
-            Decimal("150000.00"), *trueup, None,
-        ),
-        LedgerLine(
-            equity, calendar.filing_period(trued).period_id, trued,
-            Decimal("-150000.00"), *trueup, None,
-        ),
+        LedgerLine(own, None, opened, Decimal("-250000.00"), *opening, None),
+        LedgerLine(equity, None, opened, Decimal("250000.00"), *opening, None),
+        LedgerLine(own, None, trued, Decimal("150000.00"), *trueup, None),
+        LedgerLine(equity, None, trued, Decimal("-150000.00"), *trueup, None),
     ]

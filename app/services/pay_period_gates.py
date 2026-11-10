@@ -312,10 +312,12 @@ def gate_removable_head(
        are dated.
 
     **What the ledger books in the head is NOT asked here** (ruling
-    **R-PC114**, amending R-PC109's "a balance entry the app booked").  The
-    ledger files every CORRECTION dated before the first paycheck in the
-    EARLIEST one (``PayCalendar.filing_period``, **R-PC53**; a cash movement
-    is filed in its row's own period), each time it is read --
+    **R-PC114**, amending R-PC109's "a balance entry the app booked").  A
+    reader windowing the ledger by paycheck files every CORRECTION dated
+    before the first paycheck in the EARLIEST one
+    (``LedgerLine.filed_period_id`` through ``PayCalendar.filing_period``,
+    **R-PC53**; a cash movement is filed in its row's own period), each time
+    it asks --
     so after "Add earlier paychecks" a loan's opening dated years back sits
     in an added paycheck, and refusing on it made the
     undo die at the first loan payment (review 1 of C21, measured on the

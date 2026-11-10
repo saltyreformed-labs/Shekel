@@ -47,12 +47,11 @@ answer the rest of the page already shows, so the two tables now agree with
 the balance and the chips beside them rather than with the ledger's walk.
 
 **A loan with no terms reads an empty list** (ruling **plan#2917**).  It walks
-to nothing (:attr:`~app.services.loan_ledger.LoanLedgerWalk.is_empty`), so
-both surfaces read ``[]``.  Until that ruling each returned ``None`` through
-the one gate both asked (``_configured_loan_walk``), a branch no page reached:
-the dashboard sends a loan with no terms to its setup page before either
-surface is asked, and the template hides an empty table exactly as it hid
-``None``.
+to nothing, no anchor and no payment, so both surfaces read ``[]``.  Until
+that ruling each returned ``None`` through the one gate both asked
+(``_configured_loan_walk``), a branch no page reached: the dashboard sends a
+loan with no terms to its setup page before either surface is asked, and the
+template hides an empty table exactly as it hid ``None``.
 
 Reads only -- no writes, no commit.  It reads the clock once, in the payment
 table's refusal of a pass dated after today, which is why it is not a module of

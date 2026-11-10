@@ -422,9 +422,11 @@ def register_user(spec: RegistrationSpec):
     # The owner's REAL pay calendar, from the payday they stated (plan step
     # X-ad-a, ruling R-DB).  It must exist before the default account:
     # ``create_account`` refuses an owner with no pay periods
-    # (``_require_pay_period_schedule``) because the opening balance posts a
-    # correction, and ``pay_calendar.PayCalendar.filing_period`` raises when
-    # there is no materialised period to file it under (finding **N-192**).
+    # (``_require_pay_period_schedule``; its reason, the opening's correction
+    # filed through ``pay_calendar.PayCalendar.filing_period``, which raises
+    # when there is no materialised period to file it under, finding
+    # **N-192**, went off the ledger's read with finding plan#2875, and what
+    # it still guards is finding plan#3283's question).
     # ``record_paydays`` writes the ``budget.pay_schedule`` row in the same
     # call -- the cadence rule, plan step C3-b -- which is what kept
     # registration from re-opening pay-calendar finding **P8**, a payday with

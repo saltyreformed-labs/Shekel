@@ -17,6 +17,7 @@ from app.services.pay_calendar import PayCalendarError
 from app.utils.dates import to_display_date
 from tests._ledger_reads import (
     account_net,
+    filed_period_id,
     linked_key_of,
     scenario_lines,
     source_lines,
@@ -58,8 +59,10 @@ class TestCorrectionPeriodAttribution:
     (``account_service.resolve_anchor_period_id``: "the period is DERIVED from
     the day, not chosen beside it") and what the grid's "Book vs bank" row
     already does (``balance_at._cash_periods._assertion_sums`` buckets on
-    ``observed_on``).  The worked-out read files each correction by its day
-    (ruling plan#2519), so the rule is the read's own.
+    ``observed_on``).  A reader windowing the worked-out ledger by paycheck
+    files each correction by its day (ruling plan#2519,
+    :meth:`~app.services.ledger_lines.LedgerLine.filed_period_id`), so the
+    rule is the line's own.
     """
 
     _ASSERTION_DAY = date(2026, 4, 3)
@@ -199,10 +202,10 @@ class TestCorrectionPeriodAttribution:
         """A cash opening and a loan opening on ONE day file in ONE period.
 
         Pay-calendar plan step **C2-d** gave the account and loan corrections
-        one way to a calendar (finding **N-169**); the worked-out read hands
-        both families the one calendar it was given, and each files a
-        correction by
-        :meth:`~app.services.pay_calendar.PayCalendar.filing_period`.  The
+        one way to a calendar (finding **N-169**); a line of either family is
+        filed by its day through the one
+        :meth:`~app.services.ledger_lines.LedgerLine.filed_period_id`, which
+        asks :meth:`~app.services.pay_calendar.PayCalendar.filing_period`.  The
         day chosen is BEFORE the whole schedule, the clamp branch, because
         inside the schedule every candidate rule agrees and the assertion would
         grade nothing.
@@ -255,7 +258,7 @@ class TestCorrectionPeriodAttribution:
             ):
                 source_kind_id = ref_cache.posting_source_id(source)
                 assert {
-                    line.pay_period_id for line in lines
+                    filed_period_id(line, seed_user["user"].id) for line in lines
                     if line.source_kind_id == source_kind_id
                     and line.entry_date == self._PRE_SCHEDULE_DAY
                 } == {earliest.id}, source
@@ -263,11 +266,11 @@ class TestCorrectionPeriodAttribution:
     def test_an_owner_with_no_materialised_period_is_refused_loudly(
         self, app, db, seed_user,
     ):
-        """No period to file a correction in is a LOUD failure of the read.
+        """No period to file a correction in is a LOUD failure of its filing.
 
-        The read DERIVES each correction's paycheck from its day, so an empty
-        calendar is the one state that could silently mis-file every
-        correction an account has (finding **N-192**).  What keeps it out of
+        A correction's paycheck is DERIVED from its day, so an empty calendar
+        is the one state that could silently mis-file every correction an
+        account has (finding **N-192**).  What keeps it out of
         reach is code rather than a constraint -- registration opens a period
         before it creates the default account, ``truncate_pay_periods`` always
         keeps the period its ``keep_through_period_id`` names (plan step C3-a),
@@ -278,22 +281,30 @@ class TestCorrectionPeriodAttribution:
         (the ruling of 2026-08-10): a second refusal at the loader, naming the
         account, could never fire where ``filing_period`` would not, and its
         predicate had already drifted from the calendar's.  It reached the
-        stored ledger's reconcile until plan step plan#2914 deleted the store;
-        the read files through the same ``filing_period``.
+        stored ledger's reconcile until plan step plan#2914 deleted the store,
+        and the read until finding plan#2875 moved the filing to the reader
+        windowing by paycheck
+        (:meth:`~app.services.ledger_lines.LedgerLine.filed_period_id`, through
+        the same ``filing_period``).  So the read answers the account's opening
+        here, ``+500.00`` on its own line, and filing that line refuses.
         """
         with app.app_context():
             owner_id = seed_user["user"].id
             scenario_id = seed_user["scenario"].id
-            _make_account(seed_user, "500.00")
+            account = _make_account(seed_user, "500.00")
             _db.session.query(PayPeriod).filter_by(user_id=owner_id).delete()
             _db.session.commit()
 
+            (opening,) = source_lines(
+                _db.session, linked_key_of(_db.session, account.id), scenario_id,
+                PostingSourceEnum.ACCOUNT_OPENING,
+            )
+            assert opening.amount == Decimal("500.00")
             with pytest.raises(
                 PayCalendarError,
                 match=rf"user {owner_id} has no materialised pay period",
             ):
-                scenario_lines(_db.session, scenario_id)
-            _db.session.rollback()
+                filed_period_id(opening, owner_id)
 
 
 class TestLedgerAgreesWithTheGridOnAssertionPeriods:

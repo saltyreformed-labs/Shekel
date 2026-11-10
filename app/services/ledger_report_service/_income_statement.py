@@ -15,11 +15,15 @@ statement states rather than leaves to the reader.
 
 **Two window paths, one honesty rule** (:mod:`._attribution` states the
 reader contract over lines).  A ``"pay_period"`` window takes the lines filed
-in that paycheck (reader-contract C-2): a movement's in its parent's, a
-correction's by its day.  A ``"month"`` / ``"year"`` window takes the lines by
-their civil day (C-3), so an early-settled movement appears in its actual
-paid month even when its parent's paycheck sits elsewhere -- both are honest
-answers to different questions.
+in that paycheck (reader-contract C-2): a movement's in its parent's, a loan
+payment split's in its payment's, an opening's or true-up's by its day on the
+caller's calendar
+(:meth:`~app.services.ledger_lines.LedgerLine.filed_period_id`), the one
+reader that asks a calendar of the ledger (finding plan#2875).  A
+``"month"`` / ``"year"`` window takes the lines by their civil day (C-3), so
+an early-settled movement appears in its actual paid month even when its
+parent's paycheck sits elsewhere -- both are honest answers to different
+questions.
 
 Transfers never appear on either path: both a transfer's legs land on linked
 Asset/Liability accounts and the owner's Transfers in transit, outside the
@@ -66,10 +70,15 @@ def compute_income_statement(
     tier's is (ruling **R-PC19**, "How the CONTRIBUTION tier learns its
     periods"): the route that calls this already derives one for its own
     ``<select>``, so resolving a second here made the heading and the option
-    the reader picked it from two reads of one table on one render.  **The
-    read files its corrections on that same calendar** (plan task
-    plan#2771), so the render derives the owner's schedule once
-    (``tests/test_arch/test_one_read_pass_per_render.py``).
+    the reader picked it from two reads of one table on one render.  **A
+    ``"pay_period"`` window files its corrections on that same calendar**
+    (:func:`_window_test`; the read filed them on it, as plan task plan#2771
+    built, until finding plan#2875 moved the filing here), so the render
+    derives the owner's schedule once
+    (``tests/test_arch/test_one_read_pass_per_render.py``).  **Another owner's
+    calendar is refused**, whatever the window: an opening filed in another
+    owner's paycheck would be in no paycheck of its own owner's, and the read
+    refused the pairing while it filed (plan task plan#2771).
 
     **And it closed a hole the route had to guard.**  This was
     ``db.session.get(PayPeriod, window.period_id)`` -- UNSCOPED, so a foreign
@@ -86,7 +95,7 @@ def compute_income_statement(
         user_id: The owner whose statement to compute.
         calendar: That owner's
             :class:`~app.services.pay_calendar.PayCalendar`, derived once by
-            the caller: it labels a ``"pay_period"`` window, and the read
+            the caller: it labels a ``"pay_period"`` window, and that window
             files each correction on it.
         window: The :class:`StatementWindow` selector (a ``"pay_period"`` window
             takes the lines filed in its paycheck; a ``"month"`` / ``"year"``
@@ -99,14 +108,21 @@ def compute_income_statement(
         ValueError: If the window is an invalid type or omits a field its type
             requires (via
             :func:`app.services.spending_analysis.validate_window`); or if
-            *calendar* is another owner's (from the read).
+            *calendar* is another owner's.
         BaselineMissingError: The owner has no baseline scenario.  It used to
             report an all-zero income statement, which reads as "you earned
             and spent nothing this period" rather than "this ledger cannot be
             read".
-        PayCalendarError: A correction has no paycheck on *calendar* to file
-            in (from the read).
+        PayCalendarError: A ``"pay_period"`` window, and a correction with no
+            paycheck on *calendar* to file in (from
+            :meth:`~app.services.ledger_lines.LedgerLine.filed_period_id`).
     """
+    if calendar.user_id != user_id:
+        raise ValueError(
+            f"the income statement of user {user_id} was handed user "
+            f"{calendar.user_id}'s pay calendar: a correction is filed in "
+            f"its owner's own paychecks"
+        )
     spending_analysis.validate_window(
         window.window_type, window.period_id, window.month, window.year,
     )
@@ -117,8 +133,8 @@ def compute_income_statement(
     window_label = spending_analysis.window_label(
         window.window_type, window.month, window.year, period,
     )
-    ledger = read_statement_ledger(user_id, lambda: calendar)
-    in_window = _window_test(window)
+    ledger = read_statement_ledger(user_id)
+    in_window = _window_test(window, calendar)
     nets = nets_by_key(
         line for line in ledger.lines
         if in_window(line) and line.key.ledger_class in _REPORTED_CLASSES
@@ -126,22 +142,27 @@ def compute_income_statement(
     return _income_statement_from_nets(nets, ledger.labels, window_label)
 
 
-def _window_test(window: StatementWindow) -> Callable[[LedgerLine], bool]:
+def _window_test(
+    window: StatementWindow, calendar: PayCalendar,
+) -> Callable[[LedgerLine], bool]:
     """Return whether a line falls in *window*, by the reader contract.
 
-    A ``"pay_period"`` window takes the lines filed in its paycheck (C-2); a
-    ``"month"`` / ``"year"`` window the lines whose civil day falls in its
-    inclusive bounds (C-3).  Either takes a booking whole, its legs sharing
-    their paycheck and their day.
+    A ``"pay_period"`` window takes the lines filed in its paycheck (C-2,
+    :meth:`~app.services.ledger_lines.LedgerLine.filed_period_id` on
+    *calendar*); a ``"month"`` / ``"year"`` window the lines whose civil day
+    falls in its inclusive bounds (C-3), asking no calendar.  Either takes a
+    booking whole, its legs sharing their paycheck and their day.
 
     Args:
         window: The validated :class:`StatementWindow`.
+        calendar: The owner's pay calendar, which files each opening and
+            true-up of a ``"pay_period"`` window by its day.
 
     Returns:
         A predicate over :class:`~app.services.ledger_lines.LedgerLine`.
     """
     if window.window_type == "pay_period":
-        return lambda line: line.pay_period_id == window.period_id
+        return lambda line: line.filed_period_id(calendar) == window.period_id
     first_day, last_day = spending_analysis.calendar_window_bounds(
         window.window_type, window.year, window.month,
     )

@@ -83,7 +83,7 @@ class TestASettledTransferBooksEachSideAgainstTransit:
             assert {line.posting_kind_id for line in lines} == {
                 ref_cache.posting_kind_id(PostingKindEnum.TRANSFER),
             }
-            assert {line.pay_period_id for line in lines} == {period.id}
+            assert {line.budgeted_period_id for line in lines} == {period.id}
             # Each side's two lines on its own record's recorded day.
             for account in (checking, savings):
                 record = transfer_side_record(_db.session, transfer.id, account.id)

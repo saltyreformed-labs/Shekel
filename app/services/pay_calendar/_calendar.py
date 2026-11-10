@@ -11,7 +11,9 @@ anything read it; C2-a built the value and proved it the same way.  The cutover
 leaves then move one consumer package each.  **C2-d took the first**: both
 anchor-correction posting writers filed every ledger entry's ``pay_period_id``
 through :meth:`PayCalendar.filing_period`, until plan task plan#3133 deleted
-them; the worked-out ledger files each correction through it.  **C2-b2 took the second**: the
+them; a reader windowing the worked-out ledger by paycheck files each
+correction through it (``ledger_lines.LedgerLine.filed_period_id``, finding
+plan#2875).  **C2-b2 took the second**: the
 recurrence engine resolves, walks and places against this value, and the
 ``PeriodCalendar`` it used -- which COPIED each period's stored end and ordinal
 -- was deleted with the fences it carried.  **C2-c took the third**: the balance
@@ -595,8 +597,9 @@ class PayCalendar:
             raise PayCalendarError(
                 f"user {self.user_id} has no materialised pay period, so a "
                 f"record dated {day.isoformat()} has no paycheck to file "
-                f"under.  Every ledger line names the paycheck it files in and "
-                f"this calendar holds {len(self.periods)} payday(s), none of them "
+                f"under.  A reader windowing the ledger by paycheck files every "
+                f"line in one, and this calendar holds {len(self.periods)} "
+                f"payday(s), none of them "
                 f"saved, so there is no id to point at -- a broken invariant "
                 f"rather than an input this can clamp."
             )

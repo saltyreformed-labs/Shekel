@@ -304,9 +304,9 @@ class TestTieOutIsNotVacuous:
             checking = db.session.get(Account, seed_user["account"].id)
             assert _reader_bs(user_id).tie_out.in_balance is True
 
-            def planted(owner_id, scenario_id, calendar_source):
+            def planted(owner_id, scenario_id):
                 """The read's lines, and one unmatched +$50.00 on Checking."""
-                lines = worked_out_lines(owner_id, scenario_id, calendar_source)
+                lines = worked_out_lines(owner_id, scenario_id)
                 opening = next(
                     line for line in lines if line.key == linked_key(checking)
                 )

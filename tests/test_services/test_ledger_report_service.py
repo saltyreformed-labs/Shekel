@@ -30,6 +30,7 @@ import sqlalchemy as sa
 
 from app.exceptions import BaselineMissingError
 
+from app.models.account import AccountAnchorHistory
 from app.models.category import Category
 from app.models.pay_period import PayPeriod
 from app.services import ledger_report_service
@@ -248,6 +249,76 @@ class TestIncomeStatementPayPeriodWindow:
             )
             assert _labels(second.expense.lines) == ["Home: Rent"]
             assert second.expense.total == Decimal("200.00")
+
+    def test_a_true_up_falls_in_the_paycheck_its_day_files_in(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """A Money Market trued up $1,000.00 -> $1,015.01 on Feb 3: that paycheck's.
+
+        The true-up's ``1,015.01 - 1,000.00 = 15.01`` books on the account's
+        Interest Income line (ruling R-FO), and its line names no paycheck, so
+        the window files it by its day (finding plan#2875,
+        :meth:`~app.services.ledger_lines.LedgerLine.filed_period_id`): Feb 3
+        is inside the paycheck of Jan 30 - Feb 12, whose window reads it, and
+        the paycheck before it reads none.  It opened Jan 5, in the first
+        paycheck, which books only to equity.
+        """
+        with app.app_context():
+            user_id = seed_user["user"].id
+            account = create_account_of_type(
+                seed_user, db.session, "Money Market", "Filed MM",
+                anchor_balance=Decimal("1000.00"), observed_on=date(2026, 1, 5),
+            )
+            trued_on = date(2026, 2, 3)
+            db.session.add(AccountAnchorHistory(
+                account_id=account.id, anchor_balance=Decimal("1015.01"),
+                observed_on=trued_on, recorded_on=trued_on,
+            ))
+            db.session.commit()
+            filed_in, before = seed_periods[2], seed_periods[1]
+            assert filed_in.start_date <= trued_on <= last_covered_day(filed_in)
+
+            report = ledger_report_service.compute_income_statement(
+                user_id, calendar_for(user_id),
+                StatementWindow("pay_period", period_id=filed_in.id),
+            )
+            assert _labels(report.income.lines) == ["Filed MM -- Interest Income"]
+            assert report.income.total == Decimal("15.01")
+
+            earlier = ledger_report_service.compute_income_statement(
+                user_id, calendar_for(user_id),
+                StatementWindow("pay_period", period_id=before.id),
+            )
+            assert not earlier.income.lines
+
+    def test_another_owners_calendar_is_refused(
+        self, app, seed_user, seed_second_user,
+    ):
+        """The seed owner's statement, handed the second owner's calendar: refused.
+
+        A pay-period window files each opening and true-up on the calendar it
+        is handed, so another owner's would file the seed owner's in a paycheck
+        that is not theirs.  The statement refuses the pairing, naming both
+        owners, whatever the window: a month window here.  It was the read's
+        refusal (plan task plan#2771) until finding plan#2875 took the
+        calendar off the read.  The CONTROL: handed the owner's own calendar,
+        the same statement answers.
+        """
+        with app.app_context():
+            owner_id = seed_user["user"].id
+            other_id = seed_second_user["user"].id
+            window = StatementWindow("month", month=1, year=2026)
+
+            assert ledger_report_service.compute_income_statement(
+                owner_id, calendar_for(owner_id), window,
+            ).net_income == Decimal("0.00")
+            with pytest.raises(
+                ValueError,
+                match=f"income statement of user {owner_id} was handed user {other_id}'s",
+            ):
+                ledger_report_service.compute_income_statement(
+                    owner_id, calendar_for(other_id), window,
+                )
 
 
 # ---------------------------------------------------------------------------

@@ -28,8 +28,8 @@ copy's deploy ran under where it was deployed.  Production figures stay out of t
 ``verify_*`` siblings.
 
 Exit status: 0 every owner was measured and each read's count held across its reads; 1 a count
-moved between two reads of the same records (named in the report); 2 the read or the calendar
-refused an owner (named in the report), so that owner was not measured, or the run could not
+moved between two reads of the same records (named in the report); 2 the read refused an
+owner (named in the report), so that owner was not measured, or the run could not
 start or crashed part way (its traceback on standard error, ``exit_status``).
 """
 
@@ -39,7 +39,6 @@ import re
 import sys
 from collections import Counter
 from datetime import datetime
-from functools import partial
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so ``app`` and ``tests`` are not importable without this.
@@ -63,7 +62,6 @@ from app import create_app
 from app.extensions import db
 from app.models.scenario import Scenario
 from app.services.ledger_lines import worked_out_lines
-from app.services.pay_calendar import PayCalendarError, calendar_for
 
 # Each table a statement names, after FROM or JOIN, schema-qualified as the
 # app's models are.
@@ -77,9 +75,7 @@ def _read_statements(owner_id, scenario_id):
     """Run the read once from an expired session; its lines and statement texts."""
     db.session.expire_all()
     lines, statements = capture_sql_statements(
-        lambda: worked_out_lines(
-            owner_id, scenario_id, partial(calendar_for, owner_id),
-        ),
+        lambda: worked_out_lines(owner_id, scenario_id),
     )
     return lines, [text for text, _params in statements]
 
@@ -121,8 +117,8 @@ def measure(say):
         try:
             if not report_statements(scenario, say):
                 status = max(status, 1)
-        except (PayCalendarError, ValueError) as exc:
-            say(f"!  the read or the calendar REFUSED: {exc}")
+        except ValueError as exc:
+            say(f"!  the read REFUSED: {exc}")
             status = 2
     return status
 

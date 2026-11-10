@@ -63,7 +63,6 @@ import json
 import pathlib
 import sys
 from decimal import Decimal
-from functools import partial
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so ``app`` is not importable when this is run as
@@ -183,8 +182,7 @@ def _ledger_days(user_id, scenario_id):
     which costs one statement and proves the window really is empty on both
     sides.
     """
-    lines = worked_out_lines(user_id, scenario_id,
-                             partial(calendar_for, user_id))
+    lines = worked_out_lines(user_id, scenario_id)
     settled = db.session.execute(db.text("""
         SELECT DISTINCT t.settled_on
         FROM budget.transactions t

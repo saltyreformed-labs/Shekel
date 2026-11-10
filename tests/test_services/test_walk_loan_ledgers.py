@@ -37,7 +37,6 @@ from app.models.loan_features import RateHistory
 from app.services import loan_loaders
 from app.services.ledger_lines import loan_correction_targets, worked_out_lines
 from app.services.loan_ledger import walk_loan_ledger, walk_loan_ledgers
-from app.services.pay_calendar import calendar_for
 from tests._test_helpers import (
     add_escrow_line,
     capture_sql_statements,
@@ -256,13 +255,12 @@ class TestTheReadBooksEachLoanOffItsOwnWalk:
             )
             owner_id = seed_user["user"].id
             scenario_id = seed_user["scenario"].id
-            calendar = calendar_for(owner_id)
 
-            lines = worked_out_lines(owner_id, scenario_id, lambda: calendar)
+            lines = worked_out_lines(owner_id, scenario_id)
 
             expected = {
                 loan.id: _target_lines(loan_correction_targets(
-                    walk_loan_ledger(loan.id, scenario_id), loan, calendar,
+                    walk_loan_ledger(loan.id, scenario_id), loan,
                 ))
                 for loan in (first, second)
             }
@@ -271,7 +269,7 @@ class TestTheReadBooksEachLoanOffItsOwnWalk:
                 keys = {key for key, *_rest in expected[loan.id]}
                 assert Counter(
                     (
-                        line.key, line.pay_period_id, line.entry_date,
+                        line.key, line.budgeted_period_id, line.entry_date,
                         line.amount, line.source_kind_id,
                         line.posting_kind_id,
                     )

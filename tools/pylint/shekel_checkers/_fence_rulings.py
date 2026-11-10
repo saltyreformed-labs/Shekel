@@ -363,7 +363,7 @@ _FENCED_MODULE_RULINGS = {
         "purchase_source",
         "purchase_target",
         # The correction rules: what each opening, true-up or payment split
-        # BOOKS, leg by leg, keyed (kind, period, date) -- the jump a
+        # BOOKS, leg by leg, keyed (kind, budgeted period, date) -- the jump a
         # correction makes, never the balance it lands on -- and the
         # same-key merge, which returns nothing.
         "account_correction_targets",
@@ -386,8 +386,9 @@ _FENCED_MODULE_RULINGS = {
         # writer, had gone at plan task plan#3133.
         "account_corrections",
         # The worked-out read (plan task plan#2526): every LINE of one
-        # owner's ledger -- each amount on a chart account, its paycheck and
-        # day, built by the rules above -- and never a sum of them.  The
+        # owner's ledger -- each amount on a chart account, the paycheck its
+        # record names and its day, built by the rules above -- and never a
+        # sum of them.  The
         # ground ``cash_ledger.settled_cash_facts`` and
         # ``loan_ledger.walk_loan_ledger`` are ruled on: a loader of facts,
         # where folding them to a balance at T is a reader's step, and a
@@ -398,6 +399,9 @@ _FENCED_MODULE_RULINGS = {
         # Whether an account holds one of those lines, the re-type refusal's
         # question (ruling plan#2785): a yes or no, never money.
         "accounts_hold_lines",
+        # The paycheck ONE line files in, for a reader windowing by paycheck
+        # (finding plan#2875): a paycheck id, never money.
+        "filed_period_id",
     })),
     # The account-KIND classifier -- why it is scoped is recorded once, at
     # :data:`_KIND_CLASSIFIER_MODULES`.  Its ``find_period_containing_date``
@@ -567,13 +571,12 @@ _FENCED_MODULE_RULINGS = {
             "projection_boundary",
             "replay_loan_stream",
             "with_contract_charges",
-            # ``LoanLedgerWalk``'s two views (recurrence:R16-c-1), its
-            # emptiness test (plan task plan#2615) and ``PaymentOutcome``'s ten
-            # read-through properties.  Not one of them derives anything:
-            # ``settled_splits`` / ``projected_splits`` filter the walk's own
-            # outcome list by its ``is_projected`` flag, ``is_empty`` answers
-            # whether the walk holds any correction or outcome at all (a
-            # ``bool``, which cannot yield a figure), and each
+            # ``LoanLedgerWalk``'s two views (recurrence:R16-c-1) and
+            # ``PaymentOutcome``'s ten read-through properties.  Not one of
+            # them derives anything: ``settled_splits`` / ``projected_splits``
+            # filter the walk's own outcome list by its ``is_projected`` flag
+            # (its emptiness test, ruled here from plan task plan#2615, went
+            # with its one caller at finding plan#2875), and each
             # property returns a field of the outcome's ``event`` or ``split``
             # under the flat name every reader spells (``outcome.principal`` for
             # ``outcome.split.principal``).  ``balance_after`` is the replay's
@@ -588,7 +591,6 @@ _FENCED_MODULE_RULINGS = {
             "escrow",
             "excess",
             "interest",
-            "is_empty",
             "principal",
             "projected_splits",
             "settled_splits",

@@ -12,7 +12,7 @@ from app.models.account import Account, AccountAnchorHistory
 from app.services import pay_period_admin
 from app.services.ledger_lines import linked_key
 from scripts.integrity_check import check_referential_integrity
-from tests._ledger_reads import account_net, source_lines
+from tests._ledger_reads import account_net, filed_period_id, source_lines
 from tests._test_helpers import (
     rhythm_of,
     all_periods,
@@ -50,7 +50,7 @@ _LOAN_GENESIS_NET = Decimal("-100000.00")
 def _genesis_filed_in(db_session, loan, scenario_id):
     """Return the paychecks a loan's opening and true-up lines are filed in."""
     return {
-        line.pay_period_id
+        filed_period_id(line, loan.user_id)
         for source in (PostingSourceEnum.LOAN_OPENING, PostingSourceEnum.LOAN_TRUEUP)
         for line in source_lines(db_session, linked_key(loan), scenario_id, source)
     }
@@ -190,7 +190,7 @@ class TestAResetFilesTheAccountOpenings:
             earliest = min(rebuilt, key=lambda p: derived_span(p).period_index)
             assert derived_span(earliest).period_index == 0
             assert {
-                line.pay_period_id for line in source_lines(
+                filed_period_id(line, checking.user_id) for line in source_lines(
                     db.session, linked_key(checking), scenario_id,
                     PostingSourceEnum.ACCOUNT_OPENING,
                 )

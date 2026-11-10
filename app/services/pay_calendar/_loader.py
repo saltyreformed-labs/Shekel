@@ -226,8 +226,8 @@ def calendar_for(user_id: int) -> PayCalendar:
     # one ``REPEATABLE READ`` snapshot, so both reads see one state of the
     # database and no interleaving is expressible.  Inside a COMMAND they are
     # still separate snapshots: the write doors reach here through generation
-    # and through the re-type refusal's ledger read
-    # (``ledger_lines.accounts_hold_lines``), and a CLI script has no mode at all.
+    # (the re-type refusal's ledger read did too, until finding plan#2875 took
+    # the calendar off it), and a CLI script has no mode at all.
     #
     # So the order below still decides who loses the race, and only a command
     # can now lose it: in this order the loser sees a cadence and fewer

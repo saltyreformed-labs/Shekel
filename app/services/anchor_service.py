@@ -441,15 +441,15 @@ def resolve_observation_day(
     **It does NOT refuse an owner with no pay periods, and that split is ruling
     R-ER.**  The rule it replaced did, on the stated ground that "the account's
     anchor has a period to reference" -- which ruling R-EO falsified by deleting
-    ``account_anchor_history.pay_period_id``.  The live reason belongs to
-    ACCOUNT CREATION rather than to a day (the worked-out ledger files the
-    opening's correction in the pay period containing its day, finding
-    **N-192**; the stored ledger's reconcile did until plan task plan#3076), so
-    it stays there as ``account_service``'s own precondition.
-    Asking it here would have re-imposed on the true-up door exactly the refusal
-    ruling R-EO deleted from it -- a balance the user typed, refused for want of
-    a budgeting artifact that has nothing to do with what their bank holds --
-    and would have answered a true-up with a message about creating an account.
+    ``account_anchor_history.pay_period_id``.  Asking it here would have
+    re-imposed on the true-up door exactly the refusal ruling R-EO deleted from
+    it -- a balance the user typed, refused for want of a budgeting artifact
+    that has nothing to do with what their bank holds.  *R-ER kept the refusal
+    at ACCOUNT CREATION instead, as ``account_service``'s own precondition, for
+    the opening's correction a reader filed by paycheck (finding **N-192**);
+    ruling plan#3318 deleted it there too, once finding plan#3283 measured every
+    read of an account answering without a calendar.*  With no pay periods the
+    floor below is today, so today is the one day either door can assert.
 
     **The clock is the USER's** (ruling R-DH (b)).  ``display_today()``, never
     ``date.today()``: the process's UTC day is already tomorrow at 8pm Eastern,

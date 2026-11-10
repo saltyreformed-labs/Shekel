@@ -96,21 +96,20 @@ def build_owner():
     settings = UserSettings(user_id=user.id)
     db.session.add(settings)
 
-    # The paydays are recorded BEFORE the account, and the order is a
-    # precondition of the door rather than a preference:
-    # ``account_service.create_account`` refuses an owner with no pay
-    # periods (``_require_pay_period_schedule``), because the opening
-    # balance it posts derives its pay period from the day it asserts and
-    # an empty calendar has no such period.
+    # The paydays are recorded before the account.  The order was a
+    # precondition of the door until ruling plan#3318, which deleted
+    # ``account_service.create_account``'s refusal of an owner with no pay
+    # periods; it asks for none now.
     #
     # The span is anchored to the APP's civil day, not to a literal.  The
     # property the workloads need is that today falls INSIDE the recorded
-    # calendar -- ``create_account`` defaults its observation day to today
-    # and must find a period holding it -- and a hard-coded
-    # ``date(2026, 1, 2)`` holds that property only until the horizon runs
-    # out, at which point the builder would start refusing again for a
-    # reason that has nothing to do with the code under test.  Half the
-    # periods sit behind today and half ahead, on whatever day this runs.
+    # calendar -- ``create_account`` opens the account's books today, and
+    # :data:`PAYCHECKS_AFTER_THE_BOOKS_OPEN` counts the paychecks after the
+    # one holding that day -- and a hard-coded ``date(2026, 1, 2)`` holds
+    # that property only until the horizon runs out, at which point the
+    # repeating rule's rows would stop matching that count for a reason that
+    # has nothing to do with the code under test.  Half the periods sit
+    # behind today and half ahead, on whatever day this runs.
     periods = pay_period_write.record_paydays(
         user_id=user.id,
         first_payday=display_today() - timedelta(days=CADENCE_DAYS * (PERIOD_COUNT // 2)),

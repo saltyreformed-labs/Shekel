@@ -20,8 +20,8 @@ class TestRegistrationBuildsARealPayCalendar:
 
     **What it replaced, which is finding N-123.**  ``register_user`` used to
     write one ``PayPeriod`` covering ``[today, today + 13]`` and nothing else,
-    because ``account_service.create_account`` refuses an owner with no pay
-    period.  The consequence was measured at the service tier: on the form
+    because ``account_service.create_account`` refused an owner with no pay
+    period (until ruling plan#3318).  The consequence was measured at the service tier: on the form
     that then asked for the owner's real payday, ``today + 1`` through
     ``today + 13`` were REFUSED outright by
     ``pay_period_service._reject_overlapping_batch``, and every answer from

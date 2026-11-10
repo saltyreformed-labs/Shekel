@@ -623,9 +623,10 @@ class TestTheChipMarksARowOnAnotherAccount:
 
         ``fragment_balance_line`` answers ``None`` for anyone but the owner by
         the owner's id, not by what the requester holds.  Today a companion
-        holds no account -- the account factory refuses a user with no pay
-        periods and the account door is owner-gated -- so the rule is
-        indistinguishable from that population fact on any real state.  It is
+        holds no account -- the account door is owner-gated (the account
+        factory also refused a user with no pay periods until ruling
+        plan#3318) -- so the rule is indistinguishable from that population
+        fact on any real state.  It is
         graded here by making the resolver ANSWER for the requester: with the
         owner test deleted, the companion's card would chip the owner's card
         row against the account the resolver handed back.

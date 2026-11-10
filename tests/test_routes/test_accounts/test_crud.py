@@ -7,9 +7,11 @@ from decimal import Decimal
 
 from app.extensions import db
 from app.models.account import Account, AccountAnchorHistory
+from app.models.pay_period import PayPeriod
 from app.utils.dates import display_today
 from app.models.ref import AccountType
 from app.services import account_service, cash_ledger, pay_period_service
+from app.services.balance_at import BalanceContext, balance_at
 
 from ._helpers import _create_other_user_account
 
@@ -176,8 +178,9 @@ class TestAccountCreate:
         """A balance cannot be observed on a day that has not happened.
 
         The route surfaces the service's own message and returns the user to
-        the form -- not to /pay-periods/generate, which is the other shape that
-        raises the same exception type.
+        the form.  *It sent the other shape that raised the same exception type
+        -- an owner with no pay periods -- to /pay-periods/generate until ruling
+        plan#3318 deleted that refusal.*
         """
         with app.app_context():
             savings_type = (
@@ -194,8 +197,7 @@ class TestAccountCreate:
 
             assert response.status_code == 200
             assert b"has not happened yet" in response.data
-            # Back to the account form, NOT to /pay-periods/generate -- the
-            # other shape that raises the same exception type.
+            # Back to the account form.
             assert b"New Account -- Shekel" in response.data
             assert (
                 db.session.query(Account)
@@ -296,29 +298,19 @@ class TestAccountCreate:
             assert f'max="{display_today().isoformat()}"' in html
             assert f'min="{floor.isoformat()}"' in html
 
-    def test_creating_an_account_without_a_schedule_is_refused_not_500(
+    def test_an_owner_with_no_pay_periods_can_create_an_account(
         self, app, auth_client, seed_user,
     ):
-        """The schedule precondition, which no test could see before.
+        """No pay-period schedule is asked for (ruling plan#3318).
 
-        Ruling **R-ER** split this arm out of the shared day rule into
-        ``account_service._require_pay_period_schedule``, promoted it to run
-        FIRST in ``create_account``, and rewrote its rationale.  A neutral
-        review then deleted the guard outright and watched **6,218 tests stay
-        green** -- so the split, the reorder and the message were all shipping
-        ungraded.
-
-        What it protects: ``create_account``'s tail posts the opening's anchor
-        correction, and that reconcile derives each correction's pay period from
-        the day it asserts (ruling R-EA).  With an empty calendar there is no
-        such period and the reconcile raises (finding **N-192**), so without
-        this guard the user gets an unhandled 500 on a money route instead of a
-        flash pointing at the repair.
+        ``account_service`` refused this owner until then, for the opening
+        correction a reader once filed by paycheck (finding **N-192**).  Finding
+        plan#3283 measured every read of an account answering without a
+        calendar, so the refusal went, and this case grades the door it left:
+        the account is created, its books open today (with no schedule the day
+        bound floors at today), and its balance and the cockpit answer.  It
+        replaces the case that graded the refusal, by that ruling.
         """
-        # Imported here, matching this module's established local-import idiom
-        # for the model (see ``_create_other_user_account``).
-        from app.models.pay_period import PayPeriod  # pylint: disable=import-outside-toplevel
-
         with app.app_context():
             user_id = seed_user["user"].id
             db.session.query(PayPeriod).filter_by(user_id=user_id).delete()
@@ -329,23 +321,34 @@ class TestAccountCreate:
             savings_type = (
                 db.session.query(AccountType).filter_by(name="Savings").one()
             )
-            accounts_before = db.session.query(Account).filter_by(
-                user_id=user_id,
-            ).count()
 
             response = auth_client.post("/accounts", data={
                 "name": "Scheduleless Savings",
                 "account_type_id": savings_type.id,
                 "anchor_balance": "500.00",
-            }, follow_redirects=True)
+            })
 
-            # A designed refusal, not a crash, and it points at the repair.
-            assert response.status_code == 200
-            assert b"Generate pay periods" in response.data
-            # No account was created -- the guard runs before the factory.
-            assert db.session.query(Account).filter_by(
-                user_id=user_id,
-            ).count() == accounts_before
+            # Created, and sent where a Savings account always goes.
+            assert response.status_code == 302
+            assert response.headers["Location"].endswith("/savings")
+            acct = (
+                db.session.query(Account)
+                .filter_by(user_id=user_id, name="Scheduleless Savings")
+                .one()
+            )
+            today = display_today()
+            anchor = cash_ledger.resolve_anchor(acct)
+            assert anchor.balance == Decimal("500.00")
+            assert anchor.observed_on == today
+            # The read answers with no calendar: the $500.00 opening, and
+            # nothing has moved since.
+            assert balance_at(
+                acct, BalanceContext.build(user_id, as_of=today), today,
+            ) == Decimal("500.00")
+            cockpit = auth_client.get("/savings")
+            assert cockpit.status_code == 200
+            assert b"Scheduleless Savings" in cockpit.data
+            assert b"$500.00" in cockpit.data
 
     def test_create_account_zero_anchor_balance(self, app, auth_client, seed_user):
         """POST /accounts with anchor_balance "0" stores an exact zero.

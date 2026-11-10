@@ -41,65 +41,12 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import AccountOpeningSourceEnum, AcctCategoryEnum
 from app.extensions import db
-from app.exceptions import ValidationError
 from app.models.account import Account
-from app.models.pay_period import PayPeriod
 from app.models.ref import AccountType
 from app.services import anchor_service, opening_service
 
 
 logger = logging.getLogger(__name__)
-
-
-def _require_pay_period_schedule(user_id: int) -> None:
-    """Refuse to create an account for an owner with no pay-period schedule.
-
-    **A precondition of ACCOUNT CREATION, not a property of a day** (ruling
-    **R-ER**, plan step X-f1c4c).  It was the middle arm of a three-part guard
-    this module shared with nothing; when :func:`create_account` stopped being
-    that guard's only caller the arm had to be placed, and it belongs here:
-    :func:`app.services.anchor_service.resolve_observation_day` now owns the two
-    bounds that are about the DAY, and asking this one there would have refused
-    a true-up on an account that already exists -- exactly the refusal ruling
-    R-EO deleted from that door, and under a message about creating an account.
-
-    **Its stated reason was already false when it moved.**  It read "so the
-    account's anchor has a period to reference", which ruling R-EO falsified by
-    deleting ``account_anchor_history.pay_period_id`` -- an assertion references
-    no period.  The reason it then had was the worked-out ledger: its read
-    filed the account's opening correction into the pay period containing the
-    day it asserts, through
-    :meth:`~app.services.pay_calendar.PayCalendar.filing_period`, and raised
-    when the owner's calendar was empty (finding **N-192**), so an account
-    created without one failed the first statement read that reached it, and
-    refusing here turned that 500 into a ``ValidationError`` the route sends to
-    the generate-periods page.  *Until plan task plan#3076 the reason was the
-    tail of :func:`create_account` itself, whose anchor sync posted that
-    correction into the stored ledger and derived its period the same way.*
-    **Finding plan#2875 took that filing off the read**: only a reader
-    windowing by paycheck files a correction now
-    (:meth:`app.services.ledger_lines.LedgerLine.filed_period_id`), and an
-    owner with no paycheck has no paycheck window to ask.  What the refusal
-    still guards is unmeasured, finding plan#3283's question.
-
-    Args:
-        user_id: The prospective account owner.
-
-    Raises:
-        ValidationError: When the user has no ``budget.pay_periods`` rows.  The
-            route discriminates this shape from a bad observation day by
-            re-asking the database rather than by reading the message, so the
-            wording is free to say what is true.
-    """
-    if not db.session.query(
-        db.session.query(PayPeriod).filter_by(user_id=user_id).exists()
-    ).scalar():
-        raise ValidationError(
-            f"Cannot create an account for user_id={user_id}: the user has no "
-            "pay periods.  Generate pay periods first -- the opening balance "
-            "is filed in the period containing the day it asserts, and an "
-            "empty calendar has no such period."
-        )
 
 
 @dataclass(frozen=True)
@@ -240,15 +187,14 @@ def create_account(spec: AccountSpec, **extra_columns) -> Account:
         the session pending commit.
 
     Raises:
-        ValidationError: When the user has no pay periods at all
-            (:func:`_require_pay_period_schedule`, this module's own
-            precondition), or when ``observed_on`` is in the future or precedes
+        ValidationError: When ``observed_on`` is in the future or precedes
             the user's recorded history
             (:func:`app.services.anchor_service.resolve_observation_day`, the
-            rule every assertion writer shares).  **Two sources, one exception
-            type, and the route must not tell them apart by the message** --
-            ``routes/accounts/crud.create_account`` re-asks the database, which
-            is why splitting them at ruling R-ER changed no destination.
+            rule every assertion writer shares); its message names the day and
+            the bound it broke, and ``routes/accounts/crud.create_account``
+            renders it on the form.  *A second source stood beside it until
+            ruling plan#3318: this module's refusal of an owner with no pay
+            periods, which the route told apart by re-asking the database.*
         TypeError: When ``anchor_balance`` is not a ``Decimal``.  The
             project rejects ``float`` in monetary code; passing
             ``int`` or ``str`` is also a caller bug.
@@ -280,14 +226,15 @@ def create_account(spec: AccountSpec, **extra_columns) -> Account:
             f"anchor_balance must be Decimal, got {type(anchor_balance).__name__}"
         )
 
-    # An account cannot be created without a pay-period schedule, and that is
-    # this module's own precondition rather than a rule about the day below
-    # (ruling R-ER) -- see :func:`_require_pay_period_schedule` for the reason,
-    # which is the opening correction this function's own tail posts.  Asked
-    # FIRST: with an empty calendar the day bound's floor collapses to today, so
-    # letting it answer first would report "your recorded history starts on
-    # <today>" to a user whose real problem is that they have no history at all.
-    _require_pay_period_schedule(spec.user_id)
+    # No pay-period schedule is asked for (ruling plan#3318).  This function
+    # refused an owner with no pay periods until then, for the opening
+    # correction a reader once filed by paycheck; finding plan#3283 measured
+    # every read of an account answering without a calendar, and no door
+    # produces such an owner (registration records a payday before it calls
+    # here, and every door that retires paydays keeps or records one).  With an
+    # empty calendar the day bound below floors at today, so today is the one
+    # day assertable, which is what a balance typed with no history means.
+    #
     # The day the asserted balance was TRUE (ruling R-DH), defaulted and bounded
     # in ONE call by the module that owns what an assertion is (ruling R-ER).
     # ONE call is the whole point and it is load-bearing twice over: the floor

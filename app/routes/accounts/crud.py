@@ -36,7 +36,6 @@ from app.models.interest_params import InterestParams
 from app.models.investment_params import InvestmentParams
 from app.models.loan_features import RateHistory
 from app.models.loan_params import LoanParams
-from app.models.pay_period import PayPeriod
 from app.models.savings_goal import SavingsGoal
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
@@ -235,11 +234,7 @@ def create_account():
     # E-19 (Commit 3): the canonical factory in
     # ``app.services.account_service.create_account`` materializes
     # the account row AND a matching origination AccountAnchorHistory
-    # row, and resolves the anchor period from the user's pay-period
-    # inventory.  If the user has zero pay periods, the factory
-    # raises ``ValidationError``; this route converts that into a
-    # redirect to ``/pay-periods/generate`` so the user can fix the
-    # missing-periods state and retry.
+    # row, dated at the day the owner says the balance was true.
     # ``account_type_id`` and ``name`` are required ``AccountCreateSchema``
     # fields, so they are always present in ``data``; lift them out into
     # the ``AccountSpec`` and forward any remaining validated columns
@@ -266,35 +261,14 @@ def create_account():
             **data,
         )
     except ValidationError as exc:
-        # Two shapes reach here and they need different destinations: the user
-        # has NO pay periods (send them to generate some), or the "balance as
-        # of" day is out of bounds (send them back to the form with the
-        # service's own message, which names the day and the bound it broke).
-        #
-        # Discriminated by asking the database, not by re-deriving the
-        # service's own predicate: re-evaluating "is this date in the future"
-        # here would read the clock a second time and could disagree with the
-        # read that raised.
-        has_periods = db.session.query(
-            db.session.query(PayPeriod)
-            .filter_by(user_id=current_user.id).exists()
-        ).scalar()
-        if has_periods:
-            flash(str(exc), "warning")
-            return redirect(url_for("accounts.new_account"))
-        # The reason is the OPENING's posting correction, not anchoring: an
-        # assertion carries no pay period (ruling R-EO deleted the column), so
-        # "the account balance has a period to anchor against" -- what this
-        # string said until plan step X-f1c4c -- named a fact that no longer
-        # exists.  It is the only user-facing copy stating the rule, and it was
-        # left behind when the service's own wording was corrected.
-        flash(
-            "Generate pay periods before creating an account: its opening "
-            "balance posts into the pay period containing the day it is true "
-            "for, and an empty calendar has no such period.",
-            "warning",
-        )
-        return redirect(url_for("pay_periods.generate_form"))
+        # The "balance as of" day is out of bounds: back to the form with the
+        # service's own message, which names the day and the bound it broke.
+        # *A second shape reached here until ruling plan#3318 deleted the
+        # factory's refusal of an owner with no pay periods; this branch
+        # re-asked the database to tell the two apart and sent that one to
+        # the generate-periods page.*
+        flash(str(exc), "warning")
+        return redirect(url_for("accounts.new_account"))
 
     # Auto-create the type-specific params row and resolve the setup-page
     # redirect by projection kind.  The canonical classifier owns the

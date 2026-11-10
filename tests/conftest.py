@@ -1823,9 +1823,9 @@ def build_seed_user(db):
     db.session.add(settings)
 
     # The owner's OPENING pay period, written by the door that owns the
-    # table (plan step pay_calendar:C4-b-1).  ``create_account`` refuses an
-    # owner with no pay period, so one has to exist before the Checking
-    # account below; what changed is WHO writes it.  This was a hand-built
+    # table (plan step pay_calendar:C4-b-1).  It precedes the Checking
+    # account below, as registration's does (``create_account`` refused an
+    # owner with none until ruling plan#3318).  This was a hand-built
     # ``PayPeriod(...)`` -- three columns set by the fixture, two of them
     # (``end_date``, ``period_index``) values the writer DERIVES -- and no
     # ``budget.pay_schedule`` row beside it, which is a state

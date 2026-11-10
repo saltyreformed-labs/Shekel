@@ -214,8 +214,9 @@ class RegistrationSpec:
     **The pay-calendar half is plan step X-ad-a** (ruling **R-DB**, and the
     cross-arc fork ruled to it on 2026-08-09).  Registration used to FABRICATE
     a pay period covering ``[today, today + 13]`` because
-    :func:`app.services.account_service.create_account` refuses an owner with
-    no pay period -- and that invented payday is what then blocked the owner's
+    :func:`app.services.account_service.create_account` refused an owner with
+    no pay period (until ruling plan#3318) -- and that invented payday is what
+    then blocked the owner's
     real one: the forward-only batch guard of the day
     (``pay_period_service._reject_overlapping_batch``, replaced at plan step
     C3-b by ``pay_period_write._reject_backward_payday``, now
@@ -420,13 +421,12 @@ def register_user(spec: RegistrationSpec):
     db.session.add(settings)
 
     # The owner's REAL pay calendar, from the payday they stated (plan step
-    # X-ad-a, ruling R-DB).  It must exist before the default account:
-    # ``create_account`` refuses an owner with no pay periods
-    # (``_require_pay_period_schedule``; its reason, the opening's correction
-    # filed through ``pay_calendar.PayCalendar.filing_period``, which raises
-    # when there is no materialised period to file it under, finding
-    # **N-192**, went off the ledger's read with finding plan#2875, and what
-    # it still guards is finding plan#3283's question).
+    # X-ad-a, ruling R-DB).  *It had to precede the default account until
+    # ruling plan#3318: ``create_account`` refused an owner with no pay periods,
+    # for the opening's correction a reader once filed by paycheck (finding
+    # **N-192**), and finding plan#3283 measured every read answering without a
+    # calendar.*  The account's day bound asks no order either: it dates the
+    # opening ``today``, which its floor admits with or without a payday.
     # ``record_paydays`` writes the ``budget.pay_schedule`` row in the same
     # call -- the cadence rule, plan step C3-b -- which is what kept
     # registration from re-opening pay-calendar finding **P8**, a payday with

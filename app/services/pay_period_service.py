@@ -157,8 +157,12 @@ def earliest_recordable_day(user_id: int) -> date:
 
     Returns:
         The earliest recordable civil day.  Today when the user has no pay
-        periods at all -- every caller's own operation then fails on the missing
-        schedule, which is a clearer error than a date bound.
+        periods at all, so today is the one day such an owner can assert a
+        balance for.  *This said "every caller's own operation then fails on the
+        missing schedule" until ruling plan#3318 deleted account creation's
+        refusal of such an owner; the true-up door had stopped refusing one at
+        ruling R-EO, and such an owner holds no row to settle, every row and
+        transfer naming a pay period.*
     """
     earliest = (
         db.session.query(db.func.min(PayPeriod.start_date))

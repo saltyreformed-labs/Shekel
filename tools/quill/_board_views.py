@@ -113,11 +113,13 @@ PLAN = View("Plan", "is:open", "the drag order", columns=(
            "where quill shows each card's progress (ruling plan#1873)"),
 ))
 
-#: The Inbox (rulings plan#3229, plan#3231): the open cards that take a suggested Priority
-#: (``check.takes_suggestion``) and hold no Priority, newest first, so the developer sets each
-#: one's Priority from it.  A leaf, or a task, has a parent issue; a question names its step by
-#: a "blocked by" link (``_state.OWNED``), never as its parent, so ``no:parent-issue`` leaves
-#: out the leaves alone.  GitHub's own Created field is what it is sorted by.
+#: The Inbox (rulings plan#3229, plan#3231): the board's open cards that take a suggested
+#: Priority (``check.takes_suggestion``) and hold no Priority, newest first, so the developer
+#: sets each one's Priority from it.  A view lists the board's cards alone, so a step at the top
+#: level off the board, as a step split into smaller steps is, is not in it.  A leaf, or a task,
+#: has a parent issue; a question names its step by a "blocked by" link (``_state.OWNED``),
+#: never as its parent, so ``no:parent-issue`` leaves out the leaves alone.  GitHub's own
+#: Created field is what it is sorted by.
 INBOX = View(
     "Inbox",
     f"is:open no:{PRIORITY_FIELD.lower()} no:parent-issue type:{','.join(SUGGESTED_KINDS)}",

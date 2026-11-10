@@ -27,8 +27,9 @@ PRIORITY_OPTIONS = (URGENT, HIGH, "Medium", "Low", ON_HOLD)
 #: options but On hold, as plan#2798's spec names them, Urgent, High, Medium or Low.
 SUGGESTED_OPTIONS = tuple(option for option in PRIORITY_OPTIONS if option != ON_HOLD)
 #: The kinds of card that take a suggested Priority (``check.takes_suggestion``): a step, at the
-#: top level alone, and a question, which the board's Inbox lists while they hold no Priority
-#: (``_board_views.INBOX``, ruling plan#3231).  Here, beside the options a suggestion takes, so
+#: top level alone, and a question, which the board's Inbox lists while they are on the board
+#: and hold no Priority (``_board_views.INBOX``, ruling plan#3231): a step split into smaller
+#: steps leaves the board, and so the Inbox.  Here, beside the options a suggestion takes, so
 #: the Inbox's filter reads the one spelling: ``check`` imports ``setup_tracker``, which reads
 #: the board's views.
 SUGGESTED_KINDS = ("step", "question")

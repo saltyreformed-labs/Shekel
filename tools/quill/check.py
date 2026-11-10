@@ -191,7 +191,8 @@ def _sentence_problems(text: str, what: str, cap: int, source: str) -> list[str]
 def takes_suggestion(draft: Draft) -> bool:
     """Whether the card ``draft`` describes takes a suggested Priority: one of
     :data:`SUGGESTED_KINDS`, a step at the top level alone, the cards the Inbox lists while
-    they hold no Priority (ruling plan#3231); never a finding, whose owner step's Priority
+    they are on the board and hold no Priority (ruling plan#3231), a step split into smaller
+    steps leaving it; never a finding, whose owner step's Priority
     decides (ruling plan#3226), nor a leaf, which its split step's ranks (ruling plan#3229).
     The one spelling of that set, which the check holds a suggestion to and the filing
     requires one of (``_filing``); GitHub, not quill, reads the Inbox's filter, so it spells

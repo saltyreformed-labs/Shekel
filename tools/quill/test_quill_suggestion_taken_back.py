@@ -1,11 +1,12 @@
-"""quill's own pending suggestion goes when quill writes the card's Priority or a question becomes
+"""quill's own pending suggestion goes when quill sets the card's Priority or a question becomes
 its ruling (plan#2798): GitHub's API leaves the suggestion pending beside a Priority written
 (measured 2026-11-10 on plan#3178), where a later Accept would overwrite the developer's choice,
-and a ruling holds no Priority (ruling plan#2507).  ``quill priority``'s set or clear takes it
-back first (``_arc_label.cmd_field``), and so does the conversion (``_filing._convert_question``),
-each through ``_suggestion.take_back``; ``quill effort`` never touches it.  Over the fake
-tracker's suggestions (``_fake.FakeSuggestions``); the take-back itself is graded against a
-recording in ``test__suggestion.py``.
+and a ruling holds no Priority (ruling plan#2507).  ``quill priority``'s set takes it back first
+(``_arc_label.cmd_field``), and so does the conversion, before its retype
+(``_filing._convert_question``), each through ``_suggestion.take_back``; a clear decides nothing
+and takes back none, and ``quill effort`` never touches it.  Over the fake tracker's suggestions
+(``_fake.FakeSuggestions``); the take-back itself is graded against a recording in
+``test__suggestion.py``.
 """
 from __future__ import annotations
 
@@ -28,16 +29,30 @@ def _suggested(tracker, number, **fields):
     tracker.suggestions.held[number] = _PENDING
 
 
-@pytest.mark.parametrize(("argv", "value"), [(("--to", "High"), "High"), (("--clear",), None)])
-def test_a_priority_set_or_cleared_takes_back_quills_suggestion_first(code, capsys, argv,
-                                                                     value):
+def test_a_priority_set_takes_back_quills_suggestion_first(code, capsys):
     """The take-back lands before the write, so no failure leaves the two together."""
     tracker = FakeTracker()
-    _suggested(tracker, 1, priority=None if value else "Medium")
-    assert run(tracker, code, "priority", "plan#1", *argv) == 0
-    assert tracker.writes == [("withdraw", 1), ("set_field", 1, "Priority", value)]
+    _suggested(tracker, 1)
+    assert run(tracker, code, "priority", "plan#1", "--to", "High") == 0
+    assert tracker.writes == [("withdraw", 1), ("set_field", 1, "Priority", "High")]
     assert not tracker.suggestions.held
     assert capsys.readouterr().out.startswith(f"{_TOOK_BACK}Priority is decided\n")
+
+
+@pytest.mark.parametrize(("held", "said"), [
+    (None, "plan#1 [step, balance] card 1 holds no Priority already: not written\n"),
+    ("Medium", "cleared plan#1 [step, balance] card 1's Priority, which was 'Medium'\n")])
+def test_a_priority_clear_takes_back_no_suggestion(code, capsys, held, said):
+    """A clear decides nothing (review of plan#2798, finding 4): the card holds no Priority
+    after it, where the suggestion waits for the developer, and its reason, of which quill
+    keeps no copy (ruling plan#3236), stays with it.  A Priority set through the API beside
+    the suggestion is cleared alone."""
+    tracker = FakeTracker()
+    _suggested(tracker, 1, priority=held)
+    assert run(tracker, code, "priority", "plan#1", "--clear") == 0
+    assert tracker.writes == ([] if held is None else [("set_field", 1, "Priority", None)])
+    assert tracker.suggestions.held == {1: _PENDING}
+    assert capsys.readouterr().out == said
 
 
 def test_a_priority_held_already_still_takes_back_the_suggestion_beside_it(code, capsys):
@@ -94,6 +109,17 @@ def test_a_question_becoming_its_ruling_takes_back_quills_suggestion(code, tmp_p
     assert not tracker.suggestions.held
     assert ("  took back quill's suggested Priority 'Low': a ruling holds no Priority (ruling "
             "plan#2507)\n") in capsys.readouterr().out
+
+
+def test_a_questions_suggestion_is_taken_back_while_it_is_still_a_question(code, tmp_path):
+    """Before its retype (review of plan#2798, finding 9): nothing rests on how GitHub treats a
+    pending suggestion across a type change, which nobody has measured."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(2, "question", body="Which day?", title="Day")
+    tracker.suggestions.held[2] = _PENDING
+    assert run(tracker, code, *_conversion(tmp_path)) == 0
+    assert tracker.writes.index(("withdraw", 2)) < tracker.writes.index(("retype", 2, "ruling"))
 
 
 def test_a_conversion_cut_short_after_its_take_back_takes_back_nothing_again(code, tmp_path):

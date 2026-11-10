@@ -745,13 +745,19 @@ def _suggest(tracker: Tracker, card: Card, suggestion: Suggestion | None) -> Non
     writes it only where quill's suggestion is not already pending as stated (R-BAL186): one
     pending as stated is left, and one stating another is taken back first and this one put,
     as :func:`_refield` states a field value again (a put over a pending one is not measured).
-    None is put on a card holding a Priority, which only a person or ``quill priority`` set on a
-    card still being filed: the Priority is decided, and the Inbox lists only a card holding
-    none (ruling plan#3231)."""
+    None is put on a card holding a Priority, which only a person set on a card still being
+    filed (``quill priority`` refuses one, ``_arc_label._filing_refusal``): the Priority is
+    decided, and the Inbox lists only a card holding none (ruling plan#3231).  quill's own
+    suggestion, an earlier run's, is taken back from beside it (:func:`_suggestion.take_back`):
+    a Priority set through the API leaves it pending (measured 2026-11-10 on plan#3178), where a
+    later Accept would overwrite the person's."""
     if suggestion is None:
         return
     if card.priority is not None:
         print(f"  no suggested Priority: it holds the Priority {card.priority!r} already")
+        if (pending := take_back(tracker.suggestions, card)) is not None:
+            print(f"  took back quill's suggested Priority {pending.suggestion.priority!r}, an "
+                  "earlier run's, pending beside it: its Priority is decided")
         return
     pending = tracker.suggestions.pending(card)
     if pending is not None and pending.suggestion == suggestion:
@@ -918,7 +924,9 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
     hold (``check.HOLDERS``) is cleared: the question's Priority (ruling plan#2507), and an
     Effort a person set on it by hand (ruling plan#2506); and quill's pending suggestion of a
     Priority is taken back (:func:`_suggestion.take_back`), its filing's, which a later Accept
-    would write on the ruling.
+    would write on the ruling, before the card is retyped, while it is still the question the
+    suggestion was put on, so nothing rests on how GitHub treats a pending suggestion across a
+    type change (not measured).
     """
     question = asked.card
     if not question.is_open or question.kind not in ("question", "ruling"):
@@ -938,6 +946,9 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
     if normalized(asked.body) != normalized(draft.body):
         tracker.set_body(question.number, draft.body)
         print(f"  plan#{question.number}'s body: the question, then the answer")
+    if (pending := take_back(tracker.suggestions, question)) is not None:
+        print(f"  took back quill's suggested Priority {pending.suggestion.priority!r}: a "
+              "ruling holds no Priority (ruling plan#2507)")
     if question.kind != "ruling":
         tracker.retype(question.number, "ruling")
         print(f"  plan#{question.number} is now a ruling")
@@ -946,9 +957,6 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
             tracker.set_field(question.number, FIELDS[part], None)
             print(f"  cleared its {FIELDS[part]}, {held!r}: a ruling holds none (ruling "
                   f"{ruling})")
-    if (pending := take_back(tracker.suggestions, question)) is not None:
-        print(f"  took back quill's suggested Priority {pending.suggestion.priority!r}: a "
-              "ruling holds no Priority (ruling plan#2507)")
     if draft.title.strip() != question.title.strip():
         tracker.retitle(question.number, draft.title)
         print(f"  retitled {draft.title!r}")

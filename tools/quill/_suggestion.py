@@ -24,7 +24,7 @@ What GitHub does, measured 2026-11-10 on the task plan#3178 with the developer's
   because quill suggests no other field: :meth:`Suggestions.put` names Priority alone.
 - While it is pending the card's Priority holds nothing.  The developer setting another
   Priority on GitHub's own screen cleared it; the same set through the API left it pending
-  beside the value, so a writer of a Priority takes quill's back.
+  beside the value, so a write setting a Priority takes quill's back.
 - Once set aside, a suggestion left nothing in the card's timeline (ruling plan#3236: quill
   keeps no copy).
 """
@@ -166,8 +166,12 @@ def take_back(suggestions: Suggestions, card: BareCard) -> Pending | None:
     :meth:`Suggestions.withdraw`): the one taken back, None when none was pending.  For a write
     that decides the card's Priority, which GitHub's API leaves the suggestion pending beside
     (measured 2026-11-10 on plan#3178), so a later Accept would overwrite it: ``quill
-    priority``'s set or clear, and a question's conversion into its ruling, which holds none
-    (ruling plan#2507).  ``suggestions`` is the tracker's, the tests' fake among them."""
+    priority``'s set, a filing finished over a card a person gave a Priority while it was
+    still being filed (``_filing._suggest``), and a question's conversion into its ruling,
+    which holds none (ruling plan#2507).  Never for a clear, which decides nothing: the card
+    holds no Priority after it, the state the suggestion waits in, and the reason, of which
+    quill keeps no copy (ruling plan#3236), would be lost.  ``suggestions`` is the tracker's,
+    the tests' fake among them."""
     if (pending := suggestions.pending(card)) is not None:
         suggestions.withdraw(card, pending)
     return pending

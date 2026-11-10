@@ -3,7 +3,8 @@ suggests and its reason (rulings plan#2800, plan#3224, plan#3236): ``quill file`
 ``--suggest`` and ``--why`` of them, refuses one on any other card (rulings plan#3226,
 plan#3229), and writes it as GitHub's own pending suggestion on the card's Priority before the
 mark comes off, the Priority itself left blank; a run finishing a filing cut short writes it
-only where quill's suggestion is not already pending as stated (R-BAL186).  The fake tracker
+only where quill's suggestion is not already pending as stated (R-BAL186), and none on a card a
+person gave a Priority meanwhile, from beside which it takes quill's back.  The fake tracker
 holds the pending suggestions (``_fake.FakeSuggestions``); the writes themselves are graded
 against a recording in ``test__suggestion.py``.
 """
@@ -215,6 +216,24 @@ def test_a_filing_run_again_over_a_card_holding_a_priority_suggests_none(code, t
     assert not tracker.suggestions.held
     assert ("  no suggested Priority: it holds the Priority 'Medium' already\n"
             in capsys.readouterr().out)
+
+
+def test_a_filing_run_again_takes_back_its_suggestion_from_beside_a_priority(code, tmp_path,
+                                                                            capsys):
+    """An earlier run put the suggestion, and a person then set a Priority through the API,
+    which leaves it pending (measured 2026-11-10 on plan#3178; review of plan#2798, finding 7):
+    the run again takes it back before the mark comes off, so a later Accept cannot overwrite
+    the person's Priority."""
+    tracker = FakeTracker()
+    _earlier(tracker, priority="Medium")
+    tracker.suggestions.held[1] = Pending(Suggestion("Low", _WHY), QUILL_ACTOR)
+    assert run(tracker, code, *_step(tmp_path, *SUGGESTED)) == 0
+    assert tracker.writes == [("withdraw", 1), ("board_add", 1), ("unmark", 1)]
+    assert not tracker.suggestions.held
+    assert tracker.cards_by_number[1].priority == "Medium"
+    assert ("  no suggested Priority: it holds the Priority 'Medium' already\n  took back "
+            "quill's suggested Priority 'Low', an earlier run's, pending beside it: its Priority "
+            "is decided\n") in capsys.readouterr().out
 
 
 def test_a_suggestion_that_failed_leaves_the_card_marked_and_is_finished_once(code, tmp_path,

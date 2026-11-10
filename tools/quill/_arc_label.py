@@ -9,7 +9,7 @@ sync``'s pass would at its next run (:mod:`_relabel`).  ``label`` adds or remove
 :data:`setup_tracker.CHOSEN_LABELS`: never an arc label, which displays the Arc, nor quill's
 filing mark.  ``priority`` and ``effort`` set a card's Priority or Effort to one of its
 options (``setup_tracker.ISSUE_FIELDS``), or clear it, one function writing either
-(:func:`cmd_field`), a Priority's write taking back quill's pending suggestion of one.  Each
+(:func:`cmd_field`), a Priority's set taking back quill's pending suggestion of one.  Each
 writes only what differs, each write printed as it lands, so the same command run again
 finishes one a failure cut short.  Each works on a ruling, whose title
 and text alone are the developer's words (R-BAL220), and on a closed card, and refuses a card
@@ -138,11 +138,13 @@ def cmd_field(args, tracker: Tracker, root: Path) -> int:
     on a step split into smaller steps (:func:`_split_refusal`), whose clear is still taken.
     Written only when it differs from what the card holds.
 
-    A Priority's set or clear takes back quill's pending suggestion of one first
+    A Priority's set takes back quill's pending suggestion of one first
     (:func:`_suggestion.take_back`, plan#2798): GitHub's API leaves it pending beside the value
     written (measured 2026-11-10 on plan#3178), where a later Accept would overwrite it.  First,
     so no failure leaves the two together; the same command run again takes back one that a
-    run cut short left, whether or not the value still differs."""
+    run cut short left, whether or not the value still differs.  A clear takes back none: it
+    decides nothing, and leaves the card holding no Priority, where its suggestion waits for
+    the developer, its reason with it, of which quill keeps no copy (ruling plan#3236)."""
     part = args.command
     field = FIELDS[part]
     card = _one(tracker, args.card)
@@ -156,7 +158,8 @@ def cmd_field(args, tracker: Tracker, root: Path) -> int:
     if part == EFFORT and value is not None and (why := _split_refusal(tracker, root, card)):
         raise Refused(why)
     held = getattr(card, part)
-    if part == PRIORITY and (pending := take_back(tracker.suggestions, card)) is not None:
+    if (part == PRIORITY and value is not None
+            and (pending := take_back(tracker.suggestions, card)) is not None):
         print(f"took back quill's suggested {field} {pending.suggestion.priority!r} on "
               f"{_label(card)}: its {field} is decided")
     if held == value:

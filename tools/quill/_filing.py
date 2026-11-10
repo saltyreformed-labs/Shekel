@@ -45,7 +45,14 @@ from tools.quill._command import (
 )
 from tools.quill._draft import Suggestion
 from tools.quill._exits import Refused
-from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS, SUGGESTED_KINDS, SUGGESTED_OPTIONS
+from tools.quill._fields import (
+    EFFORT,
+    EFFORT_FIELD,
+    FIELDS,
+    RUBRIC,
+    SUGGESTED_KINDS,
+    SUGGESTED_OPTIONS,
+)
 from tools.quill._state import (
     OWNED,
     at_and_above,
@@ -651,9 +658,9 @@ def file_parser(commands) -> None:
     for kind in SUGGESTED_KINDS:
         sub.choices[kind].add_argument(
             "--suggest", choices=SUGGESTED_OPTIONS,
-            help="the Priority the filing session suggests, which the developer accepts or sets "
-                 "aside (rulings plan#2800, plan#3224): a step at the top level and a question "
-                 "name one, a leaf none (ruling plan#3229)")
+            help=f"the Priority the filing session suggests by the rubric in {RUBRIC}, which "
+                 "the developer accepts or sets aside (rulings plan#2800, plan#3224): a step at "
+                 "the top level and a question name one, a leaf none (ruling plan#3229)")
         sub.choices[kind].add_argument(
             "--why", help=f"its reason, one sentence of at most {REASON_CAP} characters: what "
                           "goes wrong for the developer if the card is never built, or for a "

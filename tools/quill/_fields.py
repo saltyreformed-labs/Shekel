@@ -32,6 +32,9 @@ SUGGESTED_OPTIONS = tuple(option for option in PRIORITY_OPTIONS if option != ON_
 #: the Inbox's filter reads the one spelling: ``check`` imports ``setup_tracker``, which reads
 #: the board's views.
 SUGGESTED_KINDS = ("step", "question")
+#: The rubric a suggestion follows, as the developer's rulings leave it: its one home, a path
+#: from the repository's root, which ``quill file``'s help names to the filing session.
+RUBRIC = "docs/plans/priority.md"
 #: The issue field counting the sessions a card's work takes, a single select of
 #: ``setup_tracker.ISSUE_FIELDS``' options (ruling plan#2508).
 EFFORT_FIELD = "Effort"

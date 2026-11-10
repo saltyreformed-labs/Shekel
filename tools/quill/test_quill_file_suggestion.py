@@ -9,6 +9,8 @@ against a recording in ``test__suggestion.py``.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tools.quill import quill
@@ -25,7 +27,7 @@ from tools.quill._fake import (
     run,
     suggested,
 )
-from tools.quill._fields import SUGGESTED_OPTIONS
+from tools.quill._fields import RUBRIC, SUGGESTED_KINDS, SUGGESTED_OPTIONS
 from tools.quill._suggestion import Pending
 from tools.quill.setup_tracker import FILING, TASK
 
@@ -243,3 +245,15 @@ def test_a_suggestion_whose_answer_was_lost_is_never_written_twice(code, tmp_pat
     assert run(tracker, code, *args) == 0
     assert tracker.writes == [("board_add", 1), ("unmark", 1)]
     assert tracker.suggestions.held[1].suggestion == Suggestion("Low", _WHY)
+
+
+@pytest.mark.parametrize("kind", SUGGESTED_KINDS)
+def test_the_suggest_help_names_the_rubric_whose_home_is_in_the_tree(code, capsys, kind):
+    """plan#3249: a filing session reads where its suggestion's rubric is from the command it
+    files with, and that path is the rubric's one home in this tree, so the help cannot point
+    at a file moved or deleted."""
+    with pytest.raises(SystemExit) as stopped:
+        quill.main(["file", kind, "--help"], connect=FakeTracker, root=code)
+    assert stopped.value.code == 0
+    assert f"the rubric in {RUBRIC}," in " ".join(capsys.readouterr().out.split())
+    assert (Path(__file__).resolve().parents[2] / RUBRIC).is_file()

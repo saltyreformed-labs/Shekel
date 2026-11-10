@@ -67,7 +67,8 @@ plan#2221), and ``priority`` and ``effort`` set or clear a card's Priority and E
 (plan#2491, :mod:`_arc_label`); ``file step`` and ``file finding`` file a card holding its
 Effort, the filing session's estimate (ruling plan#2492, :mod:`_filing`), and ``file step`` at
 the top level and ``file question`` one holding no Priority but the one the filing session
-suggests and its reason, GitHub's pending suggestion (rulings plan#3224, plan#3233).
+suggests and its reason, GitHub's pending suggestion (rulings plan#3224, plan#3233), by the
+rubric in ``docs/plans/priority.md`` (``_fields.RUBRIC``).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 

@@ -63,20 +63,29 @@ class TestEachKindOfDifferenceIsReported:
     def test_a_column_drop_that_takes_a_check_with_it(self, app):
         """The finding's own case: the column AND the multi-column CHECK it silently took.
 
-        ``ck_state_child_deductions_agi_order`` reads ``agi_max`` and ``agi_min``; PostgreSQL
-        drops it with ``agi_max`` and says nothing, which is how such a migration built green.
+        ``ck_escrow_component_versions_tombstone_zero_amount`` reads ``is_removed`` and
+        ``annual_amount``; PostgreSQL drops it with ``is_removed`` and says nothing, which is
+        how such a migration built green.  (The finding's own table,
+        ``salary.state_child_deductions``, went at plan step salary:X-at-2.)
         """
         del app
         check = _constraint_definition(
-            "salary", "state_child_deductions", "ck_state_child_deductions_agi_order",
+            "budget", "escrow_component_versions",
+            "ck_escrow_component_versions_tombstone_zero_amount",
         )
-        _db.session.execute(text("ALTER TABLE salary.state_child_deductions DROP COLUMN agi_max"))
+        _db.session.execute(text(
+            "ALTER TABLE budget.escrow_component_versions DROP COLUMN is_removed"
+        ))
 
         assert _drift() == (
-            Drift("column", "salary.state_child_deductions.agi_max", None, "numeric(12,2)"),
+            Drift(
+                "column", "budget.escrow_component_versions.is_removed", None,
+                "boolean NOT NULL DEFAULT false",
+            ),
             Drift(
                 "constraint",
-                "salary.state_child_deductions.ck_state_child_deductions_agi_order",
+                "budget.escrow_component_versions."
+                "ck_escrow_component_versions_tombstone_zero_amount",
                 None, check,
             ),
         )

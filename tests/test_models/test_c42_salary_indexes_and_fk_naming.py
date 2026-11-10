@@ -70,6 +70,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import text
 
+from tests._rewind_tax_tables import rewind_the_per_user_tax_tables
 from tests._test_helpers import rewind_paycheck_lines_rename
 
 
@@ -95,8 +96,14 @@ def _c42_schema(app, db):
     Nothing is replayed: the ``db`` fixture re-clones the per-worker
     database for every test, and no case here reads a line through the
     models.
+
+    One more index, ``idx_tax_brackets_bracket_set``, is on a table plan step
+    salary:X-at-2 dropped, so its downgrade runs first, newest first
+    (:func:`~tests._rewind_tax_tables.rewind_the_per_user_tax_tables`, ruling
+    plan#3235).
     """
     with app.app_context():
+        rewind_the_per_user_tax_tables(db.session)
         rewind_paycheck_lines_rename(db.session)
 
 

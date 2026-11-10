@@ -35,12 +35,6 @@ from app.models.category import Category
 from app.models.pay_period import PayPeriod
 from app.models.pay_schedule import PaySchedule
 from app.models.scenario import Scenario
-from app.models.tax_config import (
-    FicaConfig,
-    StateChildDeduction,
-    StateTaxConfig,
-    TaxBracketSet,
-)
 from app.models.user import User, UserSettings
 from app.services import pay_schedule_service
 from app.services.pay_rhythm import FixedDays
@@ -552,16 +546,6 @@ class TestSeedUserProvisioning:
                 .filter_by(user_id=user.id).count()
                 == len(DEFAULT_CATEGORIES)
             )
-
-            # No tax rows: registration copies no law (plan step
-            # salary:X-at-1, ruling R-SAL74).
-            for table in (
-                TaxBracketSet, FicaConfig, StateTaxConfig, StateChildDeduction,
-            ):
-                assert (
-                    db.session.query(table).filter_by(user_id=user.id).count()
-                    == 0
-                ), table.__tablename__
 
     def test_seed_rerun_is_idempotent_skip(self, app, db, monkeypatch, capsys):
         """A second run returns the existing user and creates nothing.

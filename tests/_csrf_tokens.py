@@ -5,9 +5,15 @@ carries one in its ``csrf-token`` meta tag and one in each form's hidden
 ``csrf_token`` input.  Two renders that should be identical therefore differ
 whenever they fall in different seconds, whatever the code does: the
 trusted-device 404 pair failed two merge-queue runs that way on 2026-11-10
-(finding plan#3244, the tokens signed at 15:11:09 and 15:11:10).  A test that
-compares renders blanks the tokens first, through this one helper, so the
-rule has one spelling.
+(finding plan#3244: run 42835256639 signed its two tokens at 14:38:15 and
+14:38:16, run 42840496116 at 15:11:09 and 15:11:10).  Every suite test that
+compares renders blanks the tokens through this one helper, so the rule has
+one spelling there.
+
+``tests/manual/verify_liability_screens.py`` keeps a fixed placeholder of its
+own, and that is deliberate: it saves bodies that ``diff -r`` compares across
+commits, so a run before a switch would differ from one after it on every
+token line.
 """
 
 import re

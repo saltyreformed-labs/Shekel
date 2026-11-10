@@ -29,6 +29,7 @@ from app.models.ref import (
     TransactionType,
 )
 from app.utils.dates import display_today
+from tests._csrf_tokens import without_csrf_tokens
 from tests._test_helpers import (
     freeze_today, make_every_period_rule, make_recurring_raise, start_test_pay_list,
 )
@@ -3111,10 +3112,9 @@ class TestTheRailProbesARaisesEndYear:
         assert probed.headers.get(RETARGET_HEADER) == "#assumptions-region"
         assert RETARGET_HEADER not in saved.headers
 
-        def without_tokens(html):
-            return re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token"', html)
-
-        assert without_tokens(probed.data.decode()) == without_tokens(saved.data.decode())
+        assert without_csrf_tokens(probed.data.decode()) == without_csrf_tokens(
+            saved.data.decode(),
+        )
         assert f"it takes effect in {effective}." in probed.data.decode()
 
 

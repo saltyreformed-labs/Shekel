@@ -91,6 +91,7 @@ QUERY_SITES = (
     ),
 )
 
+
 @pytest.fixture()
 def world(app, seed_user, seed_periods_today):
     """Seed the rows each site needs before its integer is read.

@@ -409,8 +409,8 @@ def _calendar_value(ctx):
     The calendar service projects via the seam's
     :func:`app.services.balance_at.cash_balance_at` at the calendar month-end --
     the same fold read at one date (``balance_as_of_date``, the producer it
-    called before plan step X-c2b2, is deleted).  The fixture makes
-    ``anchor_period.end_date`` the last day of its calendar month, so
+    called before plan step X-c2b2, is deleted).  The fixture makes the
+    anchor period's last covered day the last day of its calendar month, so
     the C9-3 boundary invariant guarantees the calendar's
     ``projected_end_balance`` equals the resolver's anchor-period
     balance for the same data.
@@ -1073,8 +1073,8 @@ def _property_detail_value(ctx):
     """Read the property-detail home-equity market value (the anchor balance).
 
     The service-level equivalent of ``GET /accounts/<id>/property``:
-    ``resolve_home_equity(...).market_value`` is the property's
-    ``current_anchor_balance``; with no secured loans its ``total_debt`` is
+    ``resolve_home_equity(...).market_value`` is the property's latest
+    assertion; with no secured loans its ``total_debt`` is
     zero, so market value alone is the cross-page value.
     """
     return home_equity_service.resolve_home_equity(
@@ -1483,8 +1483,8 @@ class TestPropertyCrossPageEquality:
     Property is worth more than the number last typed into it from the day after
     that number was typed.  The cockpit tile and the net-worth trend both read
     the modelled map and must agree to the cent.  The property DETAIL page still
-    reads ``Account.current_anchor_balance`` -- the cache column -- which is
-    finding **N-83**, recorded and scheduled for its own commit alongside plan
+    reads the latest assertion (the cache column until plan step X-f1c3a), which
+    is finding **N-83**, recorded and scheduled for its own commit alongside plan
     step X-e rather than fixed inside a money-moving cutover.
 
     That gap is asserted EXPLICITLY below rather than papered over: it is the
@@ -1502,7 +1502,7 @@ class TestPropertyCrossPageEquality:
         three surfaces, each of which reaches it by a different path (the
         cockpit's projection service, the home-equity producer, the net-worth
         trend).  It is asserted strictly above the asserted V, which is what
-        would fail if any surface fell back to the cache column.
+        would fail if any surface fell back to the asserted value.
         """
         with app.app_context():
             ctx = cross_page_property_ctx
@@ -1520,7 +1520,7 @@ class TestPropertyCrossPageEquality:
                  if k != "property_detail"},
                 expected, "property kind",
             )
-            # The property detail page is still on the cache column (N-83).
+            # The property detail page still reads the asserted value (N-83).
             assert surface_values["property_detail"] == ctx["V"]
             assert surface_values["property_detail"] < expected
 
@@ -1675,8 +1675,8 @@ class TestSecuredHomeEquityEquality:
         net.
 
         **The property leg is still the ASSERTED PV** (finding N-83): the equity
-        producer reads ``Account.current_anchor_balance``, where the cockpit tile
-        beside it reads the modelled map that ruling R-Y moved.  The gap is
+        producer reads the latest assertion (``cash_ledger.resolve_anchor``), where
+        the cockpit tile beside it reads the modelled map ruling R-Y moved.  The gap is
         asserted explicitly so it cannot drift, and it is N-83's own commit that
         closes it.  The DEBT leg is untouched and still pins MC exactly -- a
         loan's balance is its schedule, which no part of this step moves, and
@@ -1716,7 +1716,7 @@ class TestSecuredHomeEquityEquality:
                 date.today(),
             ))
 
-            # Property leg: the equity producer still reads the cache column,
+            # Property leg: the equity producer reads the latest assertion,
             # so it pins the ASSERTED PV, while the cockpit tile beside it now
             # reads the modelled map (ruling R-Y).  Finding N-83 owns the gap;
             # both halves are asserted so neither can drift and so N-83's own
@@ -1738,7 +1738,7 @@ class TestSecuredHomeEquityEquality:
                 f"savings_tile={mortgage_tile!r}, "
                 f"loan_detail={loan_detail!r}, MC={mc!r}"
             )
-            # Equity == PV - MC on the equity producer's own (cache-column)
+            # Equity == PV - MC on the equity producer's own (asserted-value)
             # basis, and the TREND nets the modelled value against the same
             # debt -- so the two differ by exactly the N-83 gap measured above,
             # never by anything else.  Asserting the difference rather than the
@@ -1792,7 +1792,7 @@ class TestPerKindSeamInjectionLock:
     the identical oracle the sibling positive tests use -- so this control can
     never again drift from the figure those tests assert.  And each case
     carries the surfaces its positive test EXCLUDES: the property kind's
-    ``property_detail`` still reads the cache column (finding N-83), so
+    ``property_detail`` still reads the asserted value (finding N-83), so
     including it would leave the unpatched set non-uniform for a reason that
     has nothing to do with the injection.
 

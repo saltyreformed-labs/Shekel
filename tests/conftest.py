@@ -2329,10 +2329,10 @@ def seed_cross_page_account(app, db, seed_user):
     The realised data shape is invariant across cases:
 
       * The user's existing seed_user bootstrap pay period is removed and
-        replaced with 24 calendar-monthly periods spanning
+        replaced with 36 calendar-monthly periods spanning
         ``[today.year - 1, today.year + 1]``.  Monthly (not biweekly)
-        periods are chosen deliberately so the anchor period's
-        ``end_date`` IS a calendar month-end -- the C9-3 boundary
+        periods are chosen deliberately so the anchor period's last
+        covered day IS a calendar month-end -- the C9-3 boundary
         invariant of the seam's :func:`app.services.balance_at.cash_balance_at`
         then guarantees the calendar surface's projected month-end balance
         equals the anchor-period balance for the same data.
@@ -2346,9 +2346,9 @@ def seed_cross_page_account(app, db, seed_user):
         pay-calendar plan steps C2-f2b and C2-f3a deleted them; the
         alignment is what matters and it is unchanged.
       * The account anchor is overridden -- via a fresh
-        ``AccountAnchorHistory`` row + cache-column update, latest-wins
-        per E-19 -- to the case's ``anchor_balance``.  ``seed_user``'s
-        factory-default $1,000 anchor is irrelevant here.
+        ``AccountAnchorHistory`` row, the governing one per E-19 (no cache
+        beside it since ruling R-EH) -- to the case's ``anchor_balance``.
+        ``seed_user``'s factory-default $1,000 anchor is irrelevant here.
       * A single Projected envelope expense in the anchor period, the
         engine's own row of a definition whose stated price is
         ``expense_amount`` (plan step balance:X-cf), and the supplied entries
@@ -2396,34 +2396,32 @@ def seed_cross_page_account(app, db, seed_user):
         scenario = seed_user["scenario"]
 
         # Build the calendar-monthly period grid and locate the anchor
-        # month containing today via the shared period builder (which also
-        # documents why the seed_user bootstrap is deliberately kept).
+        # month containing today via the shared period builder, whose reset
+        # retires the seed_user bootstrap period.
         all_periods, anchor_period = _build_cross_page_calendar_periods(
             db, user,
         )
 
-        # Override the anchor balance and matching history row.  The
+        # Override the anchor balance with a newer history row.  The
         # ``seed_user`` factory already wrote an origination history
-        # row at $1,000 against the bootstrap period; appending a
-        # newer row makes ``resolve_anchor`` (latest-wins by
-        # ``created_at``) return the case's balance instead.  The
-        # cache columns are updated in the same flush so the
-        # resolver's cache-reconciliation path stays quiet (cache ==
-        # latest event), which keeps the test log free of spurious
-        # ``EVT_ANCHOR_CACHE_RECONCILED`` entries.
+        # row at $1,000 on the bootstrap period's first day; appending one
+        # observed on the anchor period's first day makes
+        # ``resolve_anchor`` (which orders on ``(observed_on, created_at,
+        # id)``) return the case's balance instead.  *It updated the
+        # anchor cache columns in the same flush too, so the resolver's
+        # cache-reconciliation log stayed quiet, until ruling R-EH
+        # deleted the columns and that log.*
         #
         # Re-fetch ``account`` against the live session because the
         # earlier ``db.session.commit()`` (after the new period
         # inserts) expires every object loaded in this session
-        # (``expires_on_commit=True``).  Setting attributes on an
-        # expired instance whose load fixture lives upstream in
-        # ``seed_user`` does not reliably re-mark the row dirty in
-        # every SQLAlchemy ORM mode -- the symptom is a silent
-        # ``EVT_ANCHOR_CACHE_RECONCILED`` log entry on every surface
-        # read because the cache column did not actually move.
-        # Refetching by primary key gives us a known-attached
-        # instance whose attribute assignments are guaranteed to
-        # mark the row dirty for the next flush.
+        # (``expires_on_commit=True``).  *The refetch was for the cache
+        # write: setting attributes on an expired instance did not
+        # reliably re-mark the row dirty, and the cache column did not
+        # move.*  Nothing below sets an attribute on the account now --
+        # the open and the override read its id and add rows of their
+        # own -- so the refetch hands them an attached instance and
+        # changes nothing.
         account = db.session.get(Account, seed_user["account"].id)
         open_books_before_the_first_assertion(db.session, account)
         override_anchor(
@@ -2834,8 +2832,8 @@ def cross_page_investment_past_anchor_ctx(db, seed_user):
 
     # Anchor the investment 6 monthly periods before today's period so the
     # model-from-anchor map compounds it forward across that gap.  The grid
-    # puts today's period well above index 6 (bootstrap at 0, then 12 prior
-    # monthly periods before today's month), so ``anchor_pos - 6`` is always a
+    # puts today's period at index 12 or above (January of last year at 0,
+    # one period a month after it), so ``anchor_pos - 6`` is always a
     # real past period.
     anchor_pos = next(
         i for i, p in enumerate(all_periods) if p.id == anchor_period.id
@@ -2875,10 +2873,10 @@ def cross_page_secured_ctx(db, seed_user):
     secured debt (MC) is the equity, on the equity producer's own basis.
 
     **Since plan step X-g2b the /savings tile reads the MODELLED property value
-    while that producer still reads the ``current_anchor_balance`` cache
-    column** (finding N-83, scheduled for its own commit), so the consuming test
-    asserts the two differ by exactly that gap rather than matching.  Returns
-    PV, MC, and both account handles plus the standard period keys.
+    while that producer reads the latest ASSERTION** (finding N-83; it read the
+    ``current_anchor_balance`` cache, the same figure, until plan step X-f1c3a),
+    so the consuming test asserts the two differ by exactly that gap rather
+    than matching.  Returns PV, MC, both account handles and the period keys.
     """
     # Pylint: ``import-outside-toplevel`` -- Account / LoanParams are loaded
     # lazily, the Account-class convention this conftest follows (no model

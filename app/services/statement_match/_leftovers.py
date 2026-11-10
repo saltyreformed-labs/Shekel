@@ -106,13 +106,29 @@ from ._section import MerchantSection, merchant_section
 if TYPE_CHECKING:  # pragma: no cover -- the edge back would be a cycle
     # :mod:`._verdict` imports THIS module, so the annotation is a forward
     # reference and the import is type-checking only.  The direction is
-    # right: a line is built before the pass that rules on it exists.
+    # right: a line is built before the pass that rules on it exists.  The
+    # two safeguard values are annotations for the same reason: they are
+    # set by that pass, after the line exists.
+    from ._already_held import ArrivalsAlreadyHeld, SpendingAlreadyHeld
     from ._verdict import RuleVerdict
 
 
 @dataclass(frozen=True)
-class CreatableLine:
+class CreatableLine:  # pylint: disable=too-many-instance-attributes
     """One bank line the app has no row for, in EITHER direction, and where it could go.
+
+    Pylint: ``too-many-instance-attributes`` (8/7) -- **eight because the
+    card reads eight disjoint facts about the line**, three of which the PASS
+    sets after the line is built (:attr:`verdict`, :attr:`warning`,
+    :attr:`already_held`), and the value is the seam those three cross.  The
+    eighth is :attr:`already_held`, the double-count safeguard ruling
+    **bank_import:R-BI19** gives an outflow beside the one an inflow had, and
+    it rides HERE rather than being re-derived by the card because the card
+    and ruling **R-GH**'s automatic door must read ONE derivation of it
+    (finding **N-359**'s rule).  Folding it into :attr:`warning` would print
+    a sentence where the card names rows; folding :attr:`verdict` into
+    :attr:`warning` is what :class:`~._reads.ReviewSet`'s own disable already
+    refuses.
 
     Plan step ``bank_import:X-f6a-3b``, ruling **R-FS**'s third shape.  These
     are the lines the matcher can never explain, because the app records a
@@ -172,6 +188,18 @@ class CreatableLine:
             and :attr:`RecordableInflow.withheld` both exist to refuse.
             **A WIDER set than** :attr:`verdict`: a line no rule reaches can
             still be one the pass never finished looking at.
+        already_held: What the books may already hold this line as, or
+            ``None``: for an outflow the rows named for its merchant or
+            inside its rule's destination
+            (:class:`~._already_held.SpendingAlreadyHeld`, ruling
+            **bank_import:R-BI19**), for a refund the arriving rows of its
+            period (:class:`~._already_held.ArrivalsAlreadyHeld`, ruling
+            **R-II**).  Set by :func:`~._verdict.ruled` from the ONE map the
+            pass derives, so the rows the card names and the sentence the
+            automatic door withholds on come from one derivation.  **It is
+            set whether or not a rule reaches the line**: the screen's
+            positive signal -- *your records already hold this* -- is owed
+            to a bill no rule names just as much (finding **N-381**).
     """
 
     line: BankLine
@@ -181,6 +209,7 @@ class CreatableLine:
     verdict: "RuleVerdict | None" = None
     warning: "str | None" = None
     withheld: "str | None" = None
+    already_held: "ArrivalsAlreadyHeld | SpendingAlreadyHeld | None" = None
 
 
 @dataclass(frozen=True)

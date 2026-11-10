@@ -115,7 +115,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from ._already_held import ArrivalsAlreadyHeld
+from ._already_held import ArrivalsAlreadyHeld, SpendingAlreadyHeld
 from ._creations import PurchaseCreation
 from ._gaps import search_gap
 from ._leftovers import CreatableLine
@@ -303,7 +303,7 @@ def ruled(
     proposals: "tuple[MatchProposal, ...]",
     declined_lines: "dict[int, str]",
     bounds,
-    already_held: "dict[int, ArrivalsAlreadyHeld]",
+    already_held: "dict[int, ArrivalsAlreadyHeld | SpendingAlreadyHeld]",
 ) -> "tuple[CreatableLine, ...]":
     """Return this pass's creatable lines, each carrying what it is owed.
 
@@ -323,20 +323,29 @@ def ruled(
         bounds: What this pass did not look at
             (:class:`~._gaps.ReviewBounds`), read for the two limits that
             belong to the PASS rather than to any one line.
-        already_held: ``{line_id: ArrivalsAlreadyHeld}`` for the INFLOW lines
-            whose period already holds money ARRIVING that no bank line
-            explains
-            (:func:`~._reads.arrivals_already_held`), computed by the caller
-            because it holds the rows.  **Empty for every outflow**, which is
-            what makes the arm below a no-op on the outflow side rather than a
-            second rule about it.
+        already_held: What the books may already hold each line as, by line
+            id, computed by the caller because it holds the rows
+            (:func:`~._reads._already_held_by_line`): for an INFLOW the
+            arriving rows of its period
+            (:class:`~._already_held.ArrivalsAlreadyHeld`), for an OUTFLOW
+            the rows named for its merchant or inside its rule's destination
+            (:class:`~._already_held.SpendingAlreadyHeld`, ruling
+            **bank_import:R-BI19**).  *It was empty for every outflow until
+            plan step ``bank_import:X-f6b-2``*, which is finding **N-381**:
+            a hand-logged purchase at another amount was invisible to every
+            guard on this door, and a rule filed the swipe a second time.
+            Both values expose the same clause, so the arm below reads one.
 
     Returns:
         The same lines, with :attr:`~._leftovers.CreatableLine.verdict` set on
-        every line a stated rule names a destination for, and
+        every line a stated rule names a destination for,
         :attr:`~._leftovers.CreatableLine.warning` set on every line this pass
         has something to say about -- a WIDER set, because a line no rule
-        reaches can still be one the pass never finished looking at.
+        reaches can still be one the pass never finished looking at -- and
+        :attr:`~._leftovers.CreatableLine.already_held` set on every line the
+        books may already hold, rule or no rule: the card names those rows
+        as its positive signal, and a bill nobody stated a rule for is the
+        line that signal was measured missing on (finding **N-381**).
 
         **A rule that names no container reaches nothing**, and the three
         states that produce one are not this pass withholding anything: the
@@ -358,19 +367,23 @@ def ruled(
             item.line, declined_lines,
             bounds.crowded_days, bounds.unpriceable_count,
         )
+        held = already_held.get(item.line.line_id)
         if creation is None:
             # No rule reaches it, so there is no verdict -- but the pass may
             # still have failed to LOOK, which is the line's own fact and not
-            # the rule's, and the screen owes it either way.
+            # the rule's, and the screen owes it either way.  What the books
+            # may already hold is the line's own fact too, and it rides on
+            # the line for the card to NAME rather than being folded into
+            # the warning: the rows are the signal (ruling **R-BI19**).
             lines.append(replace(
                 item, warning=None if gap is None else look_first(gap),
+                already_held=held,
             ))
             continue
         # **The gap is asked FIRST**, and the order is the one the receipt
         # reads in: a line the pass never finished looking at has not been
         # shown to collide with anything, so naming the collision first would
         # report a conclusion this pass did not reach.
-        held = already_held.get(item.line.line_id)
         if gap is not None:
             withheld, advice = gap, _LOOK_FIRST
         elif creation.transaction_id in proposed:
@@ -386,11 +399,20 @@ def ruled(
             # not this one; their fail sets are not nested (the gap reaches
             # ACROSS periods by ``DAY_WINDOW``, this tests the row's OWN span),
             # so neither substitutes for the other.
+            #
+            # **And asked of every OUTFLOW since plan step
+            # ``bank_import:X-f6b-2``** (ruling **R-BI19**): a purchase the
+            # owner logged by hand at another amount, or a bill priced at
+            # another figure, is a row the near tier's figure bound never
+            # admits and never reports, so the gap cannot see it and the
+            # proposed-destination test does not look for it.  Same arm, same
+            # advice: the value says which rows, and the person decides.
             withheld, advice = held.why_it_could_double_count, CHECK_FIRST
         else:
             withheld, advice = None, None
         lines.append(replace(
             item,
+            already_held=held,
             verdict=RuleVerdict(creation=creation, withheld=withheld),
             warning=(
                 None if withheld is None

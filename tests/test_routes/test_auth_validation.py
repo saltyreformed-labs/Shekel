@@ -26,6 +26,7 @@ from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.services import mfa_service
 from app.services.mfa_service import TotpVerificationResult
+from app.utils.field_encryption import encrypt_secret
 from tests._test_helpers import register_form_data
 
 
@@ -274,7 +275,7 @@ class TestMfaVerifySchemaWiring:
         mfa_config = MfaConfig(
             user_id=user_id,
             is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret(secret),
+            totp_secret_encrypted=encrypt_secret(secret),
             backup_codes=mfa_service.hash_backup_codes(known_codes),
         )
         db.session.add(mfa_config)
@@ -406,7 +407,7 @@ class TestMfaDisableSchemaWiring:
         mfa_config = MfaConfig(
             user_id=user_id,
             is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret(secret),
+            totp_secret_encrypted=encrypt_secret(secret),
             backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"]),
         )
         db.session.add(mfa_config)

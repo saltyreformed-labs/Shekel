@@ -305,9 +305,24 @@ _REF_TABLE_SEEDS = (
     # stopped offering it altogether.  Migration ``a1f4c7e0b839`` updates the
     # row an existing database already carries, because this seeder INSERTS
     # missing rows and leaves present ones alone.
+    # ``simplefin`` is the FEED source of plan step ``bank_import:X-f6b-2``
+    # (ruling **R-BI12**), seeded here and inline-seeded by migration
+    # ``6efa1fb46af8`` (the same dual seed; that seed is ``ON CONFLICT DO
+    # NOTHING`` because under ``FLASK_ENV=development`` this reseed runs
+    # BEFORE Alembic).  Its label follows the rule above -- it names the
+    # format, Bridge's v2 JSON feed, not a bank -- and the upload form never
+    # renders it: ``available_sources()`` intersects these rows with the
+    # upload-parser registry, a feed's lines arrive by the sync door, and
+    # the sync leaf owes that registry the file-source / feed-source
+    # distinction before the feed's reader is registered anywhere.  The
+    # column is NOT NULL, so the row carries a label whether or not a
+    # surface renders it yet; none does at this commit (the imports table
+    # shows ``file_name``, and a sync's name is a label naming its window).
     ("StatementSource", [
         {"name": "secu_checking_csv",
          "display_name": "SECU checking -- CSV export"},
+        {"name": "simplefin",
+         "display_name": "SimpleFIN Bridge -- daily feed"},
     ]),
     # The settle DAY's discriminator (balance arc, plan step X-az).  HOW a
     # settled row's ``settled_on`` is known: ``observed`` is a day a bank

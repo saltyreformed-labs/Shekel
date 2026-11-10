@@ -15,6 +15,19 @@ an owner who chose the wrong Shekel account on a first import could never
 import that account's statements again, because nothing in ``app/`` deleted an
 ``account_external_identities`` row.
 
+**A pairing has one of two provenances since plan step ``bank_import:X-f6b-2``
+(ruling **R-BI26**), and only one of them is forgotten here.**  A pairing
+LEARNED from a file is the shape above.  A pairing DECLARED on the bank feed
+panel -- the owner saying which Bridge account is which account here, before
+any import exists -- carries the feed's id, and its life is the FEED's: the
+cascade on ``fk_account_external_identities_feed_owner`` ends it with the
+disconnect, and :func:`forget_identity_if_last` leaves it alone, because the
+imports a feed records did not teach it.  At this commit the schema and this
+module's rule exist and nothing declares a row yet: the claim door and the
+mapping form are the next commit of this leaf, and they write through this
+module's one writer, :func:`record_identity`, which takes the feed as a
+parameter so the row's provenance is written by the door that knows it.
+
 Services-boundary discipline: plain data in, no Flask import.  Nothing here
 commits.
 """
@@ -139,27 +152,47 @@ def verify_identity(
 
 def record_identity(
     account_id: int, user_id: int, source_id: int, external_account_id: str,
-) -> None:
-    """Record what *source_id* calls *account_id*, on a first import.
+    *, feed_id: "int | None" = None,
+) -> AccountExternalIdentity:
+    """Record what *source_id* calls *account_id*.
+
+    One row shape for two provenances (ruling **R-BI26**): a first import
+    records a pairing it LEARNED from the file, with no feed -- the one
+    caller at this commit, ``_record.py`` -- and the bank feed's mapping
+    form (the next commit of this leaf) records one the owner DECLARED,
+    naming the feed it was declared under.  The row's provenance is written
+    here because this is the one writer, and a second
+    ``AccountExternalIdentity(...)`` in that door's service would be a second
+    spelling of the same insert.
 
     Args:
         account_id: The account the user chose.
         user_id: Its owner, held equal to the account's by
-            ``fk_account_external_identities_owner``.
-        source_id: The adapter the file was read by.
-        external_account_id: What the file calls its account.
+            ``fk_account_external_identities_owner`` -- and to the feed's by
+            ``fk_account_external_identities_feed_owner`` when one is named.
+        source_id: The adapter the file was read by, or the feed's source.
+        external_account_id: What the source calls its account.
+        feed_id: The owner's ``budget.bank_feeds`` row for a DECLARED
+            pairing; ``None`` (the default) for one learned from a file.
+
+    Returns:
+        The staged row, so a caller that reports the act can name it.
     """
-    db.session.add(AccountExternalIdentity(
+    identity = AccountExternalIdentity(
         account_id=account_id,
         user_id=user_id,
         source_id=source_id,
         external_account_id=external_account_id,
-    ))
+        feed_id=feed_id,
+    )
+    db.session.add(identity)
     log_event(
         _logger, logging.INFO, EVT_STATEMENT_IDENTITY_RECORDED, BUSINESS,
         "Recorded which account a statement source calls this account.",
         account_id=account_id, source_id=source_id,
+        declared=feed_id is not None,
     )
+    return identity
 
 
 def forget_identity_if_last(account_id: int, source_id: int) -> bool:
@@ -177,6 +210,17 @@ def forget_identity_if_last(account_id: int, source_id: int) -> bool:
     state nothing else in the app produces: a pairing with no import behind it.
     The guard is only weakened after the owner has deleted every import from
     that source, which is the moment they have said "forget what I imported".
+
+    **A DECLARED pairing is never forgotten here** (ruling **R-BI26**, which
+    amends R-GB to the learned rows).  The owner stated it on the feed panel
+    before any import existed, so the imports that later arrived under it did
+    not teach it and deleting them says nothing about it; its life is the
+    feed's, ended by the disconnect's cascade.  Without this arm, deleting
+    the last feed import of an account would silently unmap it, and the
+    nightly sync (a later leaf of X-f6b-2) would skip the account with no
+    screen saying why.  The arm reads the row's own ``feed_id``, not the
+    source: a predicate on the source would be a per-source constant stated
+    in a door.
 
     Args:
         account_id: The account whose imports were being undone.
@@ -196,7 +240,7 @@ def forget_identity_if_last(account_id: int, source_id: int) -> bool:
     if survivor is not None:
         return False
     identity = _recorded_for(account_id, source_id)
-    if identity is None:
+    if identity is None or identity.feed_id is not None:
         return False
     db.session.delete(identity)
     return True

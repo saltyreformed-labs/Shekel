@@ -371,11 +371,11 @@ services:
       SEED_USER_CADENCE_DAYS: ${SEED_USER_CADENCE_DAYS:-}
       SEED_USER_NUM_PERIODS: ${SEED_USER_NUM_PERIODS:-}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
-      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-}
-      # Retired TOTP keys for non-destructive rotation.  Empty in
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
+      # Retired field-encryption keys for non-destructive rotation.  Empty in
       # steady state; populated transiently during key rotation.
-      # See docs/runbook_secrets.md "Rotating TOTP_ENCRYPTION_KEY".
-      TOTP_ENCRYPTION_KEY_OLD: ${TOTP_ENCRYPTION_KEY_OLD:-}
+      # See docs/runbook_secrets.md "Rotating FIELD_ENCRYPTION_KEY".
+      FIELD_ENCRYPTION_KEY_OLD: ${FIELD_ENCRYPTION_KEY_OLD:-}
       # Public-registration toggle.  Default ``false`` in production
       # (audit finding F-053 / Commit C-34): a personal-finance app
       # intended for a known user set should not ship with an open

@@ -31,6 +31,7 @@ from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.routes.auth._helpers import _MFA_PENDING_MAX_AGE
 from app.services import auth_service, mfa_service
+from app.utils.field_encryption import encrypt_secret
 from app.utils.log_events import (
     EVT_ACCOUNT_LOCKED,
     EVT_LOGIN_FAILED,
@@ -66,7 +67,7 @@ def _enable_mfa(user_id: int) -> str:
     db.session.add(MfaConfig(
         user_id=user_id,
         is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
+        totp_secret_encrypted=encrypt_secret(secret),
         backup_codes=mfa_service.hash_backup_codes([_BACKUP_CODE]),
         confirmed_at=datetime.now(timezone.utc),
     ))
@@ -238,19 +239,24 @@ class TestTheCodeFormCounts:
             assert b"Invalid verification code" in response.data
             assert _count(user_id) == 0
 
-    def test_a_failed_encryption_key_does_not_count(self, app, client, seed_user):
-        """The operator's key problem is not the person's guess."""
+    def test_a_failed_encryption_key_does_not_count(
+        self, app, client, seed_user, monkeypatch,
+    ):
+        """The operator's key problem is not the person's guess.
+
+        The key is removed for real, so every decrypt the door makes fails
+        as it would in production (the route's up-front one and the
+        verifier's), whichever module each reaches the cipher through.
+        """
         with app.app_context():
             user_id = seed_user["user"].id
             secret = _enable_mfa(user_id)
             _type_password(client)
 
-            with patch.object(
-                mfa_service, "decrypt_secret", side_effect=RuntimeError("no key"),
-            ):
-                response = client.post(
-                    "/mfa/verify", data={"totp_code": _wrong_code(secret)},
-                )
+            monkeypatch.delenv("FIELD_ENCRYPTION_KEY")
+            response = client.post(
+                "/mfa/verify", data={"totp_code": _wrong_code(secret)},
+            )
 
             assert response.status_code == 302
             assert _count(user_id) == 0

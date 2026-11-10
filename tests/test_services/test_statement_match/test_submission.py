@@ -13,15 +13,20 @@ fixture that hides which coordinate actually fired.  The door's own case
 (``test_accept``) proves the guard is REACHED; these prove it is COMPLETE.
 """
 
+from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 import pytest
 
 from app.services.statement_match import (
+    BankLine,
     CandidateRow,
+    ReviewedLine,
     ReviewedRow,
     RowKind,
     as_reviewed,
+    as_reviewed_line,
 )
 
 
@@ -205,3 +210,150 @@ class TestNeitherCoordinateSeesTheOthersWriters:
         )
 
         assert "Geico" in moved
+
+
+@dataclass(frozen=True)
+class _LockedLine:
+    """The three facts a locked ``BankStatementLine`` exposes to the day test.
+
+    Structurally what :meth:`ReviewedLine.disagrees_with` reads -- the model's
+    ``posted_on``, its sightings-derived ``transaction_on`` and its
+    ``description`` -- so these value cases need no database row.
+    """
+
+    posted_on: date
+    transaction_on: "date | None"
+    description: str = "POINT OF SALE DEBIT L340 (Food Lion)"
+
+
+def _line(**overrides):
+    """Return one offered bank line, varied one field at a time."""
+    fields = {
+        "line_id": 246,
+        "posted_on": date(2026, 6, 10),
+        "transaction_on": None,
+        "amount": Decimal("-54.12"),
+        "description": "POINT OF SALE DEBIT L340 (Food Lion)",
+        "merchant": "Food Lion",
+        "merchant_id": None,
+    }
+    fields.update(overrides)
+    return BankLine(**fields)
+
+
+class TestTheLineTokenIsOneFormatReadBothWays:
+    """Plan step ``bank_import:X-f6b-2``, ruling **bank_import:R-BI14**.
+
+    :class:`TestTheTokenIsOneFormatReadBothWays`'s twin for the LINE side of
+    a match: the day the screen showed the bank saying a line was made
+    travels back as one token, written by :attr:`ReviewedLine.token` and read
+    by :meth:`ReviewedLine.from_token`, and nothing else spells it.
+    """
+
+    def test_a_line_survives_the_round_trip(self):
+        """The one format, both directions."""
+        reviewed = as_reviewed_line(_line())
+
+        assert reviewed.token == "246:2026-06-10"
+        assert ReviewedLine.from_token(reviewed.token) == reviewed
+
+    def test_the_day_is_the_STATED_one_where_the_bank_states_it(self):
+        """``day_made``: the transaction day, else the posting day."""
+        stated = as_reviewed_line(_line(transaction_on=date(2026, 6, 8)))
+
+        assert stated.happened_on == date(2026, 6, 8)
+        assert as_reviewed_line(_line()).happened_on == date(2026, 6, 10)
+
+    def test_a_token_carrying_a_THIRD_field_is_refused_BY_NAME(self):
+        """The designed refusal, for the row token's own reason."""
+        with pytest.raises(ValueError, match="two fields"):
+            ReviewedLine.from_token("246:2026-06-10:9")
+
+    @pytest.mark.parametrize("raw", [
+        "246",
+        "246:2026-06-10:9",
+        "007:2026-06-10",
+        "0:2026-06-10",
+        "-5:2026-06-10",
+        " 246:2026-06-10",
+        "246:20260610",
+        "246:2026-6-10",
+        "246:2026-06-10T00:00:00",
+        "246:2026-W23-3",
+        "246:2026-02-30",
+        "246:2026-13-01",
+        "246:2026-06-10\n",
+        "246:",
+        ":2026-06-10",
+        "",
+    ])
+    def test_a_token_this_app_did_not_emit_raises_ValueError(self, raw):
+        """Total over every ``str``, because a form door has to be.
+
+        The day spellings ``date.fromisoformat`` ALSO reads (``20260610``,
+        the week date, the datetime) are refused by the anchored pattern
+        first, because no template of this app emits them; the calendar
+        impossibilities (``02-30``, month ``13``) pass the pattern and are
+        refused by the library, which is the ``ValueError`` the reader
+        documents.  A lax id is refused by the same reader every id on this
+        screen goes through.
+
+        Args:
+            raw: A token shape this application cannot have written.
+        """
+        with pytest.raises(ValueError):
+            ReviewedLine.from_token(raw)
+
+    def test_a_non_string_is_refused_rather_than_split(self):
+        """``bytes`` and ``None`` never reach ``str.split``."""
+        with pytest.raises(ValueError):
+            ReviewedLine.from_token(None)
+        with pytest.raises(ValueError):
+            ReviewedLine.from_token(b"246:2026-06-10")
+
+
+class TestARestatedDayIsSeenInEitherDirection:
+    """Finding **N-338**'s reconciliation, stated once and complete.
+
+    A re-import's sighting can state a transaction day where none was stated
+    (the reproduced case: the screen fell back to the posting day, the door
+    wrote the day a later import stated) or an EARLIER one than any sighting
+    before it (``transaction_on`` is the earliest any sighting states).  Both
+    are refused, and so is the direction the ruling did not reproduce,
+    because a day the owner did not review is unreviewed whichever way it
+    moved.
+    """
+
+    def test_a_day_stated_where_none_was_is_seen(self):
+        """Screen `2026-06-10` (the posting day), the bank now says `06-08`."""
+        reviewed = as_reviewed_line(_line())
+
+        moved = reviewed.disagrees_with(
+            _LockedLine(date(2026, 6, 10), date(2026, 6, 8)),
+        )
+
+        assert moved == (
+            'the bank has restated the day "POINT OF SALE DEBIT L340 (Food '
+            'Lion)" was made since you reviewed it -- it was shown as '
+            "2026-06-10 and the bank now states 2026-06-08"
+        )
+
+    def test_a_day_moved_LATER_is_seen_too(self):
+        """Fail closed in both directions."""
+        reviewed = as_reviewed_line(_line(transaction_on=date(2026, 6, 8)))
+
+        assert reviewed.disagrees_with(
+            _LockedLine(date(2026, 6, 10), date(2026, 6, 9)),
+        ) is not None
+
+    def test_an_unmoved_line_agrees(self):
+        """The control: the same day, stated or fallen back to, agrees."""
+        stated = as_reviewed_line(_line(transaction_on=date(2026, 6, 8)))
+        fallen_back = as_reviewed_line(_line())
+
+        assert stated.disagrees_with(
+            _LockedLine(date(2026, 6, 10), date(2026, 6, 8)),
+        ) is None
+        assert fallen_back.disagrees_with(
+            _LockedLine(date(2026, 6, 10), None),
+        ) is None

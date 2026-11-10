@@ -1,0 +1,211 @@
+{#
+  The bank FEED panel (plan step bank_import:X-f6b-2, leaf 3c; rulings
+  R-BI12, R-BI26, R-BI27).  ONE template for every state the panel has, so
+  the page's include and the four doors' HTMX answers render the same thing:
+
+    * no feed          -- the paste-a-setup-token form (hx-post -> claim);
+    * a feed           -- when it was claimed, what is mapped, the "Map
+                          accounts" press (hx-post -> the live listing) and
+                          Disconnect (a plain POST; it redirects);
+    * a feed + listing -- the mapping form: one row per Bridge account with a
+                          select of the owner's cash accounts (a plain POST;
+                          it redirects);
+    * any of those with panel_error (a refusal of the act just pressed) or
+      listing_error (why Bridge's list could not be fetched).
+
+  The card is the HTMX target of the two fragment doors (hx-target="#bank-feed-panel",
+  hx-swap="outerHTML"), so its id is load-bearing.  `account` is the page's
+  account: it rides in every form as `account_id` only to say which
+  statements page to answer on; the feed is the OWNER's.
+
+  Variables: account, feed (FeedState | None), listing (BridgeListing | None),
+  listing_error (str | None), panel_error (str | None), mappable (list[Account]).
+#}
+{% macro mapping_row(external_id, label, balance, current, mappable) %}
+{# One row of the mapping form.  `current` is the standing FeedMapping or
+   none.  The select offers every mappable account, and ALSO the standing
+   account when it is no longer mappable (archived since it was declared),
+   so an unrelated save does not silently clear it: the service treats a
+   choice that repeats what stands as no choice at all. #}
+<tr>
+  <td>
+    {{ label }}
+    <div class="text-muted small font-monospace">{{ external_id }}</div>
+    <input type="hidden" name="external_id" value="{{ external_id }}">
+  </td>
+  <td class="text-end text-nowrap">{{ balance }}</td>
+  <td>
+    <select class="form-select form-select-sm" name="target_account_id"
+            aria-label="Which account {{ label }} is">
+      <option value="" {% if current is none %}selected{% endif %}>Not mapped</option>
+      {% set offered = mappable | map(attribute='id') | list %}
+      {% if current is not none and current.account_id not in offered %}
+      <option value="{{ current.account_id }}" selected>{{ current.account_name }} (archived)</option>
+      {% endif %}
+      {% for option in mappable %}
+      <option value="{{ option.id }}"
+              {% if current is not none and current.account_id == option.id %}selected{% endif %}>
+        {{ option.name }}
+      </option>
+      {% endfor %}
+    </select>
+  </td>
+</tr>
+{% endmacro %}
+<div class="card" id="bank-feed-panel">
+  <div class="card-header"><i class="bi bi-cloud-download"></i> Bank feed</div>
+  <div class="card-body">
+    {% if panel_error %}
+    <div class="alert alert-danger" role="alert">{{ panel_error }}</div>
+    {% endif %}
+    {# Above the connected/not-connected fork: a listing press with no feed
+       is refused too, and its sentence must render on the panel it answers
+       with.  The retry hint is true only while a feed stands. #}
+    {% if listing_error %}
+    <div class="alert alert-warning" role="alert">
+      {{ listing_error }}{% if feed is not none %}  The feed is connected; press
+      <em>Map accounts</em> to ask Bridge again.{% endif %}
+    </div>
+    {% endif %}
+
+    {% if feed is none %}
+    {# ── Not connected: paste a setup token ────────────────────────── #}
+    <p class="small text-muted">
+      Connect SimpleFIN Bridge and Shekel fetches your bank's posted lines
+      overnight -- no export, no upload.  Bridge issues a <strong>setup
+      token</strong> per app; paste it here once.  Claiming it turns it into a
+      read-only access URL, stored encrypted, that you can revoke at Bridge any
+      time.
+    </p>
+    <form hx-post="{{ url_for('accounts.claim_bank_feed') }}"
+          hx-target="#bank-feed-panel" hx-swap="outerHTML"
+          hx-disabled-elt="find button">
+      <input type="hidden" name="account_id" value="{{ account.id }}">
+      <div class="mb-3">
+        <label for="setup_token" class="form-label">SimpleFIN setup token</label>
+        <textarea class="form-control font-monospace" id="setup_token"
+                  name="setup_token" rows="3" required
+                  autocomplete="off" spellcheck="false"></textarea>
+        <div class="form-text">
+          A setup token can be claimed once.  If a claim fails, make a new
+          token at Bridge rather than pasting the same one again.
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-plug"></i> Connect
+      </button>
+    </form>
+
+    {% else %}
+    {# ── Connected ──────────────────────────────────────────────────── #}
+    <p class="mb-2">
+      <span class="badge text-bg-success">Connected</span>
+      <span class="text-muted small">since {{ feed.claimed_at | local_datetime }}</span>
+    </p>
+
+    {% if listing is not none %}
+    {# ── The mapping form, from Bridge's live list (R-BI27) ─────────── #}
+    {% for notice in listing.notices %}
+    <div class="alert alert-info small" role="alert">Bridge says: {{ notice }}</div>
+    {% endfor %}
+    {% if listing.accounts %}
+    <form method="post" action="{{ url_for('accounts.map_bank_feed_accounts') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="account_id" value="{{ account.id }}">
+      <p class="small text-muted mb-2">
+        Say which account here each of Bridge's accounts is.  Only cash
+        accounts are offered; a Bridge account you leave unmapped is not
+        synced.
+      </p>
+      <table class="table table-sm align-middle mb-3">
+        <thead>
+          <tr>
+            <th scope="col">Bridge account</th>
+            <th scope="col" class="text-end">Balance</th>
+            <th scope="col">Is my</th>
+          </tr>
+        </thead>
+        <tbody>
+          {# One row per Bridge account Bridge listed, THEN one per standing
+             mapping Bridge no longer lists (a closed account, a re-linked
+             connection that re-issued ids), so one submission states the
+             whole mapping the owner can see and a stale declaration can be
+             kept or cleared here rather than only by disconnecting. #}
+          {% set listed = listing.accounts | map(attribute='external_id') | list %}
+          {% set stale = feed.mappings | rejectattr('external_id', 'in', listed) | list %}
+          {% for bridge in listing.accounts %}
+          {# Jinja's `first` raises on an empty sequence, so the standing
+             mapping is looked up as a list and read only when it has one. #}
+          {% set standing = feed.mappings | selectattr('external_id', 'equalto', bridge.external_id) | list %}
+          {% set current = standing[0] if standing else none %}
+          {{ mapping_row(bridge.external_id, bridge.name, bridge.currency ~ ' ' ~ ('%.2f' | format(bridge.balance)), current, mappable) }}
+          {% endfor %}
+          {% for mapping in stale %}
+          {{ mapping_row(mapping.external_id, 'No longer listed by Bridge', '--', mapping, mappable) }}
+          {% endfor %}
+        </tbody>
+      </table>
+      <button type="submit" class="btn btn-primary btn-sm">
+        <i class="bi bi-check2"></i> Save mapping
+      </button>
+    </form>
+    {% else %}
+    <p class="text-muted small">Bridge listed no accounts on this connection.</p>
+    {% endif %}
+
+    {% else %}
+    {# ── What is mapped, and the presses ────────────────────────────── #}
+    {% if feed.mappings %}
+    <table class="table table-sm mb-3">
+      <thead>
+        <tr>
+          <th scope="col">Bridge account</th>
+          <th scope="col">Is my</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for mapping in feed.mappings %}
+        <tr>
+          <td class="font-monospace small">{{ mapping.external_id }}</td>
+          <td>{{ mapping.account_name }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted small">
+      No Bridge account is mapped yet, so nothing is synced.  Press
+      <em>Map accounts</em> to see what Bridge lists.
+    </p>
+    {% endif %}
+    <form hx-post="{{ url_for('accounts.list_bank_feed_accounts') }}"
+          hx-target="#bank-feed-panel" hx-swap="outerHTML"
+          hx-disabled-elt="find button" class="d-inline">
+      <input type="hidden" name="account_id" value="{{ account.id }}">
+      <button type="submit" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-list-check"></i> Map accounts
+      </button>
+    </form>
+    {% endif %}
+
+    <hr>
+    {# `data-confirm`, not an inline handler: the CSP is script-src 'self'
+       with no 'unsafe-inline', and confirm.js intercepts a plain-POST
+       form's submit off the attribute, as for the delete-import form. #}
+    <form method="post" action="{{ url_for('accounts.disconnect_bank_feed') }}"
+          class="d-inline"
+          data-confirm="Disconnect the bank feed?  The account mappings declared under it go with it; the lines it recorded stay.  Revoke the token at Bridge as well.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="account_id" value="{{ account.id }}">
+      <button type="submit" class="btn btn-outline-danger btn-sm">
+        <i class="bi bi-plug"></i> Disconnect
+      </button>
+    </form>
+    <p class="text-muted small mt-2 mb-0">
+      Disconnecting deletes the stored access URL and the mappings declared
+      under it; what the feed already recorded stays.  Revoking the token at
+      Bridge is yours to do there.
+    </p>
+    {% endif %}
+  </div>
+</div>

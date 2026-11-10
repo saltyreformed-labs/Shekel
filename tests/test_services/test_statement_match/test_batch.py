@@ -1126,8 +1126,9 @@ def test_a_scope_serves_the_screen_and_the_doors_alike(app, db, seed_user):
             incomes=(),
             skips=(),
             matches=(MatchSubmission(
-                line_ids=frozenset(
-                    bank.line_id for bank in proposal.lines
+                lines=frozenset(
+                    statement_match.as_reviewed_line(bank)
+                    for bank in proposal.lines
                 ),
                 rows=frozenset(
                     statement_match.as_reviewed(row) for row in proposal.rows

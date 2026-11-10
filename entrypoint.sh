@@ -19,7 +19,8 @@ entrypoint_failed() {
     echo "Common causes:"
     echo "  - PostgreSQL is not ready or not reachable"
     echo "  - Missing or invalid values in .env (POSTGRES_PASSWORD,"
-    echo "    SECRET_KEY, APP_ROLE_PASSWORD, SHEKEL_VALKEY_PASSWORD)"
+    echo "    SECRET_KEY, APP_ROLE_PASSWORD, SHEKEL_VALKEY_PASSWORD,"
+    echo "    FIELD_ENCRYPTION_KEY)"
     echo "  - Database migration conflict"
     echo "  - Audit triggers absent or short of the expected count"
     echo ""
@@ -103,8 +104,8 @@ fi
 _load_secret SECRET_KEY secret_key
 _load_secret POSTGRES_PASSWORD postgres_password
 _load_secret APP_ROLE_PASSWORD app_role_password
-_load_secret TOTP_ENCRYPTION_KEY totp_encryption_key
-_load_secret TOTP_ENCRYPTION_KEY_OLD totp_encryption_key_old
+_load_secret FIELD_ENCRYPTION_KEY field_encryption_key
+_load_secret FIELD_ENCRYPTION_KEY_OLD field_encryption_key_old
 # The rate-limit store's password, from the file the valkey service's
 # deploy/valkey/start.sh reads first too, so the two read one source
 # (ruling plan#2633).  The app's configuration refuses to build without

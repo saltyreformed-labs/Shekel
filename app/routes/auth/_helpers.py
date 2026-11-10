@@ -422,7 +422,7 @@ def _verify_totp_with_replay_logging(mfa_config, code, user_id):
         cryptography.fernet.InvalidToken: If the encrypted secret
             cannot be decrypted under any current Fernet key.  Caller
             handles via the encryption-key-failure redirect.
-        RuntimeError: If ``TOTP_ENCRYPTION_KEY`` is unset.  Same
+        RuntimeError: If ``FIELD_ENCRYPTION_KEY`` is unset.  Same
             handling.
     """
     result = mfa_service.verify_totp_code(mfa_config, code)
@@ -456,7 +456,7 @@ def _totp_accepted_or_key_failure(mfa_config, totp_code, user_id):
     The shared shape of the two already-authenticated TOTP gates --
     step-up ``/reauth`` and ``/mfa/disable`` -- which verify through
     :func:`_verify_totp_with_replay_logging` and report a decrypt
-    failure (missing ``TOTP_ENCRYPTION_KEY``, ciphertext unreadable
+    failure (missing ``FIELD_ENCRYPTION_KEY``, ciphertext unreadable
     under any current Fernet) with the identical operator-actionable
     danger flash.  Only the failure *response* differs per route
     (re-render the reauth form vs redirect to security settings), so

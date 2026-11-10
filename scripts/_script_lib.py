@@ -77,7 +77,7 @@ def parse_confirm_args(
     """Parse the command line of a mandatory-``--confirm`` script.
 
     The shared argparse skeleton of the destructive one-shot scripts
-    (``rotate_sessions``, ``rotate_totp_key``): a script-specific
+    (``rotate_sessions``, ``rotate_field_key``): a script-specific
     description plus a single ``--confirm`` flag whose help text ends
     with the shared "Required" sentence.  ``--confirm`` is
     intentionally optional at the argparse level so the caller's
@@ -111,7 +111,7 @@ def confirm_gate(args: argparse.Namespace, script_name: str) -> int | None:
 
     Owns only the shared half of the scripts' exit-code contracts:
     "no ``--confirm`` means exit code 1 and an untouched database."
-    Success-path exit codes (e.g. ``rotate_totp_key``'s skipped-rows
+    Success-path exit codes (e.g. ``rotate_field_key``'s skipped-rows
     code 2) stay with each script's ``main``.
 
     Args:

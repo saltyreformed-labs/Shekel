@@ -32,7 +32,11 @@ against the edited class bodies immediately before the move, so the MOVE
 changed nothing and the schema change is the model's (rulings **R-BI16**,
 **R-BI17**).  *A first draft of this paragraph claimed all four were
 verbatim, measured against the working copy rather than the parent commit;
-named by adversarial review 2026-09-18.*
+named by adversarial review 2026-09-18.*  That paragraph describes the
+2026-09-18 move; ``account_external_identity_table_args`` has since gained
+one member, ``fk_account_external_identities_feed_owner`` (plan step
+``bank_import:X-f6b-2``, ruling **R-BI26**), and the comment beside it is
+its argument.
 
 The argument for each key, constraint and index stays WITH it, in the comments
 below.  The models that read these values:
@@ -78,6 +82,24 @@ account_external_identity_table_args = (
         ["account_id", "user_id"],
         ["budget.accounts.id", "budget.accounts.user_id"],
         name="fk_account_external_identities_owner",
+        ondelete="CASCADE",
+    ),
+    # A mapping DECLARED on the feed panel dies with the feed that declared
+    # it (plan step ``bank_import:X-f6b-2``, ruling **R-BI26**): ``feed_id``
+    # names the owner's ``budget.bank_feeds`` row and the CASCADE is what
+    # makes "a declared mapping with no feed behind it" unrepresentable,
+    # where a door rule would have left it to whichever delete remembered.
+    # A row LEARNED from a file carries NULL here, and MATCH SIMPLE (the
+    # default) is what lets it: a composite key is not checked while any of
+    # its columns is NULL.  The key is composite over ``user_id`` for the
+    # reason ``fk_account_external_identities_owner`` is: the feed's owner
+    # IS this row's owner by construction, so a mapping under another
+    # owner's feed cannot be written, and ``uq_bank_feeds_id_user`` is the
+    # superkey it targets.
+    db.ForeignKeyConstraint(
+        ["feed_id", "user_id"],
+        ["budget.bank_feeds.id", "budget.bank_feeds.user_id"],
+        name="fk_account_external_identities_feed_owner",
         ondelete="CASCADE",
     ),
     {"schema": "budget"},

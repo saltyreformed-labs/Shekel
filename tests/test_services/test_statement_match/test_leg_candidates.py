@@ -48,6 +48,7 @@ from app.services.statement_match import (
     CandidateRow,
     Candidates,
     MatchSubmission,
+    ReviewedLine,
     ReviewedRow,
     RowKind,
     accepted_register,
@@ -56,6 +57,7 @@ from app.services.statement_match import (
     matched_subjects,
 )
 from app.services.statement_match._acts import acts_of, named_rows
+from app.services.statement_match._offers import day_made
 from app.services.statement_match._candidates import (
     MatchedSubjects,
     unmatched_rows,
@@ -643,7 +645,9 @@ class TestAStaleFormIsRefused:
         scope = a_scope(seed_user)
         (leg,) = _of_transfer(scope.candidates.rows, transfer)
         submission = MatchSubmission(
-            line_ids=frozenset({line.id}),
+            lines=frozenset({
+                ReviewedLine(line_id=line.id, happened_on=day_made(line)),
+            }),
             rows=frozenset({as_reviewed(leg)}),
         )
         _settle(seed_user, transfer)
@@ -703,7 +707,10 @@ class TestAStaleFormIsRefused:
         with pytest.raises(ValidationError, match="no longer available"):
             statement_match.accept_match(
                 MatchSubmission(
-                    line_ids=frozenset({line.id}), rows=frozenset({forged}),
+                    lines=frozenset({
+                        ReviewedLine(line_id=line.id, happened_on=day_made(line)),
+                    }),
+                    rows=frozenset({forged}),
                 ),
                 scope,
             )

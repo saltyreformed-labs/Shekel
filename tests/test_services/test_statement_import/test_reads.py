@@ -39,6 +39,7 @@ from app.services.statement_import import (
     recent_lines,
     record_statement,
     recorded_span,
+    supported_sources,
 )
 # The two reads the delete confirmation shares with the act have no importer
 # outside the package, so exporting them from ``statement_import.__init__``
@@ -559,13 +560,24 @@ class TestTheOfferedSourcesAreTheUSABLEOnes:
         self, app, db,
     ):
         """A source with no label could not be rendered; one with no parser
-        would fail deeper in with a worse message."""
+        would fail deeper in with a worse message.
+
+        **The expected set changed at plan step ``bank_import:X-f6b-2``
+        (developer, 2026-09-20).**  It read "every enum member", which held
+        only while every member had a parser; the feed source ``simplefin``
+        is seeded ahead of its parser (the claim door needs the row, the sync
+        leaf writes the reader), which is the very case the intersection
+        exists for, so the set this pins is now the parser-backed members --
+        what the docstring above always said it graded.  That ``simplefin``
+        is seeded AND left out is pinned beside the schema in
+        ``tests/test_models/test_declared_mapping_schema.py``.
+        """
         offered = available_sources()
 
         assert offered
         assert all(option.label for option in offered)
         assert {option.value for option in offered} == {
-            member.value for member in StatementSourceEnum
+            member.value for member in supported_sources()
         }
 
     def test_the_label_comes_from_the_ref_table(self, app, db):

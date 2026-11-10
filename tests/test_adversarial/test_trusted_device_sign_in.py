@@ -32,6 +32,7 @@ from app.extensions import db
 from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig
 from app.services import known_device_service, mfa_service
+from app.utils.field_encryption import encrypt_secret
 from scripts.reset_mfa import reset_mfa
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
@@ -135,7 +136,7 @@ def _enrol_a_new_authenticator(user_id):
     """Turn two-factor back on for *user_id* under a fresh secret, committed."""
     config = db.session.query(MfaConfig).filter_by(user_id=user_id).one()
     config.is_enabled = True
-    config.totp_secret_encrypted = mfa_service.encrypt_secret(
+    config.totp_secret_encrypted = encrypt_secret(
         mfa_service.generate_totp_secret(),
     )
     config.confirmed_at = datetime.now(timezone.utc)

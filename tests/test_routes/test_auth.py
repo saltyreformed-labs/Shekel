@@ -20,9 +20,9 @@ from app.services import mfa_service, pay_schedule_service
 from app.services.mfa_service import TotpVerificationResult
 from app.config import BaseConfig
 from app.models.pay_era import CADENCE_DAYS_MAX, CADENCE_DAYS_MIN
-from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN
 from app.schemas.validation.pay_periods import PERIOD_BATCH_MAX
-from app.utils.dates import display_today
+from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN, display_today
+from app.utils.field_encryption import decrypt_secret, encrypt_secret
 from tests._guess_records import count_of, locked_until_of, set_record
 from tests._test_helpers import register_form_data
 
@@ -208,8 +208,7 @@ class TestLogin:
                 # guarantees this runs even if an assertion above
                 # raised.
                 with rate_app.app_context():
-                    from app.extensions import db as _db
-                    _db.engine.dispose()
+                    db.engine.dispose()
                 if limiter._storage is not None:  # pylint: disable=protected-access
                     limiter.reset()
                 limiter.enabled = False
@@ -710,7 +709,7 @@ class TestMfaSetup:
         Fernet key) rather than in ``flask_session["_mfa_setup_secret"]``,
         because the Flask session cookie is signed but not encrypted.
         Verifies (a) the column is populated, (b) the bytes round-trip
-        through ``mfa_service.decrypt_secret`` to a base32 string that
+        through ``decrypt_secret`` to a base32 string that
         matches the manual key shown on the page, and (c) the legacy
         session key is never written.
         """
@@ -734,7 +733,7 @@ class TestMfaSetup:
 
             # The ciphertext decrypts to the manual key rendered in the
             # response body.  The base32 secret is wrapped in <code>...</code>.
-            decrypted = mfa_service.decrypt_secret(config.pending_secret_encrypted)
+            decrypted = decrypt_secret(config.pending_secret_encrypted)
             assert (f"<code>{decrypted}</code>").encode("utf-8") in response.data
 
     def test_mfa_setup_sets_expiry_within_window(
@@ -804,8 +803,8 @@ class TestMfaSetup:
             # verify is that the decrypted plaintexts differ -- the
             # secret really was regenerated.
             assert (
-                mfa_service.decrypt_secret(first_ciphertext)
-                != mfa_service.decrypt_secret(second_ciphertext)
+                decrypt_secret(first_ciphertext)
+                != decrypt_secret(second_ciphertext)
             ), "Second /mfa/setup must regenerate the secret, not reuse it."
             # Expiry was extended to a fresh 15-minute window.
             assert second_expiry >= first_expiry
@@ -816,7 +815,7 @@ class TestMfaSetup:
             mfa_config = MfaConfig(
                 user_id=seed_user["user"].id,
                 is_enabled=True,
-                totp_secret_encrypted=mfa_service.encrypt_secret("TESTBASE32SECRET"),
+                totp_secret_encrypted=encrypt_secret("TESTBASE32SECRET"),
                 backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"]),
             )
             db.session.add(mfa_config)
@@ -852,7 +851,7 @@ class TestMfaSetup:
                 .filter_by(user_id=seed_user["user"].id)
                 .first()
             )
-            captured_secret = mfa_service.decrypt_secret(
+            captured_secret = decrypt_secret(
                 pending_config.pending_secret_encrypted
             )
 
@@ -879,7 +878,7 @@ class TestMfaSetup:
             # Active secret matches the secret captured during setup.
             assert config.totp_secret_encrypted is not None
             assert (
-                mfa_service.decrypt_secret(config.totp_secret_encrypted)
+                decrypt_secret(config.totp_secret_encrypted)
                 == captured_secret
             )
             assert config.backup_codes is not None
@@ -1044,7 +1043,7 @@ class TestMfaSetup:
             # Build a row with pending state already past expiry.
             mfa_config = MfaConfig(
                 user_id=seed_user["user"].id,
-                pending_secret_encrypted=mfa_service.encrypt_secret(
+                pending_secret_encrypted=encrypt_secret(
                     "JBSWY3DPEHPK3PXP"
                 ),
                 pending_secret_expires_at=(
@@ -1086,7 +1085,7 @@ class TestMfaSetup:
             mfa_config = MfaConfig(
                 user_id=seed_user["user"].id,
                 is_enabled=True,
-                totp_secret_encrypted=mfa_service.encrypt_secret("TESTBASE32SECRET"),
+                totp_secret_encrypted=encrypt_secret("TESTBASE32SECRET"),
                 backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"]),
             )
             db.session.add(mfa_config)
@@ -1119,7 +1118,7 @@ class TestMfaSetup:
             mfa_config = MfaConfig(
                 user_id=seed_user["user"].id,
                 is_enabled=True,
-                totp_secret_encrypted=mfa_service.encrypt_secret("TESTBASE32SECRET"),
+                totp_secret_encrypted=encrypt_secret("TESTBASE32SECRET"),
                 backup_codes=mfa_service.hash_backup_codes(["legacy01"], rounds=4),
             )
             db.session.add(mfa_config)
@@ -1184,11 +1183,11 @@ class TestMfaSetup:
                 f"{len(rendered_codes)}: {rendered_codes!r}"
             )
 
-    def test_mfa_confirm_missing_totp_key(self, app, auth_client, seed_user, monkeypatch):
-        """POST /mfa/confirm redirects to security settings when TOTP key is missing.
+    def test_mfa_confirm_missing_field_key(self, app, auth_client, seed_user, monkeypatch):
+        """POST /mfa/confirm redirects to security settings when the key is missing.
 
         Setup writes a pending secret successfully; then the operator
-        unsets ``TOTP_ENCRYPTION_KEY`` between request boundaries.  At
+        unsets ``FIELD_ENCRYPTION_KEY`` between request boundaries.  At
         confirm time the route's ``decrypt_secret`` call raises
         RuntimeError.  The route must (a) clear the unrecoverable
         pending state, (b) redirect to ``/settings?section=security``
@@ -1208,7 +1207,7 @@ class TestMfaSetup:
             auth_client.get("/mfa/setup")
 
             # Remove the key so the next decrypt_secret raises RuntimeError.
-            monkeypatch.delenv("TOTP_ENCRYPTION_KEY", raising=False)
+            monkeypatch.delenv("FIELD_ENCRYPTION_KEY", raising=False)
 
             response = auth_client.post("/mfa/confirm", data={
                 "totp_code": "123456",
@@ -1249,7 +1248,7 @@ class TestMfaLogin:
         mfa_config = MfaConfig(
             user_id=user_id,
             is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret(secret),
+            totp_secret_encrypted=encrypt_secret(secret),
             backup_codes=mfa_service.hash_backup_codes(known_codes),
         )
         db.session.add(mfa_config)
@@ -1397,10 +1396,10 @@ class TestMfaLogin:
             assert grid_resp.status_code == 302
             assert "login" in grid_resp.headers.get("Location", "")
 
-    def test_mfa_verify_missing_totp_key(self, app, client, seed_user, monkeypatch):
-        """POST /mfa/verify redirects to login when TOTP key is missing.
+    def test_mfa_verify_missing_field_key(self, app, client, seed_user, monkeypatch):
+        """POST /mfa/verify redirects to login when the field-encryption key is missing.
 
-        When TOTP_ENCRYPTION_KEY is removed after MFA was enabled,
+        When FIELD_ENCRYPTION_KEY is removed after MFA was enabled,
         decrypt_secret() raises RuntimeError.  The route must catch
         this, clear pending session state, and redirect to login
         instead of returning a 500 error.
@@ -1415,7 +1414,7 @@ class TestMfaLogin:
             })
 
             # Remove the key so decrypt_secret raises RuntimeError.
-            monkeypatch.delenv("TOTP_ENCRYPTION_KEY", raising=False)
+            monkeypatch.delenv("FIELD_ENCRYPTION_KEY", raising=False)
 
             # Step 2: attempt MFA verification.
             response = client.post("/mfa/verify", data={
@@ -1644,7 +1643,7 @@ class TestMfaDisable:
         mfa_config = MfaConfig(
             user_id=user_id,
             is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret(secret),
+            totp_secret_encrypted=encrypt_secret(secret),
             backup_codes=mfa_service.hash_backup_codes(known_codes),
         )
         db.session.add(mfa_config)
@@ -1711,7 +1710,7 @@ class TestMfaDisable:
         with app.app_context():
             _, mfa_config = self._enable_mfa(seed_user["user"].id)
             mfa_config.pending_secret_encrypted = (
-                mfa_service.encrypt_secret("ORSXG5A2ORSXG5A2")
+                encrypt_secret("ORSXG5A2ORSXG5A2")
             )
             mfa_config.pending_secret_expires_at = (
                 datetime.now(timezone.utc) + timedelta(minutes=15)
@@ -2387,8 +2386,7 @@ class TestRegistration:
                 # guarantees this runs even if an assertion above
                 # raised.
                 with rate_app.app_context():
-                    from app.extensions import db as _db
-                    _db.engine.dispose()
+                    db.engine.dispose()
                 if limiter._storage is not None:  # pylint: disable=protected-access
                     limiter.reset()
                 limiter.enabled = False
@@ -2414,7 +2412,7 @@ class TestMfaVerifySecurity:
         mfa_config = MfaConfig(
             user_id=user_id,
             is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret(secret),
+            totp_secret_encrypted=encrypt_secret(secret),
             backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa"]),
         )
         db.session.add(mfa_config)
@@ -2489,8 +2487,7 @@ class TestMfaVerifySecurity:
                 # guarantees this runs even if an assertion above
                 # raised.
                 with rate_app.app_context():
-                    from app.extensions import db as _db  # pylint: disable=import-outside-toplevel
-                    _db.engine.dispose()
+                    db.engine.dispose()
                 if limiter._storage is not None:  # pylint: disable=protected-access
                     limiter.reset()
                 limiter.enabled = False

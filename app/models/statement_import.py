@@ -71,6 +71,20 @@ class AccountExternalIdentity(AccountScopedMixin, UserScopedMixin,
     CSV masks the account number (``******3820``) where its OFX spells it out
     (``40943820``).
 
+    **A row has one of two PROVENANCES, and its lifetime follows** (plan step
+    ``bank_import:X-f6b-2``, ruling **R-BI26**).  A row LEARNED from a file is
+    the shape above: the first import teaches it, and it is forgotten with the
+    last import from that source (ruling **R-GB**), because a fact learned
+    from evidence should not outlive the evidence.  A row DECLARED on the bank
+    feed panel is the owner saying "Bridge's account X is my Checking" before
+    any import exists; its evidence is the owner's standing permission -- the
+    ``budget.bank_feeds`` row ``feed_id`` names -- so it dies with THAT, by the
+    CASCADE on ``fk_account_external_identities_feed_owner``, and deleting
+    imports never touches it.  R-GB's forgetting reads ``feed_id`` to tell the
+    two apart, and R-BI26 amends R-GB to exactly that scope: the state R-GB
+    rejected, a pairing with no import behind it, is the declared row's
+    ordinary state between the claim and the first sync.
+
     Columns:
         account_id  -- the Shekel account (from :class:`AccountScopedMixin`).
         user_id     -- its owner (from :class:`UserScopedMixin`), held equal to
@@ -80,6 +94,17 @@ class AccountExternalIdentity(AccountScopedMixin, UserScopedMixin,
         source_id   -- the adapter the identity was read by
                        (``ref.statement_sources``).
         external_account_id -- what that source calls the account.
+        feed_id     -- the owner's ``budget.bank_feeds`` row when this row was
+                       DECLARED on the feed panel; NULL when it was LEARNED
+                       from a file.  Held equal to the row's owner by the
+                       composite ``fk_account_external_identities_feed_owner``,
+                       ON DELETE CASCADE.  Nothing here says WHICH sources may
+                       carry a feed: at this commit no door sets it (the
+                       mapping form is the next commit of leaf 3c, and it
+                       writes it under the ``simplefin`` source), and
+                       ``tests/test_models/test_declared_mapping_schema.py``
+                       pins that a learned row is forgotten and a declared one
+                       is not.
 
     **The key is per SOURCE, not per institution, and that is deliberate
     honesty rather than a limitation accepted.**  SECU's CSV and its OFX are
@@ -101,6 +126,10 @@ class AccountExternalIdentity(AccountScopedMixin, UserScopedMixin,
         nullable=False,
     )
     external_account_id = db.Column(db.String(64), nullable=False)
+    # Bare: its key is the composite ``fk_account_external_identities_feed_owner``
+    # in the table arguments, the construction ``statement_import_id`` on
+    # ``AccountAnchorHistory`` uses for the same reason.
+    feed_id = db.Column(db.Integer)
 
     source = db.relationship("StatementSource", lazy="joined")
 

@@ -131,6 +131,8 @@ class ReconcileFormReader(HTMLParser):
         self._select = None
         self._first = None
         self._chosen = None
+        self._textarea = None
+        self._typed = []
 
     def handle_starttag(self, tag, attrs):
         """Record every control this page would submit."""
@@ -167,15 +169,32 @@ class ReconcileFormReader(HTMLParser):
         elif tag == "select":
             self.offerable.add((name, None))
             self._select, self._first, self._chosen = name, None, None
+        elif tag == "textarea":
+            # **A ``<textarea>`` submits its CONTENT**, the text between its
+            # tags rather than a ``value`` attribute -- the empty string when
+            # it renders empty, as the bank feed panel's setup-token box
+            # does (plan step ``bank_import:X-f6b-2``).  The reader was
+            # blind to the tag until then, so a form carrying one scraped
+            # as if it were not rendered at all.
+            self.offerable.add((name, None))
+            self._textarea, self._typed = name, []
+
+    def handle_data(self, data):
+        """Accumulate an open textarea's content."""
+        if self._textarea is not None:
+            self._typed.append(data)
 
     def handle_endtag(self, tag):
-        """Close a select, defaulting it to its first option if none was set."""
+        """Close a select or a textarea, submitting what a browser would."""
         if tag == "select" and self._select is not None:
             chosen = self._chosen
             self.fields.append(
                 (self._select, self._first or "" if chosen is None else chosen),
             )
             self._select = self._first = self._chosen = None
+        elif tag == "textarea" and self._textarea is not None:
+            self.fields.append((self._textarea, "".join(self._typed)))
+            self._textarea, self._typed = None, []
 
 
 class _TriggerSubtreeReader(HTMLParser):

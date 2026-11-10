@@ -490,7 +490,7 @@ pulling the trigger. Its trailing output prints the exact post-script commands.
   it world-readable (`chmod 0644 /opt/docker/shekel/secrets/postgres_password`) so the postgres user
   can read via the "other" bits. Directory containment (`/opt/docker/shekel/secrets/` is mode 0700
   josh-only) keeps the value protected from host-side enumeration. The other three secrets
-  (`secret_key`, `app_role_password`, `totp_encryption_key`) are read by uid 1000 (shekel) inside
+  (`secret_key`, `app_role_password`, `field_encryption_key`) are read by uid 1000 (shekel) inside
   the app container, which matches the host file owner, so 0600 works for those.
 
 - **Repo `deploy/nginx-shared/nginx.conf` drift.** The audit B7 hardening (`limit_req_zone`,
@@ -514,7 +514,7 @@ pulling the trigger. Its trailing output prints the exact post-script commands.
 
   ```bash
   docker run --rm --entrypoint sh ghcr.io/saltyreformed-labs/shekel@sha256:<pinned> \
-      -c "grep -cE '^_load_secret (SECRET_KEY|POSTGRES_PASSWORD|APP_ROLE_PASSWORD|TOTP_ENCRYPTION_KEY|VALKEY_PASSWORD) ' /home/shekel/app/entrypoint.sh"
+      -c "grep -cE '^_load_secret (SECRET_KEY|POSTGRES_PASSWORD|APP_ROLE_PASSWORD|FIELD_ENCRYPTION_KEY|VALKEY_PASSWORD) ' /home/shekel/app/entrypoint.sh"
   # Output must be 5: one call for each secret the script turns into a placeholder.
   ```
 
@@ -967,7 +967,7 @@ Proxmox host.
 | Secret | Purpose | Generation Command |
 |--------|---------|-------------------|
 | `SECRET_KEY` | Flask session cookie encryption | `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `TOTP_ENCRYPTION_KEY` | Fernet encryption of TOTP secrets in database | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `FIELD_ENCRYPTION_KEY` | Fernet encryption of the ciphertext columns in the database (the MFA/TOTP secret); `TOTP_ENCRYPTION_KEY` before `bank_import:X-f6b-2` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `POSTGRES_PASSWORD` | PostgreSQL database authentication | Any strong password generator |
 
 For complete secret rotation procedures, see `docs/runbook_secrets.md`.
@@ -979,16 +979,15 @@ For complete secret rotation procedures, see `docs/runbook_secrets.md`.
 3. Restart the app: `docker compose restart app`
 4. **Impact:** All active sessions are invalidated. Users must log in again.
 
-### 4.3 Rotating TOTP_ENCRYPTION_KEY
+### 4.3 Rotating FIELD_ENCRYPTION_KEY
 
-**WARNING: Changing this key makes ALL existing MFA enrollments unreadable.**
-
-1. Disable MFA for all users: `docker exec shekel-prod-app python scripts/reset_mfa.py --all`
-2. Generate a new key:
-   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-3. Update `TOTP_ENCRYPTION_KEY` in `.env`
-4. Restart the app: `docker compose restart app`
-5. Users re-enroll MFA via Settings > Security
+The rotation is **non-destructive** and has ONE procedure, in `docs/runbook_secrets.md` "Rotating
+FIELD_ENCRYPTION_KEY": the previous key moves to `FIELD_ENCRYPTION_KEY_OLD`, the app decrypts under
+either while `scripts/rotate_field_key.py --confirm` re-wraps every ciphertext, then the retired key
+is pruned. No user re-enrols MFA. (The reset-every-user procedure this section used to prescribe is
+the DISASTER path for a key that is LOST, not rotated: `docs/runbook_secrets.md` "Disaster
+Recovery".) The key was named `TOTP_ENCRYPTION_KEY` before `bank_import:X-f6b-2`; the one-time
+rename is `docs/runbook_secrets.md` "Renaming TOTP_ENCRYPTION_KEY to FIELD_ENCRYPTION_KEY".
 
 ### 4.4 Rotating POSTGRES_PASSWORD
 
@@ -2003,8 +2002,8 @@ docker exec shekel-prod-app python scripts/reset_mfa.py your-email@example.com
 2. Clone the repository: `git clone <repo-url> /opt/shekel`
 3. Reconstruct `.env` from `.env.example`:
    - `SECRET_KEY`: generate new (users must re-login)
-   - `TOTP_ENCRYPTION_KEY`: use the backed-up key from password manager, or generate new (users must
-     re-enroll MFA)
+   - `FIELD_ENCRYPTION_KEY`: use the backed-up key from password manager, or generate new (users
+     must re-enroll MFA)
    - `POSTGRES_PASSWORD`: use the password from the backup, or set new
 4. Create the monitoring network: `docker network create monitoring`
 5. Start the stack: `docker compose up -d`

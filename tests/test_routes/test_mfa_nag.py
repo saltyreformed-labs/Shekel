@@ -26,6 +26,7 @@ banner element rendered.
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
+from app.utils.field_encryption import encrypt_secret
 
 
 _NAG_MARKER = b'id="mfa-nag-banner"'
@@ -45,7 +46,7 @@ def _enable_mfa_for(user):
     config = MfaConfig(
         user_id=user.id,
         is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret("TESTBASE32SECRET"),
+        totp_secret_encrypted=encrypt_secret("TESTBASE32SECRET"),
         backup_codes=mfa_service.hash_backup_codes(
             ["aaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
         ),
@@ -64,7 +65,7 @@ def _add_pending_mfa_for(user):
     config = MfaConfig(
         user_id=user.id,
         is_enabled=False,
-        pending_secret_encrypted=mfa_service.encrypt_secret("TESTBASE32SECRET"),
+        pending_secret_encrypted=encrypt_secret("TESTBASE32SECRET"),
     )
     db.session.add(config)
     db.session.commit()

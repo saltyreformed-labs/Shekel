@@ -22,6 +22,7 @@ from cryptography.fernet import Fernet, MultiFernet
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
+from app.utils.field_encryption import decrypt_secret, encrypt_secret, get_encryption_key
 
 
 def _decode_session_cookie(app, cookie_value: str) -> dict:
@@ -93,7 +94,7 @@ class TestMfaSetupSecretIsServerSide:
             )
             assert config is not None
             assert config.pending_secret_encrypted is not None
-            plaintext_secret = mfa_service.decrypt_secret(
+            plaintext_secret = decrypt_secret(
                 config.pending_secret_encrypted
             )
 
@@ -139,12 +140,12 @@ class TestMfaSetupSecretIsServerSide:
                 .first()
             )
             first_ciphertext = config.pending_secret_encrypted
-            first_secret = mfa_service.decrypt_secret(first_ciphertext)
+            first_secret = decrypt_secret(first_ciphertext)
 
             auth_client.get("/mfa/setup")
             db.session.refresh(config)
             second_ciphertext = config.pending_secret_encrypted
-            second_secret = mfa_service.decrypt_secret(second_ciphertext)
+            second_secret = decrypt_secret(second_ciphertext)
 
             # Exactly one pending row exists post-overwrite.
             row_count = (
@@ -220,13 +221,13 @@ class TestMfaSetupSecretIsServerSide:
     def test_pending_decryptable_after_key_rotation(
         self, app, auth_client, seed_user, monkeypatch
     ):
-        """Pending secret survives a TOTP_ENCRYPTION_KEY rotation mid-setup.
+        """Pending secret survives a FIELD_ENCRYPTION_KEY rotation mid-setup.
 
         Simulates the C-04 rotation procedure between /mfa/setup and
         /mfa/confirm: the pending ciphertext was written under the
         original primary, the operator promoted a new primary and
-        moved the original to ``TOTP_ENCRYPTION_KEY_OLD``.
-        ``mfa_service.get_encryption_key`` returns a ``MultiFernet``
+        moved the original to ``FIELD_ENCRYPTION_KEY_OLD``.
+        ``get_encryption_key`` returns a ``MultiFernet``
         that decrypts under either key, so the user can still finish
         their setup, and the route re-encrypts the secret under the
         new primary so the active credential never depends on the
@@ -236,14 +237,14 @@ class TestMfaSetupSecretIsServerSide:
         re-encryption on confirm -- a user who happened to start
         setup just before a rotation would end up with an active
         credential keyed to the OLD key, and the operator could not
-        safely prune ``TOTP_ENCRYPTION_KEY_OLD`` without breaking
+        safely prune ``FIELD_ENCRYPTION_KEY_OLD`` without breaking
         their MFA.
         """
         with app.app_context():
             # Capture the original primary that auth_client's setup
             # call will use.  conftest sets a fresh key per test via
-            # the ``set_totp_key`` autouse fixture.
-            old_primary = mfa_service.get_encryption_key()
+            # the ``set_field_encryption_key`` autouse fixture.
+            old_primary = get_encryption_key()
             # Perform setup under the original primary.
             auth_client.get("/mfa/setup")
             config = (
@@ -258,17 +259,17 @@ class TestMfaSetupSecretIsServerSide:
             ).decode("utf-8")
 
             # Rotate: promote a new primary, demote the original to
-            # TOTP_ENCRYPTION_KEY_OLD.  This mirrors steps 1-2 of
+            # FIELD_ENCRYPTION_KEY_OLD.  This mirrors steps 1-2 of
             # ``docs/runbook_secrets.md``.
             from os import getenv  # pylint: disable=import-outside-toplevel
-            old_primary_key_str = getenv("TOTP_ENCRYPTION_KEY")
+            old_primary_key_str = getenv("FIELD_ENCRYPTION_KEY")
             assert old_primary_key_str, (
-                "Test setup error: TOTP_ENCRYPTION_KEY must be set."
+                "Test setup error: FIELD_ENCRYPTION_KEY must be set."
             )
             new_primary_key_str = Fernet.generate_key().decode()
             assert new_primary_key_str != old_primary_key_str
-            monkeypatch.setenv("TOTP_ENCRYPTION_KEY", new_primary_key_str)
-            monkeypatch.setenv("TOTP_ENCRYPTION_KEY_OLD", old_primary_key_str)
+            monkeypatch.setenv("FIELD_ENCRYPTION_KEY", new_primary_key_str)
+            monkeypatch.setenv("FIELD_ENCRYPTION_KEY_OLD", old_primary_key_str)
 
             # Confirm.  Decrypt should succeed via the retired key,
             # the route should re-encrypt under the new primary.
@@ -300,8 +301,8 @@ class TestMfaSetupSecretIsServerSide:
 
             # The active record decrypts under the new primary alone,
             # which is the precondition for the operator to safely
-            # prune TOTP_ENCRYPTION_KEY_OLD on the next deploy.  This
-            # is the property C-04's rotate_totp_key.py is designed
+            # prune FIELD_ENCRYPTION_KEY_OLD on the next deploy.  This
+            # is the property C-04's rotate_field_key.py is designed
             # to deliver, and C-05 must not undo it.
             new_only_multi = MultiFernet([new_primary_only])
             new_only_multi.decrypt(config.totp_secret_encrypted)
@@ -329,7 +330,7 @@ class TestMfaSetupExpiryEnforcement:
 
             mfa_config = MfaConfig(
                 user_id=seed_user["user"].id,
-                pending_secret_encrypted=mfa_service.encrypt_secret(
+                pending_secret_encrypted=encrypt_secret(
                     "JBSWY3DPEHPK3PXP"
                 ),
                 pending_secret_expires_at=(

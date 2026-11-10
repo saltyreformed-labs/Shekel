@@ -444,7 +444,7 @@ class TestTheOKControlFollowsTheDOORAndNotTheSentence:
         """
         return LineCard(
             line=_a_line(), section=Section.NOTHING, suggested=suggested,
-            sentence=choose(), arrivals_already_held=None, risk_class=None,
+            sentence=choose(), already_held=None, risk_class=None,
             panel=VerbPanel(
                 offers=offers, notes=(), answer_door=None, add=None,
                 proposal=None,
@@ -496,12 +496,12 @@ class TestNoSweptCardCarriesASentenceOrMoneyAtRisk:
     outlived that producer: plan step ``bank_import:X-gi-3`` deleted it.
     """
 
-    def _card(self, *, notes=(), arrivals_already_held=None, risk="into_open"):
+    def _card(self, *, notes=(), already_held=None, risk="into_open"):
         """Return a card that would otherwise be sweepable.
 
         Args:
             notes: What the pass owes the reader about this line.
-            arrivals_already_held: The money-at-risk signal, or ``None``.
+            already_held: The money-at-risk signal, or ``None``.
             risk: The raw sweep partition value.
 
         Returns:
@@ -509,7 +509,7 @@ class TestNoSweptCardCarriesASentenceOrMoneyAtRisk:
         """
         return LineCard(
             line=_a_line(), section=Section.BY_RULE, suggested=Verb.ADD,
-            sentence=choose(), arrivals_already_held=arrivals_already_held,
+            sentence=choose(), already_held=already_held,
             risk_class=risk,
             panel=VerbPanel(
                 offers=offers_for(
@@ -541,13 +541,13 @@ class TestNoSweptCardCarriesASentenceOrMoneyAtRisk:
     def test_a_card_whose_books_ALREADY_hold_income_is_not_swept(self):
         """The one money-at-risk signal this build has."""
         held = object()
-        assert self._card(arrivals_already_held=held).sweep_class is None
+        assert self._card(already_held=held).sweep_class is None
 
     def test_a_card_whose_verb_has_no_door_is_not_swept(self):
         """Nothing can be swept into a door that does not exist."""
         card = LineCard(
             line=_a_line(), section=None, suggested=Verb.TRANSFER,
-            sentence=choose(), arrivals_already_held=None,
+            sentence=choose(), already_held=None,
             risk_class="into_open",
             panel=VerbPanel(
                 offers=offers_for(

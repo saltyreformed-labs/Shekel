@@ -9,8 +9,8 @@ non-sensitive.
 | Secret | Purpose | Generation Command | Rotation Impact |
 |--------|---------|-------------------|-----------------|
 | `SECRET_KEY` | Flask session cookie encryption | `python -c "import secrets; print(secrets.token_hex(32))"` | All active sessions are invalidated; users must log in again |
-| `TOTP_ENCRYPTION_KEY` | Fernet encryption of TOTP secrets stored in database | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | Non-destructive when rotated via the documented procedure: place the previous value in `TOTP_ENCRYPTION_KEY_OLD`, then run `scripts/rotate_totp_key.py --confirm` to re-wrap every ciphertext under the new primary |
-| `TOTP_ENCRYPTION_KEY_OLD` | Optional comma-separated list of retired Fernet keys used during rotation | -- (existing primary value, moved here at rotation time) | Empty in steady state.  Populated transiently during a key rotation; pruned again after `scripts/rotate_totp_key.py` completes |
+| `FIELD_ENCRYPTION_KEY` | Fernet encryption of the ciphertext columns stored in the database (the MFA/TOTP secret in `auth.mfa_configs`, the bank feed's access URL in `budget.bank_feeds`).  Named `TOTP_ENCRYPTION_KEY` until `bank_import:X-f6b-2`; see "Renaming TOTP_ENCRYPTION_KEY to FIELD_ENCRYPTION_KEY" below | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | Non-destructive when rotated via the documented procedure: place the previous value in `FIELD_ENCRYPTION_KEY_OLD`, then run `scripts/rotate_field_key.py --confirm` to re-wrap every ciphertext under the new primary |
+| `FIELD_ENCRYPTION_KEY_OLD` | Optional comma-separated list of retired Fernet keys used during rotation | -- (existing primary value, moved here at rotation time) | Empty in steady state.  Populated transiently during a key rotation; pruned again after `scripts/rotate_field_key.py` completes |
 | `POSTGRES_PASSWORD` | PostgreSQL superuser password (owner role `shekel_user`).  Used by `entrypoint.sh` for schema creation, migrations, seed scripts | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | Requires updating both the db service and app service configs simultaneously; restart both containers |
 | `APP_ROLE_PASSWORD` | Least-privilege PostgreSQL DML-only role password (`shekel_app`).  Constructed into `DATABASE_URL_APP` by `entrypoint.sh` and used by Gunicorn at runtime so an in-process RCE cannot drop tables or audit triggers (audit finding F-081, Commit C-13) | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | `entrypoint.sh` reprovisions the `shekel_app` role with the new password on every restart; rotate by updating the source-of-truth secret and recreating the app container |
 
@@ -43,9 +43,9 @@ is overwritten at runtime by `entrypoint.sh::_load_secret`).
 
 - Files are stored in `/opt/docker/shekel/secrets/`.
 - Recommended permissions: directory `0700` root-owned, files `0600` root-owned.
-- Per-file secrets: `secret_key`, `postgres_password`, `app_role_password`, `totp_encryption_key`
-  (and `totp_encryption_key_old` only during a TOTP key rotation -- see the "Rotating
-  TOTP_ENCRYPTION_KEY" section below).
+- Per-file secrets: `secret_key`, `postgres_password`, `app_role_password`, `field_encryption_key`
+  (and `field_encryption_key_old` only during a key rotation -- see the "Rotating
+  FIELD_ENCRYPTION_KEY" section below).
 - Trade-off: `docker inspect` shows only the placeholder values; the real values live only in the
   operator-controlled secrets directory.
 
@@ -82,7 +82,7 @@ maintenance window: the final step recreates both the `app` and `db` containers.
    # awk extracts the value (everything after the first =) so embedded
    # = signs in the value (rare but legal in random hex/base64) are
    # preserved.
-   for var in SECRET_KEY POSTGRES_PASSWORD APP_ROLE_PASSWORD TOTP_ENCRYPTION_KEY; do
+   for var in SECRET_KEY POSTGRES_PASSWORD APP_ROLE_PASSWORD FIELD_ENCRYPTION_KEY; do
        value="$(awk -F= -v k="${var}" '$1==k { sub(/^[^=]*=/, ""); print; exit }' /opt/docker/shekel/.env)"
        file_name="$(echo "${var}" | tr '[:upper:]' '[:lower:]')"
        sudo printf '%s' "${value}" | sudo tee /opt/docker/shekel/secrets/${file_name} >/dev/null
@@ -105,14 +105,14 @@ maintenance window: the final step recreates both the `app` and `db` containers.
    -SECRET_KEY=<the-real-secret-key>
    -POSTGRES_PASSWORD=<the-real-postgres-password>
    -APP_ROLE_PASSWORD=<the-real-app-role-password>
-   -TOTP_ENCRYPTION_KEY=<the-real-totp-encryption-key>
+   -FIELD_ENCRYPTION_KEY=<the-real-field-encryption-key>
    +SECRET_KEY=replaced_by_docker_secret
    +POSTGRES_PASSWORD=replaced_by_docker_secret
    +APP_ROLE_PASSWORD=replaced_by_docker_secret
-   +TOTP_ENCRYPTION_KEY=replaced_by_docker_secret
+   +FIELD_ENCRYPTION_KEY=replaced_by_docker_secret
    ```
 
-   `TOTP_ENCRYPTION_KEY_OLD` stays as-is (empty in steady state).
+   `FIELD_ENCRYPTION_KEY_OLD` stays as-is (empty in steady state).
 
 5. Recreate the `db` and `app` containers so the new compose merge takes effect:
 
@@ -141,7 +141,7 @@ maintenance window: the final step recreates both the `app` and `db` containers.
    #   Loaded SECRET_KEY from /run/secrets/secret_key.
    #   Loaded POSTGRES_PASSWORD from /run/secrets/postgres_password.
    #   Loaded APP_ROLE_PASSWORD from /run/secrets/app_role_password.
-   #   Loaded TOTP_ENCRYPTION_KEY from /run/secrets/totp_encryption_key.
+   #   Loaded FIELD_ENCRYPTION_KEY from /run/secrets/field_encryption_key.
    ```
 
 7. Backup the secrets directory. The host-side files are now the only source of truth for these
@@ -163,7 +163,7 @@ If file-backed secrets cause an issue and you need to revert:
    or from your password-manager backup):
 
    ```bash
-   for var in SECRET_KEY POSTGRES_PASSWORD APP_ROLE_PASSWORD TOTP_ENCRYPTION_KEY; do
+   for var in SECRET_KEY POSTGRES_PASSWORD APP_ROLE_PASSWORD FIELD_ENCRYPTION_KEY; do
        file_name="$(echo "${var}" | tr '[:upper:]' '[:lower:]')"
        value="$(sudo cat /opt/docker/shekel/secrets/${file_name})"
        sudo sed -i "s|^${var}=.*|${var}=${value}|" /opt/docker/shekel/.env
@@ -191,6 +191,101 @@ If file-backed secrets cause an issue and you need to revert:
    before Commit C-38.
 
 ## Secret Rotation Procedures
+
+### Renaming TOTP_ENCRYPTION_KEY to FIELD_ENCRYPTION_KEY
+
+One-time procedure for the release that ships `bank_import:X-f6b-2` (ledger row BI-503). The key
+that encrypted the MFA/TOTP secret became the key for every encrypted column the app stores, and its
+name was changed to say so: `TOTP_ENCRYPTION_KEY` is now `FIELD_ENCRYPTION_KEY`, its rotation twin
+`TOTP_ENCRYPTION_KEY_OLD` is now `FIELD_ENCRYPTION_KEY_OLD`, the secret file `totp_encryption_key`
+is now `field_encryption_key` (and `_old`), and `scripts/rotate_totp_key.py` is now
+`scripts/rotate_field_key.py`. **The value does not change** -- no ciphertext is re-wrapped and no
+user re-enrols MFA.
+
+**A missed rename fails the release at the entrypoint, and `shekel-deploy` rolls the image back.**
+Two refusals see it, both raised by `create_app` on every start path, the entrypoint's migration
+host included (before any migration runs): the app refuses to start while either OLD name still
+holds a value (a `RuntimeError` naming this section -- what `flask run` on a host with a stale
+`.env` meets), and production refuses to start on an EMPTY, placeholder or unloadable
+`FIELD_ENCRYPTION_KEY` (ruling `bank_import:R-BI23`) -- what the CONTAINER meets on a host whose
+base compose is current, because compose interpolates only the names its file states and a stale
+host `.env` therefore yields an empty new key inside it (a host whose base compose still passes the
+old name through meets the first refusal instead; see the Posture 2 note below). Do the rename
+BEFORE `shekel-deploy`, in the same maintenance window:
+
+- **Posture 1 (env-backed):** rename the lines in `.env` (the values stay):
+
+  ```diff
+  -TOTP_ENCRYPTION_KEY=<value>
+  -TOTP_ENCRYPTION_KEY_OLD=
+  +FIELD_ENCRYPTION_KEY=<value>
+  +FIELD_ENCRYPTION_KEY_OLD=
+  ```
+
+- **Posture 2 (file-backed):** **finish any rotation in progress first** (step 5 of "Rotating
+  FIELD_ENCRYPTION_KEY" below: zero skipped rows, the `_old` file deleted, the inline override edit
+  reverted) -- the override copy below would otherwise overwrite that inline edit, leave the retired
+  key unmounted, and refuse every login whose ciphertext it still holds. Then rename the secret
+  file, rename the placeholder line in `/opt/docker/shekel/.env` (the placeholder value stays), and
+  sync the override from the release's checkout so its `secrets:` block names `field_encryption_key`
+  (`docker compose up` refuses to start on a declared secret whose file is missing, which is why the
+  file moves first):
+
+  ```bash
+  cd /opt/shekel && git pull --ff-only     # the checkout the override is copied from (s.2.5)
+  # COPY, not move: the old image reads the old file, and a rollback
+  # to it must still find one.  The old file is deleted after the
+  # release is verified (below).
+  sudo cp -p /opt/docker/shekel/secrets/totp_encryption_key \
+             /opt/docker/shekel/secrets/field_encryption_key
+  # Keep what a rollback restores: the .env and the override as they are now.
+  sudo cp -p /opt/docker/shekel/.env /opt/docker/shekel/.env.pre-rename
+  cp -p /opt/docker/shekel/docker-compose.override.yml \
+        /opt/docker/shekel/docker-compose.override.yml.pre-rename
+  sudo sed -i -e 's/^TOTP_ENCRYPTION_KEY=/FIELD_ENCRYPTION_KEY=/' \
+              -e 's/^TOTP_ENCRYPTION_KEY_OLD=/FIELD_ENCRYPTION_KEY_OLD=/' \
+              /opt/docker/shekel/.env
+  cp deploy/docker-compose.prod.yml /opt/docker/shekel/docker-compose.override.yml
+  ```
+
+  The base `docker-compose.yml` on the host is not synced by this step: under this posture the
+  entrypoint loads the key from the file, and the base file's `${FIELD_ENCRYPTION_KEY_OLD:-}`
+  interpolation matters only to an env-backed host. (A host whose base compose still interpolates
+  `${TOTP_ENCRYPTION_KEY:-}` -- the pre-2026-09 copy -- passes the placeholder through under the OLD
+  name and the new image refuses to start until the `.env` line is renamed: rename it, never add a
+  second line.)
+
+Then deploy as usual (`shekel-deploy --dry-run`, then `shekel-deploy`). Verify with the entrypoint's
+load line, then delete the old file and the two `.pre-rename` copies:
+
+```bash
+docker logs shekel-prod-app 2>&1 | grep '^Loaded FIELD_ENCRYPTION_KEY'
+# Expect: Loaded FIELD_ENCRYPTION_KEY from /run/secrets/field_encryption_key.
+sudo rm /opt/docker/shekel/secrets/totp_encryption_key \
+        /opt/docker/shekel/.env.pre-rename \
+        /opt/docker/shekel/docker-compose.override.yml.pre-rename
+```
+
+**Rollback ordering.** `shekel-deploy` re-pins the OLD image when the new container is unhealthy,
+but it restores nothing else, and the old image reads the OLD names: its entrypoint loads
+`/run/secrets/totp_encryption_key`, which the renamed override no longer mounts, so the re-pinned
+container would boot with an EMPTY key -- the old code only warns -- and every MFA login would fail
+until the names are put back. A rollback after the rename is therefore complete only once the two
+`.pre-rename` copies are restored and the old image is re-pinned against them, in that order:
+
+```bash
+sudo cp -p /opt/docker/shekel/.env.pre-rename /opt/docker/shekel/.env
+cp -p /opt/docker/shekel/docker-compose.override.yml.pre-rename \
+      /opt/docker/shekel/docker-compose.override.yml
+shekel-deploy sha256:<the previous digest>      # the old file still exists: it was copied, not moved
+```
+
+(The reverse failure is caught: a NEW image started against un-renamed names refuses at the
+entrypoint, so the migration host never reaches `flask db upgrade` and the database stamp is
+unchanged.)
+
+Every procedure below is written in the new names. Historical audit documents under `docs/audits/`
+and `docs/historical/` keep the old name as a record of what was true when they were written.
 
 ### Rotating SECRET_KEY
 
@@ -287,12 +382,12 @@ can still extract the historical key from the dangling blob. The full remediatio
 7. **Install a pre-commit hook** (gitleaks or detect-secrets) so the pattern cannot recur. This is
    tracked separately in the audit remediation plan.
 
-### Rotating TOTP_ENCRYPTION_KEY
+### Rotating FIELD_ENCRYPTION_KEY
 
 This procedure is **non-destructive**: existing MFA enrollments remain valid throughout the
 rotation, and users do not need to re-enroll. It relies on the application's `MultiFernet`
 configuration, which accepts the new primary key for encryption AND decrypts ciphertexts written
-under any retired key listed in `TOTP_ENCRYPTION_KEY_OLD`.
+under any retired key listed in `FIELD_ENCRYPTION_KEY_OLD`.
 
 The full rotation has four steps and one optional cleanup deploy:
 
@@ -309,25 +404,25 @@ The full rotation has four steps and one optional cleanup deploy:
    - **Posture 1 (env-backed):** in `/opt/shekel/.env`:
 
      ```diff
-     -TOTP_ENCRYPTION_KEY=<previous-primary-value>
-     +TOTP_ENCRYPTION_KEY=<newly-generated-value>
-     +TOTP_ENCRYPTION_KEY_OLD=<previous-primary-value>
+     -FIELD_ENCRYPTION_KEY=<previous-primary-value>
+     +FIELD_ENCRYPTION_KEY=<newly-generated-value>
+     +FIELD_ENCRYPTION_KEY_OLD=<previous-primary-value>
      ```
 
    - **Posture 2 (file-backed):**
 
      ```bash
      # Move the current primary into the retired-key file.
-     sudo mv /opt/docker/shekel/secrets/totp_encryption_key \
-             /opt/docker/shekel/secrets/totp_encryption_key_old
+     sudo mv /opt/docker/shekel/secrets/field_encryption_key \
+             /opt/docker/shekel/secrets/field_encryption_key_old
      # Install the new primary.
      sudo printf '%s' '<newly-generated-value>' | \
-         sudo tee /opt/docker/shekel/secrets/totp_encryption_key >/dev/null
-     sudo chmod 0600 /opt/docker/shekel/secrets/totp_encryption_key \
-                     /opt/docker/shekel/secrets/totp_encryption_key_old
+         sudo tee /opt/docker/shekel/secrets/field_encryption_key >/dev/null
+     sudo chmod 0600 /opt/docker/shekel/secrets/field_encryption_key \
+                     /opt/docker/shekel/secrets/field_encryption_key_old
      ```
 
-     The `totp_encryption_key_old` file is NOT declared in the `secrets:` block of
+     The `field_encryption_key_old` file is NOT declared in the `secrets:` block of
      `deploy/docker-compose.prod.yml` (because compose requires every declared secret file to
      exist). Inline- edit the override to add it before bringing the stack back up:
 
@@ -338,20 +433,20 @@ The full rotation has four steps and one optional cleanup deploy:
               - secret_key
               - postgres_password
               - app_role_password
-              - totp_encryption_key
-     +        - totp_encryption_key_old
+              - field_encryption_key
+     +        - field_encryption_key_old
         ...
         secrets:
           ...
-          totp_encryption_key:
-            file: /opt/docker/shekel/secrets/totp_encryption_key
-     +    totp_encryption_key_old:
-     +      file: /opt/docker/shekel/secrets/totp_encryption_key_old
+          field_encryption_key:
+            file: /opt/docker/shekel/secrets/field_encryption_key
+     +    field_encryption_key_old:
+     +      file: /opt/docker/shekel/secrets/field_encryption_key_old
      ```
 
      Step 5 below removes the inline edit and the retired-key file after rotation.
 
-   If `TOTP_ENCRYPTION_KEY_OLD` already has a value (e.g. from an earlier in-progress rotation),
+   If `FIELD_ENCRYPTION_KEY_OLD` already has a value (e.g. from an earlier in-progress rotation),
    append the new retired value with a comma -- the application reads the value as a comma-separated
    list of Fernet keys, regardless of whether it came from an env var or a secret file. In the
    file-backed posture, write the comma-joined string into the file with `printf` (no trailing
@@ -365,7 +460,7 @@ The full rotation has four steps and one optional cleanup deploy:
 
    At this point the application can:
 
-     - decrypt every existing ciphertext (via the retired key listed in `TOTP_ENCRYPTION_KEY_OLD`),
+     - decrypt every existing ciphertext (via the retired key listed in `FIELD_ENCRYPTION_KEY_OLD`),
        and
      - encrypt every new ciphertext under the new primary.
 
@@ -375,7 +470,7 @@ The full rotation has four steps and one optional cleanup deploy:
 4. **Re-wrap every existing ciphertext under the new primary.**
 
    ```bash
-   docker exec shekel-prod-app python scripts/rotate_totp_key.py --confirm
+   docker exec shekel-prod-app python scripts/rotate_field_key.py --confirm
    ```
 
    The script prints a summary like
@@ -389,31 +484,34 @@ The full rotation has four steps and one optional cleanup deploy:
      safe).
    - `skipped` -- rows that could not be decrypted under any configured key.
      **A non-zero `skipped` count means the script exits with code 2.** Do not proceed to step 5;
-     instead inspect the application log for the row id(s) and reconcile manually (typically by
-     resetting MFA for the affected user via `scripts/reset_mfa.py`).
+     instead inspect the application log for the table and row id(s) and reconcile manually: an
+     `auth.mfa_configs` row by resetting MFA for the affected user via `scripts/reset_mfa.py`, a
+     `budget.bank_feeds` row by removing it so the owner can claim a fresh setup token, which writes
+     a new row under the current primary -- the disconnect door once `bank_import:X-f6b-2`'s claim
+     leaf ships, a `DELETE` of the row by hand until then.
 
-5. **Prune `TOTP_ENCRYPTION_KEY_OLD` at the next deploy** (optional but recommended). Once
-   `scripts/rotate_totp_key.py` reports zero skipped rows, the retired key is no longer needed.
+5. **Prune `FIELD_ENCRYPTION_KEY_OLD` at the next deploy** (optional but recommended). Once
+   `scripts/rotate_field_key.py` reports zero skipped rows, the retired key is no longer needed.
 
    - **Posture 1 (env-backed):** clear the entry in `.env`:
 
      ```diff
-     -TOTP_ENCRYPTION_KEY_OLD=<previous-primary-value>
-     +TOTP_ENCRYPTION_KEY_OLD=
+     -FIELD_ENCRYPTION_KEY_OLD=<previous-primary-value>
+     +FIELD_ENCRYPTION_KEY_OLD=
      ```
 
    - **Posture 2 (file-backed):** revert the inline edit to `deploy/docker-compose.prod.yml` from
-     step 2 (remove the `totp_encryption_key_old` entries from the app's `secrets:` list and the
+     step 2 (remove the `field_encryption_key_old` entries from the app's `secrets:` list and the
      top-level `secrets:` block) and delete the file:
 
      ```bash
-     sudo rm /opt/docker/shekel/secrets/totp_encryption_key_old
+     sudo rm /opt/docker/shekel/secrets/field_encryption_key_old
      ```
 
    Run `docker compose up -d --force-recreate app`. The retired key is now permanently retired -- if
    it was leaked, the leak no longer confers access to the MFA secrets.
 
-   You may leave `TOTP_ENCRYPTION_KEY_OLD` populated longer than necessary if you want a rollback
+   You may leave `FIELD_ENCRYPTION_KEY_OLD` populated longer than necessary if you want a rollback
    window; the only cost is that the retired key continues to be a valid decryption key during that
    window.
 
@@ -421,7 +519,7 @@ The full rotation has four steps and one optional cleanup deploy:
 
 If something goes wrong before step 4 completes:
 
-- Restore the previous primary value to `TOTP_ENCRYPTION_KEY` (and clear `TOTP_ENCRYPTION_KEY_OLD`
+- Restore the previous primary value to `FIELD_ENCRYPTION_KEY` (and clear `FIELD_ENCRYPTION_KEY_OLD`
   if you set it) and restart. No ciphertexts have been mutated yet, so the application returns to
   its previous state.
 
@@ -434,9 +532,9 @@ If something goes wrong DURING step 4 (e.g. the script crashes mid-run):
 
 If something goes wrong after step 4 completes:
 
-- The retired key is still in `TOTP_ENCRYPTION_KEY_OLD`, so the application can still decrypt under
+- The retired key is still in `FIELD_ENCRYPTION_KEY_OLD`, so the application can still decrypt under
   either key. Decide whether to roll back to the previous primary (move the retired key back to
-  `TOTP_ENCRYPTION_KEY` and re-run the script in reverse -- in this case, the previously-current
+  `FIELD_ENCRYPTION_KEY` and re-run the script in reverse -- in this case, the previously-current
   rows will be detected as "needing rotation" and re-wrapped under the old key) or accept the new
   primary as the steady state.
 
@@ -505,8 +603,9 @@ If the Proxmox host is lost and must be rebuilt from scratch:
 
    - **Posture 1 (env-backed):** rebuild `.env` using `.env.example` as a template:
      - `SECRET_KEY`: generate a new one. Users will need to log in again.
-     - `TOTP_ENCRYPTION_KEY`: if you have the original key backed up (see recommendation below), use
-       it. If not, generate a new one and all users must re-enroll MFA.
+     - `FIELD_ENCRYPTION_KEY`: if you have the original key backed up (see recommendation below),
+       use it. If not, generate a new one: all users must re-enroll MFA, and every owner must
+       reconnect their bank feed (`budget.bank_feeds` holds ciphertext under the lost key).
      - `POSTGRES_PASSWORD`: use the password from the restored backup, or set a new one and update
        the PostgreSQL user password.
      - `APP_ROLE_PASSWORD`: any sufficiently random secret; `entrypoint.sh` reprovisions the
@@ -546,7 +645,7 @@ Either backup serves as the recovery source for step 2 above.
 Create a secure note in your password manager with:
 
 - `SECRET_KEY` value
-- `TOTP_ENCRYPTION_KEY` value
+- `FIELD_ENCRYPTION_KEY` value
 - `POSTGRES_PASSWORD` value
 - `APP_ROLE_PASSWORD` value
 - Date each secret was last rotated

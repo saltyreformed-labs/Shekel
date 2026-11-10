@@ -1,11 +1,14 @@
 """Shekel Budget App -- MFA Service.
 
-Handles TOTP secret generation, verification, backup code management,
-and secret encryption/decryption. No Flask imports -- pure service module.
+Handles TOTP secret generation, verification and backup code management.
+No Flask imports -- pure service module.  The cipher the TOTP secret is
+stored under is :mod:`app.utils.field_encryption`'s (``encrypt_secret`` /
+``decrypt_secret``), the one home of every ciphertext column's key; it
+lived here until plan step ``bank_import:X-f6b-2`` gave that key a second
+column to protect (``budget.bank_feeds``, **R-BI12**; the move **R-BI24**).
 """
 
 import hmac
-import os
 import secrets
 import time
 from base64 import b64encode
@@ -15,10 +18,10 @@ from io import BytesIO
 import bcrypt
 import pyotp
 import qrcode
-from cryptography.fernet import Fernet, MultiFernet
 
 from app.models.user import MfaConfig
 from app.utils.digit_strings import is_ascii_digits
+from app.utils.field_encryption import decrypt_secret
 
 
 # Width in seconds of one TOTP time-step.  RFC 6238 leaves this
@@ -84,77 +87,6 @@ class TotpVerificationResult(Enum):
     INVALID = "invalid"
 
 
-def _build_fernet_list():
-    """Build the ordered list of Fernet instances backing the MultiFernet.
-
-    The primary key (``TOTP_ENCRYPTION_KEY``) is used for encryption AND
-    appears first for decryption.  ``TOTP_ENCRYPTION_KEY_OLD``, if set,
-    contains zero or more comma-separated retired keys; each is wrapped
-    in a Fernet and tried in order after the primary on decrypt.  Blank
-    entries (empty strings, whitespace-only) are skipped so an operator
-    can leave a stray comma after pruning a key without breaking
-    startup.
-
-    Returns:
-        list[Fernet]: Non-empty list with the primary key at index 0.
-
-    Raises:
-        RuntimeError: If ``TOTP_ENCRYPTION_KEY`` is unset or empty.
-        ValueError: If any configured key fails to initialize as a
-            Fernet instance.  ``Fernet`` raises ``ValueError`` for
-            wrong-length keys and ``binascii.Error`` (a ``ValueError``
-            subclass) for non-base64 input, so a single ``ValueError``
-            catch covers both invalid forms.
-    """
-    primary_key = os.getenv("TOTP_ENCRYPTION_KEY")
-    if not primary_key:
-        raise RuntimeError(
-            "TOTP_ENCRYPTION_KEY environment variable is not set."
-        )
-    fernets = [Fernet(primary_key)]
-    old_keys_raw = os.getenv("TOTP_ENCRYPTION_KEY_OLD", "")
-    for raw in old_keys_raw.split(","):
-        candidate = raw.strip()
-        if candidate:
-            fernets.append(Fernet(candidate))
-    return fernets
-
-
-def get_encryption_key():
-    """Load the MultiFernet cipher from the environment.
-
-    The returned cipher encrypts with the primary key
-    (``TOTP_ENCRYPTION_KEY``) and decrypts with any primary-or-retired
-    key listed in ``TOTP_ENCRYPTION_KEY_OLD``.  This makes
-    ``TOTP_ENCRYPTION_KEY`` rotation a non-destructive operation:
-
-      1. Move the existing primary value into ``TOTP_ENCRYPTION_KEY_OLD``.
-      2. Set the new key as ``TOTP_ENCRYPTION_KEY``.  The application
-         can immediately decrypt legacy ciphertexts via the retired key
-         and writes new ciphertexts under the new primary.
-      3. Run ``scripts/rotate_totp_key.py --confirm`` to re-wrap every
-         existing ciphertext under the new primary.
-      4. Remove the retired value from ``TOTP_ENCRYPTION_KEY_OLD`` at
-         the next deploy.
-
-    See ``docs/runbook_secrets.md`` for the full procedure.
-
-    The public API exposed by ``MultiFernet`` is identical to
-    ``Fernet`` -- ``encrypt``, ``decrypt``, and ``rotate`` -- so all
-    callers of this function continue to work unchanged.
-
-    Returns:
-        MultiFernet: A cipher initialized with the primary key first
-            and any retired keys appended in declaration order.
-
-    Raises:
-        RuntimeError: If ``TOTP_ENCRYPTION_KEY`` is unset or empty.
-        ValueError: If any configured key cannot be parsed as a Fernet
-            key (wrong length or non-base64 input).
-    """
-    return MultiFernet(_build_fernet_list())
-
-
 def generate_totp_secret():
     """Generate a random base32-encoded TOTP secret.
 
@@ -162,30 +94,6 @@ def generate_totp_secret():
         str: A random base32 string suitable for TOTP provisioning.
     """
     return pyotp.random_base32()
-
-
-def encrypt_secret(plaintext_secret: str) -> bytes:
-    """Encrypt a TOTP secret for database storage.
-
-    Args:
-        plaintext_secret: The base32-encoded secret string to encrypt.
-
-    Returns:
-        bytes: The Fernet-encrypted ciphertext.
-    """
-    return get_encryption_key().encrypt(plaintext_secret.encode("utf-8"))
-
-
-def decrypt_secret(encrypted_secret: bytes) -> str:
-    """Decrypt a TOTP secret retrieved from the database.
-
-    Args:
-        encrypted_secret: The Fernet-encrypted ciphertext bytes.
-
-    Returns:
-        str: The original base32-encoded plaintext secret.
-    """
-    return get_encryption_key().decrypt(encrypted_secret).decode("utf-8")
 
 
 def get_totp_uri(secret: str, email: str, issuer: str = "Shekel") -> str:
@@ -322,7 +230,7 @@ def verify_totp_code(mfa_config: MfaConfig, code: str) -> TotpVerificationResult
             currently configured Fernet key.  Surfaced to the route
             layer so the user sees the operator-side error rather
             than a silent INVALID that would suggest a typo.
-        RuntimeError: If ``TOTP_ENCRYPTION_KEY`` is unset.  Same
+        RuntimeError: If ``FIELD_ENCRYPTION_KEY`` is unset.  Same
             rationale -- propagated, not swallowed.
     """
     secret = decrypt_secret(mfa_config.totp_secret_encrypted)

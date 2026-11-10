@@ -625,20 +625,21 @@ class TestAMatchMayNameAsManyRowsAsThePassOFFERS:
     def test_a_match_naming_more_than_a_hundred_LINES_loads_too(self):
         """Both lists carried the cap, so both are asserted.
 
-        ``line_ids`` is one member per card today, and
-        ``bank_import:X-gn`` is the step that lets a match name a second bank
-        line -- so a cap here would bound that step's own shape rather than
-        anything the wire carries now.
+        ``lines`` is one member per card today (each a reviewed-line token
+        since plan step ``bank_import:X-f6b-2``), and ``bank_import:X-gn``
+        is the step that lets a match name a second bank line -- so a cap
+        here would bound that step's own shape rather than anything the wire
+        carries now.
         """
         loaded = StatementBatchSchema().load({
             "matches": [{
-                "line_ids": [str(index) for index in
-                             range(1, self._PAST_THE_OLD_CAP + 1)],
+                "lines": [f"{index}:2026-06-10" for index in
+                          range(1, self._PAST_THE_OLD_CAP + 1)],
                 "rows": ["transaction:1:-1.00:1"],
             }],
         })
 
-        assert len(loaded["matches"][0]["line_ids"]) == self._PAST_THE_OLD_CAP
+        assert len(loaded["matches"][0]["lines"]) == self._PAST_THE_OLD_CAP
 
 
 class TestTheBatchSchemaRefusesWhatItDoesNotDeclare:

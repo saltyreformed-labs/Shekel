@@ -174,7 +174,7 @@ from ._variance import (
     mint,
     reject_unrecordable,
 )
-from ._resolve import load_lines, resolve_rows
+from ._resolve import resolve_lines, resolve_rows
 from ._scope import ReviewScope
 from ._submission import MatchSubmission
 from ._valuation import (
@@ -859,9 +859,10 @@ def accept_match(
     return record_match(
         scope,
         MatchContent(
-            lines=load_lines(
-                scope.account_id, submission.line_ids, matched,
-                for_write=True,
+            # The lines AS THE SCREEN SHOWED THEM (ruling **R-BI14**): the
+            # locked read, then the reviewed day reconciled against it.
+            lines=resolve_lines(
+                submission, scope.account_id, matched, for_write=True,
             ),
             rows=resolve_rows(submission, scope, matched),
             # **Nothing, and that is the form door's whole character**: it

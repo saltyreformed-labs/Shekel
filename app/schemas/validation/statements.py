@@ -33,6 +33,7 @@ from app.services.statement_match import (
     NEW_ENVELOPE,
     PlaceIn,
     ReviewedDifference,
+    ReviewedLine,
     ReviewedRow,
     parse_place_token,
 )
@@ -240,6 +241,50 @@ class ReviewedRowField(fields.Field):
             raise self.make_error("invalid") from exc
 
 
+class ReviewedLineField(fields.Field):
+    """One bank line a match names, AS THE SCREEN SHOWED IT.
+
+    :class:`ReviewedRowField`'s twin for the line side of a match (plan step
+    ``bank_import:X-f6b-2``, ruling **bank_import:R-BI14**), and on its
+    terms: the format is the service's, read through the service's own
+    reader (:meth:`~app.services.statement_match.ReviewedLine.from_token`),
+    so the template that writes the token and this field that reads it
+    cannot be two spellings of one format.  The line id inside it goes
+    through :func:`~app.utils.digit_strings.parse_row_id` and the day through
+    one anchored ``YYYY-MM-DD`` pattern before ``date.fromisoformat`` sees
+    it, so a spelling that library also reads (``20260610``) is refused as a
+    body this app never rendered.
+
+    What arrives is a value object, for :class:`ReviewedRowField`'s reason:
+    the door's parameter type is
+    :class:`~app.services.statement_match.ReviewedLine`.
+    """
+
+    default_error_messages = {
+        "invalid": "That is not a bank line this page could have shown you.",
+    }
+
+    def _deserialize(self, value, attr, data, **kwargs):
+        """Return the reviewed line *value* names.
+
+        Args:
+            value: The submitted token.
+            attr: The field name being loaded (marshmallow's contract).
+            data: The whole payload being loaded (marshmallow's contract).
+            **kwargs: Marshmallow's contract, unused.
+
+        Returns:
+            The :class:`~app.services.statement_match.ReviewedLine`.
+
+        Raises:
+            ValidationError: When *value* is not a token this app emitted.
+        """
+        try:
+            return ReviewedLine.from_token(value)
+        except ValueError as exc:
+            raise self.make_error("invalid") from exc
+
+
 class ReviewedDifferenceField(fields.Field):
     """What a match's consent control submitted: the difference it was
     reviewed against, and the member it lands on, AS THE SCREEN SHOWED THEM.
@@ -312,13 +357,19 @@ class StatementMatchSchema(BaseSchema):
     line AND at least one row" is a relation between two fields rather than a
     fact about either.
 
-    **``line_ids`` members are :class:`~app.schemas.validation._helpers.RowId`,
-    not ``fields.Integer``** (plan step X-ae, finding **N-141**): ``Integer``
-    reads ``'١٢'``, ``' 12 '``, ``'+12'``, ``'1_0'``, ``'007'``, ``'-5'`` and
-    ``'0'`` as ids -- two of which name no row at all.  The completeness gate
-    in ``tests/test_schemas`` is what caught the first draft of this schema
-    declaring them the lax way, and :class:`ReviewedRowField` reaches the same
-    reader for the two counters inside its token.
+    **``lines`` REPLACED ``line_ids`` at plan step ``bank_import:X-f6b-2``**
+    (ruling **bank_import:R-BI14**, finding **N-338**), on ``rows``' own
+    terms one side over: a line and the day the screen showed the bank
+    saying it was made are one fact, so they travel as one
+    :class:`ReviewedLineField` token and the ids are derived from it.  The
+    id inside the token goes through the same
+    :func:`~app.utils.digit_strings.parse_row_id` every id on this screen
+    does (plan step X-ae, finding **N-141**: ``Integer`` reads ``'١٢'``,
+    ``' 12 '``, ``'+12'``, ``'1_0'``, ``'007'``, ``'-5'`` and ``'0'`` as ids
+    -- two of which name no row at all), and the day through one anchored
+    pattern before ``date.fromisoformat`` sees it.  The completeness gate in
+    ``tests/test_schemas`` asserts both directly, as it does for
+    :class:`ReviewedRowField`'s two counters.
 
     **It is NESTED inside :class:`StatementBatchSchema` since plan step
     X-f6a-3c-2**, because one submission now carries many of these: the
@@ -397,7 +448,7 @@ class StatementMatchSchema(BaseSchema):
     #: any of these.*
     #: Both lists, and the note above governs the pair: neither carries a
     #: ceiling, for one reason, so they are spelled the same way.
-    line_ids = fields.List(RowId(), required=False, load_default=list)
+    lines = fields.List(ReviewedLineField(), required=False, load_default=list)
     rows = fields.List(ReviewedRowField(), required=False, load_default=list)
     #: What this match's CONSENT control submitted: the DIFFERENCE it states
     #: it was REVIEWED against, and the member it lands on, as ONE value

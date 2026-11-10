@@ -66,7 +66,7 @@ from app.exceptions import ValidationError
 
 from ._candidates import matched_subjects
 from ._subjects import CandidateRow
-from ._resolve import load_lines, resolve_rows
+from ._resolve import resolve_lines, resolve_rows
 from ._scope import ReviewScope
 from ._submission import MatchSubmission, ReviewedDifference, as_reviewed
 from ._sides import MatchSides
@@ -362,13 +362,13 @@ def preview_hand_build(
         # **NOT locked**: this is the preview, and a query request runs
         # in a READ ONLY transaction where PostgreSQL refuses every row
         # lock.  See :func:`~._resolve.load_lines`' ``for_write``.
-        lines = load_lines(
-            scope.account_id, ticked.line_ids, matched,
-            for_write=False,
+        lines = resolve_lines(
+            ticked, scope.account_id, matched, for_write=False,
         )
         rows = resolve_rows(ticked, scope, matched)
     except ValidationError as exc:
-        # A line another match has claimed, or a row that moved since the page
+        # A line another match has claimed, a line whose day the bank has
+        # restated (ruling **R-BI14**), or a row that moved since the page
         # was drawn.  The door would refuse the same way, so the panel says so
         # now rather than letting the press discover it.
         return HandTotals.refused(str(exc))

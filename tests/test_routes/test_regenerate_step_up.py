@@ -20,6 +20,7 @@ import pytest
 from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.services import mfa_service
+from app.utils.field_encryption import encrypt_secret
 from app.utils.session_helpers import FRESH_LOGIN_AT_KEY
 
 _EMAIL = "test@shekel.local"
@@ -48,7 +49,7 @@ def _enable_mfa(user_id: int, codes: tuple[str, ...] = (_ORIGINAL_CODE,)) -> str
     db.session.add(MfaConfig(
         user_id=user_id,
         is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
+        totp_secret_encrypted=encrypt_secret(secret),
         backup_codes=mfa_service.hash_backup_codes(list(codes)),
         confirmed_at=datetime.now(timezone.utc),
     ))

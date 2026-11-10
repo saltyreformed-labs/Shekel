@@ -197,7 +197,7 @@
 # ----------------------------------------------------------
 # Shared-mode production reads the four production-only secrets
 # (``SECRET_KEY``, ``POSTGRES_PASSWORD``, ``APP_ROLE_PASSWORD``,
-# ``TOTP_ENCRYPTION_KEY``) from operator-managed files under
+# ``FIELD_ENCRYPTION_KEY``) from operator-managed files under
 # ``/opt/docker/shekel/secrets/`` instead of the host ``.env`` file.
 # The audit's threat model: ``Container.Config.Env`` (visible via
 # ``docker inspect``) and the on-disk ``.env`` file are the two
@@ -250,7 +250,7 @@
 #     printf '%s' '<SECRET_KEY-value>'        > /opt/docker/shekel/secrets/secret_key
 #     printf '%s' '<POSTGRES_PASSWORD-value>' > /opt/docker/shekel/secrets/postgres_password
 #     printf '%s' '<APP_ROLE_PASSWORD-value>' > /opt/docker/shekel/secrets/app_role_password
-#     printf '%s' '<TOTP_ENCRYPTION_KEY-value>' > /opt/docker/shekel/secrets/totp_encryption_key
+#     printf '%s' '<FIELD_ENCRYPTION_KEY-value>' > /opt/docker/shekel/secrets/field_encryption_key
 #
 #     # File modes: compose v2 (non-Swarm) IGNORES the uid:/gid:/mode:
 #     # fields on the secret references below -- the container sees the
@@ -259,7 +259,7 @@
 #     # user), which matches the operating user's uid, so 0600 works:
 #     chmod 0600 /opt/docker/shekel/secrets/secret_key \
 #                /opt/docker/shekel/secrets/app_role_password \
-#                /opt/docker/shekel/secrets/totp_encryption_key
+#                /opt/docker/shekel/secrets/field_encryption_key
 #     # postgres_password is read by the DB container as uid 70
 #     # (postgres), which cannot read a josh-owned 0600 file.  Either
 #     # chown it to 70 with mode 0600, or leave it 0644 and rely on
@@ -276,19 +276,19 @@
 #     POSTGRES_PASSWORD=replaced_by_docker_secret
 #     APP_ROLE_PASSWORD=replaced_by_docker_secret
 #
-# TOTP_ENCRYPTION_KEY_OLD note: this variable is empty in steady
+# FIELD_ENCRYPTION_KEY_OLD note: this variable is empty in steady
 # state (populated only during a documented rotation, see
-# ``docs/runbook_secrets.md`` "Rotating TOTP_ENCRYPTION_KEY").  It is
+# ``docs/runbook_secrets.md`` "Rotating FIELD_ENCRYPTION_KEY").  It is
 # NOT included in the secrets block below because compose's
 # file-based secrets require the file to exist at ``docker compose
 # up`` time -- declaring it as a secret would force the operator to
 # touch an empty file even when they are not rotating.  During an
 # active rotation, the operator may inline-add it to the secrets
 # block below, write the retired key to
-# ``/opt/docker/shekel/secrets/totp_encryption_key_old``, and revert
-# the inline edit after ``scripts/rotate_totp_key.py`` reports zero
+# ``/opt/docker/shekel/secrets/field_encryption_key_old``, and revert
+# the inline edit after ``scripts/rotate_field_key.py`` reports zero
 # skipped rows.  The entrypoint's ``_load_secret`` helper reads
-# ``/run/secrets/totp_encryption_key_old`` on every start, so the
+# ``/run/secrets/field_encryption_key_old`` on every start, so the
 # inline edit is the only step required when one is needed.
 
 services:
@@ -492,8 +492,8 @@ services:
         uid: "1000"
         gid: "1000"
         mode: 0400
-      - source: totp_encryption_key
-        target: totp_encryption_key
+      - source: field_encryption_key
+        target: field_encryption_key
         uid: "1000"
         gid: "1000"
         mode: 0400
@@ -529,8 +529,8 @@ secrets:
     file: /opt/docker/shekel/secrets/postgres_password
   app_role_password:
     file: /opt/docker/shekel/secrets/app_role_password
-  totp_encryption_key:
-    file: /opt/docker/shekel/secrets/totp_encryption_key
+  field_encryption_key:
+    file: /opt/docker/shekel/secrets/field_encryption_key
   # Valkey's password, which start.sh hashes into the ACL and the app
   # logs in with (see the valkey service above).
   valkey_password:

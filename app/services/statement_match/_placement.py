@@ -179,6 +179,53 @@ class Placement:
         return self.records_in or self.creates or self.places
 
     @property
+    def definition_id(self) -> "int | None":
+        """Return the DEFINITION whose rows this placement files into, or ``None``.
+
+        Plan step ``bank_import:X-f6b-2``, ruling **bank_import:R-BI19**: the
+        container a merchant's swipes go into has an identity ACROSS pay
+        periods (plan step ``bank_import:X-f6c``), and the double-count
+        safeguard asks that identity -- *does any row of this definition
+        already hold an unexplained purchase near this line* -- rather than the
+        one period's row, because a hand-logged purchase's day is a guess that
+        crosses period boundaries.  Read off the placement's own arms so the
+        safeguard and the act name one definition: the row a ``RECORD_IN``
+        placement files into is one of its definition's, and a ``PLACE``
+        placement names the definition outright.  ``None`` for
+        ``CREATE_NEW`` and for ``UNRESOLVED``, because neither NAMES a
+        definition: a ``CREATE_NEW`` answer's convergence on a same-named
+        placed envelope in the line's own period yields ``RECORD_IN``
+        (finding **N-327**), and a same-named definition in ANOTHER period
+        is one the rule never named, so shape (2) has nothing to look in.
+        """
+        if self.kind is PlacementKind.RECORD_IN:
+            return self.destination.template_id
+        if self.kind is PlacementKind.PLACE:
+            return self.placed.template_id
+        return None
+
+    @property
+    def home_name(self) -> "str | None":
+        """Return what the card calls the container this files into, or ``None``.
+
+        The row's own name for ``RECORD_IN``, the definition's for ``PLACE``,
+        the envelope's for ``CREATE_NEW``.  **The ONE spelling of the home's
+        name**: :func:`~._sentence.for_placement` prints it on each arm and
+        :class:`~._already_held.SpendingAlreadyHeld` names it in the
+        safeguard's clause, so the card and the sentence the automatic door
+        withholds on cannot name two different homes (a first draft read the
+        three arms here AND there, and agreement is not the test).  ``None``
+        for ``UNRESOLVED``.
+        """
+        if self.kind is PlacementKind.RECORD_IN:
+            return self.destination.name
+        if self.kind is PlacementKind.PLACE:
+            return self.placed.name
+        if self.kind is PlacementKind.CREATE_NEW:
+            return self.new_envelope.name
+        return None
+
+    @property
     def sweep_class(self) -> "str | None":
         """Return which RISK class ticking this line would fall in.
 

@@ -123,6 +123,16 @@
    which is separate from `opened.totals.refusal`, the DOOR's). #}
 
 <div class="rec-match" id="rec-match-{{ opened.line.line_id }}">
+  {# THE LINE AS THE SCREEN SHOWED IT (plan step bank_import:X-f6b-2, ruling
+     R-BI14): its id and the day the bank said it was made, as one token the
+     server spelled, which the accept door re-derives under its lock and
+     REFUSES on difference -- a re-import's sighting can restate that day
+     under an open review, and it is the day a match writes onto a purchase.
+     ONE per line at every moment, on `rows-<line>`'s terms: the waiting
+     element the card renders carries its own copy, and this fragment
+     replaces that element whole. #}
+  <input type="hidden" name="line-{{ opened.line.line_id }}"
+         value="{{ opened.line | reviewed_line_token }}">
 
   {# THE TRIGGER IS ON THIS WRAPPER AND NOT ON THE FRAGMENT, and that is a fix
      rather than a layout choice.  It sat on the outer element with

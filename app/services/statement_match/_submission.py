@@ -26,6 +26,21 @@ and was refused outright (**R-FV**), so staleness failed CLOSED by accident.
 anything.  :class:`ReviewedRow` restores that closure deliberately, for every
 tier, and states WHY it refused.
 
+**The LINE side carries its reviewed day for the same reason since plan step
+``bank_import:X-f6b-2``** (ruling **bank_import:R-BI14**, finding **N-338**,
+the line-side twin of N-336).  A line's identity cannot move under an open
+review -- ``posted_on`` and ``amount`` are how a re-import pairs an incoming
+line with a recorded one -- but the day the bank says it was MADE can: a
+re-import records a new SIGHTING, and a line's ``transaction_on`` is the
+earliest day any sighting states, so a source stating one where none did (or
+an earlier one) moves :func:`~._offers.day_made`, which is what
+:func:`~._offers.corrected_purchase_day` writes onto a matched purchase's
+``purchased_on`` -- the one write releasing a match cannot undo.  Reproduced
+before the ruling: screen `2026-06-10`, door wrote `2026-06-08`.  Under the
+daily feed that re-import is nightly.  :class:`ReviewedLine` carries the day
+the screen showed and the door refuses on difference, fail-closed in either
+direction, exactly as :class:`ReviewedRow` does for a row's figure.
+
 **A precondition is not a payload.**  Nothing here is written.  Every figure
 and every day the door commits it still re-derives from the rows the ids name,
 inside the same transaction; what arrives on the wire is only *what the owner
@@ -40,10 +55,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from app.utils.digit_strings import parse_row_id
 
+from ._offers import BankLine, day_made
 from ._subjects import CandidateRow, RowKind
 
 
@@ -384,6 +401,157 @@ def as_reviewed(row: CandidateRow) -> ReviewedRow:
     )
 
 
+#: How many fields a reviewed LINE's token carries, on :data:`_TOKEN_FIELDS`'
+#: terms: a short body and an over-long one are refused by the same test.
+_LINE_TOKEN_FIELDS: int = 2
+
+#: The ONE spelling of a day this module will read: ``YYYY-MM-DD`` and
+#: nothing else.  **Anchored with ``\Z``** for :data:`_FIGURE`'s reason, and
+#: matched BEFORE ``date.fromisoformat``, which since Python 3.11 also reads
+#: ``20260610``, ``2026-W23-3`` and ``2026-06-10T00:00:00`` -- spellings no
+#: template of this app emits, so a body carrying one is not a page this app
+#: rendered.  The calendar test (a 31st of a month with 30) stays
+#: ``fromisoformat``'s, which refuses it with the ``ValueError`` this reader
+#: documents.
+_DAY = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
+
+
+@dataclass(frozen=True)
+class ReviewedLine:
+    """One bank line a submission names, AS THE SCREEN SHOWED IT.
+
+    Plan step ``bank_import:X-f6b-2``, ruling **bank_import:R-BI14**, finding
+    **N-338**: :class:`ReviewedRow`'s twin for the LINE side of a match.  See
+    the module docstring for what moves; what follows is why it carries the
+    DAY and nothing else.
+
+    **``posted_on`` and ``amount`` are the line's identity and cannot move**
+    (``statement_import._record`` pairs an incoming line against a recorded
+    one by exactly those), so they travel as the id does -- implied by it.
+    What a re-import can change is the provenance the sightings state, and of
+    that, ONE fact feeds a MONEY-CLOCK write: the day the bank says the money
+    was MADE (:func:`~._offers.day_made`), which :class:`~._offers.MatchDays`
+    folds into ``happened_on`` and :func:`~._offers.corrected_purchase_day`
+    writes onto a purchase -- the write releasing a match cannot undo.  The
+    card's summary prints that day beside the line (*made 2026-06-08* where
+    the bank states one, else the posting day), so it is the line-side fact
+    the owner REVIEWED.  *The match reads one other sighting-derived fact*:
+    the LABEL a group's Uncategorized residual is minted under
+    (:func:`~._variance._named_for` reads the latest line's wording), which
+    a re-import restating a description also moves.  The token does not
+    carry it, by the ruling's own shape: a label is not money and not a
+    date, and a release deletes the row it names.  A version counter would
+    see every re-import, the wording-only ones included -- the rejected
+    option (ii) -- and the day is what the money write is made of.
+
+    Attributes:
+        line_id: The bank line.
+        happened_on: The day the screen showed the bank saying it was made.
+    """
+
+    line_id: int
+    happened_on: date
+
+    @property
+    def token(self) -> str:
+        """Return this line as the single form value the screen renders.
+
+        Stated ONCE, here, in both directions (:meth:`from_token` reads it),
+        for :attr:`ReviewedRow.token`'s reason.  The day is ISO 8601's one
+        calendar-date spelling, which :data:`_DAY` is the only reader of.
+
+        Returns:
+            ``"<line_id>:<YYYY-MM-DD>"``.
+        """
+        return _SEPARATOR.join((
+            str(self.line_id), self.happened_on.isoformat(),
+        ))
+
+    @classmethod
+    def from_token(cls, raw: str) -> "ReviewedLine":
+        """Return the line *raw* names, refusing anything it does not.
+
+        **Total over every ``str``**, for :meth:`ReviewedRow.from_token`'s
+        reason: the id goes through :func:`~app.utils.digit_strings
+        .parse_row_id` as every other id on this screen does, and the day
+        through :data:`_DAY` before ``date.fromisoformat`` sees it.
+
+        Args:
+            raw: One submitted ``line-<line_id>`` value.
+
+        Returns:
+            The :class:`ReviewedLine` it names.
+
+        Raises:
+            ValueError: When *raw* is not a token this application emitted.
+                The schema field is what turns it into a 400; nothing else
+                calls this.
+        """
+        if not isinstance(raw, str):
+            raise ValueError("a reviewed line must be submitted as text")
+        parts = raw.split(_SEPARATOR)
+        if len(parts) != _LINE_TOKEN_FIELDS:
+            raise ValueError("a reviewed line names two fields")
+        line_id, day = parts
+        parsed_id = parse_row_id(line_id)
+        if parsed_id is None:
+            raise ValueError("that is not a line this page could have shown")
+        if not _DAY.match(day):
+            raise ValueError("that is not a day this page could have shown")
+        try:
+            happened_on = date.fromisoformat(day)
+        except ValueError as exc:
+            raise ValueError(
+                "that is not a day this page could have shown"
+            ) from exc
+        return cls(line_id=parsed_id, happened_on=happened_on)
+
+    def disagrees_with(self, line) -> "str | None":
+        """Return why *line*'s day is no longer what was reviewed, or ``None``.
+
+        :meth:`ReviewedRow.disagrees_with`'s twin, answering a SENTENCE for
+        ruling **R-FZ(a)**'s reason: the owner learns WHAT moved.  The day
+        is re-derived from the locked row by the same
+        :func:`~._offers.day_made` the door's own :class:`~._offers.MatchDays`
+        reads, so the comparison and the write cannot come from two
+        derivations.  Refuses on ANY difference, in either direction: a bank
+        restating a day is evidence the owner has not reviewed, whichever way
+        it moved.
+
+        Args:
+            line: The same line as it stands NOW, under the door's lock
+                (:class:`~app.models.statement_import.BankStatementLine`).
+
+        Returns:
+            One sentence naming the line and both days, or ``None`` when the
+            day still agrees with what was reviewed.
+        """
+        current = day_made(line)
+        if self.happened_on != current:
+            return (
+                f'the bank has restated the day "{line.description}" was '
+                f"made since you reviewed it -- it was shown as "
+                f"{self.happened_on} and the bank now states {current}"
+            )
+        return None
+
+
+def as_reviewed_line(line: BankLine) -> ReviewedLine:
+    """Return *line* as the state a submission would carry it back in.
+
+    :func:`as_reviewed`'s twin: the one place an offered line becomes a
+    reviewed state, so the screen that emits the token and the door that
+    checks it describe the line the same way.
+
+    Args:
+        line: The bank line the screen is about to render.
+
+    Returns:
+        Its :class:`ReviewedLine`.
+    """
+    return ReviewedLine(line_id=line.line_id, happened_on=line.happened_on)
+
+
 #: What separates the figure from the member it lands on in a
 #: :class:`ReviewedDifference` token.  It cannot occur inside either half: the
 #: figure is :data:`_FIGURE`'s alphabet, and a :attr:`ReviewedRow.token` is
@@ -570,25 +738,21 @@ class MatchSubmission:
     disagree with the scope the rows were priced from.
 
     Attributes:
-        line_ids: The bank lines to explain.  They carry no reviewed state,
-            and the reason is narrower than it looks: ``posted_on`` and
-            ``amount`` are a line's IDENTITY in
-            ``statement_import._plan._reconcile``, which pairs an incoming
-            line against a recorded one by exactly those, so neither can move
-            under an open review.  What a re-import DOES write is the NULL
-            provenance columns it can fill.
-
-            **One of those feeds a write, and finding N-338 owns it.**
-            ``transaction_on`` filled from ``NULL`` moves
-            :attr:`~._offers.MatchDays.happened_on`, which
-            :func:`~._offers.corrected_purchase_day` writes onto a matched
-            purchase's ``purchased_on`` -- the one write releasing a match
-            cannot undo.  It is the LINE-side twin of **N-336** and is
-            deliberately NOT fixed here: whether a re-import should invalidate
-            an open review is a ruling, not an omission, and the row's own
-            remedy column carries the options.  What is bounded is the blast
-            radius -- ``posted_first`` cannot move, so WHETHER a purchase is
-            re-dated is stable and only the day it moves TO can shift.
+        lines: The bank lines to explain, each as the screen showed it
+            (:class:`ReviewedLine`).  **They carried no reviewed state until
+            plan step ``bank_import:X-f6b-2``** (ruling **bank_import:R-BI14**,
+            finding **N-338**), and the reason it was left was that whether a
+            re-import should invalidate an open review is a RULING: the
+            developer ruled that a match carries the day the screen showed and
+            the door refuses on difference.  ``posted_on`` and ``amount`` are
+            a line's IDENTITY (``statement_import._plan._reconcile`` pairs an
+            incoming line against a recorded one by exactly those) and travel implied
+            by the id; the day the bank says it was MADE is the line-side
+            fact that both can move -- a re-import's new sighting -- and
+            feeds a MONEY-CLOCK write (:func:`~._offers.corrected_purchase_day`),
+            so it is the one the token carries (:class:`ReviewedLine` names
+            the label read it leaves uncovered).  The ids are DERIVED
+            (:attr:`line_ids`), as :attr:`subjects` derives the rows' keys.
         rows: The app rows that explain them, each as the screen showed it.
         consent: What the owner agreed to about the DIFFERENCE -- the figure
             the screen showed, and the member it lands on -- as one
@@ -638,9 +802,39 @@ class MatchSubmission:
             **R-FN**'s ordinary accepted row.
     """
 
-    line_ids: "frozenset[int]"
+    lines: "frozenset[ReviewedLine]"
     rows: "frozenset[ReviewedRow]"
     consent: "ReviewedDifference | None" = None
+
+    @property
+    def line_ids(self) -> "frozenset[int]":
+        """Return the bank line ids this submission names.
+
+        Derived from :attr:`lines` for every reader that needs only WHICH
+        lines -- the locked read, the receipt's correlation key, the batch's
+        lock order -- so the ids and the reviewed state cannot be two lists.
+        **Two entries naming one line COLLAPSE here** exactly as
+        :attr:`subjects` collapses two entries naming one row, and
+        :func:`~._resolve.resolve_lines` refuses that body by name for the
+        same reason, comparing :attr:`reviewed_lines` against ``len(lines)``.
+
+        Returns:
+            The ids, as a set.
+        """
+        return frozenset(line.line_id for line in self.lines)
+
+    @property
+    def reviewed_lines(self) -> "dict[int, ReviewedLine]":
+        """Return the reviewed lines keyed by the line each one names.
+
+        :attr:`subjects`' twin, built once so the lookup that says WHICH
+        lines were submitted and the one that reconciles each against the
+        locked row cannot range over different sets.
+
+        Returns:
+            ``{line_id: ReviewedLine}``.
+        """
+        return {line.line_id: line for line in self.lines}
 
     @property
     def attributed_subject(self) -> "tuple[RowKind, int] | None":

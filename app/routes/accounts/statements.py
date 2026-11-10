@@ -84,6 +84,7 @@ from app.services.statement_import import (
     record_statement,
     recorded_span,
 )
+from app.services.bank_feed import feed_state
 from app.services.pay_calendar import PayCalendarError
 from app.services.statement_match import (
     RECEIPT_LIMIT,
@@ -149,6 +150,17 @@ def statements(account_id):
         # shows, and a template literal would be a second copy of a number
         # only one of the two could keep true.
         filed_limit=RECEIPT_LIMIT,
+        # The bank feed panel (plan step ``bank_import:X-f6b-2``): the
+        # OWNER's feed, rendered on every cash account's statements page from
+        # ONE template the panel's own doors also answer with.  The page
+        # renders it with no listing and no error: Bridge is asked only by a
+        # press (ruling **R-BI27**), never by a page load, because every
+        # request spends one of Bridge's daily allowance.
+        feed=feed_state(current_user.id),
+        listing=None,
+        listing_error=None,
+        panel_error=None,
+        mappable=[],
     )
 
 

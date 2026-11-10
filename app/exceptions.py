@@ -730,3 +730,143 @@ class CardTermsRemovalRefused(ValidationError):
             f"one set. To change their date, save the terms again dated the "
             f"right day, then remove these."
         )
+
+
+class BankFeedError(ShekelError):
+    """A bank feed door refused.  The base every feed refusal shares.
+
+    Plan step ``bank_import:X-f6b-2``, leaf (3c).  Every subclass REFUSES THE
+    WHOLE ACT and writes nothing: ``str(exc)`` is the sentence the owner
+    reads, and the class is what the log carries (ledger row **BI-499**: a
+    refusal is logged at WARNING with its class), plus whatever
+    :attr:`log_details` names.  **No sentence here names a URL**, because the
+    claim URL and the access URL are credentials and a sentence reaches the
+    flash, and a refusal's class reaches the log.
+    """
+
+    @property
+    def log_details(self) -> dict:
+        """Structured facts the refusal log carries beside the class.
+
+        Empty for most refusals; :class:`BridgeRefused` names Bridge's
+        status and the failure's class, so an operator can tell a 503 from
+        a DNS failure without the sentence.
+
+        Returns:
+            Extra ``log_event`` fields.
+        """
+        return {}
+
+
+class SetupTokenUnreadable(BankFeedError):
+    """The pasted setup token is not base64 of an ``https`` claim URL.
+
+    Refused BEFORE any request, so a bad paste costs nothing at Bridge.
+    """
+
+    def __init__(self):
+        super().__init__(
+            "That does not read as a SimpleFIN setup token: it should be one "
+            "long block of letters, digits, '+', '/' and '=' copied whole "
+            "from Bridge.  Nothing was changed."
+        )
+
+
+class BridgeHostRefused(BankFeedError):
+    """The pasted setup token names a server other than Bridge's.
+
+    Ruling **R-BI28** (the host pin): a setup token is base64 of a URL the
+    app POSTs to, so a crafted paste could point the container at any
+    ``https`` host it can reach.  Refused BEFORE any request, its own class
+    so the log says why, and the sentence names the EXPECTED host and never
+    the pasted one.
+    """
+
+    def __init__(self, expected_host: str):
+        super().__init__(
+            f"That setup token points somewhere other than {expected_host}, "
+            f"so it was not claimed.  Nothing was changed."
+        )
+
+
+class FeedAlreadyConnected(BankFeedError):
+    """A feed already stands for this owner; a claim would burn the token.
+
+    Refused BEFORE the request, because Bridge consumes a setup token on
+    the claim and ``uq_bank_feeds_user`` would refuse the second row only
+    after it was consumed.
+    """
+
+    def __init__(self):
+        super().__init__(
+            "A bank feed is already connected.  Disconnect it first if you "
+            "mean to claim a new setup token.  Nothing was changed."
+        )
+
+
+class NoFeedConnected(BankFeedError):
+    """The act needs a feed and the owner has none."""
+
+    def __init__(self):
+        super().__init__(
+            "No bank feed is connected.  Paste a setup token to connect one.  "
+            "Nothing was changed."
+        )
+
+
+class FeedUnreadable(BankFeedError):
+    """The stored access URL cannot be decrypted under the current key list.
+
+    The rotation hazard ``docs/runbook_secrets.md`` names: the key the
+    ciphertext was written under was pruned from ``FIELD_ENCRYPTION_KEY_OLD``
+    before ``rotate_field_key.py`` re-wrapped the row -- or the key is unset
+    altogether.  The same two states ``/mfa/confirm`` handles for the TOTP
+    secret; a door that did not would answer them with a 500 htmx cannot
+    swap.
+    """
+
+    def __init__(self):
+        super().__init__(
+            "The stored access URL cannot be read under the current "
+            "encryption key.  Disconnect the feed and claim a new setup token, "
+            "or have the retired key restored and the rows re-wrapped.  "
+            "Nothing was changed."
+        )
+
+
+class BridgeRefused(BankFeedError):
+    """Bridge could not be reached, answered an error, or answered a shape
+    this app does not read.
+
+    Carries the two facts the log records and the sentence states -- the
+    failure's CLASS and, when Bridge answered at all, its STATUS -- and
+    deliberately not the exception's text or the response's URL, both of
+    which carry the credential (``requests`` keeps a URL's userinfo in
+    ``response.url`` and in ``str(HTTPError)``, measured 2026-09-20).
+
+    Attributes:
+        status: The HTTP status Bridge answered with, or ``None`` when no
+            answer arrived.
+        error_class: The ``requests`` exception class name, or the feed
+            service's own name for an answer of the wrong shape
+            (``UnexpectedBody``, ``UnexpectedShape``), under ruling
+            **R-BI28** for a claim answered with an access URL on a server
+            other than Bridge's (``ForeignHost``), or under ruling
+            **R-BI29** for an answer that is a redirect, which the feed
+            never follows (``Redirect``).
+    """
+
+    def __init__(self, sentence: str, *, status: "int | None", error_class: str):
+        super().__init__(sentence)
+        self.status = status
+        self.error_class = error_class
+
+    @property
+    def log_details(self) -> dict:
+        """Bridge's status and the failure's class, as log fields."""
+        return {"status": self.status, "error_class": self.error_class}
+
+
+class MappingRefused(BankFeedError):
+    """A mapping submission names an account the owner may not declare, or
+    declares two Bridge accounts to be one account here."""

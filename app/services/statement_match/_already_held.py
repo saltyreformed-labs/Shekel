@@ -1,4 +1,4 @@
-"""What the books ALREADY HOLD as ARRIVING, for one bank line's pay period.
+"""What the books ALREADY HOLD that one bank line may be, in either direction.
 
 Plan step ``bank_import:X-gj-2b``.  Split out of :mod:`._reads`, whose subject
 is *what the review screen shows about this pass*; this one answers a narrower
@@ -20,6 +20,21 @@ container-answered merchant credit into the PURCHASE pipeline
 -- and a predicate reached from two pipelines through a method on one of their
 read models is the seam that ceiling exists to surface.
 
+**Two facts since plan step ``bank_import:X-f6b-2`` (ruling
+**bank_import:R-BI19**), one per direction, and the second exists because
+the first's shape does not carry over.**  A deposit's counterpart is a bare
+row in a PERIOD -- a salary row whose span covers the day -- so
+:class:`ArrivalsAlreadyHeld` asks the period.  An outflow's counterpart is
+the same money *in another shape*: a purchase logged by hand at another
+amount or day, or a bill priced at another figure, so the amount is exactly
+what is wrong and no figure test can find it.  What CAN find it is the two
+things a hand-logged row shares with the swipe -- the merchant's name, and
+the container the merchant's swipes go in -- and :class:`SpendingAlreadyHeld`
+asks those.  Measured on the developer's own restore 2026-09-18 (X-f6b-2's
+handoff s.3d-1): 14 of 51 creatable outflows, 11 of them lines the
+search-gap guard does not reach, 1 needless warning among 20 accepted exact
+matches.
+
 Services-boundary discipline: plain data in, a frozen dataclass out, no Flask
 import, no query.  Every fact it needs arrives as an argument.
 """
@@ -28,7 +43,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
+
+from ._near import names_the_merchant
+from ._pairing import within_window
+from ._subjects import RowKind
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ._offers import BankLine
@@ -114,6 +133,22 @@ class ArrivalsAlreadyHeld:
 
     rows: "tuple[CandidateRow, ...]"
     total: Decimal
+
+    #: The words the card's alert sets around the count and the total
+    #: (``books_already_hold``): WHO holds them, and WHICH rows.  Class-level
+    #: constants on the VALUE rather than words in the template, because the
+    #: twin below has different words and a template choosing between two
+    #: values' sentences with ``{% if %}`` is the second place for the
+    #: partition to be wrong (:attr:`~._leftovers.CreatableLine.warning`
+    #: states the rule).
+    who_holds: ClassVar[str] = "This pay period already holds"
+    which: ClassVar[str] = (
+        "your records say arrived and no bank line explains"
+    )
+    glyph_title: ClassVar[str] = (
+        "This pay period already holds money arriving that no bank line "
+        "explains."
+    )
 
     @property
     def why_it_could_double_count(self) -> str:
@@ -207,4 +242,207 @@ def arrivals_already_held(
     return ArrivalsAlreadyHeld(
         rows=rows,
         total=sum((row.cash_amount for row in rows), Decimal("0.00")),
+    )
+
+
+@dataclass(frozen=True)
+class SpendingAlreadyHeld:
+    """Every unexplained LEAVING row the books may already hold this line as.
+
+    Ruling **bank_import:R-BI19**, plan step ``bank_import:X-f6b-2``, finding
+    **N-381**.  The twin of :class:`ArrivalsAlreadyHeld` for money going OUT,
+    and the daily feed's first need: ruling **R-GH**'s automatic door files a
+    NEW swipe under a standing rule with no press, and the only guards on
+    that door were *the pass did not finish looking* (:func:`~._gaps.search_gap`)
+    and *the destination is proposed whole*.  A row whose figure sits more
+    than :data:`~._near.NEAR_MISS_BOUND` from the line is never admitted by
+    the near tier and never reported -- so a purchase the owner logged by
+    hand at another amount, or a bill priced at another figure, was invisible
+    to both, and the rule filed the swipe a second time.  Measured on the
+    developer's 2026-09-15 import: 21 of 150 undisposed lines are purchases
+    logged at another amount or day, 10 are bills whose app amount differs.
+
+    **Two shapes, one fact, and NO narrowing by amount.**  The amount is what
+    is wrong in *another shape* -- `$50.00` logged for a `$54.12` swipe -- so
+    the inflow value's proof (a deposit smaller than the smallest row cannot
+    be any subset of them) is invalid here and is not copied.  The bounds are
+    the day window the pass already pairs across (:func:`~._pairing.within_window`,
+    :data:`~._pairing.DAY_WINDOW`) and the two things a hand-logged row shares
+    with the swipe:
+
+    * :attr:`named_for_merchant` -- rows whose label names the line's
+      merchant (:func:`~._near.names_the_merchant`, the near tier's own word
+      test), at any figure: a ``Food Lion`` purchase logged as `$50.00`, a
+      bill called ``GEICO auto``;
+    * :attr:`inside_destination` -- purchases under the DEFINITION the
+      owner's rule files this merchant into (plan step ``bank_import:X-f6c``
+      gave that container an identity across pay periods), whatever they are
+      called: a ``weekly shop`` entry in Groceries.  Empty where no rule
+      reaches the line, because there is then no destination to look in.
+
+    **Rejected shapes, each measured or argued in the ruling**: mirroring the
+    inflow's period-span test (an envelope IS a leaving row covering every
+    day of its period, so every swipe would warn); either shape alone (the
+    first misses ``weekly shop``, the second misses bills and rule-less
+    lines); widening the near tier's published refusals to ``TOO_FAR`` (it
+    cannot reach the container, and it would make *did not finish looking*
+    say something false).
+
+    **A row whose figure is NOT ITS OWN is never one of these, in either
+    shape.**  An envelope is priced at its purchases and a CC payback at the
+    card spend it repays (:attr:`~._offers.CandidateRow.states_own_figure`,
+    ``False`` for exactly those two), so neither holds money the books do not
+    already hold as the rows it is priced from -- and both stay in
+    ``unmatched_rows`` for the hand-build form's sake, with negative cash.
+    Counting the container beside its own purchase says `$100.00` for one
+    `$50.00` row; and because a new envelope is NAMED FOR THE MERCHANT by
+    default (both new-envelope forms offer the merchant as the name), a
+    merchant-named envelope would be *named for* every later swipe into it
+    from the moment the automatic door filed the first -- the door
+    manufacturing the population it withholds on.  That is the ruling's own
+    rejected shape (*an envelope IS a leaving row covering every day of its
+    period, so every swipe would warn*) reached by another road, and the near
+    tier refuses the same rows first of all
+    (:attr:`~._near.NearRefusal.FIGURE_NOT_ITS_OWN`) for the same reason.
+    Found by this leaf's adversarial review 2026-09-18.
+
+    **Its cost is stated**: while an envelope holds hand-logged unexplained
+    purchases within the window, every swipe into it is withheld from the
+    automatic door and needs the owner's tick.  Under the feed the owner
+    hand-logs nothing, so that population empties itself within one window.
+
+    Attributes:
+        named_for_merchant: The unexplained rows naming the line's merchant
+            inside the window, in the offer set's order.
+        inside_destination: The unexplained PURCHASES under the rule's
+            destination definition inside the window, in the offer set's
+            order.  A row in both is in both.
+        merchant: What the bank calls the merchant, for the sentence.
+        destination: What the card calls the rule's destination, for the
+            sentence, or ``None`` where no rule names one.
+    """
+
+    named_for_merchant: "tuple[CandidateRow, ...]"
+    inside_destination: "tuple[CandidateRow, ...]"
+    merchant: str
+    destination: "str | None"
+
+    #: The card's words (see :class:`ArrivalsAlreadyHeld`): the books rather
+    #: than the period, because the window reaches across periods.
+    who_holds: ClassVar[str] = "Your records already hold"
+    which: ClassVar[str] = "leaving that no bank line explains"
+    glyph_title: ClassVar[str] = (
+        "Your records already hold spending near this line that no bank "
+        "line explains, named for this merchant or inside its envelope."
+    )
+
+    @property
+    def rows(self) -> "tuple[CandidateRow, ...]":
+        """Return every row either shape found, once each.
+
+        Returns:
+            The union: the rows named for the merchant first, then the rows
+            only the container found, each run in the offer set's order.  A
+            row found both ways is listed once, where the name found it.
+        """
+        seen = set()
+        rows = []
+        for row in self.named_for_merchant + self.inside_destination:
+            key = (row.kind, row.row_id)
+            if key not in seen:
+                seen.add(key)
+                rows.append(row)
+        return tuple(rows)
+
+    @property
+    def total(self) -> Decimal:
+        """Return what the rows come to, SIGNED -- negative, money leaving.
+
+        Signed because the card's alert prints it through the ``money``
+        macro beside the rows it lists, and those print signed (`-$50.00`);
+        the clause :attr:`why_it_could_double_count` composes says the
+        direction as a WORD (*$50.00 leaving*) and prints the magnitude, as
+        the arriving twin's does.  One value, two renderings, each the
+        convention of the sentence it sits in.
+
+        Returns:
+            The sum of the rows' cash effect.
+        """
+        return sum((row.cash_amount for row in self.rows), Decimal("0.00"))
+
+    @property
+    def why_it_could_double_count(self) -> str:
+        """Return the clause the withholding sentence is built from.
+
+        The twin of :meth:`ArrivalsAlreadyHeld.why_it_could_double_count`,
+        composed once for the receipt and the screen for the reason stated
+        there.  It names WHICH of the two shapes found the rows, because that
+        is what tells the owner where to look: beside the merchant's other
+        rows, or inside the envelope the rule would file into.
+
+        Returns:
+            The clause, with no leading capital and no trailing stop.
+        """
+        found = []
+        if self.named_for_merchant:
+            found.append(f"named for {self.merchant}")
+        if self.inside_destination:
+            found.append(f"inside {self.destination}")
+        return (
+            f"your records already hold ${-self.total:,.2f} leaving that no "
+            f"bank line explains, {' or '.join(found)}, so recording it "
+            f"automatically could count the same money twice"
+        )
+
+
+def spending_already_held(
+    unmatched_rows, line: "BankLine", destination_id: "int | None",
+    destination_name: "str | None", definition_of_parent: "dict[int, int]",
+) -> "SpendingAlreadyHeld | None":
+    """Return what the books may already hold *line* as, or ``None``.
+
+    **The ONE statement of the outflow-side safeguard**, read by the card and
+    by :func:`~._verdict.ruled` -- the same value, so the sentence the
+    automatic door withholds on and the rows the screen names cannot come
+    from two derivations (finding **N-359**'s rule, one direction over).
+
+    Args:
+        unmatched_rows: The candidate rows no bank line explains
+            (:attr:`~._reads.ReviewSet.unmatched_rows`).
+        line: The outflow being considered.
+        destination_id: The DEFINITION the owner's rule files this line's
+            merchant into (:attr:`~._placement.Placement.definition_id`), or
+            ``None`` where no rule names one.
+        destination_name: What the card calls it, or ``None``.
+        definition_of_parent: The definition each candidate PURCHASE's parent
+            row belongs to, by parent id -- read once per pass by the caller
+            that holds the session.
+
+    Returns:
+        The :class:`SpendingAlreadyHeld`, or ``None`` when neither shape finds
+        a row -- which is the state that makes filing safe, and the screen
+        says nothing rather than saying it is fine.
+    """
+    # A row priced from OTHER rows (an envelope, a payback) holds nothing
+    # the books do not already hold as those rows; see the class docstring.
+    leaving = [
+        row for row in unmatched_rows
+        if row.cash_amount < 0
+        and row.states_own_figure
+        and within_window(row, line)
+    ]
+    named = tuple(row for row in leaving if names_the_merchant(line, row))
+    inside = tuple(
+        row for row in leaving
+        if destination_id is not None
+        and row.kind is RowKind.PURCHASE
+        and definition_of_parent.get(row.parent_id) == destination_id
+    )
+    if not named and not inside:
+        return None
+    return SpendingAlreadyHeld(
+        named_for_merchant=named,
+        inside_destination=inside,
+        merchant=line.merchant_label,
+        destination=destination_name,
     )

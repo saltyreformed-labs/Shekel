@@ -91,6 +91,7 @@ from app.models.statement_match import (
 )
 from app.models.statement_line_skip import StatementLineSkip
 from app.models.line_source_id import LineSourceId
+from app.models.bank_feed import BankFeed
 
 # Salary domain
 from app.models.salary_profile import SalaryProfile
@@ -185,6 +186,7 @@ __all__ = [
     "StatementMatchMember",
     "StatementLineSkip",
     "LineSourceId",
+    "BankFeed",
     # Salary domain
     "SalaryProfile",
     "SalaryRaise",

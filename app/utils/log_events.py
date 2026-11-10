@@ -637,6 +637,47 @@ EVT_MERCHANT_RULE_STATED = _register(
     "are the only record of what was said before.",
 )
 
+EVT_STATEMENT_DOOR_REFUSED = _register(
+    "statement_door_refused", BUSINESS,
+    "A statement door refused the request with a designed refusal -- the "
+    "sentence the owner read -- and wrote nothing (ledger row BI-499: until "
+    "plan step bank_import:X-f6b-2 a refusal reached the screen and no log "
+    "line, so an operator reading the log after the fact, or an unattended "
+    "fetch with no screen to flash on, had no trail of it).  Logged at "
+    "WARNING from the ONE place every statement door's refusal arm runs, "
+    "carrying the refusal's class and its sentence; a database error is not "
+    "this event, it is the handled-error path with its traceback.",
+)
+
+# ── Business events: the bank feed (bank_import:X-f6b-2) ───────────
+
+EVT_BANK_FEED_CLAIMED = _register(
+    "bank_feed_claimed", BUSINESS,
+    "An owner claimed a SimpleFIN setup token: the access URL Bridge answered "
+    "with is stored as ciphertext under the field-encryption key (ruling "
+    "R-BI12).  Emitted after the commit that stored it, and before the "
+    "account listing that follows, because the token is consumed at Bridge "
+    "by the claim and the stored credential is the fact worth recording "
+    "whatever the listing then does (ruling R-BI27).  Never carries the URL.",
+)
+
+EVT_BANK_FEED_ACCOUNTS_MAPPED = _register(
+    "bank_feed_accounts_mapped", BUSINESS,
+    "An owner declared, on the feed panel, which account here each of "
+    "Bridge's accounts is (ruling R-BI26: rows in account_external_identities "
+    "under the simplefin source, naming the feed).  Counts what was declared, "
+    "moved, cleared and left as it stood.  It moves no money: the nightly "
+    "sync reads the mapping; nothing here records a line.",
+)
+
+EVT_BANK_FEED_DISCONNECTED = _register(
+    "bank_feed_disconnected", BUSINESS,
+    "An owner disconnected the bank feed: the feed row and the mappings "
+    "declared under it are deleted (rulings R-BI12, R-BI26); the imports it "
+    "recorded stand.  Revoking the token at Bridge is the owner's own act and "
+    "is not observable here.",
+)
+
 
 # ── Performance events (request lifecycle) ─────────────────────────
 

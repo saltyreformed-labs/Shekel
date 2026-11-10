@@ -98,9 +98,9 @@
 </div>
 
 <div class="row g-3">
-  {# ── Import a statement ──────────────────────────────────────────── #}
-  <div class="col-12 col-lg-5">
-    <div class="card h-100">
+  {# ── Import a statement, and the bank feed beneath it ────────────── #}
+  <div class="col-12 col-lg-5 d-flex flex-column gap-3">
+    <div class="card">
       <div class="card-header"><i class="bi bi-upload"></i> Import a statement</div>
       <div class="card-body">
         <form method="post"
@@ -151,6 +151,11 @@
         </p>
       </div>
     </div>
+
+    {# The OWNER's feed, one panel on every cash account's statements page
+       (plan step bank_import:X-f6b-2).  Its variables come from the view
+       on a page load and from the panel's own doors on a press. #}
+    {% include "accounts/_bank_feed_panel.html" %}
   </div>
 
   {# ── What is recorded ────────────────────────────────────────────── #}

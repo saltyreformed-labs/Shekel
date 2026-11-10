@@ -109,7 +109,7 @@ from typing import TYPE_CHECKING
 from ._dating import row_days
 from ._panel import MatchCandidates
 from ._preview import preview_hand_build
-from ._submission import MatchSubmission, as_reviewed
+from ._submission import MatchSubmission, as_reviewed, as_reviewed_line
 
 if TYPE_CHECKING:  # pragma: no cover -- annotations only
     from ._dating import RowDays
@@ -280,7 +280,7 @@ def proposed_submission(subject: "CardSubject") -> MatchSubmission:
     """
     proposal = subject.proposal
     return MatchSubmission(
-        line_ids=frozenset({subject.line.line_id}),
+        lines=frozenset({as_reviewed_line(subject.line)}),
         rows=frozenset(
             () if proposal is None
             else (as_reviewed(row) for row in proposal.rows)
@@ -454,7 +454,8 @@ def refused_match(subject: "CardSubject") -> OpenedMatch:
         # **Nothing named and nothing consented to**, because the body that
         # named them was refused whole: the pane draws no box checked.
         submitted=MatchSubmission(
-            line_ids=frozenset({subject.line.line_id}), rows=frozenset(),
+            lines=frozenset({as_reviewed_line(subject.line)}),
+            rows=frozenset(),
         ),
         query="",
         re_fetches=True,

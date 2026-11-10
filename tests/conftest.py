@@ -1001,8 +1001,8 @@ def _refuse_a_build_the_environment_is_not_ready_for(name):
     missing = []
     if os.environ.get("HIBP_CHECK_ENABLED") != "false":
         missing.append("disable_hibp_check")
-    if not os.environ.get("TOTP_ENCRYPTION_KEY"):
-        missing.append("set_totp_key")
+    if not os.environ.get("FIELD_ENCRYPTION_KEY"):
+        missing.append("set_field_encryption_key")
     if missing:
         raise RuntimeError(
             f"the world {name!r} is being built before {' and '.join(missing)} "
@@ -1222,10 +1222,10 @@ def fast_bcrypt():
 
 
 @pytest.fixture(autouse=True)
-def set_totp_key(monkeypatch):
-    """Set a test TOTP encryption key for all tests."""
+def set_field_encryption_key(monkeypatch):
+    """Set a fresh field-encryption key (Fernet) for every test."""
     from cryptography.fernet import Fernet  # pylint: disable=import-outside-toplevel
-    monkeypatch.setenv("TOTP_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 
 @pytest.fixture(autouse=True)
@@ -1377,14 +1377,14 @@ def setup_database(app):
 
 
 @pytest.fixture(autouse=True)
-def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylint: disable=unused-argument
+def db(app, setup_database, request, set_field_encryption_key, disable_hibp_check):  # pylint: disable=unused-argument
     """Provide a freshly-cloned database for each test.
 
     **It DEPENDS on the two environment fixtures rather than merely coexisting
     with them** (plan step balance:X-be-2).  All three are autouse and
     function-scoped, so every test got them either way -- but pytest builds
     the fixture list from ``dir(module)``, which is ALPHABETICAL, and
-    ``"db" < "disable_hibp_check" < "set_totp_key"``.  That is the whole of
+    ``"db" < "disable_hibp_check" < "set_field_encryption_key"``.  That is the whole of
     why this one used to run first: not scope, and nothing about what it does.
     Harmless while it issued nothing but DDL; it can now run a seeded start
     state's builder, which is ordinary application code, and the first attempt

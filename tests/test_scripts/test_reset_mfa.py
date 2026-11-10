@@ -8,6 +8,7 @@ import pytest
 from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.services import mfa_service
+from app.utils.field_encryption import encrypt_secret
 from scripts.reset_mfa import parse_args, reset_mfa
 
 
@@ -23,7 +24,7 @@ class TestResetMfa:
         mfa_config = MfaConfig(
             user_id=user_id,
             is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret("JBSWY3DPEHPK3PXP"),
+            totp_secret_encrypted=encrypt_secret("JBSWY3DPEHPK3PXP"),
             backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa", "bbbbbbbb"]),
         )
         db.session.add(mfa_config)
@@ -143,7 +144,7 @@ class TestResetMfa:
             mfa_config = MfaConfig(
                 user_id=seed_user["user"].id,
                 is_enabled=False,
-                totp_secret_encrypted=mfa_service.encrypt_secret("JBSWY3DPEHPK3PXP"),
+                totp_secret_encrypted=encrypt_secret("JBSWY3DPEHPK3PXP"),
                 backup_codes=None,
                 confirmed_at=None,
             )
@@ -184,7 +185,7 @@ class TestResetMfa:
             mfa_config = MfaConfig(
                 user_id=seed_user["user"].id,
                 is_enabled=False,
-                pending_secret_encrypted=mfa_service.encrypt_secret(
+                pending_secret_encrypted=encrypt_secret(
                     "ORSXG5A2ORSXG5A2"
                 ),
                 pending_secret_expires_at=(
@@ -225,7 +226,7 @@ class TestResetMfa:
                 .filter_by(user_id=seed_user["user"].id)
                 .first()
             )
-            config.pending_secret_encrypted = mfa_service.encrypt_secret(
+            config.pending_secret_encrypted = encrypt_secret(
                 "ORSXG5A2ORSXG5A2"
             )
             config.pending_secret_expires_at = (
@@ -302,7 +303,7 @@ class TestResetMfaAuditLog:
         mfa_config = MfaConfig(
             user_id=user_id,
             is_enabled=True,
-            totp_secret_encrypted=mfa_service.encrypt_secret("JBSWY3DPEHPK3PXP"),
+            totp_secret_encrypted=encrypt_secret("JBSWY3DPEHPK3PXP"),
             backup_codes=mfa_service.hash_backup_codes(["aaaaaaaa", "bbbbbbbb"]),
         )
         db.session.add(mfa_config)

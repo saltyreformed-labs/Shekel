@@ -43,6 +43,7 @@ from app.tax_law import (
     ladder,
 )
 from app.utils.db_errors import sqlstate_of
+from app.utils.field_encryption import encrypt_secret
 
 
 #: The ``app`` package's directory, read off the package's own import origin,
@@ -2316,7 +2317,7 @@ def enable_mfa(db_session, user_id, backup_codes=()):
     db_session.add(MfaConfig(
         user_id=user_id,
         is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
+        totp_secret_encrypted=encrypt_secret(secret),
         backup_codes=mfa_service.hash_backup_codes(list(backup_codes), rounds=4),
         confirmed_at=_real_datetime.now(_real_timezone.utc),
     ))
@@ -2386,6 +2387,49 @@ def step_down_through_the_transfer_column_drop(db_session):
         ).downgrade,
         db_session,
     )
+
+
+def assert_no_schema_drift(app, tables):
+    """Assert the migration chain produces the models, for *tables* alone.
+
+    Alembic's own comparison over the test database -- migrated from scratch
+    through the chain, never ``create_all``'d -- scoped to the tables a
+    migration touched, with types and server defaults compared.  Scoped
+    because a rehearsal clone carries older tables' drifts and a test's
+    verdict must be about the chain the commit under test wrote.  Written
+    once here (the third copy would have been the sync leaf's) after
+    ``test_bank_feed_schema.py`` and ``test_declared_mapping_schema.py``
+    each carried it.
+
+    Args:
+        app: The Flask app (its context is entered here).
+        tables: The ``(schema, name)`` pairs whose drift is graded; every
+            other table is filtered out on BOTH sides of the comparison.
+
+    Raises:
+        AssertionError: Naming every difference Alembic found.
+    """
+    # Pylint: ``import-outside-toplevel`` -- ``db`` is imported lazily
+    # throughout this module (its collection-time-safety convention).
+    # pylint: disable=import-outside-toplevel
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from app.extensions import db
+
+    touched = set(tables)
+    with app.app_context():
+        ctx = MigrationContext.configure(
+            connection=db.session.connection(),
+            opts={
+                "compare_type": True,
+                "compare_server_default": True,
+                "include_schemas": True,
+                "include_object": lambda obj, name, type_, *_: (
+                    type_ != "table" or (obj.schema, name) in touched
+                ),
+            },
+        )
+        assert compare_metadata(ctx, db.metadata) == []
 
 
 def load_init_database_module():

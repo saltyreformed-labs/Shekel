@@ -73,6 +73,32 @@ _VERB_PREFIX = "verb-"
 #: and one token cannot be desynchronised from itself.
 _ROWS_PREFIX = "rows-"
 
+#: What a card's MATCH tab carries its BANK LINE in, AS THE SCREEN SHOWED IT:
+#: one token per line carrying its id and the day the bank said it was made
+#: (:class:`~app.schemas.validation.statements.ReviewedLineField`), since
+#: plan step ``bank_import:X-f6b-2`` (ruling **bank_import:R-BI14**).  The
+#: KEY beside it locates the card's controls; the token is the line's
+#: identity and reviewed state as one value, on ``rows-``' terms.  A page
+#: drawn before this step posts no such field, and the item then names no
+#: line: fail-closed, refused by the door as an empty side rather than read
+#: off the key as a line nobody reviewed.
+#:
+#: **Read as a LIST, and that is a declared widening of what the wire
+#: admits.**  Until this step the item's line WAS the key -- one line per
+#: card, structurally -- and plan step ``bank_import:X-gn`` (a match naming a
+#: second bank line) recorded that single-line key as the one thing in its
+#: way.  The token is a list here for ``rows-``' reason (a match names N
+#: lines in the service's own shape, ruling **R-FS**), so a crafted body
+#: carrying two tokens under one key reaches the accept door as a two-line
+#: group: an act the door validates whole (sums, sides, days, the owner's own
+#: lines only, through ``load_lines``' account scope) and the screen does not
+#: yet draw.  Nothing is bounded here, because the bound would be a fence
+#: X-gn deletes; that step's premise sentence is now false and is reported
+#: with this leaf.  A token naming a line OTHER than the key's is the same
+#: act as ticking that line's own card, and is not refused for the same
+#: reason ``rows-`` tokens the pane did not draw are not.
+_LINE_PREFIX = "line-"
+
 #: What a card's MATCH tab carries the owner's CONSENT in, keyed by its BANK
 #: LINE: the difference the match was reviewed against AND the member it
 #: lands on, as one :class:`~app.services.statement_match.ReviewedDifference`
@@ -141,7 +167,10 @@ def reconcile_match_payload(form, key: str) -> dict:
         nobody filled in.
 
     """
-    item = {"line_ids": [key], "rows": form.getlist(f"{_ROWS_PREFIX}{key}")}
+    item = {
+        "lines": form.getlist(f"{_LINE_PREFIX}{key}"),
+        "rows": form.getlist(f"{_ROWS_PREFIX}{key}"),
+    }
     consent = form.get(f"{_CONSENT_PREFIX}{key}")
     if consent:
         item["consent"] = consent

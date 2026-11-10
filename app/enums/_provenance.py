@@ -91,6 +91,23 @@ class StatementSourceEnum(enum.Enum):
 
         secu_checking_csv -- State Employees' Credit Union's own transaction
                              export, as CSV.
+        simplefin         -- SimpleFIN Bridge's v2 account feed, as JSON: the
+                             daily fetch of plan step ``bank_import:X-f6b-2``
+                             (ruling **R-BI12**).  A FEED source: its lines
+                             arrive by the sync door and never by the upload
+                             form.  The member and its ref row exist first
+                             (leaf 3c) so the mapping form can record which
+                             Bridge account is which account here (the
+                             ``account_external_identities`` row, ruling
+                             **R-BI26**).  ``available_sources()`` -- the
+                             upload form's list, the INTERSECTION of the ref
+                             rows and the upload-parser registry
+                             ``_adapters._PARSERS`` -- leaves it out, and
+                             must always: the sync leaf owes that registry
+                             the distinction between a file source and a
+                             feed source before it registers the feed's
+                             reader anywhere, so the form never offers a
+                             feed.
 
     **A member names a FORMAT at an INSTITUTION, not an institution**, because
     one bank publishes one statement several ways and the ways do not carry the
@@ -123,6 +140,7 @@ class StatementSourceEnum(enum.Enum):
     """
 
     SECU_CHECKING_CSV = "secu_checking_csv"
+    SIMPLEFIN = "simplefin"
 
 
 class SettledDayBasisEnum(enum.Enum):

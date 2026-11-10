@@ -9,7 +9,7 @@ paths:
 
 Docker container (Gunicorn + Nginx + Cloudflare Tunnel) on bare-metal Arch Linux.
 No Ubuntu packages, no exposed ports, no systemd. `.env` config: `DATABASE_URL`,
-`SECRET_KEY`, `TOTP_ENCRYPTION_KEY`.
+`SECRET_KEY`, `FIELD_ENCRYPTION_KEY`.
 
 ## Compose conventions (use these on every new service)
 

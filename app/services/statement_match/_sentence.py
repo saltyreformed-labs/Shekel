@@ -219,6 +219,14 @@ def for_placement(placement: Placement) -> "tuple[Span, ...]":
     third reader ever needs the pair, it belongs beside ``label`` rather than
     spelled again here.
 
+    **The NAME span is** :attr:`~._placement.Placement.home_name` **on every
+    arm** (plan step ``bank_import:X-f6b-2``): the third reader arrived --
+    :class:`~._already_held.SpendingAlreadyHeld` names the home the rule
+    would file into -- and the three per-arm name reads that lived here
+    became that property, so the sentence and the safeguard cannot name two
+    different homes.  The arms survive for what differs between them: the
+    verb's object and the period or the joining note.
+
     Args:
         placement: The :class:`~._placement.Placement`, which must name a
             destination -- ``names_a_home``: it records in a row, creates an
@@ -240,7 +248,7 @@ def for_placement(placement: Placement) -> "tuple[Span, ...]":
         return (
             Span.words(Verb.ADD.word, Ink.VERB),
             Span.words("to", Ink.PLAIN),
-            Span.words(destination.name, Ink.STRONG),
+            Span.words(placement.home_name, Ink.STRONG),
             Span.words(
                 f"({destination.period.start_date} - "
                 f"{destination.period.end_date})",
@@ -251,7 +259,7 @@ def for_placement(placement: Placement) -> "tuple[Span, ...]":
         spans = [
             Span.words(Verb.ADD.word, Ink.VERB),
             Span.words("to a new envelope", Ink.PLAIN),
-            Span.words(placement.new_envelope.name, Ink.STRONG),
+            Span.words(placement.home_name, Ink.STRONG),
         ]
         if placement.joins_new:
             # **Said on the card rather than discovered after the press**
@@ -270,7 +278,7 @@ def for_placement(placement: Placement) -> "tuple[Span, ...]":
         spans = [
             Span.words(Verb.ADD.word, Ink.VERB),
             Span.words("to", Ink.PLAIN),
-            Span.words(placement.placed.name, Ink.STRONG),
+            Span.words(placement.home_name, Ink.STRONG),
         ]
         spans.append(
             Span.words("joining the one this pass places", Ink.MUTED)

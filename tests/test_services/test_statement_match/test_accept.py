@@ -18,7 +18,7 @@ this project has twice measured the absence of.
 """
 
 from dataclasses import replace
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -43,7 +43,7 @@ from app.services import (
 )
 from app.services.balance_at import BalanceContext
 from app.services.row_valuation import settled_figure
-from app.services.statement_match import MatchSubmission
+from app.services.statement_match import MatchSubmission, ReviewedLine
 
 from app.services.ledger_lines import linked_key
 from tests._ledger_parity import assert_ledger_parity
@@ -62,6 +62,7 @@ from ._builders import (
     a_bank_line,
     a_purchase,
     a_scope,
+    a_sighting,
     a_submission,
     a_transaction,
     an_assertion,
@@ -546,6 +547,149 @@ class TestARowThatMOVEDSinceTheReviewIsRefused:
         assert settled_figure(txn) == Decimal("178.29")
 
 
+class TestALineWhoseDayTheBankRESTATEDSinceTheReviewIsRefused:
+    """Finding **N-338**, ruling **bank_import:R-BI14**, at the door.
+
+    :class:`TestARowThatMOVEDSinceTheReviewIsRefused`'s twin for the LINE
+    side of a match (plan step ``bank_import:X-f6b-2``).  The day the bank
+    says a line was MADE is what a match writes onto a purchase it re-dates
+    (ruling **R-FW**), and a re-import can restate it under an open review:
+    a line's ``transaction_on`` is the earliest day any SIGHTING states, so a
+    second import stating one where the first stated none moves it.
+    Reproduced before the ruling: the screen promised `2026-06-10` (the
+    posting day, fallen back to) and the door wrote `2026-06-08`.  Under the
+    daily feed that re-import is nightly.
+
+    ``test_submission`` grades the token and the comparison as values.  These
+    grade that the door REACHES it, writes nothing, and that the SAME match
+    reviewed against the restated day goes through -- so the refusal is the
+    reviewed day and not the restatement.
+    """
+
+    @staticmethod
+    def _the_reproduced_shape(seed_user):
+        """Return a purchase the match re-dates and the line that dates it.
+
+        The purchase is recorded five days AFTER the posting day, so the
+        match refutes its day and writes the line's; the line states no
+        transaction day, so the screen shows the posting day.
+        """
+        bank_day = seed_user["bootstrap_period"].start_date
+        envelope = a_transaction(
+            seed_user, name="Groceries", amount="100.00", is_envelope=True,
+        )
+        purchase = a_purchase(
+            seed_user, envelope, amount="25.00",
+            purchased_on=bank_day + timedelta(days=5),
+        )
+        line = a_bank_line(
+            seed_user, an_import(seed_user), amount="-25.00",
+            posted_on=bank_day,
+        )
+        return bank_day, purchase, line
+
+    def test_a_day_stated_AFTER_the_review_is_refused_and_writes_nothing(
+        self, app, db, seed_user,
+    ):
+        """The reproduced case, through the real door."""
+        bank_day, purchase, line = self._the_reproduced_shape(seed_user)
+        submission = a_submission(
+            a_scope(seed_user), lines=[line], entries=[purchase],
+        )
+        [reviewed] = submission.lines
+        assert reviewed.happened_on == bank_day, "the screen showed the posting day"
+
+        # ...and a second import states the swipe day, after the render.
+        a_sighting(
+            seed_user, an_import(seed_user), line,
+            transaction_on=bank_day - timedelta(days=2),
+        )
+
+        with pytest.raises(
+            ValidationError, match="reviewed against a different day",
+        ) as refused:
+            statement_match.accept_match(submission, a_scope(seed_user))
+
+        assert (
+            f"it was shown as {bank_day} and the bank now states "
+            f"{bank_day - timedelta(days=2)}"
+        ) in str(refused.value)
+        assert db.session.query(StatementMatch).count() == 0
+        assert purchase.purchased_on == bank_day + timedelta(days=5), (
+            "the refused act re-dated the purchase"
+        )
+        assert purchase.settled_on is None
+
+    def test_the_same_match_reviewed_AGAINST_the_restated_day_goes_through(
+        self, app, db, seed_user,
+    ):
+        """The control: a fresh render carries the day the bank now states.
+
+        Same rows, same line, same restatement -- the sighting lands BEFORE
+        the screen is drawn -- and the door writes the day it showed.  Delete
+        the comparison and the case above fails while this still passes;
+        make the comparison refuse everything and this fails.
+        """
+        bank_day, purchase, line = self._the_reproduced_shape(seed_user)
+        a_sighting(
+            seed_user, an_import(seed_user), line,
+            transaction_on=bank_day - timedelta(days=2),
+        )
+        submission = a_submission(
+            a_scope(seed_user), lines=[line], entries=[purchase],
+        )
+        [reviewed] = submission.lines
+        assert reviewed.happened_on == bank_day - timedelta(days=2)
+
+        statement_match.accept_match(submission, a_scope(seed_user))
+
+        assert db.session.query(StatementMatch).count() == 1
+        assert purchase.purchased_on == bank_day - timedelta(days=2)
+
+    def test_a_line_named_TWICE_is_refused_by_name(self, app, db, seed_user):
+        """Two reviewed states of one line, refused before either is read.
+
+        ``line_ids`` collapses the pair, so without this the guard would
+        look the line up in a mapping that kept whichever entry the set
+        iterated last -- the SENDER choosing which day is checked.
+        """
+        bank_day, purchase, line = self._the_reproduced_shape(seed_user)
+        submission = a_submission(
+            a_scope(seed_user), lines=[line], entries=[purchase],
+        )
+        twice = replace(submission, lines=frozenset({
+            ReviewedLine(line_id=line.id, happened_on=bank_day),
+            ReviewedLine(
+                line_id=line.id, happened_on=bank_day - timedelta(days=2),
+            ),
+        }))
+
+        with pytest.raises(ValidationError, match="more than once"):
+            statement_match.accept_match(twice, a_scope(seed_user))
+
+        assert db.session.query(StatementMatch).count() == 0
+
+    def test_the_PREVIEW_refuses_the_same_way_without_the_lock(
+        self, app, db, seed_user,
+    ):
+        """The pane says what the press would, so a stale tab learns early."""
+        bank_day, purchase, line = self._the_reproduced_shape(seed_user)
+        submission = a_submission(
+            a_scope(seed_user), lines=[line], entries=[purchase],
+        )
+        a_sighting(
+            seed_user, an_import(seed_user), line,
+            transaction_on=bank_day - timedelta(days=2),
+        )
+
+        totals = statement_match.preview_hand_build(
+            submission, a_scope(seed_user),
+        )
+
+        assert totals.remedy == "refused"
+        assert "reviewed against a different day" in totals.refusal
+
+
 class TestEveryOtherRefusalFires:
     """Each of these is reachable from a stale page, and each writes nothing."""
 
@@ -785,7 +929,9 @@ class TestEveryOtherRefusalFires:
             statement_match.accept_match(
                 replace(
                     a_submission(scope, transactions=[txn]),
-                    line_ids=frozenset({999999}),
+                    lines=frozenset({ReviewedLine(
+                        line_id=999999, happened_on=date(2024, 1, 5),
+                    )}),
                 ),
                 scope,
             )
@@ -1853,7 +1999,10 @@ class TestTheStoredTransactionDayReachesTheScreen:
         for proposal in review.proposals:
             statement_match.accept_match(
                 MatchSubmission(
-                    line_ids=frozenset(l.line_id for l in proposal.lines),
+                    lines=frozenset(
+                        statement_match.as_reviewed_line(l)
+                        for l in proposal.lines
+                    ),
                     rows=frozenset(
                         statement_match.as_reviewed(r) for r in proposal.rows
                     ),

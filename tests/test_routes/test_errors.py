@@ -3,6 +3,7 @@
 import logging
 
 import pytest
+from cryptography.fernet import Fernet
 from flask import abort
 
 from app import create_app
@@ -432,6 +433,10 @@ class TestErrorPages:
         # A built ProdConfig needs its rate-limit store's password too
         # (ruling plan#2633).
         monkeypatch.setenv("VALKEY_PASSWORD", "a-store-password")
+        # Production requires a loadable field key since R-BI23.
+        monkeypatch.setattr(
+            BaseConfig, "FIELD_ENCRYPTION_KEY", Fernet.generate_key().decode(),
+        )
         config = ProdConfig()
         assert config.DEBUG is False
 

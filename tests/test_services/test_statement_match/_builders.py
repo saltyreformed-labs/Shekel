@@ -50,9 +50,13 @@ from app.services.statement_match import (
     RuleSubmission,
     ReviewScope,
     ReviewedDifference,
+    ReviewedLine,
     ReviewedRow,
     RowKind,
     as_reviewed,
+)
+from app.services.statement_match._offers import (  # pylint: disable=protected-access
+    day_made,
 )
 from app.services.one_off import OneOffToPlace, place_one_off
 from app.services.pay_calendar import calendar_for
@@ -1132,7 +1136,14 @@ def a_submission(
     Args:
         scope: The pass being submitted against
             (:func:`a_scope`).
-        lines: Bank line rows.
+        lines: Bank line rows.  **Each is carried AS IT STANDS when this
+            helper reads it** (plan step ``bank_import:X-f6b-2``, ruling
+            **R-BI14**): the day the bank says it was made, by the package's
+            own :func:`~app.services.statement_match._offers.day_made` --
+            the two-moment flow the rows already have.  A case about a day
+            RESTATED between render and Apply builds the submission first
+            and moves the day afterwards, exactly as a screen would be
+            stale.
         transactions: Transaction rows, each resolved to the subject the
             screen offers for it.
         entries: Purchase rows.
@@ -1224,7 +1235,10 @@ def a_submission(
         "carrying both since plan step bank_import:X-gp"
     )
     return MatchSubmission(
-        line_ids=frozenset(line.id for line in lines),
+        lines=frozenset(
+            ReviewedLine(line_id=line.id, happened_on=day_made(line))
+            for line in lines
+        ),
         rows=frozenset(rows),
         consent=(
             None if residual is None

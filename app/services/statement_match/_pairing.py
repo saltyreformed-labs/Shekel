@@ -175,7 +175,7 @@ def exactly_matched_but_outside_the_window(
 
     **An exact figure is the strongest claim the matcher has**, which is why
     the exact tier needs no corroboration for it (:func:`~._near
-    ._names_the_merchant` states that argument from the other side).  So a line
+    .names_the_merchant` states that argument from the other side).  So a line
     whose figure an unclaimed row matches TO THE CENT, refused only because the
     two are dated too far apart, is precisely a line the pass had a reason to
     look harder at -- and until this step it was indistinguishable from a line

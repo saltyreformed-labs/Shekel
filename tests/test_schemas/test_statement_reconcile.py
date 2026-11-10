@@ -69,19 +69,44 @@ class TestNothingIsAnActWithoutItsOwnOK:
         assert silent == ()
 
     def test_an_OK_D_match_card_becomes_a_match_with_its_rows(self):
-        """One card, one line id, and the rows its MATCH tab ticked."""
+        """One card, its line AS THE SCREEN SHOWED IT, and the rows ticked.
+
+        The line travels as the card's own ``line-<line>`` token (plan step
+        ``bank_import:X-f6b-2``, ruling **bank_import:R-BI14**) and never
+        as the key: the key locates the card's controls, the token is the
+        line's identity and reviewed day as one value.
+        """
         payload, _ = reconcile_payload(_form([
             ("ok", "7"),
             ("verb-7", "match"),
+            ("line-7", "7:2026-06-10"),
             ("rows-7", "transaction:1:100.00:2"),
             ("rows-7", "transaction:2:2473.38:2"),
             ("consent-7", "0.04@transaction:2:2473.38:2"),
         ]))
 
         assert payload["matches"] == [{
-            "line_ids": ["7"],
+            "lines": ["7:2026-06-10"],
             "rows": ["transaction:1:100.00:2", "transaction:2:2473.38:2"],
             "consent": "0.04@transaction:2:2473.38:2",
+        }]
+
+    def test_a_match_card_carrying_NO_line_token_names_no_line(self):
+        """Fail closed: a page drawn before the token posts none.
+
+        The reader does not fall back to the key -- that would submit a
+        line nobody reviewed under a day nobody saw -- so the item names no
+        line and the door refuses it as an empty side.
+        """
+        payload, _ = reconcile_payload(_form([
+            ("ok", "7"),
+            ("verb-7", "match"),
+            ("rows-7", "transaction:1:100.00:2"),
+        ]))
+
+        assert payload["matches"] == [{
+            "lines": [],
+            "rows": ["transaction:1:100.00:2"],
         }]
 
     def test_an_OK_D_income_card_becomes_an_income(self):

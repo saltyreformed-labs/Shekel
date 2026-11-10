@@ -35,6 +35,7 @@ from app.services.statement_match import (
 )
 from app.services.statement_match._already_held import (  # pylint: disable=protected-access
     ArrivalsAlreadyHeld,
+    SpendingAlreadyHeld,
 )
 from app.services.statement_match._filing import (  # pylint: disable=protected-access
     _rule_filings,
@@ -138,6 +139,20 @@ def _held(total):
     the sentence states is the TOTAL.
     """
     return ArrivalsAlreadyHeld(rows=(), total=Decimal(total))
+
+
+def _spending_held(*, named=(), inside=(), destination="Groceries"):
+    """Return the OUTFLOW double-count fact (ruling **bank_import:R-BI19**).
+
+    The real value object, for the reason :func:`_held` gives: its clause is
+    what the pass writes, and a stand-in would pass while the composer was
+    deleted.  The rows are the cases' own, so a case can say WHICH shape
+    found them.
+    """
+    return SpendingAlreadyHeld(
+        named_for_merchant=tuple(named), inside_destination=tuple(inside),
+        merchant="Food Lion", destination=destination,
+    )
 
 
 def _lines(creatable, **pass_facts):
@@ -765,3 +780,109 @@ class TestARefundIsWithheldWhenTheBooksMayAlreadyHoldIt:
         assert "makes that match impossible to accept" not in (
             line.verdict.withheld
         )
+
+
+class TestAnOutflowIsWithheldWhenTheBooksMayAlreadyHoldIt:
+    """Ruling **bank_import:R-BI19**, plan step ``bank_import:X-f6b-2``.
+
+    The twin of the refund class above for money going OUT, and the daily
+    feed's first need: a purchase the owner logged by hand at another amount
+    is a row the near tier's figure bound never admits and never reports, so
+    ``search_gap`` cannot see it, the proposed-destination test does not look
+    for it, and until this step a standing rule filed the swipe a second
+    time -- nightly under the feed.  The arm is the same one the refund
+    takes; what these cases grade is that an OUTFLOW's fact reaches it, that
+    the clause names WHERE to look, and that the fact rides on the line for
+    the card whether or not a rule reaches it.
+    """
+
+    def test_a_hand_logged_row_NAMED_for_the_merchant_withholds(self):
+        """`$50.00` logged for a `$54.12` swipe: the clause says *named for*."""
+        row = _row(kind=RowKind.PURCHASE, row_id=91, parent_id=ENVELOPE_ID)
+        held = _spending_held(named=(row,))
+
+        [line] = _lines(
+            (_creatable(_records_in()),), already_held={7: held},
+        )
+
+        assert line.verdict.withheld == (
+            "your records already hold $10.89 leaving that no bank line "
+            "explains, named for Food Lion, so recording it automatically "
+            "could count the same money twice"
+        )
+        assert line.warning == (
+            "Your rules will not record this one by themselves: "
+            f"{line.verdict.withheld}.  Match it against those rows before "
+            "recording it as something new."
+        )
+        assert line.already_held is held
+
+    def test_a_row_INSIDE_the_rule_s_envelope_withholds_whatever_it_is_called(
+        self,
+    ):
+        """A ``weekly shop`` entry in Groceries: the clause says *inside*."""
+        row = _row(kind=RowKind.PURCHASE, row_id=91, parent_id=ENVELOPE_ID)
+        held = _spending_held(inside=(row,))
+
+        [line] = _lines(
+            (_creatable(_records_in()),), already_held={7: held},
+        )
+
+        assert line.verdict.withheld == (
+            "your records already hold $10.89 leaving that no bank line "
+            "explains, inside Groceries, so recording it automatically "
+            "could count the same money twice"
+        )
+
+    def test_a_row_found_BOTH_ways_is_named_once_and_the_clause_says_both(
+        self,
+    ):
+        """One row, two shapes: the total counts it once."""
+        row = _row(kind=RowKind.PURCHASE, row_id=91, parent_id=ENVELOPE_ID)
+        held = _spending_held(named=(row,), inside=(row,))
+
+        assert held.rows == (row,)
+        assert held.total == Decimal("-10.89")
+        assert "named for Food Lion or inside Groceries" in (
+            held.why_it_could_double_count
+        )
+
+    def test_a_line_NO_rule_reaches_still_carries_the_fact_for_the_card(self):
+        """The screen's positive signal is owed to a bill nobody ruled on.
+
+        Finding **N-381** measured it missing on exactly this line: nothing
+        withholds (there is no automatic act to withhold) and no warning is
+        composed (the rows ARE the signal), but the fact rides on the line so
+        the card names them.
+        """
+        row = _row(row_id=ENVELOPE_ID)
+        held = _spending_held(named=(row,), destination=None)
+
+        [line] = _lines((_creatable(None),), already_held={7: held})
+
+        assert line.verdict is None
+        assert line.warning is None
+        assert line.already_held is held
+
+    def test_the_GAP_is_still_reported_first(self):
+        """A pass that never finished looking says so before the double count."""
+        row = _row(kind=RowKind.PURCHASE, row_id=91, parent_id=ENVELOPE_ID)
+
+        [line] = _lines(
+            (_creatable(_records_in()),),
+            declined_lines={7: "one of your own rows is close enough"},
+            already_held={7: _spending_held(named=(row,))},
+        )
+
+        assert line.verdict.withheld == "one of your own rows is close enough"
+        assert line.already_held is not None, (
+            "the fact still rides on the line: the card names the rows "
+            "whichever sentence the door gave"
+        )
+
+    def test_a_line_with_NOTHING_held_still_files(self):
+        """The control: an empty map withholds no outflow."""
+        [line] = _lines((_creatable(_records_in()),), already_held={})
+
+        assert line.verdict.withheld is None
+        assert line.already_held is None

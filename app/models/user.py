@@ -299,7 +299,7 @@ class MfaConfig(TimestampMixin, db.Model):
     (user_id is unique).
 
     The TOTP secret is encrypted at rest using Fernet symmetric
-    encryption (key from TOTP_ENCRYPTION_KEY env var).  Backup codes
+    encryption (key from FIELD_ENCRYPTION_KEY env var).  Backup codes
     are stored as a JSON list of bcrypt hashes.
 
     During an in-progress /mfa/setup flow the unconfirmed secret is

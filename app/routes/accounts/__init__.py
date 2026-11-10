@@ -59,6 +59,12 @@ Module map:
   outstanding set and ``history``'s record of past assertions -- and the only
   one of them sourced from outside the app.  It RECORDS and does not
   reconcile.
+* :mod:`app.routes.accounts.bank_feed` -- The bank FEED's panel (plan step
+  ``bank_import:X-f6b-2``, rulings R-BI12, R-BI26, R-BI27): connect a
+  SimpleFIN setup token, list Bridge's accounts, declare which account here
+  each one is, disconnect.  The feed is the OWNER's and the panel sits on
+  every cash account's statements page, so its four doors take no account
+  in their path; the page they were pressed on rides in the form.
 * :mod:`app.routes.accounts.statement_merchants` -- WHERE YOUR MERCHANTS GO
   (plan step ``bank_import:X-gk``, ruling **bank_import:R-IC**): one row per
   merchant this account has ever seen, carrying its standing answer or *You
@@ -138,6 +144,7 @@ from app.routes.accounts import opening  # noqa: F401, E402
 from app.routes.accounts import types  # noqa: F401, E402
 from app.routes.accounts import detail  # noqa: F401, E402
 from app.routes.accounts import statements  # noqa: F401, E402
+from app.routes.accounts import bank_feed  # noqa: F401, E402
 from app.routes.accounts import statement_reconcile  # noqa: F401, E402
 from app.routes.accounts import statement_merchants  # noqa: F401, E402
 from app.routes.accounts import bank_agreement  # noqa: F401, E402

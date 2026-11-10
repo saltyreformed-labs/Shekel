@@ -62,7 +62,8 @@ if TYPE_CHECKING:  # pragma: no cover -- annotations only
     from ._bars import BarredLine
     from ._leftovers import CreatableLine, RecordableInflow
     from ._offers import BankLine, MatchProposal
-    from ._reads import ArrivalsAlreadyHeld, ReviewSet
+    from ._already_held import ArrivalsAlreadyHeld, SpendingAlreadyHeld
+    from ._reads import ReviewSet
     from ._skipping import SkippedAct
 
 
@@ -222,15 +223,24 @@ class LineCard:
         sentence: The ONE sentence the card carries, as spans
             (:mod:`._sentence`).  **The whole of what the card says**: ruling
             **R-HR** put every reason one click away.
-        arrivals_already_held: Every ARRIVING row this line's own pay period
-            already holds that no bank line explains
-            (:class:`~._reads.ArrivalsAlreadyHeld`), or ``None``.  **The one
-            money-at-risk signal this build has**, and the only thing on a card
-            that may be drawn in amber: recording a deposit whose period
-            already holds the same money arriving is how a paycheck gets
-            counted twice.  **ARRIVING and not income** -- a stored refund is
-            one of them since ruling **bank_import:R-II** -- and the field said
-            ``income`` until plan step ``bank_import:X-gj-2b-3``.
+        already_held: What the books may already hold this line as, or
+            ``None``: for money ARRIVING, every arriving row this line's own
+            pay period already holds that no bank line explains
+            (:class:`~._already_held.ArrivalsAlreadyHeld`); for money LEAVING,
+            the unexplained rows named for its merchant or inside its rule's
+            destination (:class:`~._already_held.SpendingAlreadyHeld`, ruling
+            **bank_import:R-BI19**, plan step ``bank_import:X-f6b-2``).  **The
+            one money-at-risk signal this build has**, and the only thing on
+            a card that may be drawn in amber: recording a line the books
+            already hold in another shape is how money gets counted twice.
+            The two values carry their own words for the alert, so the
+            template prints one macro and chooses nothing.  *The field was
+            arriving-only until X-f6b-2*, which is finding **N-381**: the
+            outflow side had no positive signal at all, and under the daily
+            feed its automatic door needed one first.  **ARRIVING and not
+            income** on that side -- a stored refund is one of them since
+            ruling **bank_import:R-II** -- and the field said ``income`` until
+            plan step ``bank_import:X-gj-2b-3``.
         risk_class: Which of :data:`~._reconcile.SWEEP_LABELS` this card's act
             falls under, or ``None`` where it falls under none.  It is what a
             sweep would reach IF the card were clean; :attr:`sweep_class` is
@@ -244,7 +254,7 @@ class LineCard:
     section: "Section | None"
     suggested: "Verb | None"
     sentence: "tuple[Span, ...]"
-    arrivals_already_held: "ArrivalsAlreadyHeld | None"
+    already_held: "ArrivalsAlreadyHeld | SpendingAlreadyHeld | None"
     risk_class: "str | None"
     panel: VerbPanel
 
@@ -378,7 +388,7 @@ class LineCard:
         """
         if not self.offers_ok:
             return None
-        if self.panel.notes or self.arrivals_already_held is not None:
+        if self.panel.notes or self.already_held is not None:
             return None
         return self.risk_class
 
@@ -580,7 +590,7 @@ def proposal_card(
         section=Section.PROPOSED,
         suggested=Verb.MATCH,
         sentence=for_proposal(proposal),
-        arrivals_already_held=None,
+        already_held=None,
         risk_class=proposal.review_class,
         panel=VerbPanel(
             offers=_offers(
@@ -628,7 +638,10 @@ def creatable_card(
         section=Section.BY_RULE if names_a_home else Section.NOTHING,
         suggested=Verb.ADD if names_a_home else None,
         sentence=for_placement(placement) if names_a_home else choose(),
-        arrivals_already_held=None,
+        # **The line's OWN fact, set by the pass** (:func:`~._verdict.ruled`)
+        # rather than derived again here: the rows this names and the
+        # sentence the automatic door withheld on are one value.
+        already_held=creatable.already_held,
         risk_class=placement.sweep_class if names_a_home else None,
         panel=VerbPanel(
             offers=_offers(review, creatable.line, creatable.withheld, None),
@@ -706,7 +719,7 @@ def inflow_card(
             for_income_placement(placement)
             if files_here else choose()
         ),
-        arrivals_already_held=review.arrivals_already_held_in(inflow.line),
+        already_held=review.arrivals_already_held_in(inflow.line),
         risk_class=None,
         panel=VerbPanel(
             offers=_offers(review, inflow.line, inflow.withheld, None),
@@ -810,7 +823,7 @@ def parked_card(
         section=None,
         suggested=Verb.TRANSFER,
         sentence=for_parked_transfer(parked),
-        arrivals_already_held=None,
+        already_held=None,
         risk_class=None,
         panel=_barred_panel(review, parked),
     )
@@ -878,7 +891,7 @@ def answered_never_card(
         # answer that claims nothing about the line.
         suggested=None,
         sentence=choose(),
-        arrivals_already_held=None,
+        already_held=None,
         risk_class=None,
         panel=_barred_panel(review, barred),
     )

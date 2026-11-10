@@ -21,7 +21,7 @@
 #   - scripts/_integrity_*.py   Its check families + shared types
 #   - scripts/reset_mfa.py      Operator MFA reset (docker exec)
 #   - scripts/rotate_sessions.py    Session invalidation (docker exec)
-#   - scripts/rotate_totp_key.py    Key rotation (docker exec)
+#   - scripts/rotate_field_key.py    Key rotation (docker exec)
 #   - scripts/_script_lib.py    Shared CLI helpers the runtime scripts
 #                               above import (run_in_app_context etc.)
 #   - alembic.ini               Alembic config

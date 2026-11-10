@@ -166,7 +166,9 @@ def asked_to_open() -> "int | None":
     ``+5`` as line ids, none of which names a row -- and that laxness became
     load-bearing the moment :func:`read_match` graded the same value as a
     ``line_ids`` member through :class:`~app.schemas.validation._helpers
-    .RowId`: ``?open=0`` on Apply would have refused the WHOLE PASS at 400 in
+    .RowId` (until plan step ``bank_import:X-f6b-2``, since when the key only
+    LOCATES the card's controls and the line itself arrives as the card's
+    own reviewed-line token): ``?open=0`` on Apply would have refused the WHOLE PASS at 400 in
     a sentence naming a field the body never carried, where the query string
     is this module's to answer and its answer is the 404 below.  Two readers
     of one value that disagree on ``"0"`` are the shape

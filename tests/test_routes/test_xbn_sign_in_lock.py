@@ -53,6 +53,7 @@ from app.models.transaction import Transaction
 from app.models.user import MfaConfig
 from app.services import mfa_service
 from app.services.user_write_lock import _USER_WRITE_LOCK_NAMESPACE
+from app.utils.field_encryption import encrypt_secret
 from tests._guess_records import count_of
 from tests._sign_in import browser_count, make_known
 from tests._test_helpers import (
@@ -111,7 +112,7 @@ def _enable_mfa(user_id):
     db.session.add(MfaConfig(
         user_id=user_id,
         is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret("JBSWY3DPEHPK3PXP"),
+        totp_secret_encrypted=encrypt_secret("JBSWY3DPEHPK3PXP"),
         backup_codes=mfa_service.hash_backup_codes(_BACKUP_CODES),
     ))
     db.session.commit()

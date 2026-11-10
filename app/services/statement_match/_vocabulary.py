@@ -50,8 +50,9 @@ from app.models.statement_import import (
 #: Keyed by the adapter rather than by the string alone, because a category
 #: string is a source's private vocabulary: two banks may spell one meaning
 #: differently and one spelling differently, and a set unioned across sources
-#: would quietly apply one bank's meaning to another's words.  One entry today,
-#: for the one adapter ``statement_import._adapters`` registers.
+#: would quietly apply one bank's meaning to another's words.  Two entries: the
+#: one upload adapter ``statement_import._adapters`` registers, and the feed
+#: source (below), whose reader the sync leaf of ``bank_import:X-f6b-2`` adds.
 #:
 #: SECU's own value, verbatim, measured on the developer's 2026-08-16 export:
 #: 22 of the 378 recorded lines carry it.
@@ -67,9 +68,28 @@ from app.models.statement_import import (
 #: ``test_bars.TestTheSourcesLabelOnlyASKS`` asserts the totality, so adding a
 #: member without deciding its vocabulary breaks the suite rather than the
 #: guard.
+#:
+#: **The SimpleFIN feed's entry is ruling R-BI22's** (developer, 2026-09-18:
+#: a recorded feed line's MX category is the sighting's source category,
+#: "R-GJ's vocabulary for this source: Financial Services/Credit Card Payment
+#: and /Transfers"), and the two strings are MEASURED on the developer's two
+#: 2026-09-18 dumps (183 lines): ``Financial Services/Credit Card Payment``
+#: on 9 (the Capital One payment), ``Financial Services/Transfers`` on 2 (the
+#: ``FUNDS TRANSFER TO ******6190`` mortgage payment -- money to an account
+#: the owner holds, the fact this bar rests on).  Two more ``Financial
+#: Services/`` spellings occur once each and are deliberately NOT here:
+#: ``/ATM`` (cash out, which is spending's raw material) and ``/Investing``
+#: (a Fidelity transfer, which the ruling did not name; a candidate for the
+#: sync leaf's review, stated rather than decided by this entry).  Entered
+#: at leaf (3c) of ``bank_import:X-f6b-2``, before any feed line is
+#: recorded, because the totality test below refuses the member without it.
 ACCOUNT_PAYMENT_CATEGORIES = {
     StatementSourceEnum.SECU_CHECKING_CSV: frozenset({
         "Financial Services/Credit Card Payment",
+    }),
+    StatementSourceEnum.SIMPLEFIN: frozenset({
+        "Financial Services/Credit Card Payment",
+        "Financial Services/Transfers",
     }),
 }
 

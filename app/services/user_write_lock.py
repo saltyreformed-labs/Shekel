@@ -22,8 +22,9 @@ user that is not committed, so no other transaction can reach it; and every
 script that writes an EXISTING user's rows holds no request, so nothing takes
 the lock for it.  The deploy reconciles take every owner's at their own start.
 Four operator scripts write rows the lock covers and take none --
-``scripts/reset_mfa.py`` (``mfa_configs``), ``scripts/rotate_totp_key.py``
-(every ``totp_secret_encrypted``), ``scripts/rotate_sessions.py`` (every
+``scripts/reset_mfa.py`` (``mfa_configs``), ``scripts/rotate_field_key.py``
+(every ``totp_secret_encrypted`` and ``access_url_encrypted``),
+``scripts/rotate_sessions.py`` (every
 ``users.session_invalidated_at``) and ``scripts/seed_companion.py``'s
 existing-user branch (``role_id`` and ``linked_owner_id``, the lock's key) --
 so each can race a sign-in or an MFA door that holds the lock (reported at

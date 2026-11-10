@@ -3,7 +3,7 @@ which consent reaches it, and the per-line safeguard against recording what the 
 hold.
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -17,6 +17,7 @@ from app.services.statement_match import (
     IncomeCreation,
     MatchSubmission,
     ReviewedBatch,
+    ReviewedLine,
     record_income_from_line,
     review_set,
 )
@@ -229,7 +230,12 @@ class TestWhichConsentReachesThisDoor:
                 # about the act CLASS a rule may consent to, and it fires in
                 # ``__post_init__`` before anything reads the item.
                 matches=(
-                    MatchSubmission(line_ids=frozenset({1}), rows=frozenset()),
+                    MatchSubmission(
+                        lines=frozenset({ReviewedLine(
+                            line_id=1, happened_on=date(2024, 1, 5),
+                        )}),
+                        rows=frozenset(),
+                    ),
                 ),
                 creations=(), incomes=(),
             )

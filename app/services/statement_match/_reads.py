@@ -37,6 +37,7 @@ from decimal import Decimal
 
 from app.extensions import db
 from app.models.statement_import import BankStatementLine
+from app.models.transaction import Transaction
 
 from ._candidates import matched_subjects, unmatched_rows
 from ._destinations import current_destinations
@@ -44,16 +45,20 @@ from ._offers import (
     BankLine,
     CandidateRow,
     MatchProposal,
+    RowKind,
 )
 from ._already_held import (
     ArrivalsAlreadyHeld,
+    SpendingAlreadyHeld,
     arrivals_already_held,
+    spending_already_held,
 )
 from ._bars import BarredLine, MerchantAnswers
 from ._gaps import ReviewBounds, search_gap
 from ._leftovers import CreatableLine, RecordableInflow, leftovers
 from ._propose import propose
 from ._scope import ReviewScope
+from ._rules import is_inflow
 from ._section import MerchantSection
 from ._undisposed import inbox_partition
 from ._verdict import ruled
@@ -587,31 +592,92 @@ def _unexplained(
     return [line for line in bank_lines if line.line_id not in explained]
 
 
+def _definition_of_each_parent(
+    never_shown: "tuple[CandidateRow, ...]",
+) -> "dict[int, int]":
+    """Return the DEFINITION each unexplained purchase's parent row is one of.
+
+    Plan step ``bank_import:X-f6b-2``, ruling **bank_import:R-BI19**.  The
+    container shape of :func:`~._already_held.spending_already_held` asks
+    whether a purchase sits under the definition a rule files this merchant
+    into, and a candidate purchase carries its PARENT (:attr:`~._offers
+    .CandidateRow.parent_id`) rather than the parent's definition.
+
+    **A SECOND READ of a fact the pass already loaded, and a stopgap rather
+    than a design.**  :func:`~._candidates.purchase_candidate` builds each
+    purchase row from an entry whose parent is eager-loaded beside it
+    (``contains_eager(TransactionEntry.transaction)``), so the parent's
+    ``template_id`` was in memory when the row was made and the right home
+    for it is a field on the candidate, read once.  It is re-read here --
+    one query, by primary key, over exactly the parents in question, empty
+    where the pass holds no unexplained purchase -- because
+    :mod:`._candidates` belongs to plan step ``balance:X-bi-4a`` until that
+    step lands (coordinator, 2026-09-18), and this leaf may not edit it.
+    The move is owed a ledger row, and the next reader should take this
+    function as the placeholder for that field, not as where the fact lives.
+
+    **Ownership is carried by the input, not by a predicate here.**  Every
+    ``parent_id`` is a purchase candidate's, and that query is bound to the
+    scope's account and to ``Transaction.pay_period_id`` in the owner's own
+    calendar (:func:`~._candidates.purchase_candidate`); nothing
+    user-supplied reaches the id set.
+
+    Args:
+        never_shown: The candidate rows no bank line explains.
+
+    Returns:
+        ``{parent transaction id: template id}`` over the purchases among them.
+        A parent naming no definition is absent, which the container test
+        reads as *not under this one*.
+    """
+    parent_ids = {
+        row.parent_id for row in never_shown
+        if row.kind is RowKind.PURCHASE and row.parent_id is not None
+    }
+    if not parent_ids:
+        return {}
+    return {
+        row_id: template_id
+        for row_id, template_id in db.session.query(
+            Transaction.id, Transaction.template_id,
+        ).filter(Transaction.id.in_(parent_ids)).all()
+        if template_id is not None
+    }
+
+
 def _already_held_by_line(
     creatable, never_shown,
-) -> "dict[int, ArrivalsAlreadyHeld]":
-    """Return the double-count answer for every creatable INFLOW.
+) -> "dict[int, ArrivalsAlreadyHeld | SpendingAlreadyHeld]":
+    """Return the double-count answer for every creatable line, by direction.
 
-    Plan step ``bank_import:X-gj-2b``.  **Asked of EVERY creatable line, with
-    no direction guard, because the predicate is already total.**  A first
-    version skipped outflows; adversarial review measured that skip an
-    EQUIVALENT MUTANT and it is -- an outflow's amount is negative, every row
-    :func:`~._already_held.arrivals_already_held` selects has positive cash,
-    so ``line.amount < min(...)`` holds and the answer is ``None`` for every
-    outflow the schema allows.  No mutation could reach the branch.  This
-    package has deleted exactly that shape three times by name
-    (:meth:`~._bars.CreationBars.bar_for`'s ``merchant is None`` arm,
-    the retired queue's ``_sweeps_for`` ``or row.notes``, and
-    :mod:`._income`'s zero arm),
-    and the cost of not having it is one pass over ``never_shown`` per outflow
-    -- 91 lines against 49 rows on the developer's own statement, arithmetic
-    with no query in it.
+    Plan step ``bank_import:X-gj-2b`` for the ARRIVING half; plan step
+    ``bank_import:X-f6b-2`` (ruling **bank_import:R-BI19**, finding
+    **N-381**) for the LEAVING half.  **One map, two producers, chosen by the
+    line's own direction** (:func:`~._rules.is_inflow`, the ONE statement of
+    the bank's sign convention this package has): a refund that a container
+    answer routes into this list is money ARRIVING and is asked the period
+    question; every outflow is asked whether its merchant's rows or its
+    rule's destination already hold it.  *It asked every line the arriving
+    question with no direction guard until this step*, which was correct only
+    while the other direction had no question: an outflow's amount is
+    negative and every arriving row positive, so that predicate answered
+    ``None`` for every outflow the schema allows -- an EQUIVALENT MUTANT this
+    docstring recorded rather than guarded against.  The guard is real now
+    because the two producers answer different questions of the same rows.
 
-    It reads the SAME rows :attr:`ReviewSet.unmatched_rows` publishes and the
-    same predicate the income pipeline asks
-    (:func:`~._already_held.arrivals_already_held`), so a refund and a
-    deposit in one period cannot come to different answers about what the books
-    already hold.
+    Both read the SAME rows :attr:`ReviewSet.unmatched_rows` publishes, so a
+    refund and a deposit in one period cannot come to different answers about
+    what the books already hold.  **That set is NARROWER than the one the
+    near tier searches**, and the ruling names it anyway: the tier reads the
+    offerable rows less the exact tiers' claims (:func:`~._propose.propose`'s
+    residue); ``unmatched_rows`` also drops the rows the near tier itself
+    proposes and every row whose window lies outside the RECORDED span
+    (:func:`_could_have_been_shown`).  The second bound
+    has an edge the nightly door runs on: a hand-logged purchase whose
+    guessed day is LATER than the newest recorded line is not in the set and
+    so not withheld on, until a later line moves the span past it.  Named by
+    this leaf's adversarial review 2026-09-18 and left as the ruling states
+    it; widening the source is the developer's question, not this reader's.
 
     Args:
         creatable: This pass's creatable lines.
@@ -619,13 +685,23 @@ def _already_held_by_line(
             the caller.
 
     Returns:
-        ``{line_id: ArrivalsAlreadyHeld}``, holding only the lines that have
-        an answer -- absent means nothing to check, which is what
-        :func:`~._verdict.ruled` reads a missing key as.
+        ``{line_id: ArrivalsAlreadyHeld | SpendingAlreadyHeld}``, holding only
+        the lines that have an answer -- absent means nothing to check, which
+        is what :func:`~._verdict.ruled` reads a missing key as.
     """
+    definition_of_parent = _definition_of_each_parent(never_shown)
     held_by_line = {}
     for item in creatable:
-        held = arrivals_already_held(never_shown, item.line)
+        placement = item.placement
+        if is_inflow(item.line.amount):
+            held = arrivals_already_held(never_shown, item.line)
+        else:
+            held = spending_already_held(
+                never_shown, item.line,
+                None if placement is None else placement.definition_id,
+                None if placement is None else placement.home_name,
+                definition_of_parent,
+            )
         if held is not None:
             held_by_line[item.line.line_id] = held
     return held_by_line

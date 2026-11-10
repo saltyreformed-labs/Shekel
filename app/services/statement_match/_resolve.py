@@ -8,13 +8,15 @@ finding **N-336** asks for took the file past its line cap.  Nothing moved
 across it: :func:`resolve_rows` called nothing in the write half and the write
 half calls nothing here, so the split is the call graph's own shape.
 
-**SEVEN refusals live here and they share one subject**: whether what a body
-sent is what this pass could have offered.  Three are about the LINES -- a
-line this account does not hold, one another match has claimed, and one the
-owner has already SKIPPED (plan step ``bank_import:X-gj-4a``) -- and four
-about the ROWS: a row this pass could not offer or can no longer price, one
-subject named twice, a row that has MOVED since the screen described it, and
-an ATTRIBUTION naming a row the submission does not carry (plan step
+**NINE refusals live here and they share one subject**: whether what a body
+sent is what this pass could have offered.  Five are about the LINES -- a
+line this account does not hold, one another match has claimed, one the
+owner has already SKIPPED (plan step ``bank_import:X-gj-4a``), one line named
+twice, and a line whose DAY the bank has restated since the screen showed it
+(plan step ``bank_import:X-f6b-2``, ruling **bank_import:R-BI14**) -- and
+four about the ROWS: a row this pass could not offer or can no longer price,
+one subject named twice, a row that has MOVED since the screen described it,
+and an ATTRIBUTION naming a row the submission does not carry (plan step
 ``bank_import:X-gj-3a``).
 The refusals in :mod:`._accept` are about the submission's SHAPE instead -- an
 empty side -- and about what the act's own writes did to a member's price, and
@@ -28,11 +30,13 @@ this module refuses it as a row this pass could not offer or can no longer
 price.)*
 
 *(This module's count is stated because this arc has shipped a taxonomy that
-did not add up before; if an eighth refusal is added here, this sentence is
+did not add up before; if a tenth refusal is added here, this sentence is
 what has to change with it.  It read SIX until plan step
-``bank_import:X-gj-4a`` added the skip, which is the count moving with the
-predicate rather than a reader being left to re-count.  No count is claimed
-for the other module, which owns its own.)*
+``bank_import:X-gj-4a`` added the skip and SEVEN until ``X-f6b-2`` added the
+line side's twins of the row side's duplicate and moved-since-review
+refusals, which is the count moving with the predicate rather than a reader
+being left to re-count.  No count is claimed for the other module, which
+owns its own.)*
 
 **The security property is the SCOPE** and it did not change: an id is looked
 up in the pass's own offer set (:class:`~._scope.ReviewScope`), never queried
@@ -66,7 +70,7 @@ from app.models.statement_import import BankStatementLine
 from ._candidates import MatchedSubjects, unmatched_rows
 from ._subjects import CandidateRow, RowKind
 from ._scope import ReviewScope
-from ._submission import MatchSubmission, ReviewedRow
+from ._submission import MatchSubmission, ReviewedLine, ReviewedRow
 from ._undisposed import skipped_among
 from ._valuation import repriced
 
@@ -455,6 +459,115 @@ def load_lines(
             "meant to explain it.  Nothing was changed."
         )
     return lines
+
+
+def resolve_lines(
+    submission: MatchSubmission, account_id: int, matched: MatchedSubjects,
+    *, for_write: bool,
+) -> "list[BankStatementLine]":
+    """Return a MATCH's submitted lines, refusing any the owner did not review.
+
+    Plan step ``bank_import:X-f6b-2``, ruling **bank_import:R-BI14**, finding
+    **N-338**: :func:`resolve_rows`' twin for the line side of a match, and
+    the ONE reader of :attr:`~._submission.MatchSubmission.lines` that
+    reconciles each against the row the door will write from.  The two doors
+    that record ONE line (:mod:`._create`, :mod:`._income`) keep calling
+    :func:`load_lines` directly: the ruling is about a MATCH, and neither
+    carries a reviewed line.  **The create door has the same drift and it is
+    reported, not built**: it dates the purchase it mints by
+    :func:`~._offers.day_made` under its lock AND picks the PAY PERIOD that
+    day falls in -- so a sighting restated between render and OK can move
+    the minted purchase's day and the paycheck's envelope it files into,
+    while the ADD pane printed the day the render saw.  Undoable (a release
+    deletes the row, ruling **R-GG**) where a match's re-dating is not,
+    which is why it is a candidate row in X-f6b-2's handoff rather than a
+    clause of R-BI14.
+
+    **Refused BEFORE the lines are read**: a body naming one line twice.
+    :attr:`~._submission.MatchSubmission.line_ids` collapses the pair, so
+    :func:`load_lines` would read one row and the reconciliation below would
+    look its reviewed day up in a mapping that kept whichever entry the set
+    iterated last -- letting the SENDER choose which day the guard checks,
+    which is :func:`resolve_rows`' duplicate-subject refusal one side over.
+
+    **Reconciled AFTER the locked read**, so the day compared is the day the
+    door writes: :func:`load_lines` refreshes each line under its lock, and
+    :meth:`~._submission.ReviewedLine.disagrees_with` reads the day off that
+    row through :func:`~._offers.day_made`, the same spelling
+    :meth:`~._offers.MatchDays.of` folds.  A preview
+    (``for_write=False``) runs the same refusal without the lock, so the pane
+    says what the press would.
+
+    Args:
+        submission: What the owner accepted.
+        account_id: The account the match is for.
+        matched: What this account's matches have already claimed, as of
+            this act.
+        for_write: :func:`load_lines`' own flag, passed through.
+
+    Returns:
+        The lines, as :func:`load_lines` returns them.
+
+    Raises:
+        ValidationError: On any of :func:`load_lines`' three refusals, on a
+            line named twice, or on a line whose day the bank has restated
+            since the screen showed it.
+    """
+    reviewed = submission.reviewed_lines
+    if len(reviewed) != len(submission.lines):
+        raise ValidationError(
+            "This match names the same bank line more than once.  Reload the "
+            "page and try again; nothing was changed."
+        )
+    lines = load_lines(
+        account_id, submission.line_ids, matched, for_write=for_write,
+    )
+    _reject_day_restated(lines, reviewed)
+    return lines
+
+
+def _reject_day_restated(
+    lines: "list[BankStatementLine]",
+    reviewed: "dict[int, ReviewedLine]",
+) -> None:
+    """Refuse a match whose line's day is no longer what the screen showed.
+
+    :func:`_reject_moved_since_review`'s twin (ruling **R-BI14**).  The day
+    the bank says a line was MADE is what a match writes onto a matched
+    purchase's ``purchased_on`` (:func:`~._offers.corrected_purchase_day`),
+    and a re-import's sighting can move it between render and Apply:
+    reproduced before the ruling as a screen promising `2026-06-10` and the
+    door writing `2026-06-08`.  Under the daily feed the re-import is nightly.
+
+    **It fails CLOSED, in either direction**, for the reason the row side
+    does: a bank restating a day is evidence the owner has not reviewed,
+    whether the purchase would move to it or not.  The options the ruling
+    rejected are named on :class:`~._submission.ReviewedLine`.
+
+    **What the lock closes is the render-to-lock window.**  ``FOR NO KEY
+    UPDATE`` does not stop a re-import inserting a sighting (an FK insert
+    takes ``KEY SHARE``, which is compatible), so a sighting committed after
+    this locked read and before this act commits is one the door never sees
+    -- and that is the ruling's own bound, not a hole in it: what is written
+    is what was reviewed, and the reviewed day is the one the door read.
+
+    Args:
+        lines: The submitted lines as they stand now, under the door's lock.
+        reviewed: What the screen showed for each, by line id
+            (:attr:`~._submission.MatchSubmission.reviewed_lines`).
+
+    Raises:
+        ValidationError: Naming the line and both days, on the first
+            disagreement -- ONE sentence, for **R-FZ(a)**'s reason.
+    """
+    for line in lines:
+        moved = reviewed[line.id].disagrees_with(line)
+        if moved is not None:
+            raise ValidationError(
+                f"This match was reviewed against a different day -- {moved}."
+                "  Nothing was changed.  Reload the page to review it against "
+                "what the bank states now."
+            )
 
 
 def resolve_rows(

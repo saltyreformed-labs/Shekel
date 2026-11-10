@@ -367,6 +367,42 @@ class RowId(fields.Integer):
         return row_id
 
 
+class OptionalRowId(RowId):
+    """A submitted row id, or the empty string a select's "none" option sends.
+
+    :class:`RowId`'s strictness for the id -- finding **N-141**: ``'007'``
+    and ``'١٢'`` name no row, and this field refuses them the same way -- with
+    exactly ONE more spelling admitted, the empty string, read as ``None``.
+    A ``<select>`` whose first option means "not chosen" submits ``""`` for
+    it (the bank feed panel's mapping form, plan step ``bank_import:X-f6b-2``,
+    where each Bridge account's select offers "Not mapped"), and a schema
+    that wants ``None`` for that cannot say so with ``allow_none``, which
+    admits a JSON ``null`` and not a form's empty string.
+
+    Declared here rather than in the schema that first needed it because the
+    row-id sweep (``tests/test_schemas/test_row_id_field.py``) resolves every
+    strict spelling against the helper modules and asserts it IS a ``RowId``
+    subclass -- a strict field that lives elsewhere reads to the gate as an
+    unclassified call.
+    """
+
+    def _deserialize(self, value, attr, data, **kwargs):
+        """Return ``None`` for the empty string, else the row id *value* names.
+
+        Args:
+            value: The submitted value.
+            attr: The field name being loaded (marshmallow's contract).
+            data: The whole payload being loaded (marshmallow's contract).
+            **kwargs: Forwarded to :class:`RowId`.
+
+        Returns:
+            ``None`` or the row id.
+        """
+        if value == "":
+            return None
+        return super()._deserialize(value, attr, data, **kwargs)
+
+
 class _RefEnumField(RowId):
     """A submitted ``ref`` row id, deserialized to the ENUM member it names.
 

@@ -340,9 +340,9 @@ wrapper re-verifies it on EVERY invocation, rebuilding when the key moved
 ## Deployment
 
 Docker (Gunicorn + Nginx + Cloudflare Tunnel) on bare-metal Arch Linux: no Ubuntu packages, no
-exposed ports, no systemd. `.env`: `DATABASE_URL`, `SECRET_KEY`, `TOTP_ENCRYPTION_KEY`. The compose,
-hardening, and prod-override-sync conventions auto-load via `.claude/rules/deploy.md` when you touch
-`deploy/` or compose files.
+exposed ports, no systemd. `.env`: `DATABASE_URL`, `SECRET_KEY`, `FIELD_ENCRYPTION_KEY`. The
+compose, hardening, and prod-override-sync conventions auto-load via `.claude/rules/deploy.md` when
+you touch `deploy/` or compose files.
 
 ## Development Status
 

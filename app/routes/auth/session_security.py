@@ -216,7 +216,7 @@ def reauth():
         prompt would burn a recovery credential for the wrong
         purpose; the user can /logout and /login with a backup code
         if their device is unavailable.
-      * Decryption errors (missing TOTP_ENCRYPTION_KEY, ciphertext
+      * Decryption errors (missing FIELD_ENCRYPTION_KEY, ciphertext
         unreadable under any current Fernet) flash an
         operator-actionable message and re-render the form, mirroring
         /mfa/verify and /mfa/disable.

@@ -36,6 +36,7 @@ from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
 from app.services.mfa_service import TotpVerificationResult
+from app.utils.field_encryption import encrypt_secret
 
 
 _KNOWN_TOTP_SECRET = "JBSWY3DPEHPK3PXP"
@@ -65,7 +66,7 @@ def _enable_mfa(user_id, codes=None):
     config = MfaConfig(
         user_id=user_id,
         is_enabled=True,
-        totp_secret_encrypted=mfa_service.encrypt_secret(_KNOWN_TOTP_SECRET),
+        totp_secret_encrypted=encrypt_secret(_KNOWN_TOTP_SECRET),
         backup_codes=mfa_service.hash_backup_codes(codes),
     )
     db.session.add(config)

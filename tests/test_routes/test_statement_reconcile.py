@@ -73,6 +73,7 @@ from tests.test_services.test_statement_match._builders import (
     an_account_whose_books_hide_a_line,
     a_purchase,
     a_rule,
+    a_sighting,
     a_transaction,
     an_envelope,
     an_import,
@@ -986,7 +987,7 @@ class TestTheMatchPanePricesWhatIsTicked:
         priced = auth_client.post(
             _match_url(seed_user["account"].id, line.id),
             data=MultiDict(
-                [("csrf_token", "x")]
+                [("csrf_token", "x"), (f"line-{line.id}", _line_token(first, line.id))]
                 + [(f"rows-{line.id}", token) for token in tokens]
             ),
         ).get_data(as_text=True)
@@ -1008,6 +1009,37 @@ class TestTheMatchPanePricesWhatIsTicked:
 
         assert "Data Manager" in pane
         assert "Health Insurance Allowance" not in pane
+
+
+def _line_token(document, line_id):
+    """Return the ONE ``line-<line_id>`` token *document* rendered.
+
+    Plan step ``bank_import:X-f6b-2``, ruling **bank_import:R-BI14**: a
+    card and its MATCH pane each carry the bank line AS THE SCREEN SHOWED IT
+    as a hidden input, and a browser submits it with every press and every
+    re-price (``hx-include="closest .rec-card"``).  A case that posts a
+    fragment body by hand reads the token off the document it rendered
+    rather than spelling one, for :func:`_post`'s reason: a hand-picked
+    payload is the shape that hid a dead control once.
+
+    Args:
+        document: The rendered page or pane, as text.
+        line_id: The bank line.
+
+    Returns:
+        The token's value.
+
+    Raises:
+        AssertionError: Unless the document carries exactly one.
+    """
+    tokens = [
+        value for name, value in reconcile_form_fields(document)
+        if name == f"line-{line_id}"
+    ]
+    assert len(tokens) == 1, (
+        f"the document carries {len(tokens)} line-{line_id} tokens: {tokens}"
+    )
+    return tokens[0]
 
 
 def _row_tokens(pane, line_id):
@@ -1533,6 +1565,83 @@ class TestAProposedCardAppliesFromThisPageAndItsPaneLoads:
         assert db.session.query(StatementMatch).count() == 1
         assert settled_figure(txn) == Decimal("178.29"), (
             "the row must book what the BANK took"
+        )
+
+    def test_the_page_emits_the_line_AS_THE_SCREEN_SHOWED_IT(
+        self, auth_client, db, seed_user,
+    ):
+        """Plan step ``bank_import:X-f6b-2``, ruling **bank_import:R-BI14**.
+
+        The card carries its bank line as one token -- the id and the day the
+        bank said it was made -- which the accept door re-derives under its
+        lock and refuses on difference.  A HIDDEN input, on the consent's own
+        terms: nothing else here would notice it going away, and without it
+        every OK'd MATCH card is refused as naming no line.  Exactly ONCE, so
+        which token the door reads is never the browser's choice.
+        """
+        line, _ = self._near_miss(seed_user, db)
+        fields = reconcile_form_fields(_page(auth_client, seed_user))
+
+        tokens = [value for name, value in fields if name == f"line-{line.id}"]
+        assert tokens == [f"{line.id}:{line.posted_on}"], (
+            "the card did not carry the line as the screen showed it"
+        )
+
+    def test_an_OPENED_card_carries_the_token_once_from_the_pane(
+        self, auth_client, db, seed_user,
+    ):
+        """The include arm: ``?open=<line>`` renders the pane in the document.
+
+        The waiting element and the pane each carry one token and the two
+        are exclusive by the template's own branch; this measures the arm
+        the sibling case above does not reach, so "exactly one at every
+        moment" is graded on both.
+        """
+        line, _ = self._near_miss(seed_user, db)
+
+        page = _open(auth_client, seed_user, line.id)
+
+        assert f'id="rec-match-{line.id}"' in page, "the pane did not open"
+        assert _line_token(page, line.id) == f"{line.id}:{line.posted_on}"
+
+    def test_OK_after_the_bank_RESTATED_the_day_is_refused_on_the_page(
+        self, auth_client, db, seed_user,
+    ):
+        """Finding **N-338** through the screen: the stale press is refused.
+
+        The page is drawn, a second import then states the swipe day for the
+        line (the bank restating a day the first source left unstated), and
+        the owner presses OK on the page they were looking at.  The door
+        answers with the screen at 200, quoting the refusal per item
+        (**R-FZ(a)**), and moves nothing -- the row keeps the figure the
+        stale page would have corrected.
+        """
+        line, txn = self._near_miss(seed_user, db)
+        page = _page(auth_client, seed_user)
+        fields = reconcile_form_fields(page)
+        assert (f"verb-{line.id}", "match") in fields
+
+        a_sighting(
+            seed_user, an_import(seed_user), line,
+            transaction_on=line.posted_on - timedelta(days=2),
+        )
+        db.session.commit()
+
+        response = _post(
+            auth_client, seed_user, fields + [("ok", str(line.id))], page,
+        )
+
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert "reviewed against a different day" in body
+        assert (
+            f"it was shown as {line.posted_on} and the bank now states "
+            f"{line.posted_on - timedelta(days=2)}"
+        ) in body
+        db.session.expire_all()
+        assert db.session.query(StatementMatch).count() == 0
+        assert settled_figure(txn) == Decimal("178.32"), (
+            "the refused press re-priced the row"
         )
 
     def test_the_MATCH_pane_LOADS_for_a_proposed_card(
@@ -2691,6 +2800,93 @@ class TestTheBooksAlreadyHoldSentenceIsONESpelling:
 
             assert "This pay period already holds" not in page
 
+    def test_an_OUTFLOW_card_prints_the_LEAVING_sentence_through_the_same_macro(
+        self, app, db, auth_client, seed_user,
+    ):
+        """Ruling **bank_import:R-BI19**, plan step ``bank_import:X-f6b-2``.
+
+        The developer's own shape: a `$50.00` ``Food Lion`` purchase logged by
+        hand, a `$54.12` Food Lion swipe from the bank, no rule.  The near
+        tier's bound throws the pair away unreported, and this card had NO
+        positive signal at all (finding **N-381**).  It prints the shared
+        macro with the value's own words -- the template chooses nothing --
+        and the glyph title beside the sentence is the value's too.
+        """
+        with app.app_context():
+            groceries = an_envelope(seed_user)
+            a_purchase(
+                seed_user, groceries, amount="50.00", description="Food Lion",
+            )
+            a_bank_line(
+                seed_user, an_import(seed_user), amount="-54.12",
+                posted_on=seed_user["bootstrap_period"].start_date,
+                description="POINT OF SALE DEBIT L340 (Food Lion)",
+                merchant="Food Lion",
+            )
+            db.session.commit()
+
+            page = " ".join(_page(auth_client, seed_user).split())
+
+            assert (
+                "Your records already hold 1 row(s) totalling -$50.00 leaving "
+                "that no bank line explains: Groceries: Food Lion -$50.00. If "
+                "this line is those, match it against them instead of "
+                "recording it here."
+            ) in page
+            assert (
+                "Your records already hold spending near this line that no "
+                "bank line explains, named for this merchant or inside its "
+                "envelope."
+            ) in page, "the glyph's title is the value's, not a fixed string"
+            assert "This pay period already holds" not in page
+
+    def test_a_REFUND_card_prints_the_ARRIVING_sentence_whole_on_the_purchase_side(
+        self, app, db, auth_client, seed_user,
+    ):
+        """Plan step ``bank_import:X-f6b-2``: the fact rides on the LINE now.
+
+        A merchant credit a rule claims files as a negative purchase (ruling
+        **R-II**), and its card had only the panel note until this step:
+        ``creatable_card`` set the money-at-risk field to ``None`` and only
+        the income branch drew the alert.  The line's own fact reaches the
+        purchase ADD branch now, so the refund card draws the amber alert
+        and the glyph with the ARRIVING words -- and this case asserts the
+        sentence WHOLE, tail included, which is what grades the reworded
+        macro as byte-identical for the value that existed before it.
+        """
+        with app.app_context():
+            envelope = an_envelope(seed_user, name="Home Improvement")
+            # Smaller than the refund, or the arriving fact's own proof
+            # (a deposit smaller than the smallest row) drops it.
+            a_transaction(
+                seed_user, name="Interest", amount="20.00", income=True,
+            )
+            a_bank_line(
+                seed_user, an_import(seed_user), amount="28.29",
+                posted_on=seed_user["bootstrap_period"].start_date,
+                description="POINT OF SALE L340 (Amazon)", merchant="Amazon",
+            )
+            db.session.commit()
+            a_rule(seed_user, "Amazon", template_id=envelope.template_id)
+            db.session.commit()
+
+            page = " ".join(_page(auth_client, seed_user).split())
+
+            assert "refund back into a budget line" in page, (
+                "the card is the purchase side's, not the income branch's"
+            )
+            assert (
+                "This pay period already holds 1 row(s) totalling $20.00 your "
+                "records say arrived and no bank line explains: Interest "
+                "$20.00. If this line is those, match it against them instead "
+                "of recording it here."
+            ) in page
+            assert (
+                "This pay period already holds money arriving that no bank "
+                "line explains."
+            ) in page, "the glyph's title is the arriving value's"
+            assert "Your records already hold" not in page
+
 
 class TestThePaneOffersWHEREADifferenceGoes:
     """Plan steps **bank_import:X-gj-3a** and **X-gp**; rulings **R-GD(a)**,
@@ -2761,7 +2957,14 @@ class TestThePaneOffersWHEREADifferenceGoes:
         Returns:
             The rendered pane, as text.
         """
-        body = [("csrf_token", "x")]
+        # The line AS THE SCREEN SHOWED IT travels with every re-price
+        # (ruling R-BI14); it is read off the pane's own bare render rather
+        # than spelled here, as :func:`_line_token` says.
+        bare = auth_client.post(
+            _match_url(seed_user["account"].id, line.id),
+            data={"csrf_token": "x"},
+        ).get_data(as_text=True)
+        body = [("csrf_token", "x"), (f"line-{line.id}", _line_token(bare, line.id))]
         body += [(f"rows-{line.id}", token) for token in rows]
         if chosen is not None:
             body.append((f"consent-{line.id}", chosen))
@@ -4327,9 +4530,8 @@ class TestARefusedApplyKeepsTheOwnersTicks:
         """
         pane_of = TestThePaneOffersWHEREADifferenceGoes()
         line, _, _ = pane_of._a_payroll_deposit(seed_user, db)
-        tokens = _row_tokens(
-            pane_of._pane(auth_client, seed_user, line), line.id,
-        )
+        first = pane_of._pane(auth_client, seed_user, line)
+        tokens = _row_tokens(first, line.id)
         chosen = f"0.05@{tokens[0]}"
         assert chosen in _consent_options(
             pane_of._pane(auth_client, seed_user, line, rows=tokens), line.id,
@@ -4338,7 +4540,8 @@ class TestARefusedApplyKeepsTheOwnersTicks:
         pane = auth_client.post(
             _match_url(seed_user["account"].id, line.id),
             data=MultiDict(
-                [("csrf_token", "x"), (f"q-{line.id}", "Data")]
+                [("csrf_token", "x"), (f"q-{line.id}", "Data"),
+                 (f"line-{line.id}", _line_token(first, line.id))]
                 + [(f"rows-{line.id}", token) for token in tokens]
                 + [(f"consent-{line.id}", chosen)]
             ),

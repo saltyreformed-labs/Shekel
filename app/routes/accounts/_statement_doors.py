@@ -22,7 +22,12 @@ along.
 * the act runs and the request commits, so the unit of work is the request and
   a refusal leaves nothing behind -- which is what makes "nothing was changed",
   the phrase every refusal message here ends with, true rather than reassuring;
-* a DOMAIN refusal is the user's own sentence, flashed as it was written;
+* a DOMAIN refusal is the user's own sentence, flashed as it was written --
+  and, since plan step ``bank_import:X-f6b-2`` (ledger row **BI-499**),
+  LOGGED at WARNING with its class through :func:`log_refusal` -- from
+  these two arms, and from the one feed-panel press that commits nothing
+  and so takes no helper -- so an operator reading the log after the fact
+  has the trail a screen alone never left;
 * a DATABASE error is not, so it goes to
   :func:`~app.routes._commit_helpers.handle_db_error`, which logs the detail
   and shows the user a sentence that does not name a table;
@@ -52,6 +57,7 @@ from app.schemas.validation import form_payload
 from app.utils.log_events import (
     BUSINESS,
     EVT_STATEMENT_BATCH_APPLIED,
+    EVT_STATEMENT_DOOR_REFUSED,
     log_event,
 )
 from app.services.statement_match import (
@@ -120,6 +126,7 @@ def run_statement_door(
         db.session.commit()
     except ctx.refusal as exc:
         db.session.rollback()
+        log_refusal(ctx.logger, exc)
         flash(str(exc), "danger")
         return redirect(ctx.target)
     except SQLAlchemyError:
@@ -133,6 +140,43 @@ def run_statement_door(
     message, category = on_success(result)
     flash(message, category)
     return redirect(ctx.target)
+
+
+def log_refusal(logger: logging.Logger, exc: Exception) -> None:
+    """Log a designed refusal at WARNING with its class (ledger row **BI-499**).
+
+    **The ONE place a statement door's refusal reaches the log.**  Until plan
+    step ``bank_import:X-f6b-2`` a refusal was flashed and never logged, so
+    an operator reading the app log after the fact -- or an unattended fetch,
+    which that step builds -- had no trail of it.  Both door helpers call
+    this from their refusal arm; the bank feed panel's listing press, which
+    commits nothing and takes no helper, calls it from its own catch.
+
+    **The CLASS, not the sentence** -- BI-499's letter, and the stricter
+    choice: a refusal sentence is written for the OWNER's screen and can
+    carry what the screen may show them (``StatementAccountMismatch`` names
+    the source's account identifier, ``StatementLineConflict`` quotes bank
+    line wording), which is data the app log has never held and this step
+    does not decide to add.  A refusal that has structured facts worth a
+    field -- Bridge's status and the failure's class on
+    :class:`~app.exceptions.BridgeRefused` -- names them on its own
+    ``log_details``, read here when present.  A database error is NOT this
+    event: that path keeps its traceback under
+    :func:`~app.routes._commit_helpers.handle_db_error`.
+
+    Args:
+        logger: The calling module's logger, so the line is filed under the
+            module that owns the door.
+        exc: The designed refusal.
+    """
+    log_event(
+        logger, logging.WARNING, EVT_STATEMENT_DOOR_REFUSED, BUSINESS,
+        "A statement door refused the request.",
+        user_id=current_user.id,
+        path=request.path,
+        refusal_class=type(exc).__name__,
+        **getattr(exc, "log_details", {}),
+    )
 
 
 def run_one_id_door(
@@ -207,21 +251,32 @@ def run_one_id_door(
 
 
 @dataclass(frozen=True)
-class StatementFragmentDoorContext:
+class StatementFragmentDoorContext:  # pylint: disable=too-many-instance-attributes
     """What one FRAGMENT-shaped statement door needs in order to fail well.
+
+    Pylint: ``too-many-instance-attributes`` (8/7) -- this class IS the
+    parameter object ``CLAUDE.md``'s too-many-arguments rule points a public
+    door at, so the count is the remedy rather than the defect: seven of the
+    eight are what a fragment door supplies and the eighth (``refusal``) is
+    the one fact that made a second kind of fragment door possible.
+    Splitting them would put one door's configuration in two values every
+    door must then keep in step.
 
     :class:`StatementDoorContext`'s twin, and a parameter object for the reason
     ``CLAUDE.md``'s own too-many-arguments rule gives: a PUBLIC function over
     the limit takes one, and only a private helper decomposes instead.
 
-    **Built by :func:`fragment_door` rather than at the call site**, and that
+    **Built by :func:`fragment_door` for the two reconcile doors**, and that
     is what dissolved the ``duplicate-code`` this class was created in response
-    to.  Constructing it inline left the two doors with nine byte-identical
+    to.  Constructing it inline left those two doors with nine byte-identical
     lines of configuration -- ``logger=``, the refusal lambda, the log-args
     tuple, the fresh-scope render -- because two doors that differ only in
     their payload and their surface CONFIGURE identically.  Extracting the
     helper made the invariant half invariant in one place; what is left at each
-    call site is the two facts that genuinely differ.
+    call site is the two facts that genuinely differ.  The bank feed's claim
+    door (plan step ``bank_import:X-f6b-2``) constructs it inline: its scope
+    is not a review pass and its reread is Bridge's listing, so none of the
+    factory's invariant half applies to it.
 
     Attributes:
         logger: The calling module's logger, so a database error is logged
@@ -247,12 +302,13 @@ class StatementFragmentDoorContext:
             way every refusal in this package does, which is true because
             :func:`run_statement_fragment_door` owns the unit of work.
 
-    **There is no ``refusal`` field, and its sibling has one.**  That class
-    serves doors that genuinely differ -- the import door raises
-    ``StatementImportError`` -- while every fragment-shaped statement door
-    refuses through the ``ValidationError`` the service package raises
-    throughout.  A field with one possible value is configurability nobody
-    asked for.
+    **``refusal`` defaults to ``ValidationError``**, which every fragment
+    door of the statement pages raises, and it became a field only when a
+    second value existed: the bank feed's claim door (plan step
+    ``bank_import:X-f6b-2``) answers with the panel and refuses through
+    ``BankFeedError``.  Until then the class carried no such field, its
+    docstring saying a field with one possible value is configurability
+    nobody asked for -- which was true, and stopped being.
     """
 
     logger: logging.Logger
@@ -262,6 +318,7 @@ class StatementFragmentDoorContext:
     log_message: str
     log_args: tuple
     db_error_message: str
+    refusal: type = ValidationError
 
 
 def fragment_door(  # pylint: disable=too-many-arguments
@@ -376,16 +433,19 @@ def run_statement_fragment_door(
     try:
         result = act()
         db.session.commit()
-    except ValidationError as exc:
-        # **Nothing raises one from inside ``act`` on either door today, and
-        # the arm stands for the SURFACE rather than for a known caller**: a
-        # designed refusal escaping an htmx POST is answered by the app-wide
-        # handler with a page htmx will not swap (no marker header), so the
-        # owner presses the button and sees nothing at all.  This arm is the
-        # only thing that can answer with the screen, and it has a firing
-        # control -- ``test_a_refusal_raised_OUTSIDE_an_item_still_answers
-        # _with_the_screen``.
+    except ctx.refusal as exc:
+        # **On the two reconcile doors nothing raises one from inside
+        # ``act``, and the arm stands for the SURFACE rather than for a known
+        # caller**: a designed refusal escaping an htmx POST is answered by
+        # the app-wide handler with a page htmx will not swap (no marker
+        # header), so the owner presses the button and sees nothing at all.
+        # This arm is the only thing that can answer with the screen, and it
+        # has a firing control -- ``test_a_refusal_raised_OUTSIDE_an_item
+        # _still_answers_with_the_screen``.  The bank feed's claim door
+        # (``ctx.refusal = BankFeedError``) raises from inside ``act`` on
+        # every refusal it makes.
         db.session.rollback()
+        log_refusal(ctx.logger, exc)
         return ctx.render(ctx.scope, error=str(exc))
     except SQLAlchemyError:
         db.session.rollback()
@@ -422,7 +482,7 @@ def submitted_match(submitted) -> MatchSubmission:
         The :class:`~app.services.statement_match.MatchSubmission`.
     """
     return MatchSubmission(
-        line_ids=frozenset(submitted["line_ids"]),
+        lines=frozenset(submitted["lines"]),
         rows=frozenset(submitted["rows"]),
         # The difference the owner agreed to AND the member it lands on, as
         # ONE value (plan step ``bank_import:X-gp``).  ``None`` where the body
@@ -645,7 +705,8 @@ def _messages(errors, path=()):
     """Yield every message in a Marshmallow error structure, WITH its path.
 
     **A LIST field's errors are keyed by INDEX, not flat**, so
-    ``{"matches": {0: {"line_ids": {0: ["Not a valid id."]}}}}`` is the
+    ``{"matches": {0: {"lines": {0: ["That is not a bank line this page could
+    have shown you."]}}}}`` is the
     ordinary shape here rather than an exotic one -- and a flattener assuming
     ``{field: [str]}`` raises ``TypeError`` inside the handler that exists to
     render a refusal.  It is also why ``error_fragments.flatten_schema_errors``

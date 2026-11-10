@@ -12,10 +12,20 @@
    rather than a missing link.  It is PRUNED here rather than left for
    bank_import:X-gi-3, which is the obligation bank_import:X-gi-1 recorded
    against this step.  The FILE survives both: `_statement_reconcile_macros`
-   imports `books_already_hold` below. #}
+   imports `held_alert` below, which wraps `books_already_hold`. #}
 
 {% macro books_already_hold(held) %}
-{# WHAT THE BOOKS ALREADY HOLD as ARRIVING for one line's own pay period.
+{# WHAT THE BOOKS ALREADY HOLD for one line: as ARRIVING for a deposit's own
+   pay period (ArrivalsAlreadyHeld), as LEAVING near an outflow -- named for
+   its merchant or inside its rule's destination -- for a swipe
+   (SpendingAlreadyHeld, ruling bank_import:R-BI19, plan step X-f6b-2).
+
+   THE VALUE SUPPLIES ITS OWN WORDS (`held.who_holds`, `held.which`) AND THIS
+   MACRO SUPPLIES THE NUMBERS.  Two values with two sentences, and a macro
+   choosing between them with `{% if %}` would be the template restating a
+   partition the service already owns -- the shape CreatableLine.warning's
+   docstring refuses.  The service composes the words; the money macro
+   formats the figures; neither does the other's job.
 
    ONE SPELLING, for the reason `_filing` states in as many words about its
    own twin: the sentence the receipt reports and the sentence a screen prints
@@ -41,5 +51,18 @@
    MATCH pane rather than being told to go looking (it said *on the workbench*
    until plan step bank_import:X-gi-2 deleted that page).  It is not a suggestion that this line
    IS them. #}
-This pay period already holds {{ held.rows | length }} row(s) totalling {{ money(held.total) }} your records say arrived and no bank line explains{% for row in held.rows %}{% if loop.first %}: {% else %}, {% endif %}{{ row.label }} {{ money(row.cash_amount) }}{% endfor %}. If this line is those, match it against them instead of recording it here.
+{{ held.who_holds }} {{ held.rows | length }} row(s) totalling {{ money(held.total) }} {{ held.which }}{% for row in held.rows %}{% if loop.first %}: {% else %}, {% endif %}{{ row.label }} {{ money(row.cash_amount) }}{% endfor %}. If this line is those, match it against them instead of recording it here.
+{%- endmacro %}
+
+{% macro held_alert(held) %}
+{# THE AMBER ALERT the ADD pane prints under its explanation, for either
+   direction: the one place the rows `books_already_hold` names are drawn as
+   money at risk.  One macro since plan step bank_import:X-f6b-2, when the
+   purchase branch gained the alert the income branch had (ruling R-BI19) --
+   two copies of the same six lines is how the two branches' sentences drifted
+   apart once already (this file's own header). #}
+<div class="alert rec-risk d-flex gap-2 align-items-start py-2 mb-2" role="alert">
+  <i class="bi bi-exclamation-triangle mt-1"></i>
+  <div class="small">{{ books_already_hold(held) }}</div>
+</div>
 {%- endmacro %}

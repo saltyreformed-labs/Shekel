@@ -35,10 +35,12 @@ from app.services.grid_view_service import (
 )
 from app.services.salary_cockpit_service import clean_raise_label, is_pay_cut
 from app.services.statement_match import (
+    BankLine,
     CandidateRow,
     MatchProposal,
     ReviewedDifference,
     as_reviewed,
+    as_reviewed_line,
 )
 from app.services.transfer_legs import TransferLeg
 from app.tax_law import name_states
@@ -216,6 +218,28 @@ def reviewed_token(row: CandidateRow) -> str:
     return as_reviewed(row).token
 
 
+def reviewed_line_token(line: BankLine) -> str:
+    """Render one bank line as the form value a match submits for it.
+
+    :func:`reviewed_token`'s twin for the line side (plan step
+    ``bank_import:X-f6b-2``, ruling **bank_import:R-BI14**): a thin wrapper
+    over :func:`app.services.statement_match.as_reviewed_line`, read back by
+    :class:`~app.schemas.validation.statements.ReviewedLineField` on the next
+    request.  The card emits one for the line it explains, carrying the day
+    the bank said it was made as the owner saw it -- which is what lets the
+    accept door refuse a match whose line's day a re-import has RESTATED
+    since the page was rendered (finding **N-338**).
+
+    Args:
+        line: The :class:`~app.services.statement_match.BankLine` the card
+            is rendering.
+
+    Returns:
+        Its token, ``"<line_id>:<YYYY-MM-DD>"``.
+    """
+    return as_reviewed_line(line).token
+
+
 def stated_difference(proposal: MatchProposal) -> str:
     """Render the difference a proposal states, as the form value it submits.
 
@@ -307,6 +331,7 @@ def register_template_filters(app: Flask) -> None:
     app.add_template_filter(raise_label, "raise_label")
     app.add_template_filter(pay_cut, "pay_cut")
     app.add_template_filter(reviewed_token, "reviewed_token")
+    app.add_template_filter(reviewed_line_token, "reviewed_line_token")
     app.add_template_filter(stated_difference, "stated_difference")
     # The one wording of a list of states (ruling plan#3202), registered as
     # itself so the tax-law banner and the refusals cannot word a list apart.

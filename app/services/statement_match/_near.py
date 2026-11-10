@@ -139,7 +139,7 @@ _DECLINED_SENTENCES: "dict[NearRefusal | None, str]" = {
 }
 
 
-def _names_the_merchant(line: BankLine, row: CandidateRow) -> bool:
+def names_the_merchant(line: BankLine, row: CandidateRow) -> bool:
     """Return whether the app's own row NAMES the merchant the bank recorded.
 
     **The corroboration a near miss needs, and it is a REQUIREMENT here rather
@@ -170,6 +170,20 @@ def _names_the_merchant(line: BankLine, row: CandidateRow) -> bool:
     ``POINT OF SALE DEBIT L340 DATE 03-26 HARRIS TEETER`` where the budget says
     ``Groceries``.  Requiring it of the exact tier would throw away 70 correct
     proposals.  It is corroboration for a WEAK claim, not a predicate.
+
+    **PUBLIC since plan step ``bank_import:X-f6b-2`` (ruling
+    **bank_import:R-BI19**), and the second reader is the OPPOSITE kind of
+    question.**  :func:`~._already_held.spending_already_held` asks it of
+    every unexplained row at ANY figure -- *does the book already hold a row
+    named for this merchant near this day* -- because a hand-logged purchase
+    or a bill at another amount is exactly the row this tier's figure bound
+    throws away unreported (``TOO_FAR`` is not in :data:`_FIGURE_ADMITTED`),
+    and a standing rule then files the swipe a second time.  That reader is
+    a WITHHOLDING, the conservative direction; this tier's use is a PROPOSAL,
+    the permissive one.  One spelling of the word test serves both because
+    the two cannot then disagree about what "names the merchant" means, and
+    the measurement above still bounds what the word test may be asked to
+    carry on its own.
 
     **It reads the COLUMN, never** :attr:`~._offers.BankLine.merchant_label`.
     Ruling **R-GA(a)** drew exactly that line: the label falls back to the
@@ -262,7 +276,7 @@ def _is_a_near_miss(line: BankLine, row: CandidateRow) -> bool:
       shadow, an envelope worth its purchases, a payback worth the spend it
       repays.  Measured live: 2 of the 4 uncorroborated near candidates on the
       developer's own clone are CC paybacks, refused by the door by name;
-    * the bound, and the merchant (:func:`_names_the_merchant`);
+    * the bound, and the merchant (:func:`names_the_merchant`);
     * the day window (:func:`~._pairing.within_window`), which is the pair
       legality test the exact tier already uses -- INCLUDING the purchase
       floor, so a near miss cannot offer a pairing ``update_entry`` refuses.
@@ -333,7 +347,7 @@ def _refusal_for(
         return NearRefusal.TOO_FAR
     if not within_window(row, line):
         return NearRefusal.OUTSIDE_THE_WINDOW
-    if not _names_the_merchant(line, row):
+    if not names_the_merchant(line, row):
         return NearRefusal.NO_MERCHANT
     return None
 

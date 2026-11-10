@@ -12,6 +12,11 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from sqlalchemy.pool import NullPool
 
+from app.utils.field_encryption import (
+    fernet_list_from,
+    refuse_retired_field_key_names,
+)
+
 # Load .env file if present (development convenience).
 load_dotenv()
 
@@ -132,24 +137,54 @@ _DRIVER_CONNECT_ARGS = {"connect_timeout": 5, "prepare_threshold": None}
 
 
 class BaseConfig:
-    """Shared configuration defaults across all environments."""
+    """Shared configuration defaults across all environments.
+
+    ``create_app`` INSTANTIATES the configuration class it loads
+    (``app.config.from_object(config_class())``), so ``__init__`` here,
+    on ``_ValkeyStore`` and on ``ProdConfig`` is the start-up validation
+    every environment runs (finding plan#2652: Flask's ``from_object``
+    reads a class's attributes and instantiates nothing, so passing the
+    class left every refusal dead).
+    """
+
+    def __init__(self):
+        """Refuse an environment still spelling the field key's old name.
+
+        Every environment: ``DevConfig`` and ``TestConfig`` run it first,
+        ``ProdConfig`` after its SECRET_KEY and DATABASE_URL refusals
+        (through ``_ValkeyStore``) and before the field key's own
+        (``_validate_field_encryption_key``), so a missed rename is named
+        as a rename, which the "not set" warning ``create_app`` would
+        otherwise log, or production's "required" refusal would state,
+        cannot.  See
+        :func:`app.utils.field_encryption.refuse_retired_field_key_names`.
+        """
+        refuse_retired_field_key_names()
 
     # Flask core.  No fallback default: production must fail closed
     # when SECRET_KEY is missing.  Dev and test paths set this via
     # the developer's .env file or, in the test suite, conftest.py.
     SECRET_KEY = os.getenv("SECRET_KEY")
 
-    # MFA -- Fernet key for encrypting TOTP secrets at rest.
-    TOTP_ENCRYPTION_KEY = os.getenv("TOTP_ENCRYPTION_KEY")
+    # The Fernet key under which the app stores its ciphertext columns
+    # at rest (``auth.mfa_configs``' TOTP secret).  The cipher is built
+    # at call time by ``app.utils.field_encryption.build_fernet_list``
+    # (through that module's ``get_encryption_key``); this attribute is
+    # the same variable captured at import, which ``ProdConfig``
+    # validates and ``create_app``'s warning reads.  REQUIRED in
+    # production (ruling ``bank_import:R-BI23``); optional in dev and
+    # test, where a missing key only makes MFA unavailable.  Named
+    # ``TOTP_ENCRYPTION_KEY`` until ``bank_import:X-f6b-2`` (BI-503).
+    FIELD_ENCRYPTION_KEY = os.getenv("FIELD_ENCRYPTION_KEY")
 
-    # MFA -- optional comma-separated list of retired Fernet keys.
-    # Used by ``mfa_service.get_encryption_key`` to build a MultiFernet
-    # that decrypts ciphertexts written under a previous primary key.
-    # Set this transiently during a TOTP_ENCRYPTION_KEY rotation; the
-    # operator removes it again after running scripts/rotate_totp_key.py.
+    # Optional comma-separated list of retired Fernet keys.  Used by
+    # ``field_encryption.get_encryption_key`` to build a MultiFernet that
+    # decrypts ciphertexts written under a previous primary key.  Set
+    # this transiently during a FIELD_ENCRYPTION_KEY rotation; the
+    # operator removes it again after running scripts/rotate_field_key.py.
     # Optional and may be absent or empty -- the empty case is the
     # steady-state production posture.  See docs/runbook_secrets.md.
-    TOTP_ENCRYPTION_KEY_OLD = os.getenv("TOTP_ENCRYPTION_KEY_OLD")
+    FIELD_ENCRYPTION_KEY_OLD = os.getenv("FIELD_ENCRYPTION_KEY_OLD")
 
     # SQLAlchemy
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -332,7 +367,7 @@ class BaseConfig:
     # ``_judge_strangers_try``) for the enforcement path.  These settings
     # are documented here for
     # operator discovery; the service itself reads ``os.getenv`` at call
-    # time (matching the ``mfa_service.TOTP_ENCRYPTION_KEY`` pattern) so
+    # time (matching ``field_encryption.get_encryption_key``'s read) so
     # tests can adjust thresholds via ``monkeypatch.setenv`` without
     # going through the Flask config object.
     #
@@ -551,6 +586,14 @@ class DevContainerConfig(_ValkeyStore, DevConfig):
 class TestConfig(BaseConfig):
     """Test configuration -- separate database, no CSRF, WTF disabled."""
 
+    # Not a test: pytest collects any ``Test*`` class a test module
+    # imports, and once ``BaseConfig`` gained an ``__init__`` it warned
+    # on every worker that it could not collect this one (before that it
+    # collected it silently, as an empty test class).  The Flask naming
+    # convention and pytest's heuristic collide here; this is pytest's
+    # own opt-out.
+    __test__ = False
+
     TESTING = True
     # Falls back to peer-auth local test database if TEST_DATABASE_URL
     # is not set in .env.  ``_reject_sentinel`` runs at class-body
@@ -676,9 +719,14 @@ class ProdConfig(_ValkeyStore, BaseConfig):
                 placeholder, or is shorter than the minimum acceptable
                 length, if ``DATABASE_URL`` is missing, or, after both,
                 if the rate-limit store's password is missing
-                (``_ValkeyStore``).  Each branch emits a distinct,
-                actionable error message so the operator knows exactly
-                which secret is misconfigured.
+                (``_ValkeyStore``), or -- ruling ``bank_import:R-BI23``
+                -- if ``FIELD_ENCRYPTION_KEY`` is missing, matches the
+                docker-secret placeholder, or holds (as does
+                ``FIELD_ENCRYPTION_KEY_OLD``) a value Fernet cannot load.
+                Each branch emits a distinct, actionable error message so
+                the operator knows exactly which secret is misconfigured.
+            RuntimeError: From ``BaseConfig.__init__``, when the
+                environment still spells the field key's old name.
         """
         if not self.SECRET_KEY:
             raise ValueError(
@@ -703,6 +751,57 @@ class ProdConfig(_ValkeyStore, BaseConfig):
         if not self.SQLALCHEMY_DATABASE_URI:
             raise ValueError("DATABASE_URL must be set in production.")
         super().__init__()
+        self._validate_field_encryption_key()
+
+    def _validate_field_encryption_key(self) -> None:
+        """Refuse a production start without a loadable field key (R-BI23).
+
+        The key encrypts every ciphertext column the app stores, so a
+        production process without one is misconfigured, not
+        "MFA-optional": under the old warning-only posture a missed
+        rename of the host's ``.env`` yielded an EMPTY key inside the
+        container, the app started, ``/health`` passed, and every
+        MFA-enrolled user met "MFA verification failed" at login.
+        The three refusals mirror ``SECRET_KEY``'s: missing, the
+        docker-secret placeholder (the secret file is absent or
+        unreadable), and a value the cipher could not build from --
+        checked for the retired keys too, since a bad ``_OLD`` entry
+        raises from the first decrypt otherwise.
+
+        Raises:
+            ValueError: One actionable message per refusal.
+        """
+        if not self.FIELD_ENCRYPTION_KEY:
+            raise ValueError(
+                "FIELD_ENCRYPTION_KEY is required in production: it "
+                "encrypts every ciphertext column the app stores. "
+                "Generate with: python -c 'from cryptography.fernet "
+                "import Fernet; print(Fernet.generate_key().decode())'"
+            )
+        if (
+            self.FIELD_ENCRYPTION_KEY in _KNOWN_DEFAULT_SECRETS
+            or self.FIELD_ENCRYPTION_KEY.startswith(
+                "replaced_by_docker_secret"
+            )
+        ):
+            raise ValueError(
+                "FIELD_ENCRYPTION_KEY matches a known placeholder: the "
+                "Docker secret at /run/secrets/field_encryption_key is "
+                "missing or unreadable, or .env was never filled in.  "
+                "See docs/runbook_secrets.md."
+            )
+        try:
+            fernet_list_from(
+                self.FIELD_ENCRYPTION_KEY, self.FIELD_ENCRYPTION_KEY_OLD,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "FIELD_ENCRYPTION_KEY or FIELD_ENCRYPTION_KEY_OLD holds a "
+                "value Fernet cannot load (a Fernet key is 32 url-safe "
+                "base64-encoded bytes; generate with "
+                "Fernet.generate_key()).  Nothing encrypted could be "
+                "read under it."
+            ) from exc
 
 
 # Map environment names to config classes for the factory.

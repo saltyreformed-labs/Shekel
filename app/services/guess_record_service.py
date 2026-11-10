@@ -143,9 +143,9 @@ def _digest_key() -> bytes:
     """Return the key :func:`email_digest` is computed under.
 
     Derived from ``SECRET_KEY``, read from the environment at call time as
-    every key in this layer is (``mfa_service`` reads ``TOTP_ENCRYPTION_KEY``
-    the same way).  A new ``SECRET_KEY`` therefore names new records: every
-    count starts again, as every session does.
+    every key in this layer is (``app.utils.field_encryption`` reads
+    ``FIELD_ENCRYPTION_KEY`` the same way).  A new ``SECRET_KEY`` therefore
+    names new records: every count starts again, as every session does.
 
     Returns:
         The 32-byte key.

@@ -797,9 +797,10 @@ class StatementSource(db.Model):
     ADAPTER: a format at an institution, because one bank publishes one
     statement several ways and the ways carry different facts.
 
-    One value today, ``secu_checking_csv``.  Later adapters -- SECU's OFX, the
-    Capital One card, and ``X-f6b``'s automated SimpleFIN feed -- INSERT a row
-    here, because a new source is data and never schema.
+    Two values today: ``secu_checking_csv`` and, since plan step
+    ``bank_import:X-f6b-2`` (migration ``6efa1fb46af8``), ``simplefin``, the
+    daily feed.  Later adapters -- SECU's OFX, the Capital One card -- INSERT
+    a row here, because a new source is data and never schema.
 
     Why the member names a format rather than an institution, and why an
     adapter without an external transaction id loses nothing, are both measured

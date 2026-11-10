@@ -16,6 +16,7 @@ gate covers every static security knob the app ships with.
 from importlib import reload
 
 import pytest
+from cryptography.fernet import Fernet
 from flask import Config, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -49,6 +50,11 @@ _STORE_PASSWORD = "a-store-password"
 # out here so a moved address fails a test rather than passing on its own
 # constant.
 _STORE_SOCKET = "valkey+unix:///run/valkey/valkey.sock"
+
+# A loadable Fernet key for the cases that construct a VALID production
+# configuration: production requires one since ``bank_import:R-BI23``.
+# Generated per import, never a real secret.
+_VALID_FIELD_KEY = Fernet.generate_key().decode()
 
 
 class TestTheUploadCeiling:
@@ -215,9 +221,13 @@ class TestTestConfig:
 class TestProdConfig:
     """Tests for ProdConfig validation.
 
-    Covers SECRET_KEY (empty / placeholder / short / valid),
-    DATABASE_URL, and TOTP_ENCRYPTION_KEY paths through
-    ``ProdConfig.__init__``.
+    Covers SECRET_KEY (empty / placeholder / short / valid) and
+    DATABASE_URL paths through ``ProdConfig.__init__``.  The
+    FIELD_ENCRYPTION_KEY refusals (ruling ``bank_import:R-BI23``) and
+    the proof that ``create_app`` runs ``__init__`` at all are
+    ``tests/test_field_encryption_key.py``.  A successful construction
+    here supplies a loadable field key, because production requires
+    one since R-BI23.
     """
 
     def test_prodconfig_rejects_empty_secret_key(self, monkeypatch):
@@ -324,6 +334,9 @@ class TestProdConfig:
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
         monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
+        monkeypatch.setattr(
+            BaseConfig, "FIELD_ENCRYPTION_KEY", _VALID_FIELD_KEY,
+        )
         config = ProdConfig()
         assert config.SECRET_KEY == _VALID_SECRET_KEY
 
@@ -350,7 +363,7 @@ class TestProdConfig:
         """
         monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
         monkeypatch.setattr(ProdConfig, "SQLALCHEMY_DATABASE_URI", None)
-        monkeypatch.setenv("TOTP_ENCRYPTION_KEY", "test-key")
+        monkeypatch.setenv("FIELD_ENCRYPTION_KEY", "test-key")
         with pytest.raises(ValueError, match="DATABASE_URL"):
             ProdConfig()
 
@@ -387,21 +400,6 @@ class TestProdConfig:
         # The browser only honors the prefix when Secure=True (above)
         # and Path="/" (Flask default).  See F-096.
         assert ProdConfig.SESSION_COOKIE_NAME == "__Host-session"
-
-    def test_totp_key_optional_at_startup(self, monkeypatch):
-        """ProdConfig does not crash when TOTP_ENCRYPTION_KEY is missing.
-
-        The key is only needed when a user enables MFA, not at app
-        startup.  Enforcement happens in mfa_service.get_encryption_key().
-        """
-        monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
-        monkeypatch.setattr(
-            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
-        )
-        monkeypatch.setattr(BaseConfig, "TOTP_ENCRYPTION_KEY", None)
-        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
-        config = ProdConfig()
-        assert config.TOTP_ENCRYPTION_KEY is None
 
 
 class TestRuntimeDatabaseUri:
@@ -1002,6 +1000,9 @@ class TestRateLimitConfig:
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
         monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
+        monkeypatch.setattr(
+            BaseConfig, "FIELD_ENCRYPTION_KEY", _VALID_FIELD_KEY,
+        )
         config = ProdConfig()
         assert config.RATELIMIT_STORAGE_OPTIONS == {
             "username": "shekel", "password": _STORE_PASSWORD,

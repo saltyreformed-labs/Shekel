@@ -179,15 +179,43 @@ class BankLine:  # pylint: disable=too-many-instance-attributes
     def happened_on(self) -> date:
         """Return the day the bank says this movement was MADE.
 
-        The stated transaction day where the bank states one, else the day it
-        posted -- which is the tightest bound the statement supports, since
-        money cannot clear before it moves.  **It is a fallback and not a
-        claim of equality**, which is exactly the distinction
-        ``bank_statement_lines.transaction_on`` became NULLABLE to express:
-        callers that must write a day get an answer here, and callers that
-        need to know whether the bank OBSERVED it read the column itself.
+        :func:`day_made`, read off this value; the rule and its reasons are
+        stated there once.
         """
-        return self.transaction_on or self.posted_on
+        return day_made(self)
+
+
+def day_made(line) -> date:
+    """Return the day the bank says *line*'s money was MADE.
+
+    **THE ONE SPELLING** of the budget-clock day a bank line supports, since
+    plan step ``bank_import:X-f6b-2`` (ruling **bank_import:R-BI14**).  The
+    stated transaction day where the source states one, else the day it
+    posted -- which is the tightest bound the statement supports, since
+    money cannot clear before it moves.  **It is a fallback and not a claim
+    of equality**, which is exactly the distinction a line's
+    ``transaction_on`` is NULLABLE to express: callers that must write a day
+    get an answer here, and callers that need to know whether the bank
+    OBSERVED it read the fact itself.
+
+    **Structurally typed, like** :meth:`MatchDays.of`: *line* exposes
+    ``posted_on`` (a ``date``) and ``transaction_on`` (``date | None``),
+    which :class:`BankLine` and
+    :class:`~app.models.statement_import.BankStatementLine` both do, so one
+    rule serves the offer value the screen renders and the locked row the
+    door writes from.  *It was spelled three times until X-f6b-2* -- on
+    :attr:`BankLine.happened_on`, inside :meth:`MatchDays.of`, and as
+    ``_create._made_on`` -- and that step compares the day the screen showed
+    against the day the door derives, which is a comparison with no meaning
+    unless both sides are ONE derivation.
+
+    Args:
+        line: A bank line, in either shape.
+
+    Returns:
+        Its budget-clock day.
+    """
+    return line.transaction_on or line.posted_on
 
 
 @dataclass(frozen=True)
@@ -251,9 +279,7 @@ class MatchDays:
         """
         return cls(
             posts_on=max(line.posted_on for line in lines),
-            happened_on=min(
-                line.transaction_on or line.posted_on for line in lines
-            ),
+            happened_on=min(day_made(line) for line in lines),
             posted_first=min(line.posted_on for line in lines),
         )
 

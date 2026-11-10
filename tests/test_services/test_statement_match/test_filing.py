@@ -31,6 +31,7 @@ from app.services.statement_match import (
     BankLine,
     Consent,
     MatchSubmission,
+    ReviewedLine,
     MerchantSection,
     NewEnvelope,
     PurchaseCreation,
@@ -280,6 +281,19 @@ class TestARuleFilesANewSwipeByItself:
         exactly these terms: the row's recorded figure IS its purchases, so a
         new one raises that cost by exactly what the bank showed.  A door that
         refused this would file nothing for Groceries, Gas or Kayla's.
+
+        **The purchase that closed the envelope is EXPLAINED by the bank**
+        (a second line for exactly its figure, which the exact tier pairs),
+        since plan step ``bank_import:X-f6b-2``: ruling **bank_import:R-BI19**
+        withholds a filing into an envelope holding a purchase no bank line
+        explains, so this case now says what it always meant -- a CLOSED
+        envelope takes the filing -- with the other safeguard out of the way.
+        The withheld shape is the next case's.  *The pairing rests on the
+        window*: the closed envelope is itself an exact `$130.11` candidate,
+        and it is the PURCHASE the tier pairs only because
+        ``settle_from_entries`` dates the envelope TODAY, more than
+        ``DAY_WINDOW`` from the line, so ``within_window`` refuses it; the
+        undated purchase's window is the period's start, where the line is.
         """
         with app.app_context():
             envelope = _groceries(seed_user)
@@ -292,6 +306,10 @@ class TestARuleFilesANewSwipeByItself:
             a_rule(seed_user, MERCHANT, template_id=envelope.template_id)
             statement = an_import(seed_user)
             _swipe(seed_user, statement, amount="-10.89")
+            _swipe(
+                seed_user, statement, amount="-130.11", merchant="Sam's Club",
+                sequence_in_group=1,
+            )
             db.session.flush()
 
             filing = _file(seed_user, statement)
@@ -304,6 +322,48 @@ class TestARuleFilesANewSwipeByItself:
             # now records the swipe the bank showed after it was closed.
             assert sorted(p.amount for p in _purchases_in(envelope)) == [
                 Decimal("10.89"), Decimal("130.11"),
+            ]
+
+    def test_an_envelope_holding_a_purchase_NO_LINE_EXPLAINS_withholds(
+        self, app, db, seed_user,
+    ):
+        """Ruling **bank_import:R-BI19**, plan step ``bank_import:X-f6b-2``.
+
+        The case above with the bank's `$130.11` line absent: the envelope's
+        own ``Sams`` purchase is money the books already hold that no bank
+        line explains, and the `$10.89` swipe the rule would file into the
+        same envelope may be that purchase logged at another amount -- the
+        21-of-150 shape the developer's 2026-09-15 import measured.  Until
+        this step the door filed it (the case above was written against that
+        door) and the near tier, whose figure bound the `$130.11` fails by
+        a mile, reported nothing.  The clause names WHERE to look.
+        """
+        with app.app_context():
+            envelope = _groceries(seed_user)
+            a_purchase(
+                seed_user, envelope, amount="130.11", description="Sams",
+            )
+            transaction_service.settle_from_entries(envelope)
+            db.session.flush()
+            a_rule(seed_user, MERCHANT, template_id=envelope.template_id)
+            statement = an_import(seed_user)
+            _swipe(seed_user, statement, amount="-10.89")
+            db.session.flush()
+
+            filing = _file(seed_user, statement)
+            db.session.flush()
+
+            assert _story(filing) == {
+                "filed": 0,
+                "withheld": [
+                    "your records already hold $130.11 leaving that no bank "
+                    "line explains, inside Groceries, so recording it "
+                    "automatically could count the same money twice",
+                ],
+                "refused": [],
+            }
+            assert [p.amount for p in _purchases_in(envelope)] == [
+                Decimal("130.11"),
             ]
 
 
@@ -665,8 +725,16 @@ class TestAPassThatCouldNotFinishLookingWITHHOLDS:
         this as new spending* on such a line; this is that advice made
         structural for a door with nobody reading it.
 
-        The second swipe, whose figure no row is near, IS filed -- so a door
-        that withheld everything would fail this case.
+        **The second Food Lion swipe is withheld TOO since plan step
+        ``bank_import:X-f6b-2``**, by the other safeguard (ruling
+        **bank_import:R-BI19**): the same two hand rows are named for its
+        merchant and sit inside the envelope its rule would file it into, so
+        it may be one of them logged at another amount.  *It read "the second
+        swipe, whose figure no row is near, IS filed" until then*, which was
+        the gap that ruling closes.  The gap is still asked FIRST, so the
+        contested line keeps the near tier's own words.  A third swipe from a
+        merchant whose envelope holds nothing IS filed -- so a door that
+        withheld everything still fails this case.
         """
         with app.app_context():
             envelope = _groceries(seed_user)
@@ -677,11 +745,17 @@ class TestAPassThatCouldNotFinishLookingWITHHOLDS:
                     description="Food Lion", purchased_on=start,
                 )
             a_rule(seed_user, MERCHANT, template_id=envelope.template_id)
+            gas = _groceries(seed_user, name="Gas", amount="200.00")
+            a_rule(seed_user, "BJ's Fuel", template_id=gas.template_id)
             statement = an_import(seed_user)
             _swipe(seed_user, statement, amount="-178.29", posted_on=start)
             _swipe(
                 seed_user, statement, amount="-10.89",
                 posted_on=start + timedelta(days=1), sequence_in_group=1,
+            )
+            _swipe(
+                seed_user, statement, amount="-47.61", merchant="BJ's Fuel",
+                posted_on=start + timedelta(days=1), sequence_in_group=2,
             )
             db.session.flush()
 
@@ -689,14 +763,23 @@ class TestAPassThatCouldNotFinishLookingWITHHOLDS:
             db.session.flush()
 
             assert filing.filed_count == 1
-            assert [item.line.amount for item in filing.withheld] == [
-                Decimal("-178.29"),
-            ]
-            assert "close enough" in filing.withheld[0].reason
-            # The two hand rows are untouched and only the answered swipe
-            # landed: 10.89 + 178.30 + 178.32.
+            withheld = {
+                item.line.amount: item.reason for item in filing.withheld
+            }
+            assert set(withheld) == {Decimal("-178.29"), Decimal("-10.89")}
+            assert "close enough" in withheld[Decimal("-178.29")]
+            assert withheld[Decimal("-10.89")] == (
+                "your records already hold $356.62 leaving that no bank line "
+                "explains, named for Food Lion or inside Groceries, so "
+                "recording it automatically could count the same money twice"
+            )
+            # The two hand rows are untouched and nothing joined them; the
+            # fuel swipe landed in Gas.
             assert sorted(p.amount for p in _purchases_in(envelope)) == [
-                Decimal("10.89"), Decimal("178.30"), Decimal("178.32"),
+                Decimal("178.30"), Decimal("178.32"),
+            ]
+            assert [p.amount for p in _purchases_in(gas)] == [
+                Decimal("47.61"),
             ]
 
     def test_a_destination_this_statement_explains_WHOLE_is_withheld(
@@ -1116,7 +1199,9 @@ class TestARuleMayNotModifyAHandMadeRow:
                 consent=Consent.STANDING_RULE,
                 incomes=(),
                 matches=(MatchSubmission(
-                    line_ids=frozenset({1}),
+                    lines=frozenset({ReviewedLine(
+                        line_id=1, happened_on=date(2024, 1, 5),
+                    )}),
                     rows=frozenset({"transaction:1"}),
                 ),),
                 creations=(),
@@ -1135,7 +1220,10 @@ class TestARuleMayNotModifyAHandMadeRow:
             consent=Consent.TICKED,
             incomes=(),
             matches=(MatchSubmission(
-                line_ids=frozenset({1}), rows=frozenset({"transaction:1"}),
+                lines=frozenset({ReviewedLine(
+                    line_id=1, happened_on=date(2024, 1, 5),
+                )}),
+                rows=frozenset({"transaction:1"}),
             ),),
             creations=(),
         )

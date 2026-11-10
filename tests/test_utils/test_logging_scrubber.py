@@ -21,6 +21,8 @@ import logging
 import uuid
 
 from app.utils.logging_config import (
+    _SENSITIVE_PATTERNS,
+    _URL_USERINFO,
     RFC3339JsonFormatter,
     SensitiveFieldScrubber,
     _redact_value,
@@ -103,6 +105,26 @@ class TestScrubMessage:
 
         assert "zoo-bar-baz-quux-this-is-the-key" not in record.msg
         assert "SECRET_KEY=[REDACTED]" in record.msg
+
+    def test_field_encryption_key_env_line_redacted(self):
+        """``FIELD_ENCRYPTION_KEY=...`` and its ``_OLD`` twin are redacted.
+
+        The key's regex was renamed with the key (``bank_import:X-f6b-2``,
+        BI-503) and carried no case of its own before; a config dump that
+        prints either spelling is the shape this pins.
+        """
+        scrubber = SensitiveFieldScrubber()
+        record = _make_record(
+            "config dump FIELD_ENCRYPTION_KEY=fernet-primary-key-bytes "
+            "FIELD_ENCRYPTION_KEY_OLD=fernet-retired-key-bytes"
+        )
+
+        scrubber.filter(record)
+
+        assert "fernet-primary-key-bytes" not in record.msg
+        assert "fernet-retired-key-bytes" not in record.msg
+        assert "FIELD_ENCRYPTION_KEY=[REDACTED]" in record.msg
+        assert "FIELD_ENCRYPTION_KEY_OLD=[REDACTED]" in record.msg
 
     def test_backup_code_redacted(self):
         """``backup_code=`` and ``backup_codes=`` both match."""
@@ -262,6 +284,89 @@ class TestScrubMessage:
         assert record.msg == {"event": "raw_dict_msg"}
 
 
+    def test_bank_feed_keys_redacted_in_a_message(self):
+        """``access_url=``, ``access_url_encrypted=`` and ``setup_token=`` are
+        redacted by key (``bank_import:X-f6b-2``, ruling R-BI12).
+
+        Each needs its own entry in ``_SENSITIVE_KEY_NAMES``: the ``_``
+        before ``token`` blocks the bare ``token`` key from matching
+        ``setup_token`` (the ``csrf_token`` protection, which this case
+        also re-asserts), and nothing else names a URL by key.
+        """
+        scrubber = SensitiveFieldScrubber()
+        record = _make_record(
+            "claim access_url=https://alice:s3cr3t@bridge.example/simplefin "
+            "access_url_encrypted=the-fernet-ciphertext-bytes "
+            "setup_token=the-pasted-setup-token csrf_token=keep-me"
+        )
+
+        scrubber.filter(record)
+
+        assert "s3cr3t" not in record.msg
+        assert "the-fernet-ciphertext-bytes" not in record.msg
+        assert "the-pasted-setup-token" not in record.msg
+        assert "access_url=[REDACTED]" in record.msg
+        assert "access_url_encrypted=[REDACTED]" in record.msg
+        assert "setup_token=[REDACTED]" in record.msg
+        assert "csrf_token=keep-me" in record.msg
+
+    def test_a_credential_inside_a_bare_url_is_redacted(self):
+        """``scheme://user:password@host`` with NO key before it is scrubbed
+        to ``scheme://[REDACTED]@host`` (``bank_import:X-f6b-2``).
+
+        The SimpleFIN access URL carries its credential in the URL's
+        userinfo, and a ``requests`` exception's text names the URL with
+        no ``key=`` in front -- the shape the key-name forms cannot see.
+        The scheme and the host survive so the line still says WHICH
+        service the credential was for.  ``DATABASE_URL`` has the same
+        shape: a bare connection string is caught the same way, where
+        ``database_url=`` was the only spelling caught before.
+        """
+        scrubber = SensitiveFieldScrubber()
+        record = _make_record(
+            "GET https://alice:s3cr3t@beta-bridge.simplefin.org/simplefin"
+            "/accounts?start-date=1 failed; "
+            "engine postgresql://shekel_user:pw-live@db:5432/shekel"
+        )
+
+        scrubber.filter(record)
+
+        assert "s3cr3t" not in record.msg
+        assert "pw-live" not in record.msg
+        assert (
+            "https://[REDACTED]@beta-bridge.simplefin.org/simplefin"
+            "/accounts?start-date=1 failed" in record.msg
+        )
+        assert "postgresql://[REDACTED]@db:5432/shekel" in record.msg
+
+    def test_a_credential_url_with_an_empty_user_is_redacted(self):
+        """``scheme://:password@host`` -- the Redis convention -- is a
+        credential with no user, and is caught (named by review: the first
+        cut required at least one user character)."""
+        scrubber = SensitiveFieldScrubber()
+        record = _make_record("limiter redis://:s3cr3t@redis:6379/0 unreachable")
+
+        scrubber.filter(record)
+
+        assert "s3cr3t" not in record.msg
+        assert "redis://[REDACTED]@redis:6379/0" in record.msg
+
+    def test_a_url_with_a_user_and_no_password_is_left_alone(self):
+        """``scheme://user@host`` names a user, not a credential, and a URL
+        with no userinfo is not touched at all."""
+        scrubber = SensitiveFieldScrubber()
+        record = _make_record(
+            "see https://docs.example.org/guide and git@github.com:org/repo "
+            "and https://alice@host.example/path"
+        )
+
+        scrubber.filter(record)
+
+        assert record.msg == (
+            "see https://docs.example.org/guide and git@github.com:org/repo "
+            "and https://alice@host.example/path"
+        )
+
 class TestScrubArgs:
     """String members of ``record.args`` are scrubbed; non-strings are not."""
 
@@ -288,6 +393,18 @@ class TestScrubArgs:
         # The formatter would render this as "count=42" -- coercing
         # 42 to "42" would also work for %d but would break for %s
         # callers that expect the original type.
+
+    def test_string_arg_carrying_a_bare_credential_url_redacted(self):
+        """A URL with userinfo passed as a ``%s`` argument is scrubbed."""
+        scrubber = SensitiveFieldScrubber()
+        record = _make_record(
+            "feed sync failed: %s",
+            args=("https://alice:s3cr3t@bridge.example/simplefin",),
+        )
+
+        scrubber.filter(record)
+
+        assert record.args == ("https://[REDACTED]@bridge.example/simplefin",)
 
     def test_dict_args_with_secret_string_value_redacted(self):
         """``%(name)s`` formatting with a dict args is also handled."""
@@ -336,6 +453,47 @@ class TestScrubExtras:
         scrubber.filter(record)
 
         assert record.token == "[REDACTED]"
+
+    def test_exact_name_bank_feed_fields_replaced(self):
+        """``access_url``, ``access_url_encrypted`` and ``setup_token``
+        extras are replaced wholesale (``bank_import:X-f6b-2``)."""
+        scrubber = SensitiveFieldScrubber()
+        record = _make_record(
+            "feed claimed",
+            access_url="https://alice:s3cr3t@bridge.example/simplefin",
+            access_url_encrypted=b"the-fernet-ciphertext-bytes",
+            setup_token="the-pasted-setup-token",
+        )
+
+        scrubber.filter(record)
+
+        assert record.access_url == "[REDACTED]"
+        assert record.access_url_encrypted == "[REDACTED]"
+        assert record.setup_token == "[REDACTED]"
+
+    def test_extra_error_string_carrying_a_bare_credential_url_redacted(self):
+        """An ``error=str(exc)`` extra naming the access URL is scrubbed.
+
+        The refusal-logging shape ``bank_import:X-f6b-2`` uses (every feed
+        refusal at WARNING through ``log_event`` with its class, BI-499)
+        attaches the exception's text, and a ``requests`` error's text
+        names the URL it was for.
+        """
+        scrubber = SensitiveFieldScrubber()
+        record = _make_record(
+            "feed refused",
+            error=(
+                "HTTPSConnectionPool: Max retries exceeded with url: "
+                "https://alice:s3cr3t@bridge.example/simplefin/accounts"
+            ),
+        )
+
+        scrubber.filter(record)
+
+        assert "s3cr3t" not in record.error
+        assert record.error.endswith(
+            "https://[REDACTED]@bridge.example/simplefin/accounts"
+        )
 
     def test_extra_string_with_pattern_redacted(self):
         """A free-form string extra carrying a secret is pattern-scrubbed."""
@@ -469,3 +627,17 @@ class TestScrubTextIdempotence:
         once = _scrub_text("password=hunter2")
         twice = _scrub_text(once)
         assert once == twice == "password=[REDACTED]"
+
+    def test_a_redacted_url_is_unchanged_on_second_pass(self):
+        """The credential-in-URL form is idempotent too: ``[REDACTED]``
+        holds no ``:``, so ``scheme://[REDACTED]@host`` is not userinfo.
+
+        Asked of the named pattern directly as well as of ``_scrub_text``,
+        so the claim is about ``_URL_USERINFO`` and not about whichever
+        pattern happened to fire first.
+        """
+        once = _scrub_text("https://alice:s3cr3t@host.example/x")
+        twice = _scrub_text(once)
+        assert once == twice == "https://[REDACTED]@host.example/x"
+        assert _URL_USERINFO in _SENSITIVE_PATTERNS
+        assert _URL_USERINFO.search(once) is None

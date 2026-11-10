@@ -22,8 +22,29 @@ from app.exceptions import UnsupportedStateError
 from app.extensions import db as _db
 from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
+from app.services.tax_config_service import TaxLawBasis, load_tax_configs_for_year
 from app.services.tax_liability_service import AnnualLiability, compute_annual_liability
-from tests._test_helpers import EMPTY_TAX_LAW, start_test_pay_list
+from app.tax_law import TaxLaw
+from tests._test_helpers import (
+    EMPTY_TAX_LAW,
+    made_up_state,
+    made_up_year,
+    start_test_pay_list,
+)
+
+
+def _liability(profile, tax_year, annual_wage_income, annual_pretax):
+    """Resolve *profile*'s law for *tax_year* and price its liability on it.
+
+    The order the Taxes tab's producer follows: it resolves the primary
+    profile's law once and hands the set to the liability (plan step
+    salary:X-at-5), so a state the law does not list is refused at the
+    resolution, before any arithmetic.
+    """
+    return compute_annual_liability(
+        profile, load_tax_configs_for_year(profile, tax_year),
+        annual_wage_income, annual_pretax,
+    )
 
 
 def _make_profile(
@@ -97,13 +118,14 @@ class TestWorkedAnchor:
             additional_income="1200.00",
             additional_deductions="3000.00",
         )
-        result = compute_annual_liability(
+        result = _liability(
             profile, 2026,
             Decimal("110000.00"), Decimal("12000.00"),
         )
 
         assert isinstance(result, AnnualLiability)
-        assert result.tax_year == 2026
+        # The shipped law carries 2026, so every part is priced on 2026's rules.
+        assert result.basis == TaxLawBasis(2026, 2026, 2026, 2026)
         assert result.annual_wage_income == Decimal("110000.00")
         assert result.annual_pretax == Decimal("12000.00")
         assert result.additional_income == Decimal("1200.00")
@@ -150,11 +172,11 @@ class TestFourBExclusion:
         )
         db.session.commit()
 
-        base = compute_annual_liability(
+        base = _liability(
             no_4b, 2026,
             Decimal("110000.00"), Decimal("12000.00"),
         )
-        alt = compute_annual_liability(
+        alt = _liability(
             with_4b, 2026,
             Decimal("110000.00"), Decimal("12000.00"),
         )
@@ -183,16 +205,17 @@ class TestConfigYearSelection:
         """
         profile = _committed_profile(seed_user, additional_income="1200.00")
 
-        r2026 = compute_annual_liability(
+        r2026 = _liability(
             profile, 2026,
             Decimal("110000.00"), Decimal("12000.00"),
         )
-        r2025 = compute_annual_liability(
+        r2025 = _liability(
             profile, 2025,
             Decimal("110000.00"), Decimal("12000.00"),
         )
 
-        assert r2025.tax_year == 2025
+        assert r2025.basis == TaxLawBasis(2025, 2025, 2025, 2025)
+        assert r2026.basis == TaxLawBasis(2026, 2026, 2026, 2026)
         assert r2025.federal.standard_deduction == Decimal("15750.00")
         assert r2025.federal.taxable == Decimal("83450.00")
         assert r2025.federal.liability == Decimal("13273.00")
@@ -204,6 +227,39 @@ class TestConfigYearSelection:
         assert r2026.federal.liability == Decimal("12994.00")
         assert r2026.state.liability == Decimal("3449.36")
         assert r2025.federal.liability != r2026.federal.liability
+
+
+class TestTheBasisItWasPricedOn:
+    """The liability carries the resolver's basis for the law it priced (plan step X-at-5)."""
+
+    def test_a_substituted_year_is_priced_and_labelled_on_the_newest_years_rules(
+        self, seed_user, tax_law,
+    ):
+        """2028 is past the made-up law's newest year, 2027: priced on 2027's NC rate.
+
+        Made-up law, every federal and FICA figure zero: 2026 NC 4.00%, 2027
+        NC 5.00%, each with ``made_up_state``'s $25,500.00 standard deduction.
+        Single, wages 50,000.00, nothing pre-tax, no 4(a), no children:
+          NC base      = 50,000.00
+          taxable      = 50000 - 25500 = 24,500.00
+          2027's tax   = 24500 * 0.0500 = 1,225.00  (2026's would be 980.00)
+        The basis names 2027 for every part, the year whose figure was used.
+        """
+        tax_law(TaxLaw(years=(
+            made_up_year(2026, states={"NC": made_up_state(Decimal("0.0400"))}),
+            made_up_year(2027, states={"NC": made_up_state(Decimal("0.0500"))}),
+        )))
+        profile = _committed_profile(seed_user)
+        configs = load_tax_configs_for_year(profile, 2028)
+
+        result = compute_annual_liability(
+            profile, configs, Decimal("50000.00"), Decimal("0.00"),
+        )
+
+        assert result.basis is configs["basis"]
+        assert result.basis == TaxLawBasis(2028, 2027, 2027, 2027)
+        assert result.state.flat_rate == Decimal("0.0500")
+        assert result.state.liability == Decimal("1225.00")
 
 
 class TestHeadOfHouseholdBoundary2026:
@@ -229,7 +285,7 @@ class TestHeadOfHouseholdBoundary2026:
         profile = _committed_profile(
             seed_user, filing_status_name="head_of_household",
         )
-        result = compute_annual_liability(
+        result = _liability(
             profile, 2026, Decimal("260000.00"), Decimal("0.00"),
         )
 
@@ -255,7 +311,7 @@ class TestDependentCredits:
             qualifying_children=2,
             other_dependents=1,
         )
-        result = compute_annual_liability(
+        result = _liability(
             profile, 2026,
             Decimal("110000.00"), Decimal("12000.00"),
         )
@@ -295,7 +351,7 @@ class TestDeveloperLiveAnchorMFJ:
             filing_status_name="married_jointly",
             qualifying_children=4,
         )
-        result = compute_annual_liability(
+        result = _liability(
             profile, 2026,
             Decimal("94619.62"), Decimal("13943.93"),
         )
@@ -326,7 +382,7 @@ class TestNCFilingStatusStandardDeduction:
         profile = _committed_profile(
             seed_user, filing_status_name="married_jointly",
         )
-        result = compute_annual_liability(
+        result = _liability(
             profile, 2026,
             Decimal("100000.00"), Decimal("0.00"),
         )
@@ -341,7 +397,7 @@ class TestNCFilingStatusStandardDeduction:
           tax     = 87250 * 0.0399 = 3,481.275 -> 3,481.28 (ROUND_HALF_UP)
         """
         profile = _committed_profile(seed_user, filing_status_name="single")
-        result = compute_annual_liability(
+        result = _liability(
             profile, 2026,
             Decimal("100000.00"), Decimal("0.00"),
         )
@@ -365,7 +421,7 @@ class TestNCChildDeductionTierBoundary:
         profile = _committed_profile(
             seed_user, filing_status_name="single", qualifying_children=1,
         )
-        result = compute_annual_liability(
+        result = _liability(
             profile, 2026,
             Decimal("40000.00"), Decimal("0.00"),
         )
@@ -384,7 +440,7 @@ class TestNCChildDeductionTierBoundary:
         profile = _committed_profile(
             seed_user, filing_status_name="single", qualifying_children=1,
         )
-        result = compute_annual_liability(
+        result = _liability(
             profile, 2026,
             Decimal("40000.01"), Decimal("0.00"),
         )
@@ -397,7 +453,7 @@ class TestNCChildDeductionTierBoundary:
         profile = _committed_profile(
             seed_user, filing_status_name="single", qualifying_children=0,
         )
-        result = compute_annual_liability(
+        result = _liability(
             profile, 2026,
             Decimal("40000.00"), Decimal("0.00"),
         )
@@ -418,7 +474,7 @@ class TestClampAndMissingConfigs:
           state base      = 10000 -> (10000 - 12750) < 0 -> liability 0.00
         """
         profile = _committed_profile(seed_user)
-        result = compute_annual_liability(
+        result = _liability(
             profile, 2026,
             Decimal("10000.00"), Decimal("0.00"),
         )
@@ -441,7 +497,7 @@ class TestClampAndMissingConfigs:
             seed_user, state_code="PA", additional_income="1200.00",
         )
         with pytest.raises(UnsupportedStateError) as refused:
-            compute_annual_liability(
+            _liability(
                 profile, 2026,
                 Decimal("110000.00"), Decimal("12000.00"),
             )
@@ -462,7 +518,7 @@ class TestClampAndMissingConfigs:
         profile = _make_profile(seed_user, additional_income="1200.00")
         db.session.commit()
         with pytest.raises(UnsupportedStateError, match=r"\(it lists no state\)"):
-            compute_annual_liability(
+            _liability(
                 profile, date.today().year,
                 Decimal("110000.00"), Decimal("12000.00"),
             )

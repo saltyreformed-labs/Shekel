@@ -122,7 +122,7 @@
       <div class="card-body">
         <dl class="row mb-0 small tax-assumptions">
           <dt class="col-6 fw-normal">Tax year</dt>
-          <dd class="col-6 text-end mb-1">{{ report.liability.tax_year }}</dd>
+          <dd class="col-6 text-end mb-1">{{ report.liability.basis.tax_year }}</dd>
           <dt class="col-6 fw-normal">Filing status</dt>
           <dd class="col-6 text-end mb-1">{{ report.assumptions.filing.filing_status_name|replace('_', ' ')|title }}</dd>
           <dt class="col-6 fw-normal">Standard deduction</dt>

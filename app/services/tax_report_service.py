@@ -50,7 +50,9 @@ Medicare wages as well, is read off the same breakdowns in the same pass
 
 No duplicated data: the liability's own outputs (standard deduction,
 dependent counts + credit amounts, state rate + state standard deduction,
-tax year) live on the carried :class:`~app.services.tax_liability_service.AnnualLiability`;
+and the basis -- the tax year and which year's rules priced each part, plan
+step salary:X-at-5) live on the carried
+:class:`~app.services.tax_liability_service.AnnualLiability`;
 the T-P4 assumptions card reads them from ``report.liability`` rather than
 having them copied onto :class:`TaxAssumptions` (which carries only the
 non-liability disclosures).
@@ -406,8 +408,9 @@ class TaxReport:  # pylint: disable=too-many-instance-attributes
     """The complete analytics Taxes tab dataset for one filer and year.
 
     One bundle per T-P4 card: ``refund`` + ``chips`` (hero band),
-    ``liability`` (derivation ledger; also the SSOT for tax year, standard
-    deduction, credits, and state rate the assumptions card shows),
+    ``liability`` (derivation ledger; also the SSOT for the basis -- the tax
+    year and which year's rules priced it -- standard deduction, credits,
+    and state rate the assumptions card shows),
     ``w2_preview`` (hybrid W-2), ``schedule_a`` (Schedule A check),
     ``assumptions`` (assumptions card).  ``withholding`` carries the shared
     measured/modeled split the hero and W-2 both read.
@@ -488,13 +491,19 @@ def compute_tax_report(user_id: int, year: int, today: date) -> TaxReport | None
     # calendar reaching this line always carries a cadence and the read above
     # is total.
     periods = year_paydays(calendar, year)
+    # The primary profile's law for the year, resolved ONCE: the liability,
+    # the W-2's Social Security cap and the marginal-rate chip all price from
+    # this set, so the basis the liability carries -- which year's rules
+    # priced each part, the line the tab prints (ruling R-SAL75, plan step
+    # salary:X-at-5) -- is the resolution behind every one of them.  Until
+    # X-at-5 the liability resolved the same profile and year a second time.
     configs = load_tax_configs_for_year(primary, year)
 
     withholding = _aggregate_withholding(year, profiles, balance_ctx)
     pretax = _aggregate_modeled_pretax(profiles, periods, balance_ctx)
 
     liability = compute_annual_liability(
-        primary, year, withholding.total.gross, pretax.total_pre_tax,
+        primary, configs, withholding.total.gross, pretax.total_pre_tax,
     )
     box1_wages = waterfall_taxable(withholding.total.gross, pretax.total_pre_tax)
     next_stub = _next_stub(periods, today)

@@ -7,10 +7,12 @@ drops the five and ``ref.tax_types``; the same change deletes their models,
 the ``TaxType`` model, the ref cache's ``tax_type_id`` and the five
 ``AUDITED_TABLES`` rows.
 
-**Both directions are EXECUTED here.**  The ``db`` fixture re-clones this
-worker's own database for every test, so the DDL reaches no other worker and
-survives no other case: each refusal case runs the downgrade (the tables back,
-empty), stores the rows it grades, then runs the real upgrade.
+**Both directions are EXECUTED here**, each through
+:func:`tests._test_helpers.run_migration_callable`, which commits.  The ``db``
+fixture re-clones this worker's own database for every test, so the DDL
+reaches no other worker and survives no other case: each refusal case runs the
+downgrade (the tables back, empty), stores the rows it grades, then runs the
+real upgrade.
 
 The rows stored are the law's own, written from the revision's frozen record
 (:func:`_store_the_law`), and each refusal case changes one of them the way a
@@ -27,13 +29,11 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from sqlalchemy import text
 
 from app import models, ref_cache
 from app.audit_infrastructure import AUDITED_TABLES
-from tests._test_helpers import load_migration_module
+from tests._test_helpers import load_migration_module, run_migration_callable
 from tests.test_models._production_tax_tables_2026_11_10 import (
     PRODUCTION_COLUMNS,
     PRODUCTION_CONSTRAINTS,
@@ -45,21 +45,6 @@ _MIGRATION = load_migration_module("5f2c46a35a79_the_per_user_tax_tables_go.py")
 #: The five salary tables, schema-qualified, then ``ref.tax_types``.
 _SALARY_TABLES = tuple(f"salary.{table}" for table in _MIGRATION.TABLES)
 _ALL_TABLES = (*_SALARY_TABLES, "ref.tax_types")
-
-
-def _run(session, direction: str) -> None:
-    """Execute the revision's own ``upgrade`` or ``downgrade`` on *session*'s connection.
-
-    Installs Alembic's operation proxy over the test's connection, so the
-    migration's module-level ``op`` calls run inside the per-test transaction.
-
-    Args:
-        session: The test session.
-        direction: ``"upgrade"`` or ``"downgrade"``.
-    """
-    context = MigrationContext.configure(session.connection())
-    with Operations.context(context):
-        getattr(_MIGRATION, direction)()
 
 
 def _exists(session, table: str) -> bool:
@@ -547,7 +532,7 @@ class TestTheDowngradeRecreatesThemEmpty:
     @pytest.mark.parametrize("table", _ALL_TABLES)
     def test_the_columns_are_production_s(self, db, table):
         """Each column in production's order, with its type, nullability and default."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         schema, name = table.split(".")
         columns = db.session.execute(text(
             "SELECT column_name, data_type, numeric_precision, numeric_scale, "
@@ -560,7 +545,7 @@ class TestTheDowngradeRecreatesThemEmpty:
     @pytest.mark.parametrize("table", _ALL_TABLES)
     def test_the_constraints_are_production_s(self, db, table):
         """Every key and CHECK, by production's names and definitions."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         constraints = db.session.execute(text(
             "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
             " WHERE conrelid = CAST(:t AS regclass) AND contype <> 'n' ORDER BY conname"
@@ -570,7 +555,7 @@ class TestTheDowngradeRecreatesThemEmpty:
     @pytest.mark.parametrize("table", _ALL_TABLES)
     def test_the_indexes_are_production_s(self, db, table):
         """Every index, by production's names and definitions."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         schema, name = table.split(".")
         indexes = db.session.execute(text(
             "SELECT indexname, indexdef FROM pg_indexes "
@@ -580,7 +565,7 @@ class TestTheDowngradeRecreatesThemEmpty:
 
     def test_the_tax_types_come_back_by_name(self, db):
         """The three names the previous image's ref cache reads, and nothing else."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         names = db.session.execute(text("SELECT name FROM ref.tax_types")).scalars().all()
         assert sorted(names) == ["bracket", "flat", "none"]
 
@@ -590,7 +575,7 @@ class TestTheDowngradeRecreatesThemEmpty:
         The previous image refuses a deploy while a table its ``AUDITED_TABLES``
         names lacks its trigger, so the downgrade attaches them.
         """
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         triggers = db.session.execute(text(
             "SELECT c.relname, t.tgname, p.proname, pg_get_triggerdef(t.oid) "
             "  FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
@@ -611,8 +596,8 @@ class TestTheDowngradeRecreatesThemEmpty:
 
     def test_the_upgrade_runs_again_after_it(self, db, capsys):
         """Down then up: empty tables pass, and all six go again."""
-        _run(db.session, "downgrade")
-        _run(db.session, "upgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
+        run_migration_callable(_MIGRATION.upgrade, db.session)
         printed = capsys.readouterr().out
         assert not any(_exists(db.session, table) for table in _ALL_TABLES)
         assert (
@@ -631,7 +616,7 @@ class TestTheLawsOwnRowsPass:
 
         Production held this shape: 260 rows, two users' 2025 and 2026.
         """
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         _store_the_law(db.session, seed_user["user"].id)
         _store_the_law(db.session, seed_second_user["user"].id)
         assert _counts(db.session) == {
@@ -639,7 +624,7 @@ class TestTheLawsOwnRowsPass:
             "salary.state_tax_configs": 16, "salary.fica_configs": 4,
             "salary.state_child_deductions": 112,
         }
-        _run(db.session, "upgrade")
+        run_migration_callable(_MIGRATION.upgrade, db.session)
         assert not any(_exists(db.session, table) for table in _ALL_TABLES)
         assert (
             "16 in salary.tax_bracket_sets, 112 in salary.tax_brackets, "
@@ -649,7 +634,7 @@ class TestTheLawsOwnRowsPass:
 
     def test_a_row_the_law_has_and_a_table_lacks_refuses_nothing(self, db, seed_user):
         """A missing rung and a missing tier throw no figure away."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         set_ids = _store_the_law(db.session, seed_user["user"].id)
         db.session.execute(text("DELETE FROM salary.tax_brackets WHERE id = :id"), {
             "id": _rung_id(db.session, set_ids["2026 single"], 6),
@@ -657,7 +642,7 @@ class TestTheLawsOwnRowsPass:
         db.session.execute(text(
             "DELETE FROM salary.state_child_deductions WHERE agi_max IS NULL"
         ))
-        _run(db.session, "upgrade")
+        run_migration_callable(_MIGRATION.upgrade, db.session)
         assert not _exists(db.session, "salary.tax_brackets")
 
 
@@ -674,7 +659,7 @@ class TestTheRefusal:
         """Run the upgrade, which must refuse; return its message after checking nothing moved."""
         before = _counts(session)
         with pytest.raises(RuntimeError) as refused:
-            _run(session, "upgrade")
+            run_migration_callable(_MIGRATION.upgrade, session)
         assert all(_exists(session, table) for table in _ALL_TABLES)
         assert _counts(session) == before
         message = str(refused.value)
@@ -689,7 +674,7 @@ class TestTheRefusal:
         row of the law the app seeded, so it may be someone's and is not thrown
         away unseen (ruling plan#3285, which settled the question's example).
         """
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         user_id = seed_user["user"].id
         set_ids = _store_the_law(db.session, user_id)
         rung = _rung_id(db.session, set_ids["2026 head_of_household"], 3)
@@ -704,7 +689,7 @@ class TestTheRefusal:
 
     def test_a_changed_standard_deduction_refuses(self, db, seed_user):
         """2025 single's $15,000.00 changed to $15,750.00 on the bracket set."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         user_id = seed_user["user"].id
         set_ids = _store_the_law(db.session, user_id)
         db.session.execute(text(
@@ -721,7 +706,7 @@ class TestTheRefusal:
         Only its position differs from a row of the law, so the case grades
         the comparison's ``sort_order``.
         """
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         set_ids = _store_the_law(db.session, seed_user["user"].id)
         _store_rung(db.session, set_ids["2026 single"], 7, _SINGLE_2026[4][6])
         assert "sort_order 7, min_income 640600.00, max_income None, rate 0.3700" in (
@@ -730,7 +715,7 @@ class TestTheRefusal:
 
     def test_a_year_the_law_never_had_refuses(self, db, seed_user):
         """A 2024 FICA row: a year the app never carried."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         user_id = seed_user["user"].id
         _store_the_law(db.session, user_id)
         db.session.execute(text(
@@ -746,7 +731,7 @@ class TestTheRefusal:
         Only its state differs from a row of the law, so the case grades the
         comparison's ``state_code``.
         """
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         user_id = seed_user["user"].id
         _store_the_law(db.session, user_id)
         row = _store_state_row(
@@ -766,7 +751,7 @@ class TestTheRefusal:
         one case, so a comparison narrowed to some of the columns, or one that
         matched a figure against any row's, fails a case here (ruling plan#3285).
         """
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         user_id = seed_user["user"].id
         set_ids = _store_the_law(db.session, user_id)
         move(db.session, user_id, set_ids)
@@ -774,7 +759,7 @@ class TestTheRefusal:
 
     def test_a_filing_status_the_law_never_had_refuses(self, db, seed_user):
         """A tier under a fifth filing status the law does not model."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         user_id = seed_user["user"].id
         _store_the_law(db.session, user_id)
         db.session.execute(text(
@@ -790,7 +775,7 @@ class TestTheRefusal:
 
     def test_a_changed_tax_type_refuses(self, db, seed_user):
         """North Carolina 2025 single stored as a bracket state."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         user_id = seed_user["user"].id
         _store_the_law(db.session, user_id)
         db.session.execute(text(
@@ -805,7 +790,7 @@ class TestTheRefusal:
 
     def test_a_changed_child_deduction_refuses(self, db, seed_user):
         """2026 joint filers' lowest tier given $3,500.00 a child."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         user_id = seed_user["user"].id
         _store_the_law(db.session, user_id)
         db.session.execute(text(
@@ -820,7 +805,7 @@ class TestTheRefusal:
 
     def test_a_changed_fica_figure_refuses(self, db, seed_user):
         """2026's Social Security wage base stored as the 2025 figure."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         user_id = seed_user["user"].id
         _store_the_law(db.session, user_id)
         db.session.execute(text(
@@ -834,7 +819,7 @@ class TestTheRefusal:
         self, db, seed_user, seed_second_user,
     ):
         """The comparison reads every user's rows: the second owner's edit refuses too."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         _store_the_law(db.session, seed_user["user"].id)
         other = seed_second_user["user"].id
         set_ids = _store_the_law(db.session, other)
@@ -847,7 +832,7 @@ class TestTheRefusal:
 
     def test_every_differing_row_is_named(self, db, seed_user):
         """Two edits in two tables: both named, and the count says two."""
-        _run(db.session, "downgrade")
+        run_migration_callable(_MIGRATION.downgrade, db.session)
         user_id = seed_user["user"].id
         set_ids = _store_the_law(db.session, user_id)
         db.session.execute(text(
@@ -857,7 +842,7 @@ class TestTheRefusal:
             "UPDATE salary.fica_configs SET ss_rate = 0.0630 WHERE tax_year = 2025"
         ))
         with pytest.raises(RuntimeError) as refused:
-            _run(db.session, "upgrade")
+            run_migration_callable(_MIGRATION.upgrade, db.session)
         message = str(refused.value)
         assert message.startswith("X-at-2 refuses: 2 stored row(s)")
         assert "standard_deduction 15750.00" in message

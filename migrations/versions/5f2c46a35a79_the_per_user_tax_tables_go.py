@@ -401,12 +401,9 @@ _STORED_ROWS_SQL = {
 #: The three names ``ref.tax_types`` carried, in the seed list's order.
 #: Inline rather than read from ``app/ref_seeds.py``: this revision's own
 #: commit deletes that entry, so a downgrade run from a later checkout would
-#: find nothing to restore.  ``ON CONFLICT (name) DO NOTHING``: idempotent
-#: against a partial re-run, as ``b2e9a47c3f18``'s reseed is.
-_RESEED_SQL = (
-    "INSERT INTO ref.tax_types (name) VALUES ('flat'), ('none'), ('bracket') "
-    "ON CONFLICT (name) DO NOTHING"
-)
+#: find nothing to restore.  It runs on the table the line before creates, so
+#: no name can already be there.
+_RESEED_SQL = "INSERT INTO ref.tax_types (name) VALUES ('flat'), ('none'), ('bracket')"
 
 #: The five tables' audit trigger as production carried it, the shape
 #: ``app.audit_infrastructure`` attaches; spelled here because a migration
@@ -422,16 +419,14 @@ def _money(value: str | None) -> Decimal | None:
     return None if value is None else Decimal(value)
 
 
-def law_rows() -> dict[str, frozenset[tuple]]:
-    """Return each table's rows as the law X-at-1 left has them, on :data:`FIELDS`.
+#: One row of the law on its table's :data:`FIELDS`: a year or a rung's
+#: position as ``int``, a ``ref`` name or a state code as ``str``, a figure as
+#: ``Decimal``, and an open ceiling as ``None``.
+LawRow = tuple[int | str | Decimal | None, ...]
 
-    Also read by this revision's tests, so "a row of the law" has one
-    spelling.
 
-    Returns:
-        ``{table: frozenset of FIELDS tuples}``, one entry per table of
-        :data:`TABLES`.
-    """
+def _federal_rows() -> tuple[frozenset[LawRow], frozenset[LawRow]]:
+    """Return :data:`FEDERAL` as its ``tax_bracket_sets`` rows, then its ``tax_brackets`` rows."""
     bracket_sets, brackets = set(), set()
     for (year, status), (deduction, child, other, cap, ladder) in FEDERAL.items():
         bracket_sets.add((
@@ -439,6 +434,15 @@ def law_rows() -> dict[str, frozenset[tuple]]:
         ))
         for position, (floor, ceiling, rate) in enumerate(ladder):
             brackets.add((year, status, position, _money(floor), _money(ceiling), _money(rate)))
+    return frozenset(bracket_sets), frozenset(brackets)
+
+
+def _state_rows() -> tuple[frozenset[LawRow], frozenset[LawRow]]:
+    """Return :data:`STATES` as ``state_tax_configs`` rows, then ``state_child_deductions`` rows.
+
+    Each year reads the statute's unindexed tables, :data:`NC_STANDARD_DEDUCTION`
+    and :data:`NC_CHILD_TIERS`.
+    """
     states, tiers = set(), set()
     for (year, state), (tax_type, rate) in STATES.items():
         for status, deduction in NC_STANDARD_DEDUCTION.items():
@@ -448,15 +452,29 @@ def law_rows() -> dict[str, frozenset[tuple]]:
                 tiers.add((
                     state, year, status, _money(floor), _money(ceiling), _money(per_child),
                 ))
-    fica = {
-        (year, *(_money(figure) for figure in figures)) for year, figures in FICA.items()
-    }
+    return frozenset(states), frozenset(tiers)
+
+
+def law_rows() -> dict[str, frozenset[LawRow]]:
+    """Return each table's rows as the law X-at-1 left has them, on :data:`FIELDS`.
+
+    Also read by this revision's tests, so "a row of the law" has one
+    spelling.
+
+    Returns:
+        ``{table: frozenset of FIELDS tuples}``, one entry per table of
+        :data:`TABLES`.
+    """
+    bracket_sets, brackets = _federal_rows()
+    states, tiers = _state_rows()
     return {
-        'tax_bracket_sets': frozenset(bracket_sets),
-        'tax_brackets': frozenset(brackets),
-        'state_tax_configs': frozenset(states),
-        'fica_configs': frozenset(fica),
-        'state_child_deductions': frozenset(tiers),
+        'tax_bracket_sets': bracket_sets,
+        'tax_brackets': brackets,
+        'state_tax_configs': states,
+        'fica_configs': frozenset(
+            (year, *(_money(figure) for figure in figures)) for year, figures in FICA.items()
+        ),
+        'state_child_deductions': tiers,
     }
 
 
@@ -521,7 +539,8 @@ def refuse_a_row_the_law_lacks(stored: dict[str, list[sa.engine.Row]]) -> None:
         "plan#3285): "
         + "; ".join(lacking)
         + ".  Nothing has read these tables since X-at-1, so no figure here "
-        "prices anything; the developer rules what happens to each row.  "
+        "prices anything.  Bring each row named above to the developer, who "
+        "rules what becomes of it, before this release is tried again.  "
         "Nothing was written: the revision rolls back whole."
     )
 
@@ -549,7 +568,6 @@ def upgrade():
     )
 
 
-
 def _year_check(table: str) -> sa.CheckConstraint:
     """Return *table*'s ``tax_year`` range CHECK under production's name."""
     return sa.CheckConstraint(
@@ -565,14 +583,24 @@ def _created_at() -> sa.Column:
     )
 
 
-def _money_column(name: str, *, nullable: bool = False, **kwargs) -> sa.Column:
-    """Return a ``numeric(12,2)`` column."""
-    return sa.Column(name, sa.Numeric(precision=12, scale=2), nullable=nullable, **kwargs)
+def _money_column(
+    name: str, *, nullable: bool = False, server_default: str | sa.TextClause | None = None,
+) -> sa.Column:
+    """Return a ``numeric(12,2)`` column, with no default unless *server_default*."""
+    return sa.Column(
+        name, sa.Numeric(precision=12, scale=2), nullable=nullable,
+        server_default=server_default,
+    )
 
 
-def _rate_column(name: str, *, nullable: bool = False, **kwargs) -> sa.Column:
-    """Return a ``numeric(5,4)`` column."""
-    return sa.Column(name, sa.Numeric(precision=5, scale=4), nullable=nullable, **kwargs)
+def _rate_column(
+    name: str, *, nullable: bool = False, server_default: sa.TextClause | None = None,
+) -> sa.Column:
+    """Return a ``numeric(5,4)`` column, with no default unless *server_default*."""
+    return sa.Column(
+        name, sa.Numeric(precision=5, scale=4), nullable=nullable,
+        server_default=server_default,
+    )
 
 
 def _user_key(*, name: str | None = None) -> sa.ForeignKeyConstraint:

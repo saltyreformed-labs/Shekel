@@ -179,6 +179,14 @@ _M_C43 = _load_migration(
     "b4b588a49a0c_c43_fk_ondelete_restrict_and_naming_.py"
 )
 
+#: The tables two of C-43's ``REF_FK_SPECS`` are on, which plan step
+#: salary:X-at-2 dropped with their models (ruling plan#3235): no model is left
+#: to declare those keys, so the model-contract check skips them by name.
+_TABLES_NO_MODEL_DECLARES = frozenset({
+    ("salary", "state_tax_configs"),
+    ("salary", "tax_bracket_sets"),
+})
+
 
 # Mapping of (model class, column attribute name) for every FK that
 # C-43 touched.  Used by ``TestNamingConventionContract`` to assert
@@ -192,14 +200,6 @@ _M_C43 = _load_migration(
 # ``salary.paycheck_lines`` and its kind column ``paycheck_line_kind_id`` --
 # so each row carries a FOURTH element: the name C-43's ``REF_FK_SPECS``
 # wrote, which is the model's own name for every row but those two.
-#: The tables two of C-43's ``REF_FK_SPECS`` are on, which plan step
-#: salary:X-at-2 dropped with their models (ruling plan#3235): no model is left
-#: to declare those keys, so the model-contract check skips them by name.
-_TABLES_NO_MODEL_DECLARES = frozenset({
-    ("salary", "state_tax_configs"),
-    ("salary", "tax_bracket_sets"),
-})
-
 MODEL_FK_NAME_CONTRACT: tuple[tuple[type, str, str, str], ...] = (
     (AccountType, "category_id",
      "fk_account_types_category_id", "fk_account_types_category_id"),

@@ -399,7 +399,7 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
     """
 
     def test_a_clean_run_commits_the_seed_with_the_migration(
-        self, app, db, seed_user, pending_migration, uncorrected_payment,
+        self, app, db, pending_migration, uncorrected_payment,
     ):
         """The deleted ref row commits with the stamp.
 
@@ -429,7 +429,7 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
         ) == new_id
 
     def test_a_missing_audit_trigger_rolls_everything_back(
-        self, app, db, seed_user, pending_migration, uncorrected_payment,
+        self, app, db, pending_migration, uncorrected_payment,
     ):
         """One audit trigger is gone: the check refuses and nothing commits.
 

@@ -29,13 +29,16 @@ of one account**: the state the record door has refused since
 ``bank_import:X-f6b-1`` (``_plan._refuse_moved_ids``) and the one the new key
 cannot hold.  The door has no hole that reaches it by moving an id, but one
 shape slipped past it -- a file stating two ids that one line held -- and a
-row written outside the door could too.  The refusal names the count and the
-remedy rather than choosing a line.
+row written outside the door could too.  The refusal lists each such id with
+its lines and the imports that state it, and gives the remedy, rather than
+choosing a line.
 
 The DOWNGRADE writes each id back onto every sighting its own source wrote of
-its line -- below this revision a source's sighting carries the id, and every
-one of that source's sightings of the line showed it.  Two states it cannot
-write back exactly:
+its line -- below this revision a source's sighting carries the id it stated.
+That is exact for a source that states an id on every line it sends; one that
+stated an id on only some of its sightings of a line would have it written
+onto those that never stated it, and no such source exists (the one shipped
+adapter, SECU's CSV, states none).  Two states it cannot write back exactly:
 
 * **An id whose source no longer shows its line** -- the state ruling
   **plan#2233** keeps and the old schema cannot hold.  It is DROPPED, which is
@@ -44,10 +47,10 @@ write back exactly:
 * **One line holding two ids from one source** -- below this revision each
   came from a different import's sighting, and which import stated which is
   not recorded here.  The downgrade REFUSES while a sighting of that source
-  still shows such a line, naming the count and the remedy (delete every
-  import of that source that shows it; an id is kept while its line is, so
-  one import's deletion frees nothing), rather than writing an id onto a
-  sighting that may never have stated it.
+  still shows such a line, listing each with its ids and giving the remedy
+  (delete every import of that source that shows it; an id is kept while its
+  line is, so one import's deletion frees nothing), rather than writing an id
+  onto a sighting that may never have stated it.
 
 Revision ID: 6534c1bfeeb1
 Revises: 3748145b83e3
@@ -67,17 +70,20 @@ _SIGHTINGS = "statement_line_sightings"
 _SIGHTING_ID_INDEX = "idx_statement_line_sightings_account_external_id"
 
 # UP: the state the key cannot hold -- one source's id on two lines of one
-# account, over the sightings that carried an id.
-COUNT_IDS_ON_TWO_LINES_SQL = """
-SELECT count(*) FROM (
-    SELECT s.account_id, i.source_id, s.external_id
-    FROM budget.statement_line_sightings AS s
-    JOIN budget.statement_imports AS i
-      ON i.id = s.import_id AND i.account_id = s.account_id
-    WHERE s.external_id IS NOT NULL
-    GROUP BY s.account_id, i.source_id, s.external_id
-    HAVING count(DISTINCT s.line_id) > 1
-) AS colliding
+# account, over the sightings that carried an id.  One row per such id, with
+# its lines and the imports whose sightings state it: the refusal's count and
+# what it prints, so the two cannot disagree.
+IDS_ON_TWO_LINES_SQL = """
+SELECT s.account_id, i.source_id, s.external_id,
+       array_agg(DISTINCT s.line_id ORDER BY s.line_id) AS line_ids,
+       array_agg(DISTINCT s.import_id ORDER BY s.import_id) AS import_ids
+FROM budget.statement_line_sightings AS s
+JOIN budget.statement_imports AS i
+  ON i.id = s.import_id AND i.account_id = s.account_id
+WHERE s.external_id IS NOT NULL
+GROUP BY s.account_id, i.source_id, s.external_id
+HAVING count(DISTINCT s.line_id) > 1
+ORDER BY s.account_id, i.source_id, s.external_id
 """
 
 # UP: one row per (account, source, id), naming the one line it is on.
@@ -93,20 +99,22 @@ ORDER BY s.account_id, i.source_id, s.external_id
 
 # DOWN: the state the old schema cannot write back -- one line holding two
 # ids from one source, among the ids a sighting of that source still shows.
-COUNT_LINES_WITH_TWO_IDS_SQL = """
-SELECT count(*) FROM (
-    SELECT k.line_id, k.source_id
-    FROM budget.line_source_ids AS k
-    WHERE EXISTS (
-        SELECT 1
-        FROM budget.statement_line_sightings AS s
-        JOIN budget.statement_imports AS i
-          ON i.id = s.import_id AND i.account_id = s.account_id
-        WHERE s.line_id = k.line_id AND i.source_id = k.source_id
-    )
-    GROUP BY k.line_id, k.source_id
-    HAVING count(*) > 1
-) AS doubled
+# One row per such line and source, with its ids: the refusal's count and what
+# it prints.
+LINES_WITH_TWO_IDS_SQL = """
+SELECT k.account_id, k.source_id, k.line_id,
+       array_agg(k.external_id ORDER BY k.external_id) AS external_ids
+FROM budget.line_source_ids AS k
+WHERE EXISTS (
+    SELECT 1
+    FROM budget.statement_line_sightings AS s
+    JOIN budget.statement_imports AS i
+      ON i.id = s.import_id AND i.account_id = s.account_id
+    WHERE s.line_id = k.line_id AND i.source_id = k.source_id
+)
+GROUP BY k.account_id, k.source_id, k.line_id
+HAVING count(*) > 1
+ORDER BY k.account_id, k.source_id, k.line_id
 """
 
 # DOWN: each id onto every sighting its own source wrote of its line.  An id
@@ -146,17 +154,17 @@ def upgrade():
         RuntimeError: One source's id already names two lines of one account
             (the module docstring), before anything is created.
     """
-    colliding = op.get_bind().execute(
-        sa.text(COUNT_IDS_ON_TWO_LINES_SQL),
-    ).scalar()
+    colliding = op.get_bind().execute(sa.text(IDS_ON_TWO_LINES_SQL)).all()
     if colliding:
         raise RuntimeError(
-            f"{colliding} bank line id(s) are each held on two lines of one "
-            "account by one source, and the key this revision adds holds a "
-            "source to one line per id.  Find them with: "
-            f"{COUNT_IDS_ON_TWO_LINES_SQL.strip()} -- then delete the import "
-            "that recorded the wrong line on its statements page and upgrade "
-            "again.  Nothing was changed."
+            f"{len(colliding)} bank line id(s) are each held on two lines of "
+            "one account by one source, and the key this revision adds holds "
+            "a source to one line per id.  List them, each with its lines and "
+            "the imports that state it, with: "
+            f"{IDS_ON_TWO_LINES_SQL.strip()} -- then, for each, delete on the "
+            "statements page every import of that source whose sighting "
+            "states the id on the wrong line, and upgrade again.  Nothing was "
+            "changed."
         )
 
     op.create_table(
@@ -204,19 +212,17 @@ def downgrade():
             of that source still shows (the module docstring), before
             anything is dropped.
     """
-    doubled = op.get_bind().execute(
-        sa.text(COUNT_LINES_WITH_TWO_IDS_SQL),
-    ).scalar()
+    doubled = op.get_bind().execute(sa.text(LINES_WITH_TWO_IDS_SQL)).all()
     if doubled:
         raise RuntimeError(
-            f"{doubled} bank line(s) each hold two ids from one source, and "
-            "the schema this revision downgrades to keeps a source's id on "
-            "each import's sighting without recording which import stated "
-            "which.  Find them with: "
-            f"{COUNT_LINES_WITH_TWO_IDS_SQL.strip()} -- an id is kept while "
-            "its line is, so deleting one import does not free it: delete "
-            "every import of that source that shows such a line on its "
-            "statements page, then downgrade again.  Nothing was changed."
+            f"{len(doubled)} bank line(s) each hold two ids from one source, "
+            "and the schema this revision downgrades to keeps a source's id "
+            "on each import's sighting without recording which import stated "
+            "which.  List them, each with its ids, with: "
+            f"{LINES_WITH_TWO_IDS_SQL.strip()} -- an id is kept while its "
+            "line is, so deleting one import does not free it: delete every "
+            "import of that source that shows such a line on its statements "
+            "page, then downgrade again.  Nothing was changed."
         )
 
     op.add_column(

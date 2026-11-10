@@ -7,7 +7,11 @@ the migration makes about itself: that the upgrade writes ONE key row per
 downgrade writes each id back onto every sighting its OWN source wrote of its
 line and onto no other source's; that it drops an id whose source no longer
 shows its line (the old rule, ruling **plan#2233**'s state); and that each
-direction REFUSES, before any DDL, the one state the other side cannot hold.
+direction REFUSES the one state the other side cannot hold, changing nothing,
+and prints a query that lists every row of it.  *That the refusal runs before
+any DDL is the code's order, which these cases cannot see: the callable
+commits only on success and PostgreSQL rolls DDL back, so a refusal after it
+would change nothing too.*
 """
 
 from __future__ import annotations
@@ -194,7 +198,7 @@ class TestTheRoundTrip:
 
 @pytest.mark.xdist_group("line_source_id_ddl")
 class TestTheRefusals:
-    """Each direction names the state the other side cannot hold, before any DDL."""
+    """Each direction refuses the state the other side cannot hold, and lists it."""
 
     def test_the_upgrade_REFUSES_one_sources_id_on_two_lines(
         self, db, seed_user,
@@ -205,7 +209,9 @@ class TestTheRefusals:
         are given one id by hand -- the state the door's check refused and a
         writer outside the door could still make.  The upgrade names it and
         changes nothing: the key table is still absent, the column still
-        present.
+        present.  The query its message prints lists the id with both its
+        lines and the one import stating it, and the remedy reaches every
+        import of that source, not one.
         """
         account = seed_user["account"]
         secu = ref_cache.statement_source_id(
@@ -223,12 +229,17 @@ class TestTheRefusals:
         )
         db.session.commit()
 
-        with pytest.raises(RuntimeError, match="1 bank line id"):
+        with pytest.raises(RuntimeError, match="1 bank line id") as caught:
             _run(_MIGRATION.upgrade, db.session)
         db.session.rollback()
 
         assert _sql("SELECT to_regclass('budget.line_source_ids')") == [(None,)]
         assert _column_exists()
+        assert _MIGRATION.IDS_ON_TWO_LINES_SQL.strip() in str(caught.value)
+        assert "every import of that source" in str(caught.value)
+        assert _sql(_MIGRATION.IDS_ON_TWO_LINES_SQL) == [
+            (account.id, secu, "FIT-1", [one.id, two.id], [statement.id]),
+        ]
 
     def test_the_downgrade_REFUSES_a_line_holding_two_ids_its_source_still_shows(
         self, db, seed_user,
@@ -237,7 +248,8 @@ class TestTheRefusals:
 
         One SECU line holds ``FIT-1`` and ``FIT-2`` and a SECU sighting still
         shows it.  The downgrade names the count and changes nothing: the
-        key table stands with both rows, and no column was added.
+        key table stands with both rows, and no column was added.  The query
+        its message prints lists the line with both its ids.
         """
         account = seed_user["account"]
         secu = ref_cache.statement_source_id(
@@ -250,7 +262,7 @@ class TestTheRefusals:
         _key(line, secu, "FIT-2")
         db.session.commit()
 
-        with pytest.raises(RuntimeError, match="1 bank line"):
+        with pytest.raises(RuntimeError, match="1 bank line") as caught:
             _run(_MIGRATION.downgrade, db.session)
         db.session.rollback()
 
@@ -258,6 +270,10 @@ class TestTheRefusals:
             "SELECT count(*) FROM budget.line_source_ids",
         ) == [(2,)]
         assert not _column_exists()
+        assert _MIGRATION.LINES_WITH_TWO_IDS_SQL.strip() in str(caught.value)
+        assert _sql(_MIGRATION.LINES_WITH_TWO_IDS_SQL) == [
+            (account.id, secu, line.id, ["FIT-1", "FIT-2"]),
+        ]
 
     def test_two_ids_on_a_line_its_source_NO_LONGER_shows_are_dropped_not_refused(
         self, db, seed_user,

@@ -504,10 +504,11 @@ def settle_transaction(
             untouched, which always shows the recorded tender -- names
             nothing new and is dropped (``status_seam.tender_for_status``,
             the one echo rule, shared with the identity arm); anything else
-            is gated here against the ROW's owner and the owner's cash-flow
-            set by the one gate the purchase door uses
-            (``movement_account.admitted_movement_account_id``), so a
-            payment on a 401(k) or a savings account is unwritable and a
+            is gated here against the ROW's owner and "Paid from"'s list by
+            the one gate the purchase door uses
+            (``movement_account.admitted_movement_account_id``, ruling
+            plan#3227), so a payment on a 401(k) or a loan is unwritable, a
+            bill's payment on a card is Credit's and refused here, and a
             foreign account is a 404, before any mutation.  ``None`` means
             nobody named one, and the seam books on its one default -- the
             kept record's account, else the row's own (ruling **R-CC42**:
@@ -541,8 +542,9 @@ def settle_transaction(
             to store) or a soft-deleted row, from the
             envelope branch's remaining preconditions, from an illegal
             transition, from the seam's settle-day refusals, or from the
-            tender gate (an archived account, or one outside the owner's
-            cash-flow set).  All are 400s at the route.
+            tender gate (an archived account, a credit card other than the
+            row's own, or one that holds no cash).  All are 400s at the
+            route.
         NotFoundError: When *tender_account_id* names no account of the ROW's
             owner (the security response rule: one answer for "not found"
             and "not yours").  A 404 at the route.

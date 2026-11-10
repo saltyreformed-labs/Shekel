@@ -661,10 +661,11 @@ class TransactionEntry(
     # joins to 17).  Its readers are the transfer endpoint move, which
     # assigns it, and the grid's account chip and the entry list's account
     # name (plan step ``credit_card:CC-5-2``), which read ``.name`` only for
-    # a movement off its row's account -- an identity-map hit for a member
-    # of the owner's cash-flow set, which the page's resolver has loaded
-    # (measured: a card swipe adds no statement to the grid render), and
-    # one load per distinct account per render otherwise.
+    # a movement off its row's account -- an identity-map hit for an active
+    # cash account or card of the owner's, which the page's
+    # ``movement_account.owner_accounts`` read has loaded (measured: a card
+    # swipe adds no statement to the grid render), and one load per
+    # distinct account per render otherwise.
     account = db.relationship("Account", foreign_keys=[account_id])
     user = db.relationship("User", lazy="joined")
     credit_payback = db.relationship(

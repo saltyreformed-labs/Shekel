@@ -10,7 +10,7 @@ reads all three, and nothing here reads back.
 
 Architecture:
   - No Flask imports.
-  - Reads the named account and the owner's cash-flow set; never writes.
+  - Reads the named account and the owner's accounts; never writes.
 """
 
 from dataclasses import dataclass
@@ -92,16 +92,18 @@ class EntryDetails:
             ``credit_card:CC-5-2``, ruling **R-CC15**; the movement folds on
             its own account, **R-BAL75**), or ``None`` for its row's -- where
             the row is EXPECTED to be paid from, which is every purchase's
-            account until a card exists and the one every caller but the
-            add-purchase form states.  A card swipe in a checking envelope
-            names the card here: the envelope's spend grows by the purchase
-            whatever account it moved through, checking's fold sees nothing
-            on that day, and the card's fold sees the swipe.  The door gates
-            it against the ROW's owner, never the caller (a companion records
-            the purchase on the owner's card, ruling **R-CC11**), and admits
-            exactly what the picker offers -- the row's own account or a
-            member of the owner's cash-flow set (ruling **R-CC37**; see
-            :func:`purchase_account_id`).
+            account until the owner has another account that holds cash, and
+            the one every caller but the add-purchase form states.  A
+            purchase paid from Savings in a checking envelope names Savings
+            here: the envelope's spend grows by the purchase whatever account
+            it moved through, checking's fold sees nothing on that day, and
+            Savings' fold sees the purchase.  The door gates it against the
+            ROW's owner, never the caller (a companion records the purchase
+            on the owner's account, ruling **R-CC11**), and admits exactly
+            what the picker offers -- the row's own account, then every
+            account of the owner's that holds cash, never a card other than
+            the row's own (ruling plan#3227; see :func:`purchase_account_id`).
+            A swipe on a card is *on_card*, the CC tick, never this field.
 
     **The posting day was deliberately NOT here until plan step
     ``bank_import:X-f6a-3b``, and the premise that kept it out was true only of
@@ -135,18 +137,19 @@ def purchase_account_id(txn: Transaction, details: EntryDetails) -> int:
     onto another account than its row's (ruling **R-BAL76** dropped the key
     that forbade it at ``CC-5-1``).  ``None`` is the row's own account --
     today's behaviour for every caller, and the add-purchase form's when the
-    owner has no card (ruling **R-CC34**: the picker renders only when there
-    is a choice).
+    owner has no other account that holds cash (ruling **R-CC34**: the
+    picker renders only when there is a choice).
 
     **The gate itself is**
     :func:`app.services.movement_account.admitted_movement_account_id`
     **since plan step ``CC-5-3``**: the ONE spelling of which accounts a
-    movement under a row may name (rulings **R-CC37** / **R-CC39** -- the
-    row's own, or a member of the ROW OWNER's cash-flow set, the tuple every
-    picker renders from), shared with the settle verb's tender so the two
-    doors cannot part.  Its argument -- the owner gate over ``txn.user_id``
-    (ruling **R-CC11**), the 404, the two refusals and why the books boundary
-    is not asked there -- is that module's docstring; this door's own half is
+    movement under a row may name (ruling plan#3227, which replaced rulings
+    **R-CC37** and **R-CC39** -- the row's own, then every account of the ROW
+    OWNER's that holds cash, never a card other than the row's own, the
+    tuple every picker renders from), shared with the settle verb's tender
+    so the two doors cannot part.  Its argument -- the owner gate over
+    ``txn.user_id`` (ruling **R-CC11**), the 404, the refusals and why the
+    books boundary is not asked there -- is that module's docstring; this door's own half is
     the ``None`` arm and the tick's.  The review of this leaf's first cut found the door
     admitting every non-loan account under a docstring that claimed parity
     with the picker; the grid half (the second commit of CC-5-2) made the
@@ -177,8 +180,9 @@ def purchase_account_id(txn: Transaction, details: EntryDetails) -> int:
     Raises:
         NotFoundError: The account, or the picked card, does not exist or is
             not the ROW's owner's.
-        ValidationError: The account is archived, or is neither the row's own
-            nor a member of the owner's cash-flow set; or, ticked, the owner
+        ValidationError: The account is archived, is a credit card other
+            than the row's own, or is neither the row's own nor one that
+            holds cash; or, ticked, the owner
             has no card, picked an account that is not a card, has two or
             more cards and picked none, or set "Paid from" to another account
             too; or a card is picked with the tick left off.

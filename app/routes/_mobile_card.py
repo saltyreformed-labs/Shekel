@@ -126,11 +126,11 @@ def render_mobile_card(
     the next payday after this one" query here would be a second
     implementation of the rule this arc exists to state once.
 
-    **And that owner's cash-flow set, since plan step ``credit_card:CC-5-2``**,
-    for the envelope's add-purchase account picker -- the owner's set with no
-    override, the purchase door's own predicate -- from the SAME walk that
-    resolves the chip's balance line (:func:`fragment_cash_flow`), so the
-    card pays one resolve for its two questions.
+    **And that owner's accounts, since plan step ``credit_card:CC-5-2``**,
+    for the envelope's add-purchase account picker and CC tick -- the
+    owner's, whatever page the card is on, the purchase door's own predicate
+    (``movement_account.owner_accounts``, plan task plan#3232) -- beside the
+    chip's balance line, each read once (:func:`fragment_cash_flow`).
 
     Args:
         item: The row or transfer side just acted on, with a row's

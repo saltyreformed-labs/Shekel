@@ -224,8 +224,9 @@ def build_entry_sums_dict(
     load or lazy access) but for one: the "on CC" split reads the account of
     each purchase off its row's account (:func:`compute_entry_sums`), a
     primary-key load the session answers from its identity map when the
-    request has read that account already (the cash-flow set's members) and
-    with one ``SELECT`` per such account when it has not (an archived card).
+    request has read that account already (the owner's active cash
+    accounts and cards, ``movement_account.owner_accounts``) and with one
+    ``SELECT`` per such account when it has not (an archived card).
 
     Args:
         transactions: List of Transaction objects with entries accessible.

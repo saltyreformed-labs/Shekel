@@ -47,7 +47,7 @@ and the cell alike.
 status Credit holds its live CC Payback, and Undo CC on it still deletes that
 payback (``credit_workflow.unmark_credit``).  A press on one changes nothing.
 
-Architecture: no Flask imports; reads the row, the owner's cash-flow set, the
+Architecture: no Flask imports; reads the row, the owner's cards, the
 pay calendar and what a moved payment's matches would withdraw; mutates
 through the settle verb and the status door only; does not commit.
 """

@@ -457,9 +457,6 @@ def _tender_picker(txn, owner):
 
 
 # ---- the empty-cell family ------------------------------------------
-
-
-# ---- the empty-cell family ------------------------------------------
 #
 # The three fragments a cell with no transaction in it can show -- the dash,
 # the quick-create input, the full-create popover -- are all addressed by the

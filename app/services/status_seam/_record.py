@@ -124,8 +124,9 @@ class Settlement:
             figure of its own to have been written.
         account_id: The TENDER -- the ``budget.accounts.id`` the covering
             movement books on -- when the door named one, already gated
-            against the row's owner and the owner's cash-flow set
-            (``movement_account.admitted_movement_account_id``); ``None``
+            against the row's owner: "Paid from"'s list for Paid
+            (``movement_account.admitted_movement_account_id``), the card for
+            Credit (``movement_account.the_card``); ``None``
             for the seam's default.  Never set on a ``purchases`` record,
             which writes no movement to book anywhere.
     """

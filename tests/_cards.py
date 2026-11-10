@@ -43,11 +43,12 @@ def add_savings(seed_user, name: str = "Savings", *, observed_on=None) -> Accoun
     **Why a test of a payment kept elsewhere plans its bill on Savings**
     (ruling plan#3104, developer 2026-11-09, whose option text moved those
     tests "to a second checking or savings account, where it still works"):
-    a revert of a row put on the card takes its payment home now, and a
-    payment may name only the row's own account, the owner's primary Checking
-    or a card (``movement_account.admitted_movement_account_id``).  So a bill
-    reopened with its payment on another account is one planned on Savings
-    and paid from Checking.
+    a revert of a row put on the card takes its payment home now, and "Paid
+    from" names the row's own account or another account of the owner's
+    that holds cash, never a card (ruling plan#3227,
+    ``movement_account.admitted_movement_account_id``).  So a bill reopened
+    with its payment on another account is paid from one cash account and
+    planned on another: here, planned on Savings and paid from Checking.
 
     Args:
         seed_user: The ``seed_user`` fixture dict (the owner).

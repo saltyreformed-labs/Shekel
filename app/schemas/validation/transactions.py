@@ -146,8 +146,9 @@ class TransactionUpdateSchema(BaseSchema):
     # record only through ``transaction_service.apply_requested_status``,
     # never the ``setattr`` loop (``_SEAM_OWNED_FIELDS``).  The row's OWNER
     # gates it, never the caller (ruling **R-CC11**); a foreign id is the
-    # door's 404.  Rendered only when the owner's cash-flow set offers a
-    # choice (ruling **R-CC34**), so a one-account form posts nothing here
+    # door's 404.  Rendered only when "Paid from" offers a choice
+    # (``movement_account.paid_from_accounts``, ruling plan#3227; drawn
+    # only for two or more, ruling **R-CC34**), so a one-account form posts nothing here
     # and ``_normalize_empty_inputs`` drops an empty select.
     tender_account_id = RowId()
     # The bank lines the popover's withdrawal captions NAMED (plan step

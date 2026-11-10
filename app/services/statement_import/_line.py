@@ -294,11 +294,11 @@ def pair_by_statement(
     **``external_id`` is not consulted HERE, and since plan step
     ``bank_import:X-f6b-1`` it is consulted BEFORE here** (ruling
     **R-BI10**): the reconciliation pairs an incoming line carrying an id to
-    the line a sighting of the same source already carries that id on, and
-    hands this function only what that step left.  The id breaks ties within
-    a group; it is never the identity, and a source that carries none
-    (SECU's CSV) is not thereby unidentifiable.  Both sides given here are
-    ONE source's wordings -- what this source called the lines it has already
+    the line the same source holds that id on (``budget.line_source_ids``,
+    plan step plan#2232), and hands this function only what that step left.
+    The id breaks ties within a group; it is never the identity, and a source
+    that carries none (SECU's CSV) is not thereby unidentifiable.  Both sides
+    given here are ONE source's wordings -- what this source called the lines it has already
     sighted -- because a wording compare across sources is what finding
     **N-303** measured as a false restatement.
 

@@ -63,6 +63,7 @@ import json
 import pathlib
 import sys
 from decimal import Decimal
+from functools import partial
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so ``app`` is not importable when this is run as
@@ -79,6 +80,7 @@ from app import create_app
 from app.extensions import db
 from app.models.user import User
 from app.services import ledger_report_service
+from app.services.ledger_lines import worked_out_lines
 from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 from app.services.scenario_resolver import get_baseline_scenario
@@ -167,23 +169,28 @@ def _ledger_days(user_id, scenario_id):
     Sampling months would have walked straight past the ones plan step X-f3d
     moves.
 
-    Deliberately a raw two-table union rather than a call into the reader's own
-    attribution core: this harness must stay a SECOND OPINION about what the
-    statements say, and it must not reach into a reader's private module to
-    decide what to ask.  It over-covers on purpose -- a settle day with no
-    posted effect yields an empty window, which costs one statement and proves
-    the window really is empty on both sides.
+    **The ledger's own days are its lines' days** (finding plan#2953): the
+    day of every line the worked-out read books
+    (:func:`app.services.ledger_lines.worked_out_lines`, the public read both
+    statements fold), so which record books a line on which day is stated
+    once, by the read, and never again here.  This read
+    ``budget.journal_entries`` until plan task plan#3080, and on a copy whose
+    stored ledger was emptied it found only the settle days.  Neither is the
+    statements' attribution core (``ledger_report_service``'s private
+    modules), which this harness must not reach into to decide what to ask:
+    it stays a SECOND OPINION about what the statements say.  It over-covers on
+    purpose -- a settle day with no booked effect yields an empty window,
+    which costs one statement and proves the window really is empty on both
+    sides.
     """
-    rows = db.session.execute(db.text("""
-        SELECT DISTINCT je.entry_date AS day
-        FROM budget.journal_entries je
-        WHERE je.user_id = :user_id AND je.scenario_id = :scenario_id
-        UNION
+    lines = worked_out_lines(user_id, scenario_id,
+                             partial(calendar_for, user_id))
+    settled = db.session.execute(db.text("""
         SELECT DISTINCT t.settled_on
         FROM budget.transactions t
         WHERE t.scenario_id = :scenario_id AND t.settled_on IS NOT NULL
-    """), {"user_id": user_id, "scenario_id": scenario_id}).all()
-    return sorted(row[0] for row in rows)
+    """), {"scenario_id": scenario_id}).scalars()
+    return sorted({line.entry_date for line in lines} | set(settled))
 
 
 def _user_blob(user_id):

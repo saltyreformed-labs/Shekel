@@ -45,7 +45,7 @@ from pathlib import Path
 from flask import Blueprint, Response, current_app, url_for
 from werkzeug.security import safe_join
 
-from app.extensions import limiter
+from app.rate_limits import limiter
 
 
 static_pass_bp = Blueprint("static_pass", __name__)

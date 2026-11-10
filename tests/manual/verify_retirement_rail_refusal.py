@@ -26,7 +26,8 @@ Usage:
     VERIFY_DEV_DATABASE=<the app's database> python tests/manual/verify_retirement_rail_refusal.py
 
 Exit code 0 when every check passes, 1 on a failure, 2 when the preconditions
-are not met.  Paced to the dev app's real Valkey limiter (30/minute per IP):
+are not met.  Paced to the dev app's real Valkey limiter (30/minute on each
+page per signed-in browser):
 every field change fires one readiness GET after the 500 ms debounce.
 """
 import os

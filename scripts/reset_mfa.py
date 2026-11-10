@@ -17,7 +17,7 @@ Like ``/mfa/disable``, the reset also bumps the user's
 ``session_invalidated_at``: it ends every session of the user and forgets
 every trusted device of theirs (plan#2173, ruling plan#2406, "turning 2FA
 off ... forgets them all").  A device is trusted only while it was trusted
-at or after that column (``app.services.trusted_device_service``), and a
+at or after that column (``app.services.known_device_service``), and a
 lost authenticator is exactly when a trust it vouched for must die: without
 the bump, a browser trusted under the old authenticator would skip the
 code of the one enrolled after the reset.

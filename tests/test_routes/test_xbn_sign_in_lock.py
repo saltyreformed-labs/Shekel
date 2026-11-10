@@ -6,14 +6,18 @@ approval decide the edges of that, and each is graded here with the arm that
 proves it fires:
 
 * **R-CC121** ("Lock, then check"): sign-in finds the account, takes the
-  signing-in person's owner lock, and only then reads the codes or the
-  failed-attempt count.  Graded by statement ORDER on the password step (a
-  wrong password writes ``failed_login_count``) and the backup-code step (the
-  code check reads ``auth.mfa_configs``), by the count being read AGAIN under
-  the lock and a race proving it (another transaction raises the count while
-  the sign-in waits, and the sign-in counts on top of it), and by a held key
-  making each step WAIT, with the free-key control beside it.  A companion's
-  sign-in takes its OWNER's key.
+  signing-in person's owner lock, and only then reads the codes or a known
+  browser's count.  Graded by statement ORDER on a known browser's password
+  step (a wrong password writes its record, ``auth.known_devices``) and the
+  backup-code step (the code check reads ``auth.mfa_configs``), by the
+  browser's count being read under the lock and a race proving it (another
+  transaction raises the count while the sign-in waits, and the sign-in
+  counts on top of it), and by a held key making each step WAIT, with the
+  free-key control beside it.  A companion's sign-in takes its OWNER's key.
+  A STRANGER's password step takes the key only after its check has
+  committed, on the way to signing in, and its count is serialised by the
+  guess record's row lock instead (ruling plan#3110): that is
+  ``tests/test_routes/test_strangers_sign_in.py``.
 * **R-CC122** ("Refusals first"): a request the form-token check or the
   app-wide rate limit refuses never takes the lock.  The registration ORDER is
   pinned by the exact hook list in ``tests/test_routes/test_auth_required.py``,
@@ -23,8 +27,10 @@ proves it fires:
   through.
 * **R-CC123**: a request's transaction -- and the lock riding it -- ends where
   the request ends, as production's app-context teardown ends it.  Graded on a
-  correct-password sign-in, which commits nothing, so its transaction would
-  otherwise outlive the request under the test client's shared app context.
+  correct password on an account that still owes its code, which commits
+  nothing once it holds the key (its try's judgment commits before), so its
+  transaction would otherwise outlive the request under the test client's
+  shared app context.
 * **The rule-5 approval of 2026-09-25** (the lock sits BEFORE the sign-in
   gate): a companion deactivated while their save waits for the owner's lock
   is turned away, because taking the lock expires the signed-in user's row and
@@ -44,9 +50,11 @@ from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.models.user import MfaConfig, User
+from app.models.user import MfaConfig
 from app.services import mfa_service
 from app.services.user_write_lock import _USER_WRITE_LOCK_NAMESPACE
+from tests._guess_records import count_of
+from tests._sign_in import browser_count, make_known
 from tests._test_helpers import (
     HeldOwnerKey,
     advisory_lock_keys,
@@ -124,19 +132,27 @@ def _post_login(client, password=SEED_USER_PASSWORD, email=SEED_USER_EMAIL):
 
 
 class TestSignInLocksBeforeItChecks:
-    """R-CC121: the account is found, the owner's lock is taken, then it is checked."""
+    """R-CC121: a known browser's or the code step's lock: after the look-up, before the check.
 
-    def test_a_wrong_password_locks_before_it_counts(self, client, seed_user):
-        """The failed-attempt write happens under the lock; the lookup before it.
+    And a companion's sign-in takes its owner's key.  A stranger's password
+    step, the companion's here, takes it only after its check (ruling
+    plan#3110), so that case grades the key and not the order.
+    """
 
-        A wrong password is the password step's one WRITE
-        (``failed_login_count``), and "Lock, then check" puts the lock between
-        the email lookup (which must run first: it is how the owner is found)
-        and that write.  Both neighbours are asserted to exist, so the order
-        cannot pass over a run that never looked the account up or never
-        counted the attempt.
+    def test_a_known_browser_s_wrong_password_locks_before_it_counts(
+        self, client, seed_user,
+    ):
+        """The browser's count is read and written under the lock; the lookup before it.
+
+        A known browser's wrong password is its password step's one WRITE (its
+        record, ``auth.known_devices``), and "Lock, then check" puts the lock
+        between the email lookup (which must run first: it is how the owner is
+        found) and that write.  Every neighbour is asserted to exist, so the
+        order cannot pass over a run that never looked the account up, never
+        read the browser under the lock or never counted the attempt.
         """
         user_id = seed_user["user"].id
+        make_known(client)
 
         response, statements = capture_sql_statements(
             lambda: _post_login(client, password="not-the-password"),
@@ -147,22 +163,20 @@ class TestSignInLocksBeforeItChecks:
             statements, lambda sql: "FROM auth.users" in sql,
         )
         lock_at = _lock_index(statements)
+        assert None not in (lookup_at, lock_at), (lookup_at, lock_at)
+        # The count is read under the lock: counting on a copy read before it
+        # is the race the ruling closed (two wrong passwords counted once).
+        read_at = _first_index(
+            statements, lambda sql: "FROM auth.known_devices" in sql, start=lock_at,
+        )
         count_at = _first_index(
             statements,
-            lambda sql: sql.lstrip().startswith("UPDATE auth.users"),
+            lambda sql: sql.lstrip().startswith("UPDATE auth.known_devices"),
         )
-        assert None not in (lookup_at, lock_at, count_at), (lookup_at, lock_at, count_at)
-        assert lookup_at < lock_at < count_at
+        assert None not in (read_at, count_at), (read_at, count_at)
+        assert lookup_at < lock_at < read_at < count_at
         assert advisory_lock_keys(statements)[0] == owner_lock_key(user_id)
-        # The check itself runs on a row read AGAIN under the lock: the lookup's
-        # copy was taken before it, and counting on that copy is the race the
-        # ruling closed (two wrong passwords counted once).
-        reread_at = _first_index(
-            statements, lambda sql: "FROM auth.users" in sql, start=lock_at + 1,
-        )
-        assert reread_at is not None and reread_at < count_at, (
-            "the failed-attempt count was not read again under the lock"
-        )
+        assert browser_count(user_id) == 1
 
     def test_a_backup_code_locks_before_it_reads_the_codes(self, client, seed_user):
         """The code step takes the lock before its first read of the codes.
@@ -296,20 +310,29 @@ class TestTheLockEndsWithItsRequest:
     """R-CC123: the request's transaction ends where the request ends."""
 
     def test_a_sign_in_that_saves_nothing_leaves_the_key_free(self, client, seed_user):
-        """After a correct-password sign-in, another connection can take the key.
+        """After a correct password that saves nothing, another connection can take the key.
 
-        A correct password with no failed attempts to clear commits nothing,
-        so the sign-in's transaction is still open when its route returns --
-        holding the owner's key.  Production's app-context teardown ends it; under
-        the test client the app context outlives the request, and the request
-        teardown is what ends it.  The capture proves the sign-in took the key
-        at all, so a free key afterwards is the teardown's doing.
+        A correct password commits its try's judgment and then takes the key
+        (ruling plan#3110), and commits nothing after that while the account
+        still owes its code, so the sign-in's transaction is still open when
+        its route returns -- holding the owner's key.  A finished sign-in
+        would grade this too: its browser's record commits (plan#2772), and
+        then ``login_user`` reads the user that commit expired, which begins a
+        new transaction whose first act is the owner's key, and the route
+        returns holding it.  Measured 2026-11-10 with the teardown's rollback
+        removed: after a finished sign-in another connection could not take
+        the key, as after this one.  Production's app-context teardown ends
+        it; under the test client the app context outlives the request, and
+        the request teardown is what ends it.  The capture proves the sign-in
+        took the key at all, so a free key afterwards is the teardown's doing.
         """
         user_id = seed_user["user"].id
+        _enable_mfa(user_id)
         response, statements = capture_sql_statements(
             lambda: _post_login(client),
         )
         assert response.status_code == 302
+        assert response.headers["Location"].endswith("/mfa/verify")
         assert owner_lock_key(user_id) in advisory_lock_keys(statements)
 
         probe = db.engine.connect()
@@ -409,30 +432,36 @@ def _run_behind(held, app, request):
 
 
 class TestTheCheckReadsWhatTheLockProtects:
-    """R-CC121's point, raced: the count is read after the lock, not before."""
+    """R-CC121's point, raced: a known browser's count is read after the lock, not before."""
 
     def test_a_count_raised_during_the_wait_is_counted_on(self, app, client, seed_user):
-        """Another transaction raises the failed count while the sign-in waits.
+        """Another transaction raises the browser's count while the sign-in waits.
 
-        The holder takes the owner's key and sets ``failed_login_count`` to 3
-        without committing; a wrong password then finds the account (count 0
-        as committed), waits, and after the holder commits counts ON TOP of
-        what it wrote.  Counting on the pre-lock copy writes 1 -- the "two
-        wrong passwords counted once" race the ruling closed.
+        The holder takes the owner's key and writes 3 on the known browser's
+        record without committing; a wrong password from that browser then
+        finds the account and the browser (no count committed), waits, and
+        after the holder commits counts ON TOP of what it wrote.  Counting on
+        a copy read before the lock writes 1 -- the "two wrong passwords
+        counted once" race the ruling closed.  The account's count is a
+        stranger's and stays 0.
         """
         user_id = seed_user["user"].id
+        make_known(client)
         with HeldOwnerKey(user_id) as held:
             held.connection.execute(
-                text("UPDATE auth.users SET failed_login_count = 3 WHERE id = :id"),
-                {"id": user_id},
+                text(
+                    "UPDATE auth.known_devices SET failed_login_count = 3 "
+                    "WHERE user_id = :user_id"
+                ),
+                {"user_id": user_id},
             )
             response = _run_behind(
                 held, app, lambda: _post_login(client, password="not-the-password"),
             )
 
         assert response.status_code == 200, "the refusal re-renders the form"
-        db.session.expire_all()
-        assert db.session.get(User, user_id).failed_login_count == 4
+        assert browser_count(user_id) == 4
+        assert count_of(SEED_USER_EMAIL) == 0
 
 
 class TestADeactivatedCompanionIsTurnedAwayAfterTheWait:

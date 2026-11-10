@@ -14,7 +14,7 @@ their tables until plan step salary:X-at-2 drops them.)
 that forced the question** (developer, 2026-09-06).  This lived in
 :mod:`app.services.auth_service`, which is now two subjects in one file: an
 IDENTITY tier -- hashing, verification, the HIBP breach check, the lockout
-counters, ``authenticate`` and ``change_password`` -- and this one, which
+counters, the sign-in password checks and ``change_password`` -- and this one, which
 builds an owner's whole financial baseline and touches eight tables.  The two
 share nothing but :func:`~app.services.auth_service.hash_password`, which this
 module imports and nothing here is imported back.

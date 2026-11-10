@@ -45,7 +45,7 @@ them now if this session has not. Then hold the work to this brief:
    (`--before`), and one not wanted is dropped (`quill drop plan#T --why REASON`). A claim made
    before its tree held the commit hook takes it in by a merge of `dev`, never a rebase onto it:
    a rebase remakes every older commit on a tree holding the hook, and CI then refuses each that
-   names no task. It then runs `quill claim plan#N` again on its branch, which files its two
+   names no task. It then runs `quill claim plan#N` again on its branch, which files its
    finishing tasks where they are missing, files its remaining pieces, and starts the next before
    its next commit; CI holds only its commits made after (plan#1861, items 5 and 12). A commit CI
    refuses is put right by rewording it, which rewrites the branch from it on, so its push is
@@ -58,8 +58,9 @@ them now if this session has not. Then hold the work to this brief:
    saved (R-BAL174), so the review also reads every edit since the work started:
    `python -m tools.quill.quill spec-history plan#N --since card/N` is handed to the reviewer, and a
    spec change the code does not answer is a finding. The review is the card's task "Adversarial
-   review": each finding to fix in this pull request is filed as a task, which `quill file task`
-   places above "Full suite and pull request".
+   review", and it grades a "Release kit" done before it as that task's text says (ruling
+   plan#3201): each finding to fix in this pull request is filed as a task, which `quill file
+   task` places above "Full suite and pull request".
 6. **Land your own work.** The card's pull request is yours to open into `dev` and queue once its
    review is done and the full suite is green: `python -m tools.quill.quill pr plan#N --title TITLE
    --body-file TEXT` opens it, its text naming the card so the card links it, and

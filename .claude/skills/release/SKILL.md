@@ -257,19 +257,21 @@ itself, so it makes nothing step 12 removes. Read `rows.txt`:
 - The rollback's other line: `rollback: base's image knows ...` holds; `... rolling back past this
   release is a restore` goes in the approval question, since undoing the release is then a
   restore of the pre-deploy dump, never a re-pin.
-- **Each changed table and column** (`base against cut: <n> rows differ`, then a line per table and
-  an indented line per column; each row is in `rows_report.txt`) is traced to the change in the cut
-  that writes it: an `ADDED` migration in `plan.txt` (its `upgrade()`, `git show "$CUT":<its
-  path>`), or a pull request in `production.txt` that changes what the deploy step writes
-  (`scripts/init_database.py`: the reference rows `app/ref_seeds.py` seeds and its three deploy
-  hooks). `public.alembic_version` differs by the stamp moving from production's revision to the
-  cut's, exactly when the cut adds a migration. A `system.audit_log` row only on cut is the
-  trigger's record of a write the deploy made, traced with the table and `row_id` it names. In the
-  report a column one side lacks reads `null` on that side, so `7 -> null` can be a column the cut
-  drops and `null -> 6` one it adds and fills (its migration says which), and `null -> null` is
-  always one it adds empty or drops empty. A table the cut renames reads as rows only on base under
-  the old name and only on cut under the new. A difference no change in the cut explains is a
-  STOP: tell Josh what differs.
+- **Each changed table and column** (`base against cut: <s> s, <n> rows differ`, then a line per
+  table and an indented line per column; each row is in `rows_report.txt`) is traced to the change
+  in the cut that writes it: an `ADDED` migration in `plan.txt` (its `upgrade()`, `git show
+  "$CUT":<its path>`), or a pull request in `production.txt` that changes what the deploy step
+  writes (`scripts/init_database.py`: the reference rows `app/ref_seeds.py` seeds, and its three
+  deploy hooks with the `app/services` code they call). `public.alembic_version` differs by the
+  stamp moving from production's revision to the cut's, exactly when the cut adds a migration. A
+  `system.audit_log` row only on cut is the trigger's record of a write the deploy made, traced
+  with the table and `row_id` it names. In the report a column one side lacks reads `null` on
+  that side, so `7 -> null` can be a column the cut drops and `null -> 6` one it adds and fills
+  (its migration says which), and `null -> null` is always one it adds empty or drops empty. A
+  table the cut renames reads as rows only on base under the old name and only on cut under the
+  new. A day column that `rows.txt`'s `compared, though the server's clock fills them` line
+  names, differing because the deploys ran either side of midnight, is that line's false
+  difference. A difference no change in the cut explains is a STOP: tell Josh what differs.
 - An `ADDED` migration that no line traces to moved no row (a new table, a column on an empty
   table, a constraint): the comparison compares no table shape, so it saw nothing of it, and the
   approval question says so.

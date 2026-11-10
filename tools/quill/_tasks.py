@@ -56,8 +56,8 @@ FINISHING = (
      "dump's path and exits 0 only when every figure holds, and its manifest. It holds a few "
      "figures worked by hand from the card's spec, each one that must move as the card says, "
      "built in at most one session: no planted-defect trials, no independent recalculation "
-     "and no undo rehearsal (rulings plan#2860, plan#2873). Done once it exits 0 at this "
-     "branch's tip on a recent production dump."),
+     "and no undo rehearsal (card plan#2858's spec, under rulings plan#2860 and plan#2873). "
+     "Done once it exits 0 at this branch's tip on a recent production dump."),
     ("Adversarial review",
      "A neutral fresh subagent reviews the design and the whole diff against the card's spec "
      "and its edits since the claim (`quill spec-history plan#{card} --since card/{card}`), "

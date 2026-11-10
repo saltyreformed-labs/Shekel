@@ -326,8 +326,9 @@ def _claimed_again(tracker: Tracker, root: Path, card: Card, cards: dict[int, Ca
                    reads: _git.Reads) -> int:
     """``claim`` of ``card``, which one of ``reads``' claims holds: refused, with nothing
     written, but where that claim's branch is checked out here and some of the card's
-    finishing tasks are not filed (a failure cut the claim short, or the claim came before
-    ruling plan#1875), the claim is finished: they are filed
+    finishing tasks are not filed (a failure cut the claim short, the claim came before
+    ruling plan#1875, or the card was labelled moves-money after it, so its Release kit is
+    missing, ruling plan#2860), the claim is finished: they are filed
     (:func:`_filing.file_finishing`, R-BAL186)."""
     held = reads.claims[card.number]
     finishing = (_filing.finishing_filings(tracker, root, card, cards, reads)

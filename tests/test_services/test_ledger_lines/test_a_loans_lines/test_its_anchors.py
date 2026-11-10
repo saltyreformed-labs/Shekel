@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db as _db
-from app.services import loan_ledger, loan_posting_service, pay_period_admin
+from app.services import loan_ledger, loan_walk_reads, pay_period_admin
 from app.services.ledger_lines import loan_key
 from tests._ledger_reads import (
     account_net,
@@ -143,7 +143,7 @@ class TestTrackingStartOpening:
             )
             db.session.commit()
 
-            rows = loan_posting_service.loan_balance_anchor_history(
+            rows = loan_walk_reads.loan_balance_anchor_history(
                 loan.id, scenario_id, _AS_OF,
             )
             assert len(rows) == 2

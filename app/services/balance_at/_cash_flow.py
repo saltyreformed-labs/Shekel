@@ -418,7 +418,7 @@ def records_balance_at(
     :attr:`~._assertions.CashAnchorCorrection.balance_before` is
     documented as the running balance *just before this assertion resets it*,
     which is exactly this question, already public and already the figure the
-    LOAN side's drift card renders (``loan_posting_service._display``:
+    LOAN side's drift card renders (``loan_walk_reads``:
     ``computed``).  Subtracting correction deltas out of
     :func:`cash_balance_at` instead would be a second statement of the fold's
     step rule, and this field is the rule's own output.  *It was also WRONG
@@ -479,7 +479,7 @@ class CashAnchorRow:
     """One recorded balance, beside what the ledger held just before it.
 
     The display row of :func:`cash_anchor_history`, and the cash twin of
-    :class:`app.services.loan_posting_service.LoanAnchorDrift`.
+    :class:`app.services.loan_walk_reads.LoanAnchorDrift`.
 
     **:attr:`ledger` and :attr:`correction` are OPTIONAL, and their absence is
     a statement rather than a gap.**  Both are ``None`` exactly where the pair
@@ -747,7 +747,7 @@ def cash_anchor_history(
 
     **It takes no valuation date, and that is exact rather than an omission.**
     The loan twin
-    (:func:`app.services.loan_posting_service.loan_balance_anchor_history`)
+    (:func:`app.services.loan_walk_reads.loan_balance_anchor_history`)
     filters its anchors to ``anchor_date <= as_of`` because a loan anchor can
     be dated ahead of a display date.  A cash assertion cannot:
     :func:`app.services.anchor_service.resolve_observation_day` refuses a day

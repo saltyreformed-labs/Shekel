@@ -167,7 +167,7 @@ from app.services.ledger_lines import (
 )
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.loan_loaders import load_escrow_lines, load_loan_params
-from app.services.loan_posting_service import confirmed_loan_payment_history
+from app.services.loan_walk_reads import confirmed_loan_payment_history
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import RecurrenceSpec, author_rule
 from app.services.scenario_resolver import get_baseline_scenario

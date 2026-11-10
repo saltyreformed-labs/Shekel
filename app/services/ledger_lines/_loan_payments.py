@@ -38,7 +38,7 @@ reversal first, no detector hunts payments that "left the confirmed set" (a
 key with no target reverses in the same pass), and no reader maps rows back
 onto payments.  Two payments on one day in one period merge into one entry,
 which is the sum the ledger holds; WHICH payment paid what is the walk's
-answer (``loan_posting_service._display``), never the ledger's.
+answer (``loan_walk_reads``), never the ledger's.
 
 **This module builds the TARGET and nothing else**, for the stored ledger's
 writer and the worked-out read alike; it was ``loan_posting_service._payments``

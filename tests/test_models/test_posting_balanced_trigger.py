@@ -38,7 +38,7 @@ from app.posting_infrastructure import (
     apply_posting_infrastructure,
     remove_posting_infrastructure,
 )
-from tests._stored_ledger import ledger_accounts_for_account
+from tests._stored_ledger import chart_row_or_plant
 from tests._test_helpers import (
     create_account_of_type,
     refused_by_database_rule,
@@ -100,19 +100,18 @@ def _balanced_function_exists(session):
 def ledgers(app, db, seed_user):  # pylint: disable=unused-argument
     """Return (checking_ledger_id, savings_ledger_id, period_id).
 
-    Runs in the ``db`` fixture's app context (no nested context) and returns
-    plain ints.
+    Plants each account's linked row, which no door writes since plan task
+    plan#3133.  Runs in the ``db`` fixture's app context (no nested context)
+    and returns plain ints.
     """
     savings = create_account_of_type(
         seed_user, _db.session, "Savings", "Trigger Savings",
     )
+    checking_ledger = chart_row_or_plant(
+        _db.session, seed_user["account"], "linked", "Asset",
+    )
+    savings_ledger = chart_row_or_plant(_db.session, savings, "linked", "Asset")
     _db.session.commit()
-    checking_ledger = ledger_accounts_for_account(
-        _db.session, seed_user["account"].id,
-    )[0].id
-    savings_ledger = ledger_accounts_for_account(
-        _db.session, savings.id,
-    )[0].id
     return checking_ledger, savings_ledger, seed_user["bootstrap_period"].id
 
 

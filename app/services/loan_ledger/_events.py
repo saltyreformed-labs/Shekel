@@ -77,7 +77,7 @@ def confirmed_shadows_through(
     visible-on bound).  It returns LEGS since plan step balance:X-bi-6-4b and
     keeps its shadow-era name until ``X-bi-6-4d``.  The posted ledger's
     payment-history table
-    (:func:`app.services.loan_posting_service.confirmed_loan_payment_history`)
+    (:func:`app.services.loan_walk_reads.confirmed_loan_payment_history`)
     consumed this until plan step ``balance:X-bi-6-3``, when it began reading
     the walk's outcomes by the same ``visible_on`` bound, and since plan
     step recurrence:R16-c-1 it is the payment half of a read pass's visibility

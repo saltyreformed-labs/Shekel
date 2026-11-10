@@ -61,6 +61,7 @@ from ._legs import (
     IncomeLegs,
     income_legs,
     projected_income_legs,
+    scenarios_with_loan_payments,
     settled_income_legs,
 )
 from ._records import LoanRecords, load_loan_records
@@ -101,6 +102,7 @@ __all__ = [
     "load_standing_loan_assertions",
     "loan_payment_due_date",
     "projected_income_legs",
+    "scenarios_with_loan_payments",
     "settled_income_legs",
     "synthesize_origination_anchor",
 ]

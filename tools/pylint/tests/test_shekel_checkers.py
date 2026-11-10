@@ -56,7 +56,7 @@ def _fenced_module_sources(module_name: str) -> list[Path]:
     A flat module (``app.services.account_projection``) is one file.  A PACKAGE
     (``app.services.loan_posting_service``) is every ``.py`` file inside it --
     because the checker scopes a package by prefix, so a producer born in ANY
-    submodule (``_display``, ``_corrections``, ``_walk``) is in scope and must be
+    submodule (``_sync``, ``_corrections``, ``_walk``) is in scope and must be
     classified.  Enumerating them here is what makes the registry-vs-reality
     test see the same surface the checker does.
 
@@ -800,8 +800,8 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
         sitting a few lines from the entries they cover -- the residue of
         PUBLIC balance-ingredient packages W9910 cannot protect:
 
-        * ``_LOAN_LEDGER_DEFINING_MODULES`` (``loan_ledger`` +
-          ``loan_posting_service``, the walk and the posting readers)
+        * ``_LOAN_LEDGER_DEFINING_MODULES`` (``loan_ledger``, ``loan_posting_service``
+          and ``loan_walk_reads``: the walk, its writers, the page's reads of it)
         * ``_CASH_LEDGER_MODULES`` (``cash_ledger``, D1a then D1c)
         * ``_ROW_VALUATION_MODULES`` (``row_valuation``, X-au-c2 -- the
           producer-free valuation arms, extracted BELOW ``cash_ledger`` so the
@@ -846,7 +846,7 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
             "app.services.cash_ledger",
             "app.services.row_valuation",
             "app.services.loan_ledger",
-            "app.services.loan_posting_service",
+            "app.services.loan_posting_service", "app.services.loan_walk_reads",
             "app.services.loan_payment_service",
             "app.services.loan_resolver",
             "app.services.recurring_transfer_query",

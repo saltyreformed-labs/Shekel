@@ -53,7 +53,6 @@ from app.routes.accounts.opening import books_opening_context
 from app.services import (
     account_service,
     definition_delete,
-    ledger_account_service,
     liability_sign,
     pay_period_service,
     transfer_service,
@@ -817,7 +816,7 @@ def hard_delete_account(account_id):
     # plan task plan#2867 until plan task plan#3076: step 1's delete of a
     # hidden payment re-synced the loan it left, and a loan with no terms
     # walked to nothing, so that sync could not post on the chart rows this
-    # step disposes of.  Plan task plan#3075 deleted that re-sync, and with it
+    # step disposed of.  Plan task plan#3075 deleted that re-sync, and with it
     # the reason for the order.
     db.session.query(LoanParams).filter_by(account_id=account_id).delete()
     db.session.query(InterestParams).filter_by(account_id=account_id).delete()
@@ -832,7 +831,10 @@ def hard_delete_account(account_id):
     db.session.query(EscrowLine).filter_by(account_id=account_id).delete()
     db.session.query(RateHistory).filter_by(account_id=account_id).delete()
     db.session.query(SavingsGoal).filter_by(account_id=account_id).delete()
-    ledger_account_service.dispose_loan_chart_rows(account_id)
+    # A loan's stored per-loan chart rows were cleared here, ahead of the
+    # RESTRICT key ``fk_ledger_accounts_loan_account_id``, until plan task
+    # plan#3133: migration ``d913d743c78c`` emptied the stored ledger's tables
+    # and no door writes them, so no row can hold the delete (ruling plan#3068).
 
     # Step 4: delete the account.  AccountAnchorHistory, AccountOpening and
     # LoanAnchorEvent are append-only (plan step X-f3c-2c), so the ORM must

@@ -59,7 +59,7 @@ from app.exceptions import TrackingStartRefused
 from app.extensions import db
 from app.models.account import Account
 from app.models.loan_anchor_event import LoanAnchorEvent
-from app.services import loan_loaders, loan_posting_service
+from app.services import loan_loaders
 from app.services.anchor_service import AnchorTrueUpOutcome
 
 logger = logging.getLogger(__name__)
@@ -166,7 +166,7 @@ def _append_loan_anchor_and_commit(
     ``user_trueup`` are DISTINCT FACTS even at the same date and balance:
     :func:`app.services.loan_loaders.load_loan_anchor_facts` loads both as
     assertions differing only in ``is_tracking_start``, and
-    ``loan_posting_service.loan_balance_anchor_history`` renders that label on
+    ``loan_walk_reads.loan_balance_anchor_history`` renders that label on
     the loan dashboard's drift card.  A cross-source comparison would answer
     UNCHANGED to a ``tracking_start`` because a same-valued ``user_trueup``
     stands, silently dropping the label the user asked to record.
@@ -464,7 +464,7 @@ def _earliest_payment_moved_on(account: Account) -> date | None:
     movement carries its day.
 
     **Every scenario the loan has a payment in**, through
-    :func:`app.services.loan_posting_service.scenarios_with_loan_payments`, the
+    :func:`app.services.loan_loaders.scenarios_with_loan_payments`, the
     same enumeration the all-scenario re-sync walked (until plan task
     plan#3076): a tracking start is a fact
     of the loan ACCOUNT and re-bases the walk in each of them, so a payment in
@@ -484,7 +484,7 @@ def _earliest_payment_moved_on(account: Account) -> date | None:
     return min(
         (
             leg.settled_on
-            for scenario_id in loan_posting_service.scenarios_with_loan_payments(
+            for scenario_id in loan_loaders.scenarios_with_loan_payments(
                 account.id,
             )
             for leg in loan_loaders.settled_income_legs(

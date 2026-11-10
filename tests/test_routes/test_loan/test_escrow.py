@@ -221,7 +221,7 @@ class TestEscrow:
         stored split before and after the merge until plan task plan#3077
         deleted it; the history reads the walk, never that store.
         """
-        from app.services.loan_posting_service import (  # pylint: disable=import-outside-toplevel
+        from app.services.loan_walk_reads import (  # pylint: disable=import-outside-toplevel
             confirmed_loan_payment_history,
         )
         acct = _create_mortgage(seed_user, db.session)

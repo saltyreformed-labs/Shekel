@@ -65,9 +65,9 @@ def chart_row_or_plant(db_session, account, kind, class_name, name=None):
     plants its revision's rows.  The shape every per-account row shares
     (``account_id`` set, no category, no loan, not an owner bucket) under its
     natural key ``uq_ledger_accounts_account_kind``, so a get-or-plant is
-    safe: an account holds at most one row of a kind.  It finds the linked row
-    ``account_service.create_account`` still pairs until plan task plan#3133
-    deletes that call, and plants it after.
+    safe: an account holds at most one row of a kind.  It found the linked row
+    ``account_service.create_account`` paired until plan task plan#3133
+    deleted that call; it plants that row now.
 
     Args:
         db_session: The test ``db.session``.

@@ -58,8 +58,10 @@ keep working unchanged:
   one reconcile), the loan-GLOBAL all-scenarios sync, the duplicate translation,
   and the per-user re-sync (the historical backfill went with the deploy's
   hooks at plan task plan#3077).
-* :mod:`._display` -- the loan-detail page's two surfaces, both read off the
-  walk.  This package answers no balance: the two sum-of-postings balance
+* ``_display`` -- the loan-detail page's two surfaces, both read off the
+  walk, until plan task plan#3133 moved them to
+  :mod:`app.services.loan_walk_reads`, named for what they read.  This
+  package answers no balance: the two sum-of-postings balance
   readers it once held (``confirmed_loan_balance_at`` /
   ``confirmed_loan_balance_map``) were DELETED at plan step E1e, having lost
   their last ``app/`` caller when the seam cut a loan's past onto the event
@@ -108,32 +110,19 @@ ahead of the doors plan#2914 stops writing the store from.
 that once pointed at them is retired: the balance seam folds a loan's past from
 SOURCE events (steps C3b1 / C3b3) and its confirmed rows from the walk (step
 E1d-b), so a cold or stale posting cache is a repairable inconsistency, never a
-read outage.  What DOES read them is this package's per-payment attribution
-(:mod:`._display`); the balance sheet and statements did too until plan task
-plan#2771 moved them onto the worked-out ledger.
+read outage.  Nothing reads them: the balance sheet and statements did until
+plan task plan#2771 moved them onto the worked-out ledger.
 """
 
-from ._display import (
-    LoanAnchorDrift,
-    LoanPaymentHistoryRow,
-    confirmed_loan_payment_history,
-    loan_balance_anchor_history,
-)
 from ._sync import (
     resync_user_loan_postings,
-    scenarios_with_loan_payments,
     sync_all_scenarios_or_duplicate,
     sync_loan_postings,
     sync_loan_postings_all_scenarios,
 )
 
 __all__ = [
-    "LoanAnchorDrift",
-    "LoanPaymentHistoryRow",
-    "confirmed_loan_payment_history",
-    "loan_balance_anchor_history",
     "resync_user_loan_postings",
-    "scenarios_with_loan_payments",
     "sync_all_scenarios_or_duplicate",
     "sync_loan_postings",
     "sync_loan_postings_all_scenarios",

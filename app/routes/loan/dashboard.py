@@ -53,7 +53,7 @@ from app.services import (
     loan_loaders,
     loan_recurrence_sync,
 )
-from app.services.loan_posting_service import (
+from app.services.loan_walk_reads import (
     confirmed_loan_payment_history,
     loan_balance_anchor_history,
 )

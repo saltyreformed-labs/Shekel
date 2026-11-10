@@ -49,8 +49,8 @@ from ._fence_rulings_cash_ledger import CASH_LEDGER_NON_PRODUCERS
 # inside ``balance_at`` as a private submodule instead.
 #
 # Scope (the D3 residue): the PUBLIC packages that hold balance INGREDIENTS
-# outside W9910's protection -- the two genesis loan-ledger packages (the
-# posting attribution reads and the walk they are built on), the cash ledger
+# outside W9910's protection -- the genesis loan-ledger packages (the walk,
+# the posting writers and the loan page's reads of the walk), the cash ledger
 # leaf, the loan resolver tier and its db-facing seeding module, and the
 # account-kind classifier.  The ``balance_at`` seam package is deliberately NOT
 # scoped: its public functions ARE the seam entries every consumer is supposed
@@ -101,6 +101,11 @@ _SEAM_PRIVATE_CONTEXT_MODULES = frozenset({
 _LOAN_LEDGER_DEFINING_MODULES = frozenset({
     "app.services.loan_ledger",
     "app.services.loan_posting_service",
+    # The loan detail page's two surfaces, read off the walk: they were the
+    # posting package's ``_display`` until plan task plan#3133 moved them
+    # here, and the scope moved with them, so a balance-at-T reader born
+    # beside them errors at its definition as it did there.
+    "app.services.loan_walk_reads",
 })
 # The loan-payment LOADER module (plan step D3, from its adversarial review).
 # Its PRIVILEGE is gone -- plan step E1d-b took it off the reader allowlist above
@@ -630,7 +635,7 @@ _FENCED_MODULE_RULINGS = {
         }),
     ),
     # The genesis loan-ledger package.  Scoped WHOLE, not one submodule: a new
-    # balance-at-T reader born in ``_display`` would reproduce exactly the hole
+    # balance-at-T reader born in any of its modules would reproduce exactly the hole
     # this check exists to kill.  Its producer set is EMPTY as of plan step E1e,
     # which DELETED the two sum-of-postings balance readers that were the last
     # public producers outside the seam anywhere in ``app/`` (see the header
@@ -638,20 +643,11 @@ _FENCED_MODULE_RULINGS = {
     # attribution -- and never the answer to "what do I owe" (plan Section 3).
     "app.services.loan_posting_service": (
         frozenset(), frozenset({
-            # Rich row detail: the payment-history table's per-payment cash /
-            # principal / interest / escrow split.  Rows, not a balance-at-T.
-            # (Its schedule-row sibling ``confirmed_loan_history_rows`` was
-            # deleted at plan step E1d-b; the yearly tax / paid-YTD figures folded
-            # off the postings onto the loan ledger at steps C3c / C6c, so this
-            # package no longer exposes either.)
-            "confirmed_loan_payment_history",
-            # The anchor EVENT rows (the source documents behind a balance), not
-            # the balance itself.
-            "loan_balance_anchor_history",
-            # The scenario ids a loan has a payment in: the enumeration the
-            # all-scenario re-sync and the tracking-start refusal (rulings
-            # R-R114, R-R115) walk.  Ids, never a balance.
-            "scenarios_with_loan_payments",
+            # (The payment-history table and the anchor-event rows were ruled
+            # here until plan task plan#3133 moved them to
+            # ``app.services.loan_walk_reads``, ruled below; the scenario
+            # enumeration went to ``app.services.loan_loaders``, which no
+            # scope covers, as ids and never a balance.)
             # WRITERS.  Everything below emits or reconciles postings; a writer
             # is not a balance reader, and the ledger-write path has its own
             # seams (``posting_service._emit_balanced_entry``).  The two
@@ -667,6 +663,22 @@ _FENCED_MODULE_RULINGS = {
             "sync_loan_postings_all_scenarios",
             "sync_all_scenarios_or_duplicate",
             "resync_user_loan_postings",
+        }),
+    ),
+    # The loan detail page's two surfaces, read off the loan's walk (plan task
+    # plan#3133 moved them from the posting package's ``_display``).
+    "app.services.loan_walk_reads": (
+        frozenset(), frozenset({
+            # Rich row detail: the payment-history table's per-payment cash /
+            # principal / interest / escrow split.  Rows, not a balance-at-T.
+            # (Its schedule-row sibling ``confirmed_loan_history_rows`` was
+            # deleted at plan step E1d-b; the yearly tax / paid-YTD figures folded
+            # off the postings onto the loan ledger at steps C3c / C6c, so no
+            # module here exposes either.)
+            "confirmed_loan_payment_history",
+            # The anchor EVENT rows (the source documents behind a balance), not
+            # the balance itself.
+            "loan_balance_anchor_history",
         }),
     ),
     # The read pass's context (:data:`_SEAM_PRIVATE_CONTEXT_MODULES`) -- the

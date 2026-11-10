@@ -312,7 +312,8 @@ def _planned_from_legs(
     ``cash_ledger.settled_cash_leg``, is deleted at plan step
     ``balance:X-bi-4a``): ``loan_ledger._events.loan_event_stream``
     (``._split.split_one_payment`` until plan step X-au-g-2c-3b-2),
-    ``loan_posting_service._sync`` and ``._display``,
+    ``loan_posting_service._sync`` and ``._display`` (``loan_walk_reads``
+    since plan task plan#3133),
     ``savings_dashboard_service._metrics``, and the spending report's
     ``_window`` and ``_breakdown`` -- each loading rows filtered to the settled
     statuses in SQL.

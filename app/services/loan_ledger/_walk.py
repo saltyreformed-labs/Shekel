@@ -171,7 +171,7 @@ class LoanLedgerWalk:
         the worked-out read asks it of each loan to decide whether the
         owner's pay calendar is loaded (``ledger_lines.worked_out_lines``),
         and the loan page's two measured surfaces hide on it
-        (``loan_posting_service``'s ``_configured_loan_walk``).
+        (``loan_walk_reads._configured_loan_walk``).
         """
         return not self.anchor_corrections and not self.payment_splits
 

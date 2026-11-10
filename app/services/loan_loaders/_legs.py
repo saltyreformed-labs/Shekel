@@ -3,8 +3,9 @@
 The half of :mod:`app.services.loan_loaders` that answers *which payments*,
 against :mod:`._terms`' *what are this loan's contractual facts*.  It owns the
 two producers -- :func:`settled_income_legs` and
-:func:`projected_income_legs` -- and the partition value that composes them
-(:func:`income_legs`).
+:func:`projected_income_legs` -- the partition value that composes them
+(:func:`income_legs`), and the scenarios a loan has a payment in
+(:func:`scenarios_with_loan_payments`).
 
 A payment INTO an account is the to-side LEG of a transfer into it
 (:class:`~app.services.transfer_legs.TransferLeg`): a payment received by a
@@ -433,3 +434,44 @@ def projected_income_legs(
     ]
     legs.sort(key=lambda leg: (leg.pay_period.start_date, leg.transfer.id))
     return legs
+
+
+def scenarios_with_loan_payments(loan_account_id: int) -> list[int]:
+    """Return the scenarios that carry a payment for a loan.
+
+    The distinct ``scenario_id`` set over the live transfers INTO the loan,
+    which the tracking-start door, its one caller outside the stored ledger's
+    writers, reads the money days of
+    (``loan_anchor_service._earliest_payment_moved_on``, rulings **R-R114**,
+    **R-R115**): a tracking start is a fact of the loan ACCOUNT and re-bases
+    its walk in every scenario the loan has a payment in, so a payment in any
+    one of them contradicts it.  It read the loan's non-deleted income SHADOWS
+    until plan step balance:X-bi-6-4b; every live transfer carried one live
+    income shadow in its own scenario then (Transfer Invariants 1 and 3), so
+    the two sets were one (measured equal on the 2026-09-23 21:17 production
+    dump).  A projected-only scenario is included: the set is of payments,
+    not of payments that moved, and the caller reads only the settled legs
+    of each.
+
+    *It lived in the loan posting package until plan task plan#3133*, whose
+    loan-global re-sync walks the same set (adding the owner's baseline) to
+    re-post a loan's corrections in each scenario; that task deletes the
+    re-sync with the stored ledger's other writers, and moved the query here
+    first, beside the leg loaders the tracking-start door reads it with.
+
+    Args:
+        loan_account_id: The loan whose payment scenarios to enumerate.
+
+    Returns:
+        The distinct scenario ids, ascending.
+    """
+    rows = (
+        db.session.query(Transfer.scenario_id)
+        .filter(
+            Transfer.to_account_id == loan_account_id,
+            Transfer.is_deleted.is_(False),
+        )
+        .distinct()
+        .all()
+    )
+    return sorted(row[0] for row in rows)

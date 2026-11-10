@@ -334,7 +334,7 @@ def select_latest_anchor(anchor_events: list) -> object:
     names the loan's latest anchor outright; every reader of the walk applies its
     own ``as_of`` bound afterwards
     (:func:`app.services.balance_at.confirmed_view`,
-    ``loan_posting_service.loan_balance_anchor_history``), so for a PAST read
+    ``loan_walk_reads.loan_balance_anchor_history``), so for a PAST read
     date the last anchor a reader has applied is not necessarily this one.  That
     gap is finding **N-207** -- this resolves against the loan's latest anchor
     whatever date the pass asked about -- and it is owned by X-i2, not fixed

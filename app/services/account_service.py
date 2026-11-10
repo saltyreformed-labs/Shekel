@@ -45,11 +45,7 @@ from app.exceptions import ValidationError
 from app.models.account import Account
 from app.models.pay_period import PayPeriod
 from app.models.ref import AccountType
-from app.services import (
-    anchor_service,
-    ledger_account_service,
-    opening_service,
-)
+from app.services import anchor_service, opening_service
 
 
 logger = logging.getLogger(__name__)
@@ -371,17 +367,15 @@ def create_account(spec: AccountSpec, **extra_columns) -> Account:
             "account, which breaks the E-19 / CRIT-01 invariant."
         )
 
-    # Pair the account with its chart-of-accounts ledger account
-    # (Build-Order Step 2): exactly one Asset/Liability ledger account per
-    # real account, so the double-entry posting ledger has somewhere to
-    # post.  Idempotent and side-effecting only -- the returned Account is
-    # unchanged.  **It outlives the anchor sync that stood below it**, which
-    # plan task plan#3076 deleted (the worked-out ledger books the opening
-    # from the records, and no door posts it): the suite's setup helpers still
-    # drive the stored ledger's writers until plan task plan#3079 deletes
-    # them, and every writer finds an account's line on this row, so the
-    # pairing goes with them there.
-    ledger_account_service.create_ledger_account_for_account(account)
+    # No chart-of-accounts row is paired here.  This tail paired the account
+    # with its stored ``budget.ledger_accounts`` row (Build-Order Step 2), so
+    # the stored ledger's writers had a line to post on, until plan task
+    # plan#3133, which deletes those writers, deleted the pairing first: the
+    # worked-out ledger names an account's line from the account itself
+    # (:func:`app.services.ledger_lines.linked_key`).  The pairing's flush went
+    # too, and nothing here needed it: the account was flushed above for its
+    # id, and the staged opening and assertion reach the database at the
+    # next autoflush or the caller's commit.
 
     logger.info(
         "Created account %s (id=%d, user_id=%d) asserted at $%s on %s",

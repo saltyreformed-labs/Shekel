@@ -755,7 +755,7 @@ def loan_payment_due_date(
     contractual day.  The due date is read by the fold's event stream
     (:func:`app.services.loan_ledger.loan_event_stream`),
     the payment-history table
-    (:func:`app.services.loan_posting_service.confirmed_loan_payment_history`),
+    (:func:`app.services.loan_walk_reads.confirmed_loan_payment_history`),
     the forward plan's PLANNED tier and the settled-payment guards below, so no
     two of them can disagree on a payment's due date.
 

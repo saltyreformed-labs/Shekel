@@ -267,7 +267,7 @@ def installment_paid_by(
     the day a ``$0.00`` close is visible and booked on (ruling **R-R107**,
     :func:`app.services.loan_ledger.payment_visible_on`), the loan page's
     payment-history card (ruling **R-R108**,
-    :func:`app.services.loan_posting_service.confirmed_loan_payment_history`)
+    :func:`app.services.loan_walk_reads.confirmed_loan_payment_history`)
     and the confirmed schedule row's date, number and escrow (ruling
     **R-R109**, :func:`app.services.balance_at.confirmed_view`).  The first
     two each spelled the early-extra fallback out beside

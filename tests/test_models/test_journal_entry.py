@@ -48,7 +48,7 @@ from app.models.journal_entry import (
     PostingImmutableError,
 )
 from app.models.pay_period import PayPeriod
-from tests._stored_ledger import ledger_accounts_for_account
+from tests._stored_ledger import chart_row_or_plant
 from tests._test_helpers import (
     create_account_of_type,
     make_balanced_entry,
@@ -58,11 +58,6 @@ from tests._test_helpers import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _ledger_id(session, account):
-    """Return the id of the single linked ledger account for *account*."""
-    return ledger_accounts_for_account(session, account.id)[0].id
 
 
 # The balanced-entry builder now lives in ``tests._test_helpers``
@@ -75,19 +70,20 @@ def _ledger_id(session, account):
 def two_ledgers(app, db, seed_user):  # pylint: disable=unused-argument
     """Return (checking_ledger_id, savings_ledger_id) for two real accounts.
 
-    The seed Checking already carries a ledger account from the Commit-2 sync
-    hook; this fixture adds a Savings (also auto-paired) so a balanced
+    The fixture adds a Savings beside the seed Checking and plants each one's
+    linked row (no door pairs one since plan task plan#3133), so a balanced
     two-leg entry has two distinct ledger accounts to post into.  Runs in the
     ``db`` fixture's app context (no nested context) and returns plain ints.
     """
     savings = create_account_of_type(
         seed_user, _db.session, "Savings", "Posting Savings",
     )
-    _db.session.commit()
-    return (
-        _ledger_id(_db.session, seed_user["account"]),
-        _ledger_id(_db.session, savings),
+    ledgers = (
+        chart_row_or_plant(_db.session, seed_user["account"], "linked", "Asset"),
+        chart_row_or_plant(_db.session, savings, "linked", "Asset"),
     )
+    _db.session.commit()
+    return ledgers
 
 
 # ---------------------------------------------------------------------------

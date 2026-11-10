@@ -70,7 +70,7 @@ from app.services import (
     dashboard_service,
     loan_loaders,
     loan_payment_service,
-    loan_posting_service,
+    loan_walk_reads,
     retirement_projection,
     savings_dashboard_service,
     spending_report_service,
@@ -365,7 +365,7 @@ def _loans(user_id, scenario_id, accounts):
         )
         history = _guard(
             f"loan_history:{account.id}",
-            lambda a=account: loan_posting_service
+            lambda a=account: loan_walk_reads
             .confirmed_loan_payment_history(a.id, scenario_id, date(2026, 8, 12)),
         )
         out[str(account.id)] = {

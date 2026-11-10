@@ -1,7 +1,7 @@
 """Tests for the loan-detail display read producers (Loop B rebuild).
 
-:mod:`app.services.loan_posting_service._display` answers the loan detail page's
-posting-derived measured surfaces:
+:mod:`app.services.loan_walk_reads` answers the loan detail page's
+walk-derived measured surfaces:
 
 * ``confirmed_loan_payment_history`` -- the confirmed payment table, each
   payment's real cash / principal / interest / escrow split; and
@@ -31,8 +31,8 @@ from app import ref_cache
 from app.enums import StatusEnum
 from app.models.ref import AccountType
 from app.models.scenario import Scenario
-from app.services import account_service, loan_posting_service, transfer_service
-from app.services.loan_posting_service import LoanAnchorDrift, LoanPaymentHistoryRow
+from app.services import account_service, loan_walk_reads, transfer_service
+from app.services.loan_walk_reads import LoanAnchorDrift, LoanPaymentHistoryRow
 from tests._test_helpers import (
     SPLIT_LOAN,
     capture_sql_statements,
@@ -114,7 +114,7 @@ class TestConfirmedLoanPaymentHistory:
             )
             db.session.commit()
 
-            rows = loan_posting_service.confirmed_loan_payment_history(
+            rows = loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, _AS_OF,
             )
             assert rows == [_P1_ROW]
@@ -136,7 +136,7 @@ class TestConfirmedLoanPaymentHistory:
                 )
             db.session.commit()
 
-            rows = loan_posting_service.confirmed_loan_payment_history(
+            rows = loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, _AS_OF,
             )
             assert [(r.principal, r.interest, r.cash) for r in rows] == [
@@ -164,7 +164,7 @@ class TestConfirmedLoanPaymentHistory:
             )
             db.session.commit()
 
-            [row] = loan_posting_service.confirmed_loan_payment_history(
+            [row] = loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, _AS_OF,
             )
             assert row.cash == Decimal("1100.00")
@@ -186,7 +186,7 @@ class TestConfirmedLoanPaymentHistory:
             )
             db.session.commit()
 
-            [row] = loan_posting_service.confirmed_loan_payment_history(
+            [row] = loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, _AS_OF,
             )
             assert row.cash == Decimal("1500.00")
@@ -212,7 +212,7 @@ class TestConfirmedLoanPaymentHistory:
                 )
             db.session.commit()
 
-            table = loan_posting_service.confirmed_loan_payment_history(
+            table = loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, _AS_OF,
             )
             schedule = seam_confirmed_view(
@@ -243,10 +243,10 @@ class TestConfirmedLoanPaymentHistory:
             db.session.commit()
 
             before = settled - timedelta(days=1)
-            assert loan_posting_service.confirmed_loan_payment_history(
+            assert loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, before,
             ) == []
-            assert len(loan_posting_service.confirmed_loan_payment_history(
+            assert len(loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, settled,
             )) == 1
 
@@ -269,7 +269,7 @@ class TestConfirmedLoanPaymentHistory:
             )
             db.session.commit()
 
-            assert loan_posting_service.confirmed_loan_payment_history(
+            assert loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, _AS_OF,
             ) == []
 
@@ -292,10 +292,10 @@ class TestConfirmedLoanPaymentHistory:
             db.session.commit()
 
             scenario_id = seed_user["scenario"].id
-            assert loan_posting_service.confirmed_loan_payment_history(
+            assert loan_walk_reads.confirmed_loan_payment_history(
                 account.id, scenario_id, _AS_OF,
             ) is None
-            assert loan_posting_service.loan_balance_anchor_history(
+            assert loan_walk_reads.loan_balance_anchor_history(
                 account.id, scenario_id, _AS_OF,
             ) is None
 
@@ -306,7 +306,7 @@ class TestConfirmedLoanPaymentHistory:
         with app.app_context():
             loan = _make_split_loan(seed_user, db.session)
             db.session.commit()
-            assert loan_posting_service.confirmed_loan_payment_history(
+            assert loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, seed_user["scenario"].id, _AS_OF,
             ) == []
 
@@ -336,7 +336,7 @@ class TestConfirmedLoanPaymentHistory:
             )
             db.session.commit()
 
-            history = loan_posting_service.confirmed_loan_payment_history
+            history = loan_walk_reads.confirmed_loan_payment_history
             assert history(loan.id, whatif.id, _AS_OF) == [_P1_ROW]
             assert history(loan.id, seed_user["scenario"].id, _AS_OF) == []
             assert history(loan.id, unopened.id, _AS_OF) == []
@@ -363,12 +363,12 @@ class TestConfirmedLoanPaymentHistory:
             db.session.commit()
 
             rows, table_reads = capture_sql_statements(
-                lambda: loan_posting_service.confirmed_loan_payment_history(
+                lambda: loan_walk_reads.confirmed_loan_payment_history(
                     loan.id, scenario_id, _AS_OF,
                 ),
             )
             drifts, scorecard_reads = capture_sql_statements(
-                lambda: loan_posting_service.loan_balance_anchor_history(
+                lambda: loan_walk_reads.loan_balance_anchor_history(
                     loan.id, scenario_id, _AS_OF,
                 ),
             )
@@ -391,7 +391,7 @@ class TestConfirmedLoanPaymentHistory:
             loan = _make_split_loan(seed_user, db.session)
             db.session.commit()
             with pytest.raises(ValueError, match="as_of <= today"):
-                loan_posting_service.confirmed_loan_payment_history(
+                loan_walk_reads.confirmed_loan_payment_history(
                     loan.id, seed_user["scenario"].id, date(2027, 6, 1),
                 )
 
@@ -481,7 +481,7 @@ class TestAPaymentIsNamedByTheInstallmentItPays:
             )
             db.session.commit()
 
-            card = loan_posting_service.confirmed_loan_payment_history(
+            card = loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, _AS_OF,
             )
             assert [
@@ -526,7 +526,7 @@ class TestAPaymentIsNamedByTheInstallmentItPays:
             )
             db.session.commit()
 
-            [row] = loan_posting_service.confirmed_loan_payment_history(
+            [row] = loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, _AS_OF,
             )
             assert (row.installment, row.interest, row.principal) == (
@@ -567,7 +567,7 @@ class TestLoanBalanceAnchorHistory:
                 rate=_RATE, origination_date=_ORIGINATION_DATE,
             )
 
-            assert loan_posting_service.loan_balance_anchor_history(
+            assert loan_walk_reads.loan_balance_anchor_history(
                 loan.id, scenario_id, _AS_OF,
             ) == [LoanAnchorDrift(
                 anchor_date=_ORIGINATION_DATE,
@@ -591,7 +591,7 @@ class TestLoanBalanceAnchorHistory:
             loan = _make_split_loan(seed_user, db.session)
             db.session.commit()
 
-            assert loan_posting_service.loan_balance_anchor_history(
+            assert loan_walk_reads.loan_balance_anchor_history(
                 loan.id, scenario_id, _AS_OF,
             ) == [
                 LoanAnchorDrift(
@@ -632,7 +632,7 @@ class TestLoanBalanceAnchorHistory:
                 )
             db.session.commit()
 
-            rows = loan_posting_service.loan_balance_anchor_history(
+            rows = loan_walk_reads.loan_balance_anchor_history(
                 loan.id, scenario_id, _AS_OF,
             )
             assert [(r.recorded, r.computed, r.drift) for r in rows] == [
@@ -644,6 +644,6 @@ class TestLoanBalanceAnchorHistory:
     def test_unconfigured_loan_returns_none(self, app, db, seed_user):
         """A non-loan account is not a configured loan, so the card is None."""
         with app.app_context():
-            assert loan_posting_service.loan_balance_anchor_history(
+            assert loan_walk_reads.loan_balance_anchor_history(
                 seed_user["account"].id, seed_user["scenario"].id, _AS_OF,
             ) is None

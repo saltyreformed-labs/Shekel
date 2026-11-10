@@ -9,8 +9,9 @@ from the account-type category.
 The migration is already at HEAD when these tests run (the template
 builder upgraded it base->head against an EMPTY ``budget.accounts`` table,
 so the in-chain backfill was a no-op).  Each test therefore sets up a new
-account, removes the ledger account the go-forward sync hook auto-created,
-then invokes the migration's idempotent backfill SQL directly to assert the
+account, which no door pairs with a ledger account since plan task plan#3133
+(each test removed the row a go-forward sync hook paired until then), then
+invokes the migration's idempotent backfill SQL directly to assert the
 deterministic mapping from account-type category to ledger class -- exactly
 the pattern the ``loan_anchor_events`` backfill test
 (``tests/test_models/test_loan_anchor_backfill.py``) uses.
@@ -46,7 +47,7 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import LedgerAccountClassEnum
 from app.extensions import db as _db
-from tests._stored_ledger import ledger_accounts_for_account
+from tests._stored_ledger import chart_row_or_plant, ledger_accounts_for_account
 from tests._test_helpers import create_account_of_type
 
 
@@ -80,18 +81,6 @@ _MIGRATION = _load_migration(_MIGRATION_FILENAME)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _drop_ledger_account_for(account_id):
-    """Remove the ledger account the sync hook auto-created, via raw SQL.
-
-    Leaves the account itself unpaired so the migration's backfill (which
-    skips already-paired accounts) has work to do.
-    """
-    _db.session.execute(_db.text(
-        "DELETE FROM budget.ledger_accounts WHERE account_id = :a"
-    ), {"a": account_id})
-    _db.session.commit()
 
 
 # The Step-4 ``ledger_accounts.kind_id`` subquery the b82 linked-row backfill
@@ -157,14 +146,10 @@ class TestBackfill:
         ``account_id``, and a NULL ``name``.
         """
         with app.app_context():
-            # $0 anchor: no Step-5 opening entry, so the raw ledger-row drop
-            # below leaves no posting-less journal entry behind (the deferred
-            # balanced trigger raises on one at COMMIT) and no equity twin.
             account = create_account_of_type(
                 seed_user, _db.session, "Checking", "Backfill Asset",
                 anchor_balance=Decimal("0.00"),
             )
-            _drop_ledger_account_for(account.id)
             assert ledger_accounts_for_account(_db.session, account.id) == []
 
             _run_backfill()
@@ -188,7 +173,6 @@ class TestBackfill:
                 seed_user, _db.session, "Mortgage", "Backfill Loan",
                 anchor_balance=Decimal("0.00"),
             )
-            _drop_ledger_account_for(account.id)
 
             _run_backfill()
 
@@ -205,12 +189,10 @@ class TestBackfill:
         two runs in a row must leave exactly one linked row.
         """
         with app.app_context():
-            # $0 anchor -- same rationale as test_backfill_pairs_asset_account.
             account = create_account_of_type(
                 seed_user, _db.session, "HYSA", "Idem Backfill",
                 anchor_balance=Decimal("0.00"),
             )
-            _drop_ledger_account_for(account.id)
 
             _run_backfill()
             _run_backfill()
@@ -224,16 +206,16 @@ class TestBackfill:
 
         Two accounts of different categories are unpaired, then backfilled
         together; each ends with exactly one correctly-classed row.  The
-        seed_user Checking (still paired) is skipped by the NOT EXISTS
+        seed_user Checking, paired by the test, is skipped by the NOT EXISTS
         guard, proving the backfill is additive, not a wipe-and-replace: its
-        rows keep their ids.  *It counted two rows there until plan task
+        row keeps its id.  *It counted two rows there until plan task
         plan#3132, the second the anchor-equity twin the seed fixture's
-        account sync minted; with that sync gone it holds its linked row
+        account sync minted; with that sync gone it held its linked row
         alone, which a count cannot tell from a re-created one, so the case
-        grades the ids.*
+        grades the ids.  That row was the create door's until plan task
+        plan#3133 deleted its pairing; the test plants it now.*
         """
         with app.app_context():
-            # $0 anchors -- same rationale as test_backfill_pairs_asset_account.
             asset_acct = create_account_of_type(
                 seed_user, _db.session, "Savings", "Cover Asset",
                 anchor_balance=Decimal("0.00"),
@@ -242,8 +224,10 @@ class TestBackfill:
                 seed_user, _db.session, "Auto Loan", "Cover Liability",
                 anchor_balance=Decimal("0.00"),
             )
-            _drop_ledger_account_for(asset_acct.id)
-            _drop_ledger_account_for(liab_acct.id)
+            chart_row_or_plant(
+                _db.session, seed_user["account"], "linked", "Asset",
+            )
+            _db.session.commit()
             checking_rows = sorted(
                 row.id for row in ledger_accounts_for_account(
                     _db.session, seed_user["account"].id,

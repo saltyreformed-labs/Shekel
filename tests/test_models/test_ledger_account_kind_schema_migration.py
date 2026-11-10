@@ -59,6 +59,7 @@ from app import ref_cache
 from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
 from app.extensions import db as _db
 from app.models.ledger_account import LedgerAccount
+from tests._stored_ledger import chart_row_or_plant
 from tests._test_helpers import create_account_of_type, load_migration_module
 
 
@@ -251,17 +252,12 @@ class TestBackfillShapeMapping:
             account = create_account_of_type(
                 seed_user, _db.session, "Checking", "Kind Map Linked",
             )
-            # Kind-filtered: the $100 sentinel opening also minted the
-            # anchor-equity twin sharing this account_id (Step 5).
-            linked = (
-                _db.session.query(LedgerAccount)
-                .filter_by(
-                    account_id=account.id,
-                    kind_id=_kind_id(LedgerAccountKindEnum.LINKED),
-                )
-                .one()
+            # Planted: no door pairs an account's linked row since plan task
+            # plan#3133.
+            linked_id = chart_row_or_plant(
+                _db.session, account, "linked", "Asset",
             )
-            derived, stored = self._derived_and_stored_kind(db, linked.id)
+            derived, stored = self._derived_and_stored_kind(db, linked_id)
             assert derived == _kind_id(LedgerAccountKindEnum.LINKED)
             assert stored == derived
 

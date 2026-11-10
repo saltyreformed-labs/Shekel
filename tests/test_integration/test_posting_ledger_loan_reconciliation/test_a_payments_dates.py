@@ -10,7 +10,7 @@ from decimal import Decimal
 from app.services import (
     balance_at,
     loan_anchor_service,
-    loan_posting_service,
+    loan_walk_reads,
     pay_period_write,
     transfer_service,
 )
@@ -100,7 +100,7 @@ class TestLatePaidPaymentDating:
             rows = _confirmed_rows_at(loan.id, scenario_id, _AS_OF)
             assert [row.payment_date for row in rows] == [date(2026, 2, 1)]
 
-            history = loan_posting_service.confirmed_loan_payment_history(
+            history = loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, _AS_OF,
             )
             assert [row.installment for row in history] == [date(2026, 2, 1)]

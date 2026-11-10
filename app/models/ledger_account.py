@@ -24,8 +24,9 @@ Twelve kinds coexist in one table:
 
 * **linked** (``account_id`` set, ``category_id`` NULL, ``is_owner_bucket``
   False, ``loan_account_id`` NULL) -- one per real ``budget.accounts`` row,
-  created by the account-create sync hook (``ledger_account_service``) and by
-  the Step-2 backfill migration.  ``name`` is ``NULL`` and the display label
+  created by the account-create sync hook (``ledger_account_service``) until
+  plan task plan#3133 deleted that call, and by the Step-2 backfill
+  migration.  No door writes one since.  ``name`` is ``NULL`` and the display label
   derives from the live ``account.name`` via the relationship.  Every such
   row is Asset or Liability (derived from the account-type category:
   Liability category -> Liability class; Asset, Retirement, and Investment
@@ -217,9 +218,11 @@ and a kind delete would strand every ledger account of that kind.
 interest / escrow / refund / opening row to the loan ``budget.accounts`` row
 it books against, and is NULL on every other kind.  RESTRICT
 (not SET NULL) because SET NULL would strand the row's kind (a ``loan_interest``
-row with no loan).  A permanent delete of a loan therefore clears these rows
-first (``ledger_account_service.dispose_loan_chart_rows``, ruling plan#2784), and
-the key is the backstop against a delete that does not.  Like ``account`` and
+row with no loan).  A permanent delete of a loan cleared these rows first
+(``ledger_account_service.dispose_loan_chart_rows``, ruling plan#2784) until
+plan task plan#3133 deleted that call: migration ``d913d743c78c`` emptied the
+table (ruling plan#3068) and no door writes it, so the key has no row to hold
+a delete with.  Like ``account`` and
 ``category``, the relationship is one-directional (no backref on ``Account``), so
 an account delete never triggers an ORM action on the ledger row.
 

@@ -10,7 +10,7 @@ from app.enums import LedgerAccountKindEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
 from app.services import (
     loan_ledger,
-    loan_posting_service,
+    loan_walk_reads,
     transaction_service,
     transfer_service,
 )
@@ -524,7 +524,7 @@ class TestTheSplitIsADateKeyedCorrection:
             )
             assert _interest_net(loan, scenario_id) == Decimal("997.50")
 
-            rows = loan_posting_service.confirmed_loan_payment_history(
+            rows = loan_walk_reads.confirmed_loan_payment_history(
                 loan.id, scenario_id, display_today(),
             )
             assert [(row.installment, row.interest, row.principal) for row in rows] == [

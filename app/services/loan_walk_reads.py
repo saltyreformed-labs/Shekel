@@ -1,13 +1,18 @@
-"""Loan-detail display read producers: the Loop B rebuild's measured surfaces.
+"""Shekel Budget App -- the loan detail page's two surfaces, read off the loan's walk.
 
-The display read side of the genesis loan sub-ledger: the loan DETAIL page's
-two measured surfaces, both shaped from the ONE walk the postings are
-reconciled from (:func:`app.services.loan_ledger.walk_loan_ledger`):
+Both are shaped from the ONE walk of the loan's facts
+(:func:`app.services.loan_ledger.walk_loan_ledger`), and neither reads a
+stored ledger row:
 
 * the confirmed payment-history table (:func:`confirmed_loan_payment_history`,
   each payment's real cash / principal / interest / escrow split); and
 * the balance-anchors drift scorecard (:func:`loan_balance_anchor_history`, each
-  opening / true-up paired with what the ledger had computed just before it).
+  opening / true-up paired with what the walk had computed just before it).
+
+**They lived in the loan POSTING package until plan task plan#3133** (its
+``_display`` module), which deletes that package's writers with the rest of
+the stored ledger's and moved these two out first: a home named for postings
+held no reader of one.  This module is named for what they read.
 
 **The payment table reads the WALK, not the ledger's legs** (plan step
 ``balance:X-bi-6-3``, ruling **R-BAL102**).  Through that step a reader
@@ -16,18 +21,18 @@ interest / escrow / principal legs back out of the ledger by the loan-side
 shadow's ``transaction_id``, so the table would "cross-check the writer".  The
 split is a date-keyed correction with no row link now, and two payments on
 one day in one period share ONE entry, so the ledger cannot say which payment
-paid what -- and never needed to: the ledger is a projection of this same
-walk (graded against it per date by plan step E1a's write-time assert until
-plan task plan#3093 deleted the assert ahead of the store), and a
-display-side second grade was a checker.  The paid-in-year chips moved OFF
-the postings onto the fold at step C6c
+paid what -- and never needed to: the stored ledger was a projection of this
+same walk, and a display-side second grade was a checker.  The paid-in-year
+chips moved OFF the postings onto the fold at step C6c
 (:func:`app.services.balance_at.loan_interest_paid_in_year` /
 :func:`~app.services.balance_at.loan_principal_paid_in_year`), so this module
-no longer answers them.
+does not answer them.
 
 **Whether a surface shows is the walk's answer too** (plan task plan#2779):
-:func:`_configured_loan_walk`, the one gate both ask.  This module reads no
-stored ledger row.  Reads only -- no writes, no commit.
+:func:`_configured_loan_walk`, the one gate both ask.  Reads only -- no
+writes, no commit.  It reads the clock once, in the payment table's refusal of
+a future *as_of*, which is why it is not a module of the walk's own package:
+:mod:`app.services.loan_ledger` reads no clock.
 """
 
 from dataclasses import dataclass
@@ -153,7 +158,7 @@ def confirmed_loan_payment_history(
     ``balance:X-bi-6-3`` this loaded the confirmed shadows once for the rows
     and summed each payment's posted legs back out of the ledger by the
     loan-side shadow's ``transaction_id`` in three more reads; the split has no
-    row link now and the walk the ledger is reconciled from already holds
+    row link now and the walk the worked-out ledger books from already holds
     every figure this table shows, so the walk is the table's one producer.
     ``cash`` is the outcome's (the settled payment leg's
     parent's :func:`~app.services.row_valuation.settled_contribution`, read once by
@@ -270,9 +275,10 @@ def loan_balance_anchor_history(
     that replaces the old use of the amortization schedule as a trust check.
 
     Derived from the SAME deterministic walk
-    (:func:`app.services.loan_ledger.walk_loan_ledger`) the loan's
-    opening / true-up postings are reconciled from, so a drift row and the posted
-    correction it describes can never disagree.
+    (:func:`app.services.loan_ledger.walk_loan_ledger`) the worked-out
+    ledger books the loan's opening / true-up corrections from
+    (:func:`app.services.ledger_lines.loan_correction_targets`), so a drift
+    row and the correction it describes can never disagree.
 
     **The *as_of* bound is applied HERE, on the walk's output, not inside it.**
     The walk records every anchor the loan carries whatever its date (it reads no

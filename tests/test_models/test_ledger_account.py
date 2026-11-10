@@ -46,6 +46,7 @@ from app.audit_infrastructure import AUDITED_TABLES
 from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
 from app.extensions import db as _db
 from app.models.ledger_account import LedgerAccount
+from tests._stored_ledger import chart_row_or_plant
 from tests._test_helpers import create_account_of_type
 
 
@@ -74,13 +75,14 @@ class TestPartialUnique:
     ):
         """A second LINKED row for the same ``account_id`` trips the index.
 
-        The account already has one paired row from the sync hook; a second
-        linked row with the same ``(account_id, kind_id)`` must raise on the
-        partial unique index (the uniqueness applies per account-linked
-        kind).
+        The test plants the account's one linked row (no door pairs one since
+        plan task plan#3133); a second linked row with the same
+        ``(account_id, kind_id)`` must raise on the partial unique index (the
+        uniqueness applies per account-linked kind).
         """
         with app.app_context():
             account = create_account_of_type(seed_user, _db.session, "Checking", "Dup Checking")
+            chart_row_or_plant(_db.session, account, "linked", "Asset")
             with pytest.raises(IntegrityError):
                 _db.session.add(LedgerAccount(
                     user_id=account.user_id,
@@ -104,12 +106,13 @@ class TestPartialUnique:
         duplicate linked row would.
         """
         with app.app_context():
-            # $0 anchor: the zero-delta rule mints NO opening and NO twin, so
-            # this test constructs the twin manually at the storage tier.
+            # No door writes an account's chart rows (plan task plan#3133), so
+            # this storage-tier test plants the linked row and the twin itself.
             account = create_account_of_type(
                 seed_user, _db.session, "Checking", "Twin Checking",
                 anchor_balance=Decimal("0.00"),
             )
+            chart_row_or_plant(_db.session, account, "linked", "Asset")
             _db.session.add(LedgerAccount(
                 user_id=account.user_id,
                 class_id=_class_id(LedgerAccountClassEnum.EQUITY),
@@ -244,12 +247,13 @@ class TestLinkedRowDisplayName:
         the display label is never a stale snapshot.
         """
         with app.app_context():
-            # $0 anchor keeps the chart at the single linked row this
-            # storage-tier test reads with .one().
+            # The test plants the one linked row it reads with .one(): no
+            # door pairs one since plan task plan#3133.
             account = create_account_of_type(
                 seed_user, _db.session, "Checking", "Original Name",
                 anchor_balance=Decimal("0.00"),
             )
+            chart_row_or_plant(_db.session, account, "linked", "Asset")
             ledger_account = (
                 _db.session.query(LedgerAccount)
                 .filter_by(account_id=account.id)
@@ -292,12 +296,8 @@ class TestForeignKeyActions:
                 seed_user, _db.session, "Savings", "Empty Savings",
                 anchor_balance=Decimal("0.00"),
             )
-            account_id = account.id
-            ledger_account_id = (
-                _db.session.query(LedgerAccount)
-                .filter_by(account_id=account_id)
-                .one()
-                .id
+            ledger_account_id = chart_row_or_plant(
+                _db.session, account, "linked", "Asset",
             )
 
             _db.session.delete(account)
@@ -787,30 +787,17 @@ class TestAccountOrCategoryExclusiveCheck:
     def test_both_account_and_category_set_rejected(self, app, db, seed_user):
         """A row with BOTH account_id and category_id set trips the CHECK.
 
-        The account's auto-paired linked row is removed first
-        (``ledger_accounts`` is not append-only) so the only constraint a
-        both-set row can violate is the partition CHECK, not
-        ``uq_ledger_accounts_account_kind`` -- pinning the CHECK as the surface
-        regardless of constraint-evaluation order.
+        The account carries no linked row (no door pairs one since plan task
+        plan#3133), so the only constraint a both-set row can violate is the
+        partition CHECK, not ``uq_ledger_accounts_account_kind`` -- pinning
+        the CHECK as the surface regardless of constraint-evaluation order.
         """
         with app.app_context():
-            # $0 anchor keeps the chart at the single linked row this test
-            # removes below.
             account = create_account_of_type(
                 seed_user, _db.session, "Checking", "Both Links",
                 anchor_balance=Decimal("0.00"),
             )
             category = seed_user["categories"]["Groceries"]
-            # Free the account_id by removing its linked row so a both-set
-            # row cannot collide on uq_ledger_accounts_account_kind.
-            linked = (
-                _db.session.query(LedgerAccount)
-                .filter_by(account_id=account.id)
-                .one()
-            )
-            _db.session.delete(linked)
-            _db.session.commit()
-
             with pytest.raises(IntegrityError) as excinfo:
                 _db.session.add(LedgerAccount(
                     user_id=account.user_id,
@@ -859,24 +846,18 @@ class TestFallbackShapeCheck:
     def test_fallback_with_account_id_rejected(self, app, db, seed_user):
         """``is_owner_bucket`` True on a row that ALSO links a real account is refused.
 
-        The account's auto-paired linked row is removed first so the only
-        constraint a (linked AND is_owner_bucket) row can violate is the
-        fallback-shape CHECK, not ``uq_ledger_accounts_account_kind``.
+        The row is kind ``fallback``, so ``uq_ledger_accounts_account_kind``
+        (keyed ``(account_id, kind_id)``) cannot fire on it whatever else the
+        account holds: the only constraint a (linked AND is_owner_bucket) row
+        can violate is the fallback-shape CHECK.  *It deleted the account's
+        linked row first until plan task plan#3133, for a collision that could
+        not happen; no door pairs one since.*
         """
         with app.app_context():
-            # $0 anchor keeps the chart at the single linked row this test
-            # removes below.
             account = create_account_of_type(
                 seed_user, _db.session, "Checking", "Fallback Account",
                 anchor_balance=Decimal("0.00"),
             )
-            linked = (
-                _db.session.query(LedgerAccount)
-                .filter_by(account_id=account.id)
-                .one()
-            )
-            _db.session.delete(linked)
-            _db.session.commit()
             with pytest.raises(IntegrityError) as excinfo:
                 _db.session.add(LedgerAccount(
                     user_id=account.user_id,
@@ -911,15 +892,16 @@ class TestLoanLedgerShapeAndUnique:
 
         ``loan_account_id`` set, ``account_id`` / ``category_id`` NULL,
         ``is_owner_bucket`` False, a snapshot ``name``, the ``loan_interest`` kind,
-        Expense class -- the shape the Step-4 resolver will create.  It coexists
-        with the loan account's own linked row (different shape, different
-        index), proving the loan unique does not collide with
-        ``uq_ledger_accounts_account_kind``.
+        Expense class -- the shape the Step-4 resolver created.  It coexists
+        with the loan account's own linked row, which the test plants
+        (different shape, different index), proving the loan unique does not
+        collide with ``uq_ledger_accounts_account_kind``.
         """
         with app.app_context():
             loan = create_account_of_type(
                 seed_user, _db.session, "Mortgage", "Loan Shape OK",
             )
+            chart_row_or_plant(_db.session, loan, "linked", "Liability")
             _db.session.add(LedgerAccount(
                 user_id=loan.user_id,
                 class_id=_class_id(LedgerAccountClassEnum.EXPENSE),
@@ -950,22 +932,17 @@ class TestLoanLedgerShapeAndUnique:
         """A per-loan row that ALSO links a real account trips the shape CHECK.
 
         ``ck_ledger_accounts_loan_shape`` forbids ``account_id`` on a
-        ``loan_account_id`` row.  The loan's auto-paired linked row is removed
-        first so the only constraint a (loan AND account) row can violate is the
-        loan-shape CHECK, not ``uq_ledger_accounts_account_kind`` -- pinning the
-        CHECK as the surface regardless of constraint-evaluation order.
+        ``loan_account_id`` row.  The row is kind ``loan_interest``, so
+        ``uq_ledger_accounts_account_kind`` (keyed ``(account_id, kind_id)``)
+        cannot fire on it whatever else the loan holds: the only constraint a
+        (loan AND account) row can violate is the loan-shape CHECK.  *It
+        deleted the loan's linked row first until plan task plan#3133, for a
+        collision that could not happen; no door pairs one since.*
         """
         with app.app_context():
             loan = create_account_of_type(
                 seed_user, _db.session, "Mortgage", "Loan Bad Acct",
             )
-            linked = (
-                _db.session.query(LedgerAccount)
-                .filter_by(account_id=loan.id)
-                .one()
-            )
-            _db.session.delete(linked)
-            _db.session.commit()
             with pytest.raises(IntegrityError) as excinfo:
                 _db.session.add(LedgerAccount(
                     user_id=loan.user_id,
@@ -1122,11 +1099,12 @@ class TestAuditTableRegistration:
     def test_audit_log_captures_inserts(self, app, db, seed_user):
         """Creating a ledger account materialises an INSERT audit row.
 
-        Arithmetic: one new account fires the sync hook -> one
-        ledger_accounts INSERT -> exactly one audit_log row tagged
-        table_schema='budget', table_name='ledger_accounts',
-        operation='INSERT'.  A trigger pointed at the wrong function would
-        silently no-op, so the count delta proves the trail is intact.
+        Arithmetic: one planted linked row -> one ledger_accounts INSERT ->
+        exactly one audit_log row tagged table_schema='budget',
+        table_name='ledger_accounts', operation='INSERT' (creating the
+        account itself inserts no chart row since plan task plan#3133).  A
+        trigger pointed at the wrong function would silently no-op, so the
+        count delta proves the trail is intact.
         """
         with app.app_context():
             baseline = _db.session.execute(_db.text(
@@ -1136,12 +1114,11 @@ class TestAuditTableRegistration:
                 "   AND operation = 'INSERT'"
             )).scalar()
 
-            # $0 anchor: exactly one ledger_accounts INSERT (a non-zero
-            # anchor would also mint the Step-5 anchor-equity twin).
-            create_account_of_type(
+            account = create_account_of_type(
                 seed_user, _db.session, "Checking", "Audited Account",
                 anchor_balance=Decimal("0.00"),
             )
+            chart_row_or_plant(_db.session, account, "linked", "Asset")
 
             after = _db.session.execute(_db.text(
                 "SELECT count(*) FROM system.audit_log "

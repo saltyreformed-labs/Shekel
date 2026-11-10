@@ -44,7 +44,7 @@ from app.models.pay_period import PayPeriod
 from app.models.ref import AccountType
 from app.posting_infrastructure import apply_ledger_append_only_privileges
 from app.services import account_service
-from tests._stored_ledger import ledger_accounts_for_account
+from tests._stored_ledger import chart_row_or_plant
 from tests._test_helpers import (
     add_entry,
     create_account_of_type,
@@ -748,17 +748,17 @@ class TestLedgerAppendOnlyPrivileges:
         Runs as the OWNER role (callers RESET ROLE first): test data is
         staged with owner privileges so the assertions exercise only the
         app role's runtime behaviour, not its ability to build fixtures.
+        Each account's linked row is planted, as no door writes one since
+        plan task plan#3133.
         """
         savings = create_account_of_type(
             seed_user, db_session, "Savings", "R4 Posting Savings",
         )
+        checking_ledger = chart_row_or_plant(
+            db_session, seed_user["account"], "linked", "Asset",
+        )
+        savings_ledger = chart_row_or_plant(db_session, savings, "linked", "Asset")
         db_session.commit()
-        checking_ledger = ledger_accounts_for_account(
-            db_session, seed_user["account"].id,
-        )[0].id
-        savings_ledger = ledger_accounts_for_account(
-            db_session, savings.id,
-        )[0].id
         return checking_ledger, savings_ledger
 
     def test_ledger_posture_matches_runtime(self, db, shekel_app_role):

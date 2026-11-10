@@ -25,8 +25,8 @@ Flushes but never commits -- the caller owns the transaction boundary.
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models.transfer import Transfer
 from app.services import loan_loaders
+from app.services.loan_loaders import scenarios_with_loan_payments
 from app.services._posting_reconcile import account_owner_id
 from app.services.scenario_resolver import get_baseline_scenario
 from app.utils.db_errors import is_unique_violation
@@ -34,41 +34,6 @@ from app.utils.db_errors import is_unique_violation
 from app.services.loan_ledger import walk_loan_ledger
 
 from ._corrections import reconcile_loan_corrections
-
-
-def scenarios_with_loan_payments(loan_account_id: int) -> list[int]:
-    """Return the scenarios that carry a payment for a loan.
-
-    The distinct ``scenario_id`` set over the live transfers INTO the loan --
-    the scenarios whose split corrections a loan-GLOBAL change re-bases.  It
-    read the loan's non-deleted income SHADOWS until plan step
-    balance:X-bi-6-4b; every live transfer carried one live income shadow in
-    its own scenario then (Transfer Invariants 1 and 3), so the two sets were
-    one (measured equal on the 2026-09-23 21:17 production dump).  A balance
-    true-up, a rate change, and a params edit all live on the loan ACCOUNT,
-    not a scenario, so they move the
-    confirmed-payment split in every scenario the loan has payments in;
-    :func:`sync_loan_postings_all_scenarios` reconciles each in turn (adding the
-    baseline so a payment-less loan is not skipped).  A projected-only scenario
-    is harmlessly included -- its sync is a no-op, since only a settled payment
-    posts a correction.
-
-    Args:
-        loan_account_id: The loan whose payment scenarios to enumerate.
-
-    Returns:
-        The distinct scenario ids, ascending.
-    """
-    rows = (
-        db.session.query(Transfer.scenario_id)
-        .filter(
-            Transfer.to_account_id == loan_account_id,
-            Transfer.is_deleted.is_(False),
-        )
-        .distinct()
-        .all()
-    )
-    return sorted(row[0] for row in rows)
 
 
 def sync_loan_postings(loan_account_id: int, scenario_id: int) -> None:
@@ -156,7 +121,7 @@ def sync_loan_postings_all_scenarios(loan_account_id: int) -> None:
     :func:`sync_loan_postings` over the union of:
 
     * every scenario the loan has a payment in
-      (:func:`scenarios_with_loan_payments`), and
+      (:func:`app.services.loan_loaders.scenarios_with_loan_payments`), and
     * the owner's BASELINE scenario -- so a payment-less loan (a brand-new loan
       at params-create, before any payment settles) still gets its opening
       posted, and so the baseline is never skipped.  The opening is per-scenario

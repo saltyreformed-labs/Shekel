@@ -433,8 +433,8 @@ findings **N-205**, **N-204** and **N-206**.
 
 "What balances have I told this account it held, and how far off were my records each time?" The
 cash twin of the loan dashboard's Balance anchors card (`loan/dashboard.html:427-478`, producer
-`loan_posting_service._display.loan_balance_anchor_history`), which renders As of / Recorded /
-Ledger / Drift per anchor.
+`loan_walk_reads.loan_balance_anchor_history`), which renders As of / Recorded / Ledger / Drift per
+anchor.
 
 ### What exists today, and the divergence
 

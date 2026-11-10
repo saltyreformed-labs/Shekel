@@ -1516,12 +1516,12 @@ def create_account_of_type(
     The shared "build an account of type X" helper for the ledger-account
     (Build-Order Step 2) suites, so the stereotyped ``AccountType`` lookup +
     ``AccountSpec`` + ``create_account`` block is not copied per file (a
-    duplicate-code finding).  ``create_account`` fires the Step-2
-    ledger-account sync hook, so the returned account already carries its
-    paired ``budget.ledger_accounts`` row.  The opening anchor balance
-    defaults to a fixed sentinel (the ledger-pairing suites assert on
-    pairing, never on balance); the Step-5 account-anchor suites pass an
-    explicit ``anchor_balance`` because the opening correction posts exactly
+    duplicate-code finding).  It pairs no ``budget.ledger_accounts`` row:
+    ``create_account``'s sync hook did until plan task plan#3133, and a store
+    model test plants one (``tests._stored_ledger.chart_row_or_plant``).  The
+    opening anchor balance defaults to a fixed sentinel (the store suites
+    assert on rows, never on balance); the account-anchor suites pass an
+    explicit ``anchor_balance`` because the opening books exactly
     that value.  The anchor period is resolved by the factory from the day the
     opening is observed on.
 

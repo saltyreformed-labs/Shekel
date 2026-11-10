@@ -12,6 +12,13 @@ reader now prices a settled row at (**R-CC40**, half 1: what its movement
 moves ON THE ACCOUNT ASKED ABOUT, so a card-tendered bill leaves checking's
 offer).
 
+**Since ruling plan#3227 "Paid from" names the row's own account or one that
+holds cash, never a card**: Credit puts a bill on a card, through the verb's
+other entry (``_settle.settle_onto_card``) and its own gate
+(``movement_account.the_card``).  So the tender is graded here with Savings,
+an HYSA, a money market and a second checking, and the card refused in words;
+the developer's worked case below is pressed Credit.
+
 Every refusal is graded by the state it leaves, re-read from the database:
 the verb composes its refusals ahead of any mutation, so a refused settle
 leaves the row Projected with no movement and a refused correction leaves the

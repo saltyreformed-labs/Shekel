@@ -16,6 +16,7 @@ from app.models.transaction import Transaction
 from app.services import status_seam, transaction_service
 from app.services.row_valuation import settled_figure
 from app.services.transaction_service import settle_transaction
+from app.utils.dates import display_today
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_account,
@@ -47,8 +48,8 @@ class TestASettleBooksOnTheTender:
         """Every caller but the picker states nothing: the row's own account.
 
         The byte-identical default -- the cell's checkmark, the mobile card's
-        Mark Paid, every settle through ``CC-5-2`` -- and the tuple's first
-        member (ruling **R-CC39**).
+        Mark Paid, every settle through ``CC-5-2`` -- and the "Paid from"
+        list's first member (ruling plan#3227).
         """
         with app.app_context():
             _card(seed_user)
@@ -62,12 +63,15 @@ class TestASettleBooksOnTheTender:
     ):
         """The developer's worked case, read by every reader that counts money.
 
-        The row stays on Checking (its paycheck budgets it); its ONE movement
-        is on the card, owned by the row's owner, dated the act's day on the
-        ``entered`` basis; the card's fold reads `-120.00` that day and
-        checking's reads nothing; the posted ledger books the leg against the
-        CARD's ledger account and nothing against checking's; and the row is
-        worth `$120.00` to the grid exactly as a checking-settled bill is.
+        Charged to the card by a Credit press, the verb's entry for a card
+        (``_settle.settle_onto_card``) since ruling plan#3227 took the card
+        out of "Paid from".  The row stays on Checking (its paycheck budgets
+        it); its ONE movement is on the card, owned by the row's owner, dated
+        the act's day on the ``entered`` basis; the card's fold reads
+        `-120.00` that day and checking's reads nothing; the posted ledger
+        books the leg against the CARD's ledger account and nothing against
+        checking's; and the row is worth `$120.00` to the grid exactly as a
+        checking-settled bill is.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -79,7 +83,12 @@ class TestASettleBooksOnTheTender:
             checking_before = ledger_net(db.session, checking_ledger.id, scenario_id)
             card_before = ledger_net(db.session, card_ledger.id, scenario_id)
 
-            settle_transaction(txn, tender_account_id=card.id)
+            # Today typed under "Money moved on", the day a settle is dated
+            # by default: the row's own date is before the card's first
+            # balance, which would absorb the leg (``create_account_of_type``).
+            transaction_service.mark_as_credit(
+                txn, card_account_id=card.id, day=display_today(),
+            )
             db.session.commit()
 
             movement = _movement(txn)
@@ -111,23 +120,28 @@ class TestASettleBooksOnTheTender:
             db.session.commit()
             assert _movement(txn).account_id == txn.account_id
 
-    def test_a_row_living_outside_the_set_may_be_paid_from_the_card(
+    def test_a_row_on_savings_may_be_paid_from_checking(
         self, app, seed_user, seed_periods,
     ):
-        """A Savings bill paid from the card: the union (ruling **R-CC39**), one rule for every row."""
+        """A Savings bill paid from Checking: one list for every row (ruling plan#3227).
+
+        The row's own account, then every cash account of the owner's, so a
+        row off Checking names Checking as a row on Checking names Savings.
+        """
         with app.app_context():
-            card = _card(seed_user)
+            checking = seed_user["account"]
+            _card(seed_user)
             savings = create_account_of_type(
                 seed_user, db.session, "Savings", "Rainy Day",
             )
             txn = _hotel_bill(seed_user, seed_periods[0], account=savings)
-            settle_transaction(txn, tender_account_id=card.id)
+            settle_transaction(txn, tender_account_id=checking.id)
             db.session.commit()
-            assert _movement(txn).account_id == card.id
+            assert _movement(txn).account_id == checking.id
 
 
 class TestTheTenderGate:
-    """Foreign -> 404; archived or outside the picker's set -> refused; nothing written."""
+    """Foreign -> 404; archived, a card, or holding no cash -> refused; nothing written."""
 
     @staticmethod
     def _still_projected(txn):
@@ -182,19 +196,42 @@ class TestTheTenderGate:
                 settle_transaction(txn, tender_account_id=card.id)
             self._still_projected(txn)
 
-    def test_an_account_outside_the_pickers_set_is_refused_per_kind(
+    def test_a_card_is_refused_naming_credit_and_cc(self, app, seed_user, seed_periods):
+        """A hand-built Paid naming the card is refused, not settled on the card (ruling plan#3227).
+
+        plan#3057's review (MEDIUM-2): Credit puts a bill on a card, and its
+        own gate admits the card (``movement_account.the_card``); "Paid
+        from" lists the cash a bill was paid with.
+        """
+        with app.app_context():
+            card = _card(seed_user)
+            db.session.commit()
+            txn = _hotel_bill(seed_user, seed_periods[0])
+            with pytest.raises(
+                ValidationError,
+                match=(
+                    r"^'Rewards Card' is a credit card, so a payment cannot be "
+                    r"paid from it: Credit puts a bill on a card, and CC puts a "
+                    r"purchase on one\.$"
+                ),
+            ):
+                settle_transaction(txn, tender_account_id=card.id)
+            self._still_projected(txn)
+
+    def test_an_account_that_holds_no_cash_is_refused_per_kind(
         self, app, seed_user, seed_periods,
     ):
-        """A loan, a 401(k), savings, a second checking: unwritable, one sentence (R-CC37 / R-CC39)."""
+        """A loan, a 401(k), a CD, a house: unwritable, one sentence (ruling plan#3227).
+
+        A CD and a house are assets, so a predicate that widened to "not a
+        loan" or to "an asset" fails on them.
+        """
         with app.app_context():
-            _card(seed_user)
             outsiders = [
                 create_loan_account(seed_user, db.session, name="Car Loan"),
                 create_account_of_type(seed_user, db.session, "401(k)", "Work 401k"),
-                create_account_of_type(seed_user, db.session, "Savings", "Rainy Day"),
-                create_account_of_type(
-                    seed_user, db.session, "Checking", "Second Checking",
-                ),
+                create_account_of_type(seed_user, db.session, "CD", "12-month CD"),
+                create_account_of_type(seed_user, db.session, "Property", "House"),
             ]
             db.session.commit()
             for account in outsiders:
@@ -206,6 +243,36 @@ class TestTheTenderGate:
                 ):
                     settle_transaction(txn, tender_account_id=account.id)
                 self._still_projected(txn)
+
+    def test_every_account_that_holds_cash_is_admitted_per_kind(
+        self, app, seed_user, seed_periods,
+    ):
+        """Savings, an HYSA, a money market, a second checking: each holds the payment.
+
+        Ruling plan#3227: "Paid from" lists the row's own account, then every
+        active account of the owner's that holds cash.  Until then the gate
+        refused savings and a second checking as outside the cash-flow set
+        (rulings R-CC37 and R-CC39).  How the paying account's balance and
+        the posted ledger count it is ``test_a_payment_from_cash_counts_once``.
+        """
+        with app.app_context():
+            cash = [
+                create_account_of_type(seed_user, db.session, "Savings", "Rainy Day"),
+                create_account_of_type(seed_user, db.session, "HYSA", "High Yield"),
+                create_account_of_type(
+                    seed_user, db.session, "Money Market", "Money Market",
+                ),
+                create_account_of_type(
+                    seed_user, db.session, "Checking", "Second Checking",
+                ),
+            ]
+            db.session.commit()
+            for account in cash:
+                txn = _hotel_bill(seed_user, seed_periods[0])
+                settle_transaction(txn, tender_account_id=account.id)
+                db.session.commit()
+                assert txn.status_id == ref_cache.status_id(StatusEnum.DONE)
+                assert _movement(txn).account_id == account.id
 
     def test_a_foreign_tender_on_a_replayed_settle_is_still_a_404(
         self, app, seed_user, seed_periods, second_user,
@@ -311,27 +378,28 @@ class TestATenderCorrectionOnASettledRow:
     def test_the_movement_moves_and_both_clearing_links_are_released(
         self, app, seed_user, seed_periods,
     ):
-        """A checking-settled bill, linked by checking's statement, corrected to the card.
+        """A checking-settled bill, linked by checking's statement, corrected to Savings.
 
-        The same movement (id kept) books on the card; the link the row and
+        The same movement (id kept) books on Savings; the link the row and
         its movement carried to checking's statement is withdrawn on both
-        (a statement of checking never showed money that moved on the card,
+        (a statement of checking never showed money that moved on Savings,
         and the movement's key would refuse the pair); the row's version
         counter moves, so a second stale tab meets a 409 rather than
         overwriting the correction; and the POSTED ledger follows the fold
         -- the door's reconcile after the seam reverses checking's leg and
-        posts the card's, so checking's ledger account is back where it was
-        and the card's carries the payment.
+        posts Savings', so checking's ledger account is back where it was
+        and Savings' carries the payment.  It was corrected to the card
+        until ruling plan#3227 took the card out of "Paid from".
         """
         with app.app_context():
             checking = seed_user["account"]
-            card = _card(seed_user)
+            savings = add_savings(seed_user)
             txn = _hotel_bill(seed_user, seed_periods[0])
             scenario_id = txn.scenario_id
             checking_ledger = linked_ledger_account(db.session, checking.id)
-            card_ledger = linked_ledger_account(db.session, card.id)
+            savings_ledger = linked_ledger_account(db.session, savings.id)
             checking_before = ledger_net(db.session, checking_ledger.id, scenario_id)
-            card_before = ledger_net(db.session, card_ledger.id, scenario_id)
+            savings_before = ledger_net(db.session, savings_ledger.id, scenario_id)
             settle_transaction(txn)
             status_seam.record_clearing(txn, _latest_anchor(checking.id).id)
             db.session.commit()
@@ -341,19 +409,22 @@ class TestATenderCorrectionOnASettledRow:
             assert ledger_net(db.session, checking_ledger.id, scenario_id) - checking_before == -_HOTEL
             first_id, version_before = movement.id, txn.version_id
 
-            _correct_tender(txn, card.id)
+            _correct_tender(txn, savings.id)
 
             movement = _movement(txn)
             assert movement.id == first_id
-            assert movement.account_id == card.id
+            assert movement.account_id == savings.id
             assert movement.reconciled_by_id is None
             assert txn.reconciled_by_id is None
             assert txn.version_id == version_before + 1
             assert movement.settled_on == txn.settled_on
-            assert _per_day(card.id, scenario_id)[txn.settled_on] == -_HOTEL
+            assert _per_day(savings.id, scenario_id)[txn.settled_on] == -_HOTEL
             assert txn.settled_on not in _per_day(checking.id, scenario_id)
             assert ledger_net(db.session, checking_ledger.id, scenario_id) == checking_before
-            assert ledger_net(db.session, card_ledger.id, scenario_id) - card_before == -_HOTEL
+            assert (
+                ledger_net(db.session, savings_ledger.id, scenario_id) - savings_before
+                == -_HOTEL
+            )
 
     def test_an_echo_of_the_recorded_tender_writes_nothing(
         self, app, seed_user, seed_periods,
@@ -437,7 +508,7 @@ class TestATenderCorrectionOnASettledRow:
     ):
         """A `$0.00` close records no movement, so there is nothing to book elsewhere."""
         with app.app_context():
-            card = _card(seed_user)
+            savings = add_savings(seed_user)
             txn = _hotel_bill(seed_user, seed_periods[0])
             settle_transaction(txn, submitted=typed(Decimal("0.00")))
             db.session.commit()
@@ -445,7 +516,7 @@ class TestATenderCorrectionOnASettledRow:
             with pytest.raises(ValidationError, match=r"records no payment movement"):
                 transaction_service.apply_requested_status(
                     txn, txn.status_id,
-                    stated=transaction_service.StatedRecord(tender_account_id=card.id),
+                    stated=transaction_service.StatedRecord(tender_account_id=savings.id),
                 )
 
     def test_the_settle_verb_ignores_a_tender_on_the_entries_branch(
@@ -459,7 +530,7 @@ class TestATenderCorrectionOnASettledRow:
         no 'Paid from' picker on a row settling from its purchases.
         """
         with app.app_context():
-            card = _card(seed_user)
+            savings = add_savings(seed_user)
             txn = _hotel_bill(seed_user, seed_periods[0], is_envelope=True)
             from app.services import entry_service  # pylint: disable=import-outside-toplevel
             entry_service.create_entry(
@@ -469,7 +540,7 @@ class TestATenderCorrectionOnASettledRow:
                     purchased_on=seed_periods[0].start_date,
                 ),
             )
-            settle_transaction(txn, tender_account_id=card.id)
+            settle_transaction(txn, tender_account_id=savings.id)
             db.session.commit()
             assert txn.status_id == ref_cache.status_id(StatusEnum.DONE)
             assert txn.covering_movements == []

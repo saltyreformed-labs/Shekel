@@ -12,8 +12,8 @@ corrected from the single filer's $201,775 at plan step salary:X-at-7, finding
 where its withholding documents print other figures than the return's).  On
 2026-11-10 neither prints one: the Pub 15-T draft irs.gov posts is still 2026's,
 and the draft Form W-4 (2027), created 2026-06-10, shows placeholders for its
-Step 3 child credit and its standard deductions.  Re-verify against both when
-the IRS posts them final.
+Step 3 child credit and its standard deductions.  Step plan#3353 re-checks
+against both when the IRS posts them final.
 
 **North Carolina's 2027 rate is fixed by statute, not by a revenue trigger.**
 S.L. 2026-41 sec. 44.1(a) (approved 2026-07-07) rewrote N.C.G.S.

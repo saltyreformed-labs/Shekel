@@ -8,13 +8,16 @@ rate (N.C.G.S. 105-153.7(a)).  A future year whose statute amends either table
 gets its own table beside these, and the years before it keep reading these.
 
 **Graded 2026-11-10** (step plan#3207): no session law through S.L. 2026-62,
-the latest then enacted, amends N.C.G.S. 105-153.5(a)(1) or (a1), and the 2025
-Form D-401 instructions print these same tables, band edges included.  Each
-year that reads them and has no D-401 instructions yet names the step that
+the latest ncleg.gov had posted, amends N.C.G.S. 105-153.5(a)(1) or (a1), and
+the 2025 Form D-401 instructions print these same tables, band edges included.
+Each year that reads them and has no D-401 instructions yet names the step that
 re-checks them against its own when NCDOR posts them.
 
-Married filing separately's standard deduction is the base $12,750; the
-statute's "$0 if the spouse itemizes" case is not modelled.
+Married filing separately's standard deduction is the table's $12,750.  The
+statute's zero for "a person who is not eligible for a standard deduction
+under section 63 of the Code" is not modelled; for a separate filer that is
+IRC sec. 63(c)(6)(A), "where either spouse itemizes deductions" (the D-401's
+"If spouse claims itemized deductions", $0).
 """
 
 from decimal import Decimal
@@ -29,8 +32,9 @@ STANDARD_DEDUCTION = {
     FilingStatusEnum.HEAD_OF_HOUSEHOLD: Decimal("19125.00"),
 }
 
-# Single and married-filing-separately filers share one tier table in the
-# statute, so they share one here.
+# The statute's table gives single and married-filing-separately filers rows
+# of their own with the same figures (the D-401 prints them as one row), so
+# they share one tuple here.
 _SINGLE_OR_SEPARATE_TIERS = (
     ChildDeductionTier(Decimal("0.00"), Decimal("20000.00"), Decimal("3000.00")),
     ChildDeductionTier(Decimal("20000.00"), Decimal("30000.00"), Decimal("2500.00")),

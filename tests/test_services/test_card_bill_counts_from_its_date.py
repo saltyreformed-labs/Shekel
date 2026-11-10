@@ -105,11 +105,17 @@ def _envelope(seed_user, period, budget, *, on_card=None):
 
 
 def _swipe(seed_user, row, card, amount, on, *, name="Kroger"):
-    """A purchase of *amount* on *card* under *row*, the bank not yet seen to take it."""
+    """A purchase of *amount* on *card* under *row*, the bank not yet seen to take it.
+
+    Under a row that lives on *card* it is filed on the row's own account;
+    under any other row the CC tick puts it on *card*, as the forms post.
+    """
+    on_another_account = row.account_id != card.id
     entry_service.create_entry(
         row.id, seed_user["user"].id, entry_service.EntryDetails(
-            figure=typed(Decimal(amount)), description=name,
-            purchased_on=on, account_id=card.id,
+            figure=typed(Decimal(amount)), description=name, purchased_on=on,
+            on_card=on_another_account,
+            card_account_id=card.id if on_another_account else None,
         ),
     )
     db.session.commit()

@@ -667,14 +667,20 @@ class TestHardDeleteAndTheMovementsOnAnAccount:
 
     @staticmethod
     def _swipe(row, seed_user, card):
-        """Record a `$60.00` purchase against *row* ON *card*, through the door."""
+        """Record a `$60.00` purchase against *row* ON *card*, through the door.
+
+        Under a row on *card* it is filed on the row's own account; under any
+        other row the CC tick puts it on *card*, as the forms post.
+        """
+        on_another_account = row.account_id != card.id
         return entry_service.create_entry(
             row.id, seed_user["user"].id,
             entry_service.EntryDetails(
                 figure=typed(Decimal("60.00")),
                 description="Kroger",
                 purchased_on=display_today() - timedelta(days=1),
-                account_id=card.id,
+                on_card=on_another_account,
+                card_account_id=card.id if on_another_account else None,
             ),
         )
 

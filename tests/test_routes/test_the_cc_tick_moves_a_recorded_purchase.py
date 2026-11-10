@@ -100,11 +100,11 @@ def _stored(entry_id):
 
 
 def _swipe(seed_user, txn, card):
-    """A $12.34 Kroger bought on *card* under *txn*, through the add door's "Paid from"."""
+    """A $12.34 Kroger bought on *card* under *txn*, through the add door's CC tick."""
     entry = entry_service.create_entry(
         txn.id, seed_user["user"].id, entry_service.EntryDetails(
             figure=typed(Decimal("12.34")), description="Kroger",
-            purchased_on=_day(seed_user), account_id=card.id,
+            purchased_on=_day(seed_user), on_card=True, card_account_id=card.id,
         ),
     )
     db.session.commit()

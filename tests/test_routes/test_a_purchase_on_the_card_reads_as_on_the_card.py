@@ -98,13 +98,18 @@ def _tick(client, row, amount, description, bought_on):
     return _the(row.id, description)
 
 
-def _recorded(seed_user, row, amount, description, *, account_id=None):
-    """Record a purchase bought in the bootstrap paycheck, on *account_id* or its row's account."""
+def _recorded(seed_user, row, amount, description, *, account_id=None, card=None):
+    """Record a purchase bought in the bootstrap paycheck, through the add door.
+
+    "Paid from" *account_id*, or its row's account; or, given *card*, ticked
+    CC with *card* picked.
+    """
     entry = entry_service.create_entry(
         row.id, seed_user["user"].id, entry_service.EntryDetails(
             figure=typed(Decimal(amount)), description=description,
             purchased_on=_bought_on(seed_user["bootstrap_period"]),
-            account_id=account_id,
+            account_id=account_id, on_card=card is not None,
+            card_account_id=None if card is None else card.id,
         ),
     )
     db.session.commit()
@@ -423,8 +428,8 @@ class TestOnACardIsNarrowerThanOffItsRowsAccount:
     ):
         """Groceries on Savings, one purchase paid from checking: no CC anywhere.
 
-        Ruling R-CC39's "Paid from" offers a Savings row Checking too, so this
-        purchase has moved off its row's account and is on no card.
+        "Paid from" offers a Savings row Checking too (ruling plan#3227), so
+        this purchase has moved off its row's account and is on no card.
         Arithmetic: 800.00 - 45.00 = 755.00 remaining.
         """
         with app.app_context():
@@ -460,7 +465,7 @@ class TestOnACardIsNarrowerThanOffItsRowsAccount:
             period = seed_user["bootstrap_period"]
             row = _groceries(seed_user, period, account=visa)
             _recorded(seed_user, row, "50.00", "Shell")
-            _recorded(seed_user, row, "30.00", "Kroger", account_id=amex.id)
+            _recorded(seed_user, row, "30.00", "Kroger", card=amex)
 
             assert (
                 "$80.00 / $800.00 -- $720.00 remaining -- 2 entries -- "

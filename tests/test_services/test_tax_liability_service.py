@@ -22,7 +22,9 @@ from app.exceptions import UnsupportedStateError
 from app.extensions import db as _db
 from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
-from app.services.tax_config_service import TaxLawBasis, load_tax_configs_for_year
+from app.services.income_service import ProfilePaychecks
+from app.services.pay_calendar import calendar_for
+from app.services.tax_config_service import TaxLawBasis
 from app.services.tax_liability_service import AnnualLiability, compute_annual_liability
 from app.tax_law import TaxLaw
 from tests._test_helpers import (
@@ -33,17 +35,21 @@ from tests._test_helpers import (
 )
 
 
-def _liability(profile, tax_year, annual_wage_income, annual_pretax):
-    """Resolve *profile*'s law for *tax_year* and price its liability on it.
+def _pricer(profile):
+    """Return *profile*'s paycheck pricer on its owner's pay calendar."""
+    return ProfilePaychecks(profile, calendar_for(profile.user_id))
 
-    The order the Taxes tab's producer follows: it resolves the primary
-    profile's law once and hands the set to the liability (plan step
-    salary:X-at-5), so a state the law does not list is refused at the
-    resolution, before any arithmetic.
+
+def _liability(profile, tax_year, annual_wage_income, annual_pretax):
+    """Build *profile*'s pricer and price its liability for *tax_year* on it.
+
+    The order the Taxes tab's producer follows: the liability takes the
+    primary profile's pricer, the one home of its law in a read pass (plan
+    step salary:X-at-5), so a state the law does not list is refused when
+    the pricer is built, before any arithmetic.
     """
     return compute_annual_liability(
-        profile, load_tax_configs_for_year(profile, tax_year),
-        annual_wage_income, annual_pretax,
+        _pricer(profile), tax_year, annual_wage_income, annual_pretax,
     )
 
 
@@ -185,7 +191,7 @@ class TestFourBExclusion:
 
 
 class TestConfigYearSelection:
-    """load_tax_configs_for_year selects the requested year's brackets."""
+    """The pricer's law for the requested year selects that year's brackets."""
 
     def test_2025_vs_2026_differ(self, app, db, seed_user):
         """Same inputs against 2025 vs 2026 seeds produce different results.
@@ -250,13 +256,13 @@ class TestTheBasisItWasPricedOn:
             made_up_year(2027, states={"NC": made_up_state(Decimal("0.0500"))}),
         )))
         profile = _committed_profile(seed_user)
-        configs = load_tax_configs_for_year(profile, 2028)
+        paychecks = _pricer(profile)
 
         result = compute_annual_liability(
-            profile, configs, Decimal("50000.00"), Decimal("0.00"),
+            paychecks, 2028, Decimal("50000.00"), Decimal("0.00"),
         )
 
-        assert result.basis is configs["basis"]
+        assert result.basis is paychecks.law(2028)["basis"]
         assert result.basis == TaxLawBasis(2028, 2027, 2027, 2027)
         assert result.state.flat_rate == Decimal("0.0500")
         assert result.state.liability == Decimal("1225.00")

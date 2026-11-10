@@ -23,11 +23,11 @@ from app.services.tax_config_service import (
     StateTaxRules,
     TaxLawBasis,
     configs_by_year,
-    load_tax_configs_for_year,
     profile_tax_series,
     resolve_tax_year,
 )
 from app.tax_law import ChildDeductionTier, TaxLaw
+from tests._tax_configs import tax_configs_for
 from tests._test_helpers import (
     EMPTY_TAX_LAW,
     made_up_fica,
@@ -239,7 +239,7 @@ class TestOneKindsYearsDoNotDecideAnotherKinds:
             profile = _make_profile(seed_user)
 
             for requested in (2027, 2028):
-                result = load_tax_configs_for_year(profile, requested)
+                result = tax_configs_for(profile, requested)
                 assert result["bracket_set"] is year_2027.federal[
                     FilingStatusEnum.SINGLE
                 ], requested
@@ -250,8 +250,8 @@ class TestOneKindsYearsDoNotDecideAnotherKinds:
                 assert result["state_config"] == _state_slice(year_2026), requested
 
 
-class TestLoadTaxConfigsForYear:
-    """load_tax_configs_for_year: resolve which year applies, then load it (DH-#30)."""
+class TestOneYearsLaw:
+    """One year's law for a profile: slice the law, then pick the year that applies (DH-#30)."""
 
     def test_returns_target_year_configs_when_present(self, app, seed_user, tax_law):
         """A year the law HAS returns its own rules, with no substitution."""
@@ -260,7 +260,7 @@ class TestLoadTaxConfigsForYear:
         with app.app_context():
             profile = _make_profile(seed_user)
 
-            result = load_tax_configs_for_year(profile, 2026)
+            result = tax_configs_for(profile, 2026)
 
             assert result["state_config"].flat_rate == Decimal("0.0500")
             assert result["state_config"] == _state_slice(year_2026)
@@ -274,7 +274,7 @@ class TestLoadTaxConfigsForYear:
         with app.app_context():
             profile = _make_profile(seed_user)
 
-            result = load_tax_configs_for_year(profile, 2031)
+            result = tax_configs_for(profile, 2031)
 
             assert result["state_config"].flat_rate == Decimal("0.0399")
             assert result["state_config"] == _state_slice(year_2026)
@@ -294,7 +294,7 @@ class TestLoadTaxConfigsForYear:
             profile = _make_profile(seed_user)
 
             with pytest.raises(UnsupportedStateError) as refused:
-                load_tax_configs_for_year(profile, date.today().year)
+                tax_configs_for(profile, date.today().year)
 
             assert refused.value.supported == ()
             assert refused.value.state_code == "NC"
@@ -315,7 +315,7 @@ class TestLoadTaxConfigsForYear:
             profile = _make_profile(seed_user)
 
             for requested in (2027, 2028, 2029):
-                result = load_tax_configs_for_year(profile, requested)
+                result = tax_configs_for(profile, requested)
                 assert result["state_config"] == _state_slice(year_2026), requested
 
 
@@ -425,7 +425,7 @@ class TestTheBasis:
         with app.app_context():
             profile = _make_profile(seed_user)
 
-            basis = load_tax_configs_for_year(profile, 2026)["basis"]
+            basis = tax_configs_for(profile, 2026)["basis"]
 
             assert basis == TaxLawBasis(
                 tax_year=2026, federal_year=2026, state_year=2026, fica_year=2026,
@@ -444,7 +444,7 @@ class TestTheBasis:
         with app.app_context():
             profile = _make_profile(seed_user)
 
-            basis = load_tax_configs_for_year(profile, 2028)["basis"]
+            basis = tax_configs_for(profile, 2028)["basis"]
 
             assert basis == TaxLawBasis(
                 tax_year=2028, federal_year=2027, state_year=2027, fica_year=2027,
@@ -463,7 +463,7 @@ class TestTheBasis:
         with app.app_context():
             profile = _make_profile(seed_user)
 
-            basis = load_tax_configs_for_year(profile, 2019)["basis"]
+            basis = tax_configs_for(profile, 2019)["basis"]
 
             assert basis == TaxLawBasis(
                 tax_year=2019, federal_year=2025, state_year=2025, fica_year=2025,
@@ -484,7 +484,7 @@ class TestTheBasis:
         with app.app_context():
             profile = _make_profile(seed_user)
 
-            basis = load_tax_configs_for_year(profile, 2027)["basis"]
+            basis = tax_configs_for(profile, 2027)["basis"]
 
             assert basis == TaxLawBasis(
                 tax_year=2027, federal_year=2027, state_year=2026, fica_year=2027,
@@ -507,7 +507,7 @@ class TestTheBasis:
         with app.app_context():
             profile = _make_profile(seed_user)
 
-            basis = load_tax_configs_for_year(profile, 2028)["basis"]
+            basis = tax_configs_for(profile, 2028)["basis"]
 
             assert basis == TaxLawBasis(
                 tax_year=2028, federal_year=2027, state_year=2026, fica_year=2027,
@@ -531,7 +531,7 @@ class TestTheBasis:
         with app.app_context():
             profile = _make_profile(seed_user)
 
-            configs = load_tax_configs_for_year(profile, 2028)
+            configs = tax_configs_for(profile, 2028)
 
             assert configs["basis"] == TaxLawBasis(2028, 2027, 2026, 2027)
             assert configs["bracket_set"] is year_2027.federal[FilingStatusEnum.SINGLE]

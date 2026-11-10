@@ -87,7 +87,6 @@ from app.services.projection_inputs import (
     load_active_salary_profiles,
 )
 from app.services.balance_at import BalanceContext
-from app.services.tax_config_service import load_tax_configs_for_year
 from app.services.tax_liability_service import (
     AnnualLiability,
     compute_annual_liability,
@@ -491,19 +490,24 @@ def compute_tax_report(user_id: int, year: int, today: date) -> TaxReport | None
     # calendar reaching this line always carries a cadence and the read above
     # is total.
     periods = year_paydays(calendar, year)
-    # The primary profile's law for the year, resolved ONCE: the liability,
-    # the W-2's Social Security cap and the marginal-rate chip all price from
-    # this set, so the basis the liability carries -- which year's rules
-    # priced each part, the line the tab prints (ruling R-SAL75, plan step
-    # salary:X-at-5) -- is the resolution behind every one of them.  Until
-    # X-at-5 the liability resolved the same profile and year a second time.
-    configs = load_tax_configs_for_year(primary, year)
+    # The primary profile's law for the year is its PRICER's (plan step
+    # salary:X-at-5, R-IZ: move the leaf): the pass's one pricer for the
+    # primary resolves the year once, prices the primary's paychecks on it,
+    # and hands the same set to the liability, the W-2's Social Security cap
+    # and the marginal-rate chip.  So the basis the liability carries --
+    # which year's rules priced each part, the line the tab prints (ruling
+    # R-SAL75) -- is the law behind the primary's paychecks too.  Until then
+    # this function resolved the year itself beside the pricer: two slices
+    # of the primary's law and at least two resolutions of its year per
+    # request.
+    primary_paychecks = balance_ctx.paychecks().for_profile(primary)
+    law = primary_paychecks.law(year)
 
     withholding = _aggregate_withholding(year, profiles, balance_ctx)
     pretax = _aggregate_modeled_pretax(profiles, periods, balance_ctx)
 
     liability = compute_annual_liability(
-        primary, configs, withholding.total.gross, pretax.total_pre_tax,
+        primary_paychecks, year, withholding.total.gross, pretax.total_pre_tax,
     )
     box1_wages = waterfall_taxable(withholding.total.gross, pretax.total_pre_tax)
     next_stub = _next_stub(periods, today)
@@ -513,14 +517,13 @@ def compute_tax_report(user_id: int, year: int, today: date) -> TaxReport | None
         withholding=withholding,
         liability=liability,
         w2_preview=_build_w2_preview(
-            withholding, box1_wages, pretax.total_pre_fica,
-            configs.get("fica_config"),
+            withholding, box1_wages, pretax.total_pre_fica, law["fica_config"],
         ),
         schedule_a=_build_schedule_a(
             user_id, year, balance_ctx, withholding, liability,
         ),
         chips=_build_chips(
-            liability, box1_wages, configs.get("bracket_set"), next_stub,
+            liability, box1_wages, law["bracket_set"], next_stub,
         ),
         assumptions=_build_assumptions(primary, withholding, profiles),
         primary_profile_id=primary.id,

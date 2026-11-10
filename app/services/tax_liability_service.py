@@ -4,19 +4,27 @@ Shekel Budget App -- Annual Tax Liability Service
 Computes a salary profile's filing-time FEDERAL and NC-STATE income tax
 liability for a full tax year -- the missing piece the analytics Taxes tab
 needs to estimate a refund (refund = withheld - liability, produced later
-in T-P3).  This module is arithmetic orchestration only: it takes the year's
-tax law as the caller RESOLVED it (``load_tax_configs_for_year``, the one
-resolver), reads the W-4 inputs off the profile, and delegates every
-arithmetic step to the pure engine in ``tax_calculator``.  It never touches
-projections -- the year's wage and pre-tax figures are PASSED IN (the T-P3
-producer computes them from elapsed actuals plus projected remainder).
+in T-P3).  This module is arithmetic orchestration only: it reads the
+year's tax law and the W-4 inputs off the profile's paycheck pricer, and
+delegates every arithmetic step to the pure engine in ``tax_calculator``.
+It never touches projections -- the year's wage and pre-tax figures are
+PASSED IN (the T-P3 producer computes them from elapsed actuals plus
+projected remainder).
 
-**It takes the resolved law rather than a year** (plan step salary:X-at-5).
-Until then it resolved the law itself, and the Taxes tab's producer resolved
-the same profile and year a second time for the W-2 and the rate chip: two
-resolutions in one report.  The report now resolves once and hands the set
-here, so the year the liability carries (:attr:`AnnualLiability.basis`) is
-the resolution every figure on the tab was priced from.
+**It takes the profile's pricer and a year** (plan step salary:X-at-5), the
+pricer being the one home of a profile's law in a read pass
+(:meth:`~app.services.income_service.ProfilePaychecks.law`).  Until then it
+resolved the law itself, and the Taxes tab's producer resolved the same
+profile and year again for the W-2 and the rate chip, while the pricer that
+priced the primary's paychecks resolved it a third time.  It reads the
+profile (:attr:`~app.services.income_service.ProfilePaychecks.profile`) and
+its law off the one object, so the two cannot name different profiles, and
+the law it prices on, whose basis it carries (:attr:`AnnualLiability.basis`),
+is the very set the primary profile's paychecks of that year were priced on,
+which the W-2's Social Security cap and the marginal-rate chip read too.  In a
+household with two jobs the second job's paychecks are priced on its own
+pricer's law, which may resolve on other years when the jobs are in
+different states (plan#3362).
 
 Liability basis (developer ruling 2026-07-04, worked-example fork):
 
@@ -39,6 +47,7 @@ a monetary figure.
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from app.services.tax_calculator import (
     W4Inputs,
@@ -47,6 +56,9 @@ from app.services.tax_calculator import (
     resolve_child_deduction_per_child,
 )
 from app.services.tax_config_service import TaxLawBasis
+
+if TYPE_CHECKING:  # pragma: no cover -- annotations only
+    from app.services.income_service import ProfilePaychecks
 
 ZERO = Decimal("0")
 
@@ -93,8 +105,9 @@ class StateLiability:
     filing status the law does not model -- refused by the federal layer
     before this one is built -- because a state the law does not list is
     refused by the resolver
-    (:func:`~app.services.tax_config_service.profile_tax_series`) before the
-    set :func:`compute_annual_liability` takes can be built.
+    (:func:`~app.services.tax_config_service.profile_tax_series`) when the
+    profile's pricer is built, before :func:`compute_annual_liability` can
+    be called.
     ``child_deduction_per_child`` is the
     resolved AGI-tier per-child deduction (T-P5) and ``child_deduction_total``
     the amount actually subtracted (per-child x qualifying children); both are
@@ -134,27 +147,29 @@ class AnnualLiability:
 
 
 def compute_annual_liability(
-    profile, configs: dict, annual_wage_income, annual_pretax,
+    paychecks: "ProfilePaychecks",
+    tax_year: int,
+    annual_wage_income: Decimal,
+    annual_pretax: Decimal,
 ) -> AnnualLiability:
-    """Compute a profile's filing-time federal + NC-state liability on *configs*.
+    """Compute a profile's filing-time federal + state liability for *tax_year*.
 
-    Prices the tax law the caller resolved for the profile and year --
-    :func:`~app.services.tax_config_service.load_tax_configs_for_year`, the
-    same per-year resolution (the latest year the law carries at or before
-    the requested one) the salary projection uses -- reads the
-    additional-income and dependent counts off *profile*, and delegates the
-    arithmetic to the pure ``tax_calculator`` engine.  The tax year is the
-    set's own (``configs["basis"].tax_year``), not a second argument that
-    could name another.
+    Prices the law the profile's pricer holds for the year
+    (:meth:`~app.services.income_service.ProfilePaychecks.law`, the same
+    per-year resolution -- the latest year the law carries at or before the
+    requested one -- its paychecks are priced on), reads the
+    additional-income and dependent counts off the pricer's profile, and
+    delegates the arithmetic to the pure ``tax_calculator`` engine.
 
     Args:
-        profile: The SalaryProfile.  Supplies ``additional_income`` (W-4
-            4(a)), ``qualifying_children``, and ``other_dependents``.  Its
-            ``additional_deductions`` (4(b)) is deliberately NOT read.
-        configs: The profile's law for the tax year, as
-            :func:`~app.services.tax_config_service.load_tax_configs_for_year`
-            resolved it: ``bracket_set``, ``state_config`` and ``basis``
-            are read.
+        paychecks: The profile's
+            :class:`~app.services.income_service.ProfilePaychecks`, off the
+            read pass.  Its ``profile`` supplies ``additional_income`` (W-4
+            4(a)), ``qualifying_children``, and ``other_dependents``; that
+            profile's ``additional_deductions`` (4(b)) is deliberately NOT
+            read.  Its ``law(tax_year)`` supplies ``bracket_set``,
+            ``state_config`` and ``basis``.
+        tax_year: The tax year to price.
         annual_wage_income: The year's total wage income (gross wages).
             Passed in -- T-P1 does not project.
         annual_pretax: The year's total pre-tax deductions (retirement,
@@ -168,9 +183,12 @@ def compute_annual_liability(
         InvalidFilingStatusError: If no bracket set resolved for the year
             (raised by :func:`calculate_annual_federal_liability` on a None
             bracket set -- consistent with the withholding engine).  A state
-            the law does not list is refused earlier, by the resolver
-            (plan step salary:X-at-3).
+            the law does not list is refused earlier, when the pricer is
+            built (:func:`~app.services.tax_config_service.profile_tax_series`,
+            plan step salary:X-at-3).
     """
+    profile = paychecks.profile
+    configs = paychecks.law(tax_year)
     wage = Decimal(str(annual_wage_income))
     pretax = Decimal(str(annual_pretax))
     additional_income = Decimal(str(profile.additional_income))

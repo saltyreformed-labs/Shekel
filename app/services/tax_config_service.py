@@ -148,7 +148,7 @@ class TaxLawBasis:
 
     A part's year is ``None`` only when the law resolves no rules for it at
     all, which is the same condition its rules are ``None`` under
-    (:func:`load_tax_configs_for_year`).
+    (:func:`_configs_from_series`).
 
     Attributes:
         tax_year: The year whose rules were asked for.
@@ -224,9 +224,10 @@ def profile_tax_series(profile) -> ProfileTaxSeries:
     reaches this; the refusal (ruling **R-SAL130**) reaches the owner as one
     page naming the profile and linking its edit page
     (:mod:`app.error_handlers`).  Every pricing surface reads
-    the law through here -- the paycheck pricer
-    (:class:`~app.services.income_service.ProfilePaychecks`) and the Taxes
-    tab's :func:`load_tax_configs_for_year` -- so the one check covers them all.
+    the law through here by one door, the paycheck pricer
+    (:class:`~app.services.income_service.ProfilePaychecks`), whose law the
+    Taxes tab's liability reads too since plan step salary:X-at-5 -- so the
+    one check covers them all.
 
     **A filing status the law does not model resolves no federal or state
     rules**, which is what the per-user copy answered for a status it held no
@@ -356,9 +357,8 @@ def _pick(series: dict, tax_year: int):
 def _configs_from_series(series: ProfileTaxSeries, tax_year: int) -> dict:
     """Resolve each kind in *series* independently for ``tax_year``.
 
-    The shared body of :func:`load_tax_configs_for_year` and
-    :func:`configs_by_year`, so the multi-year caller slices the law ONCE and
-    every year after the first is pure computation.
+    The body of :func:`configs_by_year`, one year at a time, so a caller
+    slices the law ONCE and every year after the first is pure computation.
 
     **Each kind's resolved year is handed back as the set's ``basis``**
     (:class:`TaxLawBasis`, ruling **R-SAL75**): the one record of which year's
@@ -379,9 +379,15 @@ def _configs_from_series(series: ProfileTaxSeries, tax_year: int) -> dict:
 
     Returns:
         dict: Keys ``bracket_set``, ``state_config``, ``fica_config`` -- each
-            value the applicable rules, or ``None`` when that kind has no
-            entries -- and ``basis``, the :class:`TaxLawBasis` naming the year
-            each of the three was resolved on.
+            value the applicable rules, or ``None`` only when the law carries
+            NO year of that kind for the profile: never merely because
+            *tax_year* itself is not in the law, and never because a SIBLING
+            kind lacks that year.  Since plan step salary:X-at-3 that is only
+            the federal and state rules of a filing status the law does not
+            model, as a law with no year lists no state and so refuses every
+            profile (:func:`profile_tax_series`).  And ``basis``, the
+            :class:`TaxLawBasis` naming the year each of the three was
+            resolved on.
     """
     federal_year, bracket_set = _pick(series.bracket_sets, tax_year)
     state_year, state_config = _pick(series.state_configs, tax_year)
@@ -400,45 +406,6 @@ def _configs_from_series(series: ProfileTaxSeries, tax_year: int) -> dict:
         "fica_config": fica_config,
         "basis": basis,
     }
-
-
-def load_tax_configs_for_year(profile, tax_year):
-    """Return the tax law that APPLIES to ``tax_year`` for *profile*.
-
-    The resolving loader for a single year: each kind's own series decides
-    which of ITS years applies (:func:`resolve_tax_year`).  Its one caller in
-    the app is the Taxes tab's report
-    (:func:`~app.services.tax_report_service.compute_tax_report`), which hands
-    the set to the liability
-    (:func:`~app.services.tax_liability_service.compute_annual_liability`
-    resolves nothing itself).  The paycheck pricer
-    (:class:`~app.services.income_service.ProfilePaychecks`) -- and through it
-    the withholding service and the salary projection, breakdown and
-    dashboard paths -- resolves through :func:`configs_by_year` instead.  Both
-    doors share :func:`_configs_from_series`, so two surfaces cannot disagree
-    on which year's brackets and FICA wage base/cap apply (deep-hunt DH-#30).
-
-    Args:
-        profile (SalaryProfile): Supplies ``filing_status_id`` and
-            ``state_code``.
-        tax_year (int): The tax year whose rules are wanted.
-
-    Returns:
-        dict: Keys ``bracket_set``, ``state_config``, ``fica_config``.  A value
-            is ``None`` only when the law carries NO year for that kind and
-            profile -- never merely because *tax_year* itself is not in the law,
-            and never because a SIBLING kind lacks that year.  Since plan step
-            salary:X-at-3 that is only the federal and state rules of a filing
-            status the law does not model: a law with no year lists no state,
-            so it refuses every profile below.  And ``basis``, the
-            :class:`TaxLawBasis` naming the year each of the three was
-            resolved on (plan step salary:X-at-5).
-
-    Raises:
-        UnsupportedStateError: The law does not list the profile's state
-            (:func:`profile_tax_series`).
-    """
-    return _configs_from_series(profile_tax_series(profile), tax_year)
 
 
 def configs_by_year(series: ProfileTaxSeries, tax_years) -> dict:
@@ -462,6 +429,16 @@ def configs_by_year(series: ProfileTaxSeries, tax_years) -> dict:
     ``configs_by_year(series, {p.start_date.year for p in periods})``.  Only
     ``start_date.year`` was ever read, so this never depended on the two
     derived columns pay-calendar plan step C4-c dropped.
+
+    **It is the app's one resolving door since plan step salary:X-at-5**,
+    reached through :meth:`~app.services.income_service.ProfilePaychecks.law`,
+    so no two surfaces can disagree on which year's brackets and FICA wage
+    base/cap apply (deep-hunt DH-#30).  A single-year door,
+    ``load_tax_configs_for_year(profile, tax_year)``, sliced the law afresh
+    on every call; the Taxes tab's report was its last caller in the app,
+    and when the report began reading its law off the primary profile's
+    pricer it left for the tests (``tests/_tax_configs.py``), a production
+    function with only test callers being the shape ruling P54 names.
 
     Args:
         series: The profile's :class:`ProfileTaxSeries`, from

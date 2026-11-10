@@ -51,6 +51,7 @@ from tools.quill._state import (
     leaf_placement,
     leaves,
     leaves_below,
+    moves_money,
     owner,
     release_hint,
     withdrawn_filing,
@@ -697,7 +698,8 @@ class Finishing:
 def finishing_filings(tracker: Tracker, root: Path, card: Card, cards: dict[int, Card],
                       reads: _git.Reads) -> list[Finishing]:
     """What ``quill claim`` files of ``card``'s finishing tasks (:func:`_tasks.finishing`,
-    ruling plan#1875), in order, each as ``quill file task`` files a task under it: decided
+    ruling plan#1875; its Release kit only while it moves money, ruling plan#2860), in order,
+    each as ``quill file task`` files a task under it: decided
     before anything is written, so that a refusal writes nothing, over ``cards``
     (:func:`with_closure` of ``card``) and ``reads``, the claim's read of git.  A task under
     ``card`` with a finishing task's title whose filing finished is that task filed, whatever
@@ -711,7 +713,7 @@ def finishing_filings(tracker: Tracker, root: Path, card: Card, cards: dict[int,
     filed = {task.title.strip() for task in held.values() if not filing_unfinished(task)}
     held_by = _owner(card, cards, reads.shipped.cards)
     planned = []
-    for title, body in _tasks.finishing(card.number):
+    for title, body in _tasks.finishing(card.number, moves_money(card)):
         if title in filed:
             continue
         filing = _Filing(Draft(TASK, title, body, (), None, held_by), card, cards, reads, None,
@@ -726,8 +728,9 @@ def finishing_filings(tracker: Tracker, root: Path, card: Card, cards: dict[int,
 
 def file_finishing(tracker: Tracker, card: Card, planned: list[Finishing]) -> None:
     """File each of ``card``'s finishing tasks :func:`finishing_filings` decided on, in order,
-    each write printed as it lands (:func:`_write`), so each is linked last in its order, the
-    review above the suite and pull request (:func:`_tasks.place`); a failure that cuts it
+    each write printed as it lands (:func:`_write`), so each is linked last in its order, a
+    Release kit above the review, the review above the suite and pull request
+    (:func:`_tasks.place`); a failure that cuts it
     short leaves what the same ``quill claim`` run again, on ``card``'s branch, finishes."""
     if not planned:
         print("  its finishing tasks are filed already (ruling plan#1875)")

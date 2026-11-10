@@ -30,6 +30,8 @@ Each name, and who reads it:
 - ``SHIPPABLE``: ``tools/release._cards``, which refuses a marker naming a card of a
   kind no commit ships (a ruling, a question, a card of no type), by quill's one list
   of the kinds a commit ships.
+- ``moves_money``: ``tools/release._cards``, for whether each card a release carries moves
+  money, by quill's one reading of its label (R-BAL287), which ``quill claim`` reads too.
 - ``MARKERS``, ``card_of``, ``markers_in``, ``merged_tree``, ``MarkerConflict``,
   ``changes`` and ``marker_changes``: ``tools/release._cards``, for what a release changes
   in the ship markers (ruling ``balance:R-BAL359``; step X-cx's M3): the tree a release of
@@ -113,6 +115,7 @@ from tools.quill._state import (
     dropped,
     dropped_above,
     leaves_below,
+    moves_money,
     owner,
 )
 from tools.quill._tracker import Card, OutsideLink, Tracker, TrackerError
@@ -173,6 +176,7 @@ __all__ = [
     "marker_changes",
     "markers_in",
     "merged_tree",
+    "moves_money",
     "owner",
     "paged",
     "reading",

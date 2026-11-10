@@ -30,7 +30,8 @@ A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-is
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, on the board under a step the board holds (ruling plan#1814,
 ``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842), ``claim`` files a
-card's two finishing tasks (ruling plan#1875, ``_filing.finishing_filings``),
+card's finishing tasks (ruling plan#1875, its Release kit only while it moves money, ruling
+plan#2860; ``_filing.finishing_filings``),
 ``start`` begins it with a commit naming it (ruling plan#1872), the commit hook stamps each
 commit of the piece with it (:mod:`commit_hook`), ``task-file`` writes its file for the commit
 that finishes the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it; ``sync``
@@ -263,8 +264,9 @@ def cmd_claim(args, tracker: Tracker, root: Path,
     """Claim a card (R-BAL359): a commit adding its ship marker, made on ``origin/dev`` --
     or with ``--here`` on the commit checked out, for work already started -- and pushed
     create-only as the branch ``card/N`` (:func:`_git.claim`), then checked out here as
-    that branch, with no upstream; then its two finishing tasks filed under it, last in its
-    order, unless they are filed already (ruling plan#1875): decided before the push
+    that branch, with no upstream; then its finishing tasks filed under it, last in its
+    order, unless they are filed already (ruling plan#1875; a Release kit among them while
+    it moves money, ruling plan#2860): decided before the push
     (:func:`_filing.finishing_filings`), written after it.  Refused, with nothing written,
     for what is no work to claim (work shown done that a revert unshipped says to sync
     first); for what is never offered (:func:`_state.never_offered`: On hold, ruling plan#1832,

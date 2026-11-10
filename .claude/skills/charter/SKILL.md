@@ -35,8 +35,10 @@ them now if this session has not. Then hold the work to this brief:
 4. **The card's tasks are the plan; decompose** (rulings plan#1868, plan#1872). After the claim
    and before any code, file the build pieces as tasks in build order:
    `python -m tools.quill.quill file task --parent plan#N --title NAME --body-file PIECE` puts each
-   above the two finishing tasks the claim filed ("Adversarial review", "Full suite and pull
-   request"), or above `--before plan#T`. Then each piece in turn: `quill start plan#T` begins it
+   above the finishing tasks the claim filed ("Release kit" for a card that moves money,
+   "Adversarial review", "Full suite and pull request"), or above `--before plan#T`. A card
+   labelled moves-money after its claim gets its "Release kit" from `quill claim plan#N` run
+   again on `card/N`. Then each piece in turn: `quill start plan#T` begins it
    (the commit hook refuses a commit while no task is in progress, and stamps each with the one
    that is), build it, and finish it with its file, `quill task-file plan#T`, in its last commit.
    Re-plan on the card, never in a file: a piece added or split is filed where it is built

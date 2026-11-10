@@ -50,7 +50,7 @@ write back exactly:
   sighting that may never have stated it.
 
 Revision ID: 6534c1bfeeb1
-Revises: 0fe9c332b9b0
+Revises: 3748145b83e3
 Create Date: 2026-11-10
 """
 import sqlalchemy as sa
@@ -58,7 +58,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "6534c1bfeeb1"
-down_revision = "0fe9c332b9b0"
+down_revision = "3748145b83e3"
 branch_labels = None
 depends_on = None
 

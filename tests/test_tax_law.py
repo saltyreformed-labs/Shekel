@@ -292,6 +292,80 @@ class TestFederalAmounts:
             ladder(("0.00", "100000000000.00", "0.1000"), ("100000000000.00", None, "0.1200"))
 
 
+class TestWithholdingFigures:
+    """A year states a withholding figure only where it differs (ruling plan#3213).
+
+    The made-up rules' return figures are a 15,000.00 standard deduction and a
+    2,000.00 child credit (:func:`_federal`).
+    """
+
+    _RETURNS = {
+        "withholding_standard_deduction": Decimal("15000.00"),
+        "withholding_child_credit_amount": Decimal("2000.00"),
+    }
+
+    @pytest.mark.parametrize("field", sorted(_RETURNS))
+    def test_a_figure_equal_to_the_returns_is_refused(self, field):
+        """Stating the return's figure again would be a second spelling of it."""
+        with pytest.raises(ValueError, match=f"federal {field} .* is the return's figure"):
+            _federal(**{field: self._RETURNS[field]})
+
+    @pytest.mark.parametrize("field", sorted(_RETURNS))
+    def test_a_negative_figure_is_refused(self, field):
+        """A withholding figure is an amount like the return's."""
+        with pytest.raises(ValueError, match=f"federal {field} -1.00 must be at least zero"):
+            _federal(**{field: Decimal("-1.00")})
+
+    @pytest.mark.parametrize("field", sorted(_RETURNS))
+    def test_a_figure_finer_than_a_cent_is_refused(self, field):
+        """To the cent, as every amount in the law."""
+        with pytest.raises(ValueError, match="more than 2 decimal places"):
+            _federal(**{field: Decimal("1400.005")})
+
+    @pytest.mark.parametrize("field", sorted(_RETURNS))
+    def test_a_float_figure_is_refused(self, field):
+        """A float cannot carry an exact figure."""
+        with pytest.raises(ValueError, match="must be a Decimal figure"):
+            _federal(**{field: 1400.0})
+
+    def test_rules_stating_none_withhold_on_themselves(self):
+        """The default: withholding prices on the return's rules, the same object."""
+        rules = _federal()
+        assert rules.withholding_standard_deduction is None
+        assert rules.withholding_child_credit_amount is None
+        assert rules.withholding_rules is rules
+
+    def test_each_stated_figure_takes_the_returns_place(self):
+        """Both stated: the withholding rules carry them and the rest of the return's."""
+        rules = _federal(
+            withholding_standard_deduction=Decimal("14000.00"),
+            withholding_child_credit_amount=Decimal("1800.00"),
+        )
+        withheld = rules.withholding_rules
+        assert withheld.standard_deduction == Decimal("14000.00")
+        assert withheld.child_credit_amount == Decimal("1800.00")
+        assert withheld.other_dependent_credit_amount == Decimal("500.00")
+        assert withheld.child_credit_refundable_cap == Decimal("1500.00")
+        assert withheld.brackets == rules.brackets
+        # It states none itself: it already is what withholding prices on.
+        assert withheld.withholding_standard_deduction is None
+        assert withheld.withholding_child_credit_amount is None
+        assert withheld.withholding_rules is withheld
+        # The return's rules are unmoved.
+        assert rules.standard_deduction == Decimal("15000.00")
+        assert rules.child_credit_amount == Decimal("2000.00")
+
+    def test_a_figure_not_stated_stays_the_returns(self):
+        """One stated: the other withholding figure is the return's."""
+        deduction_only = _federal(withholding_standard_deduction=Decimal("14000.00"))
+        assert deduction_only.withholding_rules.standard_deduction == Decimal("14000.00")
+        assert deduction_only.withholding_rules.child_credit_amount == Decimal("2000.00")
+
+        credit_only = _federal(withholding_child_credit_amount=Decimal("1800.00"))
+        assert credit_only.withholding_rules.standard_deduction == Decimal("15000.00")
+        assert credit_only.withholding_rules.child_credit_amount == Decimal("1800.00")
+
+
 class TestFicaRules:
     """FicaRules refuses what the deleted ``ck_fica_configs_*`` CHECKs refused."""
 

@@ -86,9 +86,13 @@ def calculate_paycheck(basis: PayrollBasis, period: DerivedPeriod, tax_configs,
                       "The four calendar questions" for what a partial
                       sequence cost.
         period:       The ``DerivedPeriod`` this paycheck is for.
-        tax_configs:  dict with keys:
-                      - bracket_set: :class:`app.tax_law.FederalRules`
-                      - state_config: :class:`~app.services.tax_config_service.StateTaxRules`
+        tax_configs:  dict with keys (as
+                      :func:`app.services.tax_config_service.load_tax_configs_for_year`
+                      resolves them):
+                      - bracket_set: :class:`app.tax_law.FederalRules`, whose
+                        ``withholding_rules`` the withholding formula prices on
+                      - state_config:
+                        :class:`app.services.tax_config_service.StateTaxRules`
                       - fica_config: :class:`app.tax_law.FicaRules`
         configs_by_year: ``{tax_year: configs dict}`` covering the year of
                       every pay stub that may price the paycheck

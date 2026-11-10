@@ -120,12 +120,23 @@ def calculate_federal_withholding(gross_pay, pay_periods, bracket_set, w4=W4Inpu
     All monetary values must be Decimal.  Returns a Decimal rounded
     HALF_UP to two decimal places.
 
+    **It prices on the year's WITHHOLDING figures** (ruling plan#3213, plan
+    step salary:X-at-7): ``bracket_set.withholding_rules``, which carries
+    Pub 15-T's standard deduction and the W-4's credits where the year states
+    figures other than the return's (:class:`app.tax_law.FederalRules` says
+    why a year can), and is the return's rules themselves where it states
+    none.  Reading it HERE,
+    off the rules every caller hands in, is what keeps any caller from
+    withholding on the return's figures;
+    :func:`calculate_annual_federal_liability` reads the return's.
+
     Args:
         gross_pay:              Gross pay for one pay period.
         pay_periods:            Number of pay periods per year (e.g. 26).
         bracket_set:            The year's federal rules for the filer's
-                                status (:class:`app.tax_law.FederalRules`)
-                                with .standard_deduction, .child_credit_amount,
+                                status (:class:`app.tax_law.FederalRules`),
+                                whose ``withholding_rules`` carry
+                                .standard_deduction, .child_credit_amount,
                                 .other_dependent_credit_amount, and .brackets
                                 (:class:`app.tax_law.Bracket` rungs).
         w4:                     :class:`W4Inputs` -- the employee's W-4 /
@@ -161,6 +172,7 @@ def calculate_federal_withholding(gross_pay, pay_periods, bracket_set, w4=W4Inpu
         raise InvalidDependentCountError(
             "other_dependents", w4.other_dependents,
         )
+    rules = bracket_set.withholding_rules
 
     # ── Step 1 -- Annualize income ─────────────────────────────────
     # IRS Pub 15-T: multiply periodic gross pay by the number of
@@ -178,7 +190,7 @@ def calculate_federal_withholding(gross_pay, pay_periods, bracket_set, w4=W4Inpu
     adjusted_income = max(adjusted_income, ZERO)
 
     # ── Step 3 -- Subtract standard deduction ──────────────────────
-    standard_deduction = Decimal(str(bracket_set.standard_deduction))
+    standard_deduction = Decimal(str(rules.standard_deduction))
     taxable_income = adjusted_income - standard_deduction
     taxable_income = max(taxable_income, ZERO)
 
@@ -188,7 +200,7 @@ def calculate_federal_withholding(gross_pay, pay_periods, bracket_set, w4=W4Inpu
     # Brackets are data-driven: iterate sorted bracket tiers and apply
     # the marginal rate to the portion of income within each tier.
     annual_tax_before_credits = _apply_marginal_brackets(
-        taxable_income, bracket_set.brackets
+        taxable_income, rules.brackets
     )
 
     logger.debug(
@@ -197,7 +209,7 @@ def calculate_federal_withholding(gross_pay, pay_periods, bracket_set, w4=W4Inpu
 
     # ── Step 5 -- Apply credits (W-4 Step 3) ───────────────────────
     total_credits = _dependent_credits(
-        bracket_set, w4.qualifying_children, w4.other_dependents,
+        rules, w4.qualifying_children, w4.other_dependents,
     )
 
     logger.debug("Step 5 -- total_credits: %s", total_credits)
@@ -374,13 +386,18 @@ def calculate_annual_federal_liability(annual_wage_income, bracket_set, w4=W4Inp
     """Compute the filing-time FEDERAL income tax liability for a full year.
 
     This is the annual-liability sibling of
-    :func:`calculate_federal_withholding`: it applies the SAME
-    bracket ladder and dependent credits, but ONCE to the whole year's
-    income rather than per pay period, to answer "what will this taxpayer
-    owe the IRS at filing time" (the tax-refund estimate the analytics
-    Taxes tab is built around).  Both functions share the
-    :func:`_apply_marginal_brackets` and :func:`_dependent_credits`
-    primitives, so there is a single bracket implementation.
+    :func:`calculate_federal_withholding`: it applies the same bracket
+    ladder and dependent credits, but ONCE to the whole year's income rather
+    than per pay period, to answer "what will this taxpayer owe the IRS at
+    filing time" (the tax-refund estimate the analytics Taxes tab is built
+    around).  Both functions share the :func:`_apply_marginal_brackets` and
+    :func:`_dependent_credits` primitives, so there is a single bracket
+    implementation.  It reads the RETURN's standard deduction and credits off
+    ``bracket_set`` itself, where the withholding formula reads the year's
+    withholding figures (``bracket_set.withholding_rules``, ruling plan#3213):
+    in a year whose withholding documents print other figures than the
+    return's, the two parting is the refund or balance due those documents
+    leave.
 
     The identity (developer ruling 2026-07-04, worked-example fork):
 

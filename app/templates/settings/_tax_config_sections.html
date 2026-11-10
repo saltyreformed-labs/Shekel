@@ -121,6 +121,16 @@
               <span class="text-muted">Child Credit:</span> {{ money(rules.child_credit_amount) }}
               <span class="ms-3 text-muted">Other Dependent Credit:</span> {{ money(rules.other_dependent_credit_amount) }}
             </div>
+            {# The rules a paycheck withholds on are these themselves unless the
+               year's withholding documents print other figures (ruling plan#3213). #}
+            {% set withholding = rules.withholding_rules %}
+            {% if withholding is not sameas rules %}
+            <div class="mb-2 small">
+              <span class="text-muted">Paychecks withhold on (Pub 15-T and Form W-4):</span>
+              <span class="ms-1 text-muted">Std. Deduction</span> {{ money(withholding.standard_deduction) }},
+              <span class="text-muted">Child Credit</span> {{ money(withholding.child_credit_amount) }}
+            </div>
+            {% endif %}
             <table class="table table-sm table-bordered mb-2 mw-px-500">
               <thead>
                 <tr>

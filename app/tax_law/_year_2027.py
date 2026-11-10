@@ -3,9 +3,17 @@
 **Every figure stands exactly as its source prints it.**  Rev. Proc. 2026-35
 sec. 3.01 gives the head of household a different 24% / 32% boundary
 ($208,300) and 35% / 37% boundary ($661,350) from the single filer's
-($208,325, $661,375), and the ladder below carries Table 2's figures.  2026's
-module carries the single filer's 24% / 32% boundary for the head of household
-instead (finding **salary:SAL-577**, plan step salary:X-at-7's to correct).
+($208,325, $661,375), and the ladder below carries Table 2's figures, as 2026's
+module carries Rev. Proc. 2025-32's own head-of-household boundary ($201,750,
+corrected from the single filer's $201,775 at plan step salary:X-at-7, finding
+**salary:SAL-577**).
+
+**2027 states no withholding figure** (ruling plan#3213: a year states one only
+where its withholding documents print other figures than the return's).  On
+2026-11-10 neither prints one: the Pub 15-T draft irs.gov posts is still 2026's,
+and the draft Form W-4 (2027), created 2026-06-10, shows placeholders for its
+Step 3 child credit and its standard deductions.  Re-verify against both when
+the IRS posts them final.
 
 **North Carolina's 2027 rate is fixed by statute, not by a revenue trigger.**
 S.L. 2026-41 sec. 44.1(a) (approved 2026-07-07) rewrote N.C.G.S.

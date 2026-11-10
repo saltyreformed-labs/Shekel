@@ -311,9 +311,10 @@ def _resolve_openings(bind) -> list[tuple]:
             "a7c41f9d2b60 refuses to seed budget.account_openings: the posted "
             "ledger and the assertion series disagree about what these "
             "accounts' books opened with, and seeding either figure would move "
-            "every balance they render.  Re-run "
-            "account_posting_service.sync_account_anchor_postings_all_scenarios "
-            "for the owner and retry.\n  " + "\n  ".join(disagreements)
+            "every balance they render.  Re-sync the owner's postings with a "
+            "release from before plan step plan#2914 (its "
+            "account_posting_service.sync_account_anchor_postings_all_scenarios),"
+            " then retry.\n  " + "\n  ".join(disagreements)
         )
     return resolved
 

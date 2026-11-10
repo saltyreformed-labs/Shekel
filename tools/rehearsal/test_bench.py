@@ -89,6 +89,65 @@ def test_states_are_name_revision_pairs_each_named_once():
         bench.parse_states([])
 
 
+def _tree_with(root: Path, dockerfile: str) -> Path:
+    """A planted tree holding only ``dockerfile`` as its ``Dockerfile``."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+    return root
+
+
+@pytest.mark.parametrize("shell", [None, "en_US.UTF-8"])
+@pytest.mark.parametrize("daemon", ["", "unix:///run/user/1000/docker.sock"])
+def test_the_image_builder_runs_under_the_locale_its_tree_pins_whatever_the_shell_has(
+        tmp_path, monkeypatch, shell, daemon):
+    """Finding plan#2900: the builder hands its template builder the locale it is given, and
+    that builder's ``create_app`` refuses any but the image's.  So the tree's ``Dockerfile``
+    value is given over a shell with none (this host's) or another, a sentinel so a value
+    the bench spelled itself would fail here; ``DOCKER_HOST`` names the daemon only when the
+    cluster module named one, and the rest of the shell's environment is kept."""
+    if shell is None:
+        monkeypatch.delenv("LC_ALL", raising=False)
+    else:
+        monkeypatch.setenv("LC_ALL", shell)
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.setenv("SHEKEL_ALLOW_HOST_DOCKER", "kept")
+    tree = _tree_with(tmp_path, "FROM x\nENV PSYCOPG_IMPL=c\nENV LC_ALL=xx_XX.pinned\n")
+    given = bench.builder_environment(tree, daemon)
+    assert given["LC_ALL"] == "xx_XX.pinned"
+    assert given.get("DOCKER_HOST") == (daemon or None)
+    assert given["SHEKEL_ALLOW_HOST_DOCKER"] == "kept"
+    assert "PSYCOPG_IMPL" not in given
+
+
+def test_a_tree_whose_dockerfile_pins_no_locale_or_is_absent_is_refused_by_name(tmp_path):
+    """No locale is guessed: a tree pinning none, or holding no ``Dockerfile``, stops the
+    bench before the builder runs."""
+    with pytest.raises(BenchError, match="Dockerfile pins no LC_ALL, so the locale"):
+        bench.builder_environment(_tree_with(tmp_path / "a", "FROM x\n"), "")
+    with pytest.raises(BenchError, match="cannot give its image's environment: "):
+        bench.builder_environment(tmp_path / "b", "")
+
+
+def test_the_bench_builds_its_image_under_this_tree_s_pinned_locale(monkeypatch):
+    """The wiring: :func:`bench.image_tag` runs this tree's builder in the environment its
+    ``Dockerfile`` gives, production's ``C.UTF-8``, on the daemon the cluster module named,
+    from a shell with no ``LC_ALL``."""
+    monkeypatch.delenv("LC_ALL", raising=False)
+    seen: dict[str, str] = {}
+
+    def builder(argv: list[str], env: dict[str, str] | None = None,
+                **_given: object) -> subprocess.CompletedProcess[str]:
+        """Answer as ``build_test_db_image.py --json`` does, recording its environment."""
+        assert env is not None
+        seen.update(env)
+        return subprocess.CompletedProcess(argv, 0, '{"tag": "shekel-test-db:k"}\n', "")
+
+    monkeypatch.setattr(bench, "cluster", lambda *args: "unix:///chosen.sock\n")
+    monkeypatch.setattr(bench, "run", builder)
+    assert bench.image_tag() == "shekel-test-db:k"
+    assert (seen["LC_ALL"], seen["DOCKER_HOST"]) == ("C.UTF-8", "unix:///chosen.sock")
+
+
 def _side(root: Path) -> Path:
     """A planted side's tree: this checkout's own ``pyproject.toml`` and ``uv.lock``, which
     ``uv export --frozen`` reads with no network."""

@@ -1634,9 +1634,9 @@ def bare_user(app, db):
     No account, no pay periods, no scenario.  Tests that exercise
     services in isolation (e.g. ``pay_period_service``) and want a
     clean user state with no pre-existing pay periods use this
-    instead of ``seed_user``, which after E-19 / Commit 3 must seed
-    a bootstrap period so its default account satisfies the NOT NULL
-    anchor columns.
+    instead of ``seed_user``, which seeds a bootstrap period (it had to
+    for the NOT NULL anchor columns ruling R-EH deleted, then for account
+    create's refusal of an owner with none, until ruling plan#3318).
 
     Returns:
         dict with keys: user, settings.
@@ -1851,11 +1851,11 @@ def build_seed_user(db):
         user.id, SEED_USER_BOOTSTRAP_START, cadence_days=SEED_USER_CADENCE_DAYS,
     )[0]
 
-    # Baseline scenario BEFORE the account, matching production
-    # registration order (Build-Order Step 5): ``create_account`` posts the
-    # opening anchor correction into every scenario, so the baseline must
-    # exist first -- the seeded Checking then carries its $1000.00 opening
-    # on the posting ledger from t0, exactly like a production account.
+    # Baseline scenario before the account, as registration orders them.  The
+    # order once mattered: ``create_account`` posted the opening's anchor
+    # correction into every scenario until plan task plan#3076 deleted that
+    # sync.  It reads no scenario now (plan task plan#3332), and the worked-out
+    # ledger reads the $1000.00 opening in whichever scenario it is asked for.
     scenario = Scenario(
         user_id=user.id,
         name="Baseline",
@@ -1877,11 +1877,11 @@ def build_seed_user(db):
             account_type_id=checking_type.id,
             name="Checking",
             anchor_balance=Decimal("1000.00"),
-            # Day one of the period the account is anchored to -- the
-            # production shape, an account opened on day one of its own period
-            # (ruling R-DH, plan step 2).  Without it the origination asserts a
-            # balance on the WALL-CLOCK day while its ``pay_period_id`` points
-            # at the 2024 bootstrap: two clocks on one row, years apart.
+            # Day one of the owner's bootstrap period -- the production shape,
+            # an account opened on day one of its own period (ruling R-DH, plan
+            # step 2).  Without it the origination asserts on the WALL-CLOCK
+            # day, years after that 2024 period; until ruling R-EO its own
+            # ``pay_period_id`` named the period too, two clocks on one row.
             #
             # **It is what makes "and then things happened" say so.**  An
             # assertion is the CLOSING balance for its civil day, so a settle
@@ -2567,9 +2567,9 @@ def cross_page_loan_unpaid_ctx(db, seed_user):
     EVERY surface and at EVERY period.  A producer that walked the schedule instead
     of the ledger would report LESS.
 
-    The loan IS opened in the ledger (``create_loan_account`` writes through
-    production's reconcile path), exactly as a real configured loan is -- so on
-    the current code every surface reads the ledger and agrees at $240,000, and
+    The loan carries its ``LoanParams``, exactly as a real configured loan does
+    (``create_loan_account`` writes what the setup door writes), so on the
+    current code every surface reads its walk and agrees at $240,000, and
     the accompanying test PASSES.  It is a regression lock, not a reproducer: it
     holds the line against a schedule producer being reintroduced for the past,
     which is what let the /savings tile and the net-worth trend disagree on their
@@ -3057,10 +3057,10 @@ def seed_second_user(app, db):
         user.id, SEED_USER_BOOTSTRAP_START, cadence_days=SEED_USER_CADENCE_DAYS,
     )[0]
 
-    # Baseline scenario BEFORE the account, mirroring ``seed_user`` (and
-    # production registration): ``create_account`` posts the opening anchor
-    # correction into every scenario, so the second Checking carries its
-    # $2000.00 opening from t0.
+    # Baseline scenario before the account, as ``seed_user`` orders them; the
+    # order is free since plan task plan#3076 (see ``seed_user`` above), and
+    # the worked-out ledger reads the second Checking's $2000.00 opening in
+    # whichever scenario it is asked for.
     scenario = Scenario(
         user_id=user.id,
         name="Baseline",

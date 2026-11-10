@@ -455,12 +455,12 @@ def register_user(spec: RegistrationSpec):
     # recorded paydays until they say otherwise.
     pay_schedule_service.set_history_opening(user.id, spec.history_opens_on)
 
-    # Create the baseline scenario BEFORE the first account (Build-Order
-    # Step 5): ``account_service.create_account`` posts the new account's
-    # opening anchor correction into every scenario, and postings are
-    # scenario-scoped -- a baseline-less create has nowhere to post and is
-    # loudly skipped.  Creating the baseline first keeps "production users
-    # get a baseline at registration" true at the moment it matters.
+    # The baseline scenario.  *It preceded the first account for a reason that
+    # is gone: ``account_service.create_account`` posted the new account's
+    # opening anchor correction into every scenario, and a baseline-less
+    # create had nowhere to post and was loudly skipped, until plan task
+    # plan#3076 deleted that sync.*  The create reads no scenario now (plan
+    # task plan#3332), so the order is free, and it is kept.
     scenario = Scenario(user_id=user.id, name="Baseline", is_baseline=True)
     db.session.add(scenario)
 

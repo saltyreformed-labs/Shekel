@@ -120,7 +120,6 @@ AUDITED_TABLES: tuple[tuple[str, str], ...] = (
     # in the seed script's write semantics.
     ("ref", "account_types"),
     # ── salary schema ────────────────────────────────────────────────
-    ("salary", "fica_configs"),
     ("salary", "pay_entries"),
     ("salary", "pay_stub_line_amounts"),
     ("salary", "pay_stub_one_offs"),
@@ -130,10 +129,6 @@ AUDITED_TABLES: tuple[tuple[str, str], ...] = (
     ("salary", "pension_profiles"),
     ("salary", "salary_profiles"),
     ("salary", "salary_raises"),
-    ("salary", "state_child_deductions"),
-    ("salary", "state_tax_configs"),
-    ("salary", "tax_bracket_sets"),
-    ("salary", "tax_brackets"),
     ("salary", "ytd_tax_checkpoints"),
 )
 

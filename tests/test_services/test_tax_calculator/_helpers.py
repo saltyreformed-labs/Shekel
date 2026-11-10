@@ -4,12 +4,14 @@
 
 from decimal import Decimal
 
+from app.enums import TaxTypeEnum
+
 
 # ── Test Fixtures ─────────────────────────────────────────────────
 
 
 class FakeBracket:
-    """Minimal stand-in for a TaxBracket ORM object."""
+    """Minimal stand-in for one rung of the law's ladder, an ``app.tax_law.Bracket``."""
 
     def __init__(self, min_income, max_income, rate, sort_order):
         self.min_income = min_income
@@ -19,11 +21,11 @@ class FakeBracket:
 
 
 class _FakeChildTier:
-    """Minimal stand-in for a StateChildDeduction tier row.
+    """Minimal stand-in for one ``app.tax_law.ChildDeductionTier``.
 
     ``resolve_child_deduction_per_child`` reads only ``agi_max`` and
     ``deduction_per_child`` (the lookup keys on ``agi_max``); ``agi_min`` is
-    carried for parity with the real row.
+    carried for parity with the real tier.
     """
 
     def __init__(self, agi_min, agi_max, deduction_per_child):
@@ -32,8 +34,8 @@ class _FakeChildTier:
         self.deduction_per_child = deduction_per_child
 
 
-class FakeBracketSet:
-    """Minimal stand-in for a TaxBracketSet ORM object.
+class FakeFederalRules:
+    """Minimal stand-in for a year's federal rules, an ``app.tax_law.FederalRules``.
 
     Bracket data below is for testing only and does not represent
     actual IRS bracket values.
@@ -79,19 +81,16 @@ def _single_brackets():
 # ── Negative-Path and Boundary-Condition Tests ─────────────────────
 
 
-class _FakeStateTaxConfig:
-    """Minimal state tax config for negative path tests."""
+class _FakeStateTaxRules:
+    """Minimal ``tax_config_service.StateTaxRules`` for negative path tests."""
 
     def __init__(self, flat_rate="0.045"):
         self.flat_rate = Decimal(str(flat_rate))
-        self.tax_type = type("_TT", (), {"name": "flat"})()
-        from app import ref_cache  # pylint: disable=import-outside-toplevel
-        from app.enums import TaxTypeEnum  # pylint: disable=import-outside-toplevel
-        self.tax_type_id = ref_cache.tax_type_id(TaxTypeEnum.FLAT)
+        self.tax_type = TaxTypeEnum.FLAT
 
 
-class _FakeFicaConfig:
-    """Minimal FICA config for negative path tests."""
+class _FakeFicaRules:
+    """Minimal ``app.tax_law.FicaRules`` for negative path tests."""
 
     def __init__(self):
         self.ss_rate = Decimal("0.062")
@@ -104,8 +103,8 @@ class _FakeFicaConfig:
 # ── capped_social_security helper (CRIT-03 / F-037) ───────────────
 
 
-class _FicaConfig184500:
-    """Fixed FicaConfig stub at the 2026-seed wage base.
+class _FicaRules184500:
+    """Fixed ``app.tax_law.FicaRules`` stub at the 2026-seed wage base.
 
     capped_social_security only reads `ss_rate` and `ss_wage_base`.
     Medicare attributes are populated because test_calculate_fica_delegates_to_helper
@@ -133,7 +132,7 @@ def _federal_2026_single():
     against the app's own figures (std deduction 16,100; CTC 2,200 per
     OBBBA; ODC 500; refundable ACTC cap 1,700).
     """
-    return FakeBracketSet(
+    return FakeFederalRules(
         standard_deduction=Decimal("16100"),
         child_credit_amount=Decimal("2200"),
         other_dependent_credit_amount=Decimal("500"),
@@ -150,15 +149,13 @@ def _federal_2026_single():
     )
 
 
-class _FakeNCStateConfig:
-    """The seeded 2026 NC flat state config (rate 3.99%, std ded 12,750)."""
+class _FakeNCStateTaxRules:
+    """2026 NC as ``tax_config_service.StateTaxRules`` (flat 3.99%, std ded 12,750)."""
 
     def __init__(self, flat_rate="0.0399", standard_deduction="12750"):
         self.flat_rate = Decimal(flat_rate)
         self.standard_deduction = Decimal(standard_deduction)
-        from app import ref_cache  # pylint: disable=import-outside-toplevel
-        from app.enums import TaxTypeEnum  # pylint: disable=import-outside-toplevel
-        self.tax_type_id = ref_cache.tax_type_id(TaxTypeEnum.FLAT)
+        self.tax_type = TaxTypeEnum.FLAT
 
 
 def _federal_2026_mfj():
@@ -169,7 +166,7 @@ def _federal_2026_mfj():
     ``tax_seed_data`` seed until plan step salary:X-at-1): std
     deduction 32,200; CTC 2,200; ODC 500; refundable ACTC cap 1,700.
     """
-    return FakeBracketSet(
+    return FakeFederalRules(
         standard_deduction=Decimal("32200"),
         child_credit_amount=Decimal("2200"),
         other_dependent_credit_amount=Decimal("500"),

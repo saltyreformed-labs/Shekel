@@ -14,7 +14,6 @@ from decimal import Decimal
 
 import pytest
 
-from app import ref_cache
 from app.enums import FilingStatusEnum
 from app.exceptions import UnsupportedStateError
 from app.extensions import db
@@ -81,7 +80,7 @@ def _state_slice(year_law, state_code="NC", status=FilingStatusEnum.SINGLE):
     state = year_law.states[state_code]
     return StateTaxRules(
         state_code=state_code,
-        tax_type_id=ref_cache.tax_type_id(state.tax_type),
+        tax_type=state.tax_type,
         flat_rate=state.flat_rate,
         standard_deduction=state.standard_deduction[status],
         child_deduction_tiers=state.child_deduction_tiers[status],

@@ -14,11 +14,11 @@ from app.services.tax_calculator import (
 
 from ._helpers import (
     FakeBracket,
-    FakeBracketSet,
+    FakeFederalRules,
     _single_brackets,
-    _FakeStateTaxConfig,
-    _FakeFicaConfig,
-    _FicaConfig184500,
+    _FakeStateTaxRules,
+    _FakeFicaRules,
+    _FicaRules184500,
 )
 
 
@@ -44,7 +44,7 @@ class TestNegativeAndBoundaryPaths:
             FakeBracket(Decimal("0"), Decimal("50000"), Decimal("0.10"), 0),
             FakeBracket(Decimal("50000"), None, Decimal("0.22"), 1),
         ]
-        bracket_set = FakeBracketSet(
+        bracket_set = FakeFederalRules(
             standard_deduction=Decimal("15000"),
             brackets=brackets,
         )
@@ -75,7 +75,7 @@ class TestNegativeAndBoundaryPaths:
         assert fed_result == Decimal("0.00")
 
         # Federal withholding pipeline: zero gross
-        bracket_set = FakeBracketSet(brackets=_single_brackets())
+        bracket_set = FakeFederalRules(brackets=_single_brackets())
         fed_wh = calculate_federal_withholding(
             gross_pay=Decimal("0"),
             pay_periods=26,
@@ -84,11 +84,11 @@ class TestNegativeAndBoundaryPaths:
         assert fed_wh == Decimal("0.00")
 
         # State: zero annual income
-        state = calculate_state_tax(Decimal("0"), _FakeStateTaxConfig())
+        state = calculate_state_tax(Decimal("0"), _FakeStateTaxRules())
         assert state == Decimal("0.00")
 
         # FICA: zero wages
-        fica = calculate_fica(Decimal("0"), _FakeFicaConfig(), Decimal("0"))
+        fica = calculate_fica(Decimal("0"), _FakeFicaRules(), Decimal("0"))
         assert fica["ss"] == Decimal("0.00")
         assert fica["medicare"] == Decimal("0.00")
 
@@ -109,7 +109,7 @@ class TestNegativeAndBoundaryPaths:
         )
 
         # Via the full withholding pipeline: income below standard deduction
-        bracket_set = FakeBracketSet(
+        bracket_set = FakeFederalRules(
             standard_deduction=Decimal("15000"),
             brackets=_single_brackets(),
         )
@@ -151,7 +151,7 @@ class TestNegativeAndBoundaryPaths:
         Why: Zero wages must not produce negative taxes or crash.
         """
         result = calculate_fica(
-            Decimal("0"), _FakeFicaConfig(), Decimal("0")
+            Decimal("0"), _FakeFicaRules(), Decimal("0")
         )
 
         assert result["ss"] == Decimal("0.00"), (
@@ -182,7 +182,7 @@ class TestCappedSocialSecurityHelper:
         result = capped_social_security(
             Decimal("12000.00"),
             Decimal("48000.00"),
-            _FicaConfig184500(),
+            _FicaRules184500(),
         )
         assert result == Decimal("744.00"), (
             f"Under-cap SS must be 744.00, got {result}"
@@ -198,7 +198,7 @@ class TestCappedSocialSecurityHelper:
         result = capped_social_security(
             Decimal("12000.00"),
             Decimal("180000.00"),
-            _FicaConfig184500(),
+            _FicaRules184500(),
         )
         assert result == Decimal("279.00"), (
             f"Partial-crossing SS must be 279.00, got {result}"
@@ -212,7 +212,7 @@ class TestCappedSocialSecurityHelper:
         result = capped_social_security(
             Decimal("12000.00"),
             Decimal("184500.00"),
-            _FicaConfig184500(),
+            _FicaRules184500(),
         )
         assert result == Decimal("0.00"), (
             f"At-cap SS must be 0.00, got {result}"
@@ -226,7 +226,7 @@ class TestCappedSocialSecurityHelper:
         result = capped_social_security(
             Decimal("12000.00"),
             Decimal("192000.00"),
-            _FicaConfig184500(),
+            _FicaRules184500(),
         )
         assert result == Decimal("0.00"), (
             f"Above-cap SS must be 0.00, got {result}"
@@ -240,7 +240,7 @@ class TestCappedSocialSecurityHelper:
         reintroduces its own copy of the cap arithmetic, this assertion
         fails because the rounding boundaries diverge.
         """
-        cfg = _FicaConfig184500()
+        cfg = _FicaRules184500()
         # Sample the partial-crossing branch where rounding is most fragile.
         gross = Decimal("12000.00")
         cumul = Decimal("180000.00")
@@ -255,7 +255,7 @@ class TestCappedSocialSecurityHelper:
     def test_string_inputs_accepted(self):
         """String gross/cumulative are coerced to Decimal -- mirrors callers."""
         result = capped_social_security(
-            "12000.00", "48000.00", _FicaConfig184500()
+            "12000.00", "48000.00", _FicaRules184500()
         )
         assert result == Decimal("744.00")
 

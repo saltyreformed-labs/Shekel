@@ -19,7 +19,7 @@ from app.services.exceptions import (
     InvalidFilingStatusError,
 )
 
-from ._helpers import FakeBracket, FakeBracketSet, _single_brackets
+from ._helpers import FakeBracket, FakeFederalRules, _single_brackets
 
 
 # ── Test 1: Zero Tax (credits exceed tax) ─────────────────────────
@@ -252,7 +252,7 @@ class TestHighIncomeScenario:
             FakeBracket(Decimal("100000"), None,
                         Decimal("0.37"), 1),
         ]
-        bracket_set = FakeBracketSet(
+        bracket_set = FakeFederalRules(
             standard_deduction=Decimal("15000"),
             brackets=brackets,
         )
@@ -328,7 +328,7 @@ class TestBracketBoundary:
         brackets = [
             FakeBracket(Decimal("0"), None, Decimal("0.15"), 0),
         ]
-        bracket_set = FakeBracketSet(
+        bracket_set = FakeFederalRules(
             standard_deduction=Decimal("0"),
             brackets=brackets,
         )

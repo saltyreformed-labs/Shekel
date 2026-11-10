@@ -7,7 +7,7 @@ for the paycheck calculator and the Taxes tab.  The law itself is
 step **salary:X-at-1**); this module reads it and decides which of its years
 applies.  Until X-at-1 it read a copy of the law stored per user in five
 ``salary`` tables, which signup and every deploy copied in and the Settings
-page could overwrite.
+page could overwrite; plan step salary:X-at-2 dropped them.
 
 **Which year's law applies to a given year is ONE rule and it lives here**
 (:func:`resolve_tax_year`).  The app carries the years that have been
@@ -53,6 +53,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from app import ref_cache, tax_law
+from app.enums import TaxTypeEnum
 from app.exceptions import UnsupportedStateError
 from app.tax_law import ChildDeductionTier, FederalRules, FicaRules
 
@@ -69,12 +70,15 @@ class StateTaxRules:
     attributes :func:`app.services.tax_calculator.calculate_state_tax` reads,
     plus the child-deduction tiers the annual liability resolves.
 
-    ``tax_type_id`` is the ``ref.tax_types`` id of the law's tax type, because
-    the calculator compares ids (IDs for logic).
+    ``tax_type`` is the law's own :class:`~app.enums.TaxTypeEnum` member, which
+    the calculator compares (ruling plan#3211).  Until plan step salary:X-at-2
+    it was the member's ``ref.tax_types`` id, because a stored row named its
+    type by a key onto that table; the law is code, so the table was a second
+    spelling of the enum, and X-at-2 deleted it.
 
     Attributes:
         state_code: The two-letter state.
-        tax_type_id: The ``ref.tax_types`` id of the state's tax type.
+        tax_type: The state's tax type, as the law states it.
         flat_rate: The state's flat rate for the year, or ``None``.
         standard_deduction: This filing status's state standard deduction.
         child_deduction_tiers: This filing status's per-child deduction tiers,
@@ -82,7 +86,7 @@ class StateTaxRules:
     """
 
     state_code: str
-    tax_type_id: int
+    tax_type: TaxTypeEnum
     flat_rate: Decimal | None
     standard_deduction: Decimal
     child_deduction_tiers: tuple[ChildDeductionTier, ...]
@@ -210,7 +214,7 @@ def _state_rules(state_code, state_year, status) -> StateTaxRules:
     """
     return StateTaxRules(
         state_code=state_code,
-        tax_type_id=ref_cache.tax_type_id(state_year.tax_type),
+        tax_type=state_year.tax_type,
         flat_rate=state_year.flat_rate,
         standard_deduction=state_year.standard_deduction[status],
         child_deduction_tiers=state_year.child_deduction_tiers[status],

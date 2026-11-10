@@ -8,6 +8,14 @@ which taxed up to $25 of a head of household's income at 24% that the law
 taxes at 32%: $2.00 a year once taxable income passes $201,775 (finding
 **salary:SAL-577**).
 
+**2026 states no withholding figure** (ruling plan#3213): Pub 15-T (2026)
+withholds on the return's standard deduction -- Worksheet 1A line 1g's $8,600
+($12,900 jointly) plus the annual table's zero-rate row, $7,500 ($19,300
+jointly, $15,550 head of household) -- and Form W-4 (2026) Step 3 claims the
+return's $2,200 a qualifying child, so a 2026 paycheck withholds on the
+figures below.  (Pub 15-T's ladder for married filing separately is the
+single filer's, which the law does not state: finding plan#3243.)
+
 North Carolina's standard deduction is the enacted, unindexed statutory amount;
 re-verify it against the 2026 Form D-401 instructions when NCDOR posts them.
 """

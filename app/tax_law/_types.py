@@ -139,10 +139,13 @@ class FederalRules:
     ``None`` where the withholding documents print the return's figure.
     ``None`` is the one way to write a figure the two share: stating it again
     would be a second spelling that a later edit could part from the first, so
-    a stated figure equal to the return's is refused.  The other figures the
-    withholding formula reads -- the ladder and the other-dependent credit --
-    have never differed, so the law has no field for a withholding copy of
-    them; a year whose withholding documents part from one adds the field.
+    a stated figure equal to the return's is refused.  The law states no
+    withholding copy of the other two figures the formula reads.  The
+    other-dependent credit has not differed.  The ladder has, for one filing
+    status: Pub 15-T has no married-filing-separately table and withholds on
+    the single filer's ladder, whose 35% rung runs past the return's 37%
+    threshold for married filing separately, and the formula withholds on
+    the return's ladder (finding plan#3243, step plan#3241).
     """
 
     standard_deduction: Decimal

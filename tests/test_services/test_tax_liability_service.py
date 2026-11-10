@@ -168,10 +168,14 @@ class TestConfigYearSelection:
     def test_2025_vs_2026_differ(self, app, db, seed_user):
         """Same inputs against 2025 vs 2026 seeds produce different results.
 
-        2025 single (std ded 15,000):
-          taxable   = 110000 + 1200 - 12000 - 15000 = 84,200.00
-          brackets  = 11925*0.10 + (48475-11925)*0.12 + (84200-48475)*0.22
-                    = 1192.50 + 4386.00 + 7859.50 = 13,438.00
+        2025 single (std ded 15,750, P.L. 119-21 by Rev. Proc. 2025-32 sec.
+        3.01 -- the return's, not Pub 15-T (2025)'s 15,000 a paycheck
+        withholds on; plan step salary:X-at-7, ruling plan#3213):
+          taxable   = 110000 + 1200 - 12000 - 15750 = 83,450.00
+          brackets  = 11925*0.10 + (48475-11925)*0.12 + (83450-48475)*0.22
+                    = 1192.50 + 4386.00 + 7694.50 = 13,273.00
+        (On the pre-P.L. 119-21 15,000 the figures were 84,200.00 and
+        13,438.00: the 750 more deduction at 22% is the 165.00 between.)
         State NC 2025 (flat 4.25%, std ded 12,750):
           raw       = (99200 - 12750) * 0.0425 = 86450 * 0.0425 = 3,674.125
           liability = 3,674.13 (ROUND_HALF_UP on the .005 half-cent)
@@ -189,9 +193,9 @@ class TestConfigYearSelection:
         )
 
         assert r2025.tax_year == 2025
-        assert r2025.federal.standard_deduction == Decimal("15000.00")
-        assert r2025.federal.taxable == Decimal("84200.00")
-        assert r2025.federal.liability == Decimal("13438.00")
+        assert r2025.federal.standard_deduction == Decimal("15750.00")
+        assert r2025.federal.taxable == Decimal("83450.00")
+        assert r2025.federal.liability == Decimal("13273.00")
         assert r2025.state.flat_rate == Decimal("0.0425")
         assert r2025.state.liability == Decimal("3674.13")
 

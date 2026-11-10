@@ -43,9 +43,14 @@ from app.utils.hidden_row import HiddenRow
 #: * ``amount`` -- :func:`app.services.row_valuation.purchases_total`,
 #:   ``cash_ledger._entry_checking_impact``, ``posted_purchase_sum``,
 #:   ``credit_entry_sum``.  COST-BEARING;
-#: * ``is_credit`` -- those same four plus ``sync_entry_payback``, which moves
-#:   the purchase between this account's outflow and its CC Payback sibling.
-#:   COST-BEARING;
+#: * ``on_card`` and ``card_account_id``, the CC tick and its pick -- which
+#:   account the purchase's money moved on, so which balance it moves:
+#:   ``cash_ledger._entry_checking_impact`` and the fold read the purchase's
+#:   ``account_id``, which the tick MOVES (plan task plan#3142), and on an old
+#:   flagged line the tick takes off the CC flag, which ``credit_entry_sum``
+#:   and ``sync_entry_payback`` read.  COST-BEARING.  They replaced
+#:   ``is_credit`` here at that task: the edit door wrote the flag until then,
+#:   and writes no such field now;
 #: * ``purchased_on`` -- ``Transaction.entries``' ordering, the out-of-period
 #:   WARNING (:func:`._sums.entry_list_view`), the reconcile panel's sort and
 #:   its two OFFER predicates
@@ -81,7 +86,7 @@ from app.utils.hidden_row import HiddenRow
 #: figure is WHAT MOVED (the covering movement's, since plan step
 #: ``balance:X-bi-4b-1``; the row's own two columns through ``X-bi-4a``) --
 #: read one level down, on the purchase instead of on the row.
-_COST_BEARING_FIELDS = frozenset({"figure", "is_credit"})
+_COST_BEARING_FIELDS = frozenset({"figure", "on_card", "card_account_id"})
 
 
 def cost_fields_changing(valid_updates: dict) -> "frozenset[str]":
@@ -105,8 +110,8 @@ def cost_fields_changing(valid_updates: dict) -> "frozenset[str]":
     figure now states its writer itself (ruling **R-BAL69**), and the day is
     left to say what it is about, which is when the money moved.
 
-    ``is_credit`` is NOT released with it: which side of the card a purchase sat
-    on is not a figure a statement states.
+    The CC tick is NOT released with it: which account a purchase's money
+    moved on is not a figure a statement states.
 
     Args:
         valid_updates: The submission, already narrowed to updatable fields.
@@ -738,10 +743,14 @@ def _reject_flag_beside_another_account(
     no account of their own to say it with.  A purchase carrying BOTH would
     be one fact in two homes (CLAUDE.md rule 14), and the flag's arm in
     ``cash_ledger.movement_cash_leg`` would zero a movement the card's fold
-    must read.  Refused at both purchase doors, so the combination is
-    unwritable rather than reconciled; ``cash_ledger.off_statement_sum``
-    still partitions its terms by both facts, so the sum would hold even for
-    a row that reached the table around the doors.
+    must read.  Refused at the add door, where the CC tick and "Paid from"
+    are both drawn and would each say where the money went (plan task
+    plan#2930); the edit door draws no "Paid from", its tick MOVES the
+    purchase, and no door writes the flag on (plan task plan#3142), so the
+    combination is unwritable rather than reconciled.
+    ``cash_ledger.off_statement_sum`` still partitions its terms by both
+    facts, so the sum would hold even for a row that reached the table
+    around the doors.
 
     Args:
         is_credit: The flag the write would leave on the purchase.

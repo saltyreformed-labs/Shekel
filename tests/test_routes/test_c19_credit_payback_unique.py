@@ -593,8 +593,9 @@ class TestSyncEntryPaybackTOCTOUPrevention:
         add door syncs no payback, so the same two POSTs are graded for what
         they do now: both 200, both purchases on the card at their figures,
         and no payback.  The payback sync's race is reached only by an edit of
-        an old flagged line (plan#3142 and plan#1034's re-plan), and the
-        unique index above is still its backstop.  Two locks serialise the
+        an old flagged line until plan#1034's re-plan converts them (the edit
+        tick moves a purchase since plan task plan#3142), and the unique index
+        above is still its backstop.  Two locks serialise the
         pair -- the request's owner lock (plan step ``balance:X-bn``) and the
         parent row's ``FOR NO KEY UPDATE`` the arrival trigger takes on every
         purchase INSERT (:mod:`app.deleted_row_infrastructure`, ruling
@@ -673,19 +674,27 @@ class TestSyncEntryPaybackTOCTOUPrevention:
         ]
 
 
-    def test_concurrent_edit_ticks_yield_one_payback(self, app, db):
-        """Two tabs ticking CC on two purchases of one envelope leave exactly one payback.
+    def test_concurrent_edit_ticks_move_both_onto_the_card(self, app, db):
+        """Two tabs ticking CC on two purchases of one envelope move both onto the card, with no payback.
 
-        The payback sync's race since plan task plan#2930 (the task's review,
-        M2): the add door syncs no payback, and the edit door's tick still
-        flips the old CC flag until plan#3142, so two PATCHes each run the
-        sync's create arm.  The arrival trigger's parent-row lock fires on an
-        INSERT or a re-parent, not on this UPDATE, so the request's owner lock
-        (plan step ``balance:X-bn``) alone serialises the pair, and the unique
-        index is the backstop.  Graded as the OUTCOME: one payback summing
-        both, 50 + 75 = 125, and both purchases linked to it.
+        The payback sync's race from plan task plan#2930 (the task's review,
+        M2) was graded here while the edit door's tick flipped the old CC flag,
+        so two PATCHes each ran the sync's create arm.  Since plan task
+        plan#3142 the tick MOVES the purchase (ruling plan#2888), so neither
+        moves the card total and the sync makes nothing.  The arrival
+        trigger's parent-row lock fires on an INSERT or a re-parent, not on
+        this UPDATE, so the request's owner lock (plan step ``balance:X-bn``)
+        alone serialises the pair.  Graded as the OUTCOME: both purchases on
+        the card, unflagged, and no payback.
         """
         data = _create_concurrent_user(db.session)
+        card = add_card({
+            "scenario": data["scenario"],
+            "account": data["account"],
+            "categories": data["categories"],
+            "user": data["user"],
+        })
+        card_id = card.id
         template = make_expense_template(
             db.session, data, amount="400.00", name="Concurrent Tracked",
             category_key="Groceries", is_envelope=True,
@@ -714,7 +723,7 @@ class TestSyncEntryPaybackTOCTOUPrevention:
         def _tick(entry_id):
             return client.patch(
                 f"/transactions/{txn_id}/entries/{entry_id}",
-                data={"is_credit": "true"},
+                data={"is_credit": "true", "tick_drawn": "true"},
             )
 
         resp_a, resp_b, err_a, err_b = _run_concurrent(
@@ -725,16 +734,17 @@ class TestSyncEntryPaybackTOCTOUPrevention:
         assert err_b is None, f"Thread B errored: {err_b!r}"
         assert (resp_a.status_code, resp_b.status_code) == (200, 200)
         db.session.expire_all()
-        active_paybacks = (
-            db.session.query(Transaction)
-            .filter_by(credit_payback_for_id=txn_id, is_deleted=False)
-            .all()
-        )
-        assert [p.estimated_amount for p in active_paybacks] == [Decimal("125.00")]
+        assert db.session.query(Transaction).filter_by(
+            credit_payback_for_id=txn_id,
+        ).count() == 0
         assert sorted(
-            entry.credit_payback_id for entry in db.session.query(TransactionEntry)
-            .filter_by(transaction_id=txn_id, is_credit=True)
-        ) == [active_paybacks[0].id, active_paybacks[0].id]
+            (entry.account_id, entry.amount, entry.is_credit)
+            for entry in db.session.query(TransactionEntry)
+            .filter_by(transaction_id=txn_id)
+        ) == [
+            (card_id, Decimal("50.00"), False),
+            (card_id, Decimal("75.00"), False),
+        ]
 
 
 # ---------------------------------------------------------------------------

@@ -1187,8 +1187,16 @@ class TestEntryServiceHooks:
     def test_update_entry_toggle_credit_creates_payback(
         self, app, db, seed_user, seed_periods, seed_entry_template,
     ):
-        """update_entry toggling is_credit to True creates a payback."""
+        """update_entry ticking CC moves the purchase onto the card and creates NO payback.
+
+        Plan task plan#3142, ruling plan#2888: the tick moves the purchase
+        (``entry_service._details.tick_edit``), so the envelope's card total
+        -- its flagged lines alone -- does not move and the sync makes no
+        payback.  It flipped the flag and created a $100.00 payback until
+        then, which the ruling changed.
+        """
         with app.app_context():
+            visa = add_card(seed_user, "Visa")
             txn = seed_entry_template["transaction"]
             user = seed_user["user"]
 
@@ -1202,15 +1210,15 @@ class TestEntryServiceHooks:
                 ),
             )
 
-            entry_service.update_entry(entry.id, user.id, is_credit=True)
+            entry_service.update_entry(entry.id, user.id, on_card=True)
 
             payback = (
                 db.session.query(Transaction)
                 .filter_by(credit_payback_for_id=txn.id)
                 .first()
             )
-            assert payback is not None
-            assert payback.estimated_amount == Decimal("100.00")
+            assert payback is None
+            assert (entry.account_id, entry.is_credit) == (visa.id, False)
 
     def test_update_entry_toggle_credit_deletes_payback(
         self, app, db, seed_user, seed_periods, seed_entry_template,
@@ -1237,7 +1245,7 @@ class TestEntryServiceHooks:
             )
             assert payback is not None
 
-            entry_service.update_entry(entry.id, user.id, is_credit=False)
+            entry_service.update_entry(entry.id, user.id, on_card=False)
 
             payback = (
                 db.session.query(Transaction)

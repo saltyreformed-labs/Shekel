@@ -48,7 +48,10 @@ class PurchaseRemoval:
         own: What taking the purchase ALONE out of its matches frees.  A
             companion's list withholds the X where this frees a line (ruling
             **R-CC132**): the line is the purchase's own, so the list can say
-            so before the press.
+            so before the press.  It is also what the CC tick's MOVE frees
+            (plan task plan#3142: ``movement_account.re_point_movement``
+            takes the purchase alone out of its matches), so the owner's edit
+            form names these lines under the tick and posts them back.
         delete: What the X frees -- the purchase's own matches and, where it
             is the envelope's last card purchase, its payback's, which the
             same press deletes.  ONE read over both removals, so a match

@@ -1,10 +1,12 @@
-"""What one purchase SAYS, and which account that names -- the add door's input.
+"""What one purchase SAYS, and which account that names -- the doors' input.
 
 Split from :mod:`._doors` at plan task plan#2930, whose CC tick took that module
 past pylint's 1,000-line ceiling: the purchase's content
 (:class:`EntryDetails`) and the rule that turns what it says about its money
 into an account (:func:`purchase_account_id`) are one value and its one reading,
-and neither writes.  :mod:`._doors` reads both, and nothing here reads back.
+and neither writes.  The edit door's twin is :func:`tick_edit` (plan task
+plan#3142): what the CC tick on a recorded purchase asks of it.  :mod:`._doors`
+reads all three, and nothing here reads back.
 
 Architecture:
   - No Flask imports.
@@ -16,10 +18,16 @@ from datetime import date
 
 from app.exceptions import ValidationError
 from app.models.transaction import Transaction
+from app.models.transaction_entry import TransactionEntry
 from app.services.entry_service._refusals import (
     _reject_flag_beside_another_account,
 )
-from app.services.movement_account import admitted_movement_account_id, the_card
+from app.services import match_press
+from app.services.movement_account import (
+    admitted_movement_account_id,
+    purchase_card,
+    the_card,
+)
 from app.services.settle_day import SettleDay
 from app.services.stated_figure import StatedFigure
 
@@ -62,8 +70,8 @@ class EntryDetails:
             cheat's spelling of "on the card" from before the card was an
             account, and the 26 lines that carry it keep it, and the payback
             arms that follow it, until plan#1034's re-plan converts them.  The
-            edit door's tick still flips it, until plan#3142 makes that tick
-            move the purchase too.  A tick beside
+            edit door's tick writes none either since plan task plan#3142: it
+            moves the purchase (:func:`tick_edit`).  A tick beside
             an ``account_id`` other than the row's is refused
             (:func:`~._refusals._reject_flag_beside_another_account`): the
             tick and "Paid from" would each say where the money went.
@@ -175,11 +183,9 @@ def purchase_account_id(txn: Transaction, details: EntryDetails) -> int:
             more cards and picked none, or set "Paid from" to another account
             too; or a card is picked with the tick left off.
     """
-    if not details.on_card and details.card_account_id is not None:
-        raise ValidationError(
-            f"A card is picked for {details.description} but CC is not "
-            "ticked: tick CC to put it on that card, or set 'Which card' back."
-        )
+    _reject_pick_without_tick(
+        details.description, details.on_card, details.card_account_id,
+    )
     if details.on_card:
         _reject_flag_beside_another_account(
             True,
@@ -194,4 +200,201 @@ def purchase_account_id(txn: Transaction, details: EntryDetails) -> int:
         return txn.account_id
     return admitted_movement_account_id(
         txn, details.account_id, movement="purchase",
+    )
+
+
+def _reject_pick_without_tick(
+    what: str, on_card: bool, card_account_id: int | None,
+) -> None:
+    """Refuse a "Which card" pick posted with the CC tick left off, at either door.
+
+    The review of plan#2930 (M4): the pick names which card only for a
+    purchase ticked onto one, so alone it says two things at once, and
+    filing the purchase where it stands would ignore what the owner chose.
+    One sentence for the add door (:func:`purchase_account_id`) and the edit
+    door (:func:`tick_edit`).
+
+    Args:
+        what: The purchase's description, for the sentence.
+        on_card: Whether the tick was posted ticked.
+        card_account_id: The card picked, or ``None``.
+
+    Raises:
+        ValidationError: When a card is picked and the tick is not.
+    """
+    if not on_card and card_account_id is not None:
+        raise ValidationError(
+            f"A card is picked for {what} but CC is not "
+            "ticked: tick CC to put it on that card, or set 'Which card' back."
+        )
+
+
+@dataclass(frozen=True)
+class TickEdit:
+    """What the CC tick on a RECORDED purchase asks of it: one act, or none.
+
+    Attributes:
+        flag: The old CC flag the purchase carries after the save: what it
+            carried, less an old flagged line's un-tick, whose flag comes off
+            through the payback arms the 26 such lines still have (the sync
+            deletes or re-prices the envelope's CC Payback) until plan#1034's
+            re-plan converts them.  Never set where it was not.
+        account_id: The account the tick MOVES the purchase to -- onto the
+            card, back to its row's account, or to another card -- through
+            ``movement_account.re_point_movement``; ``None`` where it stays.
+    """
+
+    flag: bool
+    account_id: int | None = None
+
+
+def tick_edit(
+    entry: TransactionEntry, on_card: bool | None, card_account_id: int | None,
+) -> TickEdit:
+    """Return what the edit form's CC tick and its pick ask of *entry*.
+
+    Plan task plan#3142, ruling plan#2888 ("the tick stays the one control,
+    with a pick only for two or more cards"): the tick on a recorded
+    purchase says where its money went, as the add form's does, so changing
+    it MOVES the purchase.  It reads the purchase as the form drew it
+    (``movement_account.purchase_card``), so an untouched Save moves nothing:
+
+    * **on no card, ticked**: onto the card ``movement_account.the_card``
+      answers -- the owner's one card, or the one the pick names -- against
+      the ROW's owner, so a companion's tick moves it onto the owner's card
+      (ruling **R-CC11**).  Its refusals are the add tick's: no card, two or
+      more and none picked, a pick that is not the owner's (404) or not a
+      card;
+    * **on a card, un-ticked**: back to the account its row lives on;
+    * **on a card, ticked**: where the pick names another card, onto it; with
+      no pick (one card, or an archived card the pick does not offer), it
+      stays;
+    * **on no card, un-ticked**: it stays -- a purchase "Paid from" another
+      account than a card keeps it, the edit form having no "Paid from";
+    * **an old flagged line** keeps its flag while ticked and loses it when
+      un-ticked (the payback arms it has, :class:`TickEdit`), and moves
+      nowhere: converting one is plan#1034's.  A card picked beside its tick
+      is refused, because the form draws no pick on one: it has no card to
+      name, and putting it on one would be that conversion.
+
+    A pick with the tick off is refused at either door
+    (:func:`_reject_pick_without_tick`), except a pick naming the card the
+    purchase is ON: the form draws the pick with that card selected, so a
+    Save that changed only the tick posts it back.  ``on_card`` absent -- a
+    partial update such as the statement matcher's -- asks nothing.
+
+    Args:
+        entry: The purchase as stored, its row and account loadable.
+        on_card: The tick as posted, or ``None`` when not submitted.
+        card_account_id: The card picked, or ``None``.
+
+    Returns:
+        The :class:`TickEdit`.
+
+    Raises:
+        NotFoundError: The picked card is not an account of the row's owner.
+        ValidationError: On the refusals above.
+    """
+    card = None if entry.is_credit else purchase_card(entry)
+    # The pick is drawn with the purchase's own card selected, so a Save that
+    # changed only the tick posts that card back: the box untouched, not a
+    # pick (``settle_day.submitted_settle_day``'s echo rule, one control over).
+    echoed = card is not None and card_account_id == card.id
+    _reject_pick_without_tick(
+        entry.description, bool(on_card), None if echoed else card_account_id,
+    )
+    if on_card is None:
+        return TickEdit(flag=entry.is_credit)
+    if entry.is_credit:
+        if card_account_id is not None:
+            raise ValidationError(
+                f"{entry.description} is still repaid by its CC Payback, so "
+                "it cannot be put on a card by name yet: un-tick CC and "
+                "save, then tick CC to put it on the card."
+            )
+        return TickEdit(flag=on_card)
+    if not on_card:
+        return TickEdit(
+            flag=False,
+            account_id=None if card is None else entry.transaction.account_id,
+        )
+    if card is not None and (card_account_id is None or echoed):
+        return TickEdit(flag=False)
+    target = the_card(
+        entry.transaction, card_account_id,
+        what=entry.description, again="tick CC",
+    )
+    return TickEdit(
+        flag=False,
+        account_id=None if target.id == entry.account_id else target.id,
+    )
+
+
+def settle_day_after_move(
+    entry: TransactionEntry, valid_updates: dict,
+) -> SettleDay | None:
+    """Return the posting day a purchase the CC tick MOVES ends the save with.
+
+    Decided under R-BAL207 at plan task plan#3142 (an edge of a path not yet
+    released): **a posting day the save did not move is the OLD account's,
+    and the move voids it**.  It records the day that account's bank took the
+    money, so it is no fact about the new account, whatever its basis: a day
+    a checking statement's line was observed on, or a checking true-up
+    bounded, says nothing of when the card took it.  Kept, it would date the
+    purchase on the card by checking's day, where a purchase on a card counts
+    from the day it was bought, marked or not (rulings plan#2926, plan#2958):
+    bought Jan 4 and taken from checking Jan 6, a Visa closing on the 5th
+    would carry it on the Feb 5 statement, due Feb 27, not Jan 27's.  Voided,
+    it is in flight on the new account from its own date, as every purchase
+    put there is, until that account's statement shows it.  A day the save
+    DID move is the owner's word for the new account, typed in the same Save,
+    and is kept: the books boundary grades it there
+    (``movement_account.re_point_movement``).  Read by the edit door
+    (``_doors.update_entry``) before its two day rules, so they are checked on
+    the day the save leaves.
+
+    The edit form posts its Posted box on every Save, prefilled, so a day
+    equal to the stored one is the box coming back untouched
+    (``settle_day.submitted_settle_day``'s echo rule), not a restatement.
+
+    Args:
+        entry: The purchase as stored.
+        valid_updates: The submission, already narrowed to updatable fields.
+
+    Returns:
+        The day the save typed, where it moved one; else ``None``.
+    """
+    if "settle_day" not in valid_updates:
+        return None
+    typed = valid_updates["settle_day"]
+    if typed is None or typed.day == entry.settled_on:
+        return None
+    return typed
+
+
+def move_press(
+    press: match_press.Press | None, entry: TransactionEntry,
+) -> match_press.Press | None:
+    """Return the press the CC tick's move withdraws under.
+
+    A companion's edit carries the PAYBACK's sentence
+    (``entry_credit_workflow.payback_refusal``, the line an old flagged
+    line's un-tick frees), and a move frees the purchase's OWN line, so its
+    refusal names the purchase (ruling **R-CC132**: *"Kroger is matched to a
+    line on the bank statement, so only the account owner can delete it"*),
+    the same save reworded (``match_press.Press.reworded``).  Any other press
+    is returned as it is.
+
+    Args:
+        press: The edit's save.
+        entry: The purchase the tick moves.
+
+    Returns:
+        The press for the move.
+    """
+    if press is None or not isinstance(press.shown, match_press.OwnerOnly):
+        return press
+    return press.reworded(
+        f"{entry.description} is matched to a line on the bank statement, "
+        "so only the account owner can move it onto or off a card."
     )

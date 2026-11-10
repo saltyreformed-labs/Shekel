@@ -195,8 +195,12 @@ def elsewhere_purchase_sum(txn: Transaction) -> Decimal:
     converts those lines and deletes the flag, its arm, and the
     ``not is_credit`` clause below, which then partitions nothing.
 
-    **A purchase carrying BOTH is unwritable at both purchase doors**
-    (``entry_service._refusals._reject_flag_beside_another_account``), and
+    **A purchase carrying BOTH is written by no purchase door**: the add door
+    refuses the CC tick beside another "Paid from"
+    (``entry_service._refusals._reject_flag_beside_another_account``), and no
+    door writes the flag on since plan task plan#3142 (the edit tick moves
+    the purchase); an old flagged line whose ROW moved accounts carries
+    both (ruling **R-CC36**), and
     this arm still excludes the flag so that :func:`off_statement_sum`'s
     three terms partition the purchases whatever a row holds -- a rule that
     rests on a door alone is one refactor from resting on nothing.

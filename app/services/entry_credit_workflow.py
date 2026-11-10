@@ -268,8 +268,10 @@ def sync_entry_payback(
             hands this whatever it declared, which frees nothing here.  An
             owner's door that names none passes ``None``, which
             refuses a press that would free a line (ruling **R-CC127**) --
-            the add form's card refund, and any edit whose new card total is
-            exactly zero (a re-price, or a CC tick on a refund), which no
+            and any edit whose new card total is exactly zero (a re-price of
+            an old flagged line: the add door writes no flag since plan task
+            plan#2930, and the edit door's tick moves a purchase since plan
+            task plan#3142), which no
             static caption can foresee: refused as "out of date" though the
             page was not, and again on every try (finding **CC-381**, filed
             at this step's tick, owned by plan step ``credit_card:CC-7``,

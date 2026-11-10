@@ -41,7 +41,11 @@ from app.services.entry_service._removals import (
     PurchaseControls,
     purchase_controls,
 )
-from app.services.movement_account import PurchaseChoices, purchase_choices
+from app.services.movement_account import (
+    PurchaseChoices,
+    purchase_card,
+    purchase_choices,
+)
 from app.services.pay_calendar import DerivedPeriod
 from app.services.transfer_legs import PlanItem
 from app.utils.entry_partition import partition_entries
@@ -96,7 +100,9 @@ def purchase_amount(magnitude: Decimal, *, records_a_refund: bool) -> Decimal:
     return -magnitude if records_a_refund else magnitude
 
 
-def credit_total_moves(entry: TransactionEntry, valid_updates: dict) -> bool:
+def credit_total_moves(
+    entry: TransactionEntry, valid_updates: dict, *, flag_after: bool,
+) -> bool:
     """Return whether applying *valid_updates* moves the envelope's credit total.
 
     Finding **N-323**: the payback sync refuses a settled payback's re-derive
@@ -112,9 +118,16 @@ def credit_total_moves(entry: TransactionEntry, valid_updates: dict) -> bool:
     5c-2b) took that function past pylint's local-variable ceiling; a
     reduction over one purchase, so it lives with the others.
 
+    **The flag's after-state is an argument since plan task plan#3142**: no
+    submission names the flag any more.  The CC tick posts ``on_card``, which
+    on an old flagged line un-ticked takes the flag off and otherwise moves
+    the purchase (``_details.tick_edit``), so the door states what the flag
+    will be.
+
     Args:
         entry: The purchase as stored, BEFORE the update is applied.
         valid_updates: The submission, already narrowed to updatable fields.
+        flag_after: Whether the purchase carries the old CC flag after it.
 
     Returns:
         ``True`` when the entry's contribution to the credit sum changes.
@@ -124,10 +137,7 @@ def credit_total_moves(entry: TransactionEntry, valid_updates: dict) -> bool:
         valid_updates["figure"].amount if "figure" in valid_updates
         else entry.amount
     )
-    credit_after = (
-        amount_after
-        if valid_updates.get("is_credit", entry.is_credit) else Decimal("0")
-    )
+    credit_after = amount_after if flag_after else Decimal("0")
     return credit_before != credit_after
 
 
@@ -455,7 +465,7 @@ def entry_list_view(
             silent withdrawal ruling **R-CC80** forbids.
 
     Returns:
-        The eight keys the template consumes:
+        The nine keys the template consumes:
 
           - ``entries``: the list as given.
           - ``accounts``: *choices*' accounts.  The template renders its
@@ -470,6 +480,12 @@ def entry_list_view(
             when there are two or more (ruling plan#2888); the tick posts
             ``is_credit`` (loaded as ``on_card``) and the pick
             ``card_account_id``.
+          - ``cards_on`` (dict[int, Account | None]): the card each purchase
+            is on (``movement_account.purchase_card``, which the edit door
+            reads too), for the edit form's tick and its pick (plan task
+            plan#3142): ticked, and the pick naming that card, where it is on
+            one, so an untouched Save posts back what the door reads and
+            moves nothing.
           - ``remaining`` (Decimal): the row's resolved budget minus the sum
             of all entries (debit + credit), via :func:`compute_remaining`.
           - ``out_of_period_ids`` (set[int]): entry IDs whose ``purchased_on``
@@ -503,6 +519,7 @@ def entry_list_view(
         "entries": entries,
         "accounts": choices.accounts,
         "tick_cards": choices.cards,
+        "cards_on": {entry.id: purchase_card(entry) for entry in entries},
         "remaining": compute_remaining(budget, entries),
         "out_of_period_ids": {
             e.id for e in entries if not period.covers(e.purchased_on)

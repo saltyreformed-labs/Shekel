@@ -14,12 +14,17 @@
                           Account picker only when there is more than one
                           (ruling R-CC34); with one, no control and the door
                           files the purchase on the row's account.
-     tick_cards        -- the cards the add form's CC tick offers (plan task
+     tick_cards        -- the cards the CC tick offers (plan task
                           plan#2930, ruling plan#2888;
                           ``movement_account.tick_cards``): no tick when
                           empty, the tick alone for one card, and a "Which
                           card" pick beside it for two or more.  Ticked, the
-                          purchase goes ON the card and no CC payback is made.
+                          purchase goes ON the card and no CC payback is made;
+                          on the edit form, changing it MOVES the purchase
+                          (plan task plan#3142).
+     cards_on          -- {entry id: Account or None}: the card each purchase
+                          is on (``movement_account.purchase_card``), which
+                          the edit form's tick and pick are drawn as.
      remaining         -- Decimal remaining budget (negative = overspent)
      today             -- the USER's today (display timezone): the add form's
                           default purchased_on AND both pickers' ``max``.
@@ -37,8 +42,8 @@
                           which is the fact itself.
      out_of_period_ids -- set of entry IDs with dates outside the pay period
      removals          -- {entry id: entry_service.PurchaseRemoval}: what each
-                          purchase's X and CC un-tick would leave unexplained
-                          on the statement screen (plan step
+                          purchase's X, CC un-tick and CC move would leave
+                          unexplained on the statement screen (plan step
                           credit_card:CC-5-4a-5, ruling R-CC80), from the one
                           producer of this context
                           (``entry_service.entry_list_view``).
@@ -79,8 +84,9 @@
 {# A CLOSED row's purchases are closed to RE-PRICING, and this flag is what
    stops the controls below offering acts the service refuses (plan step
    X-au-c3).  ``entry_service._doors._reject_settled_parent`` is field-aware: on
-   a settled parent it refuses the COST-BEARING fields -- ``amount`` and
-   ``is_credit`` -- plus every delete.  So the add form and the delete button
+   a settled parent it refuses the COST-BEARING fields -- the amount and the
+   CC tick, which moves the purchase's money between accounts -- and
+   ``_reject_settled_removal`` a delete that would re-price the close.  So the add form and the delete button
    are withdrawn here and the edit form narrows, rather than rendering controls
    that all 400.
 
@@ -143,18 +149,39 @@
          entry.version_id and short-circuits with 409 when the
          form is stale (commit C-18). #}
       <input type="hidden" name="version_id" value="{{ entry.version_id }}">
-      {#- **What un-ticking CC would FREE**, named below the button row and
-          posted back (plan step credit_card:CC-5-4a-5, rulings R-CC80 /
-          R-CC127): on the envelope's last card purchase the un-tick deletes
-          its CC payback, and a match naming that payback's payment is
-          withdrawn.  The owner's form always posts the field, empty when it
-          names nothing; a companion's names no bank line (R-CC132), and its
-          door refuses an un-tick that would free one. -#}
-      {% set uncredit = removals[entry.id].uncredit %}
-      {% set uncredit_caption = owner_viewing and entry.is_credit
-         and not purchases_closed and uncredit.frees_a_line %}
+      {#- **The CC tick MOVES a recorded purchase** (plan task plan#3142, ruling
+          plan#2888): ticked, onto the owner's card; un-ticked, back to the
+          row's account; the "Which card" pick, drawn for two or more cards,
+          moves it to another card.  It reads the purchase as the door does
+          (`cards_on`, ``movement_account.purchase_card``), so an untouched
+          Save posts back what it drew and moves nothing.  Drawn where there
+          is a card it could mean, where the purchase is already on one, and
+          on an old flagged line, which keeps its flag while ticked and loses
+          it when un-ticked (its CC payback deleted or re-priced) and draws no
+          pick: it is on no card to name.  It posts as `is_credit`, loaded as
+          `on_card`, as the add tick does.
+
+          **What the save would FREE is named below the button row and posted
+          back** (rulings R-CC80 / R-CC127): a move takes the purchase out of
+          every match naming it (`removal.own`), and an old flagged line's
+          un-tick, on the envelope's last card purchase, deletes its CC
+          payback and a match naming that payback's payment
+          (`removal.uncredit`).  The owner's form always posts the field,
+          empty when it names nothing; a companion's names no bank line
+          (R-CC132), and its door refuses a save that would free one, naming
+          the purchase or the payback. -#}
+      {% set removal = removals[entry.id] %}
+      {% set on_card = cards_on[entry.id] %}
+      {% set draws_tick = not purchases_closed
+         and (tick_cards or on_card or entry.is_credit) %}
+      {% set draws_pick = draws_tick and not entry.is_credit
+         and tick_cards | length > 1 %}
+      {% set uncredit_caption = owner_viewing and draws_tick and entry.is_credit
+         and removal.uncredit.frees_a_line %}
+      {% set move_caption = owner_viewing and draws_tick and not entry.is_credit
+         and removal.own.frees_a_line %}
       {% if owner_viewing %}
-      <input type="hidden" name="shown_lines" value="{{ shown_line_ids(uncredit) if uncredit_caption else '' }}">
+      <input type="hidden" name="shown_lines" value="{{ shown_line_ids(removal.uncredit) if uncredit_caption else shown_line_ids(removal.own) if move_caption else '' }}">
       {% endif %}
       {% if not purchases_closed %}
       <div class="d-flex gap-1 align-items-end mb-1">
@@ -245,14 +272,32 @@
                max="{{ today }}"
                class="form-control form-control-sm mw-px-130"
                title="The day your bank took the money.  Leave blank until you see it on a statement.">
-        {% if not purchases_closed %}
+        {% if draws_tick %}
         <div class="form-check form-check-inline mb-0">
           <input type="checkbox" name="is_credit" value="true"
                  class="form-check-input" id="edit-cc-{{ entry_list_host_id }}-{{ entry.id }}"
-                 {{ 'checked' if entry.is_credit else '' }}>
+                 {%- if uncredit_caption or move_caption %} aria-describedby="cc-withdraws-{{ entry_list_host_id }}-{{ entry.id }}"{% endif %}
+                 {{ 'checked' if entry.is_credit or on_card else '' }}>
           <input type="hidden" name="is_credit" value="false">
-          <label class="form-check-label small" for="edit-cc-{{ entry_list_host_id }}-{{ entry.id }}">CC</label>
+          {#- The form's word that the box is drawn as the purchase IS, not as
+              the old CC flag alone (the schema's `tick_drawn`). -#}
+          <input type="hidden" name="tick_drawn" value="true">
+          <label class="form-check-label small" for="edit-cc-{{ entry_list_host_id }}-{{ entry.id }}"
+                 title="{% if on_card %}On {{ on_card.name }}{% elif entry.is_credit %}Repaid by this envelope's CC payback{% else %}Bought on {{ tick_cards[0].name if tick_cards | length == 1 else 'a credit card' }}{% endif %}">CC</label>
         </div>
+        {#- The pick names the card the purchase is on; with none of the
+            offered cards its own (an archived card), its prompt stands and
+            posts nothing, so an untouched Save leaves the purchase there. -#}
+        {% if draws_pick %}
+        <select name="card_account_id" aria-label="Which card"
+                class="form-select form-select-sm mw-px-130"
+                title="The card this purchase went on, when CC is ticked">
+          <option value="">Which card</option>
+          {% for card in tick_cards %}
+          <option value="{{ card.id }}"{% if on_card and card.id == on_card.id %} selected{% endif %}>{{ card.name }}</option>
+          {% endfor %}
+        </select>
+        {% endif %}
         {% endif %}
         <button type="submit" class="btn btn-sm btn-primary py-0 px-1">
           <i class="bi bi-check"></i>
@@ -265,8 +310,16 @@
         </button>
       </div>
       {%- if uncredit_caption %}
-      <div class="form-text" id="uncredit-withdraws-{{ entry_list_host_id }}-{{ entry.id }}">
-        Un-ticking CC deletes this envelope's CC payback and {{ frees_lines(uncredit) }}.
+      <div class="form-text" id="cc-withdraws-{{ entry_list_host_id }}-{{ entry.id }}">
+        Un-ticking CC deletes this envelope's CC payback and {{ frees_lines(removal.uncredit) }}.
+      </div>
+      {%- elif move_caption and on_card %}
+      <div class="form-text" id="cc-withdraws-{{ entry_list_host_id }}-{{ entry.id }}">
+        Moving this off {{ on_card.name }}, by un-ticking CC{{ ' or picking another card' if draws_pick }}, {{ frees_lines(removal.own) }}.
+      </div>
+      {%- elif move_caption %}
+      <div class="form-text" id="cc-withdraws-{{ entry_list_host_id }}-{{ entry.id }}">
+        Ticking CC puts this on {{ tick_cards[0].name if tick_cards | length == 1 else 'the card you pick' }} and {{ frees_lines(removal.own) }}.
       </div>
       {%- endif %}
     </form>

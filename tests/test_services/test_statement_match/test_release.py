@@ -73,7 +73,7 @@ from app.services.statement_match._release import (  # pylint: disable=protected
     planned_removals,
 )
 
-from tests._legacy_credit import plant_old_flagged_purchase
+from tests._legacy_credit import flag_old_purchase, plant_old_flagged_purchase
 from tests._test_helpers import an_entered_day, typed
 
 from ._builders import (
@@ -1483,22 +1483,27 @@ class TestTheUndoFreesNoLineAnotherActHolds:
     **No door reaches it, measured through the doors below.**  A purchase the
     create arm records is born a debit one (``_create._born_purchase`` states
     no card flag), and the card total counts ``is_credit`` alone
-    (``app.utils.entry_partition``), so the purchase becomes its envelope's
-    last card purchase only by a CC tick -- an EDIT, which moves its revision,
-    and the Undo refuses an edited subject before it writes anything
-    (``_subject_removal``).  An envelope the act minted is settled and
-    refuses the tick until it is set back to Projected, another edit on the
-    way.  So the default press is a fence that does not fire here, and these
-    cases are what hold that: with the revision test deleted, each Undo
-    instead reaches the teardown and is refused as out of date.
+    (``app.utils.entry_partition``).  The edit door's CC tick put the flag on
+    it until plan task plan#3142, an EDIT, which moves its revision, and the
+    Undo refuses an edited subject before it writes anything
+    (``_subject_removal``); since that task the tick MOVES the purchase onto
+    the card and withdraws the act naming it, so no door makes it a card
+    purchase at all, and the state is planted as the old tick wrote it
+    (``tests._legacy_credit.flag_old_purchase``) for the lines production
+    may hold (finding CC-380's Undo half).  An envelope the act minted is
+    settled and refuses the tick until it is set back to Projected, another
+    edit on the way.  So the default press is a fence that does not fire
+    here, and these cases are what hold that: with the revision test
+    deleted, each Undo instead reaches the teardown and is refused as out of
+    date.
     """
 
     @staticmethod
     def _its_payback_matched_and_reverted(seed_user, created):
         """Make the act's purchase the envelope's last card purchase, its payback matched.
 
-        Through the doors the owner has, on a Projected envelope: the
-        purchase ticked CC (its payback created in the next period), the
+        On a Projected envelope: the purchase flagged CC as the old edit tick
+        flagged it (its payback created in the next period), the
         payback's payment matched to a CARD PAYMENT line by a SECOND act, and
         the payback set back to Projected, which keeps that payment un-dated
         and the second act on it -- the one shape in which deleting the last
@@ -1517,9 +1522,7 @@ class TestTheUndoFreesNoLineAnotherActHolds:
         assert envelope.status_id == projected
         a_later_period(seed_user)
         db.session.flush()
-        entry_service.update_entry(
-            created.entry_id, seed_user["user"].id, is_credit=True,
-        )
+        flag_old_purchase(db.session.get(TransactionEntry, created.entry_id))
         db.session.flush()
         payback = credit_workflow.get_active_payback(envelope.id)
         payment_line = a_bank_line(
@@ -1587,8 +1590,9 @@ class TestTheUndoFreesNoLineAnotherActHolds:
         """Route 2: the line recorded into a new envelope the act created.
 
         The act closes the envelope it mints on the bank's day, and a settled
-        envelope refuses the CC tick (``is_credit`` re-costs its purchase), so
-        the owner sets the envelope back to Projected first.
+        envelope refuses the CC tick (it moves its purchase's money between
+        accounts, so it is cost-bearing), so the owner sets the envelope back
+        to Projected first.
         """
         created = _record(
             seed_user, _a_swipe(seed_user),
@@ -1597,7 +1601,7 @@ class TestTheUndoFreesNoLineAnotherActHolds:
         db.session.commit()
         with pytest.raises(ValidationError, match="has settled"):
             entry_service.update_entry(
-                created.entry_id, seed_user["user"].id, is_credit=True,
+                created.entry_id, seed_user["user"].id, on_card=True,
             )
         db.session.rollback()
         transaction_service.apply_requested_status(

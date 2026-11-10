@@ -618,6 +618,10 @@
              an Undefined is falsy SILENTLY, which would hide the tick on every
              initial render while the HTMX refresh drew it. #}
           {% set tick_cards = _entry_data.tick_cards %}
+          {# The card each purchase is on, which the edit form's tick and pick
+             are drawn as (plan task plan#3142).  `cards_on[entry.id]` over an
+             Undefined raises, rather than drawing the tick off. #}
+          {% set cards_on = _entry_data.cards_on %}
           {# What each purchase's X and CC un-tick would free, and whether the
              session's user may be shown it (plan step credit_card:CC-5-4a-5).
              The same trap again: `removals[entry.id]` over an Undefined

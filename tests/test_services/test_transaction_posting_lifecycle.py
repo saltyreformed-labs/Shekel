@@ -72,6 +72,7 @@ from tests._test_helpers import (
 )
 from tests.test_routes.test_cc5_4a5_popover_presses import dialog_delete_values
 from app.services import cash_ledger
+from tests._cards import add_card
 from tests._legacy_credit import plant_old_credit
 
 
@@ -660,14 +661,18 @@ class TestEnvelopePostingLifecycle:
     def test_entry_credit_flip_on_a_posted_envelope_resyncs(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """Flipping a posted purchase to credit reverses its checking outflow.
+        """Ticking CC on a posted purchase moves it onto the card and reverses its checking outflow.
 
-        Arithmetic: one $40 posted debit books -40 / +40.  Flipping it to credit
-        says the card paid, not the account, so its checking leg goes and the
-        ledger returns to the $1,000.00 opening (the $40 now rides its CC
-        Payback).
+        Arithmetic: one $40 posted debit books -40 / +40.  Ticking CC says the
+        card paid, not the account (plan task plan#3142: the tick MOVES the
+        purchase; it flipped the old flag until then, which ruling plan#2888
+        changed).  Its posting day was checking's and goes with it
+        (``entry_service._details.settle_day_after_move``), so it is in flight
+        on the card and posts nothing: the checking leg goes and the ledger
+        returns to the $1,000.00 opening.
         """
         with app.app_context():
+            visa = add_card(seed_user, "Visa")
             user_id = seed_user["user"].id
             checking = seed_user["account"]
             txn = create_envelope_txn(
@@ -681,9 +686,11 @@ class TestEnvelopePostingLifecycle:
             )
             assert _ledger_total(groceries_ledger) == Decimal("40.00")
 
-            entry_service.update_entry(entry_id, user_id, is_credit=True)
+            entry_service.update_entry(entry_id, user_id, on_card=True)
             db.session.commit()
 
+            moved = db.session.get(TransactionEntry, entry_id)
+            assert (moved.account_id, moved.settled_on) == (visa.id, None)
             assert _ledger_total(groceries_ledger) == Decimal("0.00")
             assert posting_service.account_posting_total(
                 checking.id, seed_user["scenario"].id,

@@ -4,9 +4,12 @@
 from decimal import Decimal
 
 from marshmallow import (
+    ValidationError,
     fields,
+    post_load,
     pre_load,
     validate,
+    validates_schema,
 )
 
 from app.services.entry_service import CHARGE, REFUND
@@ -58,7 +61,8 @@ class EntryCreateSchema(BaseSchema):
     this step.  The schema says only that it is a row id; WHOSE account it is,
     and whether it may hold a purchase, is ``entry_service.create_entry``'s
     gate against the ROW's owner.  It is absent from :class:`EntryUpdateSchema`
-    because the update door does not move a purchase between accounts.
+    because the update door has no "Paid from": its CC tick moves a purchase
+    onto or off a card instead (plan task plan#3142).
 
     **``on_card`` is the CC tick and ``card_account_id`` its pick** (plan task
     plan#2930, ruling plan#2888): ticked, the purchase goes on the owner's
@@ -150,7 +154,24 @@ class EntryUpdateSchema(BaseSchema):
     # ticked this as posted and the statement does not actually show it", which
     # must put the purchase back among the outstanding ones.
     settled_on = fields.Date(allow_none=True)
-    is_credit = fields.Boolean()
+    # **The CC tick and its "Which card" pick** (plan task plan#3142, ruling
+    # plan#2888): changing the tick MOVES the purchase, onto the card, back to
+    # its row's account or to another card; on an old flagged line it keeps
+    # or takes off the flag (``entry_service._details.tick_edit``).  It posts
+    # as ``is_credit`` (``data_key``), the add form's name.  Absent asks
+    # nothing: a partial update.
+    on_card = fields.Boolean(data_key="is_credit")
+    card_account_id = RowId()
+    # **The edit form's word that it draws the tick as the purchase IS**
+    # (plan task plan#3142's review, M2): ticked where the purchase is on a
+    # card.  The form drawn before that task ticked the box only for the old
+    # CC flag, so its box left off over a purchase on a card, posted by a
+    # Save that only re-described it, would read as an un-tick and move the
+    # purchase off the card unasked; such a form posts the tick without this
+    # field and is refused in words (decided under R-BAL207: refusing a stale
+    # page is the safe direction, where guessing what its box meant moves
+    # money).  Read here and dropped (:meth:`drop_the_declaration`).
+    tick_drawn = fields.Boolean()
     # The bank lines the edit form's CC caption NAMED (plan step
     # ``credit_card:CC-5-4a-5``, rulings **R-CC80** / **R-CC127**): what
     # un-ticking the envelope's last card purchase frees when it deletes a
@@ -161,3 +182,24 @@ class EntryUpdateSchema(BaseSchema):
 
     # Optimistic-locking pin (commit C-18).
     version_id = RowId(validate=validate.Range(min=1))
+
+    @validates_schema
+    def refuse_a_tick_drawn_the_old_way(self, data, **kwargs):
+        """Refuse a CC tick posted by an edit form drawn before plan task plan#3142.
+
+        Raises:
+            ValidationError: When the tick is posted without the form's
+                ``tick_drawn`` declaration.
+        """
+        if "on_card" in data and not data.get("tick_drawn"):
+            raise ValidationError(
+                "This purchase's edit form was drawn before the CC box "
+                "started moving purchases on and off your card, so nothing "
+                "was saved. Reload the page and make your change again."
+            )
+
+    @post_load
+    def drop_the_declaration(self, data, **kwargs):
+        """Drop ``tick_drawn``: it says which form posted, and is no field of the purchase."""
+        data.pop("tick_drawn", None)
+        return data

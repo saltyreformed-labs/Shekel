@@ -25,6 +25,12 @@ purchase ON the card instead (ruling plan#2888) and writes no flag.  Production
 holds 26 such lines on 17 envelopes (the 2026-11-04 dump), and they keep the
 flag and its payback arms until plan#1034's re-plan, so the tests of those arms
 plant the line here (:func:`plant_old_flagged_purchase`).
+
+**The flag put on a recorded purchase**: what the edit door's CC tick wrote
+until plan task plan#3142, which moves the purchase onto the card instead.
+The tests of the state it left on a MATCHED purchase -- finding CC-380's, the
+purchase flagged with its match standing -- plant it here
+(:func:`flag_old_purchase`).
 """
 
 from app import ref_cache
@@ -133,6 +139,35 @@ def plant_old_flagged_purchase(
     record_settle_day(entry, details.settle_day)
     db.session.add(entry)
     db.session.flush()
+    db.session.expire(txn, ["entries"])
+    sync_entry_payback(txn.id, txn.user_id)
+    posting_service.sync_transaction_postings(txn)
+    return entry
+
+
+def flag_old_purchase(entry: TransactionEntry) -> TransactionEntry:
+    """Put the old CC flag on the recorded purchase *entry*, as the edit door's tick did.
+
+    The deleted writer's acts, in its order: the flag set and the clearing
+    link released (a flagged purchase clears nowhere,
+    ``ck_transaction_entries_card_purchase_clears_nowhere``), flushed; the
+    envelope's CC Payback synced, which creates or re-prices it; and the
+    family's postings reconciled.  Its match is left standing, which is
+    finding CC-380's state when *entry* was matched: the door withdrew none.
+
+    Args:
+        entry: A purchase on its row's account, carrying no flag.
+
+    Returns:
+        *entry*, flushed.
+    """
+    assert not entry.is_credit and entry.account_id == entry.transaction.account_id, (
+        "the old tick flagged a purchase on its row's account"
+    )
+    entry.is_credit = True
+    entry.reconciled_by_id = None
+    db.session.flush()
+    txn = entry.transaction
     db.session.expire(txn, ["entries"])
     sync_entry_payback(txn.id, txn.user_id)
     posting_service.sync_transaction_postings(txn)

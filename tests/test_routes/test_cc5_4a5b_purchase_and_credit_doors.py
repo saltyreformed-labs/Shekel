@@ -67,7 +67,11 @@ from tests.test_services.test_statement_match._builders import (
 )
 from app.services.statement_match import accept_match, release_match
 from tests._cards import add_card
-from tests._legacy_credit import plant_old_credit, plant_old_flagged_purchase
+from tests._legacy_credit import (
+    flag_old_purchase,
+    plant_old_credit,
+    plant_old_flagged_purchase,
+)
 
 #: The bank's own words for the Kroger line -- distinct from the purchase's
 #: description, so a page that leaked the line would be caught naming it.
@@ -252,11 +256,14 @@ def _add_form(page, txn_id):
 
 
 def _cc380(seed_user, *, companion_visible=False, payback_line=False):
-    """Kroger, matched to its checking line, then ticked CC (finding CC-380's state).
+    """Kroger, matched to its checking line, then flagged CC (finding CC-380's state).
 
-    Ticking CC on a matched purchase is admitted (CC-380, owned by
-    ``credit_card:CC-7``): Kroger is now the envelope's last card purchase
-    AND matched itself.  With *payback_line* its payback's payment is matched
+    Ticking CC on a matched purchase was admitted with the match standing
+    (CC-380): Kroger was then the envelope's last card purchase AND matched
+    itself.  Since plan task plan#3142 the tick moves it onto the card and
+    frees its line, so the state is planted as the old tick wrote it
+    (``tests._legacy_credit.flag_old_purchase``) for the payback arms it
+    still has.  With *payback_line* its payback's payment is matched
     to a CARD PAYMENT line too and the payback reverted, so the X frees both
     lines and the un-tick frees the payback's alone.
 
@@ -268,7 +275,7 @@ def _cc380(seed_user, *, companion_visible=False, payback_line=False):
     )
     a_later_period(seed_user)
     db.session.commit()
-    entry_service.update_entry(kroger.id, seed_user["user"].id, is_credit=True)
+    flag_old_purchase(kroger)
     db.session.commit()
     payback = credit_workflow.get_active_payback(txn.id)
     assert payback is not None

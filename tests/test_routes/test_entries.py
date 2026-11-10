@@ -959,20 +959,27 @@ class TestUpdateEntry:
         self, app, auth_client, seed_user, seed_periods,
         seed_entry_template,
     ):
-        """PATCH with is_credit=true toggles a debit entry to credit."""
+        """PATCH with is_credit=true moves a checking purchase onto the owner's card.
+
+        Plan task plan#3142, ruling plan#2888: the tick says where the money
+        went, so it MOVES the purchase (``entry_service._details.tick_edit``)
+        and writes no CC flag; it set the flag until then, which the ruling
+        changed.
+        """
         with app.app_context():
+            visa = add_card(seed_user, "Visa")
             txn = seed_entry_template["transaction"]
             entry = _add_entry(txn, seed_user, "50.00", "Kroger")
 
             resp = auth_client.patch(
                 f"/transactions/{txn.id}/entries/{entry.id}",
-                data={"is_credit": "true"},
+                data={"is_credit": "true", "tick_drawn": "true"},
             )
             assert resp.status_code == 200
 
             db.session.expire_all()
             entry = db.session.get(TransactionEntry, entry.id)
-            assert entry.is_credit is True
+            assert (entry.account_id, entry.is_credit) == (visa.id, False)
 
     def test_update_toggle_credit_off(
         self, app, auth_client, seed_user, seed_periods,
@@ -987,7 +994,7 @@ class TestUpdateEntry:
 
             resp = auth_client.patch(
                 f"/transactions/{txn.id}/entries/{entry.id}",
-                data={"is_credit": "false"},
+                data={"is_credit": "false", "tick_drawn": "true"},
             )
             assert resp.status_code == 200
 
@@ -1326,20 +1333,21 @@ class TestTheSettledOnEditPath:
         """A reproducible unhandled 500, found by X-f3b's trace 2026-08-15.
 
         ``ck_transaction_entries_card_purchase_clears_nowhere`` (plan step
-        X-f3a-1) refuses a purchase that is BOTH on a card and linked to a
-        statement -- a card purchase never touches this account, so the claim is
-        false by construction.  The edit door released the link when the POSTING
-        DAY moved and not when the CARD flag was set, so PATCHing ``is_credit``
-        on a purchase the reconcile panel had ticked raised an
-        ``IntegrityError`` no handler catches.  Reproduced on a production clone
-        against entry 87 before the fix.
-
-        The remedy is the one already beside it: the edit is a CORRECTION, so
-        the fact that contradicts the observation wins and the observation is
-        released.  Asserted on both columns -- a fix that swallowed the flip
-        would satisfy a status check alone.
+        X-f3a-1) refuses a purchase that is BOTH flagged for a card and linked
+        to a statement, and the edit door's flag flip once left the link
+        standing, an ``IntegrityError`` no handler caught (reproduced on a
+        production clone against entry 87).  Since plan task plan#3142 the
+        tick MOVES the purchase onto the card instead of flagging it, and the
+        link is a checking statement's, which never showed money on the card,
+        so the move releases it (``movement_account.re_point_movement``,
+        ``fk_transaction_entries_reconciled_by`` its storage half).  The
+        posting day was checking's, so it goes with the old account
+        (``entry_service._details.settle_day_after_move``).  Asserted on every
+        column -- a fix that swallowed the move would satisfy a status check
+        alone.
         """
         with app.app_context():
+            visa = add_card(seed_user, "Visa")
             txn = seed_entry_template["transaction"]
             entry = _add_entry(
                 txn, seed_user, "50.00", "Kroger",
@@ -1356,18 +1364,19 @@ class TestTheSettledOnEditPath:
 
             resp = auth_client.patch(
                 f"/transactions/{txn.id}/entries/{entry_id}",
-                data={"is_credit": "true"},
+                data={"is_credit": "true", "tick_drawn": "true"},
             )
 
             assert resp.status_code == 200
             db.session.expire_all()
-            flipped = db.session.get(TransactionEntry, entry_id)
-            assert flipped.is_credit is True
-            assert flipped.reconciled_by_id is None, (
-                "a card purchase clears nowhere on this account, so the "
+            moved = db.session.get(TransactionEntry, entry_id)
+            assert (moved.account_id, moved.is_credit) == (visa.id, False)
+            assert moved.reconciled_by_id is None, (
+                "a checking statement never showed money on the card, so the "
                 "statement it named is released rather than left to violate "
-                "the CHECK"
+                "the key"
             )
+            assert (moved.settled_on, moved.settled_day_basis_id) == (None, None)
 
     def test_the_edit_form_records_a_posting_day(
         self, app, auth_client, seed_user, seed_periods,

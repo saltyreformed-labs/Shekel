@@ -30,12 +30,18 @@ from app.services.entry_credit_workflow import (
     sync_entry_payback,
     x_press_for_payback,
 )
+from app.services.movement_account import re_point_movement
 from app.services.owned_transaction import load_owned_transaction
 from app.services.settle_day import record_settle_day, recorded_settle_day
-from app.services.entry_service._details import EntryDetails, purchase_account_id
+from app.services.entry_service._details import (
+    EntryDetails,
+    move_press,
+    purchase_account_id,
+    settle_day_after_move,
+    tick_edit,
+)
 from app.services.entry_service._sums import credit_total_moves
 from app.services.entry_service._refusals import (
-    _reject_flag_beside_another_account,
     _reject_future_posting_day,
     _reject_future_purchase_date,
     _reject_zero_amount,
@@ -66,13 +72,20 @@ from app.utils.log_events import (
 
 logger = logging.getLogger(__name__)
 
-# Fields that can be updated on an entry via update_entry().  Two of them are
-# VALUES rather than columns -- ``figure`` (the amount and who wrote it) and
-# ``settle_day`` (the day and how it is known) -- and the door writes each
-# through the one writer of its pair.
+# Fields that can be updated on an entry via update_entry().  Four of them are
+# VALUES rather than columns -- ``figure`` (the amount and who wrote it),
+# ``settle_day`` (the day and how it is known), and the CC tick with its pick
+# (:data:`_TICK_FIELDS`) -- and the door writes each through its one writer.
 _UPDATABLE_FIELDS = frozenset({
-    "figure", "description", "purchased_on", "settle_day", "is_credit",
+    "figure", "description", "purchased_on", "settle_day",
+    "on_card", "card_account_id",
 })
+
+# The CC tick and its "Which card" pick (plan task plan#3142): what they ask
+# is ``_details.tick_edit``'s, and the door writes it as a MOVE of the
+# purchase's account (``movement_account.re_point_movement``) or, on an old
+# flagged line, as its flag coming off -- never as columns of these names.
+_TICK_FIELDS = frozenset({"on_card", "card_account_id"})
 
 
 def _resync_after_entry_change(txn: Transaction) -> None:
@@ -465,8 +478,20 @@ def update_entry(
 ) -> TransactionEntry:
     """Update an existing entry.
 
-    Allowed fields: figure, description, purchased_on, settle_day, is_credit.
-    Re-validates ownership on the entry's own owner column.
+    Allowed fields: figure, description, purchased_on, settle_day, on_card,
+    card_account_id.  Re-validates ownership on the entry's own owner column.
+
+    **``on_card`` is the CC tick and ``card_account_id`` its pick** (plan task
+    plan#3142, ruling plan#2888): changing the tick MOVES the purchase -- onto
+    the owner's card, back to its row's account, or to another card -- through
+    the one write of a movement's account
+    (``movement_account.re_point_movement``): the day it ends with graded on
+    the new account's books, every match naming it withdrawn under *press*,
+    its clearing link released.  The posting day the save left unmoved goes
+    with the old account (``_details.settle_day_after_move``).  An old flagged
+    line keeps its CC flag while ticked and loses it when un-ticked, through
+    the payback sync below; no write puts the flag on.  What the tick asks is
+    ``_details.tick_edit``'s.
 
     **``figure`` is the figure AND who wrote it** (plan step **X-bi-3e-1**,
     ruling **R-BAL69**): a :class:`~app.services.stated_figure.StatedFigure`,
@@ -500,15 +525,18 @@ def update_entry(
         press: The save's press over the lines the edit form's CC caption
             named (plan step
             ``credit_card:CC-5-4a-5``, ruling **R-CC80**), or a companion's
-            ``OwnerOnly`` (ruling **R-CC132**), for the payback sync -- the
-            one place this door can free a line.
+            ``OwnerOnly`` (ruling **R-CC132**), for the two places this door
+            can free a line: the tick's move (the purchase's own matches,
+            plan task plan#3142) and the payback sync (an old flagged line's
+            un-tick, the payback's).
         **kwargs: Fields to update (must be a subset of allowed fields).
 
     Returns:
         The updated TransactionEntry.
 
     Raises:
-        NotFoundError: Entry not found or not accessible.
+        NotFoundError: Entry not found or not accessible, or the picked card
+            is not an account of the row's owner.
         ValidationError: If no valid fields provided, unknown fields are
             passed, the entry is a row's or a transfer's payment record
             rather than a purchase (:func:`~._refusals._reject_settlement_record`,
@@ -516,9 +544,12 @@ def update_entry(
             anything that changes what the row cost
             (:func:`_reject_settled_parent`).  An update touching only
             ``settle_day`` is admitted on a settled parent: it records when
-            the bank took the purchase, not how much of it moved.  Flipping
-            ``is_credit`` ON for a purchase whose account is not its row's is
-            refused (:func:`~._refusals._reject_flag_beside_another_account`).
+            the bank took the purchase, not how much of it moved; the tick
+            is cost-bearing.  The tick's own refusals
+            (``_details.tick_edit``), and a moved day the new account's books
+            do not reach.
+        PageOutOfDate: When the save frees other bank lines than *press*'s
+            page named.
     """
     unknown = set(kwargs) - _UPDATABLE_FIELDS
     if unknown:
@@ -571,24 +602,22 @@ def update_entry(
     _reject_settled_parent(
         entry.transaction, cost_fields_changing(valid_updates),
     )
-    # **Does this write flip the flag ON?**  Stated ONCE for its two readers
-    # (the refusal here and ``releases_the_link`` below): a submission that
-    # sets ``is_credit`` True on a purchase that did not carry it.
-    flips_the_flag_on = bool(
-        valid_updates.get("is_credit", False) and not entry.is_credit
+    # **What the CC tick asks of this purchase** (plan task plan#3142, ruling
+    # plan#2888; :func:`~._details.tick_edit`): a MOVE onto the card, back to
+    # the row's account or to another card, an old flagged line's flag coming
+    # off, or nothing.  After the settled refusal, which closes the tick on a
+    # settled row's purchases, and before the content guards, because a card
+    # that is not the row owner's is a bad REFERENCE (404), as at the add door.
+    # The flag is never written ON: no door has written it since plan task
+    # plan#2930, and the refusal of a flag beside another account that stood
+    # here guarded the one act that created that pair.
+    tick = tick_edit(
+        entry, valid_updates.get("on_card"), valid_updates.get("card_account_id"),
     )
-    # The same test the create door applies, on the ACT: a purchase on another
-    # account than its row's already says how it was paid, so the flag may not
-    # be flipped ON beside it (plan step ``credit_card:CC-5-2``).  The account
-    # itself is not an updatable field, so only the flag can move the pair
-    # here -- and only a flip to True is the act that creates it.  A stored
-    # flag beside a differing account is NOT refused: a legacy flagged line
-    # sits on the account its row named when it was recorded, and since ruling
-    # **R-CC36** the row may move on without it, so the edit form (which posts
-    # the flag on every submit) must still re-describe or re-date that line.
-    _reject_flag_beside_another_account(
-        flips_the_flag_on, entry.account_id, entry.transaction.account_id,
-    )
+    if tick.account_id is not None:
+        # The posting day the move leaves, BEFORE the two day rules below, so
+        # they are checked on the result (``_details.settle_day_after_move``).
+        valid_updates["settle_day"] = settle_day_after_move(entry, valid_updates)
 
     # The same boundary the create door applies, and only when the caller is
     # actually moving the date -- a partial update that leaves ``purchased_on``
@@ -615,16 +644,40 @@ def update_entry(
     # would otherwise carry through -- of which production has none.
     _reject_future_posting_day(resulting_posting_day)
 
-    # The two edits that make a recorded clearing fact FALSE.  Both release it
-    # below; see the comment there for why releasing rather than refusing.
+    # The edit that makes a recorded clearing fact FALSE: the day moving.  It
+    # releases it below; see the comment there for why releasing rather than
+    # refusing.  A move releases it too, in the one write of the account.
     releases_the_link = (
         "settle_day" in valid_updates
         and resulting_posting_day != entry.settled_on
-    ) or flips_the_flag_on
+    )
     # Read BEFORE the loop below, because the loop is what makes ``entry`` the
-    # after-state.
-    moves_credit_total = credit_total_moves(entry, valid_updates)
-    for field, value in valid_updates.items():
+    # after-state; the flag after the save is the tick's to say.
+    moves_credit_total = credit_total_moves(
+        entry, valid_updates, flag_after=tick.flag,
+    )
+    # **The tick's MOVE, before the loop** (plan task plan#3142): through the
+    # one write of a movement's account, which grades the day the purchase
+    # ends with on the new account's books, withdraws every match naming it
+    # under the save's press (the edit form named those lines first, ruling
+    # **R-CC80**, and posts them back, **R-CC127**) and releases its clearing
+    # link.  Before the loop, so the posting day the loop writes is written
+    # against the account the purchase is on (``record_settle_day`` reads the
+    # column).  CC-380's case: a tick on a purchase matched to a checking line
+    # moves it onto the card and frees that line, where it was admitted with
+    # the match standing.
+    if tick.account_id is not None:
+        re_point_movement(
+            entry, tick.account_id, day=resulting_posting_day,
+            press=move_press(press, entry),
+        )
+    # The tick and its pick are written above, as the move, and below, as the
+    # flag, so the loop writes the rest.
+    written = {
+        field: value for field, value in valid_updates.items()
+        if field not in _TICK_FIELDS
+    }
+    for field, value in written.items():
         # Two keys are VALUES rather than columns, and each is written through
         # the one writer of its pair.  ``settle_day`` is the day AND the basis
         # that says how the day is known, and
@@ -655,6 +708,9 @@ def update_entry(
             )
             continue
         setattr(entry, field, value)
+    # An old flagged line un-ticked loses its flag; the payback sync below
+    # then deletes or re-prices its envelope's CC Payback, as it always has.
+    entry.is_credit = tick.flag
     # **Moving the posting day RELEASES the clearing fact** (plan step X-f3a-1,
     # ruling **R-FL**).  ``reconciled_by_id`` records that a named statement was
     # seen to show this purchase ON that day; a user moving the day is
@@ -689,15 +745,14 @@ def update_entry(
     # <the stored pair>`` would compare the BASIS too and release on a
     # confirmation.
     #
-    # **Flipping a purchase to CARD releases it too, and that arm is a 500 fix**
-    # (found by X-f3b's trace, 2026-08-15).  A card purchase never touches this
-    # account, so ``ck_transaction_entries_card_purchase_clears_nowhere``
-    # refuses the pair -- and this door wrote the flag without touching the
-    # link, so PATCHing ``is_credit`` on a purchase the reconcile panel had
-    # ticked raised an unhandled ``IntegrityError``.  Reproduced on a production
-    # clone against entry 87.  Releasing is the same answer for the same reason:
-    # the user is correcting the observation, not confirming it, and the two
-    # facts must not be left to disagree -- here they could not even be stored.
+    # **Putting a purchase on the CARD released it too, and that arm was a 500
+    # fix** (found by X-f3b's trace, 2026-08-15): the flag flipped on beside a
+    # standing link, which ``ck_transaction_entries_card_purchase_clears_nowhere``
+    # refuses, raised an unhandled ``IntegrityError`` (reproduced on a
+    # production clone against entry 87).  No door flips the flag on since plan
+    # task plan#3142, and the tick's move releases the link in the one write
+    # of the account (``movement_account.re_point_movement``), for the same
+    # reason: a statement of the old account never showed money on the new one.
     if releases_the_link:
         entry.reconciled_by_id = None
     db.session.flush()
@@ -712,6 +767,10 @@ def update_entry(
         # Sorting fields_changed keeps the structured log deterministic
         # so dashboards can group by it without ordering noise.
         fields_changed=sorted(valid_updates.keys()),
+        # WHICH account the purchase is on after the edit, as the add door
+        # logs it: a CC tick can move it (plan task plan#3142), and a receipt
+        # naming only the fields could not tell a move from a re-tick.
+        account_id=entry.account_id,
     )
 
     sync_entry_payback(

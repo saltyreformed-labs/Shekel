@@ -343,12 +343,18 @@ class TestTheBooksBoundaryIsTheMovementsAccounts:
 
 
 class TestTheUpdateDoorRefusesTheSameCombination:
-    """Flipping the flag ON beside another account is the act refused; a stored one is not."""
+    """The update door writes the flag ON nowhere; a stored one beside another account is kept."""
 
-    def test_flipping_the_flag_on_a_card_purchase_is_refused(
+    def test_ticking_cc_on_a_card_purchase_writes_no_flag(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """The second door the combination could reach, gated by the same rule."""
+        """The combination the add door refuses is unwritable at the edit door: its tick moves.
+
+        Until plan task plan#3142 a tick here flipped the flag ON beside the
+        card and was refused ("not both"); since then the tick says where the
+        money went, the purchase is on the card already, and nothing moves or
+        is flagged (``entry_service._details.tick_edit``).
+        """
         with app.app_context():
             card = _card(seed_user)
             row = _envelope(seed_user, seed_periods[0])
@@ -356,23 +362,22 @@ class TestTheUpdateDoorRefusesTheSameCombination:
             entry = _swipe(row, owner_id, account_id=card.id)
             db.session.flush()
 
-            with pytest.raises(ValidationError, match=r"not both"):
-                entry_service.update_entry(entry.id, owner_id, is_credit=True)
-            # The refusal precedes the write: the stored flag is re-read from
-            # the database rather than trusted in memory.
+            entry_service.update_entry(entry.id, owner_id, on_card=True)
+            db.session.flush()
+            # Re-read from the database rather than trusted in memory.
             db.session.refresh(entry)
-            assert entry.is_credit is False
+            assert (entry.account_id, entry.is_credit) == (card.id, False)
 
     def test_an_edit_that_leaves_a_stored_flag_alone_is_admitted_after_the_row_moved(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
         """A legacy flagged line whose ROW moved on (ruling **R-CC36**) is still editable.
 
-        The edit form posts the flag on every submit.  The stored pair --
+        The edit form posts the tick on every submit.  The stored pair --
         flag set, account differing -- was written by no door: the line sat on
         the account its row named, and the row moved.  Re-describing it
-        re-states the flag it already carries and is admitted; only a flip ON
-        creates the combination.
+        re-states the tick it already shows and is admitted; a flagged line
+        ticked keeps its flag and moves nowhere (plan task plan#3142).
         """
         with app.app_context():
             other = create_account_of_type(
@@ -392,8 +397,9 @@ class TestTheUpdateDoorRefusesTheSameCombination:
             assert legacy.account_id != row.account_id
 
             entry_service.update_entry(
-                legacy.id, owner_id, description="Amazon", is_credit=True,
+                legacy.id, owner_id, description="Amazon", on_card=True,
             )
             db.session.flush()
             assert legacy.description == "Amazon"
             assert legacy.is_credit is True
+            assert legacy.account_id != row.account_id

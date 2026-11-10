@@ -194,7 +194,7 @@ from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services import match_withdrawal, movement_removal
 from app.services.match_press import Press
-from app.services.cash_ledger import reject_movement_before_books_open
+from app.services.movement_account import re_point_movement
 from app.services.settle_day import (
     SettleDay,
     is_evidence,
@@ -435,54 +435,31 @@ def _re_point(
 
     The TENDER's write onto a movement that already exists (plan step
     ``credit_card:CC-5-3``): a re-settle naming an account other than the
-    kept movement's, or a "Paid from" correction on a settled row.  Three
-    consequences, in this order:
+    kept movement's, or a "Paid from" correction on a settled row.  **Through
+    the one write of a movement's account**,
+    ``movement_account.re_point_movement`` (plan task plan#3142, which moved
+    this function's body there when a recorded purchase's CC tick became its
+    second caller): the day graded on the new account's books, every match
+    naming the movement withdrawn under *press*, its clearing link released,
+    the account assigned.  What stays here is the row's half:
 
-    * **both clearing links are RELEASED** -- the movement's and the row's.
-      A link records that a named statement of a named account was seen to
-      show this money; money that moved on another account was shown by no
-      such statement, so the observation is withdrawn rather than left to
-      contradict the record (the same rule a settle-day move applies, ruling
-      **R-FL**).  The storage tier would refuse the movement's anyway
-      (``fk_transaction_entries_reconciled_by`` holds the link to the
-      movement's account); the row's is released HERE because the seam's
-      own release arms are about the DAY and cannot see the tender;
-    * **every MATCH naming the movement is withdrawn** (plan step
-      ``credit_card:CC-5-4a-1``, ruling **R-CC46**, developer 2026-09-21),
-      on the same argument one clause up: a match asserts that a named
-      account's bank line IS this movement, and money that moved on another
-      account was shown by no such line.  Every accepted match names the
-      movement (ruling **R-CC43**) through a member the key
-      ``fk_statement_match_members_entry_account`` holds to the movement's
-      account, so the assertion is both false and unstorable once the
-      account changes; ``match_withdrawal.withdraw_for_moved_movement`` takes
-      the member as a delete would, withdraws an act left naming no app row,
-      and FLUSHES before the assignment below -- the unit of work orders a
-      DELETE after an UPDATE, and the key is checked at the flush.  The
-      screen that offers the move discloses it first
-      (``match_withdrawal.pending_for_movements``, the popover's "Paid from"
-      caption); the refused alternative kept the correction from happening
-      while a match stood;
-    * the account is assigned;
-    * **the day the movement will END with is graded against the new
-      account's books boundary FIRST** (``cash_ledger.
-      reject_movement_before_books_open``, the same producer
-      ``settle_day.record_settle_day`` asks).  The ROW's day, which the seam
-      has written before anything reaches :func:`_cover` and which
-      ``_mirror_assertion`` copies onto the movement next: the day writer
-      asks the boundary only when a day is written, the mirror writes one
-      only when the days differ, and a tender correction on a settled row
-      leaves them equal -- so without this line a payment dated before the
-      card's opening could be moved onto the card unrefused.  The row's day
-      rather than the movement's OLD one, because a settle-day move and a
-      tender arrive in ONE popover Save and the old day is not what the
-      movement ends up dated (the review of this leaf: a payment on the
-      card's opening day, corrected in one Save to the day after AND the
-      card, was refused for a day it was leaving).  Asked before this
-      function's two assignments, so a refused re-point writes nothing here;
-      what the seam wrote earlier in the same act (the status, the row's
-      day pair) is the caller's rollback's, as every refusal raised inside
-      ``sync_covering_movement`` is.
+    * **the day graded is the ROW's**, which the seam has written before
+      anything reaches :func:`_cover` and which ``_mirror_assertion`` copies
+      onto the movement next: the day writer asks the boundary only when a
+      day is written, the mirror writes one only when the days differ, and a
+      tender correction on a settled row leaves them equal -- so without it
+      a payment dated before the card's opening could be moved onto the card
+      unrefused.  The row's day rather than the movement's OLD one, because a
+      settle-day move and a tender arrive in ONE popover Save and the old day
+      is not what the movement ends up dated (the review of plan step
+      ``CC-5-3``: a payment on the card's opening day, corrected in one Save
+      to the day after AND the card, was refused for a day it was leaving).
+      What the seam wrote earlier in the same act (the status, the row's day
+      pair) is the caller's rollback's, as every refusal raised inside
+      ``sync_covering_movement`` is;
+    * **the ROW's clearing link is released too**: a link records that a
+      named statement of a named account showed this money, and the seam's
+      own release arms are about the DAY and cannot see the tender.
 
     Args:
         row: The settled or settling transaction, its day pair already
@@ -500,16 +477,11 @@ def _re_point(
             account's opening, or when the matches the move withdraws free
             other lines than *press*'s page named (ruling **R-CC127**).
     """
-    if movement.account_id == account_id:
+    if not re_point_movement(
+        movement, account_id, day=row.settled_on, press=press,
+    ):
         return False
-    if row.settled_on is not None:
-        reject_movement_before_books_open(account_id, row.settled_on)
-    match_withdrawal.withdraw_for_moved_movement(
-        movement, row.user_id, press=press,
-    )
-    movement.reconciled_by_id = None
     row.reconciled_by_id = None
-    movement.account_id = account_id
     return True
 
 

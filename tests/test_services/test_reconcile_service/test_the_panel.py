@@ -109,8 +109,9 @@ class TestTheCashFigureBesideTheBookedOne:
     ):
         """The partition holds for a row NO door writes: flag AND another account.
 
-        Both purchase doors refuse the combination
-        (``entry_service._refusals._reject_flag_beside_another_account``), so
+        No purchase door writes the combination (the add door refuses it,
+        ``entry_service._refusals._reject_flag_beside_another_account``, and
+        the edit door writes no flag since plan task plan#3142), so
         this plants it on the model directly -- the state the doors exist to
         keep out, graded here so the sum's partition rests on the terms
         themselves and not on the doors: `$60` flagged on the card is the

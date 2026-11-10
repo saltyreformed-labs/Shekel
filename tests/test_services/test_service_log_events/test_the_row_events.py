@@ -369,15 +369,17 @@ class TestEntryCreditWorkflowLogging:
             with _LogCapture(
                 "app.services.entry_credit_workflow",
             ) as cap:
-                # Toggling the remaining credit entry off (via update)
-                # zeroes total_credit and triggers the delete branch.
+                # Un-ticking the remaining old flagged line (via update)
+                # takes its flag off, zeroes total_credit and triggers the
+                # delete branch (plan task plan#3142: the tick's un-tick on a
+                # flagged line, posted as ``on_card``).
                 entries = entry_service.get_entries_for_transaction(
                     _envelope_transaction.id, seed_user["user"].id,
                 )
                 assert len(entries) == 1
                 entry_service.update_entry(
                     entries[0].id, seed_user["user"].id,
-                    is_credit=False,
+                    on_card=False,
                 )
             assert cap.find(EVT_ENTRY_PAYBACK_DELETED) is not None
 

@@ -534,16 +534,22 @@ class TestUpdateEntry:
     def test_update_entry_credit_toggle(
         self, app, db, seed_user, seed_entry_template,
     ):
-        """Toggle is_credit from False to True."""
+        """Ticking CC on a checking purchase moves it onto the owner's card, unflagged.
+
+        Plan task plan#3142, ruling plan#2888: the tick says where the money
+        went (``entry_service._details.tick_edit``); it flipped the old CC
+        flag until then, which the ruling changed.
+        """
         with app.app_context():
+            card = add_card(seed_user)
             txn = seed_entry_template["transaction"]
             entry = _make_entry(txn, seed_user["user"], is_credit=False)
 
             updated = entry_service.update_entry(
-                entry.id, seed_user["user"].id, is_credit=True,
+                entry.id, seed_user["user"].id, on_card=True,
             )
 
-            assert updated.is_credit is True
+            assert (updated.account_id, updated.is_credit) == (card.id, False)
 
     def test_update_entry_description(
         self, app, db, seed_user, seed_entry_template,
@@ -582,16 +588,17 @@ class TestUpdateEntry:
             txn = seed_entry_template["transaction"]
             entry = _make_entry(txn, seed_user["user"])
 
+            card = add_card(seed_user)
             updated = entry_service.update_entry(
                 entry.id, seed_user["user"].id,
                 figure=typed(Decimal("99.99")),
                 description="Updated",
-                is_credit=True,
+                on_card=True,
             )
 
             assert updated.amount == Decimal("99.99")
             assert updated.description == "Updated"
-            assert updated.is_credit is True
+            assert (updated.account_id, updated.is_credit) == (card.id, False)
 
     def test_update_entry_empty_kwargs(
         self, app, db, seed_user, seed_entry_template,
@@ -1653,12 +1660,30 @@ class TestEntryUpdateSchema:
             assert "description" not in data
 
     def test_update_partial_is_credit_only(self, app):
-        """Only is_credit provided -- valid partial update."""
+        """Only the CC tick provided, with the form's declaration -- loaded as ``on_card`` alone.
+
+        The tick posts as ``is_credit`` on the wire, and the edit form posts
+        ``tick_drawn`` beside it (plan task plan#3142), which the schema reads
+        and drops.
+        """
         with app.app_context():
             schema = EntryUpdateSchema()
-            data = schema.load({"is_credit": True})
-            assert data["is_credit"] is True
-            assert "amount" not in data
+            data = schema.load({"is_credit": True, "tick_drawn": True})
+            assert data == {"on_card": True}
+
+    def test_a_tick_from_a_form_drawn_before_plan_3142_is_refused(self, app):
+        """The tick without the form's declaration: an edit form drawn the old way, refused.
+
+        That form ticked its box only for the old CC flag, so its box left
+        off over a purchase on a card would read as an un-tick and move it.
+        """
+        with app.app_context():
+            errors = EntryUpdateSchema().validate({"is_credit": "false"})
+            assert errors == {"_schema": [
+                "This purchase's edit form was drawn before the CC box "
+                "started moving purchases on and off your card, so nothing "
+                "was saved. Reload the page and make your change again."
+            ]}
 
     def test_update_no_fields(self, app):
         """No fields provided -- empty dict (service handles this error)."""

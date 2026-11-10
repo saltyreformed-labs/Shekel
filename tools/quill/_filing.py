@@ -13,11 +13,13 @@ so is a question given ``--owner``, the step it is asked for, which its ruling k
 Priority cleared, and any Effort, as a ruling holds neither (rulings plan#2506, plan#2507); a
 leaf is filed in its split step's milestone while that step holds one, which it then gives up
 (:func:`_leaf_milestone`), and its filing clears its split step's Effort, as a split step holds
-none (ruling plan#2555, :func:`_finish`).  A step at the top level and a question are filed
-with the Priority the filing session suggests and its reason (``check.takes_suggestion``),
-GitHub's own pending suggestion on the card's Priority, which quill's App writes before the
-mark comes off (rulings plan#3224, plan#3233, :func:`_suggest`); the Priority stays blank
-until the developer sets one.  ``quill.py``'s module docstring is the command's usage.
+none (ruling plan#2555, :func:`_finish`); and none is filed under a step that neither it nor a
+step above holds a Priority for, which ranks the leaf (ruling plan#3229).  A step at the top
+level and a question are filed with the Priority the filing session suggests and its reason
+(``check.takes_suggestion``), GitHub's own pending suggestion on the card's Priority, which
+quill's App writes before the mark comes off (rulings plan#3224, plan#3233, :func:`_suggest`);
+the Priority stays blank until the developer sets one.  ``quill.py``'s module docstring is the
+command's usage.
 
 Split out of the command module at X-cx L2's leaf C, whose change would otherwise take
 that module past the 1,000 lines ``too-many-lines`` allows (it has been ``quill.py``
@@ -46,6 +48,7 @@ from tools.quill._exits import Refused
 from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS, SUGGESTED_OPTIONS
 from tools.quill._state import (
     OWNED,
+    at_and_above,
     done_tasks,
     filing_ended,
     filing_unfinished,
@@ -510,6 +513,22 @@ def _refuse_over_tasks(filing: _Filing) -> None:
                       "again under the smaller step it is a piece of")
 
 
+def _refuse_unranked(filing: _Filing) -> None:
+    """Refuse to file a leaf of ``filing``'s parent -- a new one, or one's filing again -- while
+    neither that parent nor any step above it holds a Priority (ruling plan#3229): a leaf holds
+    none of its own and is ranked by theirs when quill hands out work
+    (:func:`_state.at_and_above`, the walk ``_next._rank`` reads), so no leaf is left without
+    one.  The session asks the developer for the step's Priority first."""
+    parent = filing.parent
+    if any(step.priority is not None for step in at_and_above(parent, filing.cards)):
+        return
+    raise Refused(f"neither plan#{parent.number} nor any step above it holds a Priority, and a "
+                  "leaf is ranked by its split step's (ruling plan#3229), so no leaf is filed "
+                  f"under it until one does: ask the developer for plan#{parent.number}'s "
+                  f"Priority first (`quill priority plan#{parent.number} --to PRIORITY` sets "
+                  "it), then run this again")
+
+
 def _ended_unfinished(card: Card) -> str:
     """Why nothing is filed over ``card``, whose filing a decision ended
     (:func:`_state.withdrawn_filing`), and how a person restores it: filing it again
@@ -654,8 +673,9 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
     (:func:`_ended_unfinished`), else filed already (:func:`_filed_already`).  A leaf
     whose filing would write anything is refused under a claimed step
     (:func:`_refuse_under_a_claim`), beside an unfinished sibling
-    (:func:`_refuse_beside_unfinished`) and under a step with a task still open
-    (:func:`_refuse_over_tasks`).  A step at the top level or a question is refused without
+    (:func:`_refuse_beside_unfinished`), under a step with a task still open
+    (:func:`_refuse_over_tasks`) and under a step no Priority ranks
+    (:func:`_refuse_unranked`).  A step at the top level or a question is refused without
     the Priority its filing suggests (``check.takes_suggestion``, rulings plan#2800, plan#3224).
 
     Every card is created marked, :data:`setup_tracker.FILING` sent in the call
@@ -687,6 +707,7 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
         _refuse_under_a_claim(filing, card)
         _refuse_beside_unfinished(filing, card)
         _refuse_over_tasks(filing)
+        _refuse_unranked(filing)
     _write(tracker, filing, card, before)
     return 0
 

@@ -221,7 +221,7 @@ def test_a_released_claims_finishing_tasks_are_dropped_before_its_step_splits(co
     """A step split into smaller steps is never shipped itself (R-BAL177), so a leaf is refused
     while the finishing tasks a claim filed are open; dropped, the split goes ahead."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, "claim", "plan#1") == 0
     _released(tracker, code)
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 1

@@ -37,7 +37,7 @@ from tools.quill._fields import HIGH, URGENT
 from tools.quill._git import Claim
 from tools.quill._state import (
     SHIPPABLE,
-    above,
+    at_and_above,
     blockers,
     has_turn,
     held_at,
@@ -75,8 +75,8 @@ class NextAnswer:
 
 def _rank(card: Card, cards: Mapping[int, Card]) -> int:
     """Where ``card``'s mark puts it among :data:`_AHEAD`: the highest of its own and each step
-    above it, and past them all with neither."""
-    marks = {step.priority for step in (card, *above(card, cards))}
+    above it (:func:`_state.at_and_above`), and past them all with neither."""
+    marks = {step.priority for step in at_and_above(card, cards)}
     return next((rank for rank, mark in enumerate(_AHEAD) if mark in marks), len(_AHEAD))
 
 

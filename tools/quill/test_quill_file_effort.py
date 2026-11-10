@@ -188,7 +188,7 @@ def test_the_first_leaf_clears_its_split_step_s_effort_before_its_mark_comes_off
     #1's 4 is cleared once the leaf is linked and placed, before the leaf's mark is removed,
     last (R-BAL202)."""
     tracker = FakeTracker()
-    tracker.add(1, effort="4")
+    tracker.add(1, priority="Medium", effort="4")
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
     assert (tracker.cards_by_number[1].effort, tracker.cards_by_number[2].effort) == (None, "2")
     assert tracker.writes == [("create", 2, "step", "half", ("balance", FILING), "balance"),
@@ -205,7 +205,7 @@ def test_a_split_step_in_a_milestone_gives_up_its_milestone_and_its_effort(code,
     tracker = FakeTracker()
     tracker.milestones.add(1)
     tracker.milestone_of[1] = 1
-    tracker.add(1, effort="4")
+    tracker.add(1, priority="Medium", effort="4")
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
     assert tracker.milestone_of == {2: 1}
     assert tracker.cards_by_number[1].effort is None
@@ -217,7 +217,7 @@ def test_a_leaf_of_a_split_step_holding_no_effort_writes_none(code, tmp_path):
     """The first leaf cleared #1's Effort, so the second finds it holding none: no write, as a
     clear of a value the card does not hold is GitHub's 404 (``_tracker.Tracker.set_field``)."""
     tracker = FakeTracker()
-    tracker.add(1, effort="4")
+    tracker.add(1, priority="Medium", effort="4")
     assert run(tracker, code, *leaf_filing(tmp_path, "first half")) == 0
     assert run(tracker, code, *leaf_filing(tmp_path, "second half")) == 0
     assert _set_fields(tracker) == [("set_field", 1, EFFORT_FIELD, None)]
@@ -228,7 +228,7 @@ def test_a_leaf_filing_cut_short_at_the_clear_is_finished_by_the_same_command(co
     """R-BAL186: the clear fails, the run exits 2 with #1 still holding its Effort and the leaf
     still marked; run again, it clears it once and removes the mark, no second card filed."""
     tracker = FakeTracker()
-    tracker.add(1, effort="4")
+    tracker.add(1, priority="Medium", effort="4")
     FailOnce(tracker, "set_field")
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 2
     assert tracker.cards_by_number[1].effort == "4"
@@ -249,7 +249,7 @@ def test_a_leaf_dropped_before_its_filing_finished_leaves_its_step_as_its_filing
     holds none, and ``quill effort`` sets one.  Cut at its link, before the clear, #1 keeps the
     Effort it held."""
     tracker = FakeTracker()
-    tracker.add(1, effort="4")
+    tracker.add(1, priority="Medium", effort="4")
     FailOnce(tracker, cut)
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 2
     assert tracker.cards_by_number[1].effort == kept

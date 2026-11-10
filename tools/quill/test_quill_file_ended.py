@@ -195,8 +195,9 @@ def test_a_card_dropped_while_its_command_ran_is_never_filed_over(code, tmp_path
 
 def _split_by_an_unfinished_leaf(tracker, code, tmp_path):
     """plan#1, on the board, split by leaf plan#2 whose unmark failed: plan#2 holds plan#1's
-    place, still marked, and plan#1 is off the board."""
-    tracker.add(1)
+    place, still marked, and plan#1 is off the board; plan#1 holds a Priority, which ranks its
+    leaves (ruling plan#3229)."""
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 2
     assert tracker.board.items == [2] and FILING in tracker.cards_by_number[2].labels
@@ -286,7 +287,7 @@ def test_dropping_a_split_step_beside_a_finished_leaf_leaves_its_close_to_sync(c
     leaves -- and, leaf C2 (review M1), unlinks the unfinished one after its close
     (R-BAL205); `sync` then closes plan#1 as not planned (R-BAL187)."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "First")) == 0
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Second")) == 2
@@ -331,7 +332,7 @@ def test_a_step_left_bare_below_a_split_step_is_dropped_and_the_split_step_left_
     unfinished leaf is unlinked from it (leaf C2, review M1), and the split step above it,
     still split by it, is left to `sync` (R-BAL187)."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "Middle")) == 0
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Bottom", "plan#2")) == 2
@@ -377,7 +378,7 @@ def test_a_card_dropped_while_marked_is_refused_whatever_the_listings_show(code,
     FailOnce(tracker.board, "add")
     assert run(tracker, code, *args) == 2
     _closed_by_hand(tracker, 1, "NOT_PLANNED")
-    tracker.add(2)
+    tracker.add(2, priority="Medium")
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half", "plan#2")) == 2
     _closed_by_hand(tracker, 3)
@@ -823,7 +824,7 @@ def test_sync_finishes_an_undo_that_failed_after_its_own_close_of_the_split_step
     reopening the leaf afterwards leaves the dropped plan#1 dropped (with the link left,
     it made plan#1 split again and `sync` reopened it)."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "First")) == 0
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Second")) == 2

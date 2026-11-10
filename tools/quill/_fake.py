@@ -641,6 +641,17 @@ def suggested(number):
     return ("suggest", number, SUGGESTED[1], SUGGESTED[3])
 
 
+def split_in_two(tracker):
+    """Put in ``tracker`` plan#1, split into plan#2 and plan#3 and off the board, holding a
+    Priority, which ranks its leaves (ruling plan#3229), and plan#4 below its leaves: the board
+    the tests of a leaf filed after them, or of one cut short, file on."""
+    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True)), on_board=False,
+                priority="Medium")
+    tracker.add(2, parent=1)
+    tracker.add(3, parent=1)
+    tracker.add(4)
+
+
 def leaf_filing(tmp_path, title, parent="plan#1"):
     """``quill file step`` filing a leaf named ``title`` under ``parent``, sized at two
     sessions (ruling plan#2492), its spec written to a file."""

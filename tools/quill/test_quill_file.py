@@ -9,7 +9,7 @@ import pytest
 import requests
 
 from tools.quill._fake import (SUGGESTED, FailOnce, FakeTracker, claim, leaf_filing, run, ship,
-                              suggested)
+                              split_in_two, suggested)
 from tools.quill._tracker import Child, Edit, OutsideLink
 from tools.quill.check import ruling_body
 from tools.quill.setup_tracker import FILING, MOVES_MONEY_LABEL
@@ -54,7 +54,7 @@ def test_a_split_leaves_the_split_steps_labels_as_they_were(code, tmp_path):
     and the leaf takes labels of its own, never the split step's.  The fake applies every
     label write the tool sends, so a strip or a move would show here."""
     tracker = FakeTracker()
-    tracker.add(1, labels=("balance", MOVES_MONEY_LABEL))
+    tracker.add(1, priority="Medium", labels=("balance", MOVES_MONEY_LABEL))
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
     assert tracker.cards_by_number[1].step_children == (2,)
     assert tracker.cards_by_number[1].labels == ("balance", MOVES_MONEY_LABEL)
@@ -68,7 +68,7 @@ def test_a_leaf_takes_the_split_steps_place_and_the_next_leaf_follows_it(code, t
     spec.write_text("Build the half.")
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     args = ("file", "step", "--effort", "2", "--arc", "balance", "--parent", "plan#2",
             "--body-file", str(spec))
     assert run(tracker, code, *args, "--title", "first half") == 0
@@ -180,7 +180,7 @@ def test_splitting_a_blocked_step_offers_no_leaf_until_its_wait_ends(code, tmp_p
     tracker = FakeTracker()
     tracker.add(2)
     claim(code, 2)
-    tracker.add(7, blocked_by=(2,))
+    tracker.add(7, priority="Medium", blocked_by=(2,))
     assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
                "--title", "L7a", "--parent", "plan#7", "--body-file", str(spec)) == 0
     capsys.readouterr()
@@ -358,7 +358,7 @@ def test_a_placement_the_board_has_not_shown_yet_is_said(code, tmp_path, capsys)
     spec = tmp_path / "spec.md"
     spec.write_text("Half.")
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add(2)
     tracker.board.lagging = True
     assert run(tracker, code, "move", "plan#2", "--top") == 0
@@ -551,7 +551,7 @@ def test_a_leaf_already_placed_is_left_where_the_developer_moved_it(code, tmp_pa
     spec.write_text("Half.")
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     args = ("file", "step", "--effort", "2", "--arc", "balance", "--parent", "plan#2",
             "--body-file", str(spec))
     assert run(tracker, code, *args, "--title", "first half") == 0
@@ -638,7 +638,7 @@ def test_a_leaf_whose_split_step_is_still_on_the_board_is_finished_into_its_plac
     spec.write_text("Half.")
     tracker = FakeTracker()
     for number in (1, 2, 3):
-        tracker.add(number)
+        tracker.add(number, priority="Medium")
     FailOnce(tracker.board, "remove")
     args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "half",
             "--parent", "plan#2", "--body-file", str(spec))
@@ -707,10 +707,7 @@ def test_a_leaf_whose_move_failed_is_moved_into_its_place_by_the_same_command(co
     spec = tmp_path / "spec.md"
     spec.write_text("Build the trailer check.")
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True)), on_board=False)
-    tracker.add(2, parent=1)
-    tracker.add(3, parent=1)
-    tracker.add(4)
+    split_in_two(tracker)
     FailOnce(tracker.board, "place")
     args = ("file", "step", "--effort", "2", "--parent", "plan#1", "--arc", "balance", "--title",
             "Trailer check", "--body-file", str(spec))
@@ -779,10 +776,7 @@ def test_a_finished_leaf_a_later_leaf_follows_is_never_moved(code, tmp_path, cap
     after a later one was filed, advised a move swapping two leaves nobody touched;
     R-BAL202: the earlier leaf's filing finished, so the re-run writes nothing."""
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True)), on_board=False)
-    tracker.add(2, parent=1)
-    tracker.add(3, parent=1)
-    tracker.add(4)
+    split_in_two(tracker)
     for name in ("first", "second"):
         spec = tmp_path / f"{name}.md"
         spec.write_text(f"Build the {name} half.")
@@ -812,7 +806,7 @@ def test_a_marked_leaf_is_moved_only_by_a_leaf_filed_before_it_on_the_board(code
     spec = tmp_path / "spec.md"
     spec.write_text("Half.")
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True),
+    tracker.add(1, priority="Medium", children=(Child(2, "step", True), Child(3, "step", True),
                              Child(5, "step", True)), on_board=False)
     tracker.add(2, parent=1, on_board=False)
     tracker.add(3, parent=1, on_board=False)
@@ -837,7 +831,8 @@ def test_a_marked_leaf_the_board_listing_does_not_show_is_never_added_again(
     spec = tmp_path / "spec.md"
     spec.write_text("Half.")
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True), Child(5, "step", True)), on_board=False)
+    tracker.add(1, children=(Child(2, "step", True), Child(5, "step", True)), on_board=False,
+                priority="Medium")
     tracker.add(2, parent=1)
     tracker.add(4)
     tracker.add(5, parent=1, body="Half.", title="half", labels=("balance", FILING),
@@ -854,7 +849,7 @@ def test_a_leaf_left_at_the_bottom_is_placed_after_the_leaves_filed_before_it(co
     spec = tmp_path / "spec.md"
     spec.write_text("Half.")
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True),
+    tracker.add(1, priority="Medium", children=(Child(2, "step", True), Child(3, "step", True),
                              Child(5, "step", True), Child(6, "step", True)), on_board=False)
     tracker.add(2, parent=1, on_board=False)
     tracker.add(3, parent=1, on_board=False)

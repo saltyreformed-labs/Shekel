@@ -53,25 +53,40 @@ def _liability(profile, tax_year, annual_wage_income, annual_pretax):
     )
 
 
+#: The W-4 fields a test profile carries unless a case names one: the Step 4(a)
+#: income and dependent counts the liability reads, and the Step 4(b)
+#: deductions it must IGNORE.
+_W4_DEFAULTS = {
+    "additional_income": "0.00",
+    "additional_deductions": "0.00",
+    "qualifying_children": 0,
+    "other_dependents": 0,
+}
+
+
 def _make_profile(
     seed_user,
     *,
     name="Liability Test Profile",
     state_code="NC",
     filing_status_name="single",
-    additional_income="0.00",
-    additional_deductions="0.00",
-    qualifying_children=0,
-    other_dependents=0,
+    **w4,
 ):
     """Build and flush an active single/NC SalaryProfile for the seeded user.
 
     Mirrors the ``test_tax_config_service`` profile helper, adding the W-4
-    fields the liability service reads (Step 4(a) income and dependent
-    counts) plus the Step 4(b) deductions the service must IGNORE.  ``name``
+    fields of :data:`_W4_DEFAULTS`, each overridden by keyword.  ``name``
     is a parameter because the ``uq_salary_profiles_user_scenario_name``
     constraint forbids two same-named profiles for one user + scenario.
+
+    Raises:
+        TypeError: A keyword names no W-4 field, so a misspelt one cannot
+            build a profile without it.
     """
+    unknown = w4.keys() - _W4_DEFAULTS.keys()
+    if unknown:
+        raise TypeError(f"_make_profile: no W-4 field named {sorted(unknown)}")
+    w4 = {**_W4_DEFAULTS, **w4}
     filing_status = (
         _db.session.query(FilingStatus).filter_by(name=filing_status_name).one()
     )
@@ -83,10 +98,10 @@ def _make_profile(
         filing_status_id=filing_status.id,
         state_code=state_code,
         is_active=True,
-        additional_income=Decimal(additional_income),
-        additional_deductions=Decimal(additional_deductions),
-        qualifying_children=qualifying_children,
-        other_dependents=other_dependents,
+        additional_income=Decimal(w4["additional_income"]),
+        additional_deductions=Decimal(w4["additional_deductions"]),
+        qualifying_children=w4["qualifying_children"],
+        other_dependents=w4["other_dependents"],
     )
     _db.session.add(profile)
     start_test_pay_list(profile, Decimal("4230.77"))  # $110,000.00 a year / 26
@@ -104,7 +119,7 @@ def _committed_profile(seed_user, **profile_kwargs):
 class TestWorkedAnchor:
     """The developer's locked worked anchor (single, NC, 2026 seeds)."""
 
-    def test_anchor_federal_and_state(self, app, db, seed_user):
+    def test_anchor_federal_and_state(self, seed_user):
         """Anchor: wages 110,000; pre-tax 12,000; 4(a) 1,200; 4(b) 3,000.
 
         Federal (2026 single, std ded 16,100):
@@ -161,7 +176,7 @@ class TestWorkedAnchor:
 class TestFourBExclusion:
     """W-4 Step 4(b) additional deductions never change filing liability."""
 
-    def test_4b_does_not_change_liability(self, app, db, seed_user):
+    def test_4b_does_not_change_liability(self, db, seed_user):
         """Two profiles differing ONLY in 4(b) yield identical liability.
 
         The service never reads ``additional_deductions``, so both resolve to
@@ -193,7 +208,7 @@ class TestFourBExclusion:
 class TestConfigYearSelection:
     """The pricer's law for the requested year selects that year's brackets."""
 
-    def test_2025_vs_2026_differ(self, app, db, seed_user):
+    def test_2025_vs_2026_differ(self, seed_user):
         """Same inputs against 2025 vs 2026 seeds produce different results.
 
         2025 single (std ded 15,750, P.L. 119-21 by Rev. Proc. 2025-32 sec.
@@ -272,7 +287,7 @@ class TestHeadOfHouseholdBoundary2026:
     """2026's head-of-household 24% / 32% boundary is $201,750 (finding SAL-577)."""
 
     def test_income_past_the_boundary_is_taxed_at_32_from_201750(
-        self, app, db, seed_user,
+        self, seed_user,
     ):
         """Head of household, 2026, wages 260,000, nothing pre-tax, no 4(a).
 
@@ -302,7 +317,7 @@ class TestHeadOfHouseholdBoundary2026:
 class TestDependentCredits:
     """Dependent counts flow off the profile into the nonrefundable credit."""
 
-    def test_two_children_one_other_dependent(self, app, db, seed_user):
+    def test_two_children_one_other_dependent(self, seed_user):
         """2 children + 1 other dependent = 4,900 credit off the anchor tax.
 
           credit    = 2*2200 + 1*500 = 4,900.00  (CTC $2,200 per OBBBA)
@@ -336,7 +351,7 @@ class TestDeveloperLiveAnchorMFJ:
     NC filing-status standard deduction, and NC per-child deduction.
     """
 
-    def test_live_shape_full_integration(self, app, db, seed_user):
+    def test_live_shape_full_integration(self, seed_user):
         """MFJ, 4 children, wages 94,619.62, pre-tax 13,943.93, no 4(a).
 
         Federal (2026 MFJ, std ded 32,200; CTC 2,200; refundable cap 1,700):
@@ -377,7 +392,7 @@ class TestDeveloperLiveAnchorMFJ:
 class TestNCFilingStatusStandardDeduction:
     """finding 2b: the NC standard deduction is now filing-status-specific."""
 
-    def test_mfj_uses_25500_not_single_12750(self, app, db, seed_user):
+    def test_mfj_uses_25500_not_single_12750(self, seed_user):
         """An MFJ profile resolves the $25,500 NC standard deduction.
 
         MFJ, 0 children, wages 100,000, no pre-tax/4(a):
@@ -395,7 +410,7 @@ class TestNCFilingStatusStandardDeduction:
         assert result.state.standard_deduction == Decimal("25500.00")
         assert result.state.liability == Decimal("2972.55")
 
-    def test_single_still_uses_12750(self, app, db, seed_user):
+    def test_single_still_uses_12750(self, seed_user):
         """A single profile keeps the $12,750 NC standard deduction (regression).
 
         Single, 0 children, wages 100,000:
@@ -414,7 +429,7 @@ class TestNCFilingStatusStandardDeduction:
 class TestNCChildDeductionTierBoundary:
     """The NC child-deduction tier edge belongs to the lower (generous) tier."""
 
-    def test_single_agi_exactly_at_tier_edge(self, app, db, seed_user):
+    def test_single_agi_exactly_at_tier_edge(self, seed_user):
         """Single AGI exactly 40,000 -> 2,000/child ("Up to 40,000" inclusive).
 
         The single tiers put "Over 30,000 - Up to 40,000" at 2,000/child; an
@@ -435,7 +450,7 @@ class TestNCChildDeductionTierBoundary:
         assert result.state.child_deduction_total == Decimal("2000.00")
         assert result.state.liability == Decimal("1007.48")
 
-    def test_single_agi_one_cent_over_edge_drops_tier(self, app, db, seed_user):
+    def test_single_agi_one_cent_over_edge_drops_tier(self, seed_user):
         """Single AGI 40,000.01 -> 1,500/child ("Over 40,000" tier).
 
         wages 40,000.01, 1 child:
@@ -454,7 +469,7 @@ class TestNCChildDeductionTierBoundary:
         assert result.state.child_deduction_total == Decimal("1500.00")
         assert result.state.liability == Decimal("1027.43")
 
-    def test_zero_children_no_child_deduction(self, app, db, seed_user):
+    def test_zero_children_no_child_deduction(self, seed_user):
         """A filer with 0 children gets no child deduction regardless of AGI."""
         profile = _committed_profile(
             seed_user, filing_status_name="single", qualifying_children=0,
@@ -470,9 +485,19 @@ class TestNCChildDeductionTierBoundary:
 
 
 class TestClampAndMissingConfigs:
-    """The zero clamp, and the refusal of a state the law does not list (salary:X-at-3)."""
+    """The zero clamp, and that the liability's only path refuses a profile the law cannot price.
 
-    def test_low_income_clamps_both_layers_to_zero(self, app, db, seed_user):
+    The two refusal cases stop where that path first reads the law: building
+    the profile's pricer (``_liability``), which slices the law to the profile
+    and refuses a state the law does not list (plan step salary:X-at-3).  They
+    never reach the liability's arithmetic, and that is what they grade: no
+    liability is priced for such a profile, $0.00 state tax included.  The
+    refusal itself is the resolver's, graded where it is raised:
+    ``test_tax_config_service.py::test_an_empty_law_refuses_every_profile``
+    and ``tests/test_routes/test_salary_supported_states.py``.
+    """
+
+    def test_low_income_clamps_both_layers_to_zero(self, seed_user):
         """Income below both standard deductions -> zero federal and state.
 
         wages 10,000; pre-tax 0; 4(a) 0:
@@ -489,15 +514,16 @@ class TestClampAndMissingConfigs:
         assert result.state.taxable_base == Decimal("10000.00")
         assert result.state.liability == Decimal("0.00")
 
-    def test_a_state_the_law_does_not_list_is_refused(self, app, db, seed_user):
-        """A PA profile is refused, not priced at $0.00 state liability.
+    def test_a_state_the_law_does_not_list_is_refused(self, seed_user):
+        """A PA profile is refused before any liability is priced, never priced at $0.00 state tax.
 
-        The shipped law does not list Pennsylvania.  Until plan step
-        salary:X-at-3 this case pinned the defect finding SAL-575 names: the
-        state resolved no rules and the liability priced $0.00 state tax
-        beside a full federal figure.  Plan step salary:X-at-3: "the engine
-        refuses a state the law lacks" (ruling R-SAL78), with an error naming
-        the profile (ruling R-SAL130).
+        The shipped law does not list Pennsylvania, so building the profile's
+        pricer refuses it -- plan step salary:X-at-3: "the engine refuses a
+        state the law lacks" (ruling R-SAL78), with an error naming the
+        profile (ruling R-SAL130) -- and the liability, which takes that
+        pricer, is never reached.  Until X-at-3 this case pinned the defect
+        finding SAL-575 names: the state resolved no rules and the liability
+        priced $0.00 state tax beside a full federal figure.
         """
         profile = _committed_profile(
             seed_user, state_code="PA", additional_income="1200.00",
@@ -512,13 +538,15 @@ class TestClampAndMissingConfigs:
         assert refused.value.supported == tax_law_module.LAW.supported_states
 
     def test_an_empty_law_refuses_the_profile_before_its_federal_rules(
-        self, app, db, seed_user, tax_law,
+        self, db, seed_user, tax_law,
     ):
-        """A law with no year lists no state, so the profile is refused first.
+        """A law with no year lists no state, so the profile is refused before its federal rules.
 
-        Until plan step salary:X-at-3 this raised InvalidFilingStatusError: no
-        year held a bracket set.  The law's state check now runs before any
-        year is resolved, and an empty law supports no state.
+        Until plan step salary:X-at-3 this raised InvalidFilingStatusError from
+        the liability's federal layer: no year held a bracket set.  The pricer
+        the liability takes now slices the law first, and an empty law
+        supports no state, so the refusal comes before any year is resolved
+        and before any arithmetic.
         """
         tax_law(EMPTY_TAX_LAW)
         profile = _make_profile(seed_user, additional_income="1200.00")

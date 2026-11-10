@@ -141,8 +141,20 @@ bank_statement_line_table_args = (
     db.UniqueConstraint(
         "id", "account_id", name="uq_bank_statement_lines_id_account",
     ),
-    # THE IDENTITY.  Re-importing an overlapping span cannot duplicate a
-    # line, structurally rather than by the importer remembering to check.
+    # THE IDENTITY, and what it refuses is two WRITERS, not a re-import.
+    # A re-import cannot duplicate a line because the record door reconciles
+    # each ``(posted_on, amount)`` group as a set and mints an ordinal only
+    # for a line it has decided is new (ruling **R-FU**, amended
+    # 2026-08-20; ``statement_import._plan._reconcile``), so a re-import
+    # never reaches this key.  What only this key stops is two writers
+    # recording one account at once: each reads the same group, each mints
+    # its next ordinal (``statement_import.fresh_ordinals``), and the second
+    # insert is refused here instead of one bank line being recorded twice
+    # (ruling **R-BI31**, which orders a feed's syncs of one account behind
+    # its mapping row so a sync never reaches this refusal).  The upload
+    # door takes no such lock, so two uploads of one account at the same
+    # moment do reach it.  It does not give a line a stable address either:
+    # a freed TOP ordinal is minted again (``fresh_ordinals``' docstring).
     db.UniqueConstraint(
         "account_id", "posted_on", "amount", "sequence_in_group",
         name="uq_bank_statement_lines_identity",

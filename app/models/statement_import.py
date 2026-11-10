@@ -389,8 +389,13 @@ class BankStatementLine(AccountScopedMixin, db.Model):
     source showed (``statement_import._plan._reconcile``) -- and mints an
     ordinal only for a line it has decided is new
     (:func:`app.services.statement_import.fresh_ordinals`).  What this key
-    still guarantees is that every recorded line has a distinct, stable
-    address, which is the whole of what a surrogate owes.
+    still guarantees is that no two recorded lines share an address -- so
+    two writers that record one account at once and mint the same ordinal
+    are refused rather than recording one line twice (ruling **R-BI31**;
+    the key's comment in :mod:`app.models._statement_import_table_args`) --
+    and that is the whole of what a surrogate owes.  The address is not
+    STABLE: a freed top ordinal is minted again, and what cites a line from
+    outside its group cites its primary key.
 
     **The merchant is a FACT the adapter states, not a token a reader parses,
     and the NULL is the source saying it names none** (plan step

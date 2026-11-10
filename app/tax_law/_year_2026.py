@@ -36,6 +36,11 @@ SOURCES = (
     "tax credit $2,200; refundable $1,700 per child) and sec. 4.14 (standard "
     "deduction)",
     "IRC sec. 24(h)(4) (credit for other dependents $500)",
+    "IRS Pub 15-T (2026), Worksheet 1A line 1g and the Annual Percentage "
+    "Method tables' STANDARD Withholding Rate Schedules (the withholding "
+    "standard deduction, the return's)",
+    "Form W-4 (2026), Step 3 (the withholding child credit, the return's "
+    "$2,200)",
     "SSA 2026 COLA fact sheet (Social Security wage base $184,500)",
     "IRC sec. 3101(a) and (b)(1) (Social Security 6.2%, Medicare 1.45%); "
     "sec. 3102(f) (Additional Medicare 0.9% withheld on wages over $200,000)",

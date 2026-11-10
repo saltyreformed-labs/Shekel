@@ -132,8 +132,9 @@ class FederalRules:
     employee's Form W-4, both printed before the year starts.  P.L. 119-21
     (signed 2025-07-04) raised 2025's standard deduction and child credit, and
     the IRS left that year's withholding tables and W-4 on the old figures
-    (IR-2025-82), so all 2025 withholding was on figures the return does not
-    use; the difference came back as a refund.
+    (IR-2025-82), so 2025's paychecks withheld on a smaller standard
+    deduction and child credit than its return allows, and the difference
+    came back as a refund.
     ``withholding_standard_deduction`` and ``withholding_child_credit_amount``
     state a withholding figure where it DIFFERS from the return's, and are
     ``None`` where the withholding documents print the return's figure.

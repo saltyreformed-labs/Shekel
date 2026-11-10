@@ -18,9 +18,11 @@ single filer's, which the law does not state: finding plan#3243.)
 
 Until plan step salary:X-at-7 both priced on Rev. Proc. 2024-40's
 pre-P.L. 119-21 deduction (finding **salary:SAL-576**): the Taxes tab
-overstated 2025's tax by the $750 ($1,500 jointly, $1,125 head of household)
-times the marginal rate, and the paychecks withheld on the return's $2,200
-child credit rather than the W-4's $2,000.
+overstated 2025's tax by up to the $750 ($1,500 jointly, $1,125 head of
+household) times the marginal rate -- the bracket each taxed dollar fell in,
+and nothing where the tax was already zero after the credits -- and the
+paychecks withheld on the return's $2,200 child credit rather than the W-4's
+$2,000.
 """
 
 from decimal import Decimal

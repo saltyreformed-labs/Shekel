@@ -30,7 +30,8 @@ A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-is
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, on the board under a step the board holds (ruling plan#1814,
 ``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842), ``claim`` files a
-card's two finishing tasks (ruling plan#1875, ``_filing.finishing_filings``),
+card's finishing tasks (ruling plan#1875, its Release kit only while it moves money, ruling
+plan#2860; ``_filing.finishing_filings``),
 ``start`` begins it with a commit naming it (ruling plan#1872), the commit hook stamps each
 commit of the piece with it (:mod:`commit_hook`), ``task-file`` writes its file for the commit
 that finishes the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it; ``sync``
@@ -49,7 +50,9 @@ step's Effort too, which ``effort`` refuses to set on a split step (ruling plan#
 ``sync`` runs every three hours on this host (``shekel-plan-sync.timer``, its units' sources in
 ``/opt/docker/scripts``) from its own clone ``~/projects/shekel-plan-sync`` at dev's tip; a run
 that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``
-says when sync is behind.  ``watch`` runs every minute from the same clone, never beside
+says when sync is behind.  ``next`` hands out Urgent, then High, then the board's order, a step's
+unfinished prerequisites just ahead of it, never one On hold (rulings plan#1830, plan#1831,
+plan#1832; :mod:`_next`).  ``watch`` runs every minute from the same clone, never beside
 ``sync`` (``shekel-plan-watch.timer``): the same producer over each card whose branch moved
 since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
 :mod:`_watch`).  ``answer`` answers the developer's comments on a card, and ``next``
@@ -147,6 +150,7 @@ from tools.quill import (
     _status,
     _sync,
     _tasks,
+    _versions,
     _watch,
 )
 from tools.quill._arcs import other_labels
@@ -160,8 +164,10 @@ from tools.quill._command import (
 )
 from tools.quill._exits import Refused, exit_status
 from tools.quill._export import cmd_export
+from tools.quill._fields import ON_HOLD
 from tools.quill._filing import cmd_file
 from tools.quill._github import CredentialsError, GitHubError
+from tools.quill._next import next_step
 from tools.quill._show import cmd_show
 from tools.quill._state import (
     STALE_CLAIM,
@@ -178,12 +184,10 @@ from tools.quill._state import (
     left_bare,
     never_offered,
     never_split,
-    next_step,
     outside_reports,
     release_hint,
     resolved,
     stale_claims,
-    sync_plan,
     sync_unsplits,
     unfinished_reports,
     unshipped_shown_done,
@@ -214,19 +218,14 @@ CONNECT = partial(Tracker.connect, PLAN)
 # -- next, claim, release -----------------------------------------------------
 
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
-    """The first open step in the board's order that is unclaimed, unshipped and unblocked;
-    then how far ``sync`` is behind, what it cannot offer that a person must act on, and last,
+    """The step :func:`_next.next_step` hands out, Urgent, then High, then the board's order, each
+    step's unfinished prerequisites just ahead of it, and never one On hold; then how far ``sync``
+    is behind (:func:`_sync.behind`), what it cannot offer that a person must act on, each step
+    waiting on one On hold, by name (ruling plan#1830, plan#1820's spec), whether a release is due
+    for a version (:func:`_versions.due_line`, ruling plan#2829), and last,
     after every line no further read can cost, each claimed card, and each task under one,
     holding a comment of the developer's that no answer of quill's has followed (plan#1822,
-    ruling plan#1924, :func:`_comments.unanswered_lines`).
-
-    **Sync is behind** (ruling plan#1815) while git says work shipped or a task is done that
-    the tracker still shows open: the cards ``sync`` would close over what this reads, by
-    its one producer (:func:`_state.sync_plan`), so the count clears at the next ``sync``, a
-    schedule that stopped is seen, and a card a PERSON reopened, which ``sync`` reports
-    and never closes, is never counted.  Each card so counted is read again by its number
-    and decided again, as ``sync`` decides (:func:`_sync_reads`): the open listing can
-    still show a card ``sync`` has just closed."""
+    ruling plan#1924, :func:`_comments.unanswered_lines`)."""
     reads = _git.read(root)
     shipped = reads.shipped.cards
     cards = with_closure(tracker, {**tracker.open_cards(), **_unfinished(tracker)})
@@ -234,10 +233,7 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
     answer = next_step(order, cards, shipped, reads.claims, args.arc)
     scope = f" in {args.arc}" if args.arc else ""
     print(f"next{scope}: {_label(answer.card)}" if answer.card else f"next{scope}: nothing")
-    closes = partial(sync_plan, shipped=shipped, claims=reads.claims, tasks=reads.shipped.tasks)
-    if behind := closes(cards).close:
-        behind = closes({**cards, **tracker.cards(behind)}).close
-    if behind:
+    if behind := _sync.behind(tracker, reads, cards):
         print(f"sync is behind: {len(behind)} shipped cards still open")
     for card in answer.unplaced:
         print(f"NOT ON THE BOARD, so in no order: {_label(card)} -- "
@@ -246,6 +242,9 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
                  if never_split(card, cards, shipped) else
                  f"place it with `quill move plan#{card.number} --after plan#M` (or the board "
                  "lags a fresh write)"))
+    for wait in answer.waiting:
+        print(f"WAITING: {_label(wait.step)} needs what is {ON_HOLD}: "
+              f"{' and '.join(map(_label, wait.on))}")
     for claim in stale_claims(reads.claims, datetime.now(UTC)):
         print(f"STALE CLAIM: plan#{claim.card} on {holder(claim)}: no commit for more than "
               f"{STALE_CLAIM.days} days -- {release_hint(claim)} keeps its work and frees it")
@@ -253,6 +252,8 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
         print(f"OUTSIDE LINK: {line}")
     for line in unfinished_reports(cards, shipped):
         print(f"UNFINISHED FILING: {line}")
+    if (due := _versions.due_line(root)) is not None:
+        print(due)
     for line in _comments.unanswered_lines(tracker, reads.claims, cards):
         print(f"UNANSWERED COMMENT: {line}")
     return 0
@@ -263,11 +264,14 @@ def cmd_claim(args, tracker: Tracker, root: Path,
     """Claim a card (R-BAL359): a commit adding its ship marker, made on ``origin/dev`` --
     or with ``--here`` on the commit checked out, for work already started -- and pushed
     create-only as the branch ``card/N`` (:func:`_git.claim`), then checked out here as
-    that branch, with no upstream; then its two finishing tasks filed under it, last in its
-    order, unless they are filed already (ruling plan#1875): decided before the push
+    that branch, with no upstream; then its finishing tasks filed under it, last in its
+    order, unless they are filed already (ruling plan#1875; a Release kit among them while
+    it moves money, ruling plan#2860): decided before the push
     (:func:`_filing.finishing_filings`), written after it.  Refused, with nothing written,
     for what is no work to claim (work shown done that a revert unshipped says to sync
-    first); while ``card/N`` holds a claim (:func:`_claimed_again`); while ``origin`` holds
+    first); for what is never offered (:func:`_state.never_offered`: On hold, ruling plan#1832,
+    among its reasons); while ``card/N`` holds a claim (:func:`_claimed_again`); while
+    ``origin`` holds
     a ``card/N`` already merged, which a create-only push cannot replace; while this clone
     already has a branch of that name, which the check-out would collide with; and for what
     the filing of a finishing task refuses.  The claim line is printed once the push lands,
@@ -322,8 +326,9 @@ def _claimed_again(tracker: Tracker, root: Path, card: Card, cards: dict[int, Ca
                    reads: _git.Reads) -> int:
     """``claim`` of ``card``, which one of ``reads``' claims holds: refused, with nothing
     written, but where that claim's branch is checked out here and some of the card's
-    finishing tasks are not filed (a failure cut the claim short, or the claim came before
-    ruling plan#1875), the claim is finished: they are filed
+    finishing tasks are not filed (a failure cut the claim short, the claim came before
+    ruling plan#1875, or the card was labelled moves-money after it, so its Release kit is
+    missing, ruling plan#2860), the claim is finished: they are filed
     (:func:`_filing.file_finishing`, R-BAL186)."""
     held = reads.claims[card.number]
     finishing = (_filing.finishing_filings(tracker, root, card, cards, reads)

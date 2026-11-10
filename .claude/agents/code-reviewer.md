@@ -182,7 +182,10 @@ Tests, running them:
   runs share only the cores, and the wrapper prints any peer pytest and
   proceeds. A migration needs no manual template rebuild (the wrapper
   re-verifies the baked template on every invocation). The wrapper refuses a
-  docker daemon that is not rootless rather than falling back.
+  docker daemon that is not rootless rather than falling back. Where the tree
+  holds `uv.lock`, outside CI, it removes a `.venv` link, never following it, runs
+  `uv sync --locked` before each run and puts that venv first on `PATH`; a sync
+  that fails stops it, exit 2.
 - The wrapper defaults to `-m "not docker"`, which DESELECTS the
   container-spawning `tests/test_deploy` tests: they leave no line in the
   report, so a green local run says nothing about them. CI runs `-m ""`;

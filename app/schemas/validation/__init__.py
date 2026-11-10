@@ -71,7 +71,7 @@ from app.schemas.validation._recurrence import (
     RECURRENCE_END_BOUND_KEY,
     RECURRENCE_MAX_PER_MONTH_KEY,
     RECURRENCE_NEEDS_A_START,
-    RECURRENCE_NOMINAL_DAY_KEY,
+    RECURRENCE_REPEATS_ON_KEY,
     RECURRENCE_STARTS_ON_KEY,
     end_bound_before_start_message,
 )
@@ -195,7 +195,7 @@ __all__ = [
     "RECURRENCE_END_BOUND_KEY",
     "RECURRENCE_MAX_PER_MONTH_KEY",
     "RECURRENCE_NEEDS_A_START",
-    "RECURRENCE_NOMINAL_DAY_KEY",
+    "RECURRENCE_REPEATS_ON_KEY",
     "RECURRENCE_STARTS_ON_KEY",
     "end_bound_before_start_message",
     "form_payload",

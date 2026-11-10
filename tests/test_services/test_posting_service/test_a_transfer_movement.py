@@ -14,6 +14,7 @@ from app.models.transaction_entry import TransactionEntry
 from app.services import posting_service
 from app.services._posting_write import _emit_balanced_entry, _PostingLeg
 from app.utils.dates import display_today
+from tests._ledger_reads import account_net
 from tests._test_helpers import (
     create_settled_transfer,
     refused_by_database_rule,
@@ -233,8 +234,8 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
                 assert posting_service.settled_transfer_effect(
                     account.id, scenario_id,
                 ) == effect
-                assert posting_service.account_posting_total(
-                    account.id, scenario_id,
+                assert account_net(
+                    _db.session, account.id, scenario_id,
                 ) == opening + effect
 
             with refused_by_database_rule(

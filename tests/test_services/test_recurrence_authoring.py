@@ -47,6 +47,7 @@ from app.models.recurrence_rule import RecurrenceRule
 from app.models.ref import FilingStatus
 from app.services import pay_period_admin
 from app.services.pay_calendar import calendar_for
+from tests._stub_period import stub_period_on
 from tests.oracles.recurrence_baseline import (
     BASELINE_CADENCES,
     ShapeCadence,
@@ -63,6 +64,7 @@ from app.services.recurrence import (
     EndsOnDate,
     RecurrenceSpec,
     ResolvedRecurrence,
+    WeekdayReading,
     author_rule,
     occurrence_placements,
     scheduling_day_of_month,
@@ -160,9 +162,13 @@ _OWNING_ARC_COLUMNS = frozenset({
 #: ARRIVED at plan step salary:R15-a on the same footing: the write door takes
 #: it off the canonical cadence ``resolve`` answers, beside the interval and
 #: the unit, so the stored ceiling is the resolver's and not the request's.
+#: ``weekday_reading`` ARRIVED at plan step recurrence:R8-c on the footing of
+#: ``nominal_day`` beside it: the door writes the resolved value's.
+#: ``unit_has_day_of_month`` ARRIVED at plan step plan#2302, off the same
+#: resolved unit.
 _DERIVED_COLUMNS = (
-    "interval_n", "unit_id", "placement_id", "shift_id", "starts_on",
-    "nominal_day", "max_per_month",
+    "interval_n", "unit_id", "unit_has_day_of_month", "placement_id", "shift_id",
+    "starts_on", "nominal_day", "weekday_reading", "max_per_month",
 )
 
 #: The two columns the DATABASE assigns, which no caller may author: the
@@ -537,12 +543,21 @@ class TestTheAuthoredSurfaceIsWholeAndClosed:
             assert derived_columns(rule) == {
                 "interval_n": resolved.interval_n,
                 "unit_id": ref_cache.recurrence_unit_id(resolved.unit),
+                "unit_has_day_of_month": (
+                    ref_cache.recurrence_unit_has_day_of_month(resolved.unit)
+                ),
                 "placement_id": ref_cache.period_placement_id(
                     resolved.placement,
                 ),
                 "shift_id": ref_cache.business_day_shift_id(resolved.shift),
                 "starts_on": resolved.starts_on,
                 "nominal_day": resolved.nominal_day,
+                # The member's value is what the column names (plan step
+                # recurrence:R8-c); every baseline cadence reads its day.
+                "weekday_reading": (
+                    None if resolved.weekday_reading is None
+                    else resolved.weekday_reading.value
+                ),
                 "max_per_month": resolved.max_per_month,
             }, (
                 f"the {cadence} rule's stored cadence columns disagree "
@@ -694,6 +709,99 @@ class TestThePerMonthCeilingRoundTrips:
         db.session.rollback()
 
 
+@pytest.mark.usefixtures("seed_periods")
+class TestTheWeekdayReadingRoundTrips:
+    """How the first date is read survives the write door and the read door.
+
+    Plan step recurrence:R8-c: ``_author`` writes the resolved reading's value
+    into ``weekday_reading``, the read door reads the member back, and the
+    reader that takes a STATED cadence drops it where that cadence has no
+    month coordinate -- the nominal day's rule and the ceiling's.
+    """
+
+    @pytest.mark.parametrize(
+        ("starts_on", "reading", "stored"),
+        [
+            # Tue 2026-11-17: the 17th by day, the third Tuesday by weekday.
+            (date(2026, 11, 17), None, None),
+            (date(2026, 11, 17), WeekdayReading.FROM_START, "from_start"),
+            # Fri 2027-01-29: the last Friday of January 2027.
+            (date(2027, 1, 29), WeekdayReading.FROM_END, "from_end"),
+        ],
+        ids=["day", "from-start", "from-end"],
+    )
+    def test_every_reading_stores_and_reads_back(
+        self, seed_user, db, starts_on, reading, stored,
+    ):
+        """The row holds the member's value; the spec and the value read it back."""
+        user_id = seed_user["user"].id
+        calendar = calendar_for(user_id)
+        rule = author_rule(
+            spec_for(
+                MONTHLY, user_id=user_id, starts_on=starts_on,
+                weekday_reading=reading,
+            ),
+            calendar,
+            bare_expense_template(db.session, seed_user),
+        )
+        db.session.commit()
+        db.session.expire(rule)
+
+        assert rule.weekday_reading == stored
+        assert recurrence_spec(rule).weekday_reading is reading
+        assert resolve(recurrence_spec(rule), calendar).weekday_reading is reading
+        assert_reauthoring_changes_nothing(rule)
+
+    def test_the_stated_cadence_reader_drops_a_reading_a_paycheck_unit_cannot_hold(
+        self, seed_user, db,
+    ):
+        """Re-cadencing a third-Tuesday rule onto paychecks reads no reading.
+
+        The edit form's repair path: a reading carried onto a cadence with no
+        month coordinate would build the spec ``RecurrenceSpec`` refuses.  A
+        yearly cadence has one, and keeps it.
+        """
+        user_id = seed_user["user"].id
+        rule = author_rule(
+            spec_for(
+                MONTHLY, user_id=user_id, starts_on=date(2026, 11, 17),
+                weekday_reading=WeekdayReading.FROM_START,
+            ),
+            calendar_for(user_id),
+            bare_expense_template(db.session, seed_user),
+        )
+        db.session.flush()
+
+        def restated(unit):
+            return recurrence_spec_with_cadence(
+                rule, interval_n=1, unit=unit,
+                placement=PeriodPlacementEnum.CONTAINING_DATE,
+                max_per_month=None,
+            ).weekday_reading
+
+        assert restated(RecurrenceUnitEnum.PERIOD) is None
+        assert restated(RecurrenceUnitEnum.WEEK) is None
+        assert restated(RecurrenceUnitEnum.YEAR) is WeekdayReading.FROM_START
+
+    def test_a_stored_weekday_rule_schedules_on_no_one_day(self, seed_user, db):
+        """The third Tuesday is the 15th-21st, so the row names no day; the 17th does."""
+        user_id = seed_user["user"].id
+        calendar = calendar_for(user_id)
+
+        def stored(reading):
+            return author_rule(
+                spec_for(
+                    MONTHLY, user_id=user_id, starts_on=date(2026, 11, 17),
+                    weekday_reading=reading,
+                ),
+                calendar,
+                bare_expense_template(db.session, seed_user),
+            )
+
+        assert scheduling_day_of_month(stored(None)) == 17
+        assert scheduling_day_of_month(stored(WeekdayReading.FROM_START)) is None
+
+
 class TestTheWriteDoorRefusesAnInvertedStoredPair:
     """``EmptyAuthoredWindowError`` (plan step R7d-g): one comparison at the one writer.
 
@@ -808,6 +916,7 @@ class TestSalaryProfileWriter:
             "name": "Day Job",
             "pay_amount": "4000.00",  # $104,000.00 a year / 26
             "pay_payday": seed_periods[0].start_date.isoformat(),
+            **stub_period_on(seed_periods[0].start_date.isoformat()),
             "filing_status_id": str(filing_status.id),
             # A state the law lists: since plan step salary:X-at-3 the create
             # door refuses any other (it posted "PA" until then).

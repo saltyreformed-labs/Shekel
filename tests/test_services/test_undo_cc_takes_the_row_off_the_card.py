@@ -27,9 +27,12 @@ from app.exceptions import ValidationError
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import cash_ledger, credit_workflow, status_seam, transaction_service
+from app.services.ledger_lines import linked_key
 from app.services.settle_day import SettleDay
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import ledger_net
 from tests._legacy_credit import plant_old_credit
-from tests._test_helpers import ledger_net, linked_ledger_account, typed
+from tests._test_helpers import typed
 from tests.test_services.test_card_payment_follows_what_is_owed import _balances
 from tests.test_services.test_card_payment_price import _card
 from tests.test_services.test_credit_puts_the_row_on_the_card import _groceries, _press
@@ -185,21 +188,18 @@ class TestUndoCcTakesTheRowOffTheCard:
     def test_the_posted_ledger_follows_the_payment_home(self, seed_user, seed_periods):
         """Credit posts -800.00 on the card, Undo CC reverses it, a later Paid posts it on checking.
 
-        Each ledger account's net, as a change from before the press: the
-        card -800.00 after Credit, then -800 + 800 = $0.00 after Undo CC;
+        Each account's line of the ledger, as a change from before the press:
+        the card -800.00 after Credit, then -800 + 800 = $0.00 after Undo CC;
         checking $0.00 until Paid on Jan 10 posts -800.00 there, the card still
-        $0.00.
+        $0.00.  The store agrees at each step, which the parity line grades.
         """
         card = _card(seed_user)
         scenario_id = seed_user["scenario"].id
-        ledgers = (
-            linked_ledger_account(db.session, seed_user["account"].id).id,
-            linked_ledger_account(db.session, card.id).id,
-        )
+        ledgers = (linked_key(seed_user["account"]), linked_key(card))
         before = [ledger_net(db.session, ledger, scenario_id) for ledger in ledgers]
 
         def moved():
-            """(checking, card): each ledger account's net change since *before*."""
+            """(checking, card): each account's net change since *before*."""
             return tuple(
                 ledger_net(db.session, ledger, scenario_id) - start
                 for ledger, start in zip(ledgers, before)
@@ -207,10 +207,13 @@ class TestUndoCcTakesTheRowOffTheCard:
 
         row = _press(_groceries(seed_user, seed_periods[0]))
         assert moved() == (_ZERO, -_EIGHT_HUNDRED)
+        assert_ledger_parity(db.session, scenario_id)
         row = _undo(row)
         assert moved() == (_ZERO, _ZERO)
+        assert_ledger_parity(db.session, scenario_id)
         _paid_on(row, _JAN_10)
         assert moved() == (-_EIGHT_HUNDRED, _ZERO)
+        assert_ledger_parity(db.session, scenario_id)
 
     def test_a_second_undo_cc_is_refused_and_changes_nothing(self, seed_user, seed_periods):
         """Undo CC on a row already off the card (a stale tab): refused in words, still on checking."""

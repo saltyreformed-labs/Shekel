@@ -401,10 +401,16 @@ _NON_INTEGER_FIELD_FACTORIES = frozenset({
 #: return type, and :meth:`TestNoIdFieldWasMissed
 #: ::test_the_shown_lines_field_is_strict_about_the_ids_it_carries` asserts
 #: the strictness on every id inside it directly.
+#: **``RepeatsOnField`` holds a TOKEN, never an id** (plan step
+#: recurrence:R8-c): the "repeating on" control posts the empty string, a
+#: clamped month-end day's digits or a weekday reading's stored value, and the
+#: field accepts exactly the strings an option posts
+#: (``month_reading_from_token``) -- ``"031"`` and ``" 31"`` included among
+#: the refused, which no integer parse would refuse.
 _NON_INTEGER_FIELD_SPELLINGS = frozenset({
     "Boolean", "Date", "Decimal", "Dict", "Nested", "RuleAnswerField",
-    "PurchaseDestination", "ReviewedDifferenceField", "ReviewedRowField",
-    "ShownIds", "String",
+    "PurchaseDestination", "RepeatsOnField", "ReviewedDifferenceField",
+    "ReviewedRowField", "ShownIds", "String",
 })
 
 #: Every field-class spelling in the validation package that is STRICT about
@@ -467,8 +473,9 @@ _NON_ROW_ID_INTEGERS = frozenset({
     # ``nominal_day`` below is what survives of the pair -- the 0-or-1 day a
     # short month clamped.  ``deductions_per_year`` left at plan step
     # salary:R15-b with its column: a deduction's cadence is a recurrence rule.
-    "effective_month",
-    "effective_year",
+    # ``effective_month`` and ``effective_year`` LEFT this set at plan step
+    # salary plan#3048 with the raise schema's fields: a raise states the date
+    # it starts (ruling plan#3090), a ``fields.Date``.
     "first_day_of_month",
     "grid_default_periods",
     "inflation_effective_month",
@@ -493,13 +500,10 @@ _NON_ROW_ID_INTEGERS = frozenset({
     "max_term_months",
     "months",
     "new_term_months",
-    # ``nominal_day`` is the DAY a rule means when its first occurrence's own
-    # month was too short to hold it (ruling R-R3), not a row: plan step
-    # R7c-b's form posts it beside ``starts_on`` only where the chosen date
-    # leaves the question open.  29-31 here, refused again by
-    # ``RecurrenceSpec.__post_init__`` and again by
-    # ``ck_recurrence_rules_nominal_day``.
-    "nominal_day",
+    # ``nominal_day`` LEFT this set at plan step recurrence:R8-c with the
+    # schema field itself: the "repeating on" control posts one token
+    # (``repeats_on``, a ``RepeatsOnField``) for a clamped day or a weekday
+    # reading, so no integer field states the day any more.
     "num_periods",
     # ``offset_periods`` LEFT this set at plan step R7b-2 with the schema field
     # itself (defect D8): no form ever rendered an input for it, so every

@@ -3,11 +3,24 @@ Shekel Budget App -- Reference Table Models (ref schema)
 
 Lookup / enum tables that are rarely written and frequently joined.
 New values are added via INSERT, never via schema migration.
+
+**This module is the ref schema's one namespace**: the reseed and the cache
+find each table by its class name on it.  The recurrence vocabulary's three
+live in :mod:`app.models._ref_recurrence` since a merge of ``dev`` took this
+file past pylint's 1,000-line ceiling, and are re-exported here.
 """
 
 from sqlalchemy import text
 
 from app.extensions import db
+# Pylint: ``unused-import`` -- re-exported, not read here: the reseed finds a
+# ref table by its class name on this module (``app.ref_seeds``,
+# ``getattr(ref_models, ...)``), and every caller imports them from here.
+from app.models._ref_recurrence import (  # pylint: disable=unused-import
+    BusinessDayShift,
+    PeriodPlacement,
+    RecurrenceUnit,
+)
 
 
 class AccountTypeCategory(db.Model):
@@ -279,82 +292,6 @@ class Status(db.Model):
 
     def __repr__(self):
         return f"<Status {self.name}>"
-
-
-class RecurrenceUnit(db.Model):
-    """Recurrence cadence-unit reference: period, week, month, year.
-
-    The first axis of the two-axis recurrence model (redesign step R2): a
-    rule recurs every ``budget.recurrence_rules.interval_n`` units of this
-    kind.  Four of the closed pattern set's names were one idea with a
-    different integer baked into the name (every 1 / 3 / 6 / 12 months);
-    moving that integer into a column is what makes "every other month" and
-    "every two years" expressible.  That set lived in ``ref.recurrence_patterns``
-    until plan step **R9** dropped the table.
-
-    Application code resolves these via ``ref_cache.recurrence_unit_id`` and
-    compares against the integer ID -- never the string ``name`` -- matching
-    the project-wide ``ref-table: IDs for logic, strings for display only``
-    invariant.  See :class:`~app.enums.RecurrenceUnitEnum` for the per-value
-    semantics.
-    """
-
-    __tablename__ = "recurrence_units"
-    __table_args__ = {"schema": "ref"}
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(10), unique=True, nullable=False)
-
-    def __repr__(self):
-        return f"<RecurrenceUnit {self.name}>"
-
-
-class PeriodPlacement(db.Model):
-    """Occurrence-date -> pay-period placement reference (redesign step R2).
-
-    An occurrence is a calendar date; a Shekel row lives in a pay period.
-    This table names the rule that carries one to the other -- the axis
-    today's ``Monthly`` and ``Monthly First`` patterns differ on (they differ
-    on the anchor day as well; see :class:`~app.enums.PeriodPlacementEnum`),
-    and therefore a real user choice rather than a derived detail.
-
-    Application code resolves these via ``ref_cache.period_placement_id``
-    and compares against the integer ID -- never the string ``name``.  See
-    :class:`~app.enums.PeriodPlacementEnum` for the per-value semantics.
-    """
-
-    __tablename__ = "period_placements"
-    __table_args__ = {"schema": "ref"}
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(30), unique=True, nullable=False)
-
-    def __repr__(self):
-        return f"<PeriodPlacement {self.name}>"
-
-
-class BusinessDayShift(db.Model):
-    """Weekend/holiday occurrence-shift reference (redesign step R2).
-
-    Whether an occurrence falling on a non-business day moves backward, moves
-    forward, or stays put.  Step R2 seeds the table and defaults every rule
-    to ``none``; step R8 is the first step that lets a user pick another
-    value, so that step turns behaviour on rather than adding a column.
-
-    Application code resolves these via ``ref_cache.business_day_shift_id``
-    and compares against the integer ID -- never the string ``name``.  See
-    :class:`~app.enums.BusinessDayShiftEnum` for the per-value semantics and
-    for why the shift applies to the cash date only.
-    """
-
-    __tablename__ = "business_day_shifts"
-    __table_args__ = {"schema": "ref"}
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(10), unique=True, nullable=False)
-
-    def __repr__(self):
-        return f"<BusinessDayShift {self.name}>"
 
 
 class FilingStatus(db.Model):

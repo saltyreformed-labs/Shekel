@@ -3,8 +3,9 @@
 Branch protection on ``main`` requires a status named ``lint-and-test``.  Until
 plan step ``bank_import:X-gy`` that was one job running everything in series;
 it is now several jobs in parallel -- the landing check, the tools packages'
-lint and tests, the tax-law check, lint and the test shards -- and
-``lint-and-test`` is the job that NEEDS all of them and answers for them.
+lint and tests, the tax-law check, lint, the test shards and the app image's
+build -- and ``lint-and-test`` is the job that NEEDS all of them and answers
+for them.
 ``ci.yml`` hands it the ``needs`` context as JSON on stdin and this module
 prints the verdict and exits non-zero on red.
 
@@ -39,8 +40,10 @@ import sys
 #: which change may write a ship marker (step X-cx's M2); the tools packages'
 #: lint and tests; the tax-law check, which refuses EVERY pull request from
 #: December 1 until next year's tax law is in the app (plan step
-#: salary:X-at-4, ruling salary:R-SAL74); lint; and the test shards.
-GRADERS = ("landing", "tools", "tax-law", "lint", "test")
+#: salary:X-at-4, ruling salary:R-SAL74); lint; the test shards; and the app
+#: image, built and checked before a merge (task plan#2366), folded in here
+#: so the rulesets' required checks need no new entry.
+GRADERS = ("landing", "tools", "tax-law", "lint", "test", "image")
 
 
 def verdict(needs: dict) -> list[str]:

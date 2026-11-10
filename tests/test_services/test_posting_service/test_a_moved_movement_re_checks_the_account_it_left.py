@@ -8,7 +8,9 @@ was moved off a card reversed the card's leg and left the card's correction
 booked for money no longer there (review plan#2521, finding A1; a defect at
 the merge base too).  The self-heal now reads the accounts off the deltas'
 own legs, and these cases grade both sides of such a move through the door a
-user's correction runs (``transaction_service.apply_requested_status``).
+user's correction runs (``transaction_service.apply_requested_status``).  The
+figures are the worked-out read, which holds them whatever the re-check did, so
+the parity lines are what grade the re-check.
 """
 
 from __future__ import annotations
@@ -18,8 +20,10 @@ from decimal import Decimal
 import pytest
 
 from app.extensions import db as _db
-from app.services import anchor_service, posting_service, transaction_service
+from app.services import anchor_service, transaction_service
 from app.services.anchor_service import AnchorTrueUpOutcome
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import account_net
 from tests._test_helpers import create_account_of_type, freeze_today
 from ._helpers import (
     _TODAY,
@@ -59,7 +63,8 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
         and the card's records hold no payment, so its true-up must return
         to 0.00:
 
-            card     -500.00 (asserted; -380.00 with the card never re-checked)
+            card     -500.00 (asserted; the store reads -380.00 with the card
+                     never re-checked)
             Checking 1,000.00 opening (2024) - 120.00 riding on top = 880.00
 
         The bill reaches the card by a Credit press with the opening day
@@ -86,22 +91,24 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
             _db.session.commit()
             assert row.covering_movements[0].account_id == card.id
             scenario_id = row.scenario_id
-            assert posting_service.account_posting_total(
-                card.id, scenario_id,
+            assert account_net(
+                _db.session, card.id, scenario_id,
             ) == Decimal("-500.00"), "CONTROL: the opening absorbs the payment"
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00"), "CONTROL: Checking holds no payment yet"
+            assert_ledger_parity(_db.session, scenario_id)
 
             _move_paid_from(row, checking)
 
             assert row.covering_movements[0].account_id == checking.id
-            assert posting_service.account_posting_total(
-                card.id, scenario_id,
+            assert account_net(
+                _db.session, card.id, scenario_id,
             ) == Decimal("-500.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("880.00")
+            assert_ledger_parity(_db.session, scenario_id)
 
     def test_a_paid_from_moved_off_checking_re_checks_checking(
         self, app, db, seed_user, seed_periods,
@@ -116,7 +123,8 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
         correction.  Savings opens at $300.00 on 2026-05-14 too.  Moved to
         Savings, Checking's records hold no payment, so its true-up is 0.00:
 
-            Checking 1,000.00 (asserted; 1,120.00 with Checking never re-checked)
+            Checking 1,000.00 (asserted; the store reads 1,120.00 with Checking
+                     never re-checked)
             Savings  300.00 (its opening absorbs the payment, as the card's did)
         """
         with app.app_context():
@@ -131,22 +139,24 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
                 seed_user, seed_periods[0], checking, day, account=savings,
             )
             scenario_id = row.scenario_id
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("880.00"), "CONTROL: the payment rides on the 2024 opening"
             assert anchor_service.apply_anchor_true_up(
                 account=checking, new_balance=Decimal("1000.00"),
                 observed_on=day,
             ).outcome is AnchorTrueUpOutcome.COMMITTED
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00"), "CONTROL: the true-up absorbs the payment"
+            assert_ledger_parity(_db.session, scenario_id)
 
             _move_paid_from(row, savings)
 
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("300.00")
+            assert_ledger_parity(_db.session, scenario_id)

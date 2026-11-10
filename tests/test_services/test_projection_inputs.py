@@ -271,18 +271,21 @@ def _seed_deductions_fixture(app, db, seed_user, seed_second_user):
     db.session.flush()
 
     active_profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user_id, scenario_id=scenario_id,
         name="Active",
         state_code="NC",
         filing_status_id=filing_status_id, is_active=True,
     )
     inactive_profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user_id, scenario_id=scenario_id,
         name="Inactive",
         state_code="NC",
         filing_status_id=filing_status_id, is_active=False,
     )
     other_profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=other_user_id, scenario_id=other_scenario_id,
         name="Other",
         state_code="NC",
@@ -686,7 +689,7 @@ class TestLoadPayrollFeeds:
             db.session.add(SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
-                effective_month=7, effective_year=2026,
+                effective_date=date(2026, 7, 1),
                 percentage=Decimal("0.0300"), is_recurring=True,
                 terminal_year=None,
             ))
@@ -732,8 +735,9 @@ class TestLoadPayrollFeeds:
                 event.remove(db.engine, "before_cursor_execute", _count)
             assert statements == []
             # Non-vacuity for the raise path: the pricer the feed read priced
-            # at least one walked July with the raise's own label, so the
-            # raise-month branch of ``get_raise_event`` was on the path.
+            # at least one walked paycheck with the raise's own label, the
+            # first each July's application reaches, so the banner's path
+            # (``PayrollBasis.pay_event_on``) was walked.
             assert any(
                 pricing.for_profile(profile).at(period).period.raise_event
                 for period in projected
@@ -1520,7 +1524,7 @@ class TestTheFeedIsBuiltOverTheWiring:
         row = SalaryRaise(
             salary_profile_id=profile.id,
             raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
-            effective_month=7, effective_year=2026,
+            effective_date=date(2026, 7, 1),
             percentage=Decimal("0.0500"), is_recurring=True,
             terminal_year=None,
         )
@@ -1649,6 +1653,7 @@ class TestTheFeedIsBuiltOverTheWiring:
                 app, db, seed_user, seed_second_user,
             )
             second = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=ids["user_id"], scenario_id=seed_user["scenario"].id,
                 name="Second",
                 state_code="NC", is_active=True,

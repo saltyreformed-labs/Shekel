@@ -1,0 +1,343 @@
+# Shekel Budget App -- The weekly dependency update
+#
+# Every package the lock holds is kept current with no session to start
+# (rulings plan#2351, plan#2448, plan#2449, plan#2450): a change that moves
+# pinned versions alone, none across a major, lands with no card, and anything
+# else, a new major included, waits for one.
+#
+#   refresh  Mondays, and on a dispatch from main: checks out dev and runs
+#            the Monday lock refresh (tools/update/refresh.py).  `uv lock`
+#            builds the metadata of the packages the lock holds only as source,
+#            which runs their code, so this job holds no secret, its token
+#            reads only, and no workflow restores a cache that code could
+#            write (ruling plan#2471).  What it prepares is uploaded as the
+#            run's artifact, beside the dev commit it read.
+#   publish  after refresh: holds the update App's key and runs main's own
+#            code, installing the landing group alone from main's lock, each
+#            file checked against its hash, and running no other package code
+#            (tools/update/publish.py).  It reads the artifact as data,
+#            refused whole where it holds anything outside its layout
+#            (tools/update/folder.py), so the most a poisoned refresh can do is
+#            open a pull request, which the landing check and the queue judge
+#            like any other.  Each change becomes one commit on the dev commit
+#            the refresh read: update/lock, and update/major/<package> for each
+#            package that waits for a card.
+#   queue    every day: holds the key and runs main's own code with the
+#            landing group (tools/update/queue.py).  Each open pull request by
+#            Dependabot or the App is judged on its trial merge by the landing
+#            check's own walk, and put in dev's merge queue at the head it
+#            judged when it moves pinned versions alone and its checks passed.
+#            The developer is mentioned in a comment of the App's, once for
+#            what it tells, on each that waits for a card (once for each major
+#            it enters), that is red at its head, or that GitHub removed from
+#            the merge queue at its head, which waits for a new head (rulings
+#            plan#2450, plan#2467, plan#2468).
+#   due      every day: says a release is due (rulings plan#2829, plan#2876, which
+#            deliver balance:R-BAL296's weekly release).  One issue, found by its
+#            exact title each run, mentions the developer and lists what a release
+#            of dev would move once dev and main pin different versions in any file;
+#            it follows that list, opens no second issue while it is open, and closes
+#            once a release carries them (tools/update/due.py).  It holds only the
+#            workflow's own token, widened to issues for this job alone, and runs
+#            main's own code with the landing group, which quill's door imports.  It
+#            fetches the tips of main and dev itself: its checkout holds the run's own
+#            commit of main, an old one on a re-run, and no dev.
+#   alert    when the refresh, the publish, the queue or the due job failed: opens an
+#            issue in this repository mentioning the developer, linking the run and naming
+#            each job's result (tools/update/alert.py; ruling plan#2466).  It
+#            holds only the workflow's own token, widened to issues for this job
+#            alone, and installs nothing: main's own code on the runner's Python
+#            with the standard library alone, the issue sent by the runner's gh,
+#            so the install the other jobs share cannot stop the job that reports
+#            its failure (plan#2481).  A run cancelled opens none; the release
+#            tool's refusal of an update older than 8 days is the backstop for a
+#            run that never failed loudly.
+#
+# THE KEY.  The App "Shekel updates" (Contents, Pull requests and Workflows
+# read and write, installed on Shekel alone; rulings plan#2448, plan#2807),
+# its private key the UPDATE_APP_KEY secret of the deployment environment
+# ``update``, whose deployment branches are main alone (ruling plan#2472),
+# and its Client ID the UPDATE_APP_CLIENT_ID repository variable.  GitHub
+# refuses a job that names the environment on any other ref, so only a run on
+# main reaches the key, whatever a branch's copy of this file says; each keyed
+# run leaves a deployment record.  GitHub's own action mints an installation
+# token for one job, scoped to this repository and to Contents and Pull
+# requests alone, and revokes it when the job ends, as CI's landing job mints
+# the tracker's (ruling balance:R-BAL311).  Only the mint is handed the key
+# and only the step that uses it the token.  The workflow's own GITHUB_TOKEN
+# could not do this: a pull request it opens or a queue entry it makes starts
+# no workflow run.
+#
+# Those two permissions are what each job was measured to need, act by act,
+# on a public probe repository whose dev carried a copy of dev's ruleset
+# (plan#2769, 2026-11-04; ruling plan#2477).  Without Contents write GitHub
+# refused the publish its first tree and a branch delete, and without Pull
+# requests write its pull requests' opening and refresh; it moved its branch
+# across a workflow edit on dev with Workflows held by neither its token nor
+# the App.  The queue's ``enqueuePullRequest`` was refused under every set
+# tried without Contents write, Merge queues write among them, and accepted
+# under Contents write, with or without Pull requests write, after which
+# GitHub's merge queue merged each pull request so queued.  Its comments and
+# retargets were refused under every set tried without Pull requests write.
+# No read either job makes needs a permission, the repository being public:
+# under the metadata alone, each read what the developer's own token read in
+# every field the job uses, check results and commit statuses included.
+#
+# WORKFLOWS (ruling plan#2807).  GitHub puts a pull request that edits a file
+# under .github/workflows/, as Dependabot's Actions updates do, in the merge
+# queue only when the App holds Workflows: it reads the App's installation
+# there, not the token, so a token asking for Contents and Pull requests alone
+# was refused while the App lacked Workflows and queued one once the App held
+# it (measured; one adding a composite action under .github/actions/ was
+# queued while the App lacked it).  A token without Workflows cannot write a
+# workflow file itself, through the API or by a push, while the App holds it
+# (measured): so no token either job mints can, and only the key could mint
+# one that can.
+# That GitHub reads the App here is measured, not documented; were it to read
+# the token instead, the queue would fail on such a pull request, which the
+# alert reports, and queue nothing it should not.
+#
+# WHOSE CODE.  GitHub runs a schedule only from main, so this workflow runs
+# from the release that brings it: refresh runs dev's refresh, publish,
+# queue and due main's own code.  A branch's copy of this file never reaches the
+# key: that is GitHub's rule (THE KEY), not this file's.  Within a run on
+# main, this file keeps other code from the key: each keyed job checks out
+# the workflow's own commit, and the refresh, which runs dev's code and
+# package code, names no environment.  The refresh's ``github.ref``
+# condition keeps a dispatch from any other branch from running anything,
+# where the environment would refuse its publish as a red run.
+#
+# WHEN.  The refresh at 11:17 UTC on Mondays (07:17 New York in summer), after
+# Dependabot's 06:00 New York run; the queue and the due job at 13:47 UTC every
+# day, so the Monday pull requests' checks have finished by the queue's run, and
+# what it lands is read as due the next day.  Both times off the top of
+# the hour, when GitHub may drop queued scheduled runs.  A job's condition
+# names its schedule as the trigger list spells it
+# (tools/ci/test_updates_workflow.py holds the two equal).
+#
+# THE TIME LIMITS (rulings plan#2761, plan#2762, plan#2765).  Every step of
+# the refresh, the publish, the queue and the due job carries a
+# ``timeout-minutes`` of its own.  A step cut off by its own limit is marked failed (actions/runner's
+# StepsRunner.cs, read 2026-11-03), so its job fails and the alert opens its
+# issue.  A job cut off by its own limit is cancelled (GitHub's workflow
+# syntax: the limit is how long GitHub lets a job run "before GitHub
+# automatically cancels it"), and the alert's ``failure()`` is true only when
+# a job it needs failed (GitHub's expressions documentation; WordPress's
+# workflows, commit b2e9a22e68, read a timed-out job as cancelled), so a job
+# cut off first ends a stalled run in silence.  Each of those jobs' limits is
+# therefore longer than all its steps' together: its steps' total, with a step
+# using another repository's action counted twice (its post step, if it has
+# one, runs under the same limit: actions/runner's ActionRunner.cs), plus 5
+# for GitHub's setting the job up.  The alert's steps carry none: nothing
+# reports a stalled report, and its job's limit alone ends it.  What a stall
+# holds until then is the runner and this workflow's one run at a time (its
+# ``concurrency`` group, below); the update App's token GitHub expires an hour
+# after its mint whatever the job does.  Each step's 5 minutes is the least of
+# CI's rule, twice the longest run rounded up to a whole five minutes (rulings
+# plan#2328, plan#2330), as this workflow has no run to size one from.  The
+# nearest figures: CI's landing job, which checks out, installs the landing
+# check's packages, mints a token and runs one short program (ci.yml's figure:
+# longest of 114 runs, 2026-10-01 to 10-30 on ubuntu-24.04, 0.52 min), and,
+# on the development host 2026-11-03 with no uv cache and no Python, the uv
+# export with BuildKit's cache warm (0.97 s), the landing install (1.47 s)
+# and ``uv lock --upgrade`` (1.04 s).  The queue's own wait is not among
+# them: for the trial merges GitHub has not made, tools/update/queue.py
+# sleeps ``REREADS`` times ``REREAD_SECONDS`` a run at most, however many pull
+# requests it judges, beside one read a round of each still unmade (ruling
+# plan#2764).  The workflow's own runs re-size each limit (plan#2763).
+
+name: Updates
+
+on:
+  schedule:
+    - cron: "17 11 * * 1"
+    - cron: "47 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time: a dispatch overlapping Monday's run would race two
+# publishes onto one branch, and the daily queue could judge a pull request a
+# publish is moving.  A run waits for the one before it to end rather than
+# cancelling it; GitHub keeps one run waiting, so a third cancels the one
+# waiting, which opens no alert (a run cancelled opens none).
+concurrency:
+  group: updates
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 11 * * 1')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    outputs:
+      base: ${{ steps.checkout.outputs.commit }}
+    steps:
+      - name: Checkout dev
+        id: checkout
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          persist-credentials: false
+
+      # The landing group, which the refresh imports through quill.  uv lock
+      # builds a source-only package's metadata in an environment of its own,
+      # with only the build tools pyproject.toml trusts by hash, as its
+      # require-build-hashes holds this run to (ruling plan#2494).
+      - name: Install the lock
+        timeout-minutes: 5
+        uses: $/.github/actions/install-lock
+        with:
+          install: landing
+
+      # Its report, summary.md, is written once it has finished, whether or not
+      # anything moved, and goes on this run's page too.
+      - name: Refresh the lock
+        timeout-minutes: 5
+        run: |
+          python -m tools.update.refresh "${RUNNER_TEMP}/update"
+          cat "${RUNNER_TEMP}/update/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload what the refresh prepared
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: update
+          path: ${{ runner.temp }}/update
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: refresh
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    environment: update
+    steps:
+      - name: Checkout code
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the lock
+        timeout-minutes: 5
+        uses: $/.github/actions/install-lock
+        with:
+          install: landing
+
+      - name: Download what the refresh prepared
+        timeout-minutes: 5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: update
+          path: ${{ runner.temp }}/update
+
+      - name: Mint the update token
+        id: token
+        timeout-minutes: 5
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.UPDATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.UPDATE_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Publish each change
+        timeout-minutes: 5
+        env:
+          UPDATE_TOKEN: ${{ steps.token.outputs.token }}
+          BASE: ${{ needs.refresh.outputs.base }}
+        run: python -m tools.update.publish "${RUNNER_TEMP}/update" "${BASE}"
+
+  queue:
+    if: github.ref == 'refs/heads/main' && github.event.schedule == '47 13 * * *'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    environment: update
+    steps:
+      # The queue fetches each trial merge it judges from origin by its sha,
+      # with no credential: the repository is public.
+      - name: Checkout code
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the lock
+        timeout-minutes: 5
+        uses: $/.github/actions/install-lock
+        with:
+          install: landing
+
+      - name: Mint the update token
+        id: token
+        timeout-minutes: 5
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.UPDATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.UPDATE_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Queue each version-only bot pull request
+        timeout-minutes: 5
+        env:
+          UPDATE_TOKEN: ${{ steps.token.outputs.token }}
+          UPDATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
+        run: python -m tools.update.queue
+
+  due:
+    if: github.ref == 'refs/heads/main' && github.event.schedule == '47 13 * * *'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout code
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the lock
+        timeout-minutes: 5
+        uses: $/.github/actions/install-lock
+        with:
+          install: landing
+
+      - name: Open, update or close the issue saying a release is due
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m tools.update.due
+
+  alert:
+    needs: [refresh, publish, queue, due]
+    if: failure()
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Open an issue naming the failed run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REFRESH: ${{ needs.refresh.result }}
+          PUBLISH: ${{ needs.publish.result }}
+          QUEUE: ${{ needs.queue.result }}
+          DUE: ${{ needs.due.result }}
+        run: >-
+          python3 -S -m tools.update.alert "${RUN}"
+          "refresh=${REFRESH}" "publish=${PUBLISH}" "queue=${QUEUE}" "due=${DUE}"

@@ -10,28 +10,33 @@ from decimal import Decimal
 
 from app.extensions import db as _db
 from app.models.account import Account
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import loan_ledger, loan_loaders, loan_resolver, posting_service
 from app.services import amortization_engine
+from app.services.ledger_lines import LOAN_KINDS
 from app.services.loan_resolver._periods import _replay_from_anchor
 from app.utils.money import round_money
 from app.utils.balance_predicates import settled_status_ids
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
-from tests._ledger_parity import assert_ledger_parity
-from tests._test_helpers import (
-    SPLIT_LOAN,
-    create_loan_with_trueup,
-    create_settled_transfer,
-    loan_correction_entries,
+from tests._ledger_reads import (
+    account_net,
+    loan_correction_lines,
     posted_loan_balance_at,
     posted_loan_balance_map,
+    scenario_lines,
+    trial_balance,
+)
+from tests._stored_ledger import entries_violating_balance
+from tests._ledger_parity import assert_ledger_parity
+from tests._test_helpers import (
+    create_loan_with_trueup,
+    create_settled_transfer,
     seam_confirmed_view,
+    SPLIT_LOAN,
 )
 
 
@@ -186,64 +191,26 @@ def _settle(
 # Independent reconciliation queries (test-authored, NOT the service helpers)
 # ---------------------------------------------------------------------------
 #
-# These re-derive each side from scratch so the oracle is a genuine second
-# opinion: the ledger side reads ``account_postings`` with an independently
-# written join shape (keyed off the REAL loan account / the per-loan discriminator
-# rather than resolving the ledger account first, as ``account_posting_total``
-# does), and the source side reads ``transfers`` (status and settled figure)
-# and their side records in ``transaction_entries``.  ``_trial_balance`` /
-# ``_entries_violating_balance`` mirror the Step-2 / Step-3 oracles; the
-# duplication is DELIBERATE -- each oracle keeps its OWN independent queries so it
-# stays a self-contained second opinion.
-
-
-def _independent_loan_linked_net(loan_account_id: int, scenario_id: int) -> Decimal:
-    """Sum a loan's LINKED-ledger posting legs in a scenario (independent query).
-
-    Joins ``account_postings`` -> ``journal_entries`` (for the scenario) ->
-    ``ledger_accounts`` and keys on the REAL ``ledger_accounts.account_id ==
-    loan_account_id`` -- a different join shape than
-    ``posting_service.account_posting_total`` (which resolves the ledger account
-    first), so the two cannot share a lookup bug.  The linked ledger carries the
-    Step-2 cash (+cash) AND the Step-4 correction's loan leg
-    (-(interest+escrow+excess)), so its net is exactly the summed real principal.
-    """
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .select_from(Posting)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(
-            LedgerAccount.account_id == loan_account_id,
-            JournalEntry.scenario_id == scenario_id,
-        )
-        .scalar()
-    )
+# The ledger side of this oracle is the worked-out read (``tests/_ledger_reads.py``,
+# plan step plan#2913), and the source side reads ``transfers`` (status and settled
+# figure) and their side records in ``transaction_entries`` by its own SQL.
 
 
 def _per_loan_correction_net(loan_account_id: int, scenario_id: int) -> Decimal:
-    """Sum a loan's PER-LOAN (interest/escrow/refund) ledger legs (independent).
+    """Sum a loan's four component lines (interest, escrow, refund, opening equity).
 
-    Keys on ``ledger_accounts.loan_account_id == loan_account_id`` -- the per-loan
-    Expense / Asset accounts the correction backs the non-principal onto, which
-    carry ``account_id IS NULL``.  Their net is exactly ``sum(interest + escrow +
-    excess)`` across the loan's corrections: the amount the correction moves OFF
-    the loan.
+    Keyed on the loan's own :data:`~app.services.ledger_lines.LOAN_KINDS` keys,
+    the lines the correction backs the non-principal onto and the opening and
+    true-ups' counter.  Their net is ``sum(interest + escrow + excess)`` across
+    the loan's payments plus the opening-equity legs, so it is the amount moved
+    OFF the loan's own line.
     """
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .select_from(Posting)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(
-            LedgerAccount.loan_account_id == loan_account_id,
-            JournalEntry.scenario_id == scenario_id,
-        )
-        .scalar()
+    return sum(
+        (
+            line.amount for line in scenario_lines(_db.session, scenario_id)
+            if line.key.kind in LOAN_KINDS and line.key.record_id == loan_account_id
+        ),
+        Decimal("0.00"),
     )
 
 
@@ -266,9 +233,9 @@ def _independent_settled_income_cash(
     record onto the transfer; it reads the transfer's status, figure and the
     side link by its own SQL now, never through ``transfer_legs``, the
     producer the reader under test joins (ruling R-BAL167 class 4, plan step
-    balance:X-bi-6-4d-2).  Reads the row tables, different tables than the
-    ledger queries above, so asserting the ledger reconciles against this ties
-    the postings to the transaction source of truth.
+    balance:X-bi-6-4d-2).  Reads the row tables, so asserting the ledger
+    reconciles against this ties what the read books to the transaction source
+    of truth.
     """
     return (
         _db.session.query(
@@ -292,39 +259,6 @@ def _independent_settled_income_cash(
         )
         .scalar()
     )
-
-
-def _trial_balance() -> Decimal:
-    """Return ``SUM(account_postings.amount)`` over the whole ledger."""
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .scalar()
-    )
-
-
-def _entries_violating_balance() -> list[tuple[int, Decimal, int]]:
-    """Return ``(entry_id, leg_sum, leg_count)`` for every malformed entry.
-
-    A well-formed double-entry has ``leg_sum == 0`` and ``leg_count >= 2``.  Any
-    row returned here is a violation -- the per-entry invariant the deferred
-    trigger also enforces, re-checked from the ORM side.
-    """
-    rows = (
-        _db.session.query(
-            Posting.journal_entry_id,
-            _db.func.sum(Posting.amount),
-            _db.func.count(Posting.id),
-        )
-        .group_by(Posting.journal_entry_id)
-        .all()
-    )
-    return [
-        (entry_id, leg_sum, leg_count)
-        for entry_id, leg_sum, leg_count in rows
-        if leg_sum != 0 or leg_count < 2
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -400,8 +334,8 @@ def _resolver_balance(
 def _ledger_balance(loan_account_id: int, scenario_id: int) -> Decimal:
     """Return the ledger's genesis view of the current balance.
 
-    ``-(sum of the loan's linked-ledger postings)``: under genesis the linked
-    ledger carries the opening (-original_principal), every true-up correction,
+    ``-(the net of the loan's own line)``: under genesis that line carries the
+    opening (-original_principal), every true-up correction,
     and every payment's principal (the Step-2 cash plus the Step-4 correction), so
     the negated sum IS the confirmed balance the read switch (plan Section 10)
     displays -- no anchor read, no boundary rule.  Numerically identical to the
@@ -411,7 +345,7 @@ def _ledger_balance(loan_account_id: int, scenario_id: int) -> Decimal:
     principal is subsumed by the true-up's owed_before), so -- unlike the Step-4
     formula -- there is no pre-anchor exclusion to assume away.
     """
-    return -_independent_loan_linked_net(loan_account_id, scenario_id)
+    return -account_net(_db.session, loan_account_id, scenario_id)
 
 
 def _posted_balance(
@@ -419,14 +353,12 @@ def _posted_balance(
 ) -> Decimal:
     """Return what the postings say the loan owed on a DATE (the dated window).
 
-    :func:`tests._test_helpers.posted_loan_balance_at`: the same linked-ledger
-    legs :func:`_ledger_balance` sums, but bounded by ``entry_date <= as_of``
-    and guarded by the OPENING sentinel.  A distinct derivation, so the two
-    windows agreeing is a real check rather than one query written twice, and
-    the only one that can answer a historical date at all.  Asserts non-``None``
-    because every caller here builds a CONFIGURED loan (an opening is posted), so
-    a ``None`` would be a defect, not an unconfigured loan (the ``None`` route is
-    proven directly by its own test).
+    :func:`tests._ledger_reads.posted_loan_balance_at`: the same lines
+    :func:`_ledger_balance` sums, but bounded by ``entry_date <= as_of``, so
+    the two agreeing grades only that bound.  The only one that can answer a
+    historical date at all.  Asserts non-``None`` because every caller here
+    builds a CONFIGURED loan, and the read answers ``None`` only for a loan with
+    no terms.
     """
     result = posted_loan_balance_at(
         loan_account_id, scenario_id, as_of,
@@ -443,7 +375,7 @@ def _posted_period_map(
 ) -> "dict[int, Decimal]":
     """Return the dated posting window at every period END (the per-period form).
 
-    :func:`tests._test_helpers.posted_loan_balance_map` -- the scalar window
+    :func:`tests._ledger_reads.posted_loan_balance_map` -- the scalar window
     applied at each period's END, which is what lets the early-settle parallel
     run below check period boundaries past the frozen today (no posted entry in
     these fixtures is dated later, so such a period carries the confirmed sum
@@ -462,9 +394,7 @@ def _posted_period_map(
     return result
 
 
-def _assert_completeness(
-    loan_account_id: int, scenario_id: int, as_of: date
-) -> None:
+def _assert_completeness(loan_account_id: int, scenario_id: int) -> None:
     """Assert every settled payment that owes a correction has one.
 
     Plan 8.3: for each settled payment (the split walk's output -- since the R1
@@ -490,42 +420,39 @@ def _assert_completeness(
     )
     # A split's ``source`` is the payment's loan-side TransferLeg since plan step
     # balance:X-bi-6-4d-2, not its income shadow; the shared reader keys the
-    # corrections off the transfer and the loan side's record, and is passed
+    # split off the transfer and the loan side's record, and is passed
     # the transfer and the loan since plan step balance:X-bi-6-4d-2, where no
     # shadow exists to name the side (ruling R-BAL167 class 4).
     for split in splits:
         non_principal = split.interest + split.escrow + split.excess
         transfer_id = split.source.transfer.id
-        entries = loan_correction_entries(
+        lines = loan_correction_lines(
             _db.session, transfer_id, loan_account_id,
         )
         if non_principal != Decimal("0"):
-            assert entries, (
+            assert lines, (
                 f"settled payment transfer {transfer_id} has non-"
                 f"principal {non_principal} but no correction -- an uncorrected "
                 f"Step-2 cash entry"
             )
 
 
-def _assert_loan_reconciles(
-    loan, scenario_id: int, as_of: date
-) -> None:
+def _assert_loan_reconciles(loan, scenario_id: int) -> None:
     """Assert a loan's whole ledger reconciles: three-way + completeness + trial.
 
     The production-wide sweep run after each fixture's mutations (plan 8.3 / 8.4 /
     8.7).  It ties together, for one loan in one scenario:
 
-    * (a) the production reader ``account_posting_total`` equals the independent
-      linked-ledger query -- the two computed the same net two different ways;
-    * (b) the loan-aware superseding invariant, entirely from independent queries:
-      ``linked_net == settled_income_cash - per_loan_correction_net`` (the loan
-      nets to cash minus the non-principal moved off it);
-    * (c) the same invariant through the PRODUCTION readers
-      (``account_posting_total == settled_transfer_effect - per_loan_net``), so
-      the posted-ledger readers the balance sheet and statements consume satisfy
-      it too;
+    * (a) the store's reader ``account_posting_total`` equals the worked-out net
+      of the loan's own line -- the store has caught up with the read;
+    * (b) the loan-aware superseding invariant, on the read and the independent
+      source query: ``linked_net == settled_income_cash - per_loan_correction_net``
+      (the loan nets to cash minus the non-principal moved off it);
+    * (c) the same invariant through the store's readers
+      (``account_posting_total == settled_transfer_effect - per_loan_net``);
     * (d) completeness -- every eligible payment owing a correction has one;
-    * (e) per-entry balance and a zero whole-ledger trial balance;
+    * (e) the stored journal's per-entry balance and the read's zero whole-ledger
+      trial balance;
     * (f) the ledger worked out from the records equals the stored one to the
       cent per (chart row, paycheck, day) over the scenario owner's whole
       ledger, every loan's anchors and payment splits included (plan task
@@ -555,22 +482,22 @@ def _assert_loan_reconciles(
     """
     loan_id = loan.id
     linked_reader = posting_service.account_posting_total(loan_id, scenario_id)
-    linked_independent = _independent_loan_linked_net(loan_id, scenario_id)
+    linked_read = account_net(_db.session, loan_id, scenario_id)
     per_loan = _per_loan_correction_net(loan_id, scenario_id)
     income_independent = _independent_settled_income_cash(loan_id, scenario_id)
     income_reader = posting_service.settled_transfer_effect(loan_id, scenario_id)
 
-    # (a) production reader == independent linked-ledger query.
-    assert linked_reader == linked_independent, (
-        f"loan {loan_id}: account_posting_total {linked_reader} != independent "
-        f"linked net {linked_independent} in scenario {scenario_id}"
+    # (a) the store's reader == the worked-out net of the loan's own line.
+    assert linked_reader == linked_read, (
+        f"loan {loan_id}: account_posting_total {linked_reader} != worked-out "
+        f"linked net {linked_read} in scenario {scenario_id}"
     )
-    # (b) superseding invariant, fully independent.
-    assert linked_independent == income_independent - per_loan, (
-        f"loan {loan_id}: linked net {linked_independent} != income cash "
+    # (b) superseding invariant, on the read and the independent source query.
+    assert linked_read == income_independent - per_loan, (
+        f"loan {loan_id}: linked net {linked_read} != income cash "
         f"{income_independent} - non-principal corrections {per_loan}"
     )
-    # (c) superseding invariant through the production readers.
+    # (c) superseding invariant through the store's readers.
     assert income_reader == income_independent, (
         f"loan {loan_id}: settled_transfer_effect {income_reader} != independent "
         f"income cash {income_independent}"
@@ -580,9 +507,9 @@ def _assert_loan_reconciles(
         f"settled_transfer_effect {income_reader} - corrections {per_loan}"
     )
     # (d) completeness.
-    _assert_completeness(loan_id, scenario_id, as_of)
-    # (e) per-entry balance + trial balance (whole-ledger self-checks).
-    assert _entries_violating_balance() == []
-    assert _trial_balance() == Decimal("0")
+    _assert_completeness(loan_id, scenario_id)
+    # (e) the store's per-entry balance + the read's trial balance.
+    assert entries_violating_balance() == []
+    assert trial_balance(_db.session) == Decimal("0")
     # (f) parity with the worked-out ledger.
     assert_ledger_parity(_db.session, scenario_id)

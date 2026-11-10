@@ -44,20 +44,24 @@ from app.services.cash_ledger import (
     derived_amount_basis,
     resolve_transaction_amount,
 )
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import (
+    family_movement_ids,
+    net_posted_by_day,
+)
+from tests._stored_ledger import family_journal_filter
 from tests._test_helpers import NO_TAX_LAW
 from tests._test_helpers import (
-    typed,
     amount_basis_for,
     an_entered_day,
-    family_journal_filter,
     figure_source_columns,
     generate_row_of,
     make_expense_template,
     make_income_template,
-    net_posted_by_day,
     repriced_by_the_owner,
     settlement_if_settling,
     start_test_pay_list,
+    typed,
 )
 from app.models.amount_ownership import AmountOwnership
 from app.services.amount_ownership import state_own_amount
@@ -765,6 +769,7 @@ class TestASettleBooksTheFreshestFigure:
 
         filing = db.session.query(FilingStatus).first()
         profile = SalaryProfile(
+            period_end_days_before_payday=6,
             user_id=seed_user["user"].id,
             scenario_id=seed_user["scenario"].id,
             filing_status_id=filing.id,
@@ -1695,17 +1700,17 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
             assert txn.settled_on == day, (
                 "a figure correction moved the settle day"
             )
-            # The POSTING LEDGER, read from ``budget.journal_entries``.
+            # The worked-out ledger: what the row's records book, per day.
             # ``posting_service.settled_transaction_effect`` is NOT an oracle
             # here: it queries ``budget.transactions`` through
             # ``posting_reads.settled_figure_clause``, the query-tier twin of
-            # ``row_valuation.settled_figure`` -- so asserting on it is the
-            # line above restated in SQL, and deleting the reconcile from the
-            # door leaves it green (measured by a neutral review, 2026-08-18).
-            # The net per day is what separates "re-booked" from "booked twice".
+            # ``row_valuation.settled_figure``, so asserting on it is the line
+            # above restated in SQL.  This read cannot see the door's reconcile
+            # either, so the parity line below grades that.
             assert net_posted_by_day(
-                family_journal_filter(txn),
+                family_movement_ids(txn),
             ) == {day: Decimal("87.10")}
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_a_REVERT_carrying_a_figure_is_refused_and_changes_nothing(
         self, app, db, seed_user, seed_periods,
@@ -1725,12 +1730,12 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
         """
         with app.app_context():
             txn = self._settled_row(seed_user, seed_periods[0])
-            # The LEDGER before, from the journal rather than from the row --
+            # The LEDGER before, from the worked-out lines rather than the row --
             # see the archive test for why the row-tier reader is not an oracle.
             # The row's FAMILY, its movements' entries: it read the row's own
             # ``transaction_id`` link until card plan#1845 deleted it, which
             # had found nothing since plan step ``balance:X-bi-4a``.
-            ledger_before = net_posted_by_day(family_journal_filter(txn))
+            ledger_before = net_posted_by_day(family_movement_ids(txn))
             assert ledger_before == {txn.settled_on: Decimal("100.00")}
 
             with pytest.raises(ValidationError) as exc:
@@ -1742,7 +1747,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
             assert "has nothing to record" in str(exc.value)
             assert txn.status_id == ref_cache.status_id(StatusEnum.DONE)
             assert settled_figure(txn) == Decimal("100.00")
-            assert net_posted_by_day(family_journal_filter(txn)) == ledger_before, (
+            assert net_posted_by_day(family_movement_ids(txn)) == ledger_before, (
                 "a refused request posted to the ledger anyway"
             )
 

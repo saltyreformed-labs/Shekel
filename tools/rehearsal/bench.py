@@ -5,9 +5,11 @@ the way out by a census that names anything left.
 What it is built from, each its one home's:
 
 * The image is ``scripts/build_test_db_image.py``'s, built or verified on every run as
-  ``test.sh`` does, and the cluster's whole life -- the token, the start, the stop and the URL
-  a caller connects by -- is ``scripts/private_cluster.py``'s.  Both run as subprocesses: the
-  orchestrator imports nothing from ``scripts`` (the package docstring says why).
+  ``test.sh`` does, under the locale this tree's ``Dockerfile`` pins, as ``test.sh`` exports
+  it first (:func:`builder_environment`), and the cluster's whole life -- the token, the
+  start, the stop and the URL a caller connects by -- is ``scripts/private_cluster.py``'s.
+  Both run as subprocesses: the orchestrator imports nothing from ``scripts`` (the package
+  docstring says why).
 * Git runs through :mod:`tools.ci.gitcmd`, which strips the variables that bind git to
   another repository (a hook run from a linked worktree sets them), and every worktree is
   ``git worktree add --detach``, never a checkout.
@@ -33,18 +35,24 @@ A DUMP FROM ANOTHER POSTGRESQL MAJOR IS REFUSED before it is restored.  Every cu
 archive records the server that made it (``Dumped from database version``), so production's
 major is read from the dump on every run, never by reaching into production.
 
-EACH SIDE RUNS UNDER A VENV OF ITS OWN PINS, never the developer's: THAT side's
-``requirements.txt`` plus the ``time-machine`` pin of its ``requirements-dev.txt`` (the side
-probe pins its clock with it), so a pin that moves between base and cut -- a Dependabot change
--- is measured rather than masked by one shared venv.  It is CACHED outside git, under
-``${XDG_CACHE_HOME:-~/.cache}/shekel-rehearsal/venvs/``, by the SHA-256 of those lines and the
-interpreter's version, so two sides with the same pins share one and a later run builds
-nothing; the cache is the one thing a teardown deliberately leaves.  A venv counts as built
-only once its marker is written, the last step of a build that succeeded, so one that failed
-or was killed is never taken for built: the next run removes it and builds again.  It is
-built where it stays, never moved, because a venv's scripts hold its path in their shebangs.
-Two runs building the same venv at the same moment would collide in its directory; one kit
-runs at a time.
+EACH SIDE RUNS UNDER A VENV OF ITS OWN PINS, never the developer's: what THAT side's ``uv.lock``
+pins for its runtime set and its ``rehearsal`` group (``time-machine``, which the side probe
+pins its clock with), so a pin that moves between base and cut -- a version update -- is
+measured rather than masked by one shared venv.  uv installs it under this process's
+interpreter, every file checked against the lock's sha256, as the ``Dockerfile`` does, and
+``psycopg-c`` built in an environment of its own with the build tools the side trusts by hash
+(ruling plan#2494), so the venv holds what runs and nothing that only built it.  A side whose
+tree holds no ``uv.lock`` is a revision before the lock (ruling ``balance:R-BAL294``), and it is
+refused by name.  The venv is a stopgap (ruling plan#2404): step plan#2405 runs each side in its
+own production image, whose Python, libpq, files and settings a host venv only approximates.  It
+is CACHED outside git, under ``${XDG_CACHE_HOME:-~/.cache}/shekel-rehearsal/venvs/``, by the
+SHA-256 of those pins, as ``uv export`` writes them, and the interpreter's version, so two sides
+with the same pins share one and a later run builds nothing; the cache is the one thing a
+teardown deliberately leaves.  A venv counts as built only once its marker is written, the last
+step of a build that succeeded, so one that failed or was killed is never taken for built: the
+next run removes it and builds again.  It is built where it stays, never moved, because a venv's
+scripts hold its path in their shebangs.  Two runs building the same venv at the same moment
+would collide in its directory; one kit runs at a time.
 
 Usage, which brings a bench up and tears it down, printing what each part took::
 
@@ -98,12 +106,22 @@ _LISTING_ZONE = "UTC"
 _PINNED_HOUR = 12
 #: ``server_version_num`` is the major times 10,000 plus the minor (180006 is 18.6).
 _VERSION_NUM_PER_MAJOR = 10_000
-#: The one line of a side's ``requirements-dev.txt`` its venv takes beside ``requirements.txt``.
-_TIME_MACHINE_PIN = re.compile(r"^time-machine==\S+$", re.MULTILINE)
+#: The lock a side's pins are read from; a side's tree without one predates it.
+_LOCK = "uv.lock"
+#: The group (``pyproject.toml``) a side's venv is built with beside the runtime set:
+#: ``rehearsal``, ``time-machine``.  uv builds ``psycopg-c`` in an environment of its own, with
+#: the build tools the side's ``pyproject.toml`` trusts by hash (ruling plan#2494), so the
+#: venv holds none of them.
+_GROUPS = ("--no-default-groups", "--group", "rehearsal")
 #: Written into a venv as the last step of a build that succeeded: what makes it built.
 _BUILT_MARKER = ".rehearsal-built"
-#: How much of a failed pip's stderr a refusal quotes.
+#: How much of a failed uv's stderr a refusal quotes.
 _QUOTED_LINES = 20
+#: A tree's ``Dockerfile`` lines that set its image's environment.
+_IMAGE_ENV = re.compile(r"^ENV ([A-Z_][A-Z0-9_]*)=(\S+)$", re.MULTILINE)
+#: The variable naming the process locale, which ``create_app`` refuses to start without at
+#: the value the image pins (ruling ``recurrence:R-R92``).
+_LOCALE = "LC_ALL"
 
 
 class BenchError(RuntimeError):
@@ -235,17 +253,54 @@ def in_cluster(container: str, argv: list[str], *, stdin: IO[bytes] | None = Non
                 stdout=subprocess.PIPE if stdout is None else stdout)
 
 
+def dockerfile_environment(tree: Path) -> dict[str, str]:
+    """Every variable the ``Dockerfile`` of the tree at ``tree`` sets by a one-line ``ENV``,
+    by name: what its image gives each process it runs.  The one reader of it, for a side's
+    environment (``sides.image_environment``) and the image builder's
+    (:func:`builder_environment`).
+
+    Raises:
+        BenchError: when the file cannot be read.
+    """
+    try:
+        dockerfile = (tree / "Dockerfile").read_text(encoding="utf-8")
+    except OSError as exc:
+        raise BenchError(f"{tree} cannot give its image's environment: {exc}") from exc
+    return dict(_IMAGE_ENV.findall(dockerfile))
+
+
+def builder_environment(tree: Path, daemon: str) -> dict[str, str]:
+    """The environment the image builder of the tree at ``tree`` runs in: this process's,
+    with ``DOCKER_HOST`` naming ``daemon`` when the cluster module named one, and the locale
+    the tree's ``Dockerfile`` pins over any the shell has, as ``test.sh`` exports it before
+    its build.  The builder hands its template builder the locale it was given, and that
+    builder's ``create_app`` refuses to start under any other (ruling ``recurrence:R-R92``),
+    so a shell with none and no ``.env`` above the tree made every image build fail,
+    measuring nothing (finding plan#2900).
+
+    Raises:
+        BenchError: when the tree's ``Dockerfile`` cannot be read, or pins no locale.
+    """
+    pinned = dockerfile_environment(tree).get(_LOCALE)
+    if pinned is None:
+        raise BenchError(f"{tree / 'Dockerfile'} pins no {_LOCALE}, so the locale the image "
+                         "builder's create_app must start under is not known")
+    return {**os.environ, **({"DOCKER_HOST": daemon} if daemon else {}), _LOCALE: pinned}
+
+
 def image_tag() -> str:
     """The test-db image's tag, built or verified first, as ``test.sh`` has it done: on the
     daemon the cluster will run on, which ``private_cluster.py daemon`` names once it has
-    judged it (the module says why the bench asks it first).
+    judged it (the module says why the bench asks it first), under this tree's pinned locale
+    (:func:`builder_environment`).
 
     Raises:
-        BenchError: when the daemon is refused or the image cannot be prepared.
+        BenchError: when the daemon is refused, the locale is not known, or the image cannot
+            be prepared.
     """
     chosen = cluster("daemon").strip()
     done = run([sys.executable, str(_IMAGE_BUILDER), "--json"],
-                env={**os.environ, "DOCKER_HOST": chosen} if chosen else None)
+                env=builder_environment(arcs.REPO, chosen))
     if done.returncode:
         raise BenchError(f"build_test_db_image.py exited {done.returncode}: "
                          f"{(done.stderr or done.stdout).strip()}")
@@ -290,30 +345,31 @@ def refuse_another_major(dump: int, server_version_num: int) -> None:
 
 
 def side_pins(worktree: Path) -> str:
-    """The pins a side's venv is built from: its ``requirements.txt``, then the ``time-machine``
-    line of its ``requirements-dev.txt``.
+    """The pins a side's venv is built from, as ``uv export`` writes them from its lock: the
+    runtime set and the ``rehearsal`` group, each pin with its sha256.  No header, so the
+    text names no path and two sides with the same pins give the same text.
 
     Raises:
-        BenchError: when either file cannot be read, or no ``time-machine`` pin is there.
+        BenchError: when the side's tree holds no ``uv.lock``, or uv cannot export it.
     """
-    try:
-        runtime = (worktree / "requirements.txt").read_text(encoding="utf-8")
-        dev = (worktree / "requirements-dev.txt").read_text(encoding="utf-8")
-    except OSError as exc:
-        raise BenchError(f"{worktree} cannot give its pins: {exc}") from exc
-    pin = _TIME_MACHINE_PIN.search(dev)
-    if pin is None:
-        raise BenchError(f"{worktree / 'requirements-dev.txt'} pins no time-machine, which the "
-                         "side probe pins its clock with")
-    return runtime.rstrip("\n") + "\n" + pin.group(0) + "\n"
+    if not (worktree / _LOCK).is_file():
+        raise BenchError(f"{worktree} holds no {_LOCK}, so it is a revision before the lock "
+                         "(ruling balance:R-BAL294) and its pins are not known")
+    exported = run(["uv", "export", "--frozen", "--no-header", "--no-annotate",
+                    "--no-emit-project", *_GROUPS, "--project", str(worktree)])
+    if exported.returncode:
+        raise BenchError(f"uv could not export {worktree}'s pins (exit {exported.returncode}): "
+                         f"{exported.stderr.strip()}")
+    return exported.stdout
 
 
 def venv_for(worktree: Path) -> Path:
-    """The interpreter of the venv a side runs under: the cached one for its pins, or one
-    built now (the module says how the cache is keyed and when a venv counts as built).
+    """The interpreter of the venv a side runs under: the cached one for its pins, or one uv
+    builds now from the side's lock, under this process's interpreter (the module says how the
+    cache is keyed and when a venv counts as built).
 
     Raises:
-        BenchError: when the venv cannot be made or its pins cannot be installed.
+        BenchError: when the side's pins cannot be read, or uv cannot install them.
     """
     pins = side_pins(worktree)
     key = hashlib.sha256(f"{sys.version}\n{pins}".encode()).hexdigest()[:16]
@@ -324,18 +380,13 @@ def venv_for(worktree: Path) -> Path:
         return python
     shutil.rmtree(venv, ignore_errors=True)
     venv.parent.mkdir(parents=True, exist_ok=True)
-    made = run([sys.executable, "-m", "venv", str(venv)])
-    if made.returncode:
-        raise BenchError(f"python -m venv {venv} exited {made.returncode}: "
-                         f"{made.stderr.strip()}")
-    pinned = venv / "rehearsal-requirements.txt"
-    pinned.write_text(pins, encoding="utf-8")
-    installed = run([str(python), "-m", "pip", "install", "--quiet",
-                      "--disable-pip-version-check", "-r", str(pinned)])
-    if installed.returncode:
-        quoted = "\n".join(installed.stderr.strip().splitlines()[-_QUOTED_LINES:])
-        raise BenchError(f"pip could not install {worktree}'s pins into {venv} (exit "
-                         f"{installed.returncode}):\n{quoted}")
+    into = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
+    synced = run(["uv", "sync", "--locked", "--no-install-project", *_GROUPS,
+                  "--python", sys.executable, "--project", str(worktree)], into)
+    if synced.returncode:
+        quoted = "\n".join(synced.stderr.strip().splitlines()[-_QUOTED_LINES:])
+        raise BenchError(f"uv could not install {worktree}'s pins into {venv} (exit "
+                         f"{synced.returncode}):\n{quoted}")
     (venv / _BUILT_MARKER).write_text(pins, encoding="utf-8")
     return python
 

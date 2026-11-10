@@ -6,8 +6,8 @@ in the other mode.
 
 | Mode | Reverse proxy | Scope | Active files |
 |------|---------------|-------|--------------|
-| Bundled | `shekel-prod-nginx` (in-stack) | Single-stack hosts, fresh-host bring-up, the README Quick Start | `nginx-bundled/nginx.conf` |
-| Shared | A separate Nginx managed outside this stack | Hosts that already run a homelab Nginx in front of multiple services | `nginx-shared/nginx.conf`, `nginx-shared/conf.d/shekel.conf`, `docker-compose.prod.yml` |
+| Bundled | `shekel-prod-nginx` (in-stack) | Single-stack hosts, fresh-host bring-up, the README Quick Start | `nginx-bundled/nginx.conf`, `valkey/` |
+| Shared | A separate Nginx managed outside this stack | Hosts that already run a homelab Nginx in front of multiple services | `nginx-shared/nginx.conf`, `nginx-shared/conf.d/shekel.conf`, `docker-compose.prod.yml`, `valkey/` |
 
 The maintainer's production homelab runs **shared mode**. Generic deployments default to
 **bundled mode**.
@@ -29,6 +29,19 @@ deploy/
 │                                       conf.d/shekel.conf (per-service
 │                                       vhost included by the file
 │                                       above).
+├── valkey/
+│   ├── users.acl                       Valkey's ACL users and the
+│   │                                   commands each may run, the one
+│   │                                   home of those rules (ruling
+│   │                                   plan#2350).
+│   └── start.sh                        The valkey service's command in
+│                                       every compose file: adds the
+│                                       app user's password hash to the
+│                                       rules and starts the server.
+│                                       Both are mounted at
+│                                       /etc/valkey; a production host
+│                                       keeps a copy at /opt/docker/
+│                                       shekel/deploy/valkey/.
 └── docker-compose.prod.yml             Compose override that selects
                                         shared mode (joins the app to
                                         the dedicated shekel-frontend
@@ -73,7 +86,7 @@ In shared mode:
 
 - `deploy/docker-compose.prod.yml` joins `shekel-prod-app` to the external `shekel-frontend` bridge
   network (NOT the wider `homelab` network) and parks the bundled `shekel-prod-nginx` service in the
-  `disabled` profile, so `docker compose up -d` starts only `db`, `redis`, and `app`.
+  `disabled` profile, so `docker compose up -d` starts only `db`, `valkey`, and `app`.
 - The shared Nginx (managed under `/opt/docker/nginx/` on the host) proxies traffic to
   `shekel-prod-app:8000` over the `shekel-frontend` bridge, using the vhost in
   `deploy/nginx-shared/conf.d/shekel.conf`. Co-tenants like Jellyfin, Immich, and UniFi remain on
@@ -82,8 +95,9 @@ In shared mode:
 - `deploy/nginx-shared/nginx.conf` is the main config for the shared Nginx. The repo file is the
   source of truth; the host copy at `/opt/docker/nginx/nginx.conf` must match.
 
-The `shekel-frontend` network must exist before `docker compose up`, with the subnet pinned so
-Gunicorn's `FORWARDED_ALLOW_IPS` literal matches and Nginx's `set_real_ip_from` directive applies:
+The `shekel-frontend` network must exist before `docker compose up`, with the subnet pinned so the
+`FORWARDED_ALLOW_IPS` literal Gunicorn and the app read matches and Nginx's `set_real_ip_from`
+directive applies:
 
 ```bash
 docker network ls --filter name=shekel-frontend
@@ -117,7 +131,9 @@ truth.
    git pull --ff-only
    sudo cp deploy/nginx-shared/nginx.conf            /opt/docker/nginx/nginx.conf
    sudo cp deploy/nginx-shared/conf.d/shekel.conf    /opt/docker/nginx/conf.d/shekel.conf
+   sudo cp docker-compose.yml                        /opt/docker/shekel/docker-compose.yml
    sudo cp deploy/docker-compose.prod.yml            /opt/docker/shekel/docker-compose.override.yml
+   sudo cp deploy/valkey/users.acl deploy/valkey/start.sh /opt/docker/shekel/deploy/valkey/
    ```
 
 3. Validate the Nginx config before reloading:
@@ -132,12 +148,17 @@ truth.
    sudo docker exec nginx nginx -s reload
    ```
 
-5. If only the compose override changed, recreate the affected containers:
+5. If a compose file or `deploy/valkey/` changed, recreate the affected containers. Valkey reads its
+   rules when it starts, and a rules change alters no compose setting, so restart it by name:
 
    ```bash
    cd /opt/docker/shekel
    docker compose up -d
+   docker compose up -d --force-recreate valkey   # when deploy/valkey/ changed
    ```
+
+A change that needs more than a copy (a renamed `.env` variable, a new file under `secrets/`)
+carries host steps of its own, in `docs/runbook.md` 2.6, which `/release` runs.
 
 See `docs/runbook.md` -> "Shared-mode deployment" for full details including the rollback procedure
 and the planned `scripts/config_audit.py` drift check.
@@ -164,29 +185,18 @@ the maintainer's homelab layout) supplies the value.
 ### Updating the digest
 
 1. Build and push a new image. CI (`.github/workflows/docker-publish.yml`) runs on every push to
-   `main` and prints the digest in the "Image digest" workflow step output. For local builds via
-   `scripts/deploy.sh`, the script prints the digest after `cosign sign` succeeds.
+   `main` and prints the digest in the "Image digest" workflow step output.
 
-2. Verify the signature on the new digest before pinning it. The command depends on which signing
-   path produced the image:
+2. Verify the signature on the new digest before pinning it. CI signs keyless, through sigstore's
+   OIDC flow, so there is no key to keep:
 
-   - CI keyless OIDC (default for `main` branch pushes):
-
-     ```bash
-     cosign verify \
-         --certificate-identity-regexp \
-         '^https://github\.com/saltyreformed-labs/Shekel/\.github/workflows/docker-publish\.yml@refs/heads/main$' \
-         --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-         ghcr.io/saltyreformed-labs/shekel@sha256:<digest>
-     ```
-
-   - Local maintainer key (`deploy/cosign.pub`):
-
-     ```bash
-     cosign verify \
-         --key deploy/cosign.pub \
-         ghcr.io/saltyreformed-labs/shekel@sha256:<digest>
-     ```
+   ```bash
+   cosign verify \
+       --certificate-identity-regexp \
+       '^https://github\.com/saltyreformed-labs/Shekel/\.github/workflows/docker-publish\.yml@refs/heads/main$' \
+       --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+       ghcr.io/saltyreformed-labs/shekel@sha256:<digest>
+   ```
 
 3. Once the verify succeeds, edit the host `.env`:
 
@@ -215,26 +225,6 @@ the maintainer's homelab layout) supplies the value.
 Restore the previous digest by editing `.env` and running steps 4-5 above. Because every successful
 deploy records the digest in the host's `.env`, the on-host file is itself the rollback log; commit
 your `.env` changes to a private operator-only repo if you need an audit trail.
-
-### Cosign keypair (local-build path)
-
-When using `scripts/deploy.sh` for local builds, generate a Cosign keypair once per host:
-
-```bash
-cd /opt/shekel
-cosign generate-key-pair
-mv cosign.pub deploy/cosign.pub
-# Move the private key to a path outside the repo and chmod 600 it.
-chmod 600 cosign.key
-mv cosign.key /etc/shekel/cosign.key
-```
-
-Commit `deploy/cosign.pub` to the repo. Set the `COSIGN_PRIVATE_KEY` path in the host `.env` so
-`scripts/deploy.sh` can find it. The private key file MUST NOT be checked into git (`.gitignore`
-already excludes `cosign.key*`).
-
-For CI builds, no keypair is needed: the workflow uses sigstore's keyless OIDC flow, so the
-maintainer just verifies with the `--certificate-identity-regexp` form above.
 
 ## See Also
 

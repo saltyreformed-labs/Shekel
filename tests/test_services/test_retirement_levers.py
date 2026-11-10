@@ -291,6 +291,7 @@ def _seed_scenario(db, seed_user, *, balance, annual_return,
     retirement_date = add_months(date.today(), months_out)
 
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user.id,
         scenario_id=scenario.id,
         filing_status_id=filing.id,

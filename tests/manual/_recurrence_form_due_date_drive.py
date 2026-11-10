@@ -13,7 +13,7 @@ account page, then this form.
 """
 import time
 
-from _recurrence_form_checks import (
+from _recurrence_form_kit import (
     DEV_BASE_URL,
     MARK,
     POST_SPACING_SECONDS,

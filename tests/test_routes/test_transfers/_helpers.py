@@ -15,10 +15,11 @@ from app.models.transfer import Transfer
 from app.models.user import User, UserSettings
 from app.models.scenario import Scenario
 from app.models.ref import AccountType, Status
-from app.services import posting_service, transfer_service
+from app.services import transfer_service
 from app.services.auth_service import hash_password
 from app.services import account_service
 from app.utils.dates import display_today
+from tests._ledger_reads import account_net
 from tests._test_helpers import (
     generate_transfer_of,
     make_every_period_rule,
@@ -54,16 +55,20 @@ def _create_savings_account(seed_user):
     return acct
 
 
-def _ledger_of(seed_user, checking_id, savings_id, scenario_id):
-    """``(Checking's posted total, Savings', the owner's journal entry count)``, re-read."""
+def _ledger_of(checking_id, savings_id, scenario_id):
+    """``(Checking's worked-out net, Savings')``, re-read."""
     db.session.expire_all()
     return (
-        posting_service.account_posting_total(checking_id, scenario_id),
-        posting_service.account_posting_total(savings_id, scenario_id),
-        db.session.query(JournalEntry).filter(
-            JournalEntry.user_id == seed_user["user"].id,
-        ).count(),
+        account_net(db.session, checking_id, scenario_id),
+        account_net(db.session, savings_id, scenario_id),
     )
+
+
+def _stored_entry_count(seed_user):
+    """Return the owner's stored journal entry count; it goes with the store."""
+    return db.session.query(JournalEntry).filter(
+        JournalEntry.user_id == seed_user["user"].id,
+    ).count()
 
 
 def _create_template(seed_user, savings_acct, with_rule=True):

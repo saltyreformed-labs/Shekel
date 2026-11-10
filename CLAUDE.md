@@ -156,7 +156,7 @@ root; never silence it with a bare disable.
 
 - **Per-edit hooks (`scripts/hooks/`)** lint each `app/`/`scripts/` Python edit and hard-block on
   errors and the custom checkers `shekel-decimal-from-float` / `shekel-refname-compare`; templates
-  and `requirements.txt` have their own guards.
+  and the dependency files (`pyproject.toml`, `uv.lock`) have their own guards.
 - **SessionStart hook** (`scripts/hooks/session-start.sh`) prints the session's checkout and branch
   into context at session start, a warning when the shared main checkout is pinned to a release
   branch, a pointer to the Multi-session doctrine, and one to `python -m tools.quill.quill next` for
@@ -193,8 +193,9 @@ root; never silence it with a bare disable.
   file, from any branch, a release or a resync passing only with the done files it carries
   (R-BAL362): the files the image holds, as Docker reads its ignore file (`.dockerignore`,
   R-BAL364's one list of them), and the files outside the image that build or run production, which
-  `tools/quill/_production.py` lists, their one list (R-BAL400, R-BAL401). Its module docstring
-  states every rule.
+  `tools/quill/_production.py` lists, their one list (R-BAL400, R-BAL401); but a change that moves
+  pinned versions alone, none across a major, needs none (plan#2351, `tools/quill/_versions.py`).
+  Its module docstring states every rule.
 - **Archived documents** (`tools/ci/archive.py`): every document under an `archive/` or
   `historical/` directory opens with the `> **ARCHIVED.` banner, and CI refuses one that does not.
 - **Judgment the linters cannot mechanize** (float-on-money boundaries, IDOR, transfer invariants,
@@ -206,7 +207,7 @@ A gate is a floor, not a ceiling: the judgment rules (2, 3, 6, 8, 10, 13) still 
 
 ```bash
 # Dev server (containerized -- the primary workflow since 2026-06-12;
-# full prod parity: entrypoint pipeline, shekel_app role, redis
+# full prod parity: entrypoint pipeline, shekel_app role, valkey
 # rate limiting, hardened rootfs; live reload via the bind mount)
 docker compose -f docker-compose.dev.yml up -d && docker logs -f shekel-dev-app
 
@@ -245,8 +246,8 @@ python -m tools.quill.quill sync                      # write every card's state
 python -m tools.quill.quill release plan#N            # free a claim, keeping its work
 
 # A new lane, run in a new terminal from a checkout's root (no venv need be active): a worktree
-# ~/projects/shekel-NAME detached at origin/dev, and a session in it, the venv active, whose
-# first act claims plan#N (or `next`'s step)
+# ~/projects/shekel-NAME detached at origin/dev with a venv built from its own lock, and a session
+# in it, that venv active, whose first act claims plan#N (or `next`'s step)
 .venv/bin/python -m tools.quill.lane NAME [plan#N]
 ```
 
@@ -274,7 +275,8 @@ rows' alone and reverts the same way, since no row enters it: Credit puts a row 
 `@login_required` (gate: `tests/test_arch/test_the_login_gate_has_one_home.py`), and a route that
 must be public is named in `PUBLIC_ENDPOINTS`. Ownership helpers in `app/utils/auth_helpers.py`.
 Security response rule: 404 for both "not found" and "not yours." Structured logging via
-`log_event()`. Dependencies pinned in `requirements.txt` -- no new packages without approval.
+`log_event()`. Dependencies are declared in `pyproject.toml` and locked in `uv.lock` -- no new
+packages without approval.
 
 **Reference tables: IDs for logic, strings for display only.** Enums in `app/enums/`, cached in
 `app/ref_cache/`. NEVER compare against string `name` columns in Python or Jinja (gate:
@@ -328,6 +330,10 @@ live in `docs/testing-standards.md` (Test Run Guidelines). **The wrapper default
 from the report rather than appearing as skips, so a green local run is not a claim about them; CI
 runs the wrapper in six shards with `-m ""` and executes them all. Single test:
 `./scripts/test.sh tests/path/test_file.py::test_name -v`.
+
+**A suite runs what its tree's lock names** (ruling plan#2828; `.claude/rules/testing.md`): outside
+CI the wrapper replaces a `.venv` link and syncs first. `uv sync` by hand writes through a link.
+
 **A migration needs no manual template rebuild**: the template is baked into the image and the
 wrapper re-verifies it on EVERY invocation, rebuilding when the key moved
 (`scripts/build_test_db_image.py`).
@@ -345,12 +351,13 @@ hardening, and prod-override-sync conventions auto-load via `.claude/rules/deplo
 the single source of truth for what to do next** (R-BAL170). Every step, finding, ruling and
 question is one card, `plan#N`, and every read and write goes through quill (Common Commands). The
 board holds the steps and questions in the order the developer drags them (R-BAL177);
-**the next step is `python -m tools.quill.quill next`'s answer.** A card's spec is its body, and a
-review reads its edits since the work started (`/charter`, R-BAL174). A step split into leaves holds
-them as sub-issues, and a piece of work inside a card's one pull request is a task under it (Git
-Workflow). Whether a card SHIPPED is git's answer, never the card's state: its done file
-`plan/ships/N` in the merge of `dev` and `main` (R-BAL359), from which `quill sync` writes each
-card's state.
+**the next step is `python -m tools.quill.quill next`'s answer**: Priority Urgent, then High, then
+that order, a step's unfinished prerequisites just ahead of it, and never a step On hold (rulings
+plan#1831, plan#1832). A card's spec is its body, and a review reads its edits since the work
+started (`/charter`, R-BAL174). A step split into leaves holds them as sub-issues, and a piece of
+work inside a card's one pull request is a task under it (Git Workflow). Whether a card SHIPPED is
+git's answer, never the card's state: its done file `plan/ships/N` in the merge of `dev` and `main`
+(R-BAL359), from which `quill sync` writes each card's state.
 
 Every card but a task carries its arc (a task's is its card's). Each arc's argument, the reasoning
 behind its steps, stays in its own document: `docs/audits/balance_architecture/README.md` (balance),

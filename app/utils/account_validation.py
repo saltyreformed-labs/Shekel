@@ -22,13 +22,15 @@ The helpers fall into two groups:
   so the route owns the flash + redirect composition while this
   module owns the business validation.
 
-* **Posting-boundary type guards** (Build-Order Step 5, C6).  A
-  re-type of an account (``_validate_account_type_change``) or an
-  in-place edit of a custom type's ``has_amortization`` /
-  ``category_id`` (``_validate_account_type_boundary_edit``) that
-  crosses the amortizing or Asset/Liability boundary is refused while
-  the affected account(s) carry ledger postings -- see
-  ``_crosses_posting_boundary`` for why exactly those two boundaries.  Both
+* **The loan-boundary type guard** (ruling plan#2785).  A re-type of an
+  account (``_validate_account_type_change``) or an in-place edit of a custom
+  type's ``has_amortization`` (``_validate_account_type_boundary_edit``) that
+  crosses between a loan type and a non-loan type is refused while the
+  affected account(s) hold a line of the worked-out ledger -- see
+  ``_crosses_amortizing_boundary`` for why.  Crossing between an asset and a
+  liability is not refused: a line is classed by its account's current type,
+  as it is labeled by its current name, and an account's past true-ups are
+  re-read under that type too, past income included (ruling plan#2880).  Both
   also refuse moving an account between savings and debt while an active
   savings goal is on it, or between a loan type and a card-style debt (plan
   step credit_card:CC-5-5d, rulings R-CC87 and R-CC91):
@@ -68,9 +70,8 @@ from app.schemas.validation import (
     InterestParamsUpdateSchema,
 )
 from app.services.account_category import is_liability_category
-from app.services.ledger_lines import linked_ledger_class
+from app.services.ledger_lines import accounts_hold_lines, linked_ledger_class
 from app.services.recurring_transfer_query import due_date_repeats_into
-from app.utils import archive_helpers
 
 
 # Marshmallow schema singletons.  Constructed once per process and
@@ -230,24 +231,38 @@ def _visible_account_type(type_id, user_id):
     return None
 
 
-def _crosses_posting_boundary(old_type, new_amortization, new_category_id):
-    """Return True iff a type change crosses a posting-correction boundary.
+def _crosses_amortizing_boundary(old_type: AccountType, new_amortization: bool) -> bool:
+    """Return True iff a type change moves an account between loan and non-loan.
 
-    The single definition of "boundary" for the C6 account-type guards
-    (Build-Order Step 5).  Two crossings matter to the posting ledger, and
-    only these two -- the walk is otherwise type-agnostic for non-loans:
+    The kind decides which records an account's history is worked out from: a
+    plain account's balance records, or a loan's terms and statements, so
+    re-typing Checking to a loan type with no loan terms would drop its openings
+    and true-ups from every statement (ruling plan#2785).  Step plan#2786 makes
+    that re-type the loan's setup, and deletes the refusal this feeds.
 
-    * **The amortizing boundary** (``has_amortization`` flips): an
-      amortizing loan books its anchor corrections through the loan
-      posting package onto per-loan ledgers; every other account books
-      through the account walk onto its per-account COUNTER rows.  Crossing
-      with posted corrections would strand one family and double-count
-      under the other.
-    * **The Asset/Liability class boundary** (the category-derived linked
-      ledger class flips, per
-      :func:`app.services.ledger_lines.linked_ledger_class`):
-      posted legs carry the class's economic meaning on the balance
-      sheet, and the class is a pairing-time snapshot.
+    Args:
+        old_type: The account's current :class:`~app.models.ref.AccountType`.
+        new_amortization: The proposed ``has_amortization`` value.
+
+    Returns:
+        bool -- True when the flag flips.
+    """
+    return bool(old_type.has_amortization) != bool(new_amortization)
+
+
+def _crosses_posting_boundary(
+    old_type: AccountType, new_amortization: bool, new_category_id: int,
+) -> bool:
+    """Return True iff a type edit leaves the stored chart to bring back in step.
+
+    The upkeep of the stored ledger, which X-ew's third leaf (plan#2516)
+    deletes, and refuses nothing: an amortizing crossing swaps which family of
+    corrections the account books, and an Asset/Liability crossing flips the
+    class its stored linked row was stamped with (per
+    :func:`app.services.ledger_lines.linked_ledger_class`).  A flag that changes
+    the account's kind alone, such as ``has_interest``, is neither: the worked-out
+    ledger re-reads it at once (ruling plan#2880), and the stored one holds the old
+    reading until the account's next balance (finding plan#2883).
 
     Args:
         old_type: The account's current :class:`~app.models.ref.AccountType`.
@@ -255,9 +270,9 @@ def _crosses_posting_boundary(old_type, new_amortization, new_category_id):
         new_category_id: The proposed ``category_id`` value.
 
     Returns:
-        bool -- True when either boundary is crossed.
+        bool -- True when either is crossed.
     """
-    if bool(old_type.has_amortization) != bool(new_amortization):
+    if _crosses_amortizing_boundary(old_type, new_amortization):
         return True
     return (
         linked_ledger_class(old_type.category_id)
@@ -340,18 +355,15 @@ def _refuse_goal_crossing(account_ids, was, becomes):
 
 
 def _validate_account_type_change(account, new_type_id):
-    """Refuse a boundary-crossing re-type of an account with posted history.
+    """Refuse a re-type across the loan boundary of an account with history.
 
-    The C6 type-change guard (Build-Order Step 5, the Guard-5 pattern):
-    an ``account_type_id`` change that crosses the amortizing boundary or
-    flips the linked ledger's Asset/Liability class
-    (:func:`_crosses_posting_boundary`) is refused while the account has
-    ledger postings -- re-typing it would strand one correction family
-    and double-count under the other, or silently re-interpret posted
-    legs' balance-sheet meaning.  A non-crossing change, or a crossing on
-    an account with an empty ledger (a $0-anchor account), passes; the
-    route then re-classes the empty linked row and re-syncs the
-    corrections.
+    An ``account_type_id`` change between a loan type and a non-loan type
+    (:func:`_crosses_amortizing_boundary`) is refused while the account holds
+    a line of the worked-out ledger (:func:`accounts_hold_lines`, ruling
+    plan#2785).  Any other change passes, an Asset/Liability crossing with
+    history included, and so does a crossing on an account holding no line (a
+    $0-anchor account); the route then re-classes its stored linked row and
+    re-syncs the corrections.
 
     **A re-type to a type that is not revolving is refused while a worked-out
     card payment names the account** (:data:`CARD_PAYMENT_KEEPS_ITS_CARD`, plan
@@ -365,11 +377,8 @@ def _validate_account_type_change(account, new_type_id):
 
     **A change of what a goal on the account IS -- savings to debt, or a loan
     type to a card-style debt -- is refused FIRST while an active goal is on
-    it** (:func:`_refuse_goal_crossing`, rulings R-CC87 and R-CC91), posted
-    history or not: that rule is about what the goal means, not about the
-    ledger, and it is asked before the posting boundary so it does not depend
-    on the ledger's Asset/Liability class agreeing with the category's
-    liability test.
+    it** (:func:`_refuse_goal_crossing`, rulings R-CC87 and R-CC91), history
+    or not: that rule is about what the goal means, not about the ledger.
 
     Args:
         account: The :class:`~app.models.account.Account` being re-typed
@@ -397,16 +406,15 @@ def _validate_account_type_change(account, new_type_id):
         card_refusal = _refuse_leaving_the_card_kind(account)
         if card_refusal is not None:
             return card_refusal
-    if not _crosses_posting_boundary(
-        account.account_type, new_type.has_amortization, new_type.category_id,
+    if not _crosses_amortizing_boundary(
+        account.account_type, new_type.has_amortization,
     ):
         return None
-    if archive_helpers.account_has_ledger_postings(account.id):
+    if accounts_hold_lines([account]):
         return (
-            "This account's type cannot change across the loan or "
-            "asset/liability boundary because it has posting-ledger "
-            "history.  Archive it and create a new account of the "
-            "desired type instead.",
+            "This account's type cannot change between a loan type and a "
+            "non-loan type because it has recorded history.  Archive it and "
+            "create a new account of the desired type instead.",
             "warning",
         )
     return None
@@ -463,18 +471,18 @@ def _card_payment_on(account_id):
 
 
 def _validate_account_type_boundary_edit(account_type, data):
-    """Refuse a boundary-crossing edit of a type whose accounts have postings.
+    """Refuse an edit across the loan boundary of a type whose accounts have history.
 
-    The second crossing vector (C4 adversarial review M2): editing a
-    CUSTOM type's ``has_amortization`` or ``category_id`` IN PLACE crosses
-    the same posting boundaries as re-typing an account
-    (:func:`_crosses_posting_boundary`) -- with no ``account_type_id``
-    change for :func:`_validate_account_type_change` to see.  The edit is
-    refused while ANY of the owner's accounts of this type carries ledger
-    postings (the type row is one row -- it cannot change for some of its
-    accounts and not others).  Boundary edits on a type whose accounts all
-    have empty ledgers pass; the route then re-classes those linked rows
-    and re-syncs their corrections.
+    The second crossing vector (C4 adversarial review M2): editing a CUSTOM
+    type's ``has_amortization`` IN PLACE crosses the same boundary as re-typing
+    an account (:func:`_crosses_amortizing_boundary`) -- with no
+    ``account_type_id`` change for :func:`_validate_account_type_change` to
+    see.  The edit is refused while ANY account of this type holds a line of
+    the worked-out ledger (:func:`accounts_hold_lines`; the type row is one
+    row -- it cannot change for some of its accounts and not others).  Any
+    other edit passes, an Asset/Liability crossing with history included; the
+    route then re-classes those accounts' stored linked rows and re-syncs
+    their corrections.
 
     **An edit changing what a goal on the type's accounts IS (its category
     between savings and debt, or a debt's amortization flag) is refused first
@@ -490,10 +498,11 @@ def _validate_account_type_boundary_edit(account_type, data):
     Returns:
         ``None`` when the edit is allowed; otherwise a
         ``(message, category)`` tuple ready for :func:`flask.flash`.
-    The postings sweep is deliberately NOT owner-scoped: post C-28 only the
+    The account sweep is deliberately NOT owner-scoped: post C-28 only the
     owner can hold accounts of their custom type, but the question is "does
-    ANY account of this type carry postings", so the unscoped query is free
-    defense-in-depth against pre-C-28 legacy cross-user rows.
+    ANY account of this type hold a line", so the unscoped query is free
+    defense-in-depth against pre-C-28 legacy cross-user rows, each account
+    asked in its own owner's ledger.
     """
     new_category_id = data.get("category_id", account_type.category_id)
     new_amortization = data.get(
@@ -501,30 +510,28 @@ def _validate_account_type_boundary_edit(account_type, data):
     )
     was = _goal_kind(account_type.category_id, account_type.has_amortization)
     becomes = _goal_kind(new_category_id, new_amortization)
-    crosses_posting = _crosses_posting_boundary(
-        account_type, new_amortization, new_category_id,
+    crosses_loan_boundary = _crosses_amortizing_boundary(
+        account_type, new_amortization,
     )
-    if not crosses_posting and was == becomes:
+    if not crosses_loan_boundary and was == becomes:
         return None
-    account_ids = [
-        row[0] for row in
-        db.session.query(Account.id)
+    accounts = (
+        db.session.query(Account)
         .filter_by(account_type_id=account_type.id)
         .all()
-    ]
-    goal_refusal = _refuse_goal_crossing(account_ids, was, becomes)
+    )
+    goal_refusal = _refuse_goal_crossing(
+        [account.id for account in accounts], was, becomes,
+    )
     if goal_refusal is not None:
         return goal_refusal
-    if not crosses_posting:
-        return None
-    for account_id in account_ids:
-        if archive_helpers.account_has_ledger_postings(account_id):
-            return (
-                "This change crosses the loan or asset/liability boundary "
-                "and at least one account of this type has posting-ledger "
-                "history.  Create a new account type instead.",
-                "warning",
-            )
+    if crosses_loan_boundary and accounts_hold_lines(accounts):
+        return (
+            "This change moves accounts between a loan type and a non-loan "
+            "type, and at least one account of this type has recorded "
+            "history.  Create a new account type instead.",
+            "warning",
+        )
     return None
 
 
@@ -586,8 +593,8 @@ def _validate_collateral_link(collateral_account_id, source_account, user_id):
 def _account_type_gates(account, data, user_id):
     """Run both ``account_type_id`` gates for ``_validate_update_account``.
 
-    Combines the C-28 multi-tenant visibility check and the C6
-    posting-boundary re-type check behind ONE return site in the parent,
+    Combines the C-28 multi-tenant visibility check and the
+    loan-boundary re-type check behind ONE return site in the parent,
     which reached Pylint's return-statement ceiling when the A1
     amortizing-anchor gate was added.  Both fire only when the form
     submitted an ``account_type_id``; order is preserved (visibility
@@ -650,7 +657,7 @@ def _validate_update_account(account, form, user_id):
     data = _update_schema.load(form)
 
     # Both account_type_id gates (the C-28 multi-tenant visibility
-    # check and the C6 posting-boundary re-type check) live in
+    # check and the loan-boundary re-type check) live in
     # ``_account_type_gates`` behind one return site.
     type_failure = _account_type_gates(account, data, user_id)
     if type_failure is not None:

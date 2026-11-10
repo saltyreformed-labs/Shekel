@@ -68,11 +68,13 @@ from app.services.pay_calendar import PayCalendar
 from app.services.recurrence import (
     NEVER_ENDS,
     Closing,
+    DayOfMonth,
     DerivedStop,
     EndsOnDate,
     RecurrenceGenerationError,
     RecurrenceResolutionError,
     ResolvedRecurrence,
+    WeekdayReading,
     has_day_of_month_coordinate,
     occurrence_placements,
     occurrences,
@@ -208,6 +210,7 @@ def resolved_value(
     derived: DerivedStop | None = None,
     nominal_day: int | None = None,
     max_per_month: int | None = None,
+    weekday_reading: WeekdayReading | None = None,
 ) -> ResolvedRecurrence:
     """Return a two-axis value stated directly, bypassing ``resolve``.
 
@@ -241,6 +244,8 @@ def resolved_value(
             month clamped it.
         max_per_month: The per-month ceiling (plan step salary:R15-a), or
             ``None`` for none.
+        weekday_reading: How the first occurrence is read by its weekday
+            (plan step R8-c), or ``None`` for its day of the month.
 
     Returns:
         The :class:`~app.services.recurrence.ResolvedRecurrence`.
@@ -255,6 +260,7 @@ def resolved_value(
         closing=Closing(authored=end_bound, derived=derived),
         nominal_day=nominal_day,
         max_per_month=max_per_month,
+        weekday_reading=weekday_reading,
     )
 
 
@@ -2065,20 +2071,23 @@ class TestRefusals:
         class, and the only way to exercise the guard between them was to
         monkeypatch them apart, which is what this case did.
 
-        They are ONE statement:
-        :func:`~app.services.recurrence.has_day_of_month_coordinate` is a
-        membership test against ``MONTH_SPANNING_UNITS`` itself, which is the
-        key set of the table ``months_per_step`` reads.  A unit that names a day
-        of the month therefore has a stride by construction, and the guard that
-        used to say so was a fence over an impossible state.
+        They are ONE statement: since plan step plan#2302 (ruling plan#2748)
+        :func:`~app.services.recurrence.has_day_of_month_coordinate` reads the
+        unit's ``ref.recurrence_units.has_day_of_month``, which the DATABASE
+        generates from the same ``months_per_unit`` ``months_per_step`` reads.
+        A unit that names a day of the month therefore has a stride by
+        construction, and the guard that used to say so was a fence over an
+        impossible state.
 
-        **The intermediate alias went at plan step R8-a.**  R7b-1 left
-        ``_resolution._DAY_OF_MONTH_UNITS = MONTH_SPANNING_UNITS`` -- one
-        statement wearing two names, which this case asserted the identity of;
-        R8-a moved the predicate into ``_frequency`` beside the offer set that
-        reads it and deleted the alias, so there is no second name left to
-        compare and the property is asserted over the PREDICATE instead.  It
-        still fails the moment a separate list is written out again.
+        **Each home it has had, this case followed.**  R7b-1 left
+        ``_resolution._DAY_OF_MONTH_UNITS = MONTH_SPANNING_UNITS``, one code
+        tuple wearing two names, whose identity this case asserted; R8-a
+        deleted the alias; plan#2302 deleted the tuple and its month-span
+        table for the reference row, so there is no second name left to
+        compare and the property is asserted over the two READERS instead:
+        for every unit, the flag says a day exactly where the stride answers.
+        A separate list that agrees passes here; ``test_recurrence_unit_months``
+        changes the row to grade each reader.
 
         The refusal itself is not untested -- ``months_per_step`` still refuses
         a unit with no month span, asserted on the function directly by
@@ -2091,17 +2100,16 @@ class TestRefusals:
             if has_day_of_month_coordinate(unit)
         )
 
-        assert naming_a_day == tuple(_months.MONTH_SPANNING_UNITS), (
-            "the day-of-month units and the month-spanning units have been "
-            "written out separately again.  While they are one statement, a "
-            "cadence that names a day of the month provably has a month "
-            "stride; while they are two, that is a hope with a guard behind it."
-        )
-        # An identity between two EMPTY tuples would satisfy the assert above,
-        # so the members are exercised too.
-        assert naming_a_day
-        for unit in naming_a_day:
-            assert _months.months_per_step(unit, 1) >= 1
+        # Written out by hand: the units measured in months.  Without it a
+        # flag answering False for every unit would make the loop below
+        # vacuous on its first half.
+        assert naming_a_day == (RecurrenceUnitEnum.MONTH, RecurrenceUnitEnum.YEAR)
+        for unit in RecurrenceUnitEnum:
+            if has_day_of_month_coordinate(unit):
+                assert _months.months_per_step(unit, 1) >= 1, unit
+            else:
+                with pytest.raises(_months.MonthStepError):
+                    _months.months_per_step(unit, 1)
 
     @pytest.mark.parametrize(
         "unit", [RecurrenceUnitEnum.PERIOD, RecurrenceUnitEnum.WEEK],
@@ -2419,7 +2427,7 @@ class TestTheMonthWalkReachesTheCalendarsLastMonth:
     def test_a_monthly_walk_ends_on_the_last_day_the_calendar_holds(self):
         """The 31st from January 2100: twelve dates, the last 2100-12-31."""
         walked = list(_months.walk_months(
-            _months.month_ordinal(date(2100, 1, 1)), 31, 1,
+            _months.month_ordinal(date(2100, 1, 1)), DayOfMonth(31).date_in, 1,
         ))
         assert len(walked) == 12
         assert walked[1] == date(2100, 2, 28)
@@ -2434,11 +2442,11 @@ class TestTheMonthWalkReachesTheCalendarsLastMonth:
         so this is the case that grades the stop's direction.
         """
         assert list(_months.walk_months(
-            _months.month_ordinal(date(2100, 12, 1)), 15, 1,
+            _months.month_ordinal(date(2100, 12, 1)), DayOfMonth(15).date_in, 1,
         )) == [date(2100, 12, 15)]
 
     def test_a_stride_landing_past_the_calendar_fires_once(self):
         """Yearly from March 2100: March 2101 is past the calendar, so one date."""
         assert list(_months.walk_months(
-            _months.month_ordinal(date(2100, 3, 1)), 15, 12,
+            _months.month_ordinal(date(2100, 3, 1)), DayOfMonth(15).date_in, 12,
         )) == [date(2100, 3, 15)]

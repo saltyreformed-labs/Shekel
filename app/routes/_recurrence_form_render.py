@@ -67,7 +67,7 @@ Route-layer rather than service because :func:`edit_form_cadence` flashes;
 ``CLAUDE.md::Architecture`` keeps services isolated from Flask globals.  The
 leading underscore marks the module as route-internal.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -81,6 +81,7 @@ from app.services.recurrence import (
     UNREADABLE_CADENCE_MESSAGE,
     AuthorableCadence,
     EndBound,
+    MonthReading,
     PickerModel,
     ResolvedRecurrence,
     SelectedCadence,
@@ -91,6 +92,8 @@ from app.services.recurrence import (
     picker_model,
     selected_cadence,
     stored_cadence,
+    stored_month_reading,
+    weekday_reading_choices,
 )
 from app.services.recurring_definition import resolved_definition
 from app.utils.dates import display_today
@@ -100,13 +103,15 @@ from app.utils.dates import display_today
 class RecurrenceStart:
     """What the "Starts on" row of a recurrence form starts on.
 
-    The two fields that state WHEN a rule first fires
-    (:attr:`~app.models.recurrence_rule.RecurrenceRule.starts_on` and its
-    0-or-1 ``nominal_day``), held as one value because the form renders them as
-    one row and the table refuses them apart
-    (``ck_recurrence_rules_nominal_day``).  Two context keys would let a route
-    render a nominal day beside a date that never clamped it -- which the write
-    door refuses, so it would be a 500 out of an ordinary edit.
+    What states WHEN a rule first fires
+    (:attr:`~app.models.recurrence_rule.RecurrenceRule.starts_on` and how it
+    is read: its 0-or-1 ``nominal_day`` or, since plan step recurrence:R8-c,
+    its ``weekday_reading``), held as one value because the form renders them
+    as one row and the table refuses them apart
+    (``ck_recurrence_rules_nominal_day``, ``ck_recurrence_rules_weekday_reading``).
+    Two context keys would let a route render a reading beside a date it does
+    not fit -- which the write door refuses, so it would be a 500 out of an
+    ordinary edit.
 
     Attributes:
         starts_on: The date the definition first happens -- or ``None`` for a
@@ -114,14 +119,19 @@ class RecurrenceStart:
             (plan step salary:R18-c): there blank means the owner's opening
             payday and the route derives it, so the template forms' default
             of today would be read as a stated start.
-        nominal_day: The day it MEANS, when that date's own month was too short
-            to hold it; ``None`` for every unambiguous date.
+        reading: How the date is read -- the "repeating on" control's
+            preselection: the same day of the month, the day it MEANS when the
+            date's own month was too short to hold it, or a weekday reading.
         day_choices: Which days *starts_on* leaves OPEN, from
             :func:`~app.services.recurrence.offerable_nominal_days` -- empty
             for every date that says its own day, which is all but a handful.
-            It decides whether the "repeating on" control renders at all and
-            which of its options are enabled, so the form is correct before any
-            script runs and cannot offer a pair the write door refuses.
+        weekday_choices: Which weekday readings *starts_on* allows, each
+            option's token to its label for that date ("the third Tuesday"),
+            from :func:`~app.services.recurrence.weekday_reading_choices`.
+            With *day_choices* it decides whether the "repeating on" control
+            renders at all and which of its options are enabled, so the form
+            is correct before any script runs and cannot offer a pair the
+            write door refuses.
         locked: Whether the row renders READ-ONLY, because the app WRITES this
             bound: the definition is the standing payment of the loan it pays
             into, and ``starts_on`` is that loan's first contractual
@@ -133,8 +143,9 @@ class RecurrenceStart:
     """
 
     starts_on: date | None
-    nominal_day: int | None
+    reading: MonthReading = MonthReading()
     day_choices: tuple[int, ...] = ()
+    weekday_choices: dict[str, str] = field(default_factory=dict)
     locked: bool = False
 
 
@@ -337,7 +348,7 @@ def create_form_recurrence_state(
         picker=picker_model(cadences),
         selected_cadence=None,
         selected_start=RecurrenceStart(
-            starts_on=create_form_default_starts_on(), nominal_day=None,
+            starts_on=create_form_default_starts_on(),
         ),
         selected_end=RecurrenceEnd(selected=NEVER_ENDS),
     )
@@ -512,9 +523,7 @@ def edit_form_starts_on(template: Any, *, locked: bool) -> RecurrenceStart:
         # alone.  The script shows the control the moment a cadence that fires
         # on a day of the month is picked.  Never locked: a definition with no
         # rule is nobody's standing payment.
-        return RecurrenceStart(
-            starts_on=create_form_default_starts_on(), nominal_day=None,
-        )
+        return RecurrenceStart(starts_on=create_form_default_starts_on())
     # ``modelled_unit`` rather than a raising reader: this function's whole
     # contract is that it cannot fail on a rule the cadence controls could not
     # display (see the docstring), and a ``ref`` id the enum does not name is
@@ -523,10 +532,19 @@ def edit_form_starts_on(template: Any, *, locked: bool) -> RecurrenceStart:
     unit = modelled_unit(rule.unit_id)
     return RecurrenceStart(
         starts_on=rule.starts_on,
-        nominal_day=rule.nominal_day,
+        reading=stored_month_reading(rule.nominal_day, rule.weekday_reading),
         day_choices=(
             () if unit is None
             else offerable_nominal_days(unit, rule.starts_on)
+        ),
+        weekday_choices=(
+            {} if unit is None
+            else {
+                MonthReading(weekday_reading=reading).token: label
+                for reading, label in weekday_reading_choices(
+                    unit, rule.starts_on,
+                ).items()
+            }
         ),
         locked=locked,
     )

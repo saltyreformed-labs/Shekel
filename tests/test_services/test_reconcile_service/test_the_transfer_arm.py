@@ -19,10 +19,12 @@ from app.services import (
     transfer_service,
 )
 from app.utils.log_events import EVT_TRANSFERS_RECONCILED
+from tests._ledger_reads import (
+    linked_key_of,
+    linked_net_by_date,
+)
 from tests._test_helpers import outstanding_set_of
 from tests._test_helpers import (
-    linked_ledger_account,
-    linked_net_by_date,
     open_books_before_the_first_assertion,
     resolved_amount,
     transfer_side_figure,
@@ -454,7 +456,7 @@ class TestTheTransferArm:
             ):
                 assert linked_net_by_date(
                     db.session,
-                    linked_ledger_account(db.session, account_id).id,
+                    linked_key_of(db.session, account_id),
                     scenario_id,
                 ).get(_OBSERVED_ON) == posted, (
                     f"the correction did not reach the {side}'s leg on "

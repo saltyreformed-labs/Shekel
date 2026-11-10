@@ -119,6 +119,7 @@ def _make_profile(seed_user) -> SalaryProfile:
         db.session.query(FilingStatus).filter_by(name="single").one().id
     )
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         filing_status_id=single_id,
@@ -136,10 +137,11 @@ def _insert_raise(profile_id: int, effective_year: int,
     db.session.execute(
         text(
             "INSERT INTO salary.salary_raises "
-            "(salary_profile_id, raise_type_id, effective_year, "
-            " effective_month, percentage, is_recurring, terminal_year, "
+            "(salary_profile_id, raise_type_id, effective_date, "
+            " percentage, is_recurring, terminal_year, "
             " version_id, created_at) "
-            "VALUES (:pid, :tid, :eff, 1, 0.0300, :rec, :term, 1, now())"
+            "VALUES (:pid, :tid, make_date(:eff, 1, 1), 0.0300, :rec, :term, "
+            " 1, now())"
         ),
         {
             "pid": profile_id, "tid": _merit_type_id(),
@@ -307,10 +309,11 @@ class TestTheColumnStoresNothingByItself:
             db.session.execute(
                 text(
                     "INSERT INTO salary.salary_raises "
-                    "(salary_profile_id, raise_type_id, effective_year, "
-                    " effective_month, percentage, is_recurring, "
+                    "(salary_profile_id, raise_type_id, effective_date, "
+                    " percentage, is_recurring, "
                     " version_id, created_at) "
-                    "VALUES (:pid, :tid, 2027, 1, 0.0250, true, 1, now())"
+                    "VALUES (:pid, :tid, DATE '2027-01-01', 0.0250, true, 1, "
+                    " now())"
                 ),
                 {"pid": profile.id, "tid": _merit_type_id()},
             )
@@ -344,8 +347,7 @@ class TestTheColumnIsLiveAndNullIsTheIdentity:
         below pins -- see that test for the re-derivation.
         """
 
-        effective_year = 2027
-        effective_month = 1
+        effective_date = date(2027, 1, 1)
         is_recurring = True
         percentage = MERIT_PCT
         flat_amount = None
@@ -356,8 +358,7 @@ class TestTheColumnIsLiveAndNullIsTheIdentity:
         row = SalaryRaise(
             salary_profile_id=profile_id,
             raise_type_id=_merit_type_id(),
-            effective_year=2027,
-            effective_month=1,
+            effective_date=date(2027, 1, 1),
             percentage=MERIT_PCT,
             is_recurring=True,
             terminal_year=terminal_year,

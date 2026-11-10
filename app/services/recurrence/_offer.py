@@ -28,7 +28,9 @@ until plan step **R8-b** dated a weekly row from its occurrence
 unit facts, the interval floor and the error class -- and that module imports
 nothing of this one, which is what keeps the split a boundary.
 
-Pure: no Flask, no ORM, no clock, no database.
+No Flask, no ORM, no clock, and no database read: what a unit's reference row
+states comes from the reference cache, loaded once per process (ruling
+plan#2748).
 """
 from dataclasses import dataclass
 

@@ -11,7 +11,7 @@ the wording, EARLIEST stated day for the transaction day) with a two-element
 case where id order and the claimed order disagree.
 
 **The id step and the cross-source step are reached through
-:func:`~app.services.statement_import._record._pair_group` directly**, the
+:func:`~app.services.statement_import._plan._pair_group` directly**, the
 allowance ``test_anchor`` takes for ``resting_on``: the one adapter that
 exists carries no ids and there is one source, so no file can put either
 shape through the door.  The rows are still real -- built through the ORM,
@@ -29,11 +29,6 @@ from sqlalchemy import text
 
 from app import ref_cache
 from app.enums import StatementSourceEnum
-from app.exceptions import (
-    StatementLineConflict,
-    StatementLineIdMoved,
-    StatementParseError,
-)
 from app.extensions import db as _db
 from app.models.statement_import import (
     BankStatementLine,
@@ -42,6 +37,9 @@ from app.models.statement_import import (
 )
 from app.services.statement_import import (
     StatementLine,
+    StatementLineConflict,
+    StatementLineIdMoved,
+    StatementParseError,
     recent_lines,
     record_statement,
 )
@@ -49,7 +47,7 @@ from app.services.statement_import import (
 # collaborations of the record door with no importer outside the package; a
 # test of the RULE reaches into them, the allowance ``test_anchor`` takes for
 # ``resting_on``.
-from app.services.statement_import._record import (  # pylint: disable=protected-access
+from app.services.statement_import._plan import (  # pylint: disable=protected-access
     _held_ids,
     _pair_group,
     _refuse_moved_ids,
@@ -63,6 +61,7 @@ from tests.test_services.test_statement_match._builders import (
 )
 
 from . import _csv_builder as build
+from ._id_builder import an_id
 
 _SECU = StatementSourceEnum.SECU_CHECKING_CSV
 _DAY = date(2026, 3, 2)
@@ -131,13 +130,12 @@ class TestThePairingWithinASource:
             seed_user, statement, posted_on=_DAY, amount="-25.00",
             description="COFFEE", sequence_in_group=0,
         )
-        [sighting] = held.sightings
-        sighting.external_id = "FIT-1"
-        db.session.flush()
+        an_id(held, secu, "FIT-1")
+        incoming = [_incoming("REWORDED BY THE BANK", external_id="FIT-1")]
 
         pairing = _pair_group(
-            [_incoming("REWORDED BY THE BANK", external_id="FIT-1")],
-            _recorded(db, seed_user), secu,
+            incoming, _recorded(db, seed_user), secu,
+            _held_ids(seed_user["account"].id, secu, incoming),
         )
 
         assert pairing.held == [(0, 0)]
@@ -169,10 +167,10 @@ class TestThePairingWithinASource:
         a_sighting(seed_user, later, line, description="NEW WORDING")
         recorded = _recorded(db, seed_user)
 
-        assert _pair_group([_incoming("NEW WORDING")], recorded, secu).held == [
-            (0, 0),
-        ]
-        stale = _pair_group([_incoming("OLD WORDING")], recorded, secu)
+        assert _pair_group(
+            [_incoming("NEW WORDING")], recorded, secu, {},
+        ).held == [(0, 0)]
+        stale = _pair_group([_incoming("OLD WORDING")], recorded, secu, {})
         assert stale.fresh == [0]
         assert stale.restated == "NEW WORDING"
 
@@ -199,7 +197,7 @@ class TestThePairingWithinASource:
 
         pairing = _pair_group(
             [_incoming("OUR ONE"), _incoming("OUR TWO")],
-            _recorded(db, seed_user), secu,
+            _recorded(db, seed_user), secu, {},
         )
 
         assert pairing.held == [(0, 0), (1, 1)]
@@ -218,7 +216,7 @@ class TestThePairingWithinASource:
 
         pairing = _pair_group(
             [_incoming("OURS"), _incoming("OURS AGAIN")],
-            _recorded(db, seed_user), secu,
+            _recorded(db, seed_user), secu, {},
         )
 
         assert pairing.held == [(0, 0)]
@@ -237,7 +235,7 @@ class TestThePairingWithinASource:
         )
 
         pairing = _pair_group(
-            [_incoming("SOMETHING ELSE")], _recorded(db, seed_user), secu,
+            [_incoming("SOMETHING ELSE")], _recorded(db, seed_user), secu, {},
         )
 
         assert pairing.fresh == [0]
@@ -262,7 +260,7 @@ class TestThePairingWithinASource:
 
         pairing = _pair_group(
             [_incoming("A"), _incoming("B"), _incoming("C")],
-            _recorded(db, seed_user), secu,
+            _recorded(db, seed_user), secu, {},
         )
 
         assert pairing.held == [(0, 0), (1, 1)]
@@ -274,20 +272,20 @@ class TestASourceNamesOneLinePerId:
     """:func:`_held_ids` and :func:`_refuse_moved_ids` -- the door's rule."""
 
     def test_a_held_id_on_ANOTHER_day_is_refused(self, app, db, seed_user):
-        """The shape ``uq_bank_statement_lines_external_id`` refused as a 500."""
+        """A held id stated on another day means a second line under it: refused."""
         secu = ref_cache.statement_source_id(_SECU)
         statement = an_import(seed_user)
         line = a_bank_line(
             seed_user, statement, posted_on=_DAY, amount="-25.00",
             description="COFFEE", sequence_in_group=0,
         )
-        [sighting] = line.sightings
-        sighting.external_id = "FIT-1"
-        db.session.flush()
+        an_id(line, secu, "FIT-1")
         moved = [_incoming("COFFEE", external_id="FIT-1", day=date(2026, 3, 9))]
 
         held = _held_ids(seed_user["account"].id, secu, moved)
-        assert held == {"FIT-1": (_DAY, Decimal("-25.00"))}
+        assert {key: at.group for key, at in held.items()} == {
+            "FIT-1": (_DAY, Decimal("-25.00")),
+        }
         with pytest.raises(StatementLineIdMoved) as caught:
             _refuse_moved_ids(moved, held)
 
@@ -304,9 +302,7 @@ class TestASourceNamesOneLinePerId:
             seed_user, statement, posted_on=_DAY, amount="-25.00",
             description="COFFEE", sequence_in_group=0,
         )
-        [sighting] = line.sightings
-        sighting.external_id = "FIT-1"
-        db.session.flush()
+        an_id(line, secu, "FIT-1")
         again = [_incoming("COFFEE", external_id="FIT-1")]
 
         _refuse_moved_ids(again, _held_ids(seed_user["account"].id, secu, again))
@@ -319,9 +315,7 @@ class TestASourceNamesOneLinePerId:
             seed_user, other, posted_on=_DAY, amount="-25.00",
             description="THEIRS", sequence_in_group=0,
         )
-        [sighting] = line.sightings
-        sighting.external_id = "FIT-1"
-        db.session.flush()
+        an_id(line, other.source_id, "FIT-1")
         ours = [_incoming("OURS", external_id="FIT-1", day=date(2026, 3, 9))]
 
         assert _held_ids(seed_user["account"].id, secu, ours) == {}

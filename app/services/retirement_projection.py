@@ -63,7 +63,7 @@ class RetirementProjectionContext:
     **The read pass is the FIRST of those inputs, and it replaced the bare
     ``user_id`` this bundle used to carry** (plan step C2-f2d-1, ledger row
     **P43**; what the two-pass render cost is stated once, in
-    ``tests/test_arch/test_one_read_pass_per_render.py``).  A producer holding
+    ``tests/test_arch/test_one_read_pass_per_render/``).  A producer holding
     an id could build its own
     :class:`~app.services.balance_at.BalanceContext`, and this module did.
     Carrying the pass rather than the id also removes the id as a second

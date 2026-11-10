@@ -91,8 +91,9 @@ Environment variables read:
     SHEKEL_ALLOW_HOST_DOCKER  ``1`` accepts a daemon that is not rootless.  Shares its
                        spelling with ``tests/test_deploy/conftest.py`` on purpose.
     CI                 Sanctions a daemon that is not rootless, since a CI daemon is a
-                       throwaway nothing observes.  Read through a vocabulary, NOT by
-                       presence: ``CI=false`` must not sanction anything.
+                       throwaway nothing observes, and ``on-ci`` answers ``test.sh`` from it.
+                       Read through a vocabulary, NOT by presence: ``CI=false`` must not
+                       sanction anything (:func:`_on_ci`).
 
 Standard library only: ``test.sh`` runs it before any environment is known to hold more.
 """
@@ -158,17 +159,34 @@ _SOCKET_DIR_BYTES = _SUN_PATH_BYTES - len(f"/{_SOCKET_FILE}".encode())
 # The cluster's settings.  A CENSUS of the deleted shared cluster's, not a selection from
 # it: the compose service ``balance:X-br-4`` removed ran with TEN ``-c`` flags and the
 # per-run branch was first written with THREE, which was survivable while this path was
-# opt-in and is not now that it is the only one.  Three flags here are not from it: the
-# two socket flags are this cluster's own mechanics, and the lock table's size has its own
-# paragraph below.
+# opt-in and is not now that it is the only one.  Each of the ten is carried here or named
+# below as not carried, with why.  Three flags here are not from it: the two socket flags
+# are this cluster's own mechanics, and the lock table's size has its own paragraph below.
 #
-# The three TIMEOUTS are carried because the suite QUOTES one of them as a mechanism.
-# ``tests/_test_helpers.py`` (twice) and three migration tests state that a conflicting DDL
-# "dies on the cluster's 10-second ``lock_timeout``" -- PostgreSQL's default is 0, wait
-# forever, so without the flag that becomes the per-test pytest-timeout naming a timeout
-# instead of a lock, with four docstrings telling the author to expect the other signature.
-# ``statement_timeout`` and ``idle_in_transaction_session_timeout`` come along for the same
-# reason: a runaway is bounded by the cluster, loudly, rather than by the test runner.
+# TWO TIMEOUTS are carried because the suite QUOTES one of them as a mechanism.  Docstrings
+# and comments across ``tests/`` (``git grep lock_timeout tests`` finds them, among others)
+# state that a conflicting DDL dies on, or waits out, the cluster's 10-second
+# ``lock_timeout`` -- PostgreSQL's default is 0, wait forever, so without the flag that
+# becomes the per-test pytest-timeout naming a timeout instead of a lock, with each of them
+# telling the author to expect the other signature.  ``statement_timeout`` comes along for
+# the same reason: a runaway statement is bounded by the cluster, loudly, rather than by
+# the test runner.
+#
+# ``idle_in_transaction_session_timeout`` is DELIBERATELY NOT carried (ruling plan#3027,
+# 2026-11-06), though the shared cluster set it at 30 seconds.  It bounded no runaway: it
+# bounded a connection that was only idle.  A test using the seed fixtures holds a
+# transaction open on their session, since their reads leave it open and any later read of
+# a fixture object opens it again, so that connection sits idle in it whenever the test
+# works elsewhere.  A test 30 seconds past that session's last statement passed and then
+# errored at teardown, the merge queue's CI run 42235790947 refusing PR #673 so.  The error
+# named the connection's idle timeout, never the test or how long it ran, and it came under
+# ``pytest.ini``'s 50-second per-test timeout, which is sized on purpose (ruling R-BI41)
+# and is now the one limit on how long a suite test may sit idle.  A wait on a lock an idle
+# connection holds is still bounded, by ``lock_timeout``.  Neither production compose file
+# sets it, so as far as this repository says production runs PostgreSQL's default, 0.  The
+# rehearsal bench starts its cluster here too and loses the limit with the suite, having
+# relied on nothing it did: its row comparison holds one connection idle in a transaction
+# while it reads the other (``tools/rehearsal/rows.py``, ``compare``).
 #
 # The three ``tcp_keepalives_*`` flags are DELIBERATELY NOT carried, and this is the one
 # place that says so: they configure TCP sockets, and this cluster has none, so they would
@@ -222,7 +240,6 @@ _SOCKET_DIR_BYTES = _SUN_PATH_BYTES - len(f"/{_SOCKET_FILE}".encode())
 # suite no longer fails when one transaction outgrows that ceiling, so it is no alarm for
 # one.
 _SETTINGS = (
-    "idle_in_transaction_session_timeout=30000",
     "lock_timeout=10000",
     "statement_timeout=30000",
     "fsync=off",
@@ -243,8 +260,8 @@ _CALLERS_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 # The rootless daemon's socket, in ``XDG_RUNTIME_DIR``, where ``dockerd-rootless.sh`` makes it.
 _ROOTLESS_SOCKET = "docker.sock"
-# The values of ``CI`` that sanction a daemon that is not rootless (:func:`_sanctioned`).
-_CI_SANCTIONS = frozenset({"1", "true", "TRUE", "True", "yes", "on"})
+# The values of ``CI`` that mean this run is on CI (:func:`_on_ci`).
+_CI_VALUES = frozenset({"1", "true", "TRUE", "True", "yes", "on"})
 # The operator's own sanction, spelled as ``tests/test_deploy/conftest.py`` spells it.
 _HOST_DOCKER_OVERRIDE = "SHEKEL_ALLOW_HOST_DOCKER"
 
@@ -370,18 +387,25 @@ def _endpoint() -> str:
     return f"unix://{rootless}" if rootless.is_socket() else ""
 
 
+def _on_ci() -> bool:
+    """Whether this run is on CI.
+
+    ``CI`` is read through a VOCABULARY, not by presence.  It sanctions a container per run on
+    the daemon that runs PRODUCTION, the heaviest consequence here (:func:`_sanctioned`), and a
+    presence test made ``CI=false`` and ``CI=0`` sanction it.  An unrecognised value is not CI:
+    it cannot be refused as an operator's typo would be, because CI sets it, not the operator.
+    ``test.sh`` asks this too (``on-ci``), whether CI's install has already built the venv,
+    rather than spelling the vocabulary a second time.
+    """
+    return os.environ.get("CI", "") in _CI_VALUES
+
+
 def _sanctioned() -> bool:
     """Whether a container per run may go to a daemon that is not rootless: on CI, whose daemon
     is a throwaway nothing observes, or when the operator sets ``SHEKEL_ALLOW_HOST_DOCKER=1``
     to accept the churn.
-
-    ``CI`` is read through a VOCABULARY, not by presence.  It sanctions a container per run on
-    the daemon that runs PRODUCTION, the heaviest consequence here, and a presence test made
-    ``CI=false`` and ``CI=0`` sanction it.  An unrecognised value sanctions nothing: it cannot
-    be refused as an operator's typo would be, because CI sets it, not the operator.
     """
-    return (os.environ.get("CI", "") in _CI_SANCTIONS
-            or os.environ.get(_HOST_DOCKER_OVERRIDE) == "1")
+    return _on_ci() or os.environ.get(_HOST_DOCKER_OVERRIDE) == "1"
 
 
 def daemon() -> str:
@@ -873,6 +897,16 @@ def _client(args: argparse.Namespace) -> int:
     return 2
 
 
+def _daemon_command() -> int:
+    """Print the daemon a cluster goes to, or name its refusal; the exit status."""
+    try:
+        print(daemon())
+    except ClusterError as exc:
+        print(f"[private_cluster] {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Make a token, start or stop a cluster, or run a client tool in one, as the module says;
     its exit status."""
@@ -881,6 +915,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("token", help="print a new token, to own a cluster by")
     commands.add_parser("daemon", help="print the daemon a cluster goes to, refusing one "
                         "that is not rootless")
+    commands.add_parser("on-ci", help="exit 0 on CI, 1 anywhere else")
     starting = commands.add_parser("start", help="start a cluster owned by a token; print "
                                    "its socket directory, then its container id")
     starting.add_argument("name")
@@ -906,12 +941,9 @@ def main(argv: list[str] | None = None) -> int:
         print(url(args.socket_dir, args.database))
         return 0
     if args.command == "daemon":
-        try:
-            print(daemon())
-        except ClusterError as exc:
-            print(f"[private_cluster] {exc}", file=sys.stderr)
-            return 2
-        return 0
+        return _daemon_command()
+    if args.command == "on-ci":
+        return 0 if _on_ci() else 1
     if args.command == "client":
         return _client(args)
     return _start(args) if args.command == "start" else _stop(args)

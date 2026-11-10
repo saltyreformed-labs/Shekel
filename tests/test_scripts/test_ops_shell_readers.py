@@ -14,8 +14,7 @@ a test until now:
 * ``scripts/restore.sh``'s ``start_app``, whose wait for the app container
   asks it through that same check;
 * ``scripts/reconcile_prod_to_canonical.sh``'s ``extract_env_value`` and
-  ``compose_image_digest``;
-* ``scripts/deploy.sh``'s ``cosign_resolve_digest``.
+  ``compose_image_digest``.
 
 **Neither the reconcile script nor the restore script is run here.**  One
 writes production's ``/opt/docker/shekel`` (a hardcoded ``PROD_ROOT``), the
@@ -40,7 +39,6 @@ _CONTAINER_LIB = _REPO_ROOT / "scripts" / "_container_lib.sh"
 _BACKUP_LIB = _REPO_ROOT / "scripts" / "_backup_lib.sh"
 _RECONCILE = _REPO_ROOT / "scripts" / "reconcile_prod_to_canonical.sh"
 _RESTORE = _REPO_ROOT / "scripts" / "restore.sh"
-_SELF_HOSTED_DEPLOY = _REPO_ROOT / "scripts" / "deploy.sh"
 
 _DIGEST_A = "sha256:" + "a" * 64
 _DIGEST_B = "sha256:" + "b" * 64
@@ -450,29 +448,3 @@ class TestReconcileFindsTheLegacyInlineDigest:
         result = _compose_image_digest(None, tmp_path)
         assert result.returncode == 0, result.stderr
         assert result.stdout == ""
-
-
-class TestTheSelfHostedDeployResolvesItsDigest:
-    """``scripts/deploy.sh``'s ``cosign_resolve_digest``: first line, or empty."""
-
-    @pytest.mark.parametrize(
-        ("answer", "status", "digest"),
-        [
-            (f"{_DIGEST_A}\n", 0, _DIGEST_A),
-            (f"{'a' * 64}\n", 0, _DIGEST_A),
-            (f"{_DIGEST_A}\n{_DIGEST_B}\n", 0, _DIGEST_A),
-            ("", 1, ""),
-        ],
-        ids=["prefixed", "bare-id-gets-the-prefix", "first-line", "failed"],
-    )
-    def test_it_prints_the_image_id(self, tmp_path, answer, status, digest):
-        """A failed inspect is EMPTY with status 0, which the callers refuse."""
-        _fake_docker(tmp_path / "bin", stdout=answer, status=status)
-        result = _bash(
-            'IMAGE_REF=probe:latest; eval "$1"; '
-            'digest=$(cosign_resolve_digest); printf "%s" "$digest"',
-            _function_text(_SELF_HOSTED_DEPLOY, "cosign_resolve_digest"),
-            path_prefix=tmp_path / "bin",
-        )
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == digest, result.stdout

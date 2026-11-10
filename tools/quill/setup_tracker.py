@@ -97,7 +97,7 @@ from tools.quill._board_fields import (
     stores_values,
 )
 from tools.quill._exits import described
-from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD
+from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD, PRIORITY_OPTIONS
 from tools.quill._github import (
     APP_DIR,
     CredentialsError,
@@ -186,7 +186,8 @@ class IssueField:
 #: makes four more when issue fields are switched on, Priority, Effort, Start date and Target
 #: date.  R-BAL348 ruled them deleted, a click on the web that was never made, and on
 #: 2026-10-25 the developer kept them ("I want to use those fields even if they are empty for
-#: now"), so each is declared exactly as the organization held it that day, but Effort.
+#: now"), so each is declared exactly as the organization held it that day, but Effort, and
+#: Priority, which gained On hold (ruling plan#1832).
 #: Priority and Effort (:mod:`_fields`) are quill's to write since plan#2491; Effort counts the
 #: sessions a card's work takes, its options the ones the developer set on the web on
 #: 2026-11-01 (ruling plan#2508; read by GraphQL at 10:42 EST, in this order).  An
@@ -196,7 +197,7 @@ class IssueField:
 #: offers for it.
 ISSUE_FIELDS = {
     ARC_FIELD: IssueField("SINGLE_SELECT", ARCS, "the arcs"),
-    PRIORITY_FIELD: IssueField("SINGLE_SELECT", ("Urgent", "High", "Medium", "Low")),
+    PRIORITY_FIELD: IssueField("SINGLE_SELECT", PRIORITY_OPTIONS),
     "Start date": IssueField("DATE"),
     "Target date": IssueField("DATE"),
     EFFORT_FIELD: IssueField("SINGLE_SELECT", ("1", "2", "3", "4", "5+")),

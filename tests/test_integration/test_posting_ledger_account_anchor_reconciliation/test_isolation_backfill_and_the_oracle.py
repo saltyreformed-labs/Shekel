@@ -14,21 +14,31 @@ from app.enums import LedgerAccountKindEnum, PostingKindEnum, PostingSourceEnum
 from app.extensions import db as _db
 from app.models.account import AccountAnchorHistory
 from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
 from app.services import account_posting_service, posting_service, transfer_service
 from app.services.ledger_lines import account_counter_key, linked_key
+from tests import _ledger_reads
+from tests._ledger_reads import (
+    account_net,
+    correction_net_in_period,
+    linked_key_of,
+    trial_balance,
+)
+from tests._stored_ledger import (
+    ledger_account_of_kind,
+    linked_ledger_account,
+    stored_account_net,
+    stored_trial_balance,
+)
 from tests._ledger_parity import LedgerParityDifference
 from tests._test_helpers import (
-    append_only_guard_lifted,
     an_entered_day,
+    append_only_guard_lifted,
     create_account_of_type,
     create_settled_cash_transaction,
     create_settled_transfer,
     governing_opening_row,
-    ledger_account_of_kind,
-    linked_ledger_account,
     load_migration_module,
     observed_day_of,
     on_both_sides,
@@ -37,10 +47,8 @@ from tests._test_helpers import (
 )
 
 from ._helpers import (
-    _independent_linked_ledger_sum,
     _latest_assertion,
     _independent_post_assertion_source_effect,
-    _trial_balance,
     _assert_account_anchors_reconcile,
     _origin_instant,
     _true_up_at,
@@ -126,12 +134,12 @@ class TestScenarioAndOwnerIsolation:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                checking.id, whatif.id,
+            assert account_net(
+                _db.session, checking.id, whatif.id,
             ) == Decimal("930.00")
             # The baseline is untouched by the fresh scenario's activity.
-            assert posting_service.account_posting_total(
-                checking.id, seed_user["scenario"].id,
+            assert account_net(
+                _db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("1000.00")
             _assert_account_anchors_reconcile(whatif.id)
             # ``restate_account_opening`` writes its row straight to the
@@ -240,8 +248,8 @@ class TestScenarioAndOwnerIsolation:
             # The opening ABSORBS the pre-assertion settle (nothing rides on
             # top of it) while the on-top one reduces the balance:
             # 1000 - 40 = $960.00.
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("960.00")
             _assert_account_anchors_reconcile(scenario_id)
 
@@ -287,11 +295,11 @@ class TestScenarioAndOwnerIsolation:
             assert posting_service.account_posting_total(
                 checking.id, whatif.id,
             ) == Decimal("930.00")
-            assert _independent_linked_ledger_sum(
-                checking.id, baseline.id,
+            assert account_net(
+                _db.session, checking.id, baseline.id,
             ) == Decimal("960.00")
-            assert _independent_linked_ledger_sum(
-                checking.id, whatif.id,
+            assert account_net(
+                _db.session, checking.id, whatif.id,
             ) == Decimal("930.00")
 
             _assert_account_anchors_reconcile(baseline.id)
@@ -332,11 +340,11 @@ class TestScenarioAndOwnerIsolation:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                savings1.id, scenario1,
+            assert account_net(
+                _db.session, savings1.id, scenario1,
             ) == Decimal("340.00")
-            assert posting_service.account_posting_total(
-                savings2.id, scenario2,
+            assert account_net(
+                _db.session, savings2.id, scenario2,
             ) == Decimal("820.00")
             # A Posting has no user_id; ownership is normalized onto the entry.
             assert not hasattr(Posting, "user_id")
@@ -432,16 +440,17 @@ class TestOracleIsNotVacuous:
     def test_tampered_latest_anchor_makes_the_sweep_fail(
         self, app, db, seed_user,
     ):
-        """Forcing the latest anchor balance off its posted value breaks the sweep.
+        """Forcing the latest anchor off its posted value leaves the STORE behind.
 
-        A reconciled $500.00 Savings has linked ledger 500.00 and latest anchor
-        500.00.  Forcing the anchor-history row's balance to 999 via raw SQL
-        leaves the posted ledger at 500.00 but pushes the invariant's RHS to
-        999 + 0 -- so the per-account reconciliation the oracle relies on now
-        FAILS.  Driven through the REAL sweep helper under ``pytest.raises`` (so
-        a regression in the helper itself is caught, not only an inline
-        re-derivation), with ``match`` pinning the anchor comparison message
-        specifically -- the tooth cannot be lost undetected.
+        A reconciled $500.00 Savings has stored linked ledger 500.00 and latest
+        anchor 500.00.  Forcing the anchor-history row's balance to 999 via raw
+        SQL leaves the stored ledger at 500.00 but pushes the invariant's RHS to
+        999 + 0.  A stale stored figure is the store's own state: the worked-out
+        read follows the record, so the anchor comparison holds at 999.00 and the
+        sweep's parity arm is what names the drift.  Driven through the REAL sweep
+        helper under ``pytest.raises``.  This goes with the store;
+        :meth:`test_the_anchor_sweep_catches_a_wrong_read` grades the anchor
+        comparison on the read.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -481,18 +490,79 @@ class TestOracleIsNotVacuous:
                 ), {"i": row_id})
                 db.session.commit()
 
-            # Ledger unchanged (500), but the anchor truth drifted (999) -- the
-            # absolute invariant no longer holds, so the real sweep raises.
-            assert _independent_linked_ledger_sum(
-                savings.id, scenario_id,
-            ) == Decimal("500.00")
+            # Stored ledger unchanged (500), but the anchor truth drifted (999).
+            # ``match`` pins the parity arm's message: the read and the anchor
+            # agree after this tamper, and only the store does not.
+            assert stored_account_net(savings.id, scenario_id) == Decimal("500.00")
+            assert account_net(
+                _db.session, savings.id, scenario_id,
+            ) == Decimal("999.00")
             _, latest_anchor = _latest_assertion(savings.id)
             assert latest_anchor == Decimal("999.00")
+            with pytest.raises(AssertionError, match="parts from the stored one"):
+                _assert_account_anchors_reconcile(scenario_id)
+
+    def test_the_anchor_sweep_catches_a_wrong_read(
+        self, app, db, seed_user, monkeypatch,
+    ):
+        """A read that loses an account's opening fails the anchor comparison.
+
+        A reconciled $500.00 Savings reads ledger 500.00 = latest anchor 500.00 +
+        effect 0.00.  A read dropping every line that names no movement (an
+        opening or a true-up) answers ledger 0.00 with the anchor still 500.00, so
+        the sweep FAILS.  ``match`` pins the anchor comparison message
+        specifically, so a future edit that weakened THAT comparison but left
+        another arm firing cannot keep this test green.
+        """
+        with app.app_context():
+            scenario_id = seed_user["scenario"].id
+            savings = create_account_of_type(
+                seed_user, db.session, "Savings", "Wrong Read Savings",
+                anchor_balance=Decimal("500.00"),
+            )
+            db.session.commit()
+            _assert_account_anchors_reconcile(scenario_id)
+
+            real_read = _ledger_reads.worked_out_lines
+            monkeypatch.setattr(_ledger_reads, "worked_out_lines", lambda *args: [
+                line for line in real_read(*args) if line.movement_id is not None
+            ])
+
+            assert account_net(
+                db.session, savings.id, scenario_id,
+            ) == Decimal("0.00")
             with pytest.raises(AssertionError, match="latest anchor"):
                 _assert_account_anchors_reconcile(scenario_id)
 
-    def test_trial_balance_catches_an_injected_leg(self, app, db, seed_user):
-        """Injecting one extra leg pushes the trial balance off zero.
+    def test_the_trial_balance_catches_a_wrong_read(
+        self, app, db, seed_user, monkeypatch,
+    ):
+        """A read that loses one leg of an opening pushes the trial balance off zero.
+
+        A $500.00 Savings opening books Savings +500.00 and its equity counter
+        -500.00, over the seeded Checking's own pair.  A read dropping every
+        account's counter line leaves only the linked lines: Checking's seeded
+        $1,000.00 + Savings 500.00 = 1,500.00, so the trial-balance ``= 0``
+        assertion is a real check on the read.
+        """
+        with app.app_context():
+            create_account_of_type(
+                seed_user, db.session, "Savings", "Wrong Read Savings",
+                anchor_balance=Decimal("500.00"),
+            )
+            db.session.commit()
+            assert trial_balance(db.session) == Decimal("0.00")
+
+            real_read = _ledger_reads.worked_out_lines
+            monkeypatch.setattr(_ledger_reads, "worked_out_lines", lambda *args: [
+                line for line in real_read(*args)
+                if line.key.kind is LedgerAccountKindEnum.LINKED
+            ])
+
+            assert trial_balance(db.session) == Decimal("1500.00")
+
+    def test_stored_trial_balance_catches_an_injected_leg(self, app, db, seed_user):
+        """Injecting one extra leg pushes the stored trial balance off zero.
 
         A balanced book has trial balance 0.00.  A $500.00 Savings opening posts
         a balanced +500 / -500 pair; inserting one unmatched +50 leg onto its
@@ -509,7 +579,7 @@ class TestOracleIsNotVacuous:
                 anchor_balance=Decimal("500.00"),
             )
             db.session.commit()
-            assert _trial_balance() == Decimal("0.00")
+            assert stored_trial_balance() == Decimal("0.00")
 
             # Inject one extra, unmatched leg onto the opening entry (picked by
             # its correction source).  Flush (not commit) makes it visible; the
@@ -556,8 +626,8 @@ class TestOracleIsNotVacuous:
             })
             _db.session.flush()
 
-            assert _trial_balance() == Decimal("50.00")  # 0.00 + 50.00
-            assert _trial_balance() != Decimal("0.00")
+            assert stored_trial_balance() == Decimal("50.00")  # 0.00 + 50.00
+            assert stored_trial_balance() != Decimal("0.00")
 
             # Discard the injected leg; the deferred trigger never fires.
             _db.session.rollback()
@@ -569,35 +639,15 @@ class TestOracleIsNotVacuous:
 
 
 def _transfer_net_in_period(account_id, scenario_id, period_id) -> Decimal:
-    """Sum an account's transfer-cash LINKED-ledger legs in one pay period.
+    """Return the transfer cash on an account's own line in one pay period.
 
-    The transfer cash on *account_id*'s linked ledger -- entries of the
-    ``transfer_movement`` source, one per side's covering movement since plan
-    step ``balance:X-bi-6-3`` (it read entries carrying a ``transfer_id``
-    while the cash was one entry per transfer) -- scoped to a single
-    ``pay_period_id``, so a settled period move can be checked to have moved
-    the effect (R2): the old period nets to zero and the new period carries
+    Scoped to a single paycheck, so a settled period move can be checked to have
+    moved the effect (R2): the old period nets to zero and the new period carries
     it.
     """
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .select_from(Posting)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(
-            LedgerAccount.account_id == account_id,
-            LedgerAccount.kind_id == ref_cache.ledger_account_kind_id(
-                LedgerAccountKindEnum.LINKED,
-            ),
-            JournalEntry.scenario_id == scenario_id,
-            JournalEntry.pay_period_id == period_id,
-            JournalEntry.source_kind_id == ref_cache.posting_source_id(
-                PostingSourceEnum.TRANSFER_MOVEMENT,
-            ),
-        )
-        .scalar()
+    return correction_net_in_period(
+        _db.session, linked_key_of(_db.session, account_id), scenario_id,
+        PostingSourceEnum.TRANSFER_MOVEMENT, period_id,
     )
 
 
@@ -638,8 +688,8 @@ class TestSettledTransferAttributionMutation:
                 seed_user["bootstrap_period"], amount=Decimal("150.00"),
             )
             db.session.commit()
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("350.00")
             _assert_account_anchors_reconcile(scenario_id)
 
@@ -657,8 +707,8 @@ class TestSettledTransferAttributionMutation:
             assert _transfer_net_in_period(
                 savings.id, scenario_id, period2.id,
             ) == Decimal("150.00")
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("350.00")
             _assert_account_anchors_reconcile(scenario_id)
 
@@ -701,8 +751,8 @@ class TestSettledTransferAttributionMutation:
                 seed_user["bootstrap_period"], amount=Decimal("150.00"),
             )
             db.session.commit()
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("350.00")
             _assert_account_anchors_reconcile(scenario_id)
 
@@ -717,11 +767,11 @@ class TestSettledTransferAttributionMutation:
             db.session.commit()
 
             # Pre-assertion now: absorbed into the openings, nothing on top.
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("200.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             latest_asserted_day, _latest = _latest_assertion(savings.id)
             assert _independent_post_assertion_source_effect(

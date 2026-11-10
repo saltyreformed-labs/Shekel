@@ -673,6 +673,7 @@ class TestARecurringTransferMovedOntoALoan:
         db.session.add(surplus)
         db.session.flush()
         template.recurrence_rule.unit_id = surplus.id
+        template.recurrence_rule.unit_has_day_of_month = surplus.has_day_of_month
         db.session.commit()
         assert stored_cadence(template.recurrence_rule) is None, (
             "precondition: the cadence is unreadable"

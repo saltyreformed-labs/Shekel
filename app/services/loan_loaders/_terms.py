@@ -538,11 +538,37 @@ def load_loan_params(account_id: int) -> LoanParams | None:
         The :class:`LoanParams` row, or ``None`` when the account is not a
         configured loan.
     """
-    return (
-        db.session.query(LoanParams)
-        .filter_by(account_id=account_id)
-        .first()
-    )
+    return load_loans_params([account_id]).get(account_id)
+
+
+def load_loans_params(account_ids: Collection[int]) -> dict[int, LoanParams]:
+    """Load many loan accounts' :class:`LoanParams` rows in one statement.
+
+    :func:`load_loan_params` for many loans, and its one query: the owner's
+    loan walk (:func:`app.services.loan_ledger.walk_loan_ledgers`) reads each
+    loan's terms here, BY THE LOANS' IDS, rather than off
+    ``Account.loan_params`` as the session loaded it -- a relationship already
+    loaded is not re-read by a later query, so an account whose terms were
+    loaded as ``None`` before a ``LoanParams`` row naming it was written by its
+    ``account_id`` (the loan setup route does) would walk to nothing (finding
+    plan#2691).  A query by id reads the row the session holds, its pending
+    write flushed first.  No statement when *account_ids* is empty.
+
+    Args:
+        account_ids: The accounts whose loan parameters to load.
+
+    Returns:
+        ``{account id: its LoanParams}``; an account that is not a configured
+        loan is absent (``account_id`` is unique per row).
+    """
+    if not account_ids:
+        return {}
+    return {
+        params.account_id: params
+        for params in db.session.query(LoanParams)
+        .filter(LoanParams.account_id.in_(account_ids))
+        .all()
+    }
 
 
 def load_all_loan_account_ids() -> list[int]:
@@ -815,12 +841,12 @@ def loan_payment_due_date(
     graded the two equal on all 46 live rules before dropping the column -- so
     this is the same precondition stated over the columns that survive.
 
-    **"Dated from its occurrence" is no longer the same fact** (plan step
-    recurrence:R8-b).  A weekly rule's rows are dated on their occurrences too,
-    while ``scheduling_day_of_month`` answers ``None`` for it: a weekly date is
-    no monthly installment, so such a rule fails this precondition as a
-    pay-period one does, though its rows carry their own dates rather than a
-    payday.
+    **"Dated from its occurrence" is no longer the same fact** (plan steps
+    recurrence:R8-b and R8-c).  The rows of a weekly rule and of one read by its
+    weekday ("the third Tuesday") are dated on their occurrences too, while
+    ``scheduling_day_of_month`` answers ``None`` for both: neither fires on one
+    day of every month, so such a rule fails this precondition as a pay-period
+    one does, though its rows carry their own dates rather than a payday.
 
     The loan payment-transfer flow guarantees it: ``app/routes/loan/
     payment_transfer.py`` derives the cadence through

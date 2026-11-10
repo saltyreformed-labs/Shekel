@@ -282,7 +282,7 @@
      (password rotation, MFA enrol/disable, backup-code regeneration)
      surfaces on top of any standing security CTA.  Visibility is
      computed by the ``inject_security_event_banner`` context
-     processor in app/__init__.py; per-kind copy comes from
+     processor in app/context_processors.py; per-kind copy comes from
      ``KIND_DISPLAY`` in app/utils/security_events.py.  Audit F-091 /
      commit C-16. #}
   {% if security_event_visible %}
@@ -293,14 +293,14 @@
      Rendered before the welcome banner so the security CTA is the
      first non-nav element on the page.  See
      audit F-095 / commit C-12; visibility is computed by the
-     ``inject_mfa_nag_visible`` context processor in app/__init__.py. #}
+     ``inject_mfa_nag_visible`` context processor in app/context_processors.py. #}
   {% if mfa_nag_visible %}
     {% include "dashboard/_mfa_nag.html" %}
   {% endif %}
   {#- --- Tax-law notice (owner; rulings salary:R-SAL74, R-SAL86, R-SAL87) ---
      From November 1, on every owner page until next year's tax law is in
      the app.  ``tax_law_gaps`` is computed by the ``inject_tax_law_notice``
-     context processor in app/__init__.py from app/services/tax_law_alarm.py,
+     context processor in app/context_processors.py from app/services/tax_law_alarm.py,
      the one check the weekly GitHub run, CI's tax-law job and the release
      image's check read too.  The whitespace-trimming markers are what keep
      every page byte-identical to one without this block while the notice is

@@ -6,11 +6,13 @@ moved here, and the one builder of the loan their figures were computed from
 
 from datetime import date
 from decimal import Decimal
+from functools import partial
 
 from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingKindEnum, PostingSourceEnum
 from app.extensions import db as _db
 from app.services.ledger_lines import LedgerLine, linked_key, loan_key, worked_out_lines
+from app.services.pay_calendar import calendar_for
 from tests._test_helpers import create_loan_with_trueup
 
 
@@ -22,7 +24,10 @@ _TODAY = date(2026, 5, 15)
 
 def _read(seed_user):
     """Return the seed owner's worked-out lines in the baseline scenario."""
-    return worked_out_lines(seed_user["user"].id, seed_user["scenario"].id)
+    owner_id = seed_user["user"].id
+    return worked_out_lines(
+        owner_id, seed_user["scenario"].id, partial(calendar_for, owner_id),
+    )
 
 
 def _lines_of(lines, movement_id):

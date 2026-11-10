@@ -147,43 +147,29 @@ def _anatomy_context(profile, period, periods, paychecks):
             :class:`~app.services.pay_calendar.PeriodWindow`.
         paychecks: The pass's
             :class:`~app.services.income_service.ProfilePaychecks` of
-            *profile*: the focused period's breakdown and its predecessor's
-            banner are both read from it.
+            *profile*: the focused period's breakdown is read from it.
 
     Returns:
         A dict with ``profile``, ``focused_period``, ``is_third_paycheck``,
         ``raise_event``, ``composition``, ``line_rows``,
         ``prev_period_id``, and ``next_period_id``.  ``raise_event`` is the
-        run-start-collapsed banner value: the focused period's raw event
-        only when that period STARTS a raise run, else ``""`` -- so the
-        banner marks the paycheck where a raise takes effect rather than
-        repeating on every paycheck of the raise month (P-SA1).
+        focused paycheck's banner as the engine states it: a raise shows on
+        the one paycheck it first reaches (ruling **plan#3092**).  It was
+        collapsed here against the paycheck before it until task plan#3111,
+        when the engine badged every paycheck of a raise's month (P-SA1);
+        that read priced a second paycheck on every anatomy fragment and hid
+        a banner whose label matched the one before it.
     """
     period_ids = [p.period_id for p in periods]
     pos = period_ids.index(period.period_id)
     prev_id = period_ids[pos - 1] if pos > 0 else None
     next_id = period_ids[pos + 1] if pos < len(period_ids) - 1 else None
     breakdown = paychecks.at(period)
-    # Collapse the raise banner to the run's first paycheck: the calculator
-    # badges ``raise_event`` on EVERY period of a raise month, so compare the
-    # focused period against its predecessor's event and show the banner only
-    # on the run start.  The predecessor's banner is the ENGINE's, off the
-    # same pricer (plan step salary:X-av-3a, ruling R-SAL84): it was
-    # ``get_raise_event`` over the profile's rows here, a second walk that
-    # could not see a pay entry replacing a forecast raise.  A memo hit on
-    # the cockpit, which priced the saved schedule already.
-    prev_raise_event = (
-        paychecks.at(periods[pos - 1]).period.raise_event
-        if pos > 0 else None
-    )
-    show_raise = salary_cockpit_service.raise_run_starts(
-        breakdown.period.raise_event, prev_raise_event,
-    )
     return {
         "profile": profile,
         "focused_period": period,
         "is_third_paycheck": breakdown.period.is_third_paycheck,
-        "raise_event": breakdown.period.raise_event if show_raise else "",
+        "raise_event": breakdown.period.raise_event,
         "composition": salary_cockpit_service.build_composition(breakdown),
         "line_rows": salary_cockpit_service.build_line_rows(breakdown),
         "prev_period_id": prev_id,

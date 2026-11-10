@@ -288,6 +288,72 @@ class TestActcDrivesFederalRefund:
         )
 
 
+class TestThe2025WithholdingDocumentsLeaveARefund:
+    """2025 paychecks withhold on Pub 15-T's and the W-4's figures, the return on the law's.
+
+    Ruling plan#3213 (plan step salary:X-at-7): P.L. 119-21 raised 2025's
+    standard deduction to 31,500 jointly (Rev. Proc. 2025-32 sec. 3.01) and
+    its child credit to 2,200, and the IRS left that year's withholding
+    tables on 30,000 (Pub 15-T (2025): line 1g 12,900 + the zero-rate row
+    17,100) and its W-4 on 2,000 a child.  Married filing jointly, NC,
+    4,000.00 a paycheck, 26 paychecks from 2025-01-03, no pay stub and no
+    checkpoint, so every 2025 paycheck is priced by the formulas.  Only the
+    federal side is asserted; the state side is the state's law, unmoved.
+    """
+
+    def _report(self, db, seed_user, children):
+        """The 2025 report of the household with *children* qualifying children."""
+        _committed_profile(
+            seed_user, filing_status_name="married_jointly", pay="4000.00",
+            qualifying_children=children, first_payday=date(2025, 1, 3),
+        )
+        _make_full_year_periods(seed_user["user"], start=date(2025, 1, 3))
+        db.session.commit()
+        return compute_tax_report(seed_user["user"].id, 2025, date(2025, 3, 1))
+
+    def test_no_child_the_new_deduction_is_the_refund(self, app, db, seed_user):
+        """The 1,500 the law added, at 12%, comes back: 179.94.
+
+        Withholding (Pub 15-T 2025, 30,000):
+          annual    = 4000 * 26 = 104,000.00
+          taxable   = 104000 - 30000 = 74,000.00
+          tax       = 23850*0.10 + (74000-23850)*0.12 = 2385.00 + 6018.00 = 8,403.00
+          per check = 8403 / 26 = 323.1923... -> 323.19;  year = 323.19 * 26 = 8,402.94
+        Liability (the return, 31,500):
+          taxable   = 104000 - 31500 = 72,500.00
+          tax       = 2385.00 + (72500-23850)*0.12 = 2385.00 + 5838.00 = 8,223.00
+        Refund = 8402.94 - 8223.00 = 179.94 (1,500 * 12% = 180, less the
+        paychecks' rounding).  On one set of figures for both it would be
+        0.02 (8,223 / 26 = 316.27 a paycheck).
+        """
+        report = self._report(db, seed_user, children=0)
+
+        assert report.withholding.total.gross == Decimal("104000.00")
+        assert report.withholding.total.federal == Decimal("8402.94")
+        assert report.liability.federal.standard_deduction == Decimal("31500.00")
+        assert report.liability.federal.taxable == Decimal("72500.00")
+        assert report.liability.federal.liability == Decimal("8223.00")
+        assert report.refund.federal_refund == Decimal("179.94")
+
+    def test_one_child_the_new_credit_comes_back_too(self, app, db, seed_user):
+        """The deduction's 180 and the credit's 200 come back: 380.02.
+
+        Withholding (30,000 and the W-4's 2,000 a child):
+          per check = (8403 - 2000) / 26 = 6403 / 26 = 246.2692... -> 246.27
+          year      = 246.27 * 26 = 6,403.02
+        Liability (31,500 and the law's 2,200):
+          liability = 8223.00 - 2200.00 = 6,023.00; ACTC 0.00 (credit used in full)
+        Refund = 6403.02 - 6023.00 = 380.02.
+        """
+        report = self._report(db, seed_user, children=1)
+
+        assert report.withholding.total.federal == Decimal("6403.02")
+        assert report.liability.federal.child_credit_amount == Decimal("2200.00")
+        assert report.liability.federal.liability == Decimal("6023.00")
+        assert report.liability.federal.refundable_actc == Decimal("0.00")
+        assert report.refund.federal_refund == Decimal("380.02")
+
+
 # ── Checkpoint: measured differs from modeled ─────────────────────
 
 

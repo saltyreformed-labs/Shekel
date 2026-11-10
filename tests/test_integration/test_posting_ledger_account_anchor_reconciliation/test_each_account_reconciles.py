@@ -12,20 +12,23 @@ import pytest
 from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
 from app.services import account_posting_service, posting_service, status_seam
+from app.services.ledger_lines import account_counter_key
+from tests._ledger_reads import (
+    account_net,
+    ledger_net,
+    linked_key_of,
+    linked_net_by_date,
+    source_lines,
+    source_net,
+)
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
-    ledger_account_of_kind,
-    ledger_net,
-    linked_ledger_account,
     observed_day_of,
 )
 
 from ._helpers import (
-    _independent_linked_ledger_sum,
     _latest_assertion,
     _independent_post_assertion_source_effect,
     _assert_account_anchors_reconcile,
@@ -39,35 +42,24 @@ from ._helpers import (
 def _linked_ledger_sum_as_of(
     account_id: int, scenario_id: int, civil_date,
 ) -> Decimal:
-    """Sum a LINKED ledger's legs on entries dated at or before *civil_date*.
+    """Sum an account's own lines dated at or before *civil_date*.
 
-    The "ledger through an assertion day" reader: every linked-ledger entry --
-    a source OR an anchor correction -- carries an ``entry_date`` equal to the
-    civil day its money moved (a source entry is dated by its movement's own
-    STORED ``settled_on``, through ``_posting_purchases.emit_purchase_deltas``
-    since plan steps ``balance:X-bi-4a`` and ``balance:X-bi-6-3``;
-    corrections take the anchor's observed day), so
-    summing legs with ``entry_date <= civil_date`` reconstructs the ledger as of
-    the END of that civil day -- the ``TestLedgerThroughEachAssertionDay``
-    invariant.  The fixture places every event on a DISTINCT, increasing civil
-    day so each as-of names exactly one state.
+    The "ledger through an assertion day" reader: every line -- a source OR an
+    anchor correction -- carries an ``entry_date`` equal to the civil day its money
+    moved (a movement's own stored ``settled_on``; a correction's anchor's observed
+    day), so summing them reconstructs the ledger as of the END of that civil day
+    -- the ``TestLedgerThroughEachAssertionDay`` invariant.  The fixture places
+    every event on a DISTINCT, increasing civil day so each as-of names exactly one
+    state.
     """
-    return (
-        _db.session.query(
-            _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .select_from(Posting)
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(
-            LedgerAccount.account_id == account_id,
-            LedgerAccount.kind_id == ref_cache.ledger_account_kind_id(
-                LedgerAccountKindEnum.LINKED,
-            ),
-            JournalEntry.scenario_id == scenario_id,
-            JournalEntry.entry_date <= civil_date,
-        )
-        .scalar()
+    return sum(
+        (
+            net for day, net in linked_net_by_date(
+                _db.session, linked_key_of(_db.session, account_id), scenario_id,
+            ).items()
+            if day <= civil_date
+        ),
+        Decimal("0"),
     )
 
 
@@ -126,9 +118,9 @@ class TestAbsoluteInvariantPerAccount:
             latest_asserted_day, latest_anchor = _latest_assertion(savings.id)
             assert latest_anchor == Decimal("350.00")
 
-            # (a) hand-computed literal == independent ledger-table query.
-            assert _independent_linked_ledger_sum(
-                savings.id, scenario_id,
+            # (a) hand-computed literal == the worked-out read.
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("250.00")
             # (b) independent source query == the hand-computed post-assertion
             #     effect (only the T+3h spend rides on top).
@@ -144,11 +136,10 @@ class TestAbsoluteInvariantPerAccount:
             ) == Decimal("-300.00")  # both spends' movements, the ledger-native cash effect
 
             # The equity twin nets -(opening 500 + true-up 50) = -550.00.
-            equity = ledger_account_of_kind(
-                db.session, savings.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
-            )
             assert ledger_net(
-                db.session, equity.id, scenario_id,
+                db.session,
+                account_counter_key(LedgerAccountKindEnum.ANCHOR_EQUITY, savings.id),
+                scenario_id,
             ) == Decimal("-550.00")
 
             _assert_account_anchors_reconcile(scenario_id)
@@ -189,8 +180,8 @@ class TestAbsoluteInvariantPerAccount:
             _true_up_at(savings, "425.00", instant)
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("425.00")
             # The tie source is NOT strictly after the assertion, so nothing
             # rides on top (a strict-< walk would report -75.00 here).
@@ -199,23 +190,12 @@ class TestAbsoluteInvariantPerAccount:
             assert _independent_post_assertion_source_effect(
                 savings.id, scenario_id, latest_asserted_day,
             ) == Decimal("0.00")
-            # The true-up delta was zero (the tie was absorbed): no true-up entry
+            # The true-up delta was zero (the tie was absorbed): no true-up line
             # -- a strict-< walk would have booked one.
-            linked = linked_ledger_account(db.session, savings.id)
-            trueup_source = ref_cache.posting_source_id(
+            assert source_lines(
+                db.session, linked_key_of(db.session, savings.id), scenario_id,
                 PostingSourceEnum.ACCOUNT_TRUEUP,
-            )
-            assert (
-                db.session.query(JournalEntry.id)
-                .join(Posting, Posting.journal_entry_id == JournalEntry.id)
-                .filter(
-                    Posting.ledger_account_id == linked.id,
-                    JournalEntry.scenario_id == scenario_id,
-                    JournalEntry.source_kind_id == trueup_source,
-                )
-                .distinct()
-                .count()
-            ) == 0
+            ) == []
             _assert_account_anchors_reconcile(scenario_id)
 
 
@@ -264,11 +244,11 @@ class TestTransferSourceRidesOnTop:
             )
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("350.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert account_net(
+                _db.session, checking.id, scenario_id,
             ) == Decimal("850.00")
 
             # The independent transfer-branch effect signs each side correctly.
@@ -359,8 +339,8 @@ class TestLedgerThroughEachAssertionDay:
             ) == Decimal("250.00")                      # latest anchor + post
 
             # The final ABSOLUTE total matches, and the sweep ties.
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("250.00")
             _assert_account_anchors_reconcile(scenario_id)
 
@@ -430,8 +410,8 @@ class TestRevertAfterTrueupSelfHeals:
             posting_service.sync_transaction_postings(spend)
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
+            assert account_net(
+                _db.session, savings.id, scenario_id,
             ) == Decimal("250.00")
             # The self-heal re-based the true-up: its walked ledger_before moved
             # 300 -> 500 (the $200 no longer absorbed), so the true-up key's
@@ -439,21 +419,8 @@ class TestRevertAfterTrueupSelfHeals:
             # appended -200.00 balancing delta.  A stale correction left at +50
             # would read the account at 450.00; this pins the re-derivation
             # itself, not merely the total it happens to reach.
-            linked = linked_ledger_account(db.session, savings.id)
-            trueup_source = ref_cache.posting_source_id(
+            assert source_net(
+                db.session, linked_key_of(db.session, savings.id), scenario_id,
                 PostingSourceEnum.ACCOUNT_TRUEUP,
-            )
-            trueup_linked_net = (
-                db.session.query(
-                    _db.func.coalesce(_db.func.sum(Posting.amount), Decimal("0"))
-                )
-                .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-                .filter(
-                    Posting.ledger_account_id == linked.id,
-                    JournalEntry.scenario_id == scenario_id,
-                    JournalEntry.source_kind_id == trueup_source,
-                )
-                .scalar()
-            )
-            assert trueup_linked_net == Decimal("-150.00")
+            ) == Decimal("-150.00")
             _assert_account_anchors_reconcile(scenario_id)

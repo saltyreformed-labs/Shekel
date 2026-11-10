@@ -47,7 +47,10 @@ from datetime import date
 
 from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
 from app.services.pay_calendar import DerivedPeriod
-from app.services.recurrence._nominal_day import cadence_day_of_month
+from app.services.recurrence._month_coordinate import (
+    WeekdayReading,
+    month_coordinate,
+)
 from app.services.recurrence._offer import (
     emits_period_starts,
     fires_on_day_of_month,
@@ -59,16 +62,17 @@ def cadence_scheduled_day(
     placement: PeriodPlacementEnum,
     starts_on: date,
     nominal_day: int | None,
+    weekday_reading: WeekdayReading | None,
 ) -> int | None:
     """Return the day of the month a cadence's generated rows are SCHEDULED on.
 
     **The gate and the join, stated once** -- the body
     :func:`~app.services.recurrence.scheduling_day_of_month` carried until
     plan step ``pay_calendar:C18-a`` moved it here so a resolved value can ask
-    it too.  The day the cadence fires on is
-    :func:`~app.services.recurrence._nominal_day.cadence_day_of_month` (the
-    join of *starts_on*'s day with *nominal_day*, the same join
-    :attr:`~app.services.recurrence.ResolvedRecurrence.day_of_month` reads),
+    it too.  The day the cadence fires on is the fixed day of
+    :func:`~app.services.recurrence._month_coordinate.month_coordinate` (the
+    join of *starts_on* with *nominal_day* and *weekday_reading*, the same join
+    :attr:`~app.services.recurrence.ResolvedRecurrence.month_coordinate` reads),
     gated on the ``(unit, placement)`` PAIR by
     :func:`~app.services.recurrence._offer.fires_on_day_of_month`: a MONTH
     rule funded from a month's first paycheck fires on a day of the month but
@@ -79,7 +83,10 @@ def cadence_scheduled_day(
     **``None`` means "no day of the month", and no longer "dated from the
     paycheck"** (plan step recurrence:R8-b).  A weekly rule answers ``None``
     and its rows are dated on their occurrences; which day a row is due is
-    :func:`date_row`'s question, asked of the unit and the placement.
+    :func:`date_row`'s question, asked of the unit and the placement.  A rule
+    read by its WEEKDAY answers ``None`` too (plan step recurrence:R8-c): the
+    third Tuesday is the 15th in one month and the 21st in another, so there
+    is no one day of the month to name.
 
     Args:
         unit: The cadence unit.
@@ -87,15 +94,23 @@ def cadence_scheduled_day(
         starts_on: The rule's first occurrence.
         nominal_day: The day the rule means when *starts_on*'s month was too
             short to hold it, or ``None``.
+        weekday_reading: How *starts_on* is read by its weekday, or ``None``
+            to read it by its day of the month.
 
     Returns:
         The day 1-31 the cadence's rows are scheduled on, or ``None`` for a
         cadence that schedules on no day of the month: a pay-period or weekly
-        cadence, or a calendar one funded from a later paycheck.
+        cadence, a calendar one funded from a later paycheck, or one read by
+        its weekday.
     """
     if not fires_on_day_of_month(unit, placement):
         return None
-    return cadence_day_of_month(unit, starts_on, nominal_day)
+    coordinate = month_coordinate(
+        unit, starts_on, nominal_day, weekday_reading,
+    )
+    if coordinate is None:
+        return None
+    return coordinate.day_of_month
 
 
 def date_row(

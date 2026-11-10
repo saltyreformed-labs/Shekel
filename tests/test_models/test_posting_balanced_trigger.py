@@ -38,9 +38,9 @@ from app.posting_infrastructure import (
     apply_posting_infrastructure,
     remove_posting_infrastructure,
 )
+from tests._stored_ledger import ledger_accounts_for_account
 from tests._test_helpers import (
     create_account_of_type,
-    ledger_accounts_for_account,
     refused_by_database_rule,
 )
 

@@ -141,8 +141,20 @@ bank_statement_line_table_args = (
     db.UniqueConstraint(
         "id", "account_id", name="uq_bank_statement_lines_id_account",
     ),
-    # THE IDENTITY.  Re-importing an overlapping span cannot duplicate a
-    # line, structurally rather than by the importer remembering to check.
+    # THE IDENTITY, and what it refuses is two WRITERS, not a re-import.
+    # A re-import cannot duplicate a line because the record door reconciles
+    # each ``(posted_on, amount)`` group as a set and mints an ordinal only
+    # for a line it has decided is new (ruling **R-FU**, amended
+    # 2026-08-20; ``statement_import._plan._reconcile``), so a re-import
+    # never reaches this key.  What only this key stops is two writers
+    # recording one account at once: each reads the same group, each mints
+    # its next ordinal (``statement_import.fresh_ordinals``), and the second
+    # insert is refused here instead of one bank line being recorded twice
+    # (ruling **R-BI31**, which orders a feed's syncs of one account behind
+    # its mapping row so a sync never reaches this refusal).  The upload
+    # door takes no such lock, so two uploads of one account at the same
+    # moment do reach it.  It does not give a line a stable address either:
+    # a freed TOP ordinal is minted again (``fresh_ordinals``' docstring).
     db.UniqueConstraint(
         "account_id", "posted_on", "amount", "sequence_in_group",
         name="uq_bank_statement_lines_identity",
@@ -209,18 +221,14 @@ statement_line_sighting_table_args = (
         name="fk_statement_line_sightings_import_account",
         ondelete="CASCADE",
     ),
-    # The lookup the record door makes before it pairs: where THIS SOURCE
-    # already holds each id the file states (``_record._held_ids``).
-    # Partial, because most adapters carry no external id.  **Not
-    # unique, and the line-level index it replaces was**: a re-import
-    # re-sights a line under the same id, which is two rows here and one
-    # line there.  The rule that a source names ONE line per id is the
-    # door's (``_record._refuse_moved_ids``), pinned by its tests.
-    db.Index(
-        "idx_statement_line_sightings_account_external_id",
-        "account_id", "external_id",
-        postgresql_where=db.text("external_id IS NOT NULL"),
-    ),
+    # **No id index here, and no id column** (plan step plan#2232, ruling
+    # **plan#3220**).  A source's own id for a line lives once, in
+    # ``budget.line_source_ids``, whose unique key is the rule that a source
+    # names ONE line per id.  It lived on this row from ``bank_import:X-f6b-1``
+    # under a non-unique index, because a re-import re-sights a line under the
+    # same id -- two rows here, one line -- so the rule could only be the
+    # record door's check.
+    #
     # This sighting's merchant is one of THIS ACCOUNT's, structurally
     # (ruling **R-BI16**; the shape ``fk_bank_statement_lines_merchant_
     # account`` had on the line from ``bank_import:X-gd-1``).  ``MATCH

@@ -116,7 +116,11 @@ The per-paycheck gross -- a RATE, not a share of a year
 ``base_biweekly`` is what the profile's PAY LIST pays on the payday since plan
 step **salary:X-av-3a** (ruling **R-SAL59**): the entry the payday is priced
 from, raised by each forecast raise landing after it, each step rounded at the
-cent (**R-SAL60**).  Until then it was the (post-raise) annual salary divided
+cent (**R-SAL60**).  Since task plan#3100 (ruling **plan#3089**) it is each
+weekday of the paycheck's pay period at the pay in force that day, so a
+paycheck a raise starts inside pays a blend of the two pays and every other
+paycheck pays the rate; the yearly figure is the RATE's (``BasePay.annual``).
+Until then it was the (post-raise) annual salary divided
 by the owner's PAYCHECK COUNT and rounded once, through
 ``payroll_basis.gross_per_paycheck``, which that step deleted with the
 division.  The engine reaches it through ONE read,

@@ -335,7 +335,7 @@ class DerivedPeriod:
         produces.  That heading reaches
         :func:`~app.utils.dates.pay_period_range_label` through
         ``spending_analysis.window_label``
-        (``ledger_report_service._income_statement:111``), which is one call
+        (``ledger_report_service.compute_income_statement``), which is one call
         away rather than the direct one this sentence claimed until plan step
         ``pay_calendar:C4-a-5`` re-checked it; either way the ``<option>`` and
         the heading beside it come from one rule, which is the property that

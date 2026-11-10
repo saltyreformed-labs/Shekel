@@ -33,11 +33,11 @@ from app.services import (
     account_service,
     pay_schedule_service,
 )
+from tests._stored_ledger import stored_linked_ledger_total
 from tests._test_helpers import (
     assert_pay_period_invariants,
     capture_sql_statements,
     last_covered_day,
-    linked_ledger_total,
     mint_fixture_era,
     one_off_row_of,
     open_books_before_the_first_assertion,
@@ -538,9 +538,9 @@ class TestConcurrentAnchorUpdate:
         # with the trial balance still at $0.00 because the anchor-equity leg
         # carries the mirror-image error.  See the class docstring for the
         # measured broken state.
-        assert linked_ledger_total(account_id) == resolved, (
+        assert stored_linked_ledger_total(account_id) == resolved, (
             f"the account's linked ledger sums to "
-            f"{linked_ledger_total(account_id)} while its resolved assertion "
+            f"{stored_linked_ledger_total(account_id)} while its resolved assertion "
             f"is {resolved}; two anchor reconciles interleaved"
         )
 

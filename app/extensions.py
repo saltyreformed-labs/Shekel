@@ -4,10 +4,11 @@ Shekel Budget App -- Flask Extension Instances
 Extensions are instantiated here (without an app) and bound to the
 Flask app inside the create_app() factory.  This avoids circular
 imports: models can import `db` from here without importing the app.
+The rate limiter is the one extension built elsewhere, in
+`app.rate_limits`: what its limits count against reads a service, and a
+service imports this module (ruling plan#3147).
 """
 
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
@@ -91,16 +92,3 @@ login_manager.session_protection = "strong"
 
 # CSRF protection
 csrf = CSRFProtect()
-
-# Rate limiting.  All operational settings (storage backend, default
-# limits, swallow_errors, in-memory fallback, strategy) are intentionally
-# resolved from app.config inside Limiter.init_app(), NOT from constructor
-# arguments here.  Reason: Flask-Limiter 4.x (_extension.py:371-376)
-# preferentially uses the constructor's storage_uri over the value in
-# app.config[ConfigVars.STORAGE_URI], which means a value set here would
-# silently override TestConfig's "memory://" override and ProdConfig's
-# Redis URI.  Keeping the constructor minimal lets each environment
-# (DevConfig / TestConfig / ProdConfig) own its own posture without
-# touching this file.  See audit finding F-034 and remediation Commit
-# C-06.
-limiter = Limiter(key_func=get_remote_address)

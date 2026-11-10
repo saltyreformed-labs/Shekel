@@ -37,9 +37,9 @@ from app.models.account import AccountAnchorHistory
 from app.models.ref import AccountType
 from app.services import account_posting_service
 from app.utils.dates import display_today
+from tests._stored_ledger import ledger_account_of_kind
 from tests._test_helpers import (
     create_account_of_type,
-    ledger_account_of_kind,
     load_migration_module,
 )
 

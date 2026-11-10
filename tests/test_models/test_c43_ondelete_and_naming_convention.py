@@ -558,8 +558,9 @@ class TestRestrictBehavior:
             scenario_id = seed_user["scenario"].id
             db.session.execute(text(
                 "INSERT INTO salary.salary_profiles "
-                "(user_id, scenario_id, filing_status_id, state_code) "
-                "VALUES (:uid, :sid, 1, 'NC')"
+                "(user_id, scenario_id, filing_status_id, state_code, "
+                "period_end_days_before_payday) "
+                "VALUES (:uid, :sid, 1, 'NC', 6)"
             ), {"uid": user_id, "sid": scenario_id})
             db.session.commit()
             try:

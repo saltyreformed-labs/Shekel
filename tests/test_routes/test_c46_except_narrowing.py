@@ -44,6 +44,7 @@ from app.models.ref import (
 from app.models.salary_profile import SalaryProfile
 from app.models.salary_raise import SalaryRaise
 from app.services import account_service
+from tests._stub_period import stub_period_on
 from tests._test_helpers import freeze_today
 from tests.test_routes.test_salary._helpers import _create_profile
 
@@ -107,6 +108,7 @@ class TestSalaryNarrowCatch:
                         "name": "New Profile",
                         "pay_amount": "2884.62",  # $75,000.00 a year / 26
                         "pay_payday": "2026-01-02",  # the first period's payday
+                        **stub_period_on("2026-01-02"),
                         "filing_status_id": filing_status.id,
                         "state_code": "NC",
                     },
@@ -184,8 +186,7 @@ class TestSalaryNarrowCatch:
                     f"/salary/{profile.id}/raises",
                     data={
                         "raise_type_id": raise_type.id,
-                        "effective_month": "7",
-                        "effective_year": "2026",
+                        "effective_date": "2026-07-01",
                         "percentage": "3",
                     },
                     follow_redirects=False,
@@ -214,8 +215,7 @@ class TestSalaryNarrowCatch:
             salary_raise = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=6,
-                effective_year=2026,
+                effective_date=date(2026, 6, 1),
                 percentage=Decimal("0.0300"),
             )
             db.session.add(salary_raise)
@@ -254,8 +254,7 @@ class TestSalaryNarrowCatch:
             salary_raise = SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=6,
-                effective_year=2026,
+                effective_date=date(2026, 6, 1),
                 percentage=Decimal("0.0300"),
             )
             db.session.add(salary_raise)
@@ -270,8 +269,7 @@ class TestSalaryNarrowCatch:
                     f"/salary/raises/{raise_id}/edit",
                     data={
                         "raise_type_id": cola_type.id,
-                        "effective_month": "7",
-                        "effective_year": "2026",
+                        "effective_date": "2026-07-01",
                         "percentage": "5",
                     },
                     follow_redirects=False,
@@ -424,8 +422,13 @@ class TestRegenerateHelperNarrowCatch:
     log entry but the route handler still records them.  **It lives in
     ``app.services.salary_regeneration`` since plan step salary:S3-f-3**
     (ruling **R-SAL24**); the route package's ``_regenerate_salary_transactions``
-    is the adapter that opens the pass and flashes, and the patch below
-    targets the engine call where the catch now is.
+    is the adapter that hands it the door's pass and flashes what it kept
+    (it opened the pass itself until task plan#3106), and the patch below
+    targets the engine call inside the service's ``try``.  A lost version
+    race leaves the service by its own arm since task plan#3126, logged at
+    INFO and never as an error, for the route's conflict handling:
+    ``tests/test_services/test_salary_regeneration.py`` grades that arm, and
+    ``test_the_rails_lost_race`` the rail's race.
     """
 
     def test_helper_logs_sqlalchemy_error_with_profile_id(
@@ -433,9 +436,12 @@ class TestRegenerateHelperNarrowCatch:
     ):
         """Helper logs the profile-id when regenerate raises SQLAlchemyError.
 
-        Patches ``recurrence_engine.regenerate_for_template`` (the
-        only SQLAlchemy-emitting call inside the service's try block)
-        to raise a ``DataError``, then drives the service through
+        Patches ``recurrence_engine.regenerate_for_template`` (one of
+        the two calls inside the service's try block that reach the
+        database: ``GenerationSchedule.for_pass`` derives the pass's
+        calendar there when the door has not read it already, as this
+        POST, which carries no pay-period pair, has not) to raise a
+        ``DataError``, then drives the service through
         ``update_profile``.  The service's ``logger.exception`` must
         emit a record whose message includes the profile id, and the
         outer route's ``except SQLAlchemyError`` block then converts
@@ -518,6 +524,7 @@ class TestNonSqlAlchemyErrorPropagates:
                             "name": "New Profile",
                             "pay_amount": "2884.62",  # $75,000.00 a year / 26
                             "pay_payday": "2026-01-02",  # the first period's payday
+                            **stub_period_on("2026-01-02"),
                             "filing_status_id": filing_status.id,
                             "state_code": "NC",
                         },

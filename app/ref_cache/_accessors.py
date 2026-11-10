@@ -5,7 +5,10 @@ Split out of the flat ``app/ref_cache.py`` at plan step
 every function below stands exactly as it stood, comments and pragmas
 included.  The one addition is that step's own
 :func:`statement_balance_evidence_id`, the twenty-sixth of them.
-:mod:`app.ref_cache` re-exports all of them, so no caller changed.
+:mod:`app.ref_cache` re-exports all of them, so no caller changed.  The
+recurrence vocabulary's six moved to :mod:`._recurrence` when the merge of
+``dev`` into plan step credit_card:CC-6 took this module past pylint's
+1,000-line ceiling, a pure move.
 
 **Every one of them returns an ID and never a ``name``**, which is the
 project-wide invariant these exist to serve: reference tables drive logic by
@@ -24,7 +27,6 @@ from app.enums import (
     AcctCategoryEnum,
     AcctTypeEnum,
     AmountSourceEnum,
-    BusinessDayShiftEnum,
     CalcMethodEnum,
     CardPaymentModeEnum,
     CompoundingFrequencyEnum,
@@ -37,11 +39,9 @@ from app.enums import (
     LedgerAccountKindEnum,
     LoanAnchorSourceEnum,
     MovementFigureSourceEnum,
-    PeriodPlacementEnum,
     PostingKindEnum,
     PostingSourceEnum,
     RaiseTypeEnum,
-    RecurrenceUnitEnum,
     RoleEnum,
     SettledDayBasisEnum,
     StatementBalanceEvidenceEnum,
@@ -184,117 +184,6 @@ def acct_category_member(category_id):
     """
     require_init()
     return cache().enum_members[AcctCategoryEnum].get(category_id)
-
-
-def recurrence_unit_id(member):
-    """Return the integer primary key for a RecurrenceUnitEnum member.
-
-    The first axis of the two-axis recurrence model (redesign step R2): a
-    rule recurs every ``budget.recurrence_rules.interval_n`` units of this
-    kind.  Read by the occurrence engine to branch on the cadence unit via
-    the integer ID, never the string ``name`` -- the project-wide
-    IDs-for-logic invariant.
-
-    Args:
-        member: A ``RecurrenceUnitEnum`` member
-                (e.g. ``RecurrenceUnitEnum.MONTH``).
-
-    Returns:
-        int -- the ``ref.recurrence_units.id`` value.
-
-    Raises:
-        RuntimeError: If the cache has not been initialized.
-        KeyError: If *member* is not a valid RecurrenceUnitEnum member.
-    """
-    require_init()
-    return cache().enum_ids[RecurrenceUnitEnum][member]
-
-
-def period_placement_id(member):
-    """Return the integer primary key for a PeriodPlacementEnum member.
-
-    The rule that carries an occurrence DATE onto the pay PERIOD a Shekel
-    row lives in (redesign step R2) -- the axis today's ``Monthly`` and
-    ``Monthly First`` patterns differ on (they differ on the anchor day as
-    well; see :class:`~app.enums.PeriodPlacementEnum`).  Compared by integer
-    ID, never by the string ``name``.
-
-    Args:
-        member: A ``PeriodPlacementEnum`` member
-                (e.g. ``PeriodPlacementEnum.CONTAINING_DATE``).
-
-    Returns:
-        int -- the ``ref.period_placements.id`` value.
-
-    Raises:
-        RuntimeError: If the cache has not been initialized.
-        KeyError: If *member* is not a valid PeriodPlacementEnum member.
-    """
-    require_init()
-    return cache().enum_ids[PeriodPlacementEnum][member]
-
-
-def business_day_shift_id(member):
-    """Return the integer primary key for a BusinessDayShiftEnum member.
-
-    Whether an occurrence landing on a non-business day moves backward,
-    forward, or stays put (redesign step R2 creates the vocabulary; step R8
-    is the first step a user can choose a value other than ``none``).
-    Compared by integer ID, never by the string ``name``.
-
-    Args:
-        member: A ``BusinessDayShiftEnum`` member
-                (e.g. ``BusinessDayShiftEnum.PRIOR``).
-
-    Returns:
-        int -- the ``ref.business_day_shifts.id`` value.
-
-    Raises:
-        RuntimeError: If the cache has not been initialized.
-        KeyError: If *member* is not a valid BusinessDayShiftEnum member.
-    """
-    require_init()
-    return cache().enum_ids[BusinessDayShiftEnum][member]
-
-
-def business_day_shift_member(shift_id):
-    """Return the BusinessDayShiftEnum member an id names, or ``None``.
-
-    :func:`business_day_shift_id`'s INVERSE, and the only inverse this module
-    carries.  It is here rather than in a domain module because this
-    vocabulary is the one two arcs share (``pay_calendar:R-PC47``): the pay
-    schedule's payday convention and a recurrence rule's cash-date shift are
-    one question of one table, so a second implementation of "which member is
-    this id" would be the drift that ruling exists to prevent.  The recurrence
-    axes that are NOT shared keep their own lookups in
-    ``app.services.recurrence._vocabulary``.
-
-    A linear scan of three members rather than a stored inverse map, for
-    ``modelled_unit``'s reason: the value is resolved when a schedule form is
-    read or written, never per row of a grid.
-
-    ``None`` rather than a raise, because both askers are reading something a
-    user may repair -- a submitted id the form can refuse with a field error,
-    and a stored id an owner can re-answer -- rather than asserting an
-    invariant.
-
-    Args:
-        shift_id: A stored or submitted ``ref.business_day_shifts.id``.
-
-    Returns:
-        The matching ``BusinessDayShiftEnum`` member, or ``None`` -- either
-        because the id is not a row at all, or because it is a row this
-        application does not model.
-
-    Raises:
-        RuntimeError: If the cache has not been initialized.
-    """
-    require_init()
-    ids = cache().enum_ids[BusinessDayShiftEnum]
-    for member in BusinessDayShiftEnum:
-        if ids[member] == shift_id:
-            return member
-    return None
 
 
 def acct_type_icon(type_id):

@@ -18,7 +18,7 @@ Both ledgers are netted per (chart account, paycheck, entry day):
 
 **A chart account is a key and the stored row it is booked on**
 (:class:`ParityChart`, the one home of the rule): a stored leg's is the row it
-sits on, read as stored (:func:`tests._test_helpers.stored_chart_key`, which
+sits on, read as stored (:func:`tests._stored_ledger.stored_chart_key`, which
 repairs nothing); a worked-out line's is its key and the owner's stored row
 for that key, none when the store holds none.  So every stored row is a cell
 of its own, and a row no worked-out key lands on nets against nothing: another
@@ -42,6 +42,7 @@ Underscore-prefixed module name keeps pytest from collecting it.
 
 from collections import defaultdict, namedtuple
 from decimal import Decimal
+from functools import partial
 
 from sqlalchemy import func, or_
 
@@ -49,7 +50,8 @@ from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
 from app.models.scenario import Scenario
 from app.services.ledger_lines import worked_out_lines
-from tests._test_helpers import stored_chart_key
+from app.services.pay_calendar import calendar_for
+from tests._stored_ledger import stored_chart_key
 
 _ZERO = Decimal("0.00")
 
@@ -119,6 +121,11 @@ def assert_ledger_parity(db_session, scenario_id, known=()):
     message names each cell (:func:`_described_parity_difference`); the
     parity test's negative controls force each of its two sections to fire,
     so it is graded code rather than code a green suite never runs.
+
+    A test whose subject is a door's act on the ledger ends on this line: the
+    worked-out read follows the records and cannot see the door's sync, so
+    this is the one assertion there that fails when the sync is deleted.  It
+    goes with the sync (plan#2914).
 
     Args:
         db_session: The test ``db.session``.
@@ -243,7 +250,9 @@ def _worked_out_nets(owner_id, scenario_id, chart):
         ``{(ChartKey, stored row ids, pay_period_id, entry_date): net}``.
     """
     nets = {}
-    for line in worked_out_lines(owner_id, scenario_id):
+    for line in worked_out_lines(
+        owner_id, scenario_id, partial(calendar_for, owner_id),
+    ):
         cell = (
             *chart.worked_account(line.key), line.pay_period_id,
             line.entry_date,

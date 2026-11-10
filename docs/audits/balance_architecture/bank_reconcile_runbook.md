@@ -1,0 +1,665 @@
+# Runbook: the bank reconcile (Checking against SECU)
+
+**STATUS: PERFORMED on production 2026-11-04** (The performance, below). Written 2026-10-31 by
+task plan#2371 of plan step **balance:X-bk-2** (plan#1192); its task plan#2373 rehearsed it on a
+same-day copy, had the developer perform it on production, and re-measured. Its blocks were first
+run end to end on 2026-10-31 against copies of production's dump of 2026-10-30 15:24 (How this was
+rehearsed, below).
+
+## What this is
+
+Checking's books (account 1) disagree with SECU's own record of it on some days of the books
+span, and plan step X-bk-2 reconciles them through the app's own doors, as the owner does
+(ruling **R-BAL196**). **It MOVES MONEY**: it cancels rows and re-dates others. The acts are
+derived, not chosen: `tests/manual/reconcile_act_sheet.py` (task plan#2372) classes every
+movement the disagreement list leaves unanswered, on rulings
+
+* **plan#2343**: a CARD day (a Capital One payment line beside the per-purchase CC Payback rows
+  the app holds on other days) is named and left for step **plan#2348**, after the card
+  cutover;
+* **plan#2359**: a Checking row on neither SECU's nor Capital One's export never moved, so it is
+  cancelled, or deleted where it is a line inside an envelope;
+* **plan#2426**: a row a Capital One charge could be is kept as card spending, and only a row
+  neither export could be is cancelled;
+* **plan#2433**: SECU's 2026-04-22 Van Loan line is held back, because matching it moves the
+  payment onto the day Van Loan's books open, which no door can move; step **plan#2436**
+  performs it;
+* **plan#2439**: a line under a Paid envelope comes off by reopening the envelope, deleting the
+  line, closing it again, and typing back the day it closed on;
+* **plan#2892**: so does a line under an envelope a balance check closed, whose day then reads as
+  typed and which no longer names that balance check. Neither moves any figure (How this was
+  rehearsed, below);
+* **plan#2895**: "never moved" names only what the two exports could not find. The owner confirmed
+  each removal on 2026-11-04: most are copies of a row the bank import added, and the rest are
+  rows he had marked Paid in place of cancelling them.
+
+**Where the figures are (ruling R-BAL249).** This file names every act by its ROLE. Every figure
+to check, every row's name and every place on screen is on the PERFORMANCE SHEET the rehearsal
+writes into the handoff folder, derived from the same-day copy and the two exports. **Perform
+from the sheet of the same day's rehearsal, and from nowhere else.** Each act on it is headed
+`## Act N:` and says where it is (`Where`, the page, and from act 2 on `FIND`, how to reach it on
+screen), what to type (`TYPE`), tick (`TICK`), press (`PRESS`) or delete (`DELETE`), and what the rehearsal saw land
+(`LANDED`).
+
+**Done when** (plan#1192's done test, as rulings plan#2343 and plan#2433 amended it): after the
+acts, on the account's disagreement list, every books day still apart is apart by exactly the
+card items and the held-back act on it, and every other books day agrees. The check below grades
+it on production's copy.
+
+---
+
+## The acts, by role, in the order the rehearsal performs them
+
+| # | act | where | what it answers |
+|---|---|---|---|
+| 1 | **Import** SECU's export | Checking's Import statements page | records the lines only the export holds, so an import covers the books' last day; the owner's standing rules file the swipe lines they answer for |
+| 2.. | **Match** each TIMING pair | the Reconcile page, the line's card, MATCH | a row the app dated otherwise than SECU posted it; the match moves it onto SECU's day |
+| .. | **Match** each TRANSFER line | the same | a Projected transfer SECU paid; the match settles it on SECU's day |
+| .. | **Cancel** each never-moved row | the row's card on Checking's grid | a row neither export holds (plan#2359) |
+| ..23 | **Delete** each never-moved envelope line | the envelope's card on Checking's grid, under Purchases | a purchase line neither export holds; under a Paid envelope, by plan#2439's round trip |
+
+On the dump of 2026-10-30 that is 23 acts: the import, 6 matches (5 TIMING, 1 TRANSFER), 9
+cancels and 7 deletes, with 1 act held back and 60 card items named and left. **A same-day sheet
+can differ**, because the owner keeps using the app: the sheet tool classes every movement by
+the rulings above and refuses, writing no sheet, one it cannot class. Read the sheet's acts
+before act 1 either way.
+
+**Not performed, and graded unmoved**: the card items (plan#2348) and the held-back match
+(plan#2436). The sheet names them in its last two sections, and the rehearsal and the check
+both fail if any act moved one.
+
+---
+
+## Before you start
+
+**1. Get both exports the same day, before the dump.** SECU's Checking history as CSV (the
+running-balance column included) and Capital One's transaction history as CSV, each one download,
+asked for from January 1 of the books' first year through today, both saved into the day's handoff
+folder. The sheet is derived from both, and act 1 imports **that very file** of SECU's: the
+rehearsal and the check know the import by the file's SHA-256, and a download taken again can
+differ in its bytes. **A Capital One file that starts late or stops early turns card spending into
+cancels**: a charge outside the file reads exactly like a charge that never happened. So the SETUP
+block names the two days you asked Capital One for, and the sheet refuses, writing nothing, a row a
+charge could be whose days that download cannot speak for, and a download with a month of no lines
+inside those two days. The refusal says what to do: download again asking from earlier, or on a
+later day. The last days asked do not count, because a charge made on them may not have posted, so
+a row a few days old at the download refuses until they have.
+
+**2. Open the grid once, then change nothing in the app until the after-dump.** The first grid
+or dashboard page loaded after a payday adds a paycheck and fills it from the recurring items
+(`pay_period_rolling.top_up_rolling_window`); opening it before the dump puts those rows in the
+dump, where the rehearsal sees them too. After the dump, **record nothing, import nothing and
+true up no balance** until the after-dump is taken: a balance recorded moves the books span,
+and the check then refuses the copy as one no act sheet describes.
+
+**3. Work in ONE browser tab.** Log out everywhere else first. A second tab holds pages rendered
+before an act, and a save from one posts what it rendered.
+
+**4. Run every block from the checkout holding `card/1192`**, outside `~/projects/Shekel` (a
+checkout inside it loads that folder's `.env`). The harness files are that checkout's, and **its
+tree must hold no change git sees**, no edit and no untracked file git does not ignore: the CODE
+block records its commit beside production's revision and refuses a tree that differs from it,
+and the REHEARSAL, PRE-ACT and POST blocks each stop unless both are still the ones recorded. So
+from the CODE block until the POST block has run, commit, pull or edit nothing in that checkout,
+let no session work in it (quill's own commands commit there), and deploy nothing to production:
+a change after act 1 has the POST block refuse with the money moved. What git ignores is not
+checked: the `.venv` the checkout links to, which other checkouts share, and an ignored `.env`.
+The app the rehearsal and the check run is PRODUCTION's: the CODE block exports the deployed
+revision's `app/` into the handoff folder, and every block runs it from there. The act sheet and the
+disagreement list run that checkout's own `app/`, which the sheet needs: it reads each
+movement's id from the day drill-down, which carries them since task plan#2372. **That
+checkout's models must read production's schema**: measured 2026-10-31, `migrations/` differs
+from the deployed revision's only in comments. A checkout carrying a migration production lacks
+fails the act sheet at its first read, and is not run.
+
+**Since `card/1192` took in `dev` on 2026-11-04, these blocks wait on a release.** The harness now
+imports `login_session_stamps` (plan#2173), which the revision deployed that day lacks, so it stops
+with an `ImportError` on production's `app/`, and `migrations/` holds seven migrations production
+lacks. They run again once production runs a release holding both. Measured that night on copies
+of the performance's two dumps, each migrated by `scripts/init_database.py` as a deploy does: the
+merged tree's own `app/` performed all 18 acts, and its check, its disagreement list and every
+balance came out as the deployed app's had, its sheet differing only in its header line.
+
+First the SETUP block. It only defines names and runs nothing, so it can be pasted again at any
+time; fill in the six values in capitals.
+
+```bash
+D=~/projects/shekel-handoffs/FOLDER    # the day's handoff folder, outside every git checkout
+SECU=SECU_CSV                          # SECU's Checking export in $D, downloaded today (a name, not a path)
+CARD=CAPITAL_ONE_CSV                   # Capital One's export in $D, downloaded today
+CARD_FROM=FIRST_DAY                    # the first day you asked that download for: YYYY-MM-DD
+CARD_THROUGH=LAST_DAY                  # the last day you asked it for: YYYY-MM-DD
+H=CHECKOUT                             # the checkout holding card/1192, outside ~/projects/Shekel
+A=1                                    # the account reconciled: Checking
+B=shekel_xbk2_before                   # the copy the act sheet is derived from; no act touches it
+R=shekel_xbk2_rehearsal                # the copy the rehearsal performs on
+P=shekel_xbk2_performed                # the copy of production after the performance
+U=$(docker exec shekel-dev-db sh -c 'echo "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:5432"')
+psql_dev() { docker exec shekel-dev-db sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -U \"\$POSTGRES_USER\" -d postgres -v ON_ERROR_STOP=1 -c '$1'"; }
+dump_prod() { docker exec shekel-prod-db sh -c 'PGPASSWORD="$(cat /run/secrets/postgres_password)" pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > "$1" &&
+  [ -s "$1" ] || { echo "STOPPED: the dump $1 failed or is empty"; return 1; }; }
+restore() { { psql_dev "DROP DATABASE IF EXISTS $1;" && psql_dev "CREATE DATABASE $1 OWNER shekel_user;" &&
+  docker exec -i shekel-dev-db sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --no-owner --no-privileges -U "$POSTGRES_USER" -d '"$1" < "$2"; } ||
+  { echo "STOPPED: restoring $1 failed"; return 1; }; }
+# Run a harness file on copy $1 with PRODUCTION's app/ ($D/app_$T), or with this checkout's
+# (here); $2 holds only the program's output, and its errors go to $2.err.
+on() { app=$1 db=$2 out=$3; shift 3
+  SECRET_KEY=$(python3 -c 'import secrets;print(secrets.token_hex(32))') LC_ALL=C.UTF-8 LOG_LEVEL=ERROR \
+    PYTHONPATH=$app DATABASE_URL="$U/$db" "$H/.venv/bin/python" "$H/tests/manual/$@" > "$out" 2> "$out.err" && rc=0 || rc=$?
+  cat "$out"; [ $rc -eq 0 ] || tail -n 20 "$out.err"
+  echo "exit $rc  ($*)"; return $rc; }
+prod() { on "$D/app_$T" "$@"; }
+here() { on "$H" "$@"; }
+# The revision production's app runs, as its image names it.
+deployed() { docker inspect shekel-prod-app --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'; }
+# Stops unless git sees no change in $H: no edit, staged or not, and no untracked file it does
+# not ignore.
+clean() { s=$(git -C "$H" status --porcelain --untracked-files=normal) && [ -z "$s" ] ||
+  { printf '%s\n' "$s"; echo "STOPPED: $H holds changes no commit records"; return 1; }; }
+# Stops unless T names a run of today's, and production and $H still run the two revisions its
+# CODE block recorded in revision_$T.txt: production's, then $H's commit.
+same_code() { f="$D/revision_$T.txt"
+  [ "${T%%_*}" = "$(date +%F)" ] || { echo "STOPPED: T=$T is not a run of today's"; return 1; }
+  [ -f "$f" ] || { echo "STOPPED: no $f"; return 1; }
+  [ "$(deployed)" = "$(sed -n 1p "$f")" ] ||
+    { echo "STOPPED: production now runs $(deployed), not the revision rehearsed"; return 1; }
+  clean || return 1
+  [ "$(git -C "$H" rev-parse HEAD)" = "$(sed -n 2p "$f")" ] ||
+    { echo "STOPPED: $H is now at $(git -C "$H" rev-parse HEAD), not the commit rehearsed"; return 1; }
+  echo "SAME CODE: production still runs $(sed -n 1p "$f"), and $H the commit rehearsed"; }
+```
+
+Then the CODE block: it names the run, refuses a checkout `$H` git sees a change in, records the
+deployed revision and `$H`'s commit, exports that revision's `app/`, and takes the dump. **The
+dump is also the performance's backup**, and the REHEARSAL block restoring it is what proves it
+restores.
+
+```bash
+T=$(date +%F_%H%M%S)                   # names every file this run writes
+( set -e -o pipefail
+  [ -d "$D" ] || { echo "STOPPED: no folder $D"; exit 1; }
+  for f in "$SECU" "$CARD"; do [ -f "$D/$f" ] || { echo "STOPPED: no file $D/$f"; exit 1; }; done
+  [ "$(git -C "$H" rev-parse --abbrev-ref HEAD)" = card/1192 ] || { echo "STOPPED: $H is not on card/1192"; exit 1; }
+  clean
+  REV=$(deployed)
+  [ -n "$REV" ] || { echo "STOPPED: the deployed image names no revision"; exit 1; }
+  printf '%s\n%s\n' "$REV" "$(git -C "$H" rev-parse HEAD)" > "$D/revision_$T.txt"   # production's, then the harness's
+  mkdir "$D/app_$T" && git -C "$H" archive "$REV" app | tar -x -C "$D/app_$T"
+  [ -f "$D/app_$T/app/__init__.py" ] || { echo "STOPPED: $REV's app/ was not exported"; exit 1; }
+  dump_prod "$D/prod_$T.dump"
+  echo "CODE AND DUMP TAKEN: production runs $REV"
+)
+```
+
+Then the REHEARSAL block. Its steps run inside `( set -e ... )`, so the FIRST failure stops
+them, says why, and nothing after it runs. Its first, `same_code`, stops unless `T` is today's
+(a CODE block run before midnight is run again) and production and `$H` still run the revisions
+the CODE block recorded. It drops and rebuilds `$B` and `$R`, and nothing else.
+
+```bash
+( set -e
+  same_code
+  restore $B "$D/prod_$T.dump"; restore $R "$D/prod_$T.dump"
+  here $B "$D/act_sheet_$T.out" reconcile_act_sheet.py --clone $B --account $A \
+        --secu "$D/$SECU" --card "$D/$CARD" --card-from "$CARD_FROM" --card-through "$CARD_THROUGH" \
+        --out "$D/act_sheet_$T.json"
+  here $B "$D/disagreements_before_$T.out" measure_bank_disagreements.py --out "$D/disagreements_before_$T.txt"
+  prod $R "$D/rehearsal_$T.out" reconcile_rehearsal.py --clone $R --account $A --acts "$D/act_sheet_$T.json" \
+        --secu "$D/$SECU" --sheet "$D/sheet_$T.md" --snapshot "$D/snapshot_$T.json"
+  prod $R "$D/check_rehearsed_$T.out" reconcile_rehearsal.py --check --clone $R --account $A \
+        --acts "$D/act_sheet_$T.json" --secu "$D/$SECU" --snapshot "$D/snapshot_$T.json"
+  prod $R "$D/baseline_rehearsed_$T.out" verify_balance_baseline.py "$D/baseline_rehearsed_$T.json"
+  here $R "$D/disagreements_rehearsed_$T.out" measure_bank_disagreements.py --out "$D/disagreements_rehearsed_$T.txt"
+  echo "REHEARSED: perform from $D/sheet_$T.md"
+)
+```
+
+**The block must end `REHEARSED`, or the performance does not start**; its last gate is the
+PRE-ACT block, pasted just before act 1 (The acts, below). The act sheet refuses,
+writing nothing, a movement no class takes, a day whose unanswered movements do not add up to
+its residue, an export the import would refuse, a books day the comparison cannot take, and a
+row a charge could be on days Capital One's download cannot speak for. The
+rehearsal refuses a copy named `shekel` before it boots the app, and BEFORE any act a copy on
+which any act's pre-state has moved (the export already imported, a row already matched or no
+longer Paid, a line gone); between the two, the app's development build it boots seeds the
+reference tables. It also refuses an act sheet that holds back a transfer other than the one
+ruling plan#2433 names, or matches a settled transfer no ruling has rehearsed: **once plan#2436
+has performed the Van Loan match,
+`HELD_BACK` in `tests/manual/reconcile_post_state.py` changes with it**. After each act it reads
+the database to see the act LANDED, because the Reconcile page answers a refused card with a
+200; after the last it grades the post-state and the done test. The check is that grading again
+on a READ-ONLY connection, and must end `check complete; every connection was read-only`.
+
+**Read the sheet's header line**: `app` must be `$D/app_$T/app`. A different folder means the
+rehearsal ran some other `app/` than production's.
+
+---
+
+## The stop rules
+
+**Perform every act in ONE sitting, in the sheet's order, and finish each act before the next.**
+
+* **Inside a cancel: a save, then a press.** Between them the row is Projected: its cell shows a
+  check-mark button on hover, and its reopened card a green **Paid** beside the red **Cancel**.
+  **Press neither the check mark nor Paid**: each marks the row Paid again, dated today. Click
+  the row's amount to reopen the card, and press **Cancel**.
+* **Inside a delete under a Paid envelope: four presses.** Between the third (Paid) and the
+  fourth (the day typed back) the envelope stands settled on TODAY for its whole figure; between
+  the first and the third it is Projected, with the same check-mark button not to press, and its
+  card's red **Cancel** not to press either: it cancels the whole envelope.
+* **One Reconcile card per Apply.** The rehearsal applied each card alone, and the receipt then
+  speaks for that one card.
+* **Do not explain anything else on the Reconcile page**, including the lines the sheet leaves
+  for you (below), until the check has passed.
+
+**A refused save wrote nothing, and every save before it stands. Stop and read it, and press
+nothing again**, even where the screen says pressing again goes ahead: no retry is rehearsed.
+It shows as:
+
+* on the import page, a toast at the top right, which hides after five seconds: a RED one (the
+  file refused, with its reason, or "Something went wrong saving this statement"), or a YELLOW
+  one beginning neither "Recorded" nor "Nothing new" (the form refused, such as "Choose a file
+  to import."). "Nothing new" is not a refusal: it recorded the file again (act 1, below);
+* on the Reconcile page, the receipt at the top reading `0 applied, 1 refused` on an amber
+  border; or a RED box at the top with an octagon icon and a sentence, the press refused before
+  it reached any card; or a YELLOW box with a triangle beginning "You pressed OK on", a card
+  OK'd with nothing chosen. A good Apply reads `1 applied` on a green border;
+* on a grid card, NO flash: the card closes as after a good save, and the CELL redraws in red
+  with a small octagon icon, its reason in the cell's tooltip, or in yellow with a small
+  triangle, "This transaction was changed by another action" in its tooltip: the card was
+  opened before a save that landed since. **After every save on a grid card, look at the
+  cell**. A press of Paid or a Status save refused as out of date instead leaves the card
+  OPEN, redrawn under a YELLOW banner with a triangle beginning "Nothing was saved";
+* on deleting a purchase, the purchase still in the Purchases list after the confirm, under a banner
+  in the list: RED with an octagon and the reason, or YELLOW with a triangle saying the entry
+  or the list was changed by another action;
+* anywhere, a press that seems to do nothing at all: a row or line already gone answers "Not
+  found", which the page does not draw.
+
+**If the refused save is the day typed back on a reopened envelope** (a delete's fourth press),
+that envelope stands settled on TODAY: perform no other act, because that remedy has not been
+rehearsed.
+
+---
+
+## Finding things on screen
+
+* **The grid opens on the account Settings > General > Default Grid Account names**, which is
+  Checking on the copies measured. Every cancel and delete is on Checking's grid.
+* **A grid column is a pay period, headed by its first day.** The arrow left of the window
+  ("Show earlier periods") steps back one paycheck at a time; the books span reaches back to
+  March 2026. **Find a row by its column, not by the day on the sheet's heading**: the heading
+  gives the day its money moved, and a row's column is the paycheck it was budgeted in, which
+  can be another. The sheet's `FIND` line names the page: step with the arrows until the
+  paycheck it names is the grid's FIRST column, the page the rehearsal read. On that page it
+  names the row as the grid prints it, which can differ from the act's heading (a recurring row
+  prints its template's name), with the headers above it: the section, and the category where
+  the page holds two rows or more of it, so the headers can differ from page to page. A payback
+  row prints the name of what it pays back, so on the 2026-03-26 page "Groceries" heads a row in
+  the "Family" section and another in the "Credit Card" section.
+* **Clicking a row's amount opens its card**, the full edit. On a Paid row it shows **Status**
+  and **Money moved on**. On a Projected row it shows a green **Paid** and a red **Cancel** on its
+  top row, and Status only under **More options**, which no act here opens: the acts press those
+  two buttons instead. An envelope's card also lists its purchases under **Purchases**, each with
+  its day bought (month/day), its description and its figure (unsigned); under a settled
+  envelope the list shows no delete button (an X icon) and says to set Status to Projected first.
+* **The Reconcile page** is the **Reconcile** button on Checking's Import statements page
+  (Accounts, Checking, **Import statements**). Its tabs are To explain, Explained, Filed by
+  rules, Transfers and Skipped; the sheet's `FIND` line names the card's tab. A card is SECU's
+  line: its day, description and figure, as the act's heading gives them. A card's own tabs
+  name what the line is (MATCH among them); a Transfers card opens on TRANSFER, so click
+  **MATCH**. MATCH lists the rows budgeted in the line's own pay period, each with a checkbox,
+  its name, the days under it and its figure. Its search box ("Search your rows for this
+  account") widens the list to every unexplained row on the account whose name or figure holds
+  what is typed.
+
+---
+
+## The acts
+
+Each act is headed as the sheet heads it.
+
+**First, the moment before act 1, the PRE-ACT block.** Paste the SETUP block if this terminal
+does not still hold it, then the PRE-ACT block with `T` set to the stamp in the name of the sheet
+you perform from, never the terminal's own `T`: a CODE block run again since names a run whose
+sheet you are not performing. A release deployed since the rehearsal leaves the sheet describing
+code production no longer runs, and a change in `$H` would have the POST block refuse after the
+money has moved, so the block reads both revisions again, and refuses a `T` not of today, before
+anything moves. **It must print `SAME CODE`, or the performance does not start.**
+
+```bash
+T=STAMP                                # from the name of the sheet you perform from: sheet_STAMP.md
+same_code
+```
+
+### The import (act 1)
+
+Accounts, Checking, **Import statements**. **Export kind**: *SECU checking -- CSV export*.
+**Statement file**: SECU's export from the handoff folder, the file the sheet names. **Import**.
+
+*Success:* a green toast at the top right beginning "Recorded", whose counts are the ones the
+sheet's act 1 records the rehearsal's toast saying: the new lines, the lines already known, and
+what your standing rules filed. It hides after five seconds; **press Import once**. A second
+press records the file again, as a second import of it adding no line, with a toast beginning
+"Nothing new": stop there, because the check fails a second import (measured, below). *Why:*
+the export holds lines no earlier import recorded, among them the days after the last
+statement, and the done test is read after an import covering the books'
+last day (ruling plan#2343). The rules filing new swipe lines is the import's own act (ruling
+R-GH), and the sheet lists each one.
+
+### A match (TIMING, then TRANSFER)
+
+The Reconcile page, on the tab the sheet's `FIND` line names; find the card of SECU's line by
+the act's heading, open it, and open its **MATCH** tab. Where the sheet says **TYPE** into the
+MATCH tab's search box, the row is not in the line's own pay period: type the figure it gives
+there first, and **do NOT press Enter**: the box sits inside the Apply form, so Enter presses
+Apply. The list changes a moment after you stop typing. The sheet names the row as the tab
+prints it: its name, the days under it, its figure. Then:
+
+* where the sheet says **the page proposes the row, ticked**, check that the ticked row is the
+  one the sheet names and that NO other row is ticked;
+* where it says **TICK the row**, tick that row, and no other.
+
+The tab then reads "These add up. Nothing is left over." **If it shows a difference instead,
+stop**: every match here is an exact pair.
+
+Press the one control the sheet's **PRESS** line names, **once**: the card's **OK** on its
+summary line where the card shows one, else **Match** at the foot of the opened card (a
+Transfers card's summary shows no OK). The two are one box, so a second press of either takes
+the OK back; while it holds, the Apply button counts it ("Apply 1 of the cards you OK'd"), the
+only sign on a Transfers card, whose **Match** shows no pressed state. Press **Apply**. *Success:* the receipt at the top reads `1 applied`. If the page then asks "Should any
+of these stand?", press nothing there: it states a standing rule for the future and moves no
+money.
+
+*Why:* a TIMING pair is a row the app dated otherwise than SECU posted it, and the match moves
+the row onto SECU's day; a TRANSFER line is a Projected transfer SECU paid, and the match settles
+it on SECU's day.
+
+### A cancel
+
+`FIND` it on Checking's grid. Click its amount, set **Status** to **Projected**, **Save**. The
+card closes and the cell shows a check-mark button: **do NOT press it**. Click the amount again,
+and press the red **Cancel** on the card's top row, **not** the green **Paid** beside it.
+
+*Success:* the grid reloads, and the row's cell is gone from its column (the grid draws no
+Cancelled row). *Why:* neither export holds it, so its money never moved (ruling plan#2359); the
+Cancel door takes only a Projected row, so a Paid row goes back to Projected first.
+
+### A delete
+
+`FIND` the envelope on Checking's grid and click its amount.
+
+* **Under a Paid envelope** (the sheet's act says TYPE Status: Projected first): set **Status**
+  to **Projected**, **Save**; click the amount again. Under **Purchases**, delete the purchase the
+  sheet names with its X icon, and confirm "Delete this entry?". Click the amount again and press
+  the green **Paid** on the card's top row, **not** the red **Cancel** beside it; the cell
+  redraws as settled. Click the amount again, set **Money moved on** to the day the sheet gives,
+  **Save**.
+* **Under an envelope still Projected**: delete the purchase the sheet names with its X icon, and
+  confirm.
+
+*Success:* the purchase is gone from the list, and a reopened envelope reads Paid with Money
+moved on the sheet's day. *Why:* the line is a purchase neither export holds (ruling plan#2359),
+and under a Paid envelope it comes off by ruling plan#2439's round trip: measured 2026-10-31,
+with the day typed back it ends exactly where a delete of the line alone does, and moves no other
+line. An envelope a balance check closed ends there too but for two records (ruling plan#2892): its
+day reads as typed, and it no longer names that balance check.
+
+---
+
+## What the sheet leaves for you
+
+**Lines past the books' last day.** The import records SECU's lines up to the export's last day,
+and the books end at the latest balance's day, so some new lines are no act's. The sheet lists
+them under "Left for you on the Reconcile page" (4 on the dump of 2026-10-30). Explain them as
+any reconcile is explained, **after** the check has passed.
+
+---
+
+## After: what to check
+
+**On the rehearsal (before anyone clicks)**, the REHEARSAL block has written, beside the sheet:
+the check of the rehearsed copy, the disagreement list before (`disagreements_before_$T.txt`)
+and after (`disagreements_rehearsed_$T.txt`), and every balance figure after
+(`baseline_rehearsed_$T.json`). The list after shows the books span apart only on the days the
+sheet's last two sections name.
+
+**On production, after the last act (the same day as the rehearsal).** Paste the SETUP block if
+this terminal does not still hold it, set `T` to the stamp in the rehearsal's sheet name, then
+paste the POST block. Its first step, `same_code`, stops unless `T` is today's and production
+and `$H` still run the revisions the CODE block recorded. It compares against FILES the
+rehearsal wrote, never a live copy, and rebuilds `$P` only.
+
+```bash
+T=STAMP                                # from the sheet name of the rehearsal: sheet_STAMP.md
+( set -e
+  same_code
+  for f in act_sheet_$T.json sheet_$T.md snapshot_$T.json check_rehearsed_$T.out \
+           baseline_rehearsed_$T.json disagreements_rehearsed_$T.txt; do
+    [ -f "$D/$f" ] || { echo "STOPPED: no $f in $D"; exit 1; }; done
+  [ "$(tail -n 1 "$D/check_rehearsed_$T.out")" = "check complete; every connection was read-only" ] ||
+    { echo "STOPPED: the rehearsed copy's check did not complete"; exit 1; }
+  dump_prod "$D/prod_after_$T.dump"
+  restore $P "$D/prod_after_$T.dump"
+  prod $P "$D/check_performed_$T.out" reconcile_rehearsal.py --check --clone $P --account $A \
+        --acts "$D/act_sheet_$T.json" --secu "$D/$SECU" --snapshot "$D/snapshot_$T.json" || true
+  prod $P "$D/baseline_performed_$T.out" verify_balance_baseline.py "$D/baseline_performed_$T.json"
+  here $P "$D/disagreements_performed_$T.out" measure_bank_disagreements.py --out "$D/disagreements_performed_$T.txt"
+  if diff "$D/check_rehearsed_$T.out" "$D/check_performed_$T.out"; then echo "CHECK AS REHEARSED"
+  else echo "CHECK DIFFERS (above)"; fi
+  if cmp "$D/baseline_rehearsed_$T.json" "$D/baseline_performed_$T.json"; then echo "EVERY BALANCE AS REHEARSED"
+  else echo "BALANCES DIFFER: compare the two JSON files"; fi
+  if diff <(tail -n +4 "$D/disagreements_rehearsed_$T.txt") <(tail -n +4 "$D/disagreements_performed_$T.txt")
+  then echo "DISAGREEMENTS AS REHEARSED"; else echo "DISAGREEMENTS DIFFER (above)"; fi
+)
+```
+
+**All three "AS REHEARSED" lines should print.** The check runs before the two measurements
+because those boot the app's development build, which seeds the reference tables at boot; the
+check opens the copy read-only first.
+
+* **The CHECK** grades the post-state on production's copy: every act's own arm again (the
+  import by its digest, imported once, each match, each Cancelled row, each envelope as it
+  stood with only its line gone, and a reopened envelope's day reading as typed with no link to a
+  balance check), every card item and the held-back act unmoved since the
+  snapshot (a movement's day, figure and match; a line's match), and the done test. A failing
+  arm prints a `FAILED:` line naming its act and the row, line or envelope, and so does an arm
+  whose row or envelope is gone. `CHECK DIFFERS` with no `FAILED:` line is either the act
+  markers' count that moved (the `precondition:` line), read beside the other two lines, or the
+  check grading nothing: its refusal, or the error it stopped on, is printed just above its
+  `exit` line. Its passing output names no database, time or id, so two copies of the same acts
+  print it identically.
+* **The BALANCES** compare every figure the balance seam answers, for every account, with the
+  rehearsed copy's: two copies on which the same acts were performed hold the same balances
+  (measured, below). A difference names the account where money departed from the rehearsal: a
+  check mark pressed, a skipped act, or a change made in the app after the dump. **It cannot
+  see a day typed back wrong on a reopened envelope**: that day moves no money, because the
+  envelope's purchases carry their own days, so only the CHECK names it (measured, below).
+* **The DISAGREEMENTS** compare the list after, below its three header lines (the title, the
+  database and the time written), with the rehearsed copy's. It sees only the days the list
+  compares, which end at the export's last day; a row settled TODAY by a pressed check mark is
+  past them (measured, below).
+
+**None of the three grades what moves no money and no act names**, such as a name, category or
+note changed on a card while an act holds its row Projected, a figure, pay period or due day
+changed on a row that ends Cancelled, the held-back transfer's planned figure (once it is Paid,
+its money is the figure it settled at, which the check grades), or a standing rule stated in
+"Should any of these stand?", which the match section says to leave. The check reads only what
+the acts change, and the balances and the list compare figures.
+
+A failed line is read before anything else is done. **No remedy is rehearsed**: report what
+failed, with the three outputs, before performing anything more.
+
+---
+
+## What this does NOT do
+
+* **The card days stay apart** until step plan#2348 reconciles them through the card account,
+  after the card cutover (ruling plan#2343); its done test is `SpanAgreement.reconciles` over the
+  whole span.
+* **2026-04-22 and 2026-04-23 stay apart by the Van Loan payment** until step plan#2436 lets the
+  loan's books open earlier and performs that match (ruling plan#2433).
+* **This card's own code is not what the owner performs on.** The rehearsal and the check run
+  production's `app/`, as deployed; the Reconcile page's refusal of Done while records run past
+  the last statement (ruling plan#2346, finding BAL-651) ships with plan#1192's pull request.
+* **The lines past the books' last day** are left for the owner, above.
+
+---
+
+## The performance
+
+**2026-11-04, 21:52 to 22:06 EST, by the owner through the app**, from the sheet of the run stamped
+`2026-11-04_212658`, with production at `fc9dcfba7` and the harness at `fbaa90a25`: 18 acts, being
+the import (import 14), 1 match (transfer 328), 9 cancels and 7 deletes. The acts differ from the
+dump of 2026-10-30 because the owner's reconcile of 2026-10-31 had already answered its 5 timing
+pairs. The POST block printed `SAME CODE` and all three "AS REHEARSED" lines: the check's output and
+the list as rehearsed, and the balance file byte-identical. On Checking's 220 books days the list
+went from 40 disagreeing to 30, each apart by exactly the card items (plan#2348) and the held-back
+act (plan#2436) on it. Two days past the latest balance are set apart, and one disagrees, by the
+line the sheet leaves for the owner. The two dumps and every output are in the handoff folder
+`balance-2026-11-04/xbk2/`.
+
+---
+
+## How this was rehearsed
+
+Through production's own doors (`fc9dcfba7`, the deployed revision), on restores of production's
+dump of 2026-10-30 15:24, by `tests/manual/reconcile_rehearsal.py` (task plan#2414: each act
+fetches the page the owner opens, changes only what the owner types, and submits the rest as
+rendered; the post-state and the check, task plan#2416). Its door-driving half is
+`tests/manual/door_rehearsal.py`, from the account-10 repair's retired rehearsal.
+
+* **2026-10-31**, the whole act sheet: the import and all 22 non-card acts landed, the post-state
+  held, and the done test held, with 30 books days still apart, each by exactly the card items
+  and the held-back act on it. The read-only check of that copy completed.
+* **2026-10-31 08:52, this file's own blocks**, extracted verbatim and run under zsh from
+  `card/1192`, with two stand-ins for production's dumps: the CODE block's dump was the dump of
+  2026-10-30, and the POST block's after-dump was a dump of a copy the rehearsal had performed
+  every act on earlier that day, standing in for the owner's performance. Every step exited 0;
+  the block printed `REHEARSED`, `SAME CODE`, and all three "AS REHEARSED" lines, so two copies
+  rehearsed apart hold the same check output, the same balances byte for byte, and the same
+  list. The sheet's acts were the earlier run's, act for act. **Two controls, each through the
+  owner's own doors on a restore of that after-dump, then the POST block's three comparisons**:
+  an envelope's day typed back one day early failed the check on that envelope alone, and moved
+  neither the balances nor the list; and a cancelled row set back to Projected with its check
+  mark pressed (Paid, today) failed the check on that cancel and the balances on Checking, and
+  did not move the list.
+* **2026-10-31, the buttons a Projected row's card shows** (task plan#2451): the card folds
+  Status under More options and shows a green Paid and a red Cancel instead, so each cancel's
+  second press and each Paid envelope's re-close are made by those buttons. On a fresh restore of
+  the same dump, the whole act sheet so performed printed the earlier rehearsal's check output
+  exactly, and every balance figure was byte-identical to its baseline.
+* **2026-10-31, the MATCH tab the owner opens** (task plan#2455): each match opens its card's
+  MATCH tab as the browser loads it, the line's own pay period, rather than the page's
+  every-row render (`?open=`), and OKs the card by the press the card renders: OK on each To
+  explain card's summary, Match at the foot of the Transfers card, whose summary shows none.
+  Every act's row was in its line's own pay period; the held-back match's row is not, and
+  reaching it (never applying it) typed the line's figure into the search and found it. On a
+  fresh restore of the same dump, the whole act sheet so performed printed plan#2451's check
+  output exactly, and every balance figure was byte-identical to its baseline.
+* **2026-10-31, the row the grid prints** (task plan#2452): each cancel's and delete's `FIND`
+  line names the grid page whose first column is the row's, and the row as that page prints
+  it, with its section. Of the sixteen rows, two print otherwise than the act sheet names them
+  ("Kayla" is "Kayla's Spending Money", the template's name; "Vitamins " is "Vitamins"), and on
+  nine of the sixteen pages a payback row in the "Credit Card" section shares the row's label.
+  On a fresh restore of the same dump, the whole act sheet so performed printed plan#2451's
+  check output exactly, and every balance figure was byte-identical to its baseline.
+* **2026-10-31 14:39, both revisions read again** (task plan#2453): the CODE block records
+  `$H`'s commit only from a tree git sees no change in, and the REHEARSAL, PRE-ACT and POST
+  blocks each read both revisions again through `same_code`. The five blocks, extracted verbatim
+  and run in an interactive zsh against a clone of `card/1192` holding this change as a commit
+  (the CODE block refused the checkout itself, which held it uncommitted), with two stand-ins
+  for production's dumps: the CODE block's dump was the dump of 2026-10-30, and the POST
+  block's after-dump was a dump of the rehearsed copy itself, so its three comparisons compared
+  that copy with itself and show only that the POST block runs to them (the 08:52 run above
+  compared two copies rehearsed apart). They printed `REHEARSED`, `SAME CODE` at the
+  REHEARSAL, PRE-ACT and POST blocks, and all three "AS REHEARSED" lines, every harness step
+  exiting 0; the rehearsal left the clone with no change git sees. Each refusal fired and wrote
+  nothing: an unstaged edit and an untracked file at the CODE block; a staged edit, and a
+  commit made after the rehearsal, at the PRE-ACT block; that commit at the POST block, before
+  its after-dump; and at the PRE-ACT block, a revision file naming a production revision other
+  than the deployed one, a `T` of another day, the block pasted with `STAMP` not filled in, a
+  `T` with no revision file, and the stamp of an earlier rehearsal whose recorded harness
+  commit was not the clone's.
+* **2026-10-31, what the check cannot read** (task plan#2454), on restores of the 14:39 run's
+  dumps with its act sheet, and a snapshot this task's harness wrote of the same dump (it keys
+  a card or held-back line by its place on the sheet, and the 14:39 snapshot, keyed by line
+  id, now fails 30 arms rather than passing them ungraded): the same export imported a second
+  time through the import door (a toast beginning "Nothing new", and a second import of the
+  file); a cancelled
+  row deleted outright from the performed copy, then an envelope too; and an act sheet whose
+  card payment line carries no id, as a line only the new export holds does, though this one
+  was recorded already and was found by its day, figure and description. Before this task
+  the check raised on the second import (`MultipleResultsFound`) and on the gone row
+  (`AttributeError`), and the rehearsal on the id-less line (`MultipleResultsFound`, in the
+  snapshot before act 1), none printing a `FAILED:` line. After it, the check printed `FAILED:`
+  lines naming the two imports, the gone row and the gone envelope, and the id-less line
+  rehearsed and checked clean. The whole act sheet rehearsed again printed the 14:39 run's
+  check output exactly, every balance figure byte-identical, on a sheet differing only in its
+  header and in act 1's Export kind, now the words its select shows.
+* **2026-10-31, the held-back transfer's figure** (task plan#2463): the check read a
+  movement's figure off its own record, and a transfer side's record holds none (its transfer
+  stores what moved), so the held-back act's movement stood in the snapshot with no figure and
+  the arm calling it unmoved never graded its money. The check reads the figure the balance walk
+  books now, signed as the act sheet gives it, and each of the snapshot's 47 movements carries
+  the sheet's own day and figure. On restores of the 14:39 run's dumps, with the act sheet
+  derived again (it differed from that run's only in its database and time), the whole act sheet
+  rehearsed again printed the 14:39 run's check output exactly, and so did the check of the
+  after-dump. On a restore of the after-dump with the transfer's settled figure a cent higher
+  (written in the database; the owner's door is the full edit's figure correction), the check
+  printed a `FAILED:` line naming that movement beside the done test's on 2026-04-23, the
+  balances differed on Checking and Van Loan, and the list on 2026-04-23; before this task the
+  check printed the done test's line alone. Its planned figure a cent higher moved no money, and
+  none of the three saw it. A snapshot an earlier harness commit wrote holds each figure
+  unsigned, so it now fails every movement's arm: on the rehearsed copy, 47 arms for one
+  plan#2454's commit wrote, and 77 for the 14:39 run's (the 30 above among them). The blocks
+  never meet one: `same_code` holds `$H` at the commit that wrote the day's snapshot.
+* **2026-10-31 16:03, the five blocks and the two controls again on the changed harness** (task
+  plan#2457, after plan#2451, plan#2455, plan#2452, plan#2453, plan#2454 and plan#2463): the
+  five blocks, extracted verbatim and run in an interactive zsh from `card/1192` itself, its
+  tree clean at the task's start commit, with the 08:52 run's two stand-ins: the CODE block's
+  dump was the dump of 2026-10-30, and the POST block's after-dump was a dump of a second copy
+  the rehearsal performed every act on apart, standing in for the owner's performance. Every
+  step of the blocks exited 0; they printed `REHEARSED`, `SAME CODE` at the REHEARSAL, PRE-ACT
+  and POST blocks, and all three "AS REHEARSED" lines, and neither they nor the controls left
+  a change git sees in the checkout. The act sheet was the 14:39 run's but for its
+  database and time, and the rehearsed copy's check output and every balance figure were the
+  14:39 run's exactly. The 08:52 run's two controls, each through the owner's own doors on a
+  fresh restore of that after-dump and then the POST block's three comparisons, printed the
+  08:52 controls' check output byte for byte, with the same three verdicts: envelope 2281's day
+  typed back one day early failed the check on that envelope alone and moved neither the
+  balances nor the list; row 1299, cancelled, set back to Projected and its check mark pressed
+  on the grid (Paid, today) failed the check on that cancel and the balances on Checking alone,
+  at the same 837 figures, and did not move the list.
+* **2026-11-04, how far Capital One's download reaches** (task plan#2891): on a restore of
+  production's dump of 2026-10-30, with that day's two exports. Before this task that card file,
+  cut to begin at the earliest payment credit the sheet names, wrote a sheet, exit 0, with 5 rows
+  more to cancel than the whole file, and nothing on it said so. After it, that cut file asked for
+  from that day was refused on 22 rows, the 5 among them; said to be asked for from January 1, it
+  was refused on its 98 days with no line; and a file with no line was refused. The whole file,
+  asked for through the day it was downloaded, wrote the same sheet as before this task but for
+  its stamps and the two new lines naming the file's digest and what was asked for. Its last line
+  is 8 days before that download only because the card was quiet, as the download of 2026-11-04
+  shows. Said to be asked for only through 10-20, it was refused on 4 rows: 1 to cancel and 3 kept
+  as card spending. Hand-built rows through the same functions: a row whose charge has not posted,
+  with a later credit on file, was refused until its days were past the 5 days allowed for
+  posting; a row past the edge that took the charge another row needed was refused, which stops
+  the sheet that would have cancelled that other row; and a row that moved money in was not held.
+  **Not
+  graded**: a shorter hole inside one download's span, a payment credit past the edge, SECU's
+  own tail, and what the owner says was asked for beyond the month the lines are held to.
+* **2026-11-04, an envelope a balance check closed** (task plan#2894, ruling plan#2892): on a restore
+  of production's dump of that evening, whose owner's balance check of 10-31 had closed the
+  envelope holding the last delete. The round trip ended it on the same status and day, its day
+  reading as typed instead of as set at a balance check, and with no link to that balance check.
+  On a second copy with those two put back by hand, all 10 accounts, 536 grid cells and 7,504
+  daily balances were byte-identical, and so was the disagreement list; the seven pages compared
+  differed only in security tokens and, on the grid, in the order of that envelope's purchases made
+  on one day, which the second copy's restore reshuffled (step plan#2289). The check now
+  grades a reopened envelope as the round trip leaves it. Two controls on the performed copy, each
+  written in the database: the day a day early, and the retype skipped (today's day, as Paid writes
+  it), each failed the check on that envelope; put back, it completed.
+* **Two measured traps the harness answers**: the rate limiter answered the rehearsal's 31st
+  full-edit open inside a minute with a 429 (a person's pace never reaches it, and the rehearsal
+  turns it off: `door_rehearsal.connect`), and the Reconcile page answers a refused card with a
+  200 (the rehearsal reads the database after every act).

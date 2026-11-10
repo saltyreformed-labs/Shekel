@@ -52,6 +52,7 @@ def _make_profile(seed_user, *, state_code="NC", filing_status_name="single"):
         db.session.query(FilingStatus).filter_by(name=filing_status_name).one()
     )
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         name="Test Profile",

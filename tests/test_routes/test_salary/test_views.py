@@ -5,6 +5,7 @@ Split from ``tests/test_routes/test_salary.py`` by ``tools/split`` (ruling R-BAL
 """
 
 import re
+from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
@@ -235,7 +236,7 @@ class TestDeductionFrequencyDisplay:
                     ref_cache.period_placement_id(PeriodPlacementEnum.CONTAINING_DATE),
                 ),
                 "max-per-month": "2",
-                "starts-on": "2026-01-02", "nominal-day": "",
+                "starts-on": "2026-01-02", "repeats-on": "",
                 "end-mode": "never", "end-date": "", "max-occurrences": "",
             }
 
@@ -312,16 +313,17 @@ class TestBreakdown:
             assert b"Day Job" in response.data
             assert b"Annual Salary" in response.data
 
-    def test_projection_collapses_raise_badge_to_run_start(
+    def test_projection_badges_a_raise_on_the_first_paycheck_it_reaches(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """The ledger badges a raise only on the paycheck where it takes effect.
+        """The ledger badges a raise only on the paycheck it first reaches.
 
-        A MERIT raise effective March 2026 badges BOTH March paychecks
-        (seed_periods[5] on 2026-03-13 and [6] on 2026-03-27; the calculator
-        marks every period of the raise month).  The projection ledger shows
-        the sal-badge-raise exactly once -- on the run start (period 5) -- not
-        again on the continuation (period 6) (P-SA1, projection surface).
+        A MERIT raise from 2026-03-01 first reaches seed_periods[5]
+        (2026-03-13, paying 02-22..03-07); [6] (2026-03-27) is paid wholly
+        after it.  The engine badges [5] alone (ruling plan#3092), so the
+        ledger shows the sal-badge-raise exactly once.  The ledger collapsed
+        a run of equal labels itself until task plan#3111, when the engine
+        badged both March paychecks (P-SA1, projection surface).
         """
         with app.app_context():
             profile = _create_profile(seed_user)
@@ -329,8 +331,7 @@ class TestBreakdown:
             db.session.add(SalaryRaise(
                 salary_profile_id=profile.id,
                 raise_type_id=raise_type.id,
-                effective_month=3,
-                effective_year=2026,
+                effective_date=date(2026, 3, 1),
                 percentage=Decimal("0.0250"),
             ))
             db.session.commit()
@@ -338,9 +339,36 @@ class TestBreakdown:
             response = auth_client.get(f"/salary/{profile.id}/projection")
             assert response.status_code == 200
             html = response.data.decode()
-            # Exactly one raise badge: the run start, not every March paycheck.
+            # Exactly one raise badge: the first paycheck, not every March one.
             assert html.count("sal-badge-raise") == 1
             assert "Merit +2.5%" in html
+
+    def test_projection_badges_each_of_two_equal_raises(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """Two 2.5% merit raises, from 03-01 and 03-15: two badges, 03-13 and 03-27.
+
+        Each first reaches its own paycheck, so the ledger badges both; the
+        run-start filter this replaced (task plan#3111) badged the first
+        alone.
+        """
+        with app.app_context():
+            profile = _create_profile(seed_user)
+            raise_type = db.session.query(RaiseType).filter_by(name="merit").one()
+            for day in (date(2026, 3, 1), date(2026, 3, 15)):
+                db.session.add(SalaryRaise(
+                    salary_profile_id=profile.id,
+                    raise_type_id=raise_type.id,
+                    effective_date=day,
+                    percentage=Decimal("0.0250"),
+                ))
+            db.session.commit()
+
+            response = auth_client.get(f"/salary/{profile.id}/projection")
+            assert response.status_code == 200
+            html = response.data.decode()
+            assert html.count("sal-badge-raise") == 2
+            assert html.count("sal-row-raise") == 2
 
     def test_breakdown_no_current_period(self, app, auth_client, seed_user):
         """GET /salary/<id>/breakdown with no periods lands on the cockpit blocker.

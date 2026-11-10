@@ -40,48 +40,30 @@ says move the shared leaf rather than spell it twice, so the pair lives in
 the date-utility leaf below both, and every reader of this module's names
 -- ``_occurrence``, ``_frequency``, ``_resolution`` -- is unchanged.
 
-Pure: no Flask, no ORM, no clock, no database.
+**Which units are measured in months, and how many, is NOT stated here** since
+plan step plan#2302 (ruling plan#2748).  It was: a ``_MONTHS_PER_UNIT`` table
+(month 1, year 12) and the ``MONTH_SPANNING_UNITS`` tuple taken from its keys,
+the one statement every refusal of a unit pairing derived from.  A CHECK on
+``budget.recurrence_rules`` cannot read a code table, so that step moved the
+fact onto the unit's reference row (``ref.recurrence_units.months_per_unit``),
+where the database GENERATES the day-of-month flag from it, and
+:func:`months_per_step` reads the row through :mod:`app.ref_cache`.
+
+No Flask, no ORM, no clock, and no database read: the unit's span comes from
+the reference cache, loaded once per process.
 """
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import date
 
+from app import ref_cache
 from app.enums import RecurrenceUnitEnum
 from app.exceptions import ShekelError
 from app.utils.dates import (
     CALENDAR_DATE_MAX,
-    MONTHS_PER_YEAR,
     clamped_day,
-    grid_month_on_or_before,
+    month_on_or_before,
     month_ordinal,
 )
-
-#: How many MONTHS one of each calendar unit spans.
-#:
-#: ``PERIOD`` and ``WEEK`` are absent because they are not month-based at all --
-#: :func:`months_per_step` refuses them rather than answering a plausible
-#: number, which is the disposition every other partial function in this
-#: package takes over an enum.
-_MONTHS_PER_UNIT: dict[RecurrenceUnitEnum, int] = {
-    RecurrenceUnitEnum.MONTH: 1,
-    RecurrenceUnitEnum.YEAR: MONTHS_PER_YEAR,
-}
-
-#: The units measured in whole months, and therefore the only ones that fire on
-#: a DAY of the month.
-#:
-#: **The one statement of that class**, and an adversarial review of plan step
-#: R7b-1 is why it is here rather than beside its reader.  ``_resolution``
-#: carried its own ``(MONTH, YEAR)`` tuple; the two were extensionally equal,
-#: nothing made them so, and the ONLY way to reach
-#: :class:`MonthStepError` from either caller was to drive them apart -- which
-#: is what a test had to monkeypatch to exercise the refusal at all.  A guard
-#: whose entire reachability condition is "two hand-written sets disagree" is
-#: the fence this project removes rather than tests.
-#:
-#: Firing on a day of the month is not a second fact about a unit: a cadence
-#: measured in months has a day-of-month coordinate and one measured in
-#: paychecks or weeks does not.
-MONTH_SPANNING_UNITS: tuple[RecurrenceUnitEnum, ...] = tuple(_MONTHS_PER_UNIT)
 
 
 class MonthStepError(ShekelError):
@@ -89,8 +71,9 @@ class MonthStepError(ShekelError):
 
     A broken invariant rather than user input: :func:`months_per_step` is asked
     only for a cadence its caller has already routed to the calendar family, so
-    a unit arriving here without a month span means the router and this table
-    disagree about which units are calendar units.
+    a unit arriving here without a month span is a caller that routed a
+    paycheck or week cadence without asking the unit's day-of-month flag,
+    which the database generates from the same span (ruling plan#2748).
 
     **A :class:`~app.exceptions.ShekelError`, and an adversarial review of plan
     step R7b-1 is why.**  It was a bare ``ValueError``, which put it outside the
@@ -117,6 +100,11 @@ def months_per_step(unit: RecurrenceUnitEnum, interval_n: int) -> int:
     Both of those callers route to it on a calendar unit and CONVERT the
     refusal below into their own module's error; see :class:`MonthStepError`.
 
+    The span is the unit's reference row's (``ref_cache.recurrence_unit_months``,
+    ruling plan#2748), and so is the day-of-month flag that routes a caller
+    here: the database generates the flag from this span, so a unit that names
+    a day of the month has a stride by construction.
+
     Args:
         unit: The cadence unit.  Must be a calendar unit.
         interval_n: How many *unit*\\ s pass between occurrences.
@@ -128,7 +116,7 @@ def months_per_step(unit: RecurrenceUnitEnum, interval_n: int) -> int:
     Raises:
         MonthStepError: When *unit* is not measured in months.
     """
-    months = _MONTHS_PER_UNIT.get(unit)
+    months = ref_cache.recurrence_unit_months(unit)
     if months is None:
         raise MonthStepError(
             f"recurrence unit {unit!r} has no reading in months, so it has no "
@@ -141,9 +129,20 @@ def months_per_step(unit: RecurrenceUnitEnum, interval_n: int) -> int:
 
 
 def walk_months(
-    start_ordinal: int, nominal_day: int, month_step: int,
+    start_ordinal: int, day_in: Callable[[int], date], month_step: int,
 ) -> Iterator[date]:
-    """Yield *nominal_day* in *start_ordinal*'s month, then every *month_step*.
+    """Yield *day_in*'s day in *start_ordinal*'s month, then every *month_step*.
+
+    **It walks a GRID rather than a day since plan step ``recurrence:R8-c``**:
+    the caller hands a month coordinate's own day
+    (:meth:`~._month_coordinate.MonthCoordinate.date_in`) -- a day of the
+    month clamped into each month, the nth weekday, or the last weekday.  The
+    stride and the bound below are the same for all three, so one walk serves
+    every shape and a "third Tuesday" rule cannot be walked on its first
+    date's day of the month (plan ledger row **D29**).  It takes the function
+    rather than the shape because this module sits BELOW ``_frequency``, which
+    the coordinate module imports: naming the shape type here would be an
+    import cycle, and a walk needs nothing of a shape but its day.
 
     **Bounded by the calendar this application reaches, and NOT by anything
     about the rule.**  The anchor derivation takes the first element that clears
@@ -168,10 +167,11 @@ def walk_months(
 
     The bound is the month of the last grid day on or before
     :data:`~app.utils.dates.CALENDAR_DATE_MAX`
-    (:func:`app.utils.dates.grid_month_on_or_before`, the monthly-grid set the
-    loan calendar, the card statement and the pay grid read too since plan
-    step ``recurrence:R25``, ruling **R-R122**), read from the application's
-    own calendar vocabulary rather than restated, so the walk,
+    (:func:`app.utils.dates.month_on_or_before`, the comparison behind the
+    monthly-grid set the loan calendar, the card statement and the pay grid
+    read too since plan step ``recurrence:R25``, ruling **R-R122**, stated over
+    any one-day-a-month grid since ``R8-c``), read from the application's own
+    calendar vocabulary rather than restated, so the walk,
     ``ck_recurrence_rules_starts_on_range`` and
     ``_resolution._require_authored_start_window`` all bound the same
     calendar.  It is applied to the ORDINAL rather than to the yielded date,
@@ -179,7 +179,8 @@ def walk_months(
 
     Args:
         start_ordinal: The absolute month ordinal to start from.
-        nominal_day: The day of the month the rule MEANS, 1-31.
+        day_in: The day the rule lands on in a month ordinal, inside that
+            month.
         month_step: Months between occurrences.  Must be positive; both
             callers refuse a non-positive interval before walking.
 
@@ -190,14 +191,12 @@ def walk_months(
         answer rather than an error: it does fire once, and it names no second
         date the application can hold.
     """
-    last_ordinal = grid_month_on_or_before(CALENDAR_DATE_MAX, nominal_day)
+    last_ordinal = month_on_or_before(CALENDAR_DATE_MAX, day_in)
     for ordinal in range(start_ordinal, last_ordinal + 1, month_step):
-        yield clamped_day(ordinal, nominal_day)
+        yield day_in(ordinal)
 
 
 __all__ = [
-    "MONTHS_PER_YEAR",
-    "MONTH_SPANNING_UNITS",
     "MonthStepError",
     "clamped_day",
     "month_ordinal",

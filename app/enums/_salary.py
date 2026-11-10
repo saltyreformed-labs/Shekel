@@ -110,12 +110,12 @@ class RaiseTypeEnum(enum.Enum):
     is narrower than "display-only" and an adversarial review of that step is
     why the sentence says so.  No projection branches on it -- every engine
     applies every raise uniformly on the pay list's walk
-    (``salary_raises.applications_between``, read by
-    ``PayrollBasis.base_pay_on`` since plan step salary:X-av-3a) and stops
-    each one at its own stored ``salary.salary_raises.terminal_year``.
+    (``salary_raises.applications_between``, read by the basis since plan
+    step salary:X-av-3a, through ``PayrollBasis.pay_rate_on`` since task
+    plan#3100) and stops each one at its own stored ``terminal_year``.
     It is still LOGIC to the storage tier: ``raise_type_id`` is a member of
-    ``uq_salary_raises_profile_type_year_month``, so the type decides whether
-    a second raise on the same (profile, year, month) can be written at all,
+    ``uq_salary_raises_profile_type_date``, so the type decides whether
+    a second raise on the same profile and start date can be written at all,
     and ``salary.add_raise`` has a whole duplicate-handling branch keyed on
     that constraint.
 

@@ -26,8 +26,9 @@ The shapes under test, and what each would cost if writable:
 * **the CHECKs** on the declared window and the ordinal, each of which encodes
   a sentence the door states in Python and the schema must state
   independently.  *The two CHECKs on the stored counts went with the counts*
-  (ruling **R-IY**), and the external-id uniqueness went to the door
-  (``_record._refuse_moved_ids``, graded in ``test_record``).
+  (ruling **R-IY**), and the external-id uniqueness is a key again, on a
+  table of its own (``uq_line_source_ids_account_source_external``, plan
+  step plan#2232, graded in ``test_line_source_id_schema``).
 """
 
 from datetime import date

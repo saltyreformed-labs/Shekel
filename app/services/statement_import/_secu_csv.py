@@ -70,9 +70,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-from app.exceptions import StatementParseError
 from app.utils.money import round_money
 
+from ._errors import StatementParseError
 from ._line import ParsedStatement, StatementLine
 
 #: The header names this adapter binds, and whether each is required.  Bound by

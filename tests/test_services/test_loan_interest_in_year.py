@@ -35,13 +35,13 @@ from app.services.balance_at._loan_stream import loan_timeline
 from app.services.balance_at._plan import loan_plan
 from app.services.balance_at import BalanceContext
 from app.services.liability_sign import owed
+from tests._stored_ledger import stored_loan_balance_at
 from tests.oracles.loan_monthly_composition import charge_then_allocate
 from tests._test_helpers import (
     clear_loan_ledger,
     create_loan_with_trueup,
     create_settled_transfer,
     freeze_today,
-    posted_loan_balance_at,
     SPLIT_LOAN,
 )
 
@@ -434,7 +434,7 @@ class TestLoanInterestAnswersFromTheFold:
             # real -- the postings genuinely no longer answer for this loan.
             clear_loan_ledger(loan.id)
             db.session.commit()
-            assert posted_loan_balance_at(
+            assert stored_loan_balance_at(
                 loan.id, scenario_id, date(2025, 12, 31),
             ) is None
 

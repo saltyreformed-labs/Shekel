@@ -85,11 +85,14 @@ first three-payday month.  Like the interval it is not part of an OFFER: every
 positive ceiling is authorable wherever a unit can put two occurrences in a
 month (:func:`can_repeat_within_month`), and refused where it cannot.
 
-Pure: no Flask, no ORM, no clock, no database.
+No Flask, no ORM, no clock, and no database read: a unit's month span and
+day-of-month flag come from the reference cache, loaded once per process (ruling
+plan#2748).
 """
 from dataclasses import dataclass
 from decimal import Decimal
 
+from app import ref_cache
 from app.enums import (
     PeriodPlacementEnum,
     RecurrenceUnitEnum,
@@ -98,10 +101,7 @@ from app.exceptions import ShekelError
 from app.services.pay_calendar import PayCadence
 from app.services.pay_rhythm import FixedDays
 from app.utils.money import MONTHS_PER_YEAR
-from app.services.recurrence._months import (
-    MONTH_SPANNING_UNITS,
-    months_per_step,
-)
+from app.services.recurrence._months import months_per_step
 from app.services.recurrence._vocabulary import (
     modelled_placement,
     modelled_unit,
@@ -117,38 +117,11 @@ from app.services.recurrence._vocabulary import (
 #: inherits that rule without a second one being invented for it.
 _WEEKLY = PayCadence(FixedDays(7))
 
-#: How many times a year each CALENDAR unit fires, before its interval divides
-#: the count.
-#:
-#: The twelve comes from :data:`app.utils.money.MONTHS_PER_YEAR`, the MONEY
-#: constant, and not from ``recurrence._months``' integer twelve: this count is
-#: a factor in a monthly equivalent, and an adversarial review of plan step
-#: R7a-2b noted that one expression was reading its twelve from two modules.
-#: ``_months``' is for month-ORDINAL arithmetic and stays where it is.
-#:
-#: ``PERIOD`` is absent DELIBERATELY, and the absence is not a lookup miss:
-#: it is the one unit whose count is a property of the OWNER rather than of the
-#: calendar, so :meth:`Cadence.occurrences_per_year` answers it from the pay
-#: cadence BEFORE consulting this table.  An entry for it would have to be a
-#: placeholder, which is how a per-owner fact becomes a constant again -- the
-#: defect plan step R7a-2a removed.
-#:
-#: ``DUE_DATE`` counts a card's statements, which close once a month (plan
-#: step credit_card:CC-6, ruling plan#2671): Regulation Z's billing cycle is
-#: monthly, and the one exception, the transitional cycle a change of close
-#: day cuts, is a rate's rounding of the kind :meth:`Cadence.units_per_year`
-#: already accepts for a 27-payday year.
-_CALENDAR_UNITS_PER_YEAR: dict[RecurrenceUnitEnum, Decimal] = {
-    RecurrenceUnitEnum.WEEK: _WEEKLY.periods_per_year,
-    RecurrenceUnitEnum.MONTH: MONTHS_PER_YEAR,
-    RecurrenceUnitEnum.YEAR: Decimal(1),
-    RecurrenceUnitEnum.DUE_DATE: MONTHS_PER_YEAR,
-}
-
 #: The units whose occurrences can fall twice in one calendar month by their
 #: own stride, and so the only ones a per-month ceiling can bind
 #: (:func:`can_repeat_within_month`): paychecks and weeks.
 _STRIDE_UNITS = frozenset({RecurrenceUnitEnum.PERIOD, RecurrenceUnitEnum.WEEK})
+
 
 class RecurrenceFrequencyError(ShekelError):
     """A cadence names a unit with no yearly count.
@@ -215,7 +188,8 @@ class Cadence:
         """Return how many of this cadence's UNIT fit in a year, EXACTLY.
 
         The count before :attr:`interval_n` divides it -- 26 paychecks, 52
-        weeks, 12 months, 1 year -- and always a whole number, which is what
+        weeks, 12 months, 1 year, 12 statements -- and a whole number on every span
+        ``app.ref_seeds`` states (1 and 12 both divide twelve), which is what
         makes it the right thing to hand a money conversion.
 
         **The interval is deliberately NOT applied here, and that is an
@@ -256,16 +230,36 @@ class Cadence:
                 about a monthly bill.
 
         Returns:
-            The whole number of units in a year, as a ``Decimal``.
+            The number of units in a year, as a ``Decimal``.
 
         Raises:
             RecurrenceFrequencyError: *unit* has no yearly count -- a member
                 added to :class:`~app.enums.RecurrenceUnitEnum` without one.
         """
+        # The one unit whose count is a property of the OWNER rather than of
+        # the calendar: a constant here is how a per-owner fact becomes wrong,
+        # the defect plan step R7a-2a removed.
         if self.unit is RecurrenceUnitEnum.PERIOD:
             return pay_cadence.periods_per_year
-        per_year = _CALENDAR_UNITS_PER_YEAR.get(self.unit)
-        if per_year is None:
+        if self.unit is RecurrenceUnitEnum.WEEK:
+            return _WEEKLY.periods_per_year
+        # A card's statements, which close once a month (plan step
+        # credit_card:CC-6, ruling plan#2671): Regulation Z's billing cycle is
+        # monthly, and the one exception, the transitional cycle a change of
+        # close day cuts, is a rate's rounding of the kind a 27-payday year
+        # already is above.  Its own arm because the unit is not measured in
+        # months -- its dates are the card's due dates, so its reference row
+        # holds no span and names no day of the month.
+        if self.unit is RecurrenceUnitEnum.DUE_DATE:
+            return MONTHS_PER_YEAR
+        # Twelve over the span on the unit's reference row, the span the month
+        # stride walks (finding plan#2801), so the two cannot disagree.  The
+        # twelve is :data:`app.utils.money.MONTHS_PER_YEAR`, the MONEY constant,
+        # and not ``app.utils.dates``' integer: this count is a factor in a
+        # monthly equivalent, and an adversarial review of plan step R7a-2b
+        # noted one expression reading its twelve from two modules.
+        months = ref_cache.recurrence_unit_months(self.unit)
+        if months is None:
             raise RecurrenceFrequencyError(
                 f"recurrence unit {self.unit!r} has no yearly count.  Every "
                 f"member of RecurrenceUnitEnum must have one: a monthly "
@@ -274,7 +268,7 @@ class Cadence:
                 f"emergency-fund baseline and to every per-goal contribution "
                 f"floor."
             )
-        return per_year
+        return MONTHS_PER_YEAR / months
 
     def occurrences_per_year(self, pay_cadence: PayCadence) -> Decimal:
         """Return how many times a year this cadence actually fires.
@@ -441,9 +435,10 @@ def has_day_of_month_coordinate(unit: RecurrenceUnitEnum) -> bool:
     step itself introduced.  Every consumer used to reach for whichever of the
     two nearby predicates was in scope:
 
-    * :func:`~app.services.recurrence.offerable_nominal_days` and
-      :attr:`~app.services.recurrence.ResolvedRecurrence.day_of_month` ask
-      THIS question -- the unit's;
+    * :func:`~app.services.recurrence.offerable_nominal_days`,
+      :func:`~app.services.recurrence.offerable_weekday_readings` and
+      :attr:`~app.services.recurrence.ResolvedRecurrence.month_coordinate`
+      ask THIS question -- the unit's;
     * :func:`fires_on_day_of_month` asks a DIFFERENT one -- whether the day a
       generated ROW is dated from comes off that coordinate -- and the two
       differ for exactly one cadence, ``Monthly First``.
@@ -451,8 +446,8 @@ def has_day_of_month_coordinate(unit: RecurrenceUnitEnum) -> bool:
     They differ because a MONTH-unit rule funded from a month's FIRST paycheck
     still fires on a day of the month; only the row it generates is dated from
     the paycheck.  The occurrence walk reads
-    :attr:`~app.services.recurrence.ResolvedRecurrence.day_of_month` for it
-    like any other MONTH rule, so its nominal day is meaningful -- and asking
+    :attr:`~app.services.recurrence.ResolvedRecurrence.month_coordinate` for
+    it like any other MONTH rule, so its nominal day is meaningful -- and asking
     the other question where this one belongs is what let a "last day of every
     month" rent lose its ``nominal_day`` and move to the 30th forever
     (``recurrence_form.js``), and a month-end loan payment bill a day early for
@@ -465,13 +460,17 @@ def has_day_of_month_coordinate(unit: RecurrenceUnitEnum) -> bool:
     fact about the cadence and needs no schedule, which is this module's whole
     charter.  ``_resolution`` imports it and the public name is unchanged.
 
-    Derived from :data:`~._months.MONTH_SPANNING_UNITS` rather than written out,
-    which an adversarial review of plan step R7b-1 required: a literal
-    ``(MONTH, YEAR)`` here is a second statement of that tuple, and the only way
-    for the two to be reached apart is for them to disagree.  Firing on a day of
-    the month is not a second fact about a unit -- a cadence measured in months
-    has a day-of-month coordinate and one measured in paychecks or weeks does
-    not.
+    **Read off the unit's reference row** (``ref_cache
+    .recurrence_unit_has_day_of_month``) since plan step plan#2302, ruling
+    plan#2748.  It was a membership test against ``_months``' code tuple of the
+    month-spanning units, itself the key set of that module's month-span table,
+    which an adversarial review of plan step R7b-1 required over a second
+    literal ``(MONTH, YEAR)``.  The row's ``has_day_of_month`` is GENERATED by
+    the database from the same ``months_per_unit`` the month stride walks, so
+    the two still cannot disagree -- and a rule's CHECKs read that same column,
+    which no code tuple could give them.  Firing on a day of the month is not a
+    second fact about a unit: a cadence measured in months has a day-of-month
+    coordinate and one measured in paychecks or weeks does not.
 
     Args:
         unit: The cadence unit.
@@ -480,7 +479,7 @@ def has_day_of_month_coordinate(unit: RecurrenceUnitEnum) -> bool:
         ``True`` for the units measured in whole months, which are the only
         ones whose occurrences can be month-end clamped.
     """
-    return unit in MONTH_SPANNING_UNITS
+    return ref_cache.recurrence_unit_has_day_of_month(unit)
 
 
 def can_repeat_within_month(unit: RecurrenceUnitEnum) -> bool:
@@ -495,7 +494,13 @@ def can_repeat_within_month(unit: RecurrenceUnitEnum) -> bool:
     control the engine would ignore being a control the form does not show --
     and the read door that takes a STATED cadence
     (``_reading.recurrence_spec_with_cadence``) DROPS a stored ceiling where
-    the stated unit cannot hold it, which is the arm a restored row meets.
+    the stated unit cannot hold it, which is the arm the edit form's repair
+    path meets, stating a calendar-month cadence over a stored paycheck one.
+    A stored row on a unit measured in months cannot meet it on its own unit:
+    ``ck_recurrence_rules_max_per_month_unit`` refuses that pair (plan step
+    plan#2302).  That CHECK reads the unit's day-of-month flag, so it does not
+    refuse a ceiling on the due-date unit, which names no day of the month
+    and is no stride either; this predicate and the doors above it do.
 
     **A list of its own since plan step credit_card:CC-6**, where it was
     derived from :func:`has_day_of_month_coordinate` until then: a cadence
@@ -682,10 +687,11 @@ def canonical_cadence(
     if unit is not RecurrenceUnitEnum.MONTH:
         return stated
     months_per_year = months_per_step(RecurrenceUnitEnum.YEAR, 1)
-    if months_per_step(unit, interval_n) % months_per_year != 0:
+    stride = months_per_step(unit, interval_n)
+    if stride % months_per_year != 0:
         return stated
     return Cadence(
-        interval_n=interval_n // months_per_year,
+        interval_n=stride // months_per_year,
         unit=RecurrenceUnitEnum.YEAR,
         max_per_month=max_per_month,
     )

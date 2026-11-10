@@ -9,12 +9,13 @@ Asserts that the rate-limit posture introduced by audit Commit C-06
   4 of ~93 mutating routes were rate-limited pre-remediation.
 - The ``/health`` endpoint is exempt so the Docker / Nginx healthcheck
   loops do not burn through the per-IP budget every 30 seconds.
-- The configured key_func is ``get_remote_address`` so per-IP
-  separation actually works.
-- A storage backend outage (Redis unreachable in production)
+- The configured key_func is ``rate_limit_key``, so each client has its
+  own counter (plan#2170), and each signed-in browser its known record's,
+  else its account's (ruling plan#3108).
+- A storage backend outage (Valkey unreachable in production)
   fail-closed surfaces as a server error, NOT a silent degradation
   to per-worker memory or to allowing the request through (which
-  would let an attacker brute-force auth during a Redis outage).
+  would let an attacker brute-force auth during a Valkey outage).
 - 429 responses include the ``Retry-After`` header so a well-behaved
   client knows when to retry.
 - ``X-RateLimit-*`` headers are emitted when the limiter is active.
@@ -26,19 +27,21 @@ in all rate-limit suites at once.
 
 Storage backend: TestConfig forces ``memory://`` regardless of the
 operator's environment, so these tests run on any laptop without a
-Redis instance.  The behavior under Redis unreachability is verified
+Valkey instance.  The behavior under Valkey unreachability is verified
 by patching the storage's ``incr`` method to raise -- this exercises
-the same code path Flask-Limiter takes when redis-py raises a real
+the same code path Flask-Limiter takes when valkey-py raises a real
 ConnectionError (see flask_limiter._extension.py:1142-1169).
 """
 
 # pylint: disable=redefined-outer-name
 
+import logging
 from unittest.mock import patch
 
 import pytest
 
-from app import create_app
+from app import CONFIG_MAP, create_app
+from app.utils.log_events import EVT_RATE_LIMIT_EXCEEDED
 
 
 # Window math for the default ceiling.  RATELIMIT_DEFAULT in BaseConfig
@@ -47,6 +50,12 @@ from app import create_app
 # rejection (1-indexed: hits 1..30 succeed, hit 31 returns 429).
 _DEFAULT_PER_MINUTE = 30
 _HITS_TO_TRIP_DEFAULT = _DEFAULT_PER_MINUTE + 1
+
+# ``/login``'s own limit, 5 per 15 minutes, in ``app/routes/auth/credentials.py``.
+_LOGIN_LIMIT = 5
+
+# An address on ``TestConfig.FORWARDED_ALLOW_IPS``, as nginx is in production.
+_NGINX = "172.32.0.4"
 
 
 def _enable_limiter_on_fresh_app():
@@ -67,7 +76,7 @@ def _enable_limiter_on_fresh_app():
     rate_app.config["RATELIMIT_ENABLED"] = True
 
     # pylint: disable=import-outside-toplevel
-    from app.extensions import limiter
+    from app.rate_limits import limiter
 
     limiter.enabled = True
     limiter.init_app(rate_app)
@@ -152,7 +161,7 @@ class TestDefaultLimitCeiling:
             return "ok", 200
 
         # pylint: disable=import-outside-toplevel
-        from app.extensions import limiter
+        from app.rate_limits import limiter
 
         limiter.enabled = True
         limiter.init_app(rate_app)
@@ -202,7 +211,7 @@ class TestDefaultLimitCeiling:
             return "ok", 200
 
         # pylint: disable=import-outside-toplevel
-        from app.extensions import limiter
+        from app.rate_limits import limiter
 
         limiter.enabled = True
         limiter.init_app(rate_app)
@@ -280,7 +289,7 @@ class TestFailClosedOnStorageOutage:
     error handler.  This is the developer's deliberate fail-closed
     posture (Phase D-12 architectural decision) -- the alternative
     (silent fall-through) would let an attacker brute-force auth
-    during a Redis outage.
+    during a Valkey outage.
     """
 
     def test_storage_outage_returns_5xx_not_200(self, app, seed_user):
@@ -289,7 +298,7 @@ class TestFailClosedOnStorageOutage:
         Patches the active limiter storage's ``acquire_entry`` and
         ``get_moving_window`` methods (the moving-window strategy's
         write/read paths -- see limits/strategies.py:85-117) to raise
-        a ConnectionError.  This mirrors what redis-py raises when its
+        a ConnectionError.  This mirrors what valkey-py raises when its
         socket is closed.  The request to /login must NOT succeed
         because that would mean the rate-limit check was silently
         skipped, which is exactly the failure mode F-034's fail-closed
@@ -320,7 +329,7 @@ class TestFailClosedOnStorageOutage:
         rate_app.config["PROPAGATE_EXCEPTIONS"] = False
 
         # pylint: disable=import-outside-toplevel
-        from app.extensions import limiter
+        from app.rate_limits import limiter
 
         limiter.enabled = True
         limiter.init_app(rate_app)
@@ -328,7 +337,7 @@ class TestFailClosedOnStorageOutage:
         rate_client = rate_app.test_client()
 
         def raise_connection_error(*_args, **_kwargs):
-            """Simulate a Redis socket failure on every counter write."""
+            """Simulate a Valkey socket failure on every counter write."""
             raise ConnectionError("Simulated rate-limit storage outage")
 
         try:
@@ -365,39 +374,305 @@ class TestFailClosedOnStorageOutage:
             _disable_limiter(limiter, rate_app)
 
 
-class TestKeyFunctionWiresRemoteAddress:
-    """Limiter must key on the request's remote_addr so per-IP
-    separation actually works.  Without this, every request would key
-    on the same constant and rate limits would be shared across all
-    users (effectively turning the limit into an application-wide cap).
+class TestKeyFunctionIsTheOneKey:
+    """The limiter counts by the one key: an account, or else a client.
+
+    Without it every request would key on the same constant and rate limits
+    would be shared across all users, the defect plan#2170 fixed.
     """
 
-    def test_key_func_is_get_remote_address(self):
-        """The module-level limiter is constructed with key_func=get_remote_address.
+    def test_key_func_is_rate_limit_key(self):
+        """The module-level limiter is constructed with key_func=rate_limit_key.
 
         The limiter is instantiated at module load time in
-        ``app/extensions.py``.  ``key_func`` is the only constructor
+        ``app/rate_limits.py``.  ``key_func`` is the only constructor
         argument we pass (everything else flows through app.config in
         init_app), so a regression that drops the argument would
-        silently key every request on a fixed string.  This test
+        silently fall back to ``get_remote_address``, whose count a signed-out
+        visitor shares with a signed-in account on that address.  This test
         guards that exact construction.
         """
         # pylint: disable=import-outside-toplevel
-        from flask_limiter.util import get_remote_address
-
-        from app.extensions import limiter
+        from app.rate_limits import limiter
+        from app.rate_limits import rate_limit_key
 
         # Flask-Limiter stores the key_func as ``_key_func`` on the
         # Limiter instance.  Comparing function identity (is) is
         # stronger than name comparison and catches re-imports.
-        assert limiter._key_func is get_remote_address  # pylint: disable=protected-access
+        assert limiter._key_func is rate_limit_key  # pylint: disable=protected-access
+
+
+def _through_nginx(client_address, arrived_with=None):
+    """Return the request arguments for *client_address* arriving through nginx.
+
+    The direct caller is an address on ``TestConfig.FORWARDED_ALLOW_IPS``, and
+    ``X-Forwarded-For`` is what ``$proxy_add_x_forwarded_for`` writes: whatever
+    the request arrived with, then the address nginx saw.
+
+    Args:
+        client_address: The address nginx saw.
+        arrived_with: What the client put in the header itself, or ``None``.
+
+    Returns:
+        Keyword arguments for a test client's request method.
+    """
+    forwarded = (
+        client_address if arrived_with is None
+        else f"{arrived_with}, {client_address}"
+    )
+    return {
+        "environ_base": {"REMOTE_ADDR": _NGINX},
+        "headers": {"X-Forwarded-For": forwarded},
+    }
+
+
+def _spend_the_login_limit(rate_client, **request_arguments):
+    """POST an empty login form up to its limit, each answered short of a 429.
+
+    An empty form is refused by the schema, so no password is checked and no
+    account is touched: all this spends is the limit.
+
+    Args:
+        rate_client: A client of an app with the limiter on.
+        **request_arguments: Passed to each POST.
+    """
+    for hit in range(_LOGIN_LIMIT):
+        response = rate_client.post("/login", data={}, **request_arguments)
+        assert response.status_code == 200, (
+            f"hit {hit + 1} of {_LOGIN_LIMIT} unexpectedly returned "
+            f"{response.status_code}"
+        )
+
+
+class TestEachClientHasItsOwnCounter:
+    """Requests through nginx count per client, and no header buys another count."""
+
+    @pytest.fixture
+    def rate_client(self, app):
+        """A client of a fresh app with the limiter on.
+
+        Yields:
+            The test client.
+        """
+        # pylint: disable=unused-argument
+        rate_app, client, limiter = _enable_limiter_on_fresh_app()
+        yield client
+        _disable_limiter(limiter, rate_app)
+
+    def test_two_clients_through_nginx_do_not_share_a_counter(self, rate_client):
+        """One client spending the login limit leaves another's untouched.
+
+        This is the defect itself: both arrive from nginx's address, and
+        until plan#2170 they drained one counter.
+        """
+        _spend_the_login_limit(rate_client, **_through_nginx("8.8.8.8"))
+
+        assert rate_client.post(
+            "/login", data={}, **_through_nginx("8.8.8.8"),
+        ).status_code == 429
+        response = rate_client.post(
+            "/login", data={}, **_through_nginx("9.9.9.9"),
+        )
+        assert response.status_code == 200
+        assert b"Invalid email or password" in response.data
+
+    def test_a_client_supplied_entry_buys_no_new_counter(self, rate_client):
+        """A different leftmost entry each time is still one client."""
+        for hit in range(_LOGIN_LIMIT):
+            response = rate_client.post(
+                "/login", data={},
+                **_through_nginx("8.8.8.8", arrived_with=f"6.6.6.{hit}"),
+            )
+            assert response.status_code == 200
+
+        assert rate_client.post(
+            "/login", data={},
+            **_through_nginx("8.8.8.8", arrived_with="6.6.6.99"),
+        ).status_code == 429
+
+    def test_an_untrusted_callers_header_buys_no_new_counter(self, rate_client):
+        """A caller off the list counts as itself, whatever it claims to be."""
+        for hit in range(_LOGIN_LIMIT):
+            response = rate_client.post(
+                "/login", data={},
+                headers={"X-Forwarded-For": f"6.6.6.{hit}"},
+            )
+            assert response.status_code == 200
+
+        assert rate_client.post(
+            "/login", data={}, headers={"X-Forwarded-For": "6.6.6.99"},
+        ).status_code == 429
+
+    def test_one_ipv6_host_cannot_answer_from_a_new_counter(self, rate_client):
+        """Addresses under one /64 share a count; the next /64 does not."""
+        for hit in range(_LOGIN_LIMIT):
+            response = rate_client.post(
+                "/login", data={},
+                **_through_nginx(f"2606:4700:1234:5678::{hit + 1:x}"),
+            )
+            assert response.status_code == 200
+
+        assert rate_client.post(
+            "/login", data={},
+            **_through_nginx("2606:4700:1234:5678::ffff"),
+        ).status_code == 429
+        assert rate_client.post(
+            "/login", data={},
+            **_through_nginx("2606:4700:1234:5679::1"),
+        ).status_code == 200
+
+    def test_the_429_log_line_names_the_client(self, rate_client):
+        """The forensic line says who hit the limit, not nginx."""
+        _spend_the_login_limit(rate_client, **_through_nginx("8.8.8.8"))
+
+        records = []
+        handler = logging.Handler()
+        handler.emit = records.append
+        target = logging.getLogger("app.error_handlers")
+        target.addHandler(handler)
+        try:
+            rate_client.post("/login", data={}, **_through_nginx("8.8.8.8"))
+        finally:
+            target.removeHandler(handler)
+
+        limited = [
+            r for r in records
+            if getattr(r, "event", None) == EVT_RATE_LIMIT_EXCEEDED
+        ]
+        assert [r.remote_addr for r in limited] == ["8.8.8.8"]
+
+
+class TestEachAccountHasItsOwnCounter:
+    """A signed-in browser counts against its own budget, wherever it comes from.
+
+    Each client here signs in at ``/login``, so it is a known browser and
+    spends its record's budget (ruling plan#3108); the account's, which a
+    browser no record names spends, is
+    ``tests/test_adversarial/test_a_signed_in_pages_budget.py``.
+    """
+
+    @pytest.fixture
+    def counted_app(self, app, monkeypatch):
+        """A fresh app with the limiter on and an undecorated gated route.
+
+        The limiter is on from the start of ``create_app``, as in production,
+        so its hook runs in production's place, before the login gate.  Turning
+        it on afterwards, as :func:`_enable_limiter_on_fresh_app` does,
+        registers it after the gate, and an anonymous request would be bounced
+        before it was ever counted.
+
+        The route costs nothing to answer and carries only the default
+        ceiling, so its 30-a-minute clause is what a test spends.
+
+        Yields:
+            The app.
+        """
+        # pylint: disable=unused-argument,import-outside-toplevel
+        from app.rate_limits import limiter
+
+        # ``app.CONFIG_MAP``, the class ``create_app`` reads: importing
+        # ``TestConfig`` here would find a newer class once a test that reloads
+        # ``app.config`` has run on this worker, and the limiter would stay off.
+        monkeypatch.setattr(CONFIG_MAP["testing"], "RATELIMIT_ENABLED", True)
+        rate_app = create_app("testing")
+
+        @rate_app.route("/test-gated-route")
+        def gated():
+            """Answer a signed-in request; the login gate bounces any other."""
+            return "ok", 200
+
+        yield rate_app
+        _disable_limiter(limiter, rate_app)
+
+    @staticmethod
+    def _signed_in(counted_app, email, password, client_address):
+        """Return a client signed in as *email*, arriving through nginx.
+
+        Args:
+            counted_app: The app under test.
+            email: The account's address.
+            password: The account's password.
+            client_address: The address nginx sees.
+
+        Returns:
+            The signed-in test client.
+        """
+        client = counted_app.test_client()
+        response = client.post(
+            "/login", data={"email": email, "password": password},
+            **_through_nginx(client_address),
+        )
+        assert response.status_code == 302
+        return client
+
+    @staticmethod
+    def _spend_the_default_ceiling(client, expected_status, **request_arguments):
+        """GET the gated route up to the per-minute ceiling.
+
+        Args:
+            client: The client to spend it with.
+            expected_status: What each hit short of the ceiling answers.
+            **request_arguments: Passed to each GET.
+        """
+        for hit in range(_DEFAULT_PER_MINUTE):
+            response = client.get("/test-gated-route", **request_arguments)
+            assert response.status_code == expected_status, (
+                f"hit {hit + 1} unexpectedly returned {response.status_code}"
+            )
+
+    def test_anonymous_traffic_does_not_spend_a_signed_in_counter(
+        self, counted_app, seed_user,
+    ):
+        """A flood from the owner's own address leaves the owner's budget alone.
+
+        The spec's case: anonymous traffic cannot spend the owner's budget, even
+        from one address.  The flood is counted (its 31st hit is refused) and
+        the signed-in request from that same address still gets through.
+        """
+        # pylint: disable=unused-argument
+        owner = self._signed_in(
+            counted_app, "test@shekel.local", "testpass", "8.8.8.8",
+        )
+        anonymous = counted_app.test_client()
+        self._spend_the_default_ceiling(
+            anonymous, 302, **_through_nginx("8.8.8.8"),
+        )
+        assert anonymous.get(
+            "/test-gated-route", **_through_nginx("8.8.8.8"),
+        ).status_code == 429
+
+        response = owner.get("/test-gated-route", **_through_nginx("8.8.8.8"))
+        assert response.status_code == 200
+        assert response.get_data(as_text=True) == "ok"
+
+    def test_two_accounts_on_one_address_do_not_share(
+        self, counted_app, seed_user, seed_second_user,
+    ):
+        """One account's spending never reaches another's on the same address."""
+        # pylint: disable=unused-argument
+        owner = self._signed_in(
+            counted_app, "test@shekel.local", "testpass", "8.8.8.8",
+        )
+        other = self._signed_in(
+            counted_app, "second@shekel.local", "secondpass12", "8.8.8.8",
+        )
+        self._spend_the_default_ceiling(
+            owner, 200, **_through_nginx("8.8.8.8"),
+        )
+        assert owner.get(
+            "/test-gated-route", **_through_nginx("8.8.8.8"),
+        ).status_code == 429
+
+        response = other.get("/test-gated-route", **_through_nginx("8.8.8.8"))
+        assert response.status_code == 200
+        assert response.get_data(as_text=True) == "ok"
 
 
 class TestRateLimitHeaders:
     """``X-RateLimit-*`` response headers are emitted when the limiter
     is active.  BaseConfig sets ``RATELIMIT_HEADERS_ENABLED = True``
     so a front-end retry library or operator diagnostic does not have
-    to inspect Redis directly to learn current consumption.
+    to inspect Valkey directly to learn current consumption.
     """
 
     def test_x_ratelimit_headers_present_on_limited_route(
@@ -436,18 +711,18 @@ class TestRateLimitHeaders:
 
 class TestStorageBackendIsConfigDriven:
     """The Limiter's storage backend is resolved from app.config in
-    init_app(), NOT from a constructor argument in app/extensions.py.
+    init_app(), NOT from a constructor argument in app/rate_limits.py.
 
     This is the linchpin behavior that lets TestConfig force the
     in-memory backend regardless of the operator's environment, and
-    lets ProdConfig default to Redis without code changes.  Flask-
+    lets ProdConfig default to Valkey without code changes.  Flask-
     Limiter v4 (_extension.py:371-376) gives the constructor's
     storage_uri precedence over app.config -- so a constructor URI
     would silently override every environment's choice.
     """
 
     def test_extensions_module_does_not_pin_storage_uri(self):
-        """app/extensions.py must NOT pass storage_uri at construction.
+        """app/rate_limits.py must NOT pass storage_uri at construction.
 
         A non-None ``_storage_uri`` on the Limiter instance after
         module load means the constructor pinned a backend, which would
@@ -463,19 +738,19 @@ class TestStorageBackendIsConfigDriven:
         symptom of a regression that re-pinned at construction.
         """
         # pylint: disable=import-outside-toplevel,protected-access
-        from app.extensions import limiter
+        from app.rate_limits import limiter
 
         # At this point the test session has already imported app and
-        # called init_app(testing), which sets _storage_uri to the
-        # TestConfig override ("memory://").  A regression that pins
-        # the constructor URI would manifest as _storage_uri being a
-        # production URI (redis://...) instead.
+        # called init_app(testing), whose store is TestConfig's
+        # ("memory://").  A regression that pins the constructor URI
+        # would manifest as _storage_uri being a production URI
+        # (valkey+unix://...) instead.
         assert limiter._storage_uri is None or limiter._storage_uri == "memory://", (
             "Limiter._storage_uri should be None (constructor) or "
-            "memory:// (TestConfig override).  A redis:// or other "
-            "production URI here means app/extensions.py is pinning "
-            "storage at construction, which would break "
-            "TestConfig.RATELIMIT_STORAGE_URI override."
+            "memory:// (TestConfig's store).  A valkey+unix:// or other "
+            "production URI here means app/rate_limits.py is pinning "
+            "storage at construction, which would override each "
+            "configuration's RATELIMIT_STORAGE_URI."
         )
 
     def test_test_config_forces_memory_backend(self):

@@ -37,7 +37,7 @@ and 2 when it cannot open the script, so neither reads as a refusal.
 
 **It is READ-ONLY under production's configuration, as the release kit runs
 it** (``FLASK_ENV=production``, in the side environment
-``tools/rehearsal/rows.py`` builds): ``create_app`` writes nothing on that
+``tools/rehearsal/sides.py`` builds): ``create_app`` writes nothing on that
 start, and :func:`main` opens its transaction ``READ ONLY``, so the database
 refuses any write the measure might send, and rolls it back on the way out.
 **Under the development configuration it is not**: with ``FLASK_ENV`` unset or
@@ -51,14 +51,15 @@ a seeded database
 (``tests/test_models/test_the_old_calibration_table_goes_migration.py``,
 ``TestTheRehearsalMeasure``), including that it sends only reads.
 
-**It loads no package only the development pins hold**: the release kit runs
-it under a venv of the cut's ``requirements.txt`` and ``requirements-dev.txt``'s
-``time-machine`` pin, and production's image holds only the first.  So it loads
-the migration by path itself rather than through
-``tests._test_helpers.load_migration_module``, whose module imports ``pytest``.
-The suite grades this by loading the measure by path in a fresh interpreter and
-finding no distribution it loaded among those ``requirements-dev.txt`` pins and
-``requirements.txt`` does not; a distribution neither file names (a pin's own
+**It loads no package only the development set holds**: the release kit runs
+it under a venv of the cut's lock, the runtime set and the ``rehearsal``
+group's ``time-machine`` (``tools/rehearsal/bench.py``), and production's image
+holds the runtime set and never the ``dev`` group.  So it loads the migration
+by path itself rather than through ``tests._test_helpers.load_migration_module``,
+whose module imports ``pytest``.  The suite grades this by loading the measure
+by path in a fresh interpreter and finding no distribution it loaded among
+those ``pyproject.toml``'s ``dev`` group names and its ``[project]
+dependencies`` do not; a distribution neither names (a dependency's own
 dependency) is not graded.
 
 **Usage** (from the repository root, against a database at ``69634349bdce``;

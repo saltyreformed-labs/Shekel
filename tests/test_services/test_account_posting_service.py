@@ -66,17 +66,21 @@ from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.pay_calendar import PayCalendarError
 from app.services.auth_service import hash_password
 from app.utils.dates import display_today, to_display_date
+from app.services.ledger_lines import account_counter_key
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import (
+    account_net,
+    correction_net_in_period,
+    ledger_net,
+    linked_key_of,
+    scenario_lines,
+    source_lines,
+    source_net,
+)
 from tests._test_helpers import (
     add_entry,
-    figure_source_columns,
-    generate_row_of,
-    make_expense_template,
-    typed,
-    record_paydays_across_a_hole,
-    rhythm_of,
     an_entered_day,
     append_only_guard_lifted,
-    correction_net_in_period,
     create_account_of_type,
     create_account_via_service,
     create_envelope_txn,
@@ -84,13 +88,18 @@ from tests._test_helpers import (
     create_settled_cash_transaction,
     create_settled_transfer,
     derived_span,
-    ledger_net,
+    figure_source_columns,
+    generate_row_of,
+    make_expense_template,
     observed_day_of,
     open_owner_calendar,
+    record_paydays_across_a_hole,
     restate_account_opening,
+    rhythm_of,
     settle_day_columns,
     settle_instant_on,
     transfer_side_record,
+    typed,
 )
 from app.services.settle_day import record_settle_day
 
@@ -297,14 +306,20 @@ def _entry_legs(entry_id):
 def _correction_net_in_period(account_id, scenario_id, source_enum, period_id):
     """Sum an account's correction legs on its LINKED ledger in ONE pay period.
 
-    Resolves the account's linked ledger, then defers to the shared
-    ``tests._test_helpers.correction_net_in_period`` -- the same reading the
-    loan anchor suite makes, so the two halves of the R2 fix are graded by one
-    query rather than two that happen to agree.
+    Defers to the shared ``tests._ledger_reads.correction_net_in_period`` -- the
+    same reading the loan anchor suite makes, so the two halves of the R2 fix are
+    graded by one read rather than two that happen to agree.
     """
-    linked = _ledger_of_kind(account_id, LedgerAccountKindEnum.LINKED)
     return correction_net_in_period(
-        _db.session, linked.id, scenario_id, source_enum, period_id,
+        _db.session, linked_key_of(_db.session, account_id), scenario_id,
+        source_enum, period_id,
+    )
+
+
+def _linked_source_net(account_id, scenario_id, source_enum):
+    """Return one correction kind's net on the account's own line, worked out."""
+    return source_net(
+        _db.session, linked_key_of(_db.session, account_id), scenario_id, source_enum,
     )
 
 
@@ -990,8 +1005,8 @@ class TestSyncAccountAnchorPostings:
             )
             _db.session.commit()
 
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("500.00")
             linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
             equity = _ledger_of_kind(
@@ -999,7 +1014,9 @@ class TestSyncAccountAnchorPostings:
             )
             assert equity is not None
             assert ledger_net(
-                _db.session, equity.id, scenario_id,
+                _db.session,
+                account_counter_key(LedgerAccountKindEnum.ANCHOR_EQUITY, account.id),
+                scenario_id,
             ) == Decimal("-500.00")
 
             entries = _correction_entries(
@@ -1029,8 +1046,9 @@ class TestSyncAccountAnchorPostings:
             assert history_row.observed_on != to_display_date(
                 history_row.created_at,
             )
-            assert _correction_entries(
-                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
+            assert source_lines(
+                _db.session, linked_key_of(_db.session, account.id), scenario_id,
+                PostingSourceEnum.ACCOUNT_TRUEUP,
             ) == []
 
     def test_zero_anchor_books_nothing(self, app, db, seed_user):
@@ -1047,8 +1065,9 @@ class TestSyncAccountAnchorPostings:
             )
             _db.session.commit()
 
-            assert _correction_entries(
-                account.id, scenario_id, PostingSourceEnum.ACCOUNT_OPENING,
+            assert source_lines(
+                _db.session, linked_key_of(_db.session, account.id), scenario_id,
+                PostingSourceEnum.ACCOUNT_OPENING,
             ) == []
             assert _ledger_of_kind(
                 account.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
@@ -1106,15 +1125,17 @@ class TestSyncAccountAnchorPostings:
             )
             _db.session.commit()
 
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("250.00")
             linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
             equity = _ledger_of_kind(
                 account.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
             )
             assert ledger_net(
-                _db.session, equity.id, scenario_id,
+                _db.session,
+                account_counter_key(LedgerAccountKindEnum.ANCHOR_EQUITY, account.id),
+                scenario_id,
             ) == Decimal("-550.00")
             trueups = _correction_entries(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
@@ -1169,22 +1190,16 @@ class TestSyncAccountAnchorPostings:
             )
             _db.session.commit()
 
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("250.00")
-            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
             trueups = _correction_entries(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             )
             assert len(trueups) == 2
-            trueup_linked_net = sum(
-                (
-                    _entry_legs(entry.id)[linked.id][0]
-                    for entry in trueups
-                ),
-                Decimal("0"),
-            )
-            assert trueup_linked_net == Decimal("-150.00")
+            assert _linked_source_net(
+                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
+            ) == Decimal("-150.00")
 
     def test_trueup_retired_by_matching_balance_reverses_to_zero(
         self, app, db, seed_user,
@@ -1244,10 +1259,9 @@ class TestSyncAccountAnchorPostings:
             )
             _db.session.commit()
 
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("350.00")
-            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
             trueups = _correction_entries(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             )
@@ -1259,9 +1273,8 @@ class TestSyncAccountAnchorPostings:
                 entry.pay_period_id == expected_period_id
                 for entry in trueups
             )
-            assert sum(
-                (_entry_legs(entry.id)[linked.id][0] for entry in trueups),
-                Decimal("0"),
+            assert _linked_source_net(
+                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             ) == Decimal("0.00")
 
     def test_posted_only_key_reverses_into_the_period_it_corrected(
@@ -1321,10 +1334,9 @@ class TestSyncAccountAnchorPostings:
             )
             _db.session.commit()
 
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("300.00")
-            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
             trueups = _correction_entries(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             )
@@ -1333,9 +1345,8 @@ class TestSyncAccountAnchorPostings:
                 entry.pay_period_id == original_period_id
                 for entry in trueups
             )
-            assert sum(
-                (_entry_legs(entry.id)[linked.id][0] for entry in trueups),
-                Decimal("0"),
+            assert _linked_source_net(
+                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             ) == Decimal("0.00")
 
     def test_same_day_trueups_merge_to_one_entry_landing_later(
@@ -1367,15 +1378,16 @@ class TestSyncAccountAnchorPostings:
             )
             _db.session.commit()
 
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("550.00")
             trueups = _correction_entries(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             )
             assert len(trueups) == 1
-            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
-            assert _entry_legs(trueups[0].id)[linked.id][0] == Decimal("50.00")
+            assert _linked_source_net(
+                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
+            ) == Decimal("50.00")
 
     def test_liability_anchor_keeps_ledger_native_sign(
         self, app, db, seed_user,
@@ -1397,14 +1409,13 @@ class TestSyncAccountAnchorPostings:
             )
             _db.session.commit()
 
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("-500.00")
-            equity = _ledger_of_kind(
-                account.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
-            )
             assert ledger_net(
-                _db.session, equity.id, scenario_id,
+                _db.session,
+                account_counter_key(LedgerAccountKindEnum.ANCHOR_EQUITY, account.id),
+                scenario_id,
             ) == Decimal("500.00")
 
 
@@ -1475,8 +1486,8 @@ class TestASettleDayMoveAcrossAnAssertion:
                         account.id, scenario_id,
                         PostingSourceEnum.ACCOUNT_TRUEUP, trueup_period,
                     ),
-                    posting_service.account_posting_total(
-                        account.id, scenario_id,
+                    account_net(
+                        _db.session, account.id, scenario_id,
                     ),
                 )
 
@@ -1507,6 +1518,7 @@ class TestASettleDayMoveAcrossAnAssertion:
                     "PRECONDITION: the door moved the movement's day"
                 )
                 assert read_both() == expected, f"moved to {moved_to}"
+            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestCorrectionPeriodAttribution:
@@ -1612,14 +1624,14 @@ class TestCorrectionPeriodAttribution:
                 account.id, scenario_id,
                 PostingSourceEnum.ACCOUNT_TRUEUP, following.id,
             ) == Decimal("0.00")
-            trueups = _correction_entries(
-                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
-            )
-            assert all(
-                entry.entry_date == self._ASSERTION_DAY for entry in trueups
-            )
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert {
+                line.entry_date for line in source_lines(
+                    _db.session, linked_key_of(_db.session, account.id), scenario_id,
+                    PostingSourceEnum.ACCOUNT_TRUEUP,
+                )
+            } == {self._ASSERTION_DAY}
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("550.00")
 
     def _assert_beyond_the_schedule(self, seed_user):
@@ -1684,9 +1696,10 @@ class TestCorrectionPeriodAttribution:
                 account.id, scenario_id,
                 PostingSourceEnum.ACCOUNT_TRUEUP, containing.id,
             ) == Decimal("100.00")
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("600.00")
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_the_refiled_correction_reconcile_is_idempotent(
         self, app, db, seed_user,
@@ -1775,11 +1788,11 @@ class TestSyncEntryPoints:
             )
             _db.session.commit()
 
-            assert posting_service.account_posting_total(
-                account.id, baseline_id,
+            assert account_net(
+                _db.session, account.id, baseline_id,
             ) == Decimal("500.00")
-            assert posting_service.account_posting_total(
-                account.id, what_if.id,
+            assert account_net(
+                _db.session, account.id, what_if.id,
             ) == Decimal("460.00")
             for scenario_id in (baseline_id, what_if.id):
                 assert len(_correction_entries(
@@ -1813,13 +1826,16 @@ class TestSyncEntryPoints:
                 PostingSourceEnum.ACCOUNT_OPENING,
                 PostingSourceEnum.ACCOUNT_TRUEUP,
             ):
-                assert _correction_entries(loan.id, scenario_id, source) == []
+                assert source_lines(
+                    _db.session, linked_key_of(_db.session, loan.id), scenario_id, source,
+                ) == []
             resynced = (
                 account_posting_service.resync_user_account_anchor_postings(
                     seed_user["user"].id,
                 )
             )
             assert loan.id not in resynced
+            assert_ledger_parity(_db.session, scenario_id)
 
     def test_resync_user_posts_every_non_loan_account(
         self, app, db, seed_user,
@@ -1864,8 +1880,8 @@ class TestSyncEntryPoints:
         with app.app_context():
             scenario_id = seed_user["scenario"].id
             account = _make_account_as_created(seed_user, "750.00")
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("750.00")
             assert len(_correction_entries(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_OPENING,
@@ -1902,24 +1918,16 @@ class TestSyncEntryPoints:
             )
             _db.session.commit()
 
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("500.00")
-            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
-            openings = _correction_entries(
+            assert _linked_source_net(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_OPENING,
-            )
-            assert sum(
-                (_entry_legs(entry.id)[linked.id][0] for entry in openings),
-                Decimal("0"),
             ) == Decimal("500.00")
-            trueups = _correction_entries(
+            assert _linked_source_net(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
-            )
-            assert sum(
-                (_entry_legs(entry.id)[linked.id][0] for entry in trueups),
-                Decimal("0"),
             ) == Decimal("200.00")
+            assert_ledger_parity(_db.session, scenario_id)
 
     def test_wired_trueup_and_revert_self_heal_end_to_end(
         self, app, db, seed_user,
@@ -1962,15 +1970,16 @@ class TestSyncEntryPoints:
                 new_balance=Decimal("350.00"),
             ).outcome
             assert outcome is AnchorTrueUpOutcome.COMMITTED
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("350.00")
-            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
             trueups = _correction_entries(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             )
             assert len(trueups) == 1
-            assert _entry_legs(trueups[0].id)[linked.id][0] == Decimal("50.00")
+            assert _linked_source_net(
+                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
+            ) == Decimal("50.00")
 
             # The revert goes through the ONE status door first (plan step
             # X-bi-3a): the settle wrote a covering movement that carries the
@@ -1982,15 +1991,11 @@ class TestSyncEntryPoints:
             posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("350.00")
-            trueups = _correction_entries(
+            assert _linked_source_net(
                 account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
-            )
-            assert sum(
-                (_entry_legs(entry.id)[linked.id][0] for entry in trueups),
-                Decimal("0"),
             ) == Decimal("-150.00")
 
     def test_baselineless_owner_skips_loudly_then_recovers(
@@ -2093,8 +2098,8 @@ class TestATeardownReChecksTheAnchorsAfterTheRecordsLeave:
                 seed_user["bootstrap_period"].start_date,
             )
             _db.session.commit()
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("500.00")
 
             deletion = transaction_service.delete_transaction(
@@ -2103,8 +2108,8 @@ class TestATeardownReChecksTheAnchorsAfterTheRecordsLeave:
             _db.session.commit()
 
             assert deletion.soft is False
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("500.00")
             linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
             trueups = _correction_entries(
@@ -2151,8 +2156,8 @@ class TestATeardownReChecksTheAnchorsAfterTheRecordsLeave:
             )
             posting_service.sync_transaction_postings(envelope)
             _db.session.commit()
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("500.00")
             linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
             before = {
@@ -2170,8 +2175,8 @@ class TestATeardownReChecksTheAnchorsAfterTheRecordsLeave:
             _db.session.commit()
 
             assert deletion.soft is True
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("500.00")
             added = [
                 entry for entry in _correction_entries(
@@ -2213,20 +2218,13 @@ class TestATeardownReChecksTheAnchorsAfterTheRecordsLeave:
             _db.session.commit()
 
             assert not txn.covering_movements
-            assert posting_service.account_posting_total(
-                account.id, scenario_id,
+            assert account_net(
+                _db.session, account.id, scenario_id,
             ) == Decimal("500.00")
-            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
-            assert sum(
-                (
-                    _entry_legs(entry.id)[linked.id][0]
-                    for entry in _correction_entries(
-                        account.id, scenario_id,
-                        PostingSourceEnum.ACCOUNT_TRUEUP,
-                    )
-                ),
-                Decimal("0"),
+            assert _linked_source_net(
+                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
             ) == Decimal("0.00")
+            assert_ledger_parity(db.session, scenario_id)
 
 
 class TestLedgerAgreesWithTheGridOnAssertionPeriods:
@@ -2541,27 +2539,16 @@ class TestTheSharedFilingDoor:
             loan_posting_service.sync_loan_postings(loan.id, scenario_id)
             _db.session.commit()
 
-            # Filtered on the DAY, not merely on the source kind: re-stamping
-            # the cash opening leaves its original entry behind, reversed to
-            # zero by the reconcile's own self-heal, and counting entries would
-            # grade that instead of the filing rule.
-            filed = {}
+            # Filtered on the DAY: what files there is the books the case
+            # restated, and the question is the paycheck those lines name.
+            lines = scenario_lines(_db.session, scenario_id)
             for source in (
                 PostingSourceEnum.ACCOUNT_OPENING,
                 PostingSourceEnum.LOAN_OPENING,
             ):
-                entries = (
-                    _db.session.query(JournalEntry)
-                    .filter_by(
-                        user_id=seed_user["user"].id,
-                        scenario_id=scenario_id,
-                        source_kind_id=ref_cache.posting_source_id(source),
-                        entry_date=self._PRE_SCHEDULE_DAY,
-                    )
-                    .all()
-                )
-                assert len(entries) == 1, (source, entries)
-                filed[source] = entries[0].pay_period_id
-
-            assert filed[PostingSourceEnum.ACCOUNT_OPENING] == earliest.id
-            assert filed[PostingSourceEnum.LOAN_OPENING] == earliest.id
+                source_kind_id = ref_cache.posting_source_id(source)
+                assert {
+                    line.pay_period_id for line in lines
+                    if line.source_kind_id == source_kind_id
+                    and line.entry_date == self._PRE_SCHEDULE_DAY
+                } == {earliest.id}, source

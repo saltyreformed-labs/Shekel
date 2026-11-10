@@ -46,10 +46,8 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import LedgerAccountClassEnum
 from app.extensions import db as _db
-from tests._test_helpers import (
-    create_account_of_type,
-    ledger_accounts_for_account,
-)
+from tests._stored_ledger import ledger_accounts_for_account
+from tests._test_helpers import create_account_of_type
 
 
 # ---------------------------------------------------------------------------

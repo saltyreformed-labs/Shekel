@@ -14,14 +14,15 @@ from app.exceptions import NotFoundError, ValidationError
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import status_seam, transaction_service
+from app.services.ledger_lines import linked_key
 from app.services.row_valuation import settled_figure
 from app.services.transaction_service import settle_transaction
 from app.utils.dates import display_today
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import ledger_net
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_account,
-    ledger_net,
-    linked_ledger_account,
     typed,
 )
 
@@ -78,10 +79,10 @@ class TestASettleBooksOnTheTender:
             card = _card(seed_user)
             txn = _hotel_bill(seed_user, seed_periods[0])
             scenario_id = txn.scenario_id
-            checking_ledger = linked_ledger_account(db.session, checking.id)
-            card_ledger = linked_ledger_account(db.session, card.id)
-            checking_before = ledger_net(db.session, checking_ledger.id, scenario_id)
-            card_before = ledger_net(db.session, card_ledger.id, scenario_id)
+            checking_ledger = linked_key(checking)
+            card_ledger = linked_key(card)
+            checking_before = ledger_net(db.session, checking_ledger, scenario_id)
+            card_before = ledger_net(db.session, card_ledger, scenario_id)
 
             # Today typed under "Money moved on", the day a settle is dated
             # by default: the row's own date is before the card's first
@@ -105,8 +106,8 @@ class TestASettleBooksOnTheTender:
             on_checking = _per_day(checking.id, scenario_id)
             assert on_the_card[txn.settled_on] == -_HOTEL
             assert txn.settled_on not in on_checking
-            assert ledger_net(db.session, card_ledger.id, scenario_id) - card_before == -_HOTEL
-            assert ledger_net(db.session, checking_ledger.id, scenario_id) == checking_before
+            assert ledger_net(db.session, card_ledger, scenario_id) - card_before == -_HOTEL
+            assert ledger_net(db.session, checking_ledger, scenario_id) == checking_before
             assert settled_figure(txn) == _HOTEL
 
     def test_the_tender_may_be_the_rows_own_account_stated_outright(
@@ -385,10 +386,10 @@ class TestATenderCorrectionOnASettledRow:
         (a statement of checking never showed money that moved on Savings,
         and the movement's key would refuse the pair); the row's version
         counter moves, so a second stale tab meets a 409 rather than
-        overwriting the correction; and the POSTED ledger follows the fold
-        -- the door's reconcile after the seam reverses checking's leg and
-        posts Savings', so checking's ledger account is back where it was
-        and Savings' carries the payment.  It was corrected to the card
+        overwriting the correction; and the ledger follows: checking's line
+        is back where it was and Savings' carries the payment.  On the store
+        the door's reconcile after the seam reverses checking's leg and posts
+        Savings', which the parity line grades.  It was corrected to the card
         until ruling plan#3227 took the card out of "Paid from".
         """
         with app.app_context():
@@ -396,17 +397,17 @@ class TestATenderCorrectionOnASettledRow:
             savings = add_savings(seed_user)
             txn = _hotel_bill(seed_user, seed_periods[0])
             scenario_id = txn.scenario_id
-            checking_ledger = linked_ledger_account(db.session, checking.id)
-            savings_ledger = linked_ledger_account(db.session, savings.id)
-            checking_before = ledger_net(db.session, checking_ledger.id, scenario_id)
-            savings_before = ledger_net(db.session, savings_ledger.id, scenario_id)
+            checking_ledger = linked_key(checking)
+            savings_ledger = linked_key(savings)
+            checking_before = ledger_net(db.session, checking_ledger, scenario_id)
+            savings_before = ledger_net(db.session, savings_ledger, scenario_id)
             settle_transaction(txn)
             status_seam.record_clearing(txn, _latest_anchor(checking.id).id)
             db.session.commit()
             movement = _movement(txn)
             assert movement.reconciled_by_id is not None
             assert txn.reconciled_by_id is not None
-            assert ledger_net(db.session, checking_ledger.id, scenario_id) - checking_before == -_HOTEL
+            assert ledger_net(db.session, checking_ledger, scenario_id) - checking_before == -_HOTEL
             first_id, version_before = movement.id, txn.version_id
 
             _correct_tender(txn, savings.id)
@@ -420,11 +421,12 @@ class TestATenderCorrectionOnASettledRow:
             assert movement.settled_on == txn.settled_on
             assert _per_day(savings.id, scenario_id)[txn.settled_on] == -_HOTEL
             assert txn.settled_on not in _per_day(checking.id, scenario_id)
-            assert ledger_net(db.session, checking_ledger.id, scenario_id) == checking_before
+            assert ledger_net(db.session, checking_ledger, scenario_id) == checking_before
             assert (
-                ledger_net(db.session, savings_ledger.id, scenario_id) - savings_before
+                ledger_net(db.session, savings_ledger, scenario_id) - savings_before
                 == -_HOTEL
             )
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_an_echo_of_the_recorded_tender_writes_nothing(
         self, app, seed_user, seed_periods,

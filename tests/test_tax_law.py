@@ -31,6 +31,7 @@ from app.tax_law import (
     TaxLaw,
     TaxYearLaw,
     ladder,
+    name_states,
 )
 from app.tax_law import _north_carolina
 
@@ -289,6 +290,80 @@ class TestFederalAmounts:
         """A rung's bound is an amount like any other."""
         with pytest.raises(ValueError, match="more than 10 digits before the point"):
             ladder(("0.00", "100000000000.00", "0.1000"), ("100000000000.00", None, "0.1200"))
+
+
+class TestWithholdingFigures:
+    """A year states a withholding figure only where it differs (ruling plan#3213).
+
+    The made-up rules' return figures are a 15,000.00 standard deduction and a
+    2,000.00 child credit (:func:`_federal`).
+    """
+
+    _RETURNS = {
+        "withholding_standard_deduction": Decimal("15000.00"),
+        "withholding_child_credit_amount": Decimal("2000.00"),
+    }
+
+    @pytest.mark.parametrize("field", sorted(_RETURNS))
+    def test_a_figure_equal_to_the_returns_is_refused(self, field):
+        """Stating the return's figure again would be a second spelling of it."""
+        with pytest.raises(ValueError, match=f"federal {field} .* is the return's figure"):
+            _federal(**{field: self._RETURNS[field]})
+
+    @pytest.mark.parametrize("field", sorted(_RETURNS))
+    def test_a_negative_figure_is_refused(self, field):
+        """A withholding figure is an amount like the return's."""
+        with pytest.raises(ValueError, match=f"federal {field} -1.00 must be at least zero"):
+            _federal(**{field: Decimal("-1.00")})
+
+    @pytest.mark.parametrize("field", sorted(_RETURNS))
+    def test_a_figure_finer_than_a_cent_is_refused(self, field):
+        """To the cent, as every amount in the law."""
+        with pytest.raises(ValueError, match="more than 2 decimal places"):
+            _federal(**{field: Decimal("1400.005")})
+
+    @pytest.mark.parametrize("field", sorted(_RETURNS))
+    def test_a_float_figure_is_refused(self, field):
+        """A float cannot carry an exact figure."""
+        with pytest.raises(ValueError, match="must be a Decimal figure"):
+            _federal(**{field: 1400.0})
+
+    def test_rules_stating_none_withhold_on_themselves(self):
+        """The default: withholding prices on the return's rules, the same object."""
+        rules = _federal()
+        assert rules.withholding_standard_deduction is None
+        assert rules.withholding_child_credit_amount is None
+        assert rules.withholding_rules is rules
+
+    def test_each_stated_figure_takes_the_returns_place(self):
+        """Both stated: the withholding rules carry them and the rest of the return's."""
+        rules = _federal(
+            withholding_standard_deduction=Decimal("14000.00"),
+            withholding_child_credit_amount=Decimal("1800.00"),
+        )
+        withheld = rules.withholding_rules
+        assert withheld.standard_deduction == Decimal("14000.00")
+        assert withheld.child_credit_amount == Decimal("1800.00")
+        assert withheld.other_dependent_credit_amount == Decimal("500.00")
+        assert withheld.child_credit_refundable_cap == Decimal("1500.00")
+        assert withheld.brackets == rules.brackets
+        # It states none itself: it already is what withholding prices on.
+        assert withheld.withholding_standard_deduction is None
+        assert withheld.withholding_child_credit_amount is None
+        assert withheld.withholding_rules is withheld
+        # The return's rules are unmoved.
+        assert rules.standard_deduction == Decimal("15000.00")
+        assert rules.child_credit_amount == Decimal("2000.00")
+
+    def test_a_figure_not_stated_stays_the_returns(self):
+        """One stated: the other withholding figure is the return's."""
+        deduction_only = _federal(withholding_standard_deduction=Decimal("14000.00"))
+        assert deduction_only.withholding_rules.standard_deduction == Decimal("14000.00")
+        assert deduction_only.withholding_rules.child_credit_amount == Decimal("2000.00")
+
+        credit_only = _federal(withholding_child_credit_amount=Decimal("1800.00"))
+        assert credit_only.withholding_rules.standard_deduction == Decimal("15000.00")
+        assert credit_only.withholding_rules.child_credit_amount == Decimal("1800.00")
 
 
 class TestFicaRules:
@@ -566,11 +641,15 @@ class TestTheSupportedStates:
         assert TaxLaw(years=()).supported_states == ()
 
     def test_late_states_are_refused_and_named_alphabetically(self):
-        """Two states first listed in 2031 of a law opening in 2030: both named, in order."""
+        """Two states first listed in 2031 of a law opening in 2030: both named, in order.
+
+        In the one wording of a list of states, "AA and BB" (ruling plan#3202;
+        it read "AA, BB" until then).
+        """
         with pytest.raises(
             ValueError,
             match=(
-                "the tax law lists AA, BB from 2031 but not in its first year, "
+                "the tax law lists AA and BB from 2031 but not in its first year, "
                 "2030: a state is listed from the law's first year"
             ),
         ):
@@ -578,6 +657,29 @@ class TestTheSupportedStates:
                 _year(2030),
                 _year(2031, states={"ZZ": _state(), "BB": _state(), "AA": _state()}),
             ))
+
+
+class TestAListOfStatesHasOneWording:
+    """``name_states`` words every list of states a sentence names (ruling plan#3202).
+
+    The refusals and the tax-law banner both read it, so neither can word a
+    list the other way.
+    """
+
+    @pytest.mark.parametrize(("states", "named"), [
+        ((), "no state"),
+        (("NC",), "NC"),
+        (("NC", "SC"), "NC and SC"),
+        (("NC", "SC", "VA"), "NC, SC and VA"),
+        (("AA", "BB", "CC", "DD"), "AA, BB, CC and DD"),
+    ])
+    def test_commas_then_and_before_the_last(self, states, named):
+        """None, one, two, three and four: "and" before the last, commas before that."""
+        assert name_states(states) == named
+
+    def test_the_states_are_named_in_the_order_given(self):
+        """It words a list and never sorts one; each caller passes the order it means."""
+        assert name_states(("SC", "NC")) == "SC and NC"
 
 
 class TestTheLawCannotChangeOnceItLoads:
@@ -622,27 +724,6 @@ class TestTheShippedLaw:
             assert set(year.federal) == set(FilingStatusEnum)
             assert isinstance(year.fica, FicaRules)
             assert year.sources
-
-    def test_a_second_state_waits_on_the_two_state_banner_wording(self):
-        """The shipped law lists ONE state until the developer rules the two-state wording.
-
-        Ruling salary:R-SAL91 worded the tax-law banner for ONE state priced on
-        an older year; its two-state form ("... and NC tax uses 2026's and SC
-        tax uses 2026's, ...", and the check script's "..., except NC on
-        2026's and SC on 2026's.") is extrapolated, pinned only by made-up
-        laws, and unruled.  Plan step salary:X-at-3 owed the developer that
-        question before a second state lands, and its ruling R-SAL128 lists
-        North Carolina alone, so the question is held HERE (ledger row
-        salary:SAL-599; the developer, 2026-10-08, "Failing test + ledger
-        row"): the release adding a second state fails this until it is asked.
-        It counts states and names none, so it is no second copy of the law.
-        """
-        assert len(LAW.supported_states) == 1, (
-            f"the shipped tax law now lists {', '.join(LAW.supported_states)}: "
-            "before a second state ships, put R-SAL91's two-state banner "
-            "wording to the developer (ledger row salary:SAL-599), then "
-            "retire this test"
-        )
 
     def test_every_state_year_states_every_filing_status(self):
         """A state's standard deduction and child tiers are read per status."""

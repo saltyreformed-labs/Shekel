@@ -90,9 +90,15 @@ from app.services.recurrence._closing import (
     Empty,
     Indefinite,
 )
+from app.services.recurrence._month_coordinate import (
+    DayOfMonth,
+    LastWeekday,
+    MonthCoordinate,
+    NthWeekday,
+)
 from app.services.recurrence._offer import follows_card_due_dates
 from app.services.recurrence._resolution import ResolvedRecurrence
-from app.utils.dates import month_name, weekday_name
+from app.utils.dates import WEEKDAY_NAMES, month_name, weekday_name
 
 #: The cadence stems that have a NAME of their own, per unit.
 #:
@@ -138,6 +144,12 @@ _DEFERRED_NOTE = "first paycheck"
 #: state the mechanism twice.  Any OTHER day is stated, because then the two
 #: are different facts.
 _IMPLIED_DEFERRED_DAY = 1
+
+#: The words for a weekday's week number counted from the month's start,
+#: indexed by ``nth - 1``.  Exactly as long as the week numbers a rule can
+#: read (:data:`~._month_coordinate.LAST_WEEK_EVERY_MONTH_HOLDS`, no fifth by
+#: ruling plan#2670), which a test holds.
+_WEEK_NUMBER_WORDS: tuple[str, ...] = ("first", "second", "third", "fourth")
 
 
 class RecurrenceDescriptionError(ShekelError):
@@ -258,19 +270,143 @@ def _stem(unit: RecurrenceUnitEnum, interval_n: int) -> str:
     return f"Every {interval_n} {plural}"
 
 
+def _fires_every_month(resolved: ResolvedRecurrence) -> bool:
+    """Return whether a month-measured rule fires in EVERY month.
+
+    Then only the day distinguishes it and the phrase names no month; a rule
+    that skips months names its first month too, because which months it
+    fires in is half the answer.
+
+    Args:
+        resolved: The recurrence's two-axis meaning.
+
+    Returns:
+        ``True`` for a monthly cadence of interval one.
+    """
+    return resolved.unit is RecurrenceUnitEnum.MONTH and resolved.interval_n == 1
+
+
+def _first_month(resolved: ResolvedRecurrence) -> str:
+    """Return the abbreviated name of the rule's first month (``"Apr"``).
+
+    The month a rule that skips months names: any one of a cycle's months
+    names the whole cycle, and the first occurrence's is the one the rule
+    states (the module docstring says why it moved there).
+
+    Args:
+        resolved: The recurrence's two-axis meaning.
+
+    Returns:
+        The month's three-letter name.
+    """
+    return month_name(resolved.starts_on.month, abbr=True)
+
+
+def _in_which_months(resolved: ResolvedRecurrence) -> str:
+    """Return the suffix naming the first month of a rule that skips months.
+
+    Args:
+        resolved: The recurrence's two-axis meaning.
+
+    Returns:
+        ``""`` for a rule firing every month, ``" of Jan"`` for one that
+        skips months.
+    """
+    if _fires_every_month(resolved):
+        return ""
+    return f" of {_first_month(resolved)}"
+
+
+def _day_phrase(coordinate: DayOfMonth, resolved: ResolvedRecurrence) -> str:
+    """Return ``"day 22"`` for a monthly rule, ``"Apr 21"`` for one that skips months.
+
+    Args:
+        coordinate: The day the rule means, before the per-month clamp.
+        resolved: The recurrence's two-axis meaning.
+
+    Returns:
+        The coordinate phrase.
+    """
+    if _fires_every_month(resolved):
+        return f"day {coordinate.day}"
+    return f"{_first_month(resolved)} {coordinate.day}"
+
+
+def _weekday_phrase(
+    coordinate: NthWeekday | LastWeekday, resolved: ResolvedRecurrence,
+) -> str:
+    """Return ``"third Tuesday"``, or ``"last Friday of Jan"`` for one that skips months.
+
+    The shape's own words are :func:`weekday_words`', which the form's
+    "repeating on" control shows too.
+
+    Args:
+        coordinate: A weekday shape.
+        resolved: The recurrence's two-axis meaning.
+
+    Returns:
+        The coordinate phrase.
+    """
+    return f"{weekday_words(coordinate)}{_in_which_months(resolved)}"
+
+
+def weekday_words(coordinate: NthWeekday | LastWeekday) -> str:
+    """Return a weekday shape's own words: ``"third Tuesday"``, ``"last Friday"``.
+
+    **The ONE producer of them** (plan step recurrence:R8-c), asked by the
+    describer's phrase above and by the form's "repeating on" control
+    (:func:`~app.services.recurrence.weekday_reading_options`), so the form
+    offers a reading in the words the Recurring row then shows for it.  The
+    weekday is named off the shape's index through the shared table rather
+    than ``%A``, for the locale reason :func:`_coordinate` gives.
+
+    Args:
+        coordinate: A weekday shape.
+
+    Returns:
+        The words, without an article.
+    """
+    weekday = WEEKDAY_NAMES[coordinate.weekday]
+    if isinstance(coordinate, LastWeekday):
+        return f"last {weekday}"
+    return f"{_WEEK_NUMBER_WORDS[coordinate.nth - 1]} {weekday}"
+
+
+#: How each month-coordinate shape is worded, keyed by the shape itself
+#: (plan step R8-c, plan ledger row **D29**).
+#:
+#: Keyed by TYPE, as :data:`_STOP_PHRASES` is, so a shape missing from it
+#: raises rather than rendering as some other shape's words.  Until R8-c the
+#: coordinate was "WEEK, or else a day of the month", which is the dispatch D29
+#: named: a "third Tuesday" rule would have read "Monthly (day 17)", its first
+#: date's incidental day, with no refusal to catch it because the day was
+#: present -- just wrong.  The value type is ``Any`` for the contravariance
+#: reason :data:`_STOP_PHRASES` gives.
+_COORDINATE_PHRASES: dict[
+    type[MonthCoordinate], "Callable[[Any, ResolvedRecurrence], str]",
+] = {
+    DayOfMonth: _day_phrase,
+    NthWeekday: _weekday_phrase,
+    LastWeekday: _weekday_phrase,
+}
+
+
 def _coordinate(resolved: ResolvedRecurrence) -> str:
     """Return the calendar day/month the cadence fires on.
 
-    What goes inside the parentheses before any placement note.  Two shapes,
-    and which one applies is a property of the UNIT rather than of the pattern
-    that used to be authored:
+    What goes inside the parentheses before any placement note.  The ``WEEK``
+    unit names its weekday; every month-measured unit names its MONTH
+    COORDINATE, worded by the coordinate's SHAPE (plan step R8-c):
 
-    * ``WEEK`` -- the anchor's weekday (``"Mondays"``), which is the whole of
-      what such a rule's phase is.
-    * ``MONTH`` / ``YEAR`` -- ``"day 22"`` for a rule that fires EVERY month,
-      where only the day distinguishes it, and the anchor's month beside that
-      day (``"Apr 21"``) for one that skips months, where which months it
-      fires in is half the answer.
+    * ``"Mondays"`` -- a weekly rule's weekday, which is the whole of what
+      such a rule's phase is.
+    * ``"day 22"`` / ``"Apr 21"`` -- a day of the month.
+    * ``"third Tuesday"`` / ``"fourth Thursday of Nov"`` -- the nth weekday.
+    * ``"last Friday"`` / ``"last Friday of Jan"`` -- the last weekday.
+
+    A rule firing EVERY month names only its day, where only the day
+    distinguishes it; one that skips months names its first month too
+    (:func:`_fires_every_month`).
 
     Called only for a unit with a calendar coordinate; the ``PERIOD`` unit is
     answered by :func:`_parenthetical` before this runs, which is where the
@@ -284,8 +420,9 @@ def _coordinate(resolved: ResolvedRecurrence) -> str:
 
     Raises:
         RecurrenceDescriptionError: When *resolved* names a unit with neither
-            a weekday nor a day-of-month reading, which is a member added to
-            :class:`~app.enums.RecurrenceUnitEnum` without a coordinate shape.
+            a weekday nor a month coordinate, which is a member added to
+            :class:`~app.enums.RecurrenceUnitEnum` without a coordinate shape,
+            or a month-coordinate shape with no wording.
     """
     if resolved.unit is RecurrenceUnitEnum.WEEK:
         # Through the shared table, NOT ``%A``: that delegates to the platform
@@ -295,17 +432,22 @@ def _coordinate(resolved: ResolvedRecurrence) -> str:
         # ``recurrence:R-R92``).  The plural is the honest reading: the rule
         # fires on that weekday every ``interval_n`` weeks.
         return f"{weekday_name(resolved.starts_on)}s"
-    day = resolved.day_of_month
-    if day is None:
+    coordinate = resolved.month_coordinate
+    if coordinate is None:
         raise RecurrenceDescriptionError(
-            f"recurrence unit {resolved.unit!r} names no day of the month "
+            f"recurrence unit {resolved.unit!r} names no day of a month "
             f"and no coordinate shape.  Every member of RecurrenceUnitEnum "
             f"must have one: a cell that omits when a definition fires reads "
             f"as one that fires on no particular day."
         )
-    if resolved.unit is RecurrenceUnitEnum.MONTH and resolved.interval_n == 1:
-        return f"day {day}"
-    return f"{month_name(resolved.starts_on.month, abbr=True)} {day}"
+    phrase = _COORDINATE_PHRASES.get(type(coordinate))
+    if phrase is None:
+        raise RecurrenceDescriptionError(
+            f"month coordinate {type(coordinate).__name__!r} has no wording.  "
+            f"Every shape a month coordinate can take must have one: wording "
+            f"it as another shape would name a day the rule does not fire on."
+        )
+    return phrase(coordinate, resolved)
 
 
 def _placement_note(resolved: ResolvedRecurrence) -> str | None:
@@ -355,6 +497,13 @@ def _parenthetical(resolved: ResolvedRecurrence) -> str | None:
     day IS a second fact -- a deferring rule on the 15th funds from the first
     paycheck on or after the 15th -- so it is stated.
 
+    **The collapse asks for the DAY shape** (plan step R8-c), through
+    :attr:`~app.services.recurrence.ResolvedRecurrence.day_of_month`, which
+    is ``None`` for a weekday rule: "the first paycheck on or after the first
+    Monday" is a different paycheck from the month's first in every month
+    whose first Monday is not the 1st, so "first Monday, first paycheck" is
+    never collapsed.
+
     **The collapse names the placement it rests on**, because the implication
     holds for that member and no other.  A LEAD placement -- fund from a
     paycheck EARLIER than the one containing the occurrence -- would break it:
@@ -399,8 +548,7 @@ def _parenthetical(resolved: ResolvedRecurrence) -> str | None:
         return coordinate
     if (
         resolved.placement is PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER
-        and resolved.unit is RecurrenceUnitEnum.MONTH
-        and resolved.interval_n == 1
+        and _fires_every_month(resolved)
         and resolved.day_of_month == _IMPLIED_DEFERRED_DAY
     ):
         return note
@@ -737,4 +885,7 @@ def describe(resolved: ResolvedRecurrence) -> RecurrenceDescription:
     )
 
 
-__all__ = ["RecurrenceDescription", "RecurrenceDescriptionError", "describe"]
+__all__ = [
+    "RecurrenceDescription", "RecurrenceDescriptionError", "describe",
+    "weekday_words",
+]

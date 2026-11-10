@@ -15,12 +15,13 @@ from decimal import Decimal
 import pytest
 from marshmallow import ValidationError
 
-from app import tax_law as tax_law_module
 from app.enums import PaycheckLineKindEnum, RecurrenceUnitEnum
 from app.schemas.validation._helpers import _normalize_empty_inputs
 from app.schemas.validation.templates import A_CADENCE_IS_REQUIRED
-from tests._test_helpers import EMPTY_TAX_LAW, cadence_payload
+from tests._stub_period import stub_period_on
+from tests._test_helpers import EMPTY_TAX_LAW, cadence_payload, made_up_law
 from app.services.pay_rhythm import FixedDays
+from app.services.recurrence import MonthReading
 from app.schemas.validation import (
     RECURRENCE_NEEDS_A_START,
     AccountCreateSchema,
@@ -253,7 +254,11 @@ class TestTemplateCreateSchema:
         assert "offset_periods" not in data
 
     def test_nominal_day_range(self):
-        """nominal_day outside 29-31 fails Range validation.
+        """A "repeating on" day outside 29-31 names no option and fails validation.
+
+        ``repeats_on`` since plan step recurrence:R8-c (``nominal_day`` until
+        then): the control posts each option's own token, so 28 is a token no
+        option posts.
 
         ``day_of_month`` was this field's predecessor and its domain was 1-31,
         because it stated the cycle's day outright.  Plan step R7c-b made the
@@ -270,9 +275,9 @@ class TestTemplateCreateSchema:
                 "category_id": "1",
                 "transaction_type_id": "1",
                 "account_id": "1",
-                "nominal_day": "28",
+                "repeats_on": "28",
             })
-        assert "nominal_day" in exc.value.messages
+        assert "repeats_on" in exc.value.messages
 
     def test_empty_strings_stripped(self):
         """@pre_load drops empty non-nullable fields and nulls the nullable ones.
@@ -861,6 +866,7 @@ class TestSalaryProfileCreateSchema:
             "name": "My Salary",
             "pay_amount": "2884.62",  # $75,000.00 a year / 26
             "pay_payday": "2026-01-02",
+            **stub_period_on("2026-01-02"),
             "filing_status_id": "1",
             "state_code": "NC",
         })
@@ -894,6 +900,7 @@ class TestSalaryProfileCreateSchema:
             "name": "Stale client",
             "pay_amount": "2884.62",  # $75,000.00 a year / 26
             "pay_payday": "2026-01-02",
+            **stub_period_on("2026-01-02"),
             "filing_status_id": "1",
             "state_code": "NC",
             "pay_periods_per_year": "52",
@@ -907,6 +914,7 @@ class TestSalaryProfileCreateSchema:
                 "name": "Bad",
                 "pay_amount": "2884.62",  # $75,000.00 a year / 26
                 "pay_payday": "2026-01-02",
+                **stub_period_on("2026-01-02"),
                 "filing_status_id": "1",
                 "state_code": "NCC",  # 3 chars, max is 2.
             })
@@ -923,8 +931,7 @@ class TestRaiseCreateSchema:
         """Valid raise with percentage loads successfully."""
         data = RaiseCreateSchema().load({
             "raise_type_id": "1",
-            "effective_month": "3",
-            "effective_year": "2026",
+            "effective_date": "2026-03-01",
             "percentage": "3.50",
         })
         assert data["percentage"] == Decimal("3.50")
@@ -933,8 +940,7 @@ class TestRaiseCreateSchema:
         """Valid raise with flat_amount loads successfully."""
         data = RaiseCreateSchema().load({
             "raise_type_id": "1",
-            "effective_month": "1",
-            "effective_year": "2026",
+            "effective_date": "2026-01-01",
             "flat_amount": "5000.00",
         })
         assert data["flat_amount"] == Decimal("5000.00")
@@ -944,8 +950,7 @@ class TestRaiseCreateSchema:
         with pytest.raises(ValidationError) as exc:
             RaiseCreateSchema().load({
                 "raise_type_id": "1",
-                "effective_month": "3",
-                "effective_year": "2026",
+                "effective_date": "2026-03-01",
                 "percentage": "3",
                 "flat_amount": "5000.00",
             })
@@ -956,31 +961,28 @@ class TestRaiseCreateSchema:
         with pytest.raises(ValidationError) as exc:
             RaiseCreateSchema().load({
                 "raise_type_id": "1",
-                "effective_month": "3",
-                "effective_year": "2026",
+                "effective_date": "2026-03-01",
             })
         assert "_schema" in exc.value.messages
 
-    def test_missing_effective_year_rejected(self):
-        """Raise without effective_year is rejected."""
+    def test_missing_start_date_rejected(self):
+        """A raise without its start date is rejected (ruling plan#3090)."""
         with pytest.raises(ValidationError) as exc:
             RaiseCreateSchema().load({
                 "raise_type_id": "1",
-                "effective_month": "3",
                 "percentage": "3",
             })
-        assert "effective_year" in exc.value.messages
+        assert "effective_date" in exc.value.messages
 
-    def test_month_out_of_range(self):
-        """effective_month=13 fails Range(1-12) validation."""
+    def test_an_impossible_date_is_rejected(self):
+        """February 30 is no day, so it is no start date."""
         with pytest.raises(ValidationError) as exc:
             RaiseCreateSchema().load({
                 "raise_type_id": "1",
-                "effective_month": "13",
-                "effective_year": "2026",
+                "effective_date": "2026-02-30",
                 "percentage": "3",
             })
-        assert "effective_month" in exc.value.messages
+        assert "effective_date" in exc.value.messages
 
 
 # ── PaycheckLineCreateSchema ────────────────────────────────────────────
@@ -1386,7 +1388,7 @@ class TestTemplateCreateSchemaBoundary:
         return data
 
     def test_nominal_day_28_rejected(self):
-        """nominal_day=28 fails Range(min=29, max=31) validation.
+        """repeats_on=28 names no option and fails validation (nominal_day until R8-c).
 
         The lower boundary, and it is a real rule rather than an arbitrary
         floor: every month holds its first 28 days, so no first occurrence can
@@ -1396,24 +1398,24 @@ class TestTemplateCreateSchemaBoundary:
         """
         with pytest.raises(ValidationError) as exc:
             TemplateCreateSchema().load(
-                self._valid_template_data(nominal_day="28")
+                self._valid_template_data(repeats_on="28")
             )
-        assert "nominal_day" in exc.value.messages
+        assert "repeats_on" in exc.value.messages
 
     def test_nominal_day_32_rejected(self):
-        """nominal_day=32 fails Range(min=29, max=31) validation.
+        """repeats_on=32 names no option and fails validation (nominal_day until R8-c).
 
         No month has 32 days. The schema must reject this before it reaches
         the recurrence engine.
         """
         with pytest.raises(ValidationError) as exc:
             TemplateCreateSchema().load(
-                self._valid_template_data(nominal_day="32")
+                self._valid_template_data(repeats_on="32")
             )
-        assert "nominal_day" in exc.value.messages
+        assert "repeats_on" in exc.value.messages
 
     def test_nominal_day_31_accepted(self):
-        """nominal_day=31 is valid -- it is the day a 30-day month clamps.
+        """repeats_on=31 is valid -- it is the day a 30-day month clamps.
 
         The schema grades the DOMAIN alone; whether 31 may sit beside this
         particular ``starts_on`` is a two-field rule the field cannot see, and
@@ -1421,9 +1423,9 @@ class TestTemplateCreateSchemaBoundary:
         write door (mirroring ``ck_recurrence_rules_nominal_day``).
         """
         data = TemplateCreateSchema().load(
-            self._valid_template_data(nominal_day="31")
+            self._valid_template_data(repeats_on="31")
         )
-        assert data["nominal_day"] == 31
+        assert data["repeats_on"] == MonthReading(nominal_day=31)
 
     def test_starts_on_outside_the_calendar_window_rejected(self):
         """A five-digit-year typo in the date box is a FIELD error.
@@ -1528,6 +1530,7 @@ class TestSalaryProfileCreateSchemaBoundary:
             "name": "Test Profile",
             "pay_amount": "2884.62",  # $75,000.00 a year / 26
             "pay_payday": "2026-01-02",
+            **stub_period_on("2026-01-02"),
             "filing_status_id": "1",
             "state_code": "NC",
         }
@@ -1553,7 +1556,7 @@ class TestSalaryProfileCreateSchemaBoundary:
             )
         assert "state_code" in exc.value.messages
 
-    def test_lowercase_state_code_refused(self):
+    def test_lowercase_state_code_refused(self, tax_law):
         """Lower-case ``nc`` is refused: the tax law lists ``NC``, and no other spelling.
 
         Until plan step salary:X-at-3 this case pinned ``nc`` as ACCEPTED,
@@ -1563,14 +1566,19 @@ class TestSalaryProfileCreateSchemaBoundary:
         X-at-3).  Ruling R-SAL78: a save naming a state the law does not list
         is refused.  The form offers the law's own codes, so a browser never
         submits ``nc``.
+
+        Under a made-up law listing NC and ZZ, so the refusal's list of states
+        is pinned as words: "NC and ZZ", the one wording of a list of states
+        (ruling plan#3202).  It read the shipped law's states joined by
+        commas until then, which no second state had yet put to the test.
         """
+        tax_law(made_up_law((2026, {"NC": "0.0399", "ZZ": "0.0500"})))
         with pytest.raises(ValidationError) as exc:
             SalaryProfileCreateSchema().load(
                 self._valid_salary_data(state_code="nc")
             )
         assert exc.value.messages["state_code"] == [
-            "Shekel has no tax rules for 'nc'; it supports "
-            f"{', '.join(tax_law_module.LAW.supported_states)}."
+            "Shekel has no tax rules for 'nc'; it supports NC and ZZ."
         ]
 
     def test_the_law_installed_when_validating_decides(self, tax_law):
@@ -1644,6 +1652,7 @@ class TestAnnualSalaryRange:
             "name": "Test",
             "pay_amount": "2884.62",  # $75,000.00 a year / 26
             "pay_payday": "2026-01-02",
+            **stub_period_on("2026-01-02"),
             "filing_status_id": "1", "state_code": "NC",
         }
         data.update(overrides)
@@ -1673,28 +1682,56 @@ class TestRaiseRangeValidation:
 
     def _base(self, **overrides):
         data = {
-            "raise_type_id": "1", "effective_month": "7",
-            "effective_year": "2026", "percentage": "3.00",
+            "raise_type_id": "1", "effective_date": "2026-07-01", "percentage": "3.00",
         }
         data.update(overrides)
         return data
 
-    def test_year_zero_rejected(self):
-        """effective_year=0 is rejected (min=2000)."""
+    def test_a_start_before_2000_is_rejected(self):
+        """The last day of 1999 is outside the window (min 2000-01-01)."""
         with pytest.raises(ValidationError) as exc:
-            RaiseCreateSchema().load(self._base(effective_year="0"))
-        assert "effective_year" in exc.value.messages
+            RaiseCreateSchema().load(self._base(effective_date="1999-12-31"))
+        assert "effective_date" in exc.value.messages
 
-    def test_year_far_future_rejected(self):
-        """effective_year=999999 is rejected (max=2100)."""
+    def test_a_start_after_2100_is_rejected(self):
+        """The first day of 2101 is outside the window (max 2100-12-31)."""
         with pytest.raises(ValidationError) as exc:
-            RaiseCreateSchema().load(self._base(effective_year="999999"))
-        assert "effective_year" in exc.value.messages
+            RaiseCreateSchema().load(self._base(effective_date="2101-01-01"))
+        assert "effective_date" in exc.value.messages
 
-    def test_valid_year_accepted(self):
-        """effective_year=2026 passes."""
-        data = RaiseCreateSchema().load(self._base())
-        assert data["effective_year"] == 2026
+    def test_both_ends_of_the_window_are_accepted(self):
+        """2000-01-01 and 2100-12-31 are the window's own ends."""
+        for day in ("2000-01-01", "2100-12-31"):
+            data = RaiseCreateSchema().load(self._base(effective_date=day))
+            assert data["effective_date"] == date.fromisoformat(day)
+
+    def test_valid_start_accepted(self):
+        """A mid-month start keeps its day (ruling plan#3090)."""
+        data = RaiseCreateSchema().load(self._base(effective_date="2026-07-15"))
+        assert data["effective_date"] == date(2026, 7, 15)
+
+    def test_a_recurring_raise_may_not_start_on_february_29(self):
+        """It repeats on its month and day, which three years in four lack.
+
+        A rule of the Recur box and the date together, so it lands under the
+        whole-form key the shared loader flashes (ruling plan#3137, beside
+        ruling plan#3135; task plan#3125).
+        """
+        with pytest.raises(ValidationError) as exc:
+            RaiseCreateSchema().load(self._base(
+                effective_date="2028-02-29", is_recurring="on",
+                raise_end_mode="none",
+            ))
+        assert exc.value.messages["_schema"] == [
+            "A raise that repeats every year can't start on February 29, "
+            "because most years don't have one. Start it on February 28 "
+            "or March 1."
+        ]
+
+    def test_a_one_time_raise_may_start_on_february_29(self):
+        """A raise that happens once needs its day only once."""
+        data = RaiseCreateSchema().load(self._base(effective_date="2028-02-29"))
+        assert data["effective_date"] == date(2028, 2, 29)
 
 
 class TestContributionPerPeriodRange:
@@ -1756,8 +1793,7 @@ class TestRaiseCreateSchemaEndYearAttribution:
     @staticmethod
     def _recurring(**overrides):
         data = {
-            "raise_type_id": "1", "effective_month": "1",
-            "effective_year": "2027", "percentage": "5",
+            "raise_type_id": "1", "effective_date": "2027-01-01", "percentage": "5",
             "is_recurring": "on",
         }
         data.update(overrides)

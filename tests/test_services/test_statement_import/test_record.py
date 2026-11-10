@@ -22,17 +22,13 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app import ref_cache
 from app.enums import (
     StatementBalanceEvidenceEnum,
     StatementSourceEnum,
-)
-from app.exceptions import (
-    StatementAccountMismatch,
-    StatementBalanceUnexplained,
-    StatementLineConflict,
 )
 from app.models.merchant import Merchant
 from app.models.statement_import import (
@@ -44,8 +40,13 @@ from app.models.statement_import import (
 from app.models.journal_entry import Posting
 from app.models.transaction import Transaction
 from app.services import account_service
-from app.models.statement_import import BankStatementLine
-from app.services.statement_import import record_statement
+from app.services.statement_import import (
+    StatementAccountMismatch,
+    StatementBalanceUnexplained,
+    StatementLineConflict,
+    plan_statement,
+    record_statement,
+)
 from app.services.statement_import._balance import bank_levels
 from app.models.ref import AccountType
 from app.services.row_valuation import settled_figure
@@ -95,6 +96,37 @@ def _counts(db, account_id):
         import_id: (sighted, first)
         for import_id, sighted, first in db.session.execute(
             StatementLineSighting.counts_by_import(account_id),
+        )
+    }
+
+
+def _audit_watermark(db):
+    """Return the newest ``system.audit_log`` id, ``0`` while it is empty."""
+    return db.session.execute(
+        text("SELECT coalesce(max(id), 0) FROM system.audit_log"),
+    ).scalar_one()
+
+
+def _audited_writes_since(db, watermark):
+    """Return ``{(table, operation): rows}`` the audit trigger logged after *watermark*.
+
+    Args:
+        db: The session fixture.
+        watermark: An id :func:`_audit_watermark` returned.
+
+    Returns:
+        The count of each operation on each ``schema.table``, empty when
+        nothing was written.
+    """
+    return {
+        (f"{schema}.{table}", operation): count
+        for schema, table, operation, count in db.session.execute(
+            text(
+                "SELECT table_schema, table_name, operation, count(*) "
+                "FROM system.audit_log WHERE id > :watermark "
+                "GROUP BY table_schema, table_name, operation"
+            ),
+            {"watermark": watermark},
         )
     }
 
@@ -598,6 +630,103 @@ class TestItMovesNoMoney:
         _record(seed_user, _file())
 
         assert money_on_the_books.settled_on == date(2026, 3, 3)
+
+
+class TestItsDecisionIsReadable:
+    """The decision half (``plan_statement``) is the import's, and writes nothing.
+
+    Plan step ``balance:X-bk-2`` (plan#1192): the reconcile's act sheet must
+    know which lines an import WOULD add before any act, on a copy it reads
+    only, so the door's decision is a public read the door itself performs.
+    """
+
+    def test_it_names_exactly_the_lines_the_import_then_adds(
+        self, app, db, seed_user,
+    ):
+        """An overlapping export: the plan's fresh lines are the one new line.
+
+        The first file's three lines are held; the later export adds one
+        line on 03-05, so the plan names that line alone -- and the import
+        performed afterwards records exactly it.
+        """
+        _record(seed_user, _file())
+        extended = _ENTRIES + [
+            (date(2026, 3, 5), "-12.79", "POINT OF SALE DEBIT L340 BJS"),
+        ]
+
+        plan = plan_statement(
+            seed_user["account"].id, seed_user["user"].id, _SOURCE,
+            _file(extended),
+        )
+
+        assert [
+            (line.posted_on, line.amount, line.description)
+            for line in plan.fresh_lines
+        ] == [(date(2026, 3, 5), Decimal("-12.79"),
+               "POINT OF SALE DEBIT L340 BJS")]
+        outcome = _record(seed_user, _file(extended), file_name="later.csv")
+        assert outcome.recorded_count == 1
+        newest = db.session.query(BankStatementLine).order_by(
+            BankStatementLine.id.desc(),
+        ).first()
+        assert (newest.posted_on, newest.amount) == (
+            date(2026, 3, 5), Decimal("-12.79"),
+        )
+
+    def test_it_stages_nothing_and_writes_nothing(self, app, db, seed_user):
+        """A plan of a first import leaves the database as it found it.
+
+        Graded by ``system.audit_log``, whose trigger logs every INSERT,
+        UPDATE and DELETE on every table the import writes (each is in
+        ``AUDITED_TABLES``): a census of writes, where a count per table
+        sees only the tables someone thought to list.  Committed first, so
+        anything the plan staged and did not flush (an object added, changed
+        or deleted) is written, and logged, before the census.  A first
+        import is the plan with the most to record, so nothing it leaves
+        unwritten is a write a smaller plan would make; the import itself,
+        performed afterwards, is the control that the census sees each of
+        those writes -- the identity, the import act, its level, every line,
+        its sighting and the merchant each names.
+        """
+        watermark = _audit_watermark(db)
+        plan = plan_statement(
+            seed_user["account"].id, seed_user["user"].id, _SOURCE, _file(),
+        )
+        assert plan.identity_is_new is True
+        assert len(plan.fresh_lines) == 3
+        assert not db.session.new
+        db.session.commit()
+
+        assert not _audited_writes_since(db, watermark)
+
+        _record(seed_user, _file())
+        db.session.commit()
+
+        assert _audited_writes_since(db, watermark) == {
+            ("budget.account_external_identities", "INSERT"): 1,
+            ("budget.statement_imports", "INSERT"): 1,
+            ("budget.account_anchor_history", "INSERT"): 1,
+            ("budget.bank_statement_lines", "INSERT"): 3,
+            ("budget.statement_line_sightings", "INSERT"): 3,
+            ("budget.merchants", "INSERT"): 3,
+        }
+
+    def test_it_refuses_what_the_import_refuses(self, app, db, seed_user):
+        """The refusal is the decision's, so the plan raises it too.
+
+        The same self-contradicting file the door refuses above: its chain
+        implies 1534.19 where its header states 9999.99.
+        """
+        with pytest.raises(StatementBalanceUnexplained) as raised:
+            plan_statement(
+                seed_user["account"].id, seed_user["user"].id, _SOURCE,
+                build.build(build.chained("100.00", _ENTRIES),
+                            balance_as_of="03/09/2026",
+                            stated_balance="9999.99"),
+            )
+
+        assert raised.value.stated == Decimal("9999.99")
+        assert raised.value.implied == Decimal("1534.19")
 
 
 class TestItIsIdempotent:

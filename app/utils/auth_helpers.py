@@ -38,10 +38,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
-from flask import (
-    abort, current_app, make_response, redirect, request,
-    session as flask_session, url_for,
-)
+from flask import abort, current_app, make_response, redirect, request, url_for
 from flask_login import current_user
 
 from app import ref_cache
@@ -56,7 +53,7 @@ from app.utils.log_events import (
     EVT_RESOURCE_NOT_FOUND,
     log_event,
 )
-from app.utils.session_helpers import FRESH_LOGIN_AT_KEY
+from app.utils.session_helpers import FRESH_LOGIN_AT_KEY, session_stamp
 
 logger = logging.getLogger(__name__)
 
@@ -579,20 +576,18 @@ def get_accessible_transaction_or_deleted(txn_id):
 def _fresh_login_is_within(threshold: timedelta) -> bool:
     """Return True iff ``_fresh_login_at`` is within ``threshold``.
 
-    Fail-closed for unparseable input, matching the pattern used by
-    ``_idle_session_is_fresh`` (commit C-10):
+    Fail-closed, as ``_idle_session_is_fresh`` is (commit C-10).  False
+    for any of:
 
-      * Missing key -- the user has never re-authenticated on this
-        session, or the cookie was constructed without the field.
-        Reject so the only path to ``_fresh_login_at`` is via
+      * No readable stamp: the key is missing, or holds a value that is
+        not ISO-8601 or is naive, each of which
+        :func:`~app.utils.session_helpers.session_stamp`, the one parse
+        of a session stamp, reads as ``None``.  A missing key means the
+        user has never re-authenticated on this session, or the cookie
+        was constructed without the field: rejected so the only path to
+        ``_fresh_login_at`` is via
         :func:`~app.utils.session_helpers.stamp_login_session` /
         :func:`~app.utils.session_helpers.stamp_reauth_session`.
-
-      * Malformed (non-ISO-8601) value -- a tampered cookie that
-        ``fromisoformat`` would otherwise raise on.
-
-      * Naive timestamp -- would raise ``TypeError`` on the
-        timezone-aware subtraction.
 
       * Age exceeds ``threshold`` -- the legitimate "step-up window
         expired" case the decorator exists to enforce.
@@ -611,14 +606,8 @@ def _fresh_login_is_within(threshold: timedelta) -> bool:
         True iff the session may proceed past ``fresh_login_required``;
         False if the user must be redirected to ``/reauth``.
     """
-    raw = flask_session.get(FRESH_LOGIN_AT_KEY)
-    if raw is None:
-        return False
-    try:
-        fresh_at = datetime.fromisoformat(raw)
-    except (TypeError, ValueError):
-        return False
-    if fresh_at.tzinfo is None:
+    fresh_at = session_stamp(FRESH_LOGIN_AT_KEY)
+    if fresh_at is None:
         return False
     elapsed = datetime.now(timezone.utc) - fresh_at
     if elapsed < timedelta(0):
@@ -701,15 +690,16 @@ def fresh_login_required(max_age_minutes: int | None = None):
             if _fresh_login_is_within(threshold):
                 return f(*args, **kwargs)
             # The user must re-authenticate.  Build a /reauth URL
-            # carrying the current request URL as ``next`` so the
-            # redirect after a successful re-auth lands them back on
-            # the original action target.  ``request.url`` is the
-            # full URL (including query string); the /reauth handler
-            # validates it through the same ``_is_safe_redirect``
-            # helper used by /login, so an attacker who somehow seeds
-            # a malicious ``next`` (e.g. via an open redirect on a
-            # third-party site that links into a decorated route)
-            # cannot redirect the user off-origin after re-auth.
+            # carrying the current request URL as ``next``.
+            # ``request.url`` is the full URL (including query
+            # string), and the /reauth handler validates it through
+            # the same ``_is_safe_redirect`` helper used by /login,
+            # which refuses any absolute URL: so the user lands on
+            # /dashboard and re-issues the action, and an attacker
+            # who somehow seeds a malicious ``next`` (e.g. via an
+            # open redirect on a third-party site that links into a
+            # decorated route) cannot redirect the user off-origin
+            # after re-auth.
             reauth_url = url_for("auth.reauth", next=request.url)
             if request.headers.get("HX-Request"):
                 # HTMX swaps response bodies; a 302 would render

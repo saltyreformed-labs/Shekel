@@ -25,9 +25,11 @@ import functools
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
+from types import ModuleType
 from typing import TypedDict
 
 import sqlalchemy.exc
+from sqlalchemy.orm import Session
 
 from app.enums import (
     AccountOpeningSourceEnum,
@@ -85,7 +87,10 @@ class _RefState:
     PK}`` lookup; ``acct_type_meta`` maps an account-type PK to its
     presentation metadata; ``ledger_class_debit_normal`` maps a
     ledger-account-class PK to its natural-balance side (TRUE =
-    debit-normal); ``enum_members`` is the INVERSE of ``enum_ids``, so a
+    debit-normal); ``recurrence_unit_months`` maps each recurrence unit
+    measured in months to its span, and ``recurrence_day_of_month_units``
+    holds the units whose row says ``has_day_of_month`` (plan step plan#2302,
+    ruling plan#2748); ``enum_members`` is the INVERSE of ``enum_ids``, so a
     reader holding a stored ``*_id`` resolves its member in one lookup rather
     than scanning the enum.  Written once at startup (re-written in tests) and
     read-only thereafter via the accessor functions below.
@@ -106,6 +111,8 @@ class _RefState:
     )
     acct_type_meta: dict[int, _AcctTypeMeta] = field(default_factory=dict)
     ledger_class_debit_normal: dict[int, bool] = field(default_factory=dict)
+    recurrence_unit_months: dict[Enum, int] = field(default_factory=dict)
+    recurrence_day_of_month_units: set[Enum] = field(default_factory=set)
     initialized: bool = False
 
 
@@ -256,6 +263,76 @@ def _build_ref_specs(ref_models) -> list[_RefSpec]:
     ]
 
 
+def _load_row_meta(
+    db_session: Session, ref_models: ModuleType, unavailable: list[str],
+) -> None:
+    """Load the per-row caches the spec loop's ``name -> id`` map cannot carry.
+
+    Each is a dedicated query, so a reader holding a stored ``*_id`` or an
+    enum member branches on a cached column without a name compare.  Split
+    out of :func:`init` at plan step plan#2302, when the third of them took
+    that function past pylint's branch ceiling; the three bodies are as they
+    stood there.
+
+    Args:
+        db_session: An active SQLAlchemy session.
+        ref_models: The lazily-imported ``app.models.ref`` module.
+        unavailable: Labels of the ref tables the spec loop found missing (the
+            pre-migration bootstrap window); each such table's cache is
+            skipped, having already been warned about.
+    """
+    # Build the account type metadata cache for icon/term-limit lookups.
+    # Same built-in-only filter as the account_types map -- the cache is
+    # loaded once at startup and only knows about seeded built-ins.  Skipped
+    # when that table is unavailable (already warned during loading).
+    # Owner-scoped custom types still resolve their icon/max_term via the ORM
+    # relationship in templates (``account.account_type.icon_class``).
+    if "account_types" not in unavailable:
+        for row in (
+            db_session.query(ref_models.AccountType)
+            .filter(ref_models.AccountType.user_id.is_(None))
+            .all()
+        ):
+            _cache.acct_type_meta[row.id] = {
+                "icon_class": row.icon_class,
+                "max_term_months": row.max_term_months,
+            }
+
+    # Build the ledger-account-class natural-balance map.  Mirrors the
+    # account-type metadata block above: a dedicated query keyed by class
+    # PK (the spec loop only captures name->id), so a reader holding a
+    # ``budget.ledger_accounts.class_id`` can branch on the debit-normal
+    # side without a name compare.  Skipped when the table is unavailable
+    # (the pre-migration bootstrap window already warned during loading).
+    if "ledger_account_classes" not in unavailable:
+        for row in db_session.query(ref_models.LedgerAccountClass).all():
+            _cache.ledger_class_debit_normal[row.id] = row.is_debit_normal
+
+    # Build the recurrence-unit month-span map and day-of-month set.  The row
+    # is the ONE home of which units are measured in months (ruling
+    # plan#2748): the occurrence engine walks ``months_per_unit`` and asks
+    # ``has_day_of_month``, which the database GENERATES from it, so the
+    # stride and the flag a rule's CHECKs read cannot disagree.  Keyed by
+    # MEMBER, the shape of the code table they replace, so the engine keeps
+    # that table's answers for a value no row names: no span, no day (see the
+    # two accessors).  A row no member names is skipped, as the spec loop
+    # skips it.  Skipped whole when the table is unavailable (already warned
+    # during loading).
+    if "recurrence_units" not in unavailable:
+        members = {
+            db_id: member
+            for member, db_id in _cache.enum_ids[RecurrenceUnitEnum].items()
+        }
+        for row in db_session.query(ref_models.RecurrenceUnit).all():
+            member = members.get(row.id)
+            if member is None:
+                continue
+            if row.months_per_unit is not None:
+                _cache.recurrence_unit_months[member] = row.months_per_unit
+            if row.has_day_of_month:
+                _cache.recurrence_day_of_month_units.add(member)
+
+
 def init(db_session):
     """Load all reference table IDs into the in-memory cache.
 
@@ -298,6 +375,8 @@ def init(db_session):
     _cache.enum_members.clear()
     _cache.acct_type_meta.clear()
     _cache.ledger_class_debit_normal.clear()
+    _cache.recurrence_unit_months.clear()
+    _cache.recurrence_day_of_month_units.clear()
     for spec in specs:
         _cache.enum_ids[spec.enum] = {}
         _cache.enum_members[spec.enum] = {}
@@ -330,32 +409,7 @@ def init(db_session):
             "matching database row:\n  " + "\n  ".join(missing)
         )
 
-    # Build the account type metadata cache for icon/term-limit lookups.
-    # Same built-in-only filter as the account_types map -- the cache is
-    # loaded once at startup and only knows about seeded built-ins.  Skipped
-    # when that table is unavailable (already warned during loading).
-    # Owner-scoped custom types still resolve their icon/max_term via the ORM
-    # relationship in templates (``account.account_type.icon_class``).
-    if "account_types" not in unavailable:
-        for row in (
-            db_session.query(ref_models.AccountType)
-            .filter(ref_models.AccountType.user_id.is_(None))
-            .all()
-        ):
-            _cache.acct_type_meta[row.id] = {
-                "icon_class": row.icon_class,
-                "max_term_months": row.max_term_months,
-            }
-
-    # Build the ledger-account-class natural-balance map.  Mirrors the
-    # account-type metadata block above: a dedicated query keyed by class
-    # PK (the spec loop only captures name->id), so a reader holding a
-    # ``budget.ledger_accounts.class_id`` can branch on the debit-normal
-    # side without a name compare.  Skipped when the table is unavailable
-    # (the pre-migration bootstrap window already warned during loading).
-    if "ledger_account_classes" not in unavailable:
-        for row in db_session.query(ref_models.LedgerAccountClass).all():
-            _cache.ledger_class_debit_normal[row.id] = row.is_debit_normal
+    _load_row_meta(db_session, ref_models, unavailable)
 
     # Invert EVERY forward map so a reader holding a stored ``*_id`` resolves
     # its member in ONE lookup.  Built here rather than derived per call

@@ -67,17 +67,22 @@ stays hidden beside it on a date that opens that question for a monthly
 cadence (:func:`_drive_nominal_day`).  The two WEEK refusal cases went with
 the refusal (:func:`_drive_refusals` says what replaced them).
 
-**The drives live beside this file since plan step credit_card:CC-6** (a pure
-move, when it stood at 1,683 lines): ``_recurrence_form_checks`` is what they
-share, and ``_recurrence_form_bound_drives``, ``_recurrence_form_loan_drives``
-and ``_recurrence_form_offer_drives`` hold the drives this docstring names, and
-``_recurrence_form_due_date_drive`` grades the repeat on each statement's due
-date, which only a transfer into a configured card may take.
+**Plan step recurrence:R8-c gave the "repeating on" control its weekday
+readings** ("the third Tuesday", "the last Tuesday"), worded by the script for
+the date being typed, and ``_recurrence_form_weekday.py`` grades them on both
+forms: which readings each date offers and in which words, a choice kept or
+reset as the date moves, the units that show the control, and the preview's
+request and paychecks (:func:`_drive_weekday_reading`).
 
-**It writes nothing.**  Every check reads the form's own DOM; the crafted POSTs
-in the refusal pass are all expected to be REFUSED, and the pass asserts that
-no template and no recurrence rule was persisted by any of them.  Run it
-against a clone all the same.
+**By default it writes nothing.**  Every check reads the form's own DOM; the
+crafted POSTs in the refusal pass are all expected to be REFUSED, and the pass
+asserts that no template and no recurrence rule was persisted by any of them.
+**``VERIFY_WRITE=1`` adds one pass that writes** (plan#2680): a third-Tuesday
+definition saved through each real form and read back from the rule, its
+rows, the Recurring page and the edit form, then deleted through the app's own
+permanent-delete doors (:func:`_drive_weekday_round_trip`).  It is refused
+against the shared ``shekel``, as the line form's write pass is.  Run against a
+clone either way.
 
 Preconditions:
   * the containerized dev app is up and answering on ``DEV_BASE_URL``
@@ -89,36 +94,180 @@ Preconditions:
 
 Usage:
     python tests/manual/verify_recurrence_form.py
+    VERIFY_WRITE=1 VERIFY_DEV_DATABASE=<clone> python tests/manual/verify_recurrence_form.py
 
 Exit code 0 when every check passes, 1 on a failure, 2 when the preconditions
-are not met.  It is paced: the dev app runs the real Redis limiter (30/minute
-per IP, prod behaviour), and a burst meets 429s.
+are not met.  It is paced: the dev app runs the real Valkey limiter (30/minute
+on each page per signed-in browser, prod behaviour), and a burst meets 429s.
+
+**Its drives live in three sibling modules** since plan#2680 split this
+script at 1,000 lines: ``_recurrence_form_kit.py`` (the shared instrument:
+where the app answers, the check record and the ``FormData`` readers, which
+``verify_line_cadence_form.py`` reads too), ``_recurrence_form_cadence.py``
+(the drives run once per form kind) and ``_recurrence_form_loans.py`` (the
+transfer form's loan locks).  ``_recurrence_form_due_date_drive.py`` grades the
+repeat on each statement's due date (plan step credit_card:CC-6), which only a
+transfer into a configured card may take.  This file runs them, and holds the
+refusal pass.
 """
 import sys
+import time
 
 from playwright.sync_api import sync_playwright
 
-from _recurrence_form_bound_drives import (
+from _recurrence_form_cadence import (
     _drive_end_bound,
     _drive_month_ceiling,
     _drive_nominal_day,
     _drive_opening_bound,
+    _drive_visibility,
 )
-from _recurrence_form_checks import (
+from _recurrence_form_due_date_drive import _drive_due_date_offer
+from _recurrence_form_kit import (
     DEV_BASE_URL,
+    MARK,
+    POST_SPACING_SECONDS,
     SESSION_STATE,
     _check,
     _failures,
+    _sql,
 )
-from _recurrence_form_due_date_drive import _drive_due_date_offer
-from _recurrence_form_loan_drives import (
-    _drive_edit_form_locks,
-    _drive_loan_destination_lock,
-)
-from _recurrence_form_offer_drives import (
-    _drive_refusals,
-    _drive_visibility,
-)
+from _recurrence_form_loans import _drive_edit_form_locks, _drive_loan_destination_lock
+from _recurrence_form_weekday import _drive_weekday_reading, _drive_weekday_round_trip
+
+
+def _drive_refusals(context, page) -> None:
+    """POST the payloads the form cannot produce, and read the refusal.
+
+    Read off the POST's OWN response body rather than a later page load: the
+    API context follows the redirect, and that hop CONSUMES the flash.
+
+    Args:
+        context: The Playwright browser context (for its request API).
+        page: A page, for the CSRF token.
+    """
+    print("\n=== refusals: payloads the form cannot produce ===")
+    page.goto(f"{DEV_BASE_URL}/templates/new", wait_until="domcontentloaded")
+    token = page.evaluate(
+        "() => document.querySelector('input[name=csrf_token]').value")
+
+    ids = {
+        "category": _sql("SELECT id FROM budget.categories LIMIT 1")[0],
+        # By NAME, not LIMIT 1: an unordered pick lands on the Van Loan, which
+        # a transaction template cannot target, and the refusal under test is
+        # then indistinguishable from that one.
+        "account": _sql(
+            "SELECT id FROM budget.accounts WHERE name = 'Checking'")[0],
+        "expense": _sql(
+            "SELECT id FROM ref.transaction_types WHERE name = 'Expense'")[0],
+        "month": _sql(
+            "SELECT id FROM ref.recurrence_units WHERE name = 'month'")[0],
+        "period": _sql(
+            "SELECT id FROM ref.recurrence_units WHERE name = 'period'")[0],
+        "covering": _sql("SELECT id FROM ref.period_placements "
+                         "WHERE name = 'containing_date'")[0],
+        "first_pay": _sql("SELECT id FROM ref.period_placements "
+                          "WHERE name = 'period_starting_on_or_after'")[0],
+    }
+    # ``starts_on`` rides in the BASE form from plan step R7c-c, so each case
+    # below carries exactly ONE fault.  Without it every payload here was also
+    # missing a first occurrence, which the create schema requires beside any
+    # chosen cadence -- so a case could pass by meeting a refusal it was not
+    # written for, and two of them did the moment their own refusal stopped
+    # existing.
+    base_form = {
+        "name": f"{MARK}-refused", "amount": "10.00",
+        "category_id": ids["category"], "account_id": ids["account"],
+        "transaction_type_id": ids["expense"],
+        "starts_on": "2026-03-15",
+    }
+    rules_before = _sql("SELECT count(*) FROM budget.recurrence_rules")[0]
+
+    cases = [
+        # **The unauthorable SET has MOVED THREE TIMES, and this list is
+        # where that shows.**  It was every month or year INTERVAL the closed
+        # pattern set could not name -- "every other month", "quarterly funded
+        # from the first paycheck" -- because STORAGE was the binding
+        # constraint, and freeing the interval at R7c-c is what this arc exists
+        # for.  It was then the two ``(unit, placement)`` pairs
+        # ``anchor_family`` had no first-occurrence derivation for, and plan
+        # step **R8-a** measured one of those STALE: ruling R-R16 made the
+        # first occurrence AUTHORED at R7c-b and deleted the derivation the
+        # refusal cited, so a year-scale cadence funded from a later paycheck
+        # SAVES now.  R8-a replaced that case with the WEEK unit's other
+        # placement, beside the one already here: both withheld because a
+        # weekly row had no date to carry.  Plan step **R8-b** dates a row
+        # from its occurrence and offers weeks at both placements, so those
+        # two cases went too.
+        #
+        # **Leaving a stale case here is not harmless.**  These payloads carry
+        # the whole ``base_form``, and ``POST /templates`` GENERATES on create
+        # -- so an accepted "refusal" writes a template, a rule and its
+        # projected rows into whatever database this is pointed at, and then
+        # trips the two persistence checks at the end of this pass, which is
+        # how a real regression comes to be read as "the known week failure".
+        # What ``authorable_cadences`` withholds now is ONE reading: a
+        # pay-period cadence funded from a LATER paycheck.  Its placement is
+        # inert -- a payday is carried back to its own paycheck either way --
+        # so storing the choice would store a control the engine ignores.
+        ("a pay-period cadence funded from a later paycheck (an inert placement)",
+         {"recurrence_unit": ids["period"], "interval_n": "1",
+          "recurrence_placement": ids["first_pay"]},
+         "That repeat schedule cannot be saved yet"),
+        # The interval box is a free number input from R7c-c, so a CLEARED one
+        # is a payload the form really can produce -- and it defaulted to 1,
+        # which re-cadenced a quarterly bill to monthly on save.  Driven here
+        # because only a browser proves the box submits "" rather than nothing.
+        ("a CLEARED interval box beside a chosen cadence",
+         {"recurrence_unit": ids["month"], "interval_n": "",
+          "recurrence_placement": ids["covering"]},
+         "Say how often this repeats"),
+        ("an interval past the column's domain",
+         {"recurrence_unit": ids["period"], "interval_n": "2147483648",
+          "recurrence_placement": ids["covering"]},
+         "Must be greater than or equal to 1"),
+        ("a unit with no placement key",
+         {"recurrence_unit": ids["period"], "interval_n": "1"},
+         "Choose which paycheck funds each occurrence"),
+        ("a unit with an EMPTY placement",
+         {"recurrence_unit": ids["period"], "interval_n": "1",
+          "recurrence_placement": ""},
+         "Choose which paycheck funds each occurrence"),
+        ("an unmodelled unit id",
+         {"recurrence_unit": "999999", "interval_n": "1",
+          "recurrence_placement": ids["covering"]},
+         "Invalid repeat unit"),
+        ("an unmodelled placement id",
+         {"recurrence_unit": ids["period"], "interval_n": "1",
+          "recurrence_placement": "999999"},
+         "Invalid funding choice"),
+        # R7c-b authored this refusal and nothing carried it to the user until
+        # R7c-c put the key on the flash allowlist; it is driven here because a
+        # message that reaches no surface is invisible to the suite.
+        ("a chosen cadence with no first occurrence",
+         {"recurrence_unit": ids["month"], "interval_n": "1",
+          "recurrence_placement": ids["covering"], "starts_on": ""},
+         "Choose the date this first happens"),
+    ]
+    for label, cadence, expected in cases:
+        response = context.request.post(
+            f"{DEV_BASE_URL}/templates",
+            form={**base_form, **cadence, "csrf_token": token},
+            headers={"Referer": f"{DEV_BASE_URL}/templates/new"},
+        )
+        if response.status == 429:
+            _check(label, False, "429 rate-limited; raise POST_SPACING_SECONDS")
+        else:
+            _check(f"{label} -> its own message", expected in response.text(),
+                   f"status={response.status}")
+        time.sleep(POST_SPACING_SECONDS)
+
+    made = _sql("SELECT count(*) FROM budget.transaction_templates "
+                f"WHERE name LIKE '{MARK}%'")[0]
+    rules_after = _sql("SELECT count(*) FROM budget.recurrence_rules")[0]
+    _check("no template was persisted by any refusal", made == "0", f"{made} rows")
+    _check("no recurrence rule was persisted by any refusal",
+           rules_before == rules_after, f"{rules_before} -> {rules_after}")
 
 
 def main() -> int:
@@ -153,6 +302,7 @@ def main() -> int:
             _drive_visibility(page, kind, url)
             _drive_opening_bound(page, kind, url)
             _drive_nominal_day(page, kind, url)
+            _drive_weekday_reading(page, kind, url)
             _drive_month_ceiling(page, kind, url)
             _drive_end_bound(page, kind, url)
         # Transfer-only: the transaction form has no destination account, so
@@ -161,6 +311,9 @@ def main() -> int:
         _drive_edit_form_locks(page)
         _drive_due_date_offer(context, page)
         _drive_refusals(context, page)
+        # After the refusals: their pass counts every recurrence rule, and
+        # this one makes rules (and deletes them).
+        _drive_weekday_round_trip(context, page)
 
         # A blocked inline style is a console error and nothing else, which is
         # how defect 2 shipped past a green suite.

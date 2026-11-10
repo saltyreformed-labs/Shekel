@@ -32,10 +32,18 @@ carries the reason for the wait and pins the state it now refuses.
   * ck_recurrence_rules_starts_on_range -- the first occurrence falls inside
     the calendar this application reaches.
 
+**The two CHECKs plan step recurrence:R8-c added** with ``weekday_reading``:
+``ck_recurrence_rules_weekday_reading`` (the column's two values, and the
+position each needs of ``starts_on``) and
+``ck_recurrence_rules_one_month_reading`` (never beside ``nominal_day``);
+:class:`TestTheWeekdayReadingIsHeldToItsDate` drives every edge of both.  The
+third, on the unit, is graded with its two twins in
+``test_a_rule_is_held_to_its_unit``.
+
 Every rule here is built COLUMN BY COLUMN rather than through
 ``recurrence.author_rule``, and deliberately: the door refuses each of these
 values before it writes, so authoring one would exercise the door and prove
-nothing about the table.  :func:`_storable_columns` supplies the four ``NOT
+nothing about the table.  :func:`_storable_columns` supplies the five ``NOT
 NULL`` columns every row needs so that the INSERT reaches the CHECK under test
 rather than dying on a null.
 
@@ -90,6 +98,9 @@ def _storable_columns(**overrides):
     """
     columns = {
         "unit_id": ref_cache.recurrence_unit_id(RecurrenceUnitEnum.MONTH),
+        "unit_has_day_of_month": ref_cache.recurrence_unit_has_day_of_month(
+            RecurrenceUnitEnum.MONTH,
+        ),
         "placement_id": ref_cache.period_placement_id(
             PeriodPlacementEnum.CONTAINING_DATE,
         ),
@@ -322,6 +333,83 @@ class TestTheWindowIsHeldAtTheTableToo:
 
             assert rule.id is not None
             db.session.rollback()
+
+
+class TestTheWeekdayReadingIsHeldToItsDate:
+    """The two CHECKs plan step recurrence:R8-c added (rulings plan#2668, plan#2670).
+
+    ``ck_recurrence_rules_weekday_reading`` names the column's two values and
+    the position each needs of ``starts_on``; ``ck_recurrence_rules_one_month_reading``
+    is the exclusive arc with ``nominal_day`` (ruling R-R25).  Every edge is
+    driven from both sides, because an off-by-one in either CHECK would refuse
+    a real "last Friday" or admit a fifth weekday, and the refusals alone pass
+    against a CHECK that refused every value.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "starts_on", "reading"),
+        [
+            ("from the start on the 1st", date(2026, 1, 1), "from_start"),
+            # The 22nd-28th is the fourth of its weekday, every month.
+            ("from the start on the 28th", date(2027, 1, 28), "from_start"),
+            # 25 + 7 = 32 > 31: no later day of January is a Sunday.
+            ("from the end on Jan 25", date(2026, 1, 25), "from_end"),
+            ("from the end on Jan 31", date(2026, 1, 31), "from_end"),
+            # A common February is four whole weeks: its 22nd is a last.
+            ("from the end on Feb 22, 2027", date(2027, 2, 22), "from_end"),
+            ("from the end on Feb 23, 2028", date(2028, 2, 23), "from_end"),
+        ],
+    )
+    def test_each_value_at_its_edge_is_admitted(
+        self, app, db, seed_user, label, starts_on, reading,
+    ):
+        """The positive controls: each value on the last date it fits."""
+        with app.app_context():
+            rule = RecurrenceRule(
+                transaction_template_id=_owner_id(seed_user),
+                **_storable_columns(starts_on=starts_on, weekday_reading=reading),
+            )
+            db.session.add(rule)
+            db.session.flush()
+
+            assert rule.id is not None, label
+            db.session.rollback()
+
+    @pytest.mark.parametrize(
+        ("label", "starts_on", "reading"),
+        [
+            # No fifth weekday (plan#2670): the 29th is the fifth of its day.
+            ("from the start on the 29th", date(2026, 1, 29), "from_start"),
+            # 24 + 7 = 31: Jan 31 2026 is a later Saturday.
+            ("from the end on Jan 24", date(2026, 1, 24), "from_end"),
+            # A leap February holds a 29th, so its 22nd is not the last.
+            ("from the end on Feb 22, 2028", date(2028, 2, 22), "from_end"),
+            ("a third value", _A_FIRST_OCCURRENCE, "middle"),
+        ],
+    )
+    def test_a_value_the_date_does_not_fit_is_refused(
+        self, app, db, seed_user, label, starts_on, reading,
+    ):
+        """Each value one day past its edge, and a value outside the two."""
+        with app.app_context():
+            _refused(
+                seed_user, "ck_recurrence_rules_weekday_reading",
+                label=label, starts_on=starts_on, weekday_reading=reading,
+            )
+
+    def test_a_reading_beside_a_nominal_day_is_refused(self, app, db, seed_user):
+        """(2026-04-30, 31, 'from_end'): one date read two ways.
+
+        Each half alone is a stored shape -- Apr 30 meaning the 31st is the
+        nominal day's own case, and Thu Apr 30 is April's last Thursday -- so
+        only the arc refuses the pair.
+        """
+        with app.app_context():
+            _refused(
+                seed_user, "ck_recurrence_rules_one_month_reading",
+                starts_on=date(2026, 4, 30), nominal_day=31,
+                weekday_reading="from_end",
+            )
 
 
 class TestTheStartFallsInsideTheCalendar:

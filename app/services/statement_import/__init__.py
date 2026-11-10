@@ -27,10 +27,19 @@ The public surface, and what each piece is for:
   ``bank_import:X-f6a-4``).
 * :func:`verify_running_balance` -- the self-check a source with a running
   balance affords, and the reason the CSV was chosen over the OFX.
-* :func:`record_statement` -- the one write door, returning
-  :class:`ImportOutcome`.  A placed figure is a LEVEL row naming the import
+* :func:`plan_statement` -- that door's DECISION, every refusal included,
+  returned as a :class:`StatementPlan` and read without performing it: what a
+  file WOULD add, for a reader deriving the reconcile's acts on a copy before
+  any of them (plan step ``balance:X-bk-2``, plan#1192).
+* :func:`record_statement` -- the one write door, performing that plan and
+  returning :class:`ImportOutcome`.  A placed figure is a LEVEL row naming the import
   (plan step ``balance:X-bj-1``), and :func:`bank_levels` is the one read of
   which levels stand and which a release has withdrawn.
+* :class:`StatementImportError` and its subclasses -- every refusal the
+  import door can raise, each refusing the whole file; a route catches the
+  base and renders its message.  They stood in :mod:`app.exceptions` until
+  plan step plan#2232 moved them here verbatim (ruling **R-IR**), and then
+  added :class:`StatementLineIdsShareALine`, which never stood there.
 * :func:`delete_import` -- the one UNDO door, returning
   :class:`ImportRemoval`, and the only thing in this package that destroys.
   It is what finding **N-302** says a refusal owes (plan step
@@ -71,6 +80,16 @@ from ._balance import (
     covered_runs,
     fold_bank_balances,
 )
+from ._errors import (
+    StatementAccountMismatch,
+    StatementBalanceUnexplained,
+    StatementImportError,
+    StatementIntegrityError,
+    StatementLineConflict,
+    StatementLineIdMoved,
+    StatementLineIdsShareALine,
+    StatementParseError,
+)
 from ._integrity import (
     carries_running_balance,
     opening_balance,
@@ -96,6 +115,7 @@ from ._reads import (
     recent_lines,
     recorded_span,
 )
+from ._plan import StatementPlan, plan_statement
 from ._record import ImportOutcome, record_statement
 from ._undo import ImportRemoval, delete_import
 
@@ -114,7 +134,16 @@ __all__ = [
     "RecordedRun",
     "RecordedSpan",
     "SourceOption",
+    "StatementAccountMismatch",
+    "StatementBalanceUnexplained",
+    "StatementImportError",
+    "StatementIntegrityError",
     "StatementLine",
+    "StatementLineConflict",
+    "StatementLineIdMoved",
+    "StatementLineIdsShareALine",
+    "StatementParseError",
+    "StatementPlan",
     "available_sources",
     "bank_balance_on",
     "bank_daily_movements",
@@ -129,6 +158,7 @@ __all__ = [
     "import_history",
     "opening_balance",
     "pair_by_statement",
+    "plan_statement",
     "ParsedStatement",
     "parse_statement",
     "recent_lines",

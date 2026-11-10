@@ -67,6 +67,7 @@ Every figure is dated and rests on the developer's own data; re-measure before c
 | the same seven re-derived with the calibration removed, against their generated figure | `$2,473.38 -> $2,454.10`, `-$19.28`; the input is a calibration DELETED 2026-08-28 | 2026-09-04, **N-442** closed |
 | all 12 settled paychecks priced under every calibration the data has held | 11 reproduce under the deleted row, the 12th only under the live one; none reproduces both | 2026-09-04, **N-535** |
 | payroll deposits against the app's rows, seven of seven | `$0.04`-`$0.06` above the app; pricing at the stub's gross collapses it to `$0.00`-`$0.02` | 2026-08-30, **N-391** |
+| the same past the first raise: the app's paycheck against the deposit, on six of the nine paydays since (not the first two of the raise's month, which the employer paid by the hours worked after the raise, **plan#3048**; nor one carrying an allowance the app's paycheck did not price) | the app a few cents ABOVE: four cents is base pay alone on all four stubs of that pay, and a cent either way is the employer's, inferred on the two paydays with no stub. Stating the pay as a new entry, simulated on a clone, closes it to that cent. The figures are on plan#2866 | 2026-11-06, plan#2866 |
 | live deductions carrying the `24` mode | 11 of 12 | 2026-08-19, **F-21** |
 | the Health Insurance Allowance modelled as a 26-of-26 template | a `$100.00` income row on 2026-07-30 the employer does not pay, stopped only by an `end_date` | 2026-09-02, **D59** |
 

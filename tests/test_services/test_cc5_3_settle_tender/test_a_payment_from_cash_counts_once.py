@@ -29,16 +29,17 @@ from app.extensions import db
 from app.services import balance_at, posting_service
 from app.services.account_projection import AccountProjectionKind, classify_account
 from app.services.balance_at import BalanceContext
+from app.services.ledger_lines import linked_key
 from app.services.movement_account import re_point_movement
 from app.services.row_valuation import settled_figure
 from app.services.transaction_service import settle_transaction
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import ledger_net
 from tests._test_helpers import (
     append_balance_assertion,
     create_account_of_type,
     create_hysa_account,
     generate_row_of,
-    ledger_net,
-    linked_ledger_account,
     make_expense_template,
 )
 
@@ -113,10 +114,10 @@ class TestABillPaidFromAnotherCashAccount:
         Before the payment Checking's projection holds the bill (its starting
         figure less `$800.00`) and the paying account reads `$5,000.00`.  Paid
         from the other account, Checking reads its starting figure again and
-        the paying account `$5,000.00 - $800.00 = $4,200.00`.  The posted
-        ledger moves the same way: the paying account's ledger account by
-        `-$800.00`, Checking's by nothing.  The row is still worth `$800.00`
-        to its paycheck.
+        the paying account `$5,000.00 - $800.00 = $4,200.00`.  The ledger
+        moves the same way: the paying account's line by `-$800.00`,
+        Checking's by nothing, and the store agrees, which the parity line
+        grades.  The row is still worth `$800.00` to its paycheck.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -127,10 +128,10 @@ class TestABillPaidFromAnotherCashAccount:
             checking_start = _balance(checking)
             txn = self._bill(seed_user, seed_periods)
             scenario_id = txn.scenario_id
-            checking_ledger = linked_ledger_account(db.session, checking.id)
-            paying_ledger = linked_ledger_account(db.session, paying.id)
-            checking_posted = ledger_net(db.session, checking_ledger.id, scenario_id)
-            paying_posted = ledger_net(db.session, paying_ledger.id, scenario_id)
+            checking_ledger = linked_key(checking)
+            paying_ledger = linked_key(paying)
+            checking_posted = ledger_net(db.session, checking_ledger, scenario_id)
+            paying_posted = ledger_net(db.session, paying_ledger, scenario_id)
             assert _balance(checking) == checking_start - _BILL
             assert _balance(paying) == _OPENING
 
@@ -142,8 +143,9 @@ class TestABillPaidFromAnotherCashAccount:
             assert settled_figure(txn) == _BILL
             assert _balance(checking) == checking_start
             assert _balance(paying) == Decimal("4200.00")
-            assert ledger_net(db.session, paying_ledger.id, scenario_id) == paying_posted - _BILL
-            assert ledger_net(db.session, checking_ledger.id, scenario_id) == checking_posted
+            assert ledger_net(db.session, paying_ledger, scenario_id) == paying_posted - _BILL
+            assert ledger_net(db.session, checking_ledger, scenario_id) == checking_posted
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_a_true_up_after_the_payment_counts_it_once(
         self, app, seed_user, seed_periods, make_account,

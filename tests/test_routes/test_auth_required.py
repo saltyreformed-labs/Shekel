@@ -48,7 +48,8 @@ import pytest
 
 from app import create_app
 from app.config import TestConfig
-from app.extensions import db as _db, limiter, login_manager
+from app.extensions import db as _db, login_manager
+from app.rate_limits import limiter
 from app.login_gate import PUBLIC_ENDPOINTS
 from tests.test_integration.test_rate_limiter import _disable_limiter
 from tests.test_routes.test_no_baseline_policy import _route_table_app

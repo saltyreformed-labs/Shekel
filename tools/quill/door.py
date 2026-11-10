@@ -30,6 +30,8 @@ Each name, and who reads it:
 - ``SHIPPABLE``: ``tools/release._cards``, which refuses a marker naming a card of a
   kind no commit ships (a ruling, a question, a card of no type), by quill's one list
   of the kinds a commit ships.
+- ``moves_money``: ``tools/release._cards``, for whether each card a release carries moves
+  money, by quill's one reading of its label (R-BAL287), which ``quill claim`` reads too.
 - ``MARKERS``, ``card_of``, ``markers_in``, ``merged_tree``, ``MarkerConflict``,
   ``changes`` and ``marker_changes``: ``tools/release._cards``, for what a release changes
   in the ship markers (ruling ``balance:R-BAL359``; step X-cx's M3): the tree a release of
@@ -43,10 +45,46 @@ Each name, and who reads it:
   (``_production``; rulings ``balance:R-BAL362`` and ``R-BAL400``).  ``IgnoreFileError``:
   ``tools/release.release``, which reports an ignore file holding a pattern Docker refuses as
   a listing made of nothing, and its tests.
+- ``versions_moved`` and ``Moved``: ``tools/release._changes``, for the versions a release moves
+  in the files that pin versions, each side read by the lock reader and the line patterns the
+  landing check reads a move with (``_versions``; ruling plan#2351).  ``NotVersions``:
+  ``tools/release.release``, which reports a pinned file it cannot read (a lock that is no
+  TOML, a link) as a listing made of nothing, and its tests; ``tools/update.due`` too, as a
+  read it failed.  ``versions_waiting`` and ``Moved``, and ``fetch``, which it reads the two
+  tips with first: ``tools/update.due``, for the versions a release of ``dev`` would move, which
+  it lists to the developer (ruling plan#2829).  ``changed_outside``:
+  ``tools/release._changes`` again, for the files ``versions_moved`` reads for the versions a
+  release moves outside production (``_production``; ruling plan#2876).
+- ``lock_change``, ``LockChange``, ``lock_unversioned``, ``ceiling``, ``Move`` and ``LOCK``:
+  ``tools/update.refresh``, the Monday lock refresh, which holds back each package whose
+  move needs a card (a move across a major, below its next major; a move changing what the
+  package needs, at its version) and judges its lock by the landing check's own walk
+  before any pull request carries it (``_versions``; rulings plan#2351, plan#2450,
+  plan#2490).
+  ``lock_moves`` and ``canonical``: ``tools/update.refresh`` again, for what each new major
+  it prepares as a change of its own moves, from a lock made with ``pyproject.toml`` edited,
+  which ``lock_change`` refuses (ruling plan#2450), and for the package each requirement of
+  ``pyproject.toml`` names, by PEP 503's one reading of a project's name.  ``lock_pins``:
+  ``tools/update.publish``, for the release of a package a held-back change proposes in
+  the lock it carries, the change's own and a closed pull request's head's, by the reading
+  ``pinned`` makes of a lock (rulings plan#2774, plan#2776).
+- ``unversioned_between`` and ``Reason``: ``tools/update.queue``, the daily update queue,
+  which puts a bot's pull request in the merge queue only when the landing check's own walk
+  finds its trial merge moves pinned versions alone, none across a major, over every file it
+  changes, and mentions the developer once for each thing one waits for a card on, as each
+  reason names it (``_versions``; rulings plan#2449, plan#2450).  ``GitHub``, ``paged`` and
+  ``reading``: the queue
+  again, for its reads and writes of the repository's pull requests under the update App's
+  token, through quill's one HTTP path to GitHub, its one walk of a GraphQL connection and
+  its naming of the read a failure cut short.  ``GitHub`` and ``reading``:
+  ``tools/release._updates`` too, for its read of the update workflow's runs with no
+  credential (ruling plan#2351).
 - ``GitHubError``, ``TrackerError`` and ``CredentialsError``: ``tools/release.release``,
   which reports a failed read of the tracker, or App credentials it cannot use, as a
   release judged on nothing; ``described``, by which it prints that failure, as every
-  printer of one does: one line, naming the read it cut short (plan#1809).
+  printer of one does: one line, naming the read it cut short (plan#1809).  ``GitHubError``
+  and ``described``: ``tools/update.queue`` too, for a read or a write GitHub refused;
+  ``described``: ``tools/update.due`` too, for a read it failed.
 - ``FakeTracker`` and ``OutsideLink``: ``tools/release``'s tests, which drive the card
   reader against quill's own in-memory tracker, a card's link to an issue outside the
   tracker built as quill's read builds one.  The fake's cost, accepted so quill keeps ONE
@@ -63,12 +101,13 @@ from tools.quill._git import (
     MarkerConflict,
     card_of,
     changes,
+    fetch,
     marker_changes,
     markers_in,
     merged_tree,
 )
-from tools.quill._github import CredentialsError, GitHubError
-from tools.quill._production import IgnoreFileError, changed
+from tools.quill._github import CredentialsError, GitHub, GitHubError, paged, reading
+from tools.quill._production import IgnoreFileError, changed, changed_outside
 from tools.quill._state import (
     OWNED,
     SHIPPABLE,
@@ -76,34 +115,73 @@ from tools.quill._state import (
     dropped,
     dropped_above,
     leaves_below,
+    moves_money,
     owner,
 )
 from tools.quill._tracker import Card, OutsideLink, Tracker, TrackerError
+from tools.quill._versions import (
+    LOCK,
+    LockChange,
+    Move,
+    Moved,
+    NotVersions,
+    Reason,
+    canonical,
+    ceiling,
+    lock_change,
+    lock_moves,
+    lock_pins,
+    lock_unversioned,
+    unversioned_between,
+    versions_moved,
+    versions_waiting,
+)
 
 __all__ = [
+    "LOCK",
     "MARKERS",
     "SHIPPABLE",
     "Card",
     "CredentialsError",
     "FakeTracker",
+    "GitHub",
     "GitHubError",
     "IgnoreFileError",
+    "LockChange",
     "MarkerConflict",
+    "Move",
+    "Moved",
+    "NotVersions",
     "OWNED",
     "OutsideLink",
+    "Reason",
     "Tracker",
     "TrackerError",
     "above",
+    "canonical",
     "card_of",
+    "ceiling",
     "changed",
+    "changed_outside",
     "changes",
     "described",
     "dropped",
     "dropped_above",
+    "fetch",
     "leaves_below",
+    "lock_change",
+    "lock_moves",
+    "lock_pins",
+    "lock_unversioned",
     "marker_changes",
     "markers_in",
     "merged_tree",
+    "moves_money",
     "owner",
+    "paged",
+    "reading",
+    "unversioned_between",
+    "versions_moved",
+    "versions_waiting",
     "with_closure",
 ]

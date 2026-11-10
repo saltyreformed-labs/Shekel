@@ -9,7 +9,7 @@ from __future__ import annotations
 from tools.quill._fake import FailOnce, FakeTracker, begun, claim, piece, run
 from tools.quill._tasks import FINISHING
 
-(REVIEW, _), (LAND, _) = FINISHING
+(KIT, _), (REVIEW, _), (LAND, _) = FINISHING
 
 
 def _card(review_done=False):
@@ -69,6 +69,24 @@ def test_a_fix_filed_while_the_review_is_in_progress_goes_above_the_suite(tmp_pa
     begun(code, 1, 3)
     assert run(tracker, code, *_filing(tmp_path, "the review's fix")) == 0
     assert _order(tracker) == [2, 5, 3, 6, 4]
+
+
+def test_a_piece_goes_above_a_money_card_s_kit_and_a_review_s_fix_below_it(tmp_path, code):
+    """Ruling plan#3201: a Release kit comes before the review, so a piece filed while the
+    kit is still to begin goes above it, and a fix the review finds, the kit done and the
+    review begun, goes above the suite and pull request."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add_task(2, 1, title=KIT)
+    tracker.add_task(3, 1, title=REVIEW)
+    tracker.add_task(4, 1, title=LAND)
+    claim(code, 1)
+    assert run(tracker, code, *_filing(tmp_path)) == 0
+    assert _order(tracker) == [5, 2, 3, 4]
+    piece(code, 1, 2)
+    begun(code, 1, 3)
+    assert run(tracker, code, *_filing(tmp_path, "the review's fix")) == 0
+    assert _order(tracker) == [5, 2, 3, 6, 4]
 
 
 def test_a_fix_filed_once_the_reviews_file_is_pushed_goes_above_the_suite(tmp_path, code):

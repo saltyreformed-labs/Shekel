@@ -56,7 +56,7 @@ for a fence, the kind is this record's reading.
 | id | where | what it guards | why it stays |
 |---|---|---|---|
 | T-04 | `tools/pylint/shekel_checkers/disable_rationale.py:54` (W9903) | a `pylint: disable` with no written reason | a process rule; no app state stands behind it |
-| T-18 | `scripts/hooks/post-edit-deps.sh` | a `requirements*.txt` edit nobody approved (it asks) | a developer-approval rule |
+| T-18 | `scripts/hooks/post-edit-deps.sh` | a `pyproject.toml` or `uv.lock` edit nobody approved (it asks) | a developer-approval rule |
 | T-21 | `scripts/hooks/session-start.sh` | nothing; it prints the session's context | process |
 | T-22 | `scripts/hooks/guard-pr-actions.sh` | a pull request opened or merged outside the coordinator (it asks) | an advisory process control; deleted by plan#1819 on the developer's word (plan#1828, asked under `balance:R-BAL268`), each session queueing its own pull request into `dev` |
 | T-56 | `tools/ci/commit_trailers.py`, `tools/ci/trailers.py` | a malformed `Ships:` trailer, a revert git would answer wrongly | git is the truth of what shipped (`balance:R-BAL170`); deleted by the tracker switch (`balance:X-cx`, L8; `balance:R-BAL389`), the done file `plan/ships/N` replacing the trailer (`balance:R-BAL359`) |
@@ -181,7 +181,7 @@ list above with that ruling as its reason. The posted-ledger family is ruled by 
 | A-19 | `scripts/init_database.py:378` (`backfill_loan_payment_postings_after_migration`) | re-reconciles every loan's corrections at each deploy | the posted-ledger family | `balance:X-ek` |
 | A-22 | `app/services/loan_posting_service/_sync.py:300` (`_assert_checked_projection`) | the posted loan ledger equals the loan's fold, date by date | the posted-ledger family | `balance:X-ek` |
 | A-23 | `scripts/_integrity_consistency.py:232` (DC-10) | an undated movement holding a live journal leg | the posted-ledger family | `balance:X-ek` |
-| A-25 | `app/services/pay_period_gates.py:424` (`reject_moved_ledger`) | removing earlier paychecks when a booked total would move | `pay_calendar:R-PC53`, `R-PC114` | `pay_calendar:C25` |
+| A-25 | `app/services/pay_period_gates.py:424` (`reject_moved_ledger`) | removing earlier paychecks when a booked total would move | `pay_calendar:R-PC53`, `R-PC114` | `pay_calendar:C25`; answered yes by plan#2517, deleted by plan#2775 |
 | A-38 | `app/exceptions.py:129` (`ForeignAccountError`) | a balance read handed another owner's account | `R-GV` | `balance:X-el` |
 | A-41 | `app/services/loan_recurrence_sync.py:580` (`sync_loan_payment_start`) | a loan rule's start date re-copied from the loan | `recurrence:R-R29` | `recurrence:R31` |
 

@@ -22,30 +22,35 @@ from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.services import posting_service, transaction_service
-from app.services.ledger_lines import ChartKey, owner_bucket_key
+from app.services import ledger_account_service, posting_service, transaction_service
+from app.services.ledger_lines import ChartKey, category_key, owner_bucket_key
 from app.utils.balance_predicates import settled_status_ids
+from tests._ledger_reads import (
+    account_net,
+    family_movement_ids,
+    ledger_net,
+    period_nets_of_movements,
+    trial_balance,
+)
+from tests._stored_ledger import (
+    entries_violating_balance,
+    stored_ledger_net,
+)
 from tests._ledger_parity import LedgerParityDifference
 from tests._test_helpers import (
-    family_journal_filter,
-    figure_source_columns,
     create_account_of_type,
     create_envelope_txn,
     create_settled_cash_transaction,
-    settle_cash_row,
     create_settled_transfer,
+    figure_source_columns,
     one_off_row_of,
+    settle_cash_row,
 )
 
 from ._helpers import (
-    _independent_ledger_sum,
-    _ledger_account_sum,
     _independent_combined_source_effect,
     _signed_cash_effect,
-    _trial_balance,
-    _entries_violating_balance,
     _assert_full_reconciliation,
-    _counter_ledger_id,
 )
 
 
@@ -118,18 +123,12 @@ def _assert_every_settled_transaction_posts(user_id: int) -> None:
     )
     for txn in settled:
         if _signed_cash_effect(txn) == 0:
-            # A zero-effect settled row (all-credit envelope) posts nothing.
+            # A zero-effect settled row (all-credit envelope) books nothing.
             continue
         # The row's FAMILY (plan step X-bi-3a): a covered bill's money is
-        # posted under its covering movement, not under the row.
-        entry_count = (
-            _db.session.query(JournalEntry)
-            .filter(family_journal_filter(txn))
-            .count()
-        )
-        assert entry_count >= 1, (
-            f"settled transaction {txn.id} with a nonzero effect posted no "
-            f"journal entry"
+        # booked under its covering movement, not under the row.
+        assert period_nets_of_movements(family_movement_ids(txn), txn.scenario_id), (
+            f"settled transaction {txn.id} with a nonzero effect books no line"
         )
 
 
@@ -200,8 +199,8 @@ class TestPerLinkedAccountReconciliation:
             }
             for account_id, (want_ledger, want_effect) in expected.items():
                 # (a) hand-computed literal == independent ledger-table query.
-                assert _independent_ledger_sum(
-                    account_id, scenario_id,
+                assert account_net(
+                    _db.session, account_id, scenario_id,
                 ) == want_ledger
                 # (b) independent source query == the hand-computed effect.
                 assert _independent_combined_source_effect(
@@ -274,31 +273,31 @@ class TestPerCounterAccountReconciliation:
             )
             db.session.commit()
 
-            groceries_counter = _counter_ledger_id(
-                user_id, LedgerAccountClassEnum.EXPENSE,
-                seed_user["categories"]["Groceries"].id,
+            groceries_counter = category_key(
+                seed_user["categories"]["Groceries"].id, LedgerAccountClassEnum.EXPENSE,
             )
-            fallback_counter = _counter_ledger_id(
-                user_id, LedgerAccountClassEnum.EXPENSE, None,
+            fallback_counter = category_key(
+                None, LedgerAccountClassEnum.EXPENSE,
             )
-            salary_counter = _counter_ledger_id(
-                user_id, LedgerAccountClassEnum.INCOME,
-                seed_user["categories"]["Salary"].id,
+            salary_counter = category_key(
+                seed_user["categories"]["Salary"].id, LedgerAccountClassEnum.INCOME,
             )
 
             # Hand-computed counter totals (the negation of each cash leg).
-            assert _ledger_account_sum(
-                groceries_counter, scenario_id,
+            assert ledger_net(
+                _db.session, groceries_counter, scenario_id,
             ) == Decimal("50.00")
-            assert _ledger_account_sum(
-                fallback_counter, scenario_id,
+            assert ledger_net(
+                _db.session, fallback_counter, scenario_id,
             ) == Decimal("30.00")
-            assert _ledger_account_sum(
-                salary_counter, scenario_id,
+            assert ledger_net(
+                _db.session, salary_counter, scenario_id,
             ) == Decimal("-2000.00")
 
             # The fallback row is the is_owner_bucket singleton, not a category row.
-            fallback = db.session.get(LedgerAccount, fallback_counter)
+            fallback = ledger_account_service.get_or_create_category_ledger_account(
+                user_id, None, LedgerAccountClassEnum.EXPENSE,
+            )
             assert fallback.is_owner_bucket is True
             assert fallback.category_id is None
 
@@ -315,10 +314,10 @@ class TestPerCounterAccountReconciliation:
         ledger account -- which becomes an orphan -- and the transaction) leaves
         the orphan still holding +50.00 while the transaction now reads
         ``category_id IS NULL``.  A ``category_id`` match could no longer find
-        the transaction (it would mis-attribute it to the fallback), but the
-        ``transaction_id`` linkage reconciles the orphan against exactly the
-        transaction whose leg landed on it -- the property the counter sweep
-        relies on.  (The category-delete *route* archives a category still in use
+        the transaction (it would mis-attribute it to the fallback), and the
+        stored row keeps its leg.  The read files the leg by the row's category,
+        so it books on the Uncategorized bucket, which is the sweep's answer.
+        (The category-delete *route* archives a category still in use
         by a transaction; this raw-SQL delete reproduces the DB-level SET NULL
         directly to lock the defensive linkage reconciliation -- see the
         ``ledger_account.py`` "Reconciliation of orphans" note.)
@@ -360,11 +359,13 @@ class TestPerCounterAccountReconciliation:
             db.session.commit()
             txn_id = txn.id
             definition_id = txn.template_id
-            orphan_id = _counter_ledger_id(
-                user_id, LedgerAccountClassEnum.EXPENSE, hobbies_id,
-            )
-            assert _ledger_account_sum(
-                orphan_id, scenario_id,
+            orphan_id = ledger_account_service.get_or_create_category_ledger_account(
+                user_id, hobbies_id, LedgerAccountClassEnum.EXPENSE,
+            ).id
+            assert ledger_net(
+                db.session,
+                category_key(hobbies_id, LedgerAccountClassEnum.EXPENSE),
+                scenario_id,
             ) == Decimal("50.00")
 
             # Delete the budget category: the FK SET NULL turns its ledger
@@ -392,12 +393,19 @@ class TestPerCounterAccountReconciliation:
             assert orphan.name == hobbies_display_name  # snapshot survives delete
             assert db.session.get(Transaction, txn_id).category_id is None
 
-            # The orphan still holds +50 and still reconciles -- by linkage.
-            assert _ledger_account_sum(
-                orphan_id, scenario_id,
+            # The orphan is the store's: it still holds +50 there.  Worked out
+            # from the records no key names an orphan, so the row's category
+            # reading NULL books its +50 on the Uncategorized bucket.
+            assert stored_ledger_net(
+                db.session, orphan_id, scenario_id,
             ) == Decimal("50.00")
-            # A category_id match would find NO counter account for the now-NULL
-            # transaction (proving why the linkage formulation is required).
+            assert ledger_net(
+                db.session,
+                category_key(None, LedgerAccountClassEnum.EXPENSE),
+                scenario_id,
+            ) == Decimal("50.00")
+            # The category's own chart row is gone, so nothing is left that a
+            # category_id match could find.
             assert (
                 db.session.query(LedgerAccount)
                 .filter_by(
@@ -463,8 +471,8 @@ class TestPerEntryAndTrialBalance:
                 .filter(JournalEntry.transaction_entry_id.isnot(None))
                 .count()
             ) == 4
-            assert _entries_violating_balance() == []
-            assert _trial_balance() == Decimal("0.00")
+            assert entries_violating_balance() == []
+            assert trial_balance(db.session) == Decimal("0.00")
 
 
 # ---------------------------------------------------------------------------
@@ -518,14 +526,10 @@ class TestEverySettledTransactionPosts:
             all_credit_id = all_credit.id
 
             _assert_every_settled_transaction_posts(user_id)
-            # The zero-effect FAMILY posted nothing (no silent spurious entry):
-            # a row posts nothing of its own since plan step X-bi-4a, so a
-            # ``transaction_id`` read alone would be true of every row here.
-            assert (
-                _db.session.query(JournalEntry)
-                .filter(family_journal_filter(all_credit_id))
-                .count()
-            ) == 0
+            # The zero-effect FAMILY books nothing (no silent spurious line).
+            assert period_nets_of_movements(
+                family_movement_ids(all_credit_id), scenario_id,
+            ) == {}
             _assert_full_reconciliation(scenario_id)
 
 
@@ -576,11 +580,11 @@ class TestMultiScenarioIsolation:
 
             # Checking: opening - 100 in baseline, opening - 70 in the
             # what-if -- never the cross-scenario 830.
-            assert _independent_ledger_sum(
-                checking.id, baseline.id,
+            assert account_net(
+                _db.session, checking.id, baseline.id,
             ) == Decimal("900.00")
-            assert _independent_ledger_sum(
-                checking.id, whatif.id,
+            assert account_net(
+                _db.session, checking.id, whatif.id,
             ) == Decimal("930.00")
             assert posting_service.account_posting_total(
                 checking.id, baseline.id,
@@ -590,15 +594,14 @@ class TestMultiScenarioIsolation:
             ) == Decimal("930.00")
 
             # The shared Groceries-Expense counter splits per scenario: +100 / +70.
-            groceries_counter = _counter_ledger_id(
-                user_id, LedgerAccountClassEnum.EXPENSE,
-                seed_user["categories"]["Groceries"].id,
+            groceries_counter = category_key(
+                seed_user["categories"]["Groceries"].id, LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_account_sum(
-                groceries_counter, baseline.id,
+            assert ledger_net(
+                _db.session, groceries_counter, baseline.id,
             ) == Decimal("100.00")
-            assert _ledger_account_sum(
-                groceries_counter, whatif.id,
+            assert ledger_net(
+                _db.session, groceries_counter, whatif.id,
             ) == Decimal("70.00")
 
             _assert_full_reconciliation(baseline.id)
@@ -641,11 +644,11 @@ class TestOwnerIsolationViaJournalEntry:
             checking1 = seed_user["account"].id
             checking2 = seed_second_user["account"].id
             # No leakage: each owner's Checking ledger holds only their own.
-            assert _independent_ledger_sum(
-                checking1, scenario1,
+            assert account_net(
+                _db.session, checking1, scenario1,
             ) == Decimal("900.00")
-            assert _independent_ledger_sum(
-                checking2, scenario2,
+            assert account_net(
+                _db.session, checking2, scenario2,
             ) == Decimal("1800.00")
 
             # A Posting has no user_id; ownership is normalized onto the entry.

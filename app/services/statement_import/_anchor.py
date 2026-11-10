@@ -96,12 +96,12 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from app.enums import StatementBalanceEvidenceEnum
-from app.exceptions import StatementBalanceUnexplained
 from app.extensions import db
 from app.models.account import AccountAnchorHistory
 from app.models.anchor_release import AnchorRelease
 
 from ._balance import fold_bank_balances, standing_bank_levels
+from ._errors import StatementBalanceUnexplained
 from ._integrity import opening_balance
 from ._line import ParsedStatement
 

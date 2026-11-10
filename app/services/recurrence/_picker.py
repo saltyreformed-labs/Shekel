@@ -61,6 +61,7 @@ Pure: no Flask, no ORM, no clock.  The ``ref`` ids come from
 import json
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
+from datetime import date
 
 from app import ref_cache
 from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
@@ -70,16 +71,27 @@ from app.services.recurrence._bounds import (
     EndsOnDate,
     NeverEnds,
 )
+from app.services.recurrence._describe import weekday_words
 from app.services.recurrence._frequency import (
     CadenceReading,
     can_repeat_within_month,
     has_day_of_month_coordinate,
 )
+from app.services.recurrence._month_coordinate import (
+    WEEKDAY_READING_WINDOWS,
+    WeekdayReading,
+    offerable_weekday_readings,
+    week_of_month,
+    weekday_reading_of,
+    weekday_shape,
+)
+from app.services.recurrence._nominal_day import offerable_nominal_days
 from app.services.recurrence._offer import (
     AuthorableCadence,
     fixed_interval,
     follows_card_due_dates,
 )
+from app.utils.dates import DAYS_PER_WEEK
 
 #: What each cadence UNIT is called on the form, singular and plural.
 #:
@@ -351,6 +363,12 @@ _END_BOUND_COPY: dict[str, tuple[str, str | None]] = {
 }
 
 
+#: What the "repeating on" control calls reading a date by its own day, the
+#: option it starts on.  This is the words' one home:
+#: :attr:`PickerModel.same_day_label` hands them to the template, and
+#: :func:`month_reading_choices` to a refusal that lists what a date allows.
+_SAME_DAY_LABEL = "the same day of the month"
+
 #: What each NOMINAL DAY is called on the form.
 #:
 #: The days a month can fail to hold, and no others: every month holds its
@@ -370,24 +388,62 @@ _NOMINAL_DAY_LABELS: dict[int, str] = {
     31: "the last day of the month",
 }
 
+#: The first of one month of each length a month can have, by that length.
+_A_MONTH_OF_EACH_LENGTH: dict[int, date] = {
+    28: date(2027, 2, 1),
+    29: date(2028, 2, 1),
+    30: date(2026, 4, 1),
+    31: date(2026, 1, 1),
+}
+
+#: Every place a date can sit in a month, as ``("<lastDay>-<day>", a date there)``.
+#:
+#: **How the script reads the server's rules rather than restating them** (rule
+#: 14).  Which readings a date allows turns on its day and its month's length
+#: and on nothing else about it
+#: (:func:`~app.services.recurrence.offerable_nominal_days`,
+#: :func:`~app.services.recurrence.offerable_weekday_readings`), so asking the
+#: producers about these dates answers for every date there is, and an option
+#: carries the answers (``data-places``) for ``recurrence_form.js`` to look up.
+#: Rendered rather than fetched: the form must be right before any script runs.
+_PLACES: tuple[tuple[str, date], ...] = tuple(
+    (f"{length}-{day}", first.replace(day=day))
+    for length, first in _A_MONTH_OF_EACH_LENGTH.items()
+    for day in range(1, length + 1)
+)
+
 
 @dataclass(frozen=True)
 class NominalDayOption:
     """One day a clamped first occurrence could have MEANT, worded.
 
-    The offer set behind the form's "repeating on" control, which is rendered
-    only where the chosen date leaves the question open -- see
-    :func:`~app.services.recurrence.offerable_nominal_days` for when that is.
-    A plain value so the template DISPLAYS: the day goes in the
+    Half of the offer set behind the form's "repeating on" control; the
+    weekday readings are the other (:class:`WeekdayReadingOption`).  An
+    option is ENABLED only where the chosen date leaves the question open --
+    see :func:`~app.services.recurrence.offerable_nominal_days` for when that
+    is.  A plain value so the template DISPLAYS: the token goes in the
     ``<option value>`` and the label between the tags.
 
     Attributes:
-        day: The nominal day, 29-31, and what the control posts.
+        day: The nominal day, 29-31.
         label: The human copy.
+        places_json: Where the option reads a date, for the script to look up:
+            a JSON object holding a key from :data:`_PLACES` for each place
+            that producer leaves this day open at, ``{"30-30": true, ...}``.
     """
 
     day: int
     label: str
+    places_json: str
+
+    @property
+    def token(self) -> str:
+        """Return what the option posts: the day's digits, ``"31"``.
+
+        :attr:`MonthReading.token`'s spelling, so the option and a stored
+        rule's preselection name one string.
+        """
+        return MonthReading(nominal_day=self.day).token
 
 
 def nominal_day_options() -> tuple[NominalDayOption, ...]:
@@ -398,15 +454,286 @@ def nominal_day_options() -> tuple[NominalDayOption, ...]:
     renders them all and enables the ones
     :func:`~app.services.recurrence.offerable_nominal_days` names.  That is
     what lets the script re-enable them as the user edits the date without
-    holding any copy of its own.
+    holding any copy of its wording or its rule: each option carries that
+    producer's answer at every place (:data:`_PLACES`), asked of the ``MONTH``
+    unit because the script consults them only beside a unit with a day of the
+    month, and every such unit gets the one answer.
 
     Returns:
         One :class:`NominalDayOption` per day, ascending.
     """
     return tuple(
-        NominalDayOption(day=day, label=label)
+        NominalDayOption(
+            day=day,
+            label=label,
+            places_json=json.dumps({
+                key: True for key, place in _PLACES
+                if day in offerable_nominal_days(RecurrenceUnitEnum.MONTH, place)
+            }),
+        )
         for day, label in sorted(_NOMINAL_DAY_LABELS.items())
     )
+
+
+@dataclass(frozen=True)
+class WeekdayReadingOption:
+    """One weekday reading the "repeating on" control offers, worded for every date.
+
+    The weekday half of the control the nominal days share (plan step
+    recurrence:R8-c, rulings plan#2668 and plan#2670): ONE ``<select>``
+    offers the same day of the month, the clamped month-end days, and these,
+    because a rule's first date is read exactly one of those ways and a form
+    that posted two keys could state two.
+
+    **Worded per date by the SERVER, and the script picks the words.**
+    "The third Tuesday" depends on the date the user is still typing, so the
+    option carries where it reads a date and every phrase it can show there.
+    ``recurrence_form.js`` looks the typed date's place up and shows the phrase
+    at the week it finds; it counts no week and states no copy and no rule (the
+    template's rule, every other string on this form included).
+
+    Attributes:
+        token: What the option posts, the reading's stored value.
+        places_json: Where the option reads a date, for the script to look up:
+            a JSON object holding a key from :data:`_PLACES` for each place
+            :func:`~app.services.recurrence.offerable_weekday_readings` allows
+            this reading at, its value the date's week counted from this
+            reading's end, ``{"30-17": 3, ...}``.
+        labels_json: Every phrase the option can show, as a JSON object keyed
+            ``"<week>-<weekday>"`` -- that week and the date's
+            :meth:`datetime.date.weekday` index (0 = Monday) --
+            ``{"3-1": "the third Tuesday", ...}``.
+    """
+
+    token: str
+    places_json: str
+    labels_json: str
+
+
+def _weekday_label(reading: WeekdayReading, week: int, weekday: int) -> str:
+    """Return what the control calls *reading* for a date at *week* on *weekday*.
+
+    The shape's own words (:func:`~._describe.weekday_words`, the describer's
+    too) behind an article, so "repeating on the third Tuesday" and
+    "Monthly (third Tuesday)" cannot name two days.
+
+    Args:
+        reading: The weekday reading.
+        week: The date's week counted from *reading*'s end.
+        weekday: The date's weekday index, 0 = Monday.
+
+    Returns:
+        The label, ``"the third Tuesday"``.
+    """
+    return f"the {weekday_words(weekday_shape(reading, week, weekday))}"
+
+
+def weekday_reading_options() -> tuple[WeekdayReadingOption, ...]:
+    """Return every weekday reading the form may offer, worded for every date.
+
+    Derived from
+    :data:`~app.services.recurrence._month_coordinate.WEEKDAY_READING_WINDOWS`
+    -- the table :func:`~app.services.recurrence.offerable_weekday_readings`
+    reads -- so a reading is offerable and worded together or neither, and
+    the script is handed that producer's answers, the ones the write door
+    refuses against, asked of the ``MONTH`` unit for the reason
+    :func:`nominal_day_options` gives.
+
+    Returns:
+        One option per reading, from-start first.
+    """
+    return tuple(
+        WeekdayReadingOption(
+            token=MonthReading(weekday_reading=reading).token,
+            places_json=json.dumps({
+                key: week_of_month(place, counts_from_end=window.counts_from_end)
+                for key, place in _PLACES
+                if reading in offerable_weekday_readings(
+                    RecurrenceUnitEnum.MONTH, place,
+                )
+            }),
+            labels_json=json.dumps({
+                f"{week}-{weekday}": _weekday_label(reading, week, weekday)
+                for week in range(1, window.last_week + 1)
+                for weekday in range(DAYS_PER_WEEK)
+            }),
+        )
+        for reading, window in WEEKDAY_READING_WINDOWS.items()
+    )
+
+
+def weekday_reading_choices(
+    unit: RecurrenceUnitEnum, starts_on: date,
+) -> dict[WeekdayReading, str]:
+    """Return the weekday readings *starts_on* allows, each worded for that date.
+
+    The server's half of what the script does as the user types: which
+    weekday options a rendered form starts ENABLED, and what each says.  The
+    set is :func:`~app.services.recurrence.offerable_weekday_readings`'; the
+    words are :func:`_weekday_label`'s, the same ones
+    :func:`weekday_reading_options` hands the script.
+
+    Args:
+        unit: The cadence unit.
+        starts_on: The rule's first occurrence.
+
+    Returns:
+        ``{reading: label}`` for each reading the date allows -- ``{}`` for a
+        cadence with no month coordinate.
+    """
+    return {
+        reading: _weekday_label(
+            reading,
+            week_of_month(
+                starts_on,
+                counts_from_end=WEEKDAY_READING_WINDOWS[reading].counts_from_end,
+            ),
+            starts_on.weekday(),
+        )
+        for reading in offerable_weekday_readings(unit, starts_on)
+    }
+
+
+@dataclass(frozen=True)
+class MonthReading:
+    """How a submitted "repeating on" choice reads the first date.
+
+    What one posted token means: at most one of the two fields is set,
+    because the control posts one choice -- which is what keeps a nominal
+    day beside a weekday reading (``ck_recurrence_rules_one_month_reading``)
+    a state no form can post.  Both ``None`` is the same day of the month.
+
+    Attributes:
+        nominal_day: The clamped month-end day the choice names, or ``None``.
+        weekday_reading: The weekday reading it names, or ``None``.
+    """
+
+    nominal_day: int | None = None
+    weekday_reading: WeekdayReading | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a reading that reads the date two ways.
+
+        Raises:
+            ValueError: When both fields are set.
+        """
+        if self.nominal_day is None or self.weekday_reading is None:
+            return
+        raise ValueError(
+            f"a month reading names nominal day {self.nominal_day} AND weekday "
+            f"reading {self.weekday_reading.value!r}: one date is read one way "
+            f"(the exclusive arc, ruling R-R25), so the pair disagrees with "
+            f"itself."
+        )
+
+    @property
+    def token(self) -> str:
+        """Return what the "repeating on" option for this reading posts.
+
+        The ONE spelling of the control's wire values, which every option's
+        ``token`` and :func:`month_reading_from_token` read: the empty string
+        for the same day of the month, the day's digits, or the weekday
+        reading's stored value.
+        """
+        if self.weekday_reading is not None:
+            return self.weekday_reading.value
+        if self.nominal_day is not None:
+            return str(self.nominal_day)
+        return ""
+
+
+def stored_month_reading(
+    nominal_day: int | None, weekday_reading: str | None,
+) -> MonthReading:
+    """Return how a STORED rule reads its first date, from its two columns.
+
+    What an edit form preselects, read off the columns the write door wrote
+    (``budget.recurrence_rules.nominal_day`` and ``weekday_reading``, under
+    ``ck_recurrence_rules_one_month_reading``).
+
+    Args:
+        nominal_day: The rule's ``nominal_day``.
+        weekday_reading: The rule's ``weekday_reading`` column value.
+
+    Returns:
+        The :class:`MonthReading`.
+    """
+    return MonthReading(
+        nominal_day=nominal_day,
+        weekday_reading=weekday_reading_of(weekday_reading),
+    )
+
+
+def month_reading_from_token(token: str) -> MonthReading | None:
+    """Return what a "repeating on" token posts, or ``None`` for a token no option posts.
+
+    **The ONE reader of the control's wire value**, asked by the form schema
+    and the live preview, so the two read one submission one way -- the
+    shape :func:`~app.services.recurrence.end_bound_from_token` gives the
+    "Ends" control.  It accepts exactly the tokens the options post: the
+    empty string (the same day of the month), a nominal day's
+    :attr:`NominalDayOption.token` and a weekday reading's
+    :attr:`WeekdayReadingOption.token`.  A plain integer parse would also
+    read ``"031"`` or ``" 31"``, spellings no option posts.
+
+    Whether the date ALLOWS the choice is not asked here: that is a rule
+    over the pair, which the schema and ``RecurrenceSpec`` refuse.
+
+    Args:
+        token: The submitted value.
+
+    Returns:
+        The :class:`MonthReading`, or ``None`` when no option posts *token*.
+    """
+    offered = (
+        MonthReading(),
+        *(MonthReading(nominal_day=day) for day in sorted(_NOMINAL_DAY_LABELS)),
+        *(MonthReading(weekday_reading=reading) for reading in WeekdayReading),
+    )
+    return next(
+        (reading for reading in offered if reading.token == token), None,
+    )
+
+
+def month_reading_choices(
+    unit: RecurrenceUnitEnum, starts_on: date,
+) -> dict[MonthReading, str]:
+    """Return every way *starts_on* may be read, in the control's words and order.
+
+    **What the "repeating on" control offers for one date, as one value**: the
+    same day of the month, the clamped month-end days the date leaves open
+    (:func:`~app.services.recurrence.offerable_nominal_days`), then the weekday
+    readings it allows (:func:`weekday_reading_choices`).  Those two are what a
+    rendered control enables its options from, and the schema refuses a choice
+    by its absence here and lists the rest of this in the sentence (ruling
+    plan#2909), so a refusal cannot name a choice the control lacks or omit one
+    it has.
+
+    Every date a cadence measured in months can take has at least two entries,
+    its own day and one weekday reading: the 1st-28th is the fourth such weekday
+    or earlier, and the 29th-31st falls in its month's last week.
+
+    Args:
+        unit: The cadence unit.
+        starts_on: The rule's first occurrence.
+
+    Returns:
+        ``{reading: label}`` in the control's order -- ``{}`` for a cadence
+        with no day of the month, beside which the control is not offered.
+    """
+    if not has_day_of_month_coordinate(unit):
+        return {}
+    return {
+        MonthReading(): _SAME_DAY_LABEL,
+        **{
+            MonthReading(nominal_day=day): _NOMINAL_DAY_LABELS[day]
+            for day in offerable_nominal_days(unit, starts_on)
+        },
+        **{
+            MonthReading(weekday_reading=reading): label
+            for reading, label in weekday_reading_choices(unit, starts_on).items()
+        },
+    }
 
 
 @dataclass(frozen=True)
@@ -500,6 +827,9 @@ class PickerModel:
             worded.  The "repeating on" control renders them all and enables
             the ones the chosen date leaves open, so the script re-enables them
             as the user edits that date without holding any copy of the wording.
+        weekday_readings: The weekday readings the same control offers, each
+            with where it reads a date and every phrase it can show (plan step
+            recurrence:R8-c), for the same reason.
         units: One option per UNIT, for the unit ``<select>``.  The MONTH unit
             has two offered readings and must render one entry, or the user is
             asked to choose between two things called "months".
@@ -515,9 +845,15 @@ class PickerModel:
     options: tuple["CadenceOption", ...]
     options_json: str
     nominal_days: tuple["NominalDayOption", ...]
+    weekday_readings: tuple["WeekdayReadingOption", ...]
     end_bounds: tuple["EndBoundOption", ...]
     units: tuple["CadenceOption", ...]
     placements: tuple["CadenceOption", ...]
+
+    @property
+    def same_day_label(self) -> str:
+        """Return what the "repeating on" control's first option is called."""
+        return _SAME_DAY_LABEL
 
 
 def picker_model(cadences: tuple[AuthorableCadence, ...]) -> PickerModel:
@@ -548,6 +884,7 @@ def picker_model(cadences: tuple[AuthorableCadence, ...]) -> PickerModel:
             [asdict(option.wire) for option in options],
         ),
         nominal_days=nominal_day_options(),
+        weekday_readings=weekday_reading_options(),
         end_bounds=end_bound_options(),
         units=_first_by(options, lambda option: option.unit_id),
         placements=_first_by(options, lambda option: option.placement_id),
@@ -639,12 +976,19 @@ __all__ = [
     "CadenceOption",
     "CadenceWire",
     "EndBoundOption",
+    "MonthReading",
     "NominalDayOption",
     "PickerModel",
     "SelectedCadence",
+    "WeekdayReadingOption",
     "cadence_options",
     "end_bound_options",
+    "month_reading_choices",
+    "month_reading_from_token",
     "nominal_day_options",
     "picker_model",
     "selected_cadence",
+    "stored_month_reading",
+    "weekday_reading_choices",
+    "weekday_reading_options",
 ]

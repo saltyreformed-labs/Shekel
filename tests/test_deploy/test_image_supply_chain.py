@@ -7,10 +7,12 @@ Covers audit findings:
     F-062  Two HIGH OS CVEs with no fix available in container image
     F-120  pip CVE in container (build-time only)
     F-155  No Cosign / image-signature verification
+    BAL-653  Compose images pinned by tag alone (ledger finding, plan step X-em;
+             :class:`TestEveryComposeImageIsPinnedByDigest`, which lists the
+             compose files with ``git ls-files``)
 
 The artifacts under audit are the multi-stage Dockerfile, the
 production compose override at ``deploy/docker-compose.prod.yml``,
-``scripts/deploy.sh`` (Cosign sign + verify wrappers),
 ``.github/workflows/docker-publish.yml`` (CI signing pipeline),
 and ``.gitignore`` (private-key exclusion).  Since plan step balance:X-dj
 it also holds the runtime stage to psycopg's C implementation (ruling
@@ -33,31 +35,40 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
 import yaml
 
+from tests.test_deploy.test_uv_build_hashes import BUILD_HASHES_SETTING, PYPROJECT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # ── Files under assertion ──────────────────────────────────────────
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 DOCKER_COMPOSE = REPO_ROOT / "docker-compose.yml"
+DEV_COMPOSE = REPO_ROOT / "docker-compose.dev.yml"
 PROD_COMPOSE_OVERRIDE = REPO_ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 GITIGNORE = REPO_ROOT / ".gitignore"
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy.sh"
 DEPLOY_README = REPO_ROOT / "deploy" / "README.md"
 DOCKER_PUBLISH_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-publish.yml"
 
-# Pattern matching ``FROM <image>@sha256:<64 hex chars>``.  We do not
-# pin to a specific digest here because the digest is expected to
-# rotate over time; the assertion is that the digest pin EXISTS on
-# every FROM line, not that it points at one specific image.
-DIGEST_PIN_PATTERN = re.compile(
-    r"^FROM\s+[^\s]+@sha256:[0-9a-f]{64}\b",
+# The Python base image's FROM lines.  We do not pin to a specific
+# digest here because the digest is expected to rotate over time; the
+# assertion is that the digest pin EXISTS, not that it points at one
+# specific image.
+#: A FROM line on the Python base image: its ``X.Y`` tag and its digest.
+PYTHON_BASE_PATTERN = re.compile(
+    r"^FROM\s+python:(\d+\.\d+)-slim@sha256:([0-9a-f]{64})\b",
     re.MULTILINE,
+)
+#: The one home of the Python version (ruling balance:R-BAL294).
+PYTHON_VERSION_FILE = REPO_ROOT / ".python-version"
+#: The uv stage's FROM line: astral's uv image by its version tag and its digest.
+UV_STAGE_PATTERN = re.compile(
+    r"FROM\s+ghcr\.io/astral-sh/uv:[\w.-]+@sha256:[0-9a-f]{64}\s+AS\s+uv", re.IGNORECASE,
 )
 
 # Pattern matching the ``SHEKEL_IMAGE_DIGEST`` interpolation in the
@@ -93,8 +104,98 @@ def _docker_available() -> bool:
 
 # ──────────────────────────────────────────────────────────────────
 # F-025 + F-062 + F-120: Dockerfile pins by digest, runs OpenSSL
-#   upgrade in both stages, upgrades pip past CVE-2026-1703.
+#   upgrade in both stages, and runs no pip (it installs uv.lock).
 # ──────────────────────────────────────────────────────────────────
+
+#: The Dockerfile's instructions (Docker's reference): the first word of every line that is
+#: not a comment, a blank or a continuation.
+DOCKERFILE_INSTRUCTIONS = frozenset({
+    "ADD", "ARG", "CMD", "COPY", "ENTRYPOINT", "ENV", "EXPOSE", "FROM", "HEALTHCHECK",
+    "LABEL", "MAINTAINER", "ONBUILD", "RUN", "SHELL", "STOPSIGNAL", "USER", "VOLUME",
+    "WORKDIR",
+})
+
+
+def _instructions(text: str) -> list[str]:
+    """Each instruction of the Dockerfile ``text``, its continuation lines included, by
+    Docker's rules for its default ``\\`` escape: a comment line is dropped wherever it
+    stands, inside an instruction too, and so is a blank line inside one.
+
+    A line it cannot place fails the read rather than going unread: one that starts no
+    instruction, and a heredoc (``<<``), whose body it does not read.
+    """
+    instructions, lines = [], []
+    for line in text.splitlines():
+        if line.lstrip().startswith("#") or (lines and not line.strip()):
+            continue
+        lines.append(line)
+        if not re.search(r"\\[ \t]*$", line):
+            instructions.append("\n".join(lines))
+            lines = []
+    instructions = [one for one in [*instructions, "\n".join(lines)] if one.strip()]
+    for instruction in instructions:
+        assert instruction.split()[0].upper() in DOCKERFILE_INSTRUCTIONS, instruction
+        assert "<<" not in instruction, f"a heredoc this read cannot see into: {instruction}"
+    return instructions
+
+
+def _stages(text: str) -> list[list[str]]:
+    """The Dockerfile ``text``'s stages, each its instructions from its ``FROM`` on."""
+    stages: list[list[str]] = []
+    for instruction in _instructions(text):
+        if re.match(r"FROM\s", instruction, re.IGNORECASE):
+            stages.append([])
+        if stages:
+            stages[-1].append(instruction)
+    return stages
+
+
+def _python_stages(text: str) -> list[list[str]]:
+    """The stages built ``FROM`` the Python base image (:data:`PYTHON_BASE_PATTERN`)."""
+    return [stage for stage in _stages(text) if PYTHON_BASE_PATTERN.match(stage[0])]
+
+
+def _uv_stages(text: str) -> list[str]:
+    """The ``FROM`` instruction of each stage of the Dockerfile ``text`` named ``uv``."""
+    return [stage[0] for stage in _stages(text)
+            if re.search(r"\sAS\s+uv\s*$", stage[0], re.IGNORECASE)]
+
+
+#: Each uv stage the uv-stage check refuses, made from the real FROM line.
+UV_STAGE_REFUSED = {
+    "another registry": lambda line: line.replace("ghcr.io/", "evil.example/"),
+    "another of astral's repositories": lambda line: line.replace("/uv:", "/uv-tools:"),
+    "a digest alone": lambda line: re.sub(r":[\w.-]+@", "@", line),
+    "a tag alone": lambda line: re.sub(r"@sha256:[0-9a-f]{64}", "", line),
+    "two uv stages": lambda line: f"{line}\n{line}",
+}
+
+
+def _runs(instructions: list[str]) -> list[str]:
+    """The RUN instructions among ``instructions``."""
+    return [one for one in instructions if re.match(r"RUN\s", one, re.IGNORECASE)]
+
+
+def _commands(instruction: str) -> list[list[str]]:
+    """The words of each command a RUN ``instruction`` runs, each without the variable
+    assignments that lead it and the RUN line's own ``--`` flags.
+
+    In the shell form a command is what ``;``, ``&``, ``|``, ``(``, ``)`` and a backtick
+    separate (``&&``, ``||``, a subshell and ``$(...)`` among them); the exec form is one
+    command, its JSON punctuation dropped.
+    """
+    shell = re.sub(r"\\[ \t]*\n", " ", instruction)
+    shell = re.sub(r"^RUN(?:\s+--\S+)*\s*", "", shell, flags=re.IGNORECASE)
+    if shell.startswith("["):
+        shell = re.sub(r'[\[\]",]', " ", shell)
+    commands = []
+    for part in re.split(r"[;&|()`]", shell):
+        words = part.split()
+        while words and re.fullmatch(r"\w+=\S*", words[0]):
+            del words[0]
+        if words:
+            commands.append(words)
+    return commands
 
 
 class TestDockerfileDigestPin:
@@ -113,18 +214,19 @@ class TestDockerfileDigestPin:
         return DOCKERFILE.read_text(encoding="utf-8")
 
     def test_both_stages_pin_by_digest(self, text: str) -> None:
-        """Both FROM lines must include ``@sha256:<digest>``.
+        """Both Python FROM lines must include ``@sha256:<digest>``.
 
         The Dockerfile is multi-stage: a builder stage that installs
         psycopg-c build deps and a runtime stage that copies only the
-        venv.  A digest pin on only one stage would let the other
-        stage drift to whatever ``:latest`` resolves to at build
-        time -- defeating reproducibility.
+        venv, both on the Python base image (the uv stage before them
+        supplies only the installer binary).  A digest pin on only one
+        Python stage would let the other drift to whatever its tag
+        resolves to at build time -- defeating reproducibility.
         """
-        matches = DIGEST_PIN_PATTERN.findall(text)
-        # The Dockerfile has exactly two FROM lines (builder + runtime).
+        matches = PYTHON_BASE_PATTERN.findall(text)
+        # Exactly two FROM lines are on the Python base (builder + runtime).
         assert len(matches) == 2, (
-            f"expected exactly 2 FROM lines pinned by ``@sha256:`` digest "
+            f"expected exactly 2 ``FROM python:<X.Y>-slim@sha256:`` lines "
             f"in Dockerfile, got {len(matches)}.  Both stages must pin "
             f"to the same digest for reproducible builds (audit "
             f"findings F-025, F-060)."
@@ -138,24 +240,37 @@ class TestDockerfileDigestPin:
         revision than the one stage 1 linked psycopg-c against.  The
         symmetry is the load-bearing invariant.
         """
-        from_lines = [
-            line for line in text.splitlines()
-            if line.startswith("FROM ")
-        ]
-        digests = []
-        for line in from_lines:
-            match = re.search(r"@(sha256:[0-9a-f]{64})", line)
-            if match is not None:
-                digests.append(match.group(1))
-        assert len(digests) >= 2, (
-            f"Dockerfile has fewer than 2 digest-pinned FROM lines: "
-            f"{from_lines}"
+        stages = PYTHON_BASE_PATTERN.findall(text)
+        assert len(stages) >= 2, (
+            f"Dockerfile has fewer than 2 digest-pinned Python FROM lines: "
+            f"{stages}"
         )
-        unique = set(digests)
+        unique = {digest for _version, digest in stages}
         assert len(unique) == 1, (
-            f"Dockerfile FROM lines pin to different digests: {unique}.  "
-            f"Stage 1 (builder) and stage 2 (runtime) must use the same "
-            f"base image digest so OpenSSL revisions match across stages."
+            f"Dockerfile Python FROM lines pin to different digests: "
+            f"{unique}.  Stage 1 (builder) and stage 2 (runtime) must use "
+            f"the same base image digest so OpenSSL revisions match "
+            f"across stages."
+        )
+
+    def test_both_stages_run_the_python_version_file(self, text: str) -> None:
+        """Both Python FROM tags name the minor version ``.python-version`` holds.
+
+        ``.python-version`` is the one home of the Python version (ruling
+        balance:R-BAL294): uv, CI and the local venv read it.  A FROM line
+        cannot read a file, so this is where the image is held to it.  The
+        build itself also refuses a mismatch (``UV_PYTHON_DOWNLOADS=never``
+        leaves uv no interpreter to fetch), and ci.yml's ``image`` job builds
+        the image before every merge (task plan#2366), so a mismatch is a red
+        build there too; this check is the one naming the two files to move
+        together.
+        """
+        wanted = PYTHON_VERSION_FILE.read_text(encoding="utf-8").strip()
+        versions = [version for version, _digest in PYTHON_BASE_PATTERN.findall(text)]
+        assert versions and all(version == wanted for version in versions), (
+            f"Dockerfile Python FROM tags {versions} do not all name "
+            f"``.python-version``'s {wanted!r}; move the FROM lines (tag "
+            f"and digest) and ``.python-version`` in the same change."
         )
 
     def test_no_floating_tag_only_from(self, text: str) -> None:
@@ -176,9 +291,52 @@ class TestDockerfileDigestPin:
                 f"(audit findings F-025, F-060)."
             )
 
+    def test_the_uv_stage_is_astral_s_uv_image_by_tag_and_digest(self, text: str) -> None:
+        """The one stage named ``uv``, which the builder copies the installer from and CI
+        exports (``.github/actions/dockerfile-uv``), is built FROM astral's uv image by its
+        version tag and its digest (:data:`UV_STAGE_PATTERN`).
+
+        A digest pin alone (:meth:`test_no_floating_tag_only_from`) passes a uv image from
+        any registry.  Until task plan#2484 the install action's own reading of this line
+        refused one; BuildKit, which reads it there now, refuses none.
+        """
+        found = _uv_stages(text)
+        assert [UV_STAGE_PATTERN.fullmatch(one) is not None for one in found] == [True], (
+            f"the Dockerfile's stages named ``uv``: {found}.  It must hold exactly one, "
+            f"``FROM ghcr.io/astral-sh/uv:<version>@sha256:<digest> AS uv``."
+        )
+
+    @pytest.mark.parametrize("name", list(UV_STAGE_REFUSED))
+    def test_the_uv_stage_check_refuses_each_other_image(self, text: str, name: str) -> None:
+        """The real uv stage's FROM line replaced by each of :data:`UV_STAGE_REFUSED`: an
+        image of another registry or another of astral's repositories, astral's uv by digest
+        alone or tag alone, and the line twice; each fails the check."""
+        real, = _uv_stages(text)
+        assert text.count(real + "\n") == 1
+        mutated = text.replace(real + "\n", UV_STAGE_REFUSED[name](real) + "\n")
+        assert mutated != text
+        assert [UV_STAGE_PATTERN.fullmatch(one) is not None
+                for one in _uv_stages(mutated)] != [True], name
+
+
+#: The OpenSSL packages each Python stage upgrades: the set audit finding F-025 names.
+OPENSSL_PACKAGES = frozenset({"openssl", "libssl3t64", "openssl-provider-legacy"})
+
+
+def _upgrades_openssl(stage: list[str]) -> bool:
+    """Whether a RUN instruction of ``stage`` holds the command ``apt-get upgrade -y`` naming
+    every one of :data:`OPENSSL_PACKAGES`.
+
+    It reads the command's words, not the shell's control flow or apt's other options: an
+    upgrade after ``true ||``, or one given ``-s`` (simulate), passes it.
+    """
+    return any(words[:2] == ["apt-get", "upgrade"] and "-y" in words
+               and OPENSSL_PACKAGES <= set(words)
+               for instruction in _runs(stage) for words in _commands(instruction))
+
 
 class TestDockerfileOpenSSLUpgrade:
-    """Both stages run apt-get upgrade for the OpenSSL packages.
+    """Both Python stages run apt-get upgrade for the OpenSSL packages.
 
     Defense-in-depth on top of the digest pin: the digest gives
     reproducibility, the apt-get upgrade gives currency.  A new CVE
@@ -186,57 +344,9 @@ class TestDockerfileOpenSSLUpgrade:
     picked up on the next image build.  Audit finding F-025.
     """
 
-    @pytest.fixture(scope="class")
-    @classmethod
-    def text(cls) -> str:
-        """Return the full Dockerfile source as a string."""
-        return DOCKERFILE.read_text(encoding="utf-8")
-
-    @pytest.mark.parametrize(
-        "package", ["openssl", "libssl3t64", "openssl-provider-legacy"]
-    )
-    def test_dockerfile_mentions_openssl_package(
-        self, text: str, package: str,
-    ) -> None:
-        """Each OpenSSL package the audit names must appear in the
-        Dockerfile's apt-get upgrade list.  The audit explicitly
-        names all three (the vulnerable package set in F-025).
-        """
-        assert package in text, (
-            f"Dockerfile does not mention {package!r} -- the audit "
-            f"specifically requires upgrading this package "
-            f"(F-025)."
-        )
-
-    def test_apt_get_upgrade_appears_at_least_twice(self, text: str) -> None:
-        """``apt-get upgrade`` runs in both the builder and runtime stages.
-
-        We count occurrences rather than parse the Dockerfile because
-        each stage is a separate sequence of RUN directives and the
-        upgrade must run in EACH stage (the runtime stage gets its own
-        libssl3t64 from the postgresql-client install).
-        """
-        # Find all distinct apt-get upgrade invocations.  We allow
-        # the upgrade to be on one line or split across continuation
-        # lines, so the search is for the literal substring within
-        # any run command.
-        upgrade_count = len(re.findall(r"apt-get upgrade -y", text))
-        assert upgrade_count >= 2, (
-            f"``apt-get upgrade -y`` appears {upgrade_count} time(s) in "
-            f"Dockerfile; both the builder and runtime stages must run "
-            f"the upgrade so libssl3t64 in the runtime stage is also "
-            f"patched (audit finding F-025)."
-        )
-
-
-class TestDockerfilePipUpgrade:
-    """The Dockerfile upgrades pip past the CVE-2026-1703 fix.
-
-    Audit finding F-120: pip 25.3 has a path-traversal CVE (low
-    impact because pip only runs at build time).  Fixed in pip 26.0+.
-    The base image already ships pip 26.0.1 but the explicit upgrade
-    in the Dockerfile defends against a future base-image regression.
-    """
+    #: The two lines of each stage's RUN instruction that run the upgrade.
+    UPGRADE = ("    && apt-get upgrade -y --no-install-recommends \\\n"
+               "        openssl libssl3t64 openssl-provider-legacy \\\n")
 
     @pytest.fixture(scope="class")
     @classmethod
@@ -244,53 +354,287 @@ class TestDockerfilePipUpgrade:
         """Return the full Dockerfile source as a string."""
         return DOCKERFILE.read_text(encoding="utf-8")
 
-    def test_pip_upgrade_to_at_least_26(self, text: str) -> None:
-        """A ``pip install --upgrade`` line constrains pip to >= 26.0.
+    def test_each_python_stage_runs_the_openssl_upgrade(self, text: str) -> None:
+        """The builder and the runtime stage each hold ``apt-get upgrade -y`` naming every
+        package F-025 names, as a command of a RUN instruction of their own
+        (:func:`_upgrades_openssl`, which reads its words, not whether the shell reaches it).
 
-        We accept ``pip>=26.0``, ``pip==26.0``, ``pip==26.0.1``, or
-        any equivalent constraint -- the binding constraint is
-        "fixes CVE-2026-1703".  pip 26.0 is the minimum.
+        Since ruling plan#2443 the upgrade is the image's only OpenSSL control.  The
+        runtime stage carries its own libssl3t64 (postgresql-client needs it), which an
+        upgrade in the builder alone would leave at the base image's.  A comment naming the
+        command is no RUN instruction, and a command that only names it runs nothing.
         """
-        # Match common forms.  ``pip>=26`` is acceptable too (>=26
-        # implies >=26.0).
-        pattern = re.compile(
-            r"pip\s+install\s+(?:--no-cache-dir\s+)?--upgrade\s+"
-            r"['\"]?pip(?:[<>=!~]+|==)\s*26",
-        )
-        assert pattern.search(text) is not None, (
-            "Dockerfile does not run ``pip install --upgrade pip>=26`` "
-            "(audit finding F-120 -- CVE-2026-1703 path-traversal fix "
-            "lands in pip 26.0).  Add the upgrade BEFORE "
-            "``pip install -r requirements.txt`` so requirements are "
-            "installed with the patched pip."
+        stages = _python_stages(text)
+        assert len(stages) == 2, [stage[0] for stage in stages]
+        missing = [stage[0] for stage in stages if not _upgrades_openssl(stage)]
+        assert not missing, (
+            f"these Dockerfile stages run no ``apt-get upgrade -y`` of "
+            f"{sorted(OPENSSL_PACKAGES)}: {missing}.  Each stage on the Python base must "
+            f"run it, so libssl3t64 in the runtime stage is also patched (audit finding "
+            f"F-025)."
         )
 
-    def test_pip_upgrade_runs_before_requirements_install(
+    def test_the_upgrade_check_refuses_a_runtime_stage_that_does_not_run_it(
         self, text: str,
     ) -> None:
-        """The pip upgrade appears in source order before the
-        ``pip install -r requirements.txt`` line so the requirements
-        are resolved with the patched pip, not the pre-CVE pip.
+        """Measured on the real Dockerfile, whose header comment names the command too: the
+        runtime stage's upgrade deleted, one of its packages dropped, its lines turned into
+        comments inside the RUN instruction, or the command only echoed, and the runtime
+        stage alone fails, the builder's upgrade still read."""
+        assert text.count(self.UPGRADE) == 2, "the upgrade lines moved; re-cut these mutations"
+        head, _, tail = text.rpartition(self.UPGRADE)
+        for upgrade in ("", self.UPGRADE.replace(" libssl3t64", ""),
+                        "".join(f"#{line}\n" for line in self.UPGRADE.splitlines()),
+                        self.UPGRADE.replace("&& apt-get", "&& echo apt-get")):
+            builder, runtime = _python_stages(head + upgrade + tail)
+            assert _upgrades_openssl(builder), upgrade
+            assert not _upgrades_openssl(runtime), upgrade
+
+
+#: Python's ``-m``, alone or the last of a group of one-letter options (``-Im``).
+RUN_MODULE = r"(?<![\w-])-[A-Za-z]*m\s*"
+#: pip by name in a command, anywhere but as a path's segment after a ``/``, in
+#: ``--without-pip`` or as ``pip.conf``: ``pip``, ``pip3``, ``pip3.N``, ``pip-`` anything
+#: (pip-compile), ``pipx``, Debian's ``python3-pip`` and pip's modules (``pip._internal``),
+#: ``uv pip`` and ``python -m pip`` among them; ``-m`` (:data:`RUN_MODULE`) with pip or
+#: ensurepip; and an ensurepip function called (``ensurepip.bootstrap()``), where reading
+#: ``ensurepip.__file__`` runs nothing.
+PIP_BY_NAME = re.compile(rf"(?<![/\w])(?<!--without-)pip(?:x|3[\d.]*)?(?!\w|\.conf\b)"
+                         rf"|{RUN_MODULE}(?:ensure)?pip\b|ensurepip\.(?!__file__\b)")
+#: A path to pip's files: ``pip`` (its package directory or its command), ``pip3`` and
+#: ``pip3.N`` with or without a glob, ``pip-*`` (its dist-info, its wheel, pip-compile), and
+#: ``pipx``.
+PIP_PATH = re.compile(r"/pip(?:x|[\d.]*\*?|-\S*)?(?=[\s\"'/]|$)")
+
+
+def _runs_pip(instruction: str) -> bool:
+    """Whether a RUN ``instruction`` runs pip, by a spelling read here (rulings plan#2443,
+    plan#2446).
+
+    A command (:func:`_commands`) is refused that names pip (:data:`PIP_BY_NAME`), runs
+    ``-m venv`` without ``--without-pip`` (venv seeds pip by running ensurepip), or names a
+    path to pip's files (:data:`PIP_PATH`) as anything but ``rm`` does: ``rm`` deletes them
+    and runs nothing, so the runtime stage's delete of the base image's pip passes, while
+    ``python3 /usr/local/bin/pip install`` does not.  A spelling this does not read (a path
+    built at run time, ``from ensurepip import bootstrap``, ``import ensurepip as e``,
+    ``virtualenv``, ``uv venv --seed``, a script that runs pip) passes it: what reached the
+    image is ci.yml's ``image`` job's to grade, by finding no pip in it and its venv exactly
+    the lock's.
+    """
+    for words in _commands(instruction):
+        command = " ".join(words)
+        if (PIP_BY_NAME.search(command)
+                or (re.search(rf"{RUN_MODULE}venv\b", command) and "--without-pip" not in words)
+                or (words[0] != "rm" and PIP_PATH.search(command))):
+            return True
+    return False
+
+
+def _taken_from_elsewhere(stage: list[str]) -> list[str]:
+    """What ``stage`` takes from another stage or image: its ``FROM`` unless the Python base
+    (:data:`PYTHON_BASE_PATTERN`), each instruction naming one by ``from=`` (``COPY --from=``,
+    a RUN mount's ``from=``), each RUN with any mount (a cache mount shares its files across
+    stages by its id), and each ADD, which can also fetch a URL.  A file a RUN line fetches
+    itself (``curl``) is not read."""
+    return [one for at, one in enumerate(stage)
+            if (at == 0 and not PYTHON_BASE_PATTERN.match(one))
+            or re.search(r"\bfrom=|--mount\b", one, re.IGNORECASE)
+            or re.match(r"ADD\s", one, re.IGNORECASE)]
+
+
+class TestDockerfileInstallsTheLock:
+    """The image installs ``uv.lock`` with uv, and no pip runs in the build.
+
+    Ruling balance:R-BAL294: every package, indirect ones included, is
+    installed at the version and sha256 the lock records.  This replaces
+    audit finding F-120's control (a pip upgraded past CVE-2026-1703 before
+    ``pip install -r requirements.txt``): with no pip invoked in the build
+    and none seeded into ``/opt/venv``, that CVE has no build-time pip to
+    reach, which the old control only narrowed.  The runtime stage deletes
+    the base image's own pip with ``rm`` (rulings plan#2443, plan#2446), and
+    ci.yml's ``image`` job checks the built image holds none.
+    """
+
+    #: The one thing the runtime stage takes from another stage or image.
+    VENV_COPY = "COPY --from=builder /opt/venv /opt/venv"
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def text(cls) -> str:
+        """Return the full Dockerfile source as a string."""
+        return DOCKERFILE.read_text(encoding="utf-8")
+
+    def test_no_pip_runs_in_the_build(self, text: str) -> None:
+        """No RUN instruction runs pip (:func:`_runs_pip`).
+
+        A ``pip install`` would install outside the lock's hashes; uv
+        installs everything.
         """
-        upgrade_match = re.search(
-            r"pip\s+install\s+(?:--no-cache-dir\s+)?--upgrade\s+['\"]?pip",
-            text,
+        pip_runs = [one for one in _runs(_instructions(text)) if _runs_pip(one)]
+        assert not pip_runs, (
+            f"Dockerfile runs pip: {pip_runs}.  The image installs only "
+            f"``uv.lock``, through ``uv sync --locked`` (ruling "
+            f"balance:R-BAL294)."
         )
-        requirements_match = re.search(
-            r"pip\s+install\s+(?:--no-cache-dir\s+)?-r\s+requirements\.txt",
-            text,
+
+    @pytest.mark.parametrize("command", [
+        "RUN pip install requests",
+        "RUN pip3 install requests",
+        "RUN python -m pip install requests",
+        "RUN python3 -I -mpip install requests",
+        "RUN uv pip install requests",
+        "RUN pip-compile requirements.in",
+        "RUN pipx install ruff",
+        "RUN apt-get install -y --no-install-recommends python3-pip",
+        "RUN apt-get update && pip install requests",
+        "RUN apt-get update \\\n    && pip install requests",
+        "RUN /usr/local/bin/pip install requests",
+        "RUN apt-get update \\\n    && /usr/local/bin/pip3 install requests",
+        'RUN "${scripts}"/pip install requests',
+        "RUN version=\"$(/usr/local/bin/pip --version)\"",
+        "RUN python3 /usr/local/bin/pip install requests",
+        'RUN env "${scripts}"/pip3 install requests',
+        "RUN rm -r /tmp/x && python3 /usr/local/bin/pip install requests",
+        "RUN cp /usr/local/bin/pip /tmp/installer",
+        "RUN python -m ensurepip",
+        "RUN python -Im ensurepip",
+        "RUN python -c 'import ensurepip; ensurepip.bootstrap()'",
+        "RUN python -c 'from pip._internal.cli.main import main; main([\"install\", \"x\"])'",
+        "RUN python -m venv /opt/venv",
+        "RUN python -Im venv /opt/venv",
+        'RUN ["python", "-m", "ensurepip"]',
+    ], ids=["pip", "pip3", "python -m pip", "-mpip", "uv pip", "pip-compile", "pipx",
+            "pip's Debian package", "after an operator", "on a continuation line", "by its path",
+            "by its path on a continuation line", "by a variable's path",
+            "in a command substitution", "its path an argument to python",
+            "its path an argument to env", "its path in the command after an rm",
+            "its path an argument to cp", "-m ensurepip", "-Im ensurepip",
+            "ensurepip.bootstrap", "pip's own module", "-m venv, which seeds pip",
+            "-Im venv", "the exec form"])
+    def test_the_pip_check_refuses_each_spelling_it_reads(self, command: str) -> None:
+        """Each spelling :func:`_runs_pip` reads is refused, wherever its command stands."""
+        assert _runs_pip(command), command
+
+    @pytest.mark.parametrize("command", [
+        'RUN rm -r "${scripts}"/pip "${scripts}"/pip3* "${bundled}"/pip-*.whl',
+        "RUN --network=none rm -r /usr/local/bin/pip",
+        "RUN python -m venv --without-pip /opt/venv",
+        "RUN python -c 'import ensurepip; print(ensurepip.__file__)'",
+        "RUN set -o pipefail && apt-get update",
+        "RUN cp pip.conf /etc/pip.conf",
+    ], ids=["rm of pip's files", "rm after the RUN line's flags", "venv without pip",
+            "ensurepip's path read", "pipefail", "a file named like pip's config"])
+    def test_the_pip_check_passes_each_command_that_runs_no_pip(self, command: str) -> None:
+        """A command that names pip's files, its module or a word starting like it, and runs
+        no pip, passes :func:`_runs_pip`."""
+        assert not _runs_pip(command), command
+
+    def test_the_pip_check_passes_a_line_naming_pip_s_files_it_runs_nothing_of(
+            self, text: str) -> None:
+        """The runtime stage's ``rm`` of the base image's pip names pip's files and runs no
+        pip, so it passes; it is a RUN instruction of the Dockerfile, so the check over the
+        real file reads it."""
+        deleting = [one for one in _runs(_instructions(text)) if "rm -r " in one
+                    and '"${purelib}"/pip ' in one]
+        assert len(deleting) == 1, deleting
+        assert not _runs_pip(deleting[0]), deleting[0]
+
+    def test_the_builder_syncs_the_lock_with_its_build_hashes(
+        self, text: str,
+    ) -> None:
+        """The builder runs exactly ``uv sync --locked --compile-bytecode --no-install-project
+        --no-default-groups --group server`` in a RUN instruction, so no flag overrides the
+        project's settings and none restates one, and pyproject.toml sets uv's
+        ``require-build-hashes``: with that line turned into a comment, which still names it,
+        a flag added to it, or the setting gone, the check fails.
+
+        ``--locked`` refuses a lock that no longer matches pyproject.toml,
+        and ``require-build-hashes`` refuses a source build whose tools no
+        hash covers (pyproject.toml's ``build-constraint-dependencies``,
+        ruling plan#2494), in this sync (task plan#2550).
+        """
+        exact = ["uv", "sync", "--locked", "--compile-bytecode", "--no-install-project",
+                 "--no-default-groups", "--group", "server"]
+
+        def syncs(dockerfile: str) -> bool:
+            builder, = (stage for stage in _stages(dockerfile)
+                        if re.search(r"\sAS\s+builder$", stage[0], re.IGNORECASE))
+            return any(words == exact for one in _runs(builder) for words in _commands(one))
+
+        def requires_hashes(pyproject: str) -> bool:
+            return tomllib.loads(pyproject)["tool"]["uv"].get("require-build-hashes") is True
+
+        assert syncs(text), (
+            "the Dockerfile's builder stage no longer installs with exactly "
+            f"``{' '.join(exact)}``; the image would not be held to "
+            "uv.lock's versions and hashes (ruling balance:R-BAL294)."
         )
-        assert upgrade_match is not None, (
-            "no ``pip install --upgrade pip`` line in Dockerfile"
+        sync = "RUN uv sync --locked"
+        assert text.count(sync) == 1
+        assert not syncs(text.replace(sync, "# " + sync).replace(
+            "\n        --no-default-groups --group server\n", "\n"))
+        for flag in ("--no-require-build-hashes", "--require-build-hashes", "--no-config"):
+            assert not syncs(text.replace(sync, f"{sync} {flag}")), flag
+        pyproject = PYPROJECT.read_text(encoding="utf-8")
+        assert requires_hashes(pyproject), (
+            "pyproject.toml no longer sets ``require-build-hashes = true`` "
+            "under ``[tool.uv]``; a source build could install a build tool "
+            "no hash covers (ruling plan#2494)."
         )
-        assert requirements_match is not None, (
-            "no ``pip install -r requirements.txt`` line in Dockerfile"
+        assert pyproject.count(BUILD_HASHES_SETTING) == 1
+        assert not requires_hashes(pyproject.replace(BUILD_HASHES_SETTING, ""))
+
+    def test_the_runtime_stage_takes_only_the_builder_s_venv(self, text: str) -> None:
+        """The runtime stage is built ``FROM`` the Python base and takes from another stage
+        or image only the builder's venv (:func:`_taken_from_elsewhere`), so no copy of the
+        uv stage's or the builder's uv.
+
+        The installer is a build tool; an image that carried it would
+        hand anything with code execution in the container a way to
+        install packages.  What the venv itself holds is not read here:
+        ci.yml's ``image`` job finds its packages exactly the lock's
+        runtime and server set, and finds no file by uv's names in the
+        built image, so neither a uv the builder copied into the venv nor
+        the uv package passes (task plan#2543).
+        """
+        runtime = _stages(text)[-1]
+        assert _taken_from_elsewhere(runtime) == [self.VENV_COPY], (
+            "the runtime stage takes something from another stage or image "
+            "besides the builder's /opt/venv, or no longer takes the venv: "
+            f"{_taken_from_elsewhere(runtime)}.  uv must stay in the builder."
         )
-        assert upgrade_match.start() < requirements_match.start(), (
-            "Dockerfile installs requirements.txt BEFORE upgrading pip; "
-            "the requirements would be resolved with the pre-CVE pip "
-            "(audit finding F-120)."
-        )
+
+    @pytest.mark.parametrize("line", [
+        "COPY --from=uv /uv /usr/local/bin/uv",
+        "COPY --from=ghcr.io/astral-sh/uv:0.13.6@sha256:" + "a" * 64 + " /uv /usr/local/bin/uv",
+        "COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv",
+        "COPY --from=0 /uv /usr/local/bin/uv",
+        "copy --from=uv /uv /usr/local/bin/uv",
+        "RUN --mount=type=bind,from=uv,source=/uv,target=/mnt/uv cp /mnt/uv /usr/local/bin/",
+        "RUN --mount=type=cache,id=uvx,target=/c cp /c/uv /usr/local/bin/uv",
+        "ADD https://example.com/uv /usr/local/bin/uv",
+    ], ids=["the uv stage", "the uv image", "the builder's uv", "a stage by its index",
+            "lowercase", "a RUN mount", "a cache mount shared by its id", "an ADD"])
+    def test_the_runtime_check_refuses_each_way_it_reads_of_taking_uv(
+            self, text: str, line: str) -> None:
+        """Each line added to the real runtime stage after its venv copy is refused."""
+        assert text.count(self.VENV_COPY + "\n") == 1
+        mutated = text.replace(self.VENV_COPY + "\n", f"{self.VENV_COPY}\n{line}\n")
+        assert _taken_from_elsewhere(_stages(mutated)[-1]) == [self.VENV_COPY, line]
+
+    def test_the_runtime_check_refuses_a_stage_built_on_another_and_a_venv_copy_gone(
+            self, text: str) -> None:
+        """The runtime stage built ``FROM builder`` (which holds uv), its venv copy widened to
+        all of ``/opt`` or gone, each fails; a comment naming a copy of uv passes."""
+        runtime_from = _stages(text)[-1][0]
+        assert text.count(runtime_from + "\n") == 1
+        for mutated in (text.replace(runtime_from + "\n", "FROM builder\n"),
+                        text.replace(self.VENV_COPY, "COPY --from=builder /opt /opt"),
+                        text.replace(self.VENV_COPY + "\n", "")):
+            assert _taken_from_elsewhere(_stages(mutated)[-1]) != [self.VENV_COPY]
+        commented = text.replace(self.VENV_COPY + "\n",
+                                 f"{self.VENV_COPY}\n# COPY --from=uv /uv /usr/local/bin/uv\n")
+        assert _taken_from_elsewhere(_stages(commented)[-1]) == [self.VENV_COPY]
 
 
 class TestDockerfilePreservesC34Invariants:
@@ -349,12 +693,12 @@ class TestDockerfilePreservesC34Invariants:
     def test_healthcheck_present(self, text: str) -> None:
         """The HEALTHCHECK directive survives the C-36 refresh.
 
-        Composer and entrypoint depend on the health endpoint to
-        gate the rolling restart in scripts/deploy.sh.
+        A container run from the image reports a health status even with
+        no compose file's ``healthcheck:`` over it.
         """
         assert "HEALTHCHECK" in text, (
-            "Dockerfile lost its HEALTHCHECK directive; deploy.sh's "
-            "wait_for_health() relies on /health responding."
+            "Dockerfile lost its HEALTHCHECK directive; a container run from "
+            "the image with no compose healthcheck would report no health."
         )
 
 
@@ -365,10 +709,11 @@ class TestDockerfileRequiresPsycopgC:
     libpq, and psycopg falls back to its pure-Python implementation silently
     when the C one will not import.  ``PSYCOPG_IMPL=c`` turns that fallback
     into an import failure, so an image without psycopg-c cannot start
-    rather than running slower unnoticed.  No test builds the image (the
-    publish workflow builds it only on a push to ``main`` or a ``v*`` tag),
-    so this text assertion is what stops the line being dropped before review
-    sees it.
+    rather than running slower unnoticed.  ci.yml's ``image`` job builds the
+    image before every merge and refuses one that does not run the C
+    implementation (task plan#2366), but an image that holds psycopg-c runs it
+    with this line or without it, so that job cannot see the line dropped:
+    this text assertion is what holds it.
     """
 
     def test_the_runtime_stage_sets_psycopg_impl_c(self) -> None:
@@ -598,8 +943,9 @@ class TestComposeOverrideRequiresDigest:
             "POSTGRES_PASSWORD": "test-postgres-password",
             "SECRET_KEY": "a" * 32,
             "APP_ROLE_PASSWORD": "test-app-role-password",
-            # Phase B3 Redis ACL hardening interpolation.
-            "SHEKEL_REDIS_PASSWORD": "test-redis-password",
+            # The Valkey password the app and the valkey service
+            # interpolate (``${SHEKEL_VALKEY_PASSWORD:?...}``).
+            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
         }
 
     def _run_compose_config(self, env: dict[str, str]) -> subprocess.CompletedProcess:
@@ -684,165 +1030,86 @@ class TestComposeOverrideRequiresDigest:
 
 
 # ──────────────────────────────────────────────────────────────────
-# F-155: Cosign sign + verify wired into deploy.sh and CI.
+# BAL-653: every compose image pinned by tag and digest.
 # ──────────────────────────────────────────────────────────────────
 
+#: A pinned image: a tag, then the digest of its bytes (``.claude/rules/deploy.md``).
+TAG_AND_DIGEST_PATTERN = re.compile(r"^[^@\s]+:[\w.-]+@sha256:[0-9a-f]{64}$")
+#: The images whose own line carries no digest, each as ``(compose file, service)``: the
+#: app's.  The base file names it ``:latest`` for an end user's ``docker compose up``, and
+#: the prod override pins it through ``SHEKEL_IMAGE_DIGEST``
+#: (:class:`TestProdComposeOverridePinsByDigest`).
+PINNED_ELSEWHERE = frozenset({
+    ("docker-compose.yml", "app"),
+    ("deploy/docker-compose.prod.yml", "app"),
+})
 
-class TestDeployScriptCosignWrappers:
-    """scripts/deploy.sh defines sign + verify functions and calls
-    both before swapping the running container.  Audit finding
-    F-155 / Commit C-36.
-    """
 
-    @pytest.fixture(scope="class")
-    @classmethod
-    def text(cls) -> str:
-        """Return the full deploy.sh source as a string."""
-        return DEPLOY_SCRIPT.read_text(encoding="utf-8")
+def _compose_images() -> tuple[list[str], dict[tuple[str, str], str]]:
+    """Every committed compose file (``git ls-files``, so a new one anywhere in the tree is
+    read too) and every ``image:`` its services name, by ``(compose file, service)``."""
+    listed = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "--", "*compose*.yml", "*compose*.yaml"],
+        capture_output=True, text=True, check=True, timeout=DOCKER_SUBPROCESS_TIMEOUT_S,
+    )
+    files = listed.stdout.split()
+    images: dict[tuple[str, str], str] = {}
+    for name in files:
+        with (REPO_ROOT / name).open(encoding="utf-8") as fh:
+            services = yaml.safe_load(fh).get("services") or {}
+        for service, spec in services.items():
+            if "image" in spec:
+                images[(name, service)] = spec["image"]
+    return files, images
 
-    def test_script_parses_cleanly(self) -> None:
-        """``bash -n`` accepts the script (no syntax errors).
 
-        All other tests in this class assume the script is parseable.
-        """
-        result = subprocess.run(
-            ["bash", "-n", str(DEPLOY_SCRIPT)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"bash -n failed for {DEPLOY_SCRIPT}:\n"
-            f"  stdout: {result.stdout}\n  stderr: {result.stderr}"
-        )
+class TestEveryComposeImageIsPinnedByDigest:
+    """Every image a compose file names is ``name:tag@sha256:<digest>``, so a push to a tag
+    cannot change what a ``docker compose up`` runs (finding BAL-653): the tag says which
+    version, the digest pins its bytes.  The app's is pinned elsewhere."""
 
-    def test_defines_sign_image_function(self, text: str) -> None:
-        """``sign_image()`` exists and references cosign.
+    def test_every_image_names_its_tag_and_digest(self) -> None:
+        """Each compose image but the app's carries a tag and a sha256 digest; the census
+        found the compose files production and dev use, and the exempt lines are still where
+        the exemptions say, so neither can pass by reading nothing."""
+        files, images = _compose_images()
+        assert {"docker-compose.yml", "docker-compose.dev.yml",
+                "deploy/docker-compose.prod.yml"} <= set(files), files
+        assert PINNED_ELSEWHERE <= images.keys(), sorted(images)
+        unpinned = {f"{name} {service}": image for (name, service), image in images.items()
+                    if (name, service) not in PINNED_ELSEWHERE
+                    and not TAG_AND_DIGEST_PATTERN.match(image)}
+        assert not unpinned, (
+            f"compose images pinned by tag alone: {unpinned}.  Pin each as "
+            "``name:tag@sha256:<digest>``, the digest the multi-arch index's, read with "
+            "``docker buildx imagetools inspect name:tag`` (finding BAL-653).")
 
-        Asserts on the function definition specifically (not just any
-        ``cosign sign`` substring) so a regression that removes the
-        function but leaves a comment matching the keyword still fails.
-        """
-        assert re.search(r"^sign_image\(\)\s*\{", text, re.MULTILINE), (
-            "scripts/deploy.sh does not define ``sign_image()``; the "
-            "C-36 cosign signing wrapper is missing."
-        )
-        # The function body must call ``cosign sign``.
-        sign_block = re.search(
-            r"sign_image\(\)\s*\{(.+?)^\}", text,
-            re.MULTILINE | re.DOTALL,
-        )
-        assert sign_block is not None
-        assert "cosign sign" in sign_block.group(1), (
-            "sign_image() body does not call ``cosign sign``; the "
-            "wrapper is a no-op."
-        )
 
-    def test_defines_verify_image_signature_function(self, text: str) -> None:
-        """``verify_image_signature()`` exists and calls cosign verify."""
-        assert re.search(
-            r"^verify_image_signature\(\)\s*\{", text, re.MULTILINE,
-        ), (
-            "scripts/deploy.sh does not define "
-            "``verify_image_signature()``; the C-36 cosign verify "
-            "wrapper is missing."
-        )
-        verify_block = re.search(
-            r"verify_image_signature\(\)\s*\{(.+?)^\}", text,
-            re.MULTILINE | re.DOTALL,
-        )
-        assert verify_block is not None
-        assert "cosign verify" in verify_block.group(1), (
-            "verify_image_signature() body does not call ``cosign verify``"
-        )
+class TestDevComposeRunsProductionsImages:
+    """Each service ``docker-compose.dev.yml`` and ``docker-compose.yml`` both run from an
+    image runs ONE image in both, tag and digest, so dev exercises what production runs (parity
+    audit findings D04, the store, and D15, the database).  An interim fence (ruling
+    plan#2560): each file still writes the pin, until step plan#2561 gives each image one
+    home, a service file both extend, and deletes this class."""
 
-    def test_main_calls_sign_before_verify_before_restart(self, text: str) -> None:
-        """main() calls ``sign_image`` then ``verify_image_signature``
-        then ``restart_app`` in source order.
+    def test_each_service_both_files_run_from_an_image_runs_one_image(self) -> None:
+        """The services both files run from an image (``db`` and ``valkey``; the app is built
+        in dev) name the same image in each, so a bump of one file alone fails here."""
+        _files, images = _compose_images()
+        base, dev = ({service: image for (name, service), image in images.items()
+                      if name == path.name} for path in (DOCKER_COMPOSE, DEV_COMPOSE))
+        shared = {service: (base[service], dev[service]) for service in base.keys() & dev.keys()}
+        assert {"db", "valkey"} <= shared.keys(), sorted(shared)
+        differing = {name: pair for name, pair in shared.items() if pair[0] != pair[1]}
+        assert not differing, (
+            f"docker-compose.dev.yml runs other images than docker-compose.yml: {differing}.  "
+            "Move both files' pins in one change (ruling plan#2560; plan#2561 gives each one "
+            "home).")
 
-        Ordering invariant: signing must precede verification (verify
-        exercises the just-emitted signature, catching key mismatches
-        before the swap), and verification must precede restart (so an
-        unverifiable image never reaches the running container).
-        """
-        # Find the main() function block.
-        main_match = re.search(
-            r"^main\(\)\s*\{(.+?)^\}", text,
-            re.MULTILINE | re.DOTALL,
-        )
-        assert main_match is not None, "no main() in deploy.sh"
-        main_body = main_match.group(1)
 
-        sign_call = re.search(r"^\s*sign_image\b", main_body, re.MULTILINE)
-        verify_call = re.search(
-            r"^\s*verify_image_signature\b", main_body, re.MULTILINE,
-        )
-        restart_call = re.search(
-            r"^\s*restart_app\b", main_body, re.MULTILINE,
-        )
-
-        assert sign_call is not None, (
-            "main() does not call sign_image()"
-        )
-        assert verify_call is not None, (
-            "main() does not call verify_image_signature()"
-        )
-        assert restart_call is not None, (
-            "main() does not call restart_app() (regression in the "
-            "core deploy flow, not just the cosign wrapping)"
-        )
-
-        # Source-order assertions.
-        assert sign_call.start() < verify_call.start(), (
-            "main() calls verify_image_signature() BEFORE sign_image(); "
-            "verify must exercise the just-produced signature so a "
-            "key/verifier mismatch surfaces before the swap."
-        )
-        assert verify_call.start() < restart_call.start(), (
-            "main() calls restart_app() BEFORE "
-            "verify_image_signature(); an unverifiable image would "
-            "be deployed to the running container."
-        )
-
-    def test_skip_cosign_flag_is_documented(self, text: str) -> None:
-        """``--skip-cosign`` appears in the usage block and the
-        argument parser.  Operators need an emergency-bypass path.
-        """
-        assert "--skip-cosign" in text, (
-            "scripts/deploy.sh does not declare a --skip-cosign flag; "
-            "operators have no way to bypass cosign in an emergency."
-        )
-        # The argument parser case statement must handle the flag.
-        assert re.search(
-            r'--skip-cosign\)\s*\n\s*SKIP_COSIGN=true',
-            text,
-        ), (
-            "scripts/deploy.sh's argument parser does not set "
-            "SKIP_COSIGN=true on --skip-cosign; the flag is documented "
-            "but inert."
-        )
-
-    def test_cosign_required_env_var_handled(self, text: str) -> None:
-        """The script reads COSIGN_REQUIRED so steady-state ops can
-        promote warnings to errors via .env without changing the
-        invocation.
-        """
-        assert "COSIGN_REQUIRED" in text, (
-            "scripts/deploy.sh does not reference COSIGN_REQUIRED; "
-            "operators cannot enforce cosign in steady-state without "
-            "passing a flag on every invocation."
-        )
-
-    def test_cosign_public_key_default_points_to_deploy(self, text: str) -> None:
-        """COSIGN_PUBLIC_KEY defaults to ``deploy/cosign.pub`` so a
-        committed verifier key auto-applies without operator config.
-        """
-        assert "deploy/cosign.pub" in text, (
-            "scripts/deploy.sh does not default COSIGN_PUBLIC_KEY to "
-            "deploy/cosign.pub; operators would have to set the path "
-            "explicitly even when using the committed key."
-        )
+# ──────────────────────────────────────────────────────────────────
+# F-155: Cosign signing wired into CI.
+# ──────────────────────────────────────────────────────────────────
 
 
 class TestDockerPublishWorkflowSignsImage:
@@ -881,10 +1148,15 @@ class TestDockerPublishWorkflowSignsImage:
         )
 
     def test_workflow_installs_cosign(self, parsed: dict) -> None:
-        """A step uses sigstore/cosign-installer with a pinned version.
+        """A step installs cosign by sigstore/cosign-installer pinned by commit, and
+        installs the installer's own default cosign.
 
-        Pinning the cosign version prevents an upstream API change
-        from silently breaking signing in steady state.
+        The installer's pinned commit is cosign's one home (ruling plan#2442): its
+        default cosign is the binary it checks against the sha256 the action holds at
+        that commit, so an update of the installer's line moves cosign with it and an
+        upstream release cannot change what signs without a change here.  A
+        ``cosign-release`` of the workflow's own would be a second home, which an
+        update of the installer's line leaves behind.
         """
         steps = parsed["jobs"]["build-and-push"]["steps"]
         installer_step = next(
@@ -896,13 +1168,16 @@ class TestDockerPublishWorkflowSignsImage:
             "cosign via sigstore/cosign-installer; the sign step "
             "below would fail with ``cosign: not found``."
         )
-        # Assert the installer pins a cosign release.
-        with_args = installer_step.get("with") or {}
-        cosign_release = with_args.get("cosign-release")
-        assert cosign_release, (
-            "sigstore/cosign-installer step does not pin "
-            "cosign-release; an upstream cosign API change could "
-            "break signing without a code change."
+        assert re.fullmatch(r"sigstore/cosign-installer@[0-9a-f]{40}",
+                            installer_step["uses"]), (
+            f"sigstore/cosign-installer is not pinned by commit "
+            f"({installer_step['uses']!r}); the cosign it installs would move "
+            f"with whatever the reference names."
+        )
+        assert "cosign-release" not in (installer_step.get("with") or {}), (
+            "sigstore/cosign-installer is given a cosign-release; the installer's "
+            "pinned commit is cosign's one home (ruling plan#2442), and an update "
+            "of the installer's line would leave this one behind."
         )
 
     def test_workflow_signs_with_keyless_oidc(self, text: str) -> None:
@@ -951,9 +1226,8 @@ class TestDockerPublishWorkflowSignsImage:
 
 class TestGitignoreExcludesCosignKeys:
     """.gitignore excludes cosign private key files so a careless
-    ``git add cosign.key`` in the repo root cannot leak the signing
-    key.  The PUBLIC key (deploy/cosign.pub) is exempted -- verifiers
-    need it.
+    ``git add cosign.key`` in the repo root cannot leak a signing
+    key.
     """
 
     @pytest.fixture(scope="class")
@@ -1018,8 +1292,6 @@ class TestDeployReadmeDocumentsRotation:
         (
             "SHEKEL_IMAGE_DIGEST",
             "cosign verify",
-            "cosign generate-key-pair",
-            "deploy/cosign.pub",
             "F-060",
             "F-155",
             "C-36",

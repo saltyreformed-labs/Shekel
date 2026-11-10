@@ -92,12 +92,16 @@ from app.services.recurrence._vocabulary import (
     modelled_placement,
     modelled_unit,
 )
+from app.services.recurrence._month_coordinate import (
+    offerable_weekday_readings,
+    weekday_reading_of,
+)
 from app.services.recurrence._nominal_day import is_offerable_nominal_day
 from app.services.recurrence._resolution import (
-    RecurrenceSpec,
     ResolvedRecurrence,
     resolve,
 )
+from app.services.recurrence._spec import RecurrenceSpec
 
 @dataclass(frozen=True)
 class RuleReading:
@@ -325,8 +329,9 @@ def scheduling_day_of_month(rule: RecurrenceRule) -> int | None:
     It is ``_authoring._author``'s own expression, moved rather than restated:
     the day the cadence fires on
     (:attr:`~app.services.recurrence.ResolvedRecurrence.day_of_month`, the join
-    of ``starts_on``'s day with ``nominal_day``), gated on the ``(unit,
-    placement)`` PAIR rather than on the unit alone.  Measured on a 2026-08-16
+    of ``starts_on``'s day with ``nominal_day``, and no day for a rule read by
+    its weekday), gated on the ``(unit, placement)`` PAIR rather than on the
+    unit alone.  Measured on a 2026-08-16
     production clone: 0 of
     46 live rules disagree with the stored column, and the migration that drops
     it asserts the same equality in SQL before the ``ALTER TABLE``.
@@ -359,7 +364,8 @@ def scheduling_day_of_month(rule: RecurrenceRule) -> int | None:
     Returns:
         The day 1-31 the rule's rows are scheduled on, or ``None`` for a
         cadence that schedules on no day of the month -- a pay-period or
-        weekly cadence, or a calendar one funded from a later paycheck.
+        weekly cadence, a calendar one funded from a later paycheck, or one
+        read by its weekday, whose day moves from month to month.
 
     Raises:
         RecurrenceResolutionError: When the row names a unit or a placement
@@ -370,9 +376,11 @@ def scheduling_day_of_month(rule: RecurrenceRule) -> int | None:
     # The gate and the join live in the pure leaf the occurrence walk asks
     # too (plan step pay_calendar:C18-a): one statement of "which day a
     # cadence schedules its rows on", from a rule here and from a resolved
-    # value there.
+    # value there.  A rule read by its weekday answers ``None``: its day moves
+    # from month to month (plan step recurrence:R8-c).
     return cadence_scheduled_day(
         unit, placement, rule.starts_on, rule.nominal_day,
+        weekday_reading=weekday_reading_of(rule.weekday_reading),
     )
 
 
@@ -487,7 +495,9 @@ def recurrence_spec_with_cadence(
         ``nominal_day`` is the row's own only where the STATED cadence can hold
         it; see the inline comment on that field.  Its ``max_per_month`` is
         the STATED one, DROPPED where the stated unit cannot repeat within a
-        month, for the reason the nominal day is.
+        month, for the reason the nominal day is, and its
+        ``weekday_reading`` the row's own where the stated unit has a month
+        coordinate to read (plan step recurrence:R8-c).
 
     Raises:
         RecurrenceResolutionError: The row carries BOTH closing-bound columns,
@@ -498,7 +508,9 @@ def recurrence_spec_with_cadence(
             ``(starts_on, nominal_day)`` pair cannot raise from here: a day the
             stated cadence cannot hold is dropped rather than carried, which is
             what keeps the edit form's own cadence change off the 500 path.
+            The weekday reading is dropped the same way.
     """
+    reading = weekday_reading_of(rule.weekday_reading)
     return RecurrenceSpec(
         user_id=rule.user_id,
         unit=unit,
@@ -541,6 +553,14 @@ def recurrence_spec_with_cadence(
         # salary:R15-a).
         max_per_month=(
             max_per_month if can_repeat_within_month(unit) else None
+        ),
+        # DROPPED where the STATED cadence cannot read the first occurrence
+        # that way, as the nominal day above, for the same repair path (plan
+        # step recurrence:R8-c): a paycheck cadence has no month coordinate.
+        weekday_reading=(
+            reading if reading in offerable_weekday_readings(
+                unit, rule.starts_on,
+            ) else None
         ),
     )
 

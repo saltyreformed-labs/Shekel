@@ -25,7 +25,7 @@ import sqlalchemy.exc
 
 from app.extensions import db
 from app import create_app, ref_cache
-from app.ref_cache import _accessors, _state
+from app.ref_cache import _accessors, _recurrence, _state
 from app.enums import (
     AcctCategoryEnum,
     AmountSourceEnum,
@@ -1312,12 +1312,16 @@ class TestThePackageReExportsItsWholeSurface:
 
         A hardcoded roster would catch a DROPPED name and miss an ADDED one --
         a twenty-seventh accessor written and never re-exported is exactly the
-        same hole, arriving from the other direction.
+        same hole, arriving from the other direction.  Read over both accessor
+        modules since the recurrence vocabulary's six moved to ``_recurrence``
+        (a pure move at a merge of ``dev`` into plan step credit_card:CC-6).
         """
         defined = {
-            name for name, value in vars(_accessors).items()
+            name
+            for module in (_accessors, _recurrence)
+            for name, value in vars(module).items()
             if not name.startswith("_")
-            and getattr(value, "__module__", None) == _accessors.__name__
+            and getattr(value, "__module__", None) == module.__name__
         }
 
         assert defined, "no accessors found -- the reflection is wrong"

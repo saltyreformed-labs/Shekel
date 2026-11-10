@@ -38,7 +38,6 @@ from app.extensions import db
 from app.models.ref import FilingStatus
 from app.models.salary_pay_entry import SalaryPayEntry
 from app.models.salary_profile import SalaryProfile
-from app.models.salary_raise import SalaryRaise
 from app.services import pay_era_write
 from app.services.pay_rhythm import Monthly, Rhythm, SemiMonthly
 from tests._test_helpers import (
@@ -51,6 +50,10 @@ from tests._test_helpers import (
 )
 
 _MIGRATION = "70680a4a7405_a_salary_is_a_dated_pay_list.py"
+#: The later revision that replaced the raise's year and month with a start
+#: date (plan step salary plan#3048).  The revision under test reads the pair
+#: in raw SQL, so its cases run with this one stepped back (:func:`_pair_shape`).
+_DATED_RAISES = "6740ce13e174_a_raise_states_the_date_it_starts.py"
 
 
 def _scalar(sql, **params):
@@ -115,15 +118,35 @@ def _monthly_owner(seed_user):
     )
 
 
+@pytest.fixture
+def _pair_shape(app, db):
+    """Step the raise table back to the year-and-month shape this revision met.
+
+    ``70680a4a7405`` reads ``salary_raises.effective_year`` and
+    ``effective_month`` in raw SQL, both ways; ``6740ce13e174`` later replaced
+    them with ``effective_date``.  Downgrading that later revision first gives
+    the revision under test the schema it was written against, which is the
+    shape every database it ran on had.  Each test's database is a clone of
+    its own, so nothing steps it forward again.
+    """
+    with app.app_context():
+        run_migration_callable(load_migration_module(_DATED_RAISES).downgrade, db.session)
+
+
 def _raise(profile, year, month):
-    """Add a 3% merit raise first landing on the 1st of *month* in *year*."""
-    db.session.add(SalaryRaise(
-        salary_profile_id=profile.id,
-        raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
-        effective_year=year,
-        effective_month=month,
-        percentage=Decimal("0.0300"),
-    ))
+    """Add a 3% merit raise first landing on the 1st of *month* in *year*.
+
+    A raw INSERT into the year-and-month shape :func:`_pair_shape` restores,
+    which the ORM model, mapped to the start date, cannot write.
+    """
+    db.session.execute(sqlalchemy.text(
+        "INSERT INTO salary.salary_raises (salary_profile_id, raise_type_id, "
+        " effective_year, effective_month, percentage, is_recurring, version_id, "
+        " created_at) VALUES (:pid, :tid, :year, :month, 0.0300, false, 1, now())"
+    ), {
+        "pid": profile.id, "tid": ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
+        "year": year, "month": month,
+    })
 
 
 def _downgraded(seed_user, *, pay=Decimal("2000.00"), name="Day job"):
@@ -136,6 +159,7 @@ def _downgraded(seed_user, *, pay=Decimal("2000.00"), name="Day job"):
     return migration, profile_id
 
 
+@pytest.mark.usefixtures("_pair_shape")
 class TestTheUpgrade:
     """One entry per profile, half-up to the cent, on the first saved payday."""
 
@@ -318,6 +342,7 @@ class TestTheUpgrade:
             assert _annual_column_exists()
 
 
+@pytest.mark.usefixtures("_pair_shape")
 class TestTheDowngrade:
     """The yearly figure back as entry x count; history, emptiness and eras refused."""
 
@@ -402,6 +427,7 @@ class TestTheDowngrade:
             migration = load_migration_module(_MIGRATION)
             make_salary_profile(seed_user, db.session, name="Day job")
             bare = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=db.session.query(FilingStatus).first().id,
@@ -478,6 +504,7 @@ class TestTheDowngrade:
             migration = load_migration_module(_MIGRATION)
             make_salary_profile(seed_user, db.session, name="Day job")
             bare = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=db.session.query(FilingStatus).first().id,

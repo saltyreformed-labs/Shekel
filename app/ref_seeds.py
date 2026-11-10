@@ -32,6 +32,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.utils.dates import MONTHS_PER_YEAR
+
 if TYPE_CHECKING:
     # Typing-only imports: keep this module side-effect free at import
     # time (see the deferred ``app.models.ref`` import inside
@@ -255,10 +257,22 @@ _REF_TABLE_SEEDS = (
     # ``e7a4d95c2b18`` inline-seeds the identical rows so a freshly upgraded
     # DB resolves those enums before this idempotent reseed runs -- the same
     # dual-seed pattern the posting refs use.  Names match the enum
-    # ``.value`` strings in ``app/enums/`` exactly.
-    # ``due_date`` joined at plan step ``credit_card:CC-6`` (ruling
-    # plan#2671), inline-seeded by migration ``e2b8c4f1a9d3``.
-    ("RecurrenceUnit", ["period", "week", "month", "year", "due_date"]),
+    # ``.value`` strings in ``app/enums/`` exactly.  ``months_per_unit``
+    # (plan step plan#2302, ruling plan#2748) is the units' one statement of
+    # which are measured in months and how many; migration ``c4e8a1f7d2b6``
+    # writes it onto the rows that exist, and ``has_day_of_month`` is
+    # generated from it.  ``due_date`` joined at plan step
+    # ``credit_card:CC-6`` (ruling plan#2671), inline-seeded by migration
+    # ``e2b8c4f1a9d3``: its dates are the card's statements' due dates, read
+    # off the card's dated terms, so it is not measured in months and names no
+    # day of the month.
+    ("RecurrenceUnit", [
+        {"name": "period",   "months_per_unit": None},
+        {"name": "week",     "months_per_unit": None},
+        {"name": "month",    "months_per_unit": 1},
+        {"name": "year",     "months_per_unit": MONTHS_PER_YEAR},
+        {"name": "due_date", "months_per_unit": None},
+    ]),
     ("PeriodPlacement", ["containing_date", "period_starting_on_or_after"]),
     ("BusinessDayShift", ["none", "prior", "next"]),
     # The amount model's discriminator (balance arc, plan step X-au-c1; ruling
@@ -397,8 +411,8 @@ def seed_reference_data(session: Session, *, verbose: bool = False) -> None:
        correctly on next seed; missing rows are INSERTed.
     3. The non-AccountType ref tables from ``_REF_TABLE_SEEDS``.
        Existing rows are left alone; only missing rows are INSERTed.
-       Status carries non-name columns (booleans) -- those entries
-       are dicts; everything else is name-only.
+       An entry with non-name columns (``Status``'s booleans,
+       ``RecurrenceUnit``'s month span) is a dict; the rest are name-only.
 
     Idempotent by design: calling this twice in a row produces no
     duplicates and (modulo metadata refreshes on existing
@@ -542,8 +556,9 @@ def _seed_other_ref_tables(
     Driven by ``_REF_TABLE_SEEDS``.  Existing rows are left untouched, so
     there is no in-place metadata refresh as in step 2.  Dict entries
     carry the non-name columns -- ``Status``'s three migration-managed
-    runtime booleans, and ``StatementSource``'s ``display_name``, which
-    the statement upload form renders; every other entry is name-only.
+    runtime booleans, ``RecurrenceUnit``'s ``months_per_unit``, and
+    ``StatementSource``'s ``display_name``, which the statement upload form
+    renders; every other entry is name-only.
 
     **The consequence of "left untouched" is a real seam and it is
     graded rather than trusted**: editing a non-name value here changes

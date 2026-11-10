@@ -7,10 +7,12 @@ its label.  These tests build, for every kind the records can name, the key
 from a fixture's RECORDS and grade it against the row today's writer stores
 for the same thing (``ledger_account_service``): the same kind, the same
 class, the key the stored row's own columns spell (the mapping the parity test
-plan#2527 maps by), and the same label a statement shows today
-(``ledger_report_service._attribution.ledger_account_label``).  Every expected
-class and label is written out by hand, so the writer -- which stamps its rows
-from these same rules since this task -- is never its own grader.
+plan#2527 maps by), and the label a statement shows.  That was graded against
+the store's label reader too until plan task plan#2771 moved the statements
+onto these keys and deleted it; a statement's label is :func:`chart_label`'s
+now.  Every expected class and label is written out by hand, so the writer --
+which stamps its rows from these same rules since this task -- is never its
+own grader.
 
 Then the ruled difference (a rename relabels a worked-out line, where a stored
 snapshot kept its minted name), the deleted category no key names, and the
@@ -22,6 +24,7 @@ import pytest
 from app import ref_cache
 from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
 from app.extensions import db as _db
+from app.models.account import Account
 from app.models.category import Category
 from app.models.ledger_account import LedgerAccount
 from app.models.transaction import Transaction
@@ -31,23 +34,20 @@ from app.services.ledger_lines import (
     account_counter_key,
     category_key,
     chart_label,
+    chart_record_type,
     ledger_class_of,
     linked_key,
     loan_key,
     owner_bucket_key,
     transit_key,
 )
-# The label a statement shows for a STORED row today is package-private to the
-# report (its one reader); the test grades the worked-out label against it, so
-# it reaches the private module by name rather than asking for a re-export that
-# would exist only for a test (the same posture as
-# ``test_ledger_report_service``'s import of ``dated_account_nets``).
-from app.services.ledger_report_service._attribution import ledger_account_label
+from tests._stored_ledger import (
+    linked_ledger_account,
+    stored_chart_key,
+)
 from tests._test_helpers import (
     add_txn,
     create_account_of_type,
-    linked_ledger_account,
-    stored_chart_key,
 )
 
 
@@ -66,7 +66,6 @@ def _assert_key_matches_stored_row(stored, key, record, expected_label):
     )
     assert stored_chart_key(stored) == key
     assert chart_label(key, record) == expected_label
-    assert ledger_account_label(stored) == expected_label
 
 
 class TestEveryKindMatchesTheRowTheWriterStores:
@@ -272,8 +271,8 @@ class TestLabelsAreTodaysNames:
             loan.name = "New Loan"
             _db.session.flush()
 
-            assert ledger_account_label(counter_row) == "Old Checking -- Opening"
-            assert ledger_account_label(loan_row) == "Old Loan -- Interest"
+            assert counter_row.name == "Old Checking -- Opening"
+            assert loan_row.name == "Old Loan -- Interest"
             assert chart_label(
                 account_counter_key(
                     LedgerAccountKindEnum.ANCHOR_EQUITY, account.id,
@@ -288,8 +287,8 @@ class TestLabelsAreTodaysNames:
         """The label is the whole ``"Group: Item"``, as a statement shows today.
 
         The stored snapshot is clipped to its 100-character column; the
-        worked-out label has no column, and equals the live label today's
-        statement already reads for a category row.
+        worked-out label has no column, and is the live ``"Group: Item"`` a
+        statement shows.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -310,7 +309,6 @@ class TestLabelsAreTodaysNames:
             # 100 + len(": ") + 100 = 202, against the snapshot's 100.
             assert label == "G" * 100 + ": " + "I" * 100
             assert len(stored.name) == 100
-            assert ledger_account_label(stored) == label
 
 
 class TestADeletedCategoryIsNamedByNoKey:
@@ -462,3 +460,45 @@ class TestTheLabelRefusesARecordTheKeyDoesNotName:
                 ),
                 None,
             )
+
+
+class TestEachKeyNamesOneTypeOfRecord:
+    """:func:`chart_record_type`: the table a key's label is read from (plan#2771)."""
+
+    @pytest.mark.parametrize("key,expected", [
+        (ChartKey(
+            LedgerAccountKindEnum.LINKED, LedgerAccountClassEnum.ASSET, 1,
+        ), Account),
+        (account_counter_key(LedgerAccountKindEnum.ANCHOR_EQUITY, 1), Account),
+        (account_counter_key(LedgerAccountKindEnum.INTEREST_INCOME, 1), Account),
+        (account_counter_key(
+            LedgerAccountKindEnum.UNREALIZED_CHANGE, 1,
+        ), Account),
+        (loan_key(LedgerAccountKindEnum.LOAN_INTEREST, 1), Account),
+        (loan_key(LedgerAccountKindEnum.LOAN_ESCROW, 1), Account),
+        (loan_key(LedgerAccountKindEnum.LOAN_REFUND, 1), Account),
+        (loan_key(LedgerAccountKindEnum.EQUITY_OPENING, 1), Account),
+        (category_key(1, LedgerAccountClassEnum.INCOME), Category),
+        (category_key(1, LedgerAccountClassEnum.EXPENSE), Category),
+        (category_key(None, LedgerAccountClassEnum.INCOME), None),
+        (category_key(None, LedgerAccountClassEnum.EXPENSE), None),
+        (transit_key(), None),
+    ])
+    def test_every_kind_a_constructor_builds(self, key, expected):
+        """An account for its own line, its counters and a loan's components.
+
+        A category for a category line; no record for a bucket (the
+        Uncategorized pair and Transfers in transit).  The linked key is
+        spelled by hand because :func:`linked_key` reads a loaded account's
+        type; its class is the one that constructor gives a Checking.
+        """
+        assert chart_record_type(key) is expected
+
+    def test_a_key_no_constructor_builds_names_no_type(self):
+        """An ``orphan`` key, spelled by hand, is refused as it is labelled."""
+        with pytest.raises(ValueError, match="no chart label rule"):
+            chart_record_type(ChartKey(
+                LedgerAccountKindEnum.ORPHAN,
+                LedgerAccountClassEnum.EXPENSE,
+                None,
+            ))

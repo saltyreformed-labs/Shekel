@@ -152,16 +152,27 @@ class TestTheGrossIsARateAndNotAShareOfAYear:
     ):
         """A raise changes the rate ONCE; each side of it is flat.
 
-        A non-recurring 10% raise effective July 2026 splits the year at the
-        14th period (Jan 2 + 13*14 days = Jul 3).  Before it every paycheck is
-        $60,000 / 26 = $2307.69; after it every paycheck is
-        $2307.69 x 1.10 = $2538.459 -> $2538.46 (the raise steps the
-        per-paycheck pay since plan step salary:X-av-3a, ruling R-SAL60; the
-        yearly walk's $66,000 / 26 rounded to the same figure).  The
+        A non-recurring 10% raise effective 2026-07-01.  Every paycheck paid
+        wholly before it is $60,000 / 26 = $2307.69; every one paid wholly
+        after it is $2307.69 x 1.10 = $2538.459 -> $2538.46 (the raise steps
+        the per-paycheck pay since plan step salary:X-av-3a, ruling R-SAL60;
+        the yearly walk's $66,000 / 26 rounded to the same figure).  The
         superseded rule gave the first three of the pre-raise run and the
         first two of the post-raise run an extra cent, so each run held two
-        figures.  The yearly figure each paycheck reports is pay x 26 (ruling
-        R-SAL59): $59,999.94 and $65,999.96.
+        figures.
+
+        **Between the runs is ONE paycheck the raise starts inside** (ruling
+        plan#3089, task plan#3100): each paycheck pays Sunday through the
+        Saturday six days before its Friday payday, so 07-03 (Jan 2 + 13*14
+        days) pays 06-14..06-27, wholly before the raise, and 07-17 pays
+        06-28..07-11, 2 weekdays before and 8 after: $2307.69 x 2/10 =
+        461.538 -> $461.54 and $2538.46 x 8/10 = 2030.768 -> $2030.77,
+        $2492.31.  So the runs are 14 paychecks (01-02..07-03) and 11
+        (07-31..12-18); until plan#3100 they were 13 and 13, the raise whole
+        from 07-03.  The yearly figure each paycheck reports is its RATE x 26
+        (ruling R-SAL59), the pay in force on its last day, so 07-17 reports
+        the new $65,999.96, not its own base x 26 = $64,800.06: $59,999.94
+        fourteen times and $65,999.96 twelve.
         """
         profile = FakeProfile(
             pay=Decimal("2307.69"),  # $60,000.00 a year / 26
@@ -169,7 +180,7 @@ class TestTheGrossIsARateAndNotAShareOfAYear:
             raises=[
                 FakeRaise(
                     percentage="0.10",
-                    effective_month=7, effective_year=2026,
+                    effective_date=date(2026, 7, 1),
                     is_recurring=False,
                 ),
             ],
@@ -180,26 +191,31 @@ class TestTheGrossIsARateAndNotAShareOfAYear:
         )
 
         assert len(results) == 26
-        pre = {r.earnings.gross_biweekly for r in results[:13]}
-        post = {r.earnings.gross_biweekly for r in results[13:]}
-        assert [r.earnings.annual_salary for r in results[:13]] == (
-            [Decimal("59999.94")] * 13
+        pre = {r.earnings.gross_biweekly for r in results[:14]}
+        post = {r.earnings.gross_biweekly for r in results[15:]}
+        assert results[14].period.payday == date(2026, 7, 17)
+        assert results[14].earnings.gross_biweekly == Decimal("2492.31")
+        assert [r.earnings.annual_salary for r in results[:14]] == (
+            [Decimal("59999.94")] * 14
         )
-        assert [r.earnings.annual_salary for r in results[13:]] == (
-            [Decimal("65999.96")] * 13
+        assert [r.earnings.annual_salary for r in results[14:]] == (
+            [Decimal("65999.96")] * 12
         )
         assert pre == {Decimal("2307.69")}, f"pre-raise run: {sorted(pre)}"
         assert post == {Decimal("2538.46")}, f"post-raise run: {sorted(post)}"
 
         # What ruling R-HW costs in a RAISE year, pinned: the superseded rule
-        # made each segment total its exact pro-rata share ($30,000.00 and
-        # $33,000.00, summing to $63,000.00). Each is now the flat rate times
-        # the segment, three cents and two cents under respectively.
-        pre_total = sum(r.earnings.gross_biweekly for r in results[:13])
-        post_total = sum(r.earnings.gross_biweekly for r in results[13:])
-        assert pre_total == Decimal("29999.97"), f"pre-raise total {pre_total}"
-        assert post_total == Decimal("32999.98"), f"post-raise total {post_total}"
-        assert pre_total + post_total == Decimal("62999.95")
+        # made each segment total its exact pro-rata share. Each run is now
+        # the flat rate times the run, with the straddle between them:
+        # 14 x 2307.69 = 32307.66; 11 x 2538.46 = 27923.06; with 2492.31,
+        # 62723.03 (62999.95 while the raise was whole from 07-03).
+        pre_total = sum(r.earnings.gross_biweekly for r in results[:14])
+        post_total = sum(r.earnings.gross_biweekly for r in results[15:])
+        assert pre_total == Decimal("32307.66"), f"pre-raise total {pre_total}"
+        assert post_total == Decimal("27923.06"), f"post-raise total {post_total}"
+        assert pre_total + results[14].earnings.gross_biweekly + post_total == (
+            Decimal("62723.03")
+        )
 
     @pytest.mark.parametrize(
         "annual_salary,expected_year_total,expected_gap",
@@ -305,14 +321,18 @@ class TestGrossPerPaycheck:
         is 2000.10 x 1.05 = $2,100.105 exactly -- ROUND_HALF_UP gives
         $2,100.11, Python's default ROUND_HALF_EVEN (banker's) gives
         $2,100.10.  A money figure must never reach the even-rounding default
-        implicitly.
+        implicitly.  Read on 2026-01-30, which pays 01-11..01-24, wholly
+        after the raise; 01-02 pays 12-14..12-27 and was the case's payday
+        until ruling plan#3089 (task plan#3100) priced each weekday at its
+        own pay, so it pays $2,000.10 now.
         """
         profile = FakeProfile(
             pay=Decimal("2000.10"), pay_from=_WALK_OPENS,
-            raises=[FakeRaise(percentage="0.05", effective_month=1,
-                              effective_year=2026)],
+            raises=[FakeRaise(percentage="0.05", effective_date=date(2026, 1, 1),
+                              )],
         )
-        assert _walked_pay(profile, date(2026, 1, 2)) == Decimal("2100.11")
+        assert _walked_pay(profile, date(2026, 1, 30)) == Decimal("2100.11")
+        assert _walked_pay(profile, date(2026, 1, 2)) == Decimal("2000.10")
 
 
 class TestTheGrossContractIsDocumented:

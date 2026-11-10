@@ -15,7 +15,8 @@ from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import parent_of
-from tests._test_helpers import find_loan_ledger_account, ledger_net
+from app.services.ledger_lines import loan_key
+from tests._ledger_reads import ledger_net
 
 from ._helpers import (
     _derived_cash,
@@ -465,15 +466,8 @@ def test_an_early_extra_is_charged_nothing_in_the_posted_ledger(
         assert (split.interest, split.escrow, split.principal, split.excess) == (
             Decimal("0.00"), Decimal("0.00"), Decimal("1299.10"), Decimal("0.00"),
         )
-        # The per-loan interest ledger is minted by the first posting that
-        # books interest, so a loan whose only payment books none may have
-        # none -- which counts as nothing booked, and any interest posted
-        # would both mint it and move its net.
-        interest_ledger = find_loan_ledger_account(
-            db.session, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
-        )
-        interest_booked = (
-            Decimal("0.00") if interest_ledger is None
-            else ledger_net(db.session, interest_ledger.id, scenario_id)
-        )
-        assert interest_booked == Decimal("0.00")
+        assert ledger_net(
+            db.session,
+            loan_key(LedgerAccountKindEnum.LOAN_INTEREST, loan.id),
+            scenario_id,
+        ) == Decimal("0.00")

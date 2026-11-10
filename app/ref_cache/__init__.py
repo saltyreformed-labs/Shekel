@@ -27,8 +27,9 @@ gate rather than chosen for tidiness**: a twenty-sixth reference table took the
 flat module to 1,013 lines against pylint's 1,000-line ceiling, with four lines
 of headroom before it.  Two halves, along the seam the module already had --
 :mod:`._state` decides what is cached and refuses a reader who asks before it
-is, :mod:`._accessors` answers "what id is this enum member" -- and this file
-re-exports every name the package DEFINES, so the 98 modules that
+is, :mod:`._accessors` answers "what id is this enum member" (the recurrence
+vocabulary's in :mod:`._recurrence` since a merge of ``dev`` took it past the
+same ceiling) -- and this file re-exports every name the package DEFINES, so the 98 modules that
 ``from app import ref_cache`` are untouched.  It is the shape
 ``app.services.balance_at`` and ``app.services.statement_import`` already use,
 which is also what gives ``shekel-private-module-import`` a private surface to
@@ -60,8 +61,6 @@ from ._accessors import (
     acct_type_id,
     acct_type_max_term,
     amount_source_id,
-    business_day_shift_id,
-    business_day_shift_member,
     calc_method_id,
     card_payment_mode_id,
     card_payment_mode_member,
@@ -76,12 +75,10 @@ from ._accessors import (
     ledger_account_kind_id,
     ledger_class_is_debit_normal,
     loan_anchor_source_id,
-    period_placement_id,
     posting_kind_id,
     posting_source_id,
     raise_type_id,
     raise_type_member,
-    recurrence_unit_id,
     role_id,
     movement_figure_source_id,
     settled_day_basis_id,
@@ -93,6 +90,14 @@ from ._accessors import (
     transaction_type_is_income,
     txn_type_id,
     withholding_kind_id,
+)
+from ._recurrence import (
+    business_day_shift_id,
+    business_day_shift_member,
+    period_placement_id,
+    recurrence_unit_has_day_of_month,
+    recurrence_unit_id,
+    recurrence_unit_months,
 )
 from ._state import (
     init,
@@ -128,7 +133,9 @@ __all__ = [
     "posting_source_id",
     "raise_type_id",
     "raise_type_member",
+    "recurrence_unit_has_day_of_month",
     "recurrence_unit_id",
+    "recurrence_unit_months",
     "role_id",
     "movement_figure_source_id",
     "settled_day_basis_id",

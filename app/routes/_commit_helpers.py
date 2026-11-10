@@ -292,7 +292,8 @@ def regenerate_and_commit_or_stale(
     Args:
         regenerate: Zero-argument callable performing the
             in-transaction regeneration (e.g.
-            ``lambda: _regenerate_salary_transactions(profile)``).  Runs
+            ``lambda: _regenerate_salary_transactions(read_pass, profile)``,
+            the pass being the door's).  Runs
             before the commit, inside the stale-race guard.
         ctx: The :class:`StaleConflictContext` forwarded to
             :func:`handle_stale_conflict` on a conflict.
@@ -380,8 +381,8 @@ class UniqueViolationContext:
 
     Some form-mutation routes can hit one *known* unique constraint that
     represents a recoverable user error -- renaming a deduction to a name
-    a sibling already holds, or editing a raise onto a (type, year,
-    month) a sibling already covers.  Those routes translate that one
+    a sibling already holds, or editing a raise onto a (type, start
+    date) a sibling already holds.  Those routes translate that one
     constraint into a friendly WARNING flash + redirect and let every
     *other* IntegrityError fall through to the generic
     :func:`handle_db_error` fallback.
@@ -397,7 +398,7 @@ class UniqueViolationContext:
             :class:`StaleConflictContext` / :class:`DbErrorContext`.
         constraint: The unique constraint / index name this route expects
             to collide on (e.g.
-            ``"uq_salary_raises_profile_type_year_month"``).  Matched
+            ``"uq_salary_raises_profile_type_date"``).  Matched
             exactly against the IntegrityError via
             :func:`app.utils.db_errors.is_unique_violation`.
         log_message: ``logging``-style format string for the recognised

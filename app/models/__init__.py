@@ -35,7 +35,8 @@ from app.models.ref import (
 
 # Authentication
 from app.models.user import MfaConfig, User, UserSettings
-from app.models.trusted_device import TrustedDevice
+from app.models.known_device import KnownDevice
+from app.models.guess_record import GuessRecord
 
 # Budget domain
 from app.models.pay_period import PayPeriod
@@ -56,9 +57,6 @@ from app.models.anchor_release import (
 )
 from app.models.category import Category
 from app.models.recurrence_rule import RecurrenceRule
-from app.models.recurrence_anchors import (
-    RecurrenceWeekdayAnchor,
-)
 from app.models.scenario import Scenario
 from app.models.transaction_template import TransactionTemplate
 from app.models.transaction import Transaction
@@ -95,6 +93,7 @@ from app.models.statement_match import (
     StatementMatchMember,
 )
 from app.models.statement_line_skip import StatementLineSkip
+from app.models.line_source_id import LineSourceId
 
 # Salary domain
 from app.models.salary_profile import SalaryProfile
@@ -148,8 +147,9 @@ __all__ = [
     "UserRole",
     "WithholdingKind",
     # Authentication
+    "GuessRecord",
+    "KnownDevice",
     "MfaConfig",
-    "TrustedDevice",
     "User",
     "UserSettings",
     # Budget domain
@@ -165,7 +165,6 @@ __all__ = [
     "AnchorReleaseImmutableError",
     "Category",
     "RecurrenceRule",
-    "RecurrenceWeekdayAnchor",
     "Scenario",
     "TransactionTemplate",
     "Transaction",
@@ -198,6 +197,7 @@ __all__ = [
     "StatementMatch",
     "StatementMatchMember",
     "StatementLineSkip",
+    "LineSourceId",
     # Salary domain
     "SalaryProfile",
     "SalaryRaise",

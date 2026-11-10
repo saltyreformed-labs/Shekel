@@ -1,11 +1,12 @@
 """The fixture the release tool's tests share: a throwaway repository whose commits carry
-files (migrations, ship markers), built with :mod:`tools.ci.scratch`'s isolated git;
+files (migrations, ship markers, locks), built with :mod:`tools.ci.scratch`'s isolated git;
 and the histories the card reader's tests build on it (a cut after the cutover, a pull
 request merged as ``dev`` takes one writing ship markers, a deploy-together group in
 quill's own fake)."""
 from __future__ import annotations
 
 import shutil
+from datetime import datetime
 from itertools import count
 from pathlib import Path
 
@@ -16,6 +17,14 @@ from tools.ci.scratch import run
 from tools.quill.door import MARKERS, FakeTracker
 from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL, MOVES_MONEY_LABEL
 from tools.release._plan import Inputs, plan
+from tools.release._updates import JOB, PAGE, REFRESH, Actions
+
+
+def lock(*packages: tuple[str, str]) -> str:
+    """A lock's text holding each of ``packages``, a name and a version, from PyPI."""
+    return "version = 1\nrevision = 5\n" + "".join(
+        f'\n[[package]]\nname = "{name}"\nversion = "{version}"\n'
+        'source = { registry = "https://pypi.org/simple" }\n' for name, version in packages)
 
 
 def migration(revision: str, down: str | None) -> str:
@@ -163,3 +172,67 @@ def replanned_and_dropped(tracker):
     replan(tracker, 51, (511, 512))
     for leaf in (511, 512):
         tracker.close(leaf, "not_planned")
+
+
+# -- the update workflow's runs --------------------------------------------------------------
+
+
+def workflow_run(number: int, created: datetime, jobs: dict[str, str],
+                 started: datetime | None = None,
+                 refreshed: datetime | None = None) -> tuple[dict, list]:
+    """A run of the update workflow as GitHub lists it, created at ``created`` and its latest
+    attempt started at ``started`` (at ``created`` unless given, as a first attempt's), and
+    its latest attempt's jobs, each job's name with its conclusion and its start: the
+    refresh's at ``refreshed`` (the attempt's start unless given, a refresh that attempt
+    repeated or ran first), every other job's at the attempt's start."""
+    stamp = "%Y-%m-%dT%H:%M:%SZ"
+    attempt = started or created
+    return ({"id": number, "created_at": created.strftime(stamp),
+             "run_started_at": attempt.strftime(stamp),
+             "html_url": f"https://github.com/o/n/actions/runs/{number}"},
+            [{"name": name, "conclusion": conclusion,
+              "started_at": ((refreshed or attempt) if name == REFRESH else attempt)
+              .strftime(stamp)}
+             for name, conclusion in jobs.items()])
+
+
+def monday(number: int, created: datetime, publish: str = "success",
+           started: datetime | None = None,
+           refreshed: datetime | None = None) -> tuple[dict, list]:
+    """A Monday run: the refresh succeeded, the publish concluded ``publish``, the queue
+    skipped; its latest attempt started at ``started`` and its refresh at ``refreshed``
+    (:func:`workflow_run`)."""
+    return workflow_run(number, created, {REFRESH: "success", JOB: publish,
+                                          "queue": "skipped", "due": "skipped"},
+                        started, refreshed)
+
+
+def daily(number: int, created: datetime) -> tuple[dict, list]:
+    """A day's run of the queue and the due job: the refresh and the publish skipped."""
+    return workflow_run(number, created, {REFRESH: "skipped", JOB: "skipped",
+                                          "queue": "success", "due": "success"})
+
+
+class Runs:
+    """GitHub as it answers the update workflow's runs, newest first, a page of
+    :data:`~tools.release._updates.PAGE` at a time, and each run's jobs; ``read`` holds each
+    path asked for, in order."""
+
+    def __init__(self, *runs: tuple[dict, list]) -> None:
+        """Hold ``runs`` (:func:`workflow_run`), newest first."""
+        self.runs = [listed for listed, _ in runs]
+        self.jobs = {listed["id"]: jobs for listed, jobs in runs}
+        self.read: list[str] = []
+
+    def rest(self, method: str, path: str) -> dict:
+        """A listing page, or a run's jobs, as GitHub answers ``path``."""
+        assert method == "GET"
+        self.read.append(path)
+        if path.endswith("/jobs"):
+            return {"jobs": self.jobs[int(path.split("/")[-2])]}
+        page = int(path.rpartition("page=")[2])
+        return {"workflow_runs": self.runs[(page - 1) * PAGE:page * PAGE]}
+
+    def actions(self) -> Actions:
+        """The runs read from the repository ``o/n``, as ``Inputs.actions`` hands them."""
+        return Actions(self, "o/n")

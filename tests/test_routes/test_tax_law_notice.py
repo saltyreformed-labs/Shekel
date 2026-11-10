@@ -3,8 +3,10 @@ Shekel Budget App -- Tests for the tax-law notice on every owner page (plan step
 
 From November 1, every page the owner opens carries a banner until next year's
 tax law is in the app (rulings salary:R-SAL74 and R-SAL87), naming what is
-missing and the year whose rules price it meanwhile (R-SAL86).  It has no
-close button, and a companion never sees it.
+missing (R-SAL86) and what prices it meanwhile: each missing year once, its
+missing states together, priced on "older rules" (ruling plan#3198), and a
+whole missing year on the newest year's rules when no state lags (R-SAL87).
+It has no close button, and a companion never sees it.
 
 Every law is made up and installed through the ``tax_law`` fixture, and the
 day is set by replacing :func:`app.utils.dates.display_today` -- the one clock
@@ -20,7 +22,8 @@ import pytest
 from flask import render_template_string
 from flask_login import login_user
 
-from app import _current_user_is_owner, ref_cache
+from app import ref_cache
+from app.context_processors import _current_user_is_owner
 from app.utils import dates
 from tests._test_helpers import EMPTY_TAX_LAW, made_up_law
 
@@ -97,64 +100,76 @@ class TestTheNoticeIsOnEveryOwnerPage:
         assert "data-bs-dismiss" not in notice
         assert "alert-dismissible" not in notice
 
-    def test_a_state_the_year_left_out_is_named_with_the_year_pricing_it(
+    def test_a_state_the_year_left_out_is_named_and_priced_on_older_rules(
         self, auth_client, tax_law, on_day,
     ):
-        """A year shipped federal-first names its missing state until it lands (R-SAL86)."""
+        """A year shipped federal-first names its missing state until it lands (R-SAL86, plan#3198)."""
         tax_law(made_up_law((2025, {"NC": "0.0425"}), (2026, {"NC": "0.0399"}), (2027, {})))
         on_day(date(2027, 3, 1))
 
         assert _sentences(auth_client.get("/grid").get_data(as_text=True)) == [
-            "Shekel's 2027 tax rules are missing NC. NC tax for 2027 uses 2026's rules "
+            "Shekel's 2027 tax rules are missing NC. NC tax for 2027 uses older rules "
             "until an app update adds them."
         ]
 
-    def test_the_year_named_is_the_one_pricing_the_state_not_the_year_before(
+    def test_two_states_the_year_left_out_are_named_together(
         self, auth_client, tax_law, on_day,
     ):
-        """NC last listed in 2025: both years lacking it say 2025, the year the figures use."""
+        """One sentence pair for the year, its states named together (ruling plan#3198)."""
+        tax_law(made_up_law(
+            (2025, {"NC": "0.0425", "SC": "0.0500"}),
+            (2026, {"NC": "0.0399", "SC": "0.0500"}),
+            (2027, {}),
+        ))
+        on_day(date(2027, 3, 1))
+
+        assert _sentences(auth_client.get("/grid").get_data(as_text=True)) == [
+            "Shekel's 2027 tax rules are missing NC and SC. NC and SC tax for 2027 use "
+            "older rules until an app update adds them."
+        ]
+
+    def test_each_year_missing_a_state_says_so_once(self, auth_client, tax_law, on_day):
+        """NC last listed in 2025: 2026 and 2027 each lack it, so each says so in its own pair."""
         tax_law(made_up_law((2025, {"NC": "0.0425"}), (2026, {}), (2027, {})))
         on_day(date(2027, 3, 1))
 
         assert _sentences(auth_client.get("/dashboard").get_data(as_text=True)) == [
-            "Shekel's 2026 tax rules are missing NC. NC tax for 2026 uses 2025's rules "
+            "Shekel's 2026 tax rules are missing NC. NC tax for 2026 uses older rules "
             "until an app update adds them.",
-            "Shekel's 2027 tax rules are missing NC. NC tax for 2027 uses 2025's rules "
+            "Shekel's 2027 tax rules are missing NC. NC tax for 2027 uses older rules "
             "until an app update adds them.",
         ]
 
-    def test_every_gap_is_named_once(self, auth_client, tax_law, on_day):
-        """November 2027, with 2027 still missing its state and 2028 not added.
+    def test_a_missing_year_with_a_lagging_state_says_older_rules(
+        self, auth_client, tax_law, on_day,
+    ):
+        """November 2027, with 2027 still missing NC and 2028 not added.
 
-        2028's NC line prices on 2026, not on 2027, so 2028's one sentence names
-        each part's year in the words of ruling R-SAL91.
+        2028's federal and FICA lines price on 2027 and its NC line on 2026, so
+        no one year is true of the whole: its sentence says "older rules"
+        (ruling plan#3198, amending R-SAL91's sentence naming each part's year).
         """
         tax_law(made_up_law((2026, {"NC": "0.0399"}), (2027, {})))
         on_day(date(2027, 11, 2))
 
         assert _sentences(auth_client.get("/dashboard").get_data(as_text=True)) == [
-            "Shekel's 2027 tax rules are missing NC. NC tax for 2027 uses 2026's rules "
+            "Shekel's 2027 tax rules are missing NC. NC tax for 2027 uses older rules "
             "until an app update adds them.",
-            "Shekel doesn't have the 2028 tax rules yet. Federal tax, Social Security and "
-            "Medicare for 2028 use 2027's rules, and NC tax uses 2026's, until an app update "
-            "adds them.",
+            "Shekel doesn't have the 2028 tax rules yet. Paychecks and tax estimates "
+            "for 2028 use older rules until an app update adds them.",
         ]
 
-    def test_two_states_priced_older_are_both_named(self, auth_client, tax_law, on_day):
-        """R-SAL91's sentence for two states -- wording extrapolated from Josh's one-state form.
+    def test_the_rulings_own_two_year_example(self, auth_client, tax_law, on_day):
+        """Ruling plan#3198's two sentences, word for word: 2028 lacks NC and SC, 2029 is absent."""
+        tax_law(made_up_law((2027, {"NC": "0.0399", "SC": "0.0500"}), (2028, {})))
+        on_day(date(2028, 11, 2))
 
-        Unreachable until plan step salary:X-at-3 lists a second state; X-at-3's
-        specification carries the question of these words for the developer
-        (X-at-4's tick).  Pinned so they cannot drift unseen meanwhile.
-        """
-        tax_law(made_up_law((2026, {"NC": "0.0399", "SC": "0.0500"}), (2027, {})))
-        on_day(date(2027, 11, 2))
-
-        assert _sentences(auth_client.get("/dashboard").get_data(as_text=True))[-1] == (
-            "Shekel doesn't have the 2028 tax rules yet. Federal tax, Social Security and "
-            "Medicare for 2028 use 2027's rules, and NC tax uses 2026's and SC tax uses "
-            "2026's, until an app update adds them."
-        )
+        assert _sentences(auth_client.get("/dashboard").get_data(as_text=True)) == [
+            "Shekel's 2028 tax rules are missing NC and SC. NC and SC tax for 2028 use "
+            "older rules until an app update adds them.",
+            "Shekel doesn't have the 2029 tax rules yet. Paychecks and tax estimates "
+            "for 2029 use older rules until an app update adds them.",
+        ]
 
     def test_a_law_with_no_year_says_it_has_nothing_to_use(self, auth_client, tax_law, on_day):
         """No release ships an empty law; a test installs one, and the words stay true of it."""

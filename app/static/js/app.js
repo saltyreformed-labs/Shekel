@@ -388,10 +388,10 @@ document.addEventListener('click', function(e) {
         return;
     }
 
-    // Edit raise: populate the add form with existing data and switch to edit mode.
+    // Edit raise: fill the add form with the stored raise and switch to edit mode.
     var editBtn = e.target.closest('[data-raise-edit]');
     if (editBtn) {
-        _populateRaiseForm(editBtn);
+        _fillRaiseForm(editBtn);
         return;
     }
 
@@ -411,62 +411,71 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// Populate the raise form fields from the edit button's data attributes
-// and switch the form action/hx-post to the update endpoint.
-function _populateRaiseForm(editBtn) {
+// Fill the raise form from a source's data-raise-* attributes and open it.
+// The ONE fill for the form's two sources (task plan#3136): a row's edit
+// button, which holds the stored raise, and the reason box of a refused
+// save (#raise-refusal), which holds what was typed.  A source naming an
+// edit URL switches the form's action/hx-post to the update endpoint; the
+// refusal of an ADD names none, and its form is the freshly drawn one, in
+// add mode already.  A reason box still showing beside a different source
+// is removed: it no longer describes what the form holds.
+function _fillRaiseForm(source) {
     var form = document.getElementById('raise-form');
     if (!form) return;
 
-    var editUrl = editBtn.dataset.raiseEditUrl;
-    form.action = editUrl;
-    form.setAttribute('hx-post', editUrl);
-    // Re-process hx-post after changing it dynamically.
-    if (window.htmx) htmx.process(form);
+    var shown = document.getElementById('raise-refusal');
+    if (shown && shown !== source) shown.remove();
 
-    // Populate fields.
+    var data = source.dataset;
+    var btn = document.getElementById('raise-submit-btn');
+    if (data.raiseEditUrl) {
+        form.action = data.raiseEditUrl;
+        form.setAttribute('hx-post', data.raiseEditUrl);
+        // Re-process hx-post after changing it dynamically.
+        if (window.htmx) htmx.process(form);
+        // Change submit button icon to a check mark.
+        if (btn) btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+    }
+
+    // Fill fields.
     var sel = form.querySelector('[name=raise_type_id]');
-    if (sel) sel.value = editBtn.dataset.raiseTypeId;
+    if (sel) sel.value = data.raiseTypeId;
 
-    var month = form.querySelector('[name=effective_month]');
-    if (month) month.value = editBtn.dataset.raiseMonth;
-
-    var year = form.querySelector('[name=effective_year]');
-    if (year) year.value = editBtn.dataset.raiseYear;
+    var starts = form.querySelector('[name=effective_date]');
+    if (starts) starts.value = data.raiseDate;
 
     var pct = form.querySelector('[name=percentage]');
     var flat = form.querySelector('[name=flat_amount]');
-    if (pct) pct.value = editBtn.dataset.raisePercentage || '';
-    if (flat) flat.value = editBtn.dataset.raiseFlat || '';
+    if (pct) pct.value = data.raisePercentage || '';
+    if (flat) flat.value = data.raiseFlat || '';
 
     var recur = form.querySelector('[name=is_recurring]');
-    var isRecurring = editBtn.dataset.raiseRecurring === 'true';
-    if (recur) recur.checked = isRecurring;
+    if (recur) recur.checked = data.raiseRecurring === 'true';
 
-    // The end-year choice, restored from what is STORED: a recurring raise
-    // with a terminal year selects "ends after" and fills it, one without
-    // selects "no end year".  Editing therefore states the belief already
-    // recorded, while a NEW raise opens with neither picked -- the
-    // developer's 2026-09-05 ruling that a recurring raise is ASKED how
-    // long it is believed rather than given a default.
-    var storedEnd = editBtn.dataset.raiseTerminalYear || '';
+    // The end-year answer, as the source states it: "year" or "none", or
+    // EMPTY for unanswered.  An edit button states the stored belief -- a
+    // recurring raise with a terminal year "ends after" it, one without has
+    // "no end year" -- so editing states the belief already recorded, while
+    // a NEW raise opens with neither picked (the developer's 2026-09-05
+    // ruling that a recurring raise is ASKED how long it is believed rather
+    // than given a default).  A refused save may hold it unanswered, which
+    // is why the answer is read rather than derived from the year.
     var endYear = form.querySelector('[name=terminal_year]');
     var modeYear = document.getElementById('raise-end-mode-year');
     var modeNone = document.getElementById('raise-end-mode-none');
-    if (endYear) endYear.value = storedEnd;
-    if (modeYear) modeYear.checked = isRecurring && storedEnd !== '';
-    if (modeNone) modeNone.checked = isRecurring && storedEnd === '';
+    if (endYear) endYear.value = data.raiseTerminalYear || '';
+    if (modeYear) modeYear.checked = data.raiseEndMode === 'year';
+    if (modeNone) modeNone.checked = data.raiseEndMode === 'none';
     _syncRaiseEndYearVisibility();
 
     // Optimistic-locking pin (commit C-18 / F-010): submit the
     // raise's version_id so the route handler can detect a stale
-    // form before applying the update.  Cleared by _resetRaiseForm
-    // when the form returns to add mode.
+    // form before applying the update.  A refused edit holds the version
+    // it POSTED, so a form refused as stale is refused again rather than
+    // saved over the other action.  Cleared by _resetRaiseForm when the
+    // form returns to add mode.
     var versionInput = form.querySelector('[name=version_id]');
-    if (versionInput) versionInput.value = editBtn.dataset.raiseVersionId || '';
-
-    // Change submit button icon to a check mark.
-    var btn = document.getElementById('raise-submit-btn');
-    if (btn) btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+    if (versionInput) versionInput.value = data.raiseVersionId || '';
 
     // Expand the form if collapsed.
     var formDiv = document.getElementById('add-raise-form');
@@ -474,6 +483,19 @@ function _populateRaiseForm(editBtn) {
         formDiv.classList.add('show');
     }
 }
+
+// A refused raise save is answered with the Raises card redrawn at 422
+// (task plan#3136), the reason box holding what was typed; fill the form
+// from it.  afterSettle, not afterSwap: base.html settles the class
+// attribute, so a class the fill set at afterSwap -- the collapse's
+// "show" -- would be put back to the drawn one ~20 ms later, closing the
+// form it just opened.
+document.body.addEventListener('htmx:afterSettle', function (event) {
+    var settled = event.target;
+    if (!settled || !settled.querySelector) return;
+    var refused = settled.querySelector('#raise-refusal');
+    if (refused) _fillRaiseForm(refused);
+});
 
 // Reset a collapsible add/edit form back to add mode: restore the add
 // action + hx-post, clear the fields and the optimistic-lock version pin,
@@ -527,10 +549,14 @@ function _syncRaiseEndYearVisibility() {
 // Reset the raise form to add mode (clear fields, restore action).  The
 // reset returns both end-year radios to unchecked, because neither carries
 // a `checked` attribute for form.reset() to restore -- which is what keeps
-// "unanswered" distinguishable from "no end year" on the next add.
+// "unanswered" distinguishable from "no end year" on the next add.  The
+// reason box of a refused save goes with what it described (task
+// plan#3136).
 function _resetRaiseForm() {
     _resetForm('raise-form', 'raise-submit-btn', '<i class="bi bi-plus"></i>');
     _syncRaiseEndYearVisibility();
+    var shown = document.getElementById('raise-refusal');
+    if (shown) shown.remove();
 }
 
 // The Recur checkbox reveals the end-year question.  A `change` listener
@@ -589,12 +615,12 @@ function _populateLineForm(editBtn) {
     // all of them as it re-links: it shows the span rows for a cadence and
     // hides and DISABLES them for "Does not repeat" (a hidden control still
     // posts; a disabled one does not), reveals and enables the one input the
-    // chosen bound shape needs, and offers the nominal day's options off the
-    // (unit, date) pair.  A change dispatched on the mode select itself
+    // chosen bound shape needs, and offers the "repeating on" choices off the
+    // (unit, date) pair, worded for that date.  A change dispatched on the mode select itself
     // would re-enable it under "Does not repeat" and post a bound nothing
     // asked for (an adversarial review of this leaf), so there is exactly
-    // one dispatch here, the unit's.  The bound's value and the nominal day
-    // are filled AFTER it, into controls it has just enabled.
+    // one dispatch here, the unit's.  The bound's value and the "repeating
+    // on" choice are filled AFTER it, into controls it has just enabled.
     var unit = form.querySelector('[name=recurrence_unit]');
     var interval = form.querySelector('[name=interval_n]');
     var placement = form.querySelector('[name=recurrence_placement]');
@@ -610,8 +636,8 @@ function _populateLineForm(editBtn) {
         unit.value = editBtn.dataset.lineUnitId || '';
         unit.dispatchEvent(new Event('change', { bubbles: true }));
     }
-    var nominalDay = form.querySelector('[name=nominal_day]');
-    if (nominalDay) nominalDay.value = editBtn.dataset.lineNominalDay || '';
+    var repeatsOn = form.querySelector('[name=repeats_on]');
+    if (repeatsOn) repeatsOn.value = editBtn.dataset.lineRepeatsOn || '';
     var endDate = form.querySelector('[name=end_date]');
     if (endDate) endDate.value = editBtn.dataset.lineEndDate || '';
     var maxOccurrences = form.querySelector('[name=max_occurrences]');
@@ -777,7 +803,7 @@ document.addEventListener('keydown', function(e) {
     var cur = headerRow.querySelector('th.current-period');
     if (!cur) return 0;
     var idx = Array.prototype.indexOf.call(headerRow.children, cur) - 1;
-    return idx >= 0 ? idx : 0;
+    return Math.max(idx, 0);
   }
 
   function clearFocus() {

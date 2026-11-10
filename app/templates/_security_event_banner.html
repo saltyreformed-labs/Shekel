@@ -2,7 +2,7 @@
 
    Rendered by base.html when ``security_event_visible`` is True (set
    by the ``inject_security_event_banner`` context processor in
-   app/__init__.py).  Visibility logic lives in
+   app/context_processors.py).  Visibility logic lives in
    app.utils.security_events.banner_visible_for; per-kind copy comes
    from app.utils.security_events.KIND_DISPLAY which is exposed to the
    template as ``security_event_display`` (a dict of {kind_value:

@@ -736,25 +736,25 @@ from app.services import (
 )
 from app.services.auth_service import hash_password
 from app.services.pay_calendar import calendar_for
+from tests._ledger_reads import posted_loan_balance_at
 from tests._test_helpers import (
-    figure_source_columns,
-    rhythm_of,
-    mint_fixture_era,
     bind_db_clock_rewriter,
     create_loan_account,
+    figure_source_columns,
+    generate_row_of,
     insert_trueup_event,
     make_appreciating_account,
     make_every_period_rule,
     make_expense_template,
     make_investment_account,
+    mint_fixture_era,
     open_books_before_the_first_assertion,
     open_owner_calendar,
-    start_test_pay_list,
-    posted_loan_balance_at,
     rebuild_calendar,
     rebuild_calendar_on,
-    generate_row_of,
+    rhythm_of,
     settle_day_columns,
+    start_test_pay_list,
     state_template_price,
     step_down_through_the_transfer_column_drop,
 )
@@ -3238,6 +3238,7 @@ def _build_full_user_data(db, seed_user, periods):
 
     # d) Salary profile.
     salary_profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user.id,
         scenario_id=scenario.id,
         filing_status_id=filing_single.id,
@@ -3380,6 +3381,7 @@ def seed_full_second_user_data(app, db, seed_second_user, seed_second_periods):
 
     # d) Salary profile.
     salary_profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user.id,
         scenario_id=scenario.id,
         filing_status_id=filing_single.id,

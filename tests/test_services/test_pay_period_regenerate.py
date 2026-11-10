@@ -36,31 +36,46 @@ from app.exceptions import (
     PayPeriodLocked,
     ValidationError,
 )
-from app.enums import StatusEnum
+from app import ref_cache
+from app.enums import PostingSourceEnum, StatusEnum
 from app.models.pay_period import PayPeriod
 from app.models.transaction import Transaction
 from app.routes._period_population import populate_new_periods
 from app.services import (
+    account_posting_service,
+    loan_posting_service,
     pay_period_admin,
     pay_period_write,
     pay_schedule_service,
 )
+from app.services.ledger_lines import linked_key
 from app.services.pay_rhythm import FixedDays
 from scripts.integrity_check import (
     check_balance_anomalies,
     check_referential_integrity,
+)
+from tests._ledger_reads import (
+    owner_worked_out_lines,
+    worked_out_totals,
+)
+from tests._ledger_parity import (
+    assert_ledger_parity,
+    ledger_parity_differences,
 )
 from tests._test_helpers import (
     rhythm_of,
     add_txn,
     all_periods,
     assert_pay_period_invariants,
+    create_loan_account,
+    create_savings_account,
     derived_span,
     freeze_today,
     last_covered_day,
     make_expense_template,
     populate_in_a_fresh_pass,
     record_paydays_across_a_hole,
+    restate_account_opening,
     seam_cash_balance_at,
 )
 
@@ -512,6 +527,79 @@ class TestRegenerateRefusals:
                 )
             db.session.rollback()
             assert _count_periods(db.session, user_id) == before
+            assert_pay_period_invariants(db.session, user_id)
+
+
+class TestACorrectionLocksNothing:
+    """Ruling plan#2782: a paycheck holding only a correction is rebuilt, and it re-files."""
+
+    def test_the_openings_re_file_onto_the_rebuilt_paycheck_covering_their_day(
+        self, app, db, seed_user,
+    ):
+        """An account's and a loan's openings dated 07-11 in the 07-10 paycheck.
+
+        Rebuilt weekly from 06-26: 06-26, 07-03, 07-10, 07-17.  The old 07-10
+        paycheck goes (its row, so its id), and the worked-out line files by
+        its day in the new one covering 07-11, with every per-key total
+        unchanged.  Before plan task plan#2777 the lock kept that paycheck, so
+        the rebuilt tail began after it.
+        """
+        with app.app_context():
+            periods = _spanning_periods(db.session, seed_user, count=8)
+            user_id = seed_user["user"].id
+            day = date(2026, 7, 11)
+            old_paycheck = next(p for p in periods if p.start_date == date(2026, 7, 10))
+            savings = create_savings_account(
+                seed_user, db.session, "Savings", Decimal("500.00"),
+            )
+            restate_account_opening(db.session, savings, day)
+            account_posting_service.sync_account_anchor_postings_all_scenarios(
+                savings.id,
+            )
+            loan = create_loan_account(
+                seed_user, db.session, name="Car Loan",
+                principal=Decimal("20000.00"), rate=Decimal("0.05"),
+                origination_date=day,
+            )
+            db.session.commit()
+            scenario = seed_user["scenario"].id
+            openings = {
+                ref_cache.posting_source_id(PostingSourceEnum.ACCOUNT_OPENING),
+                ref_cache.posting_source_id(PostingSourceEnum.LOAN_OPENING),
+            }
+
+            def _filed():
+                """Return the paychecks the worked-out openings dated *day* file in."""
+                lines = [
+                    line
+                    for _scenario_id, line in owner_worked_out_lines(db.session, user_id)
+                    if line.source_kind_id in openings and line.entry_date == day
+                ]
+                assert {line.source_kind_id for line in lines} == openings
+                return {line.pay_period_id for line in lines}
+
+            assert _filed() == {old_paycheck.id}
+            old_id = old_paycheck.id
+            totals = worked_out_totals(db.session, user_id)
+            assert totals[(scenario, linked_key(savings))] == Decimal("500.00")
+            assert totals[(scenario, linked_key(loan))] == Decimal("-20000.00")
+
+            rebuilt = pay_period_admin.regenerate_pay_periods(
+                user_id, new_start_date=date(2026, 6, 26), num_periods=4,
+                rhythm=rhythm_of(7),
+            )
+            db.session.commit()
+
+            covering = next(p for p in rebuilt if p.start_date == date(2026, 7, 10))
+            assert covering.id != old_id
+            assert _filed() == {covering.id}
+            assert worked_out_totals(db.session, user_id) == totals
+            # The stored copy is short until its next re-sync, and then equal.
+            assert ledger_parity_differences(db.session, scenario)
+            loan_posting_service.resync_user_loan_postings(user_id)
+            account_posting_service.resync_user_account_anchor_postings(user_id)
+            db.session.commit()
+            assert_ledger_parity(db.session, scenario)
             assert_pay_period_invariants(db.session, user_id)
 
 

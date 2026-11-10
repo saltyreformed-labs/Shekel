@@ -86,6 +86,7 @@ def _create_investment_account_with_contributions(seed_user, seed_periods):
     scenario = seed_user["scenario"]
     filing_status = db.session.query(FilingStatus).first()
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=scenario.id,
         filing_status_id=filing_status.id,
@@ -310,6 +311,7 @@ class TestDashboard:
             # projection this case asserts would collapse to growth-only.
             filing_status = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=filing_status.id,

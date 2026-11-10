@@ -67,6 +67,9 @@ split step it leaves with no leaf back on the board (:func:`unsplit`).
 until someone removes it, and a step blocked by an outside issue waits, as
 does every leaf under it.
 
+**A card On hold is never offered** (ruling plan#1832, :func:`held_at`): the pause is the Priority
+value on the card or on a step above it, and every leaf below inherits it.
+
 **A finding or a ruling names its owner step by GitHub's "blocked by" link to it**
 (ruling ``balance:R-BAL395``, :data:`OWNED`), never as its sub-issue, so a step's
 progress counts only its pieces: its one blocker is its owner.  A question may name one the
@@ -105,9 +108,10 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from tools.ci.gitcmd import DEV, MAIN
+from tools.quill._fields import ON_HOLD
 from tools.quill._git import MARKERS, Claim, task_file
 from tools.quill._tracker import BareCard, Card
-from tools.quill.setup_tracker import FILING, TASK
+from tools.quill.setup_tracker import FILING, MOVES_MONEY_LABEL, TASK
 
 #: How long a claim's branch may go without a commit before ``quill next`` reports it
 #: stale: the build plan's three days, measured from the branch's last commit since the
@@ -121,6 +125,13 @@ SHIPPABLE = ("step", "finding")
 #: the one card each is blocked by.  A finding and a ruling always name one; a question names
 #: the step it is asked for, when it has one (plan#1861's item 10).
 OWNED = ("finding", "ruling", "question")
+
+
+def moves_money(card: BareCard) -> bool:
+    """Whether ``card``'s release moves money: its OWN moves-money label (R-BAL287), never a
+    parent's.  The one reading of it: ``/release``'s card reader takes it through the door,
+    and ``quill claim`` for a card's Release kit (ruling plan#2860)."""
+    return MOVES_MONEY_LABEL in card.labels
 
 
 def leaves(card: BareCard, cards: Mapping[int, BareCard],
@@ -367,11 +378,17 @@ def left_bare(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
     return bare
 
 
+def held_at(card: BareCard, cards: Mapping[int, BareCard]) -> BareCard | None:
+    """The nearest card at or above ``card`` marked On hold (ruling plan#1832), or None: a pause
+    is set once, and a leaf inherits every step above it (R-BAL182); nothing is copied."""
+    return next((step for step in (card, *above(card, cards)) if step.priority == ON_HOLD), None)
+
+
 def never_offered(card: Card, cards: Mapping[int, Card], shipped: Iterable[int]) -> str | None:
     """Why a piece of work is never offered, whatever its own blockers: its filing not
     finished (R-BAL202), a link of its own outside the tracker, a blocker outside the tracker on a
-    step above it (R-BAL188), or a step above it dropped (R-BAL185); None when none holds
-    it back."""
+    step above it (R-BAL188), a step above it dropped (R-BAL185), or it or a step above it On
+    hold (:func:`held_at`); None when none holds it back."""
     shipped = set(shipped)
     if filing_unfinished(card):
         return ("its filing has not finished (R-BAL202): unless a `quill file` command is "
@@ -386,14 +403,17 @@ def never_offered(card: Card, cards: Mapping[int, Card], shipped: Iterable[int])
                 return (f"plan#{step.number} above it waits on {link.issue}, outside the "
                         "tracker (R-BAL188)")
     gone = next((step for step in steps if dropped(step.number, cards, shipped)), None)
-    return f"plan#{gone.number} above it was dropped (R-BAL185)" if gone else None
+    if gone:
+        return f"plan#{gone.number} above it was dropped (R-BAL185)"
+    if held := held_at(card, cards):
+        return ("it is" if held is card else f"plan#{held.number} above it is") + (
+            f" {ON_HOLD} (ruling plan#1832)")
+    return None
 
 
-def workable(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
-             claims: Mapping[int, Claim]) -> bool:
-    """Whether a card is a step someone could start now: open unshipped unclaimed work that
-    nothing holds back (:func:`never_offered`), and every blocker of it and of each step
-    above it resolved (R-BAL182)."""
+def has_turn(card: Card, cards: Mapping[int, Card], shipped: Iterable[int]) -> bool:
+    """Whether a card is a step that takes a turn in ``quill next``'s order (:mod:`_next`): open
+    unshipped work that nothing holds back (:func:`never_offered`), claimed or not."""
     shipped = set(shipped)
     return (
         card.is_open
@@ -401,10 +421,21 @@ def workable(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
         and is_work(card, cards, shipped)
         and never_offered(card, cards, shipped) is None
         and card.number not in shipped
-        and card.number not in claims
-        and all(resolved(blocker, cards, shipped)
-                for step in (card, *above(card, cards)) for blocker in step.blocked_by)
     )
+
+
+def blockers(card: BareCard, cards: Mapping[int, BareCard]) -> set[int]:
+    """Every blocker of ``card`` and of each step above it, which a leaf inherits (R-BAL182)."""
+    return {blocker for step in (card, *above(card, cards)) for blocker in step.blocked_by}
+
+
+def workable(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
+             claims: Mapping[int, Claim]) -> bool:
+    """Whether a card is a step someone could start now: it :func:`has_turn`, no one claims it,
+    and each of its :func:`blockers` is resolved."""
+    shipped = set(shipped)
+    return has_turn(card, cards, shipped) and card.number not in claims and all(
+        resolved(blocker, cards, shipped) for blocker in blockers(card, cards))
 
 
 def outside_reports(cards: Mapping[int, Card]) -> list[str]:
@@ -438,37 +469,6 @@ def unfinished_reports(cards: Mapping[int, Card], shipped: Iterable[int]) -> lis
         for card in sorted(cards.values(), key=lambda card: card.number)
         if filing_unfinished(card)
     ]
-
-
-@dataclass(frozen=True)
-class NextAnswer:
-    """The first workable step in the board's order, and what the order cannot place."""
-
-    card: Card | None
-    unplaced: tuple[Card, ...]
-
-
-def next_step(order: Iterable[int], cards: Mapping[int, Card], shipped: Iterable[int],
-              claims: Mapping[int, Claim], arc: str | None = None) -> NextAnswer:
-    """The first workable step in ``order`` (the board's card numbers, top first).
-
-    A workable step that is NOT on the board -- filed by hand on the web, or
-    just filed and not yet shown by a lagging board -- has no place in the
-    order, so it is never chosen and never skipped silently: it is returned in
-    ``unplaced`` for the caller to say so.
-    """
-    shipped = set(shipped)
-
-    def fits(card: Card) -> bool:
-        return workable(card, cards, shipped, claims) and (arc is None or card.arc == arc)
-
-    first = next((cards[n] for n in order if n in cards and fits(cards[n])), None)
-    placed = set(order)
-    unplaced = tuple(sorted(
-        (card for card in cards.values() if card.number not in placed and fits(card)),
-        key=lambda card: card.number,
-    ))
-    return NextAnswer(first, unplaced)
 
 
 @dataclass(frozen=True)

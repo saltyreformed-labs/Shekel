@@ -36,12 +36,13 @@ class FakeRaise:
     """Minimal stand-in for a SalaryRaise ORM object."""
 
     def __init__(self, percentage=None, flat_amount=None,
-                 effective_month=3, effective_year=2026,
+                 effective_date=date(2026, 3, 1),
                  is_recurring=False, terminal_year=None):
         self.percentage = Decimal(str(percentage)) if percentage else None
         self.flat_amount = Decimal(str(flat_amount)) if flat_amount else None
-        self.effective_month = effective_month
-        self.effective_year = effective_year
+        # The day the raise starts (plan step salary plan#3048, ruling
+        # plan#3090); a year and a month, landed on the 1st, until then.
+        self.effective_date = effective_date
         self.is_recurring = is_recurring
         # The last year the raise is believed to happen, None for
         # indefinitely.  REQUIRED on the stand-in since plan step
@@ -120,6 +121,10 @@ class FakeRule:
         self.starts_on = starts_on
         self.max_per_month = max_per_month
         self.nominal_day = None
+        # The column plan step recurrence:R8-c (plan#2676) added, which
+        # ``recurrence_spec`` reads off every row: ``None`` reads the first
+        # date by its day of the month, as every migrated line's rule does.
+        self.weekday_reading = None
         self.end_date = None
         self.max_occurrences = None
 
@@ -195,6 +200,15 @@ class FakeBracketSet:
         self.other_dependent_credit_amount = other_dependent_credit_amount
         self.brackets = brackets or []
 
+    @property
+    def withholding_rules(self):
+        """The rules withholding prices on: these, as the fake states no withholding figure.
+
+        Mirrors :attr:`app.tax_law.FederalRules.withholding_rules`, which the
+        withholding formula reads (ruling plan#3213).
+        """
+        return self
+
 
 class FakeTaxType:
     def __init__(self, name="flat"):
@@ -259,6 +273,9 @@ class FakeProfile:
                  other_dependents=0, *, user_id=_STAND_IN_OWNER):
         self.user_id = user_id
         self.pay_entries = [FakePayEntry(pay_from, Decimal(str(pay)))]
+        # The job's pay periods end six days before payday (ruling
+        # plan#3096), as every profile the suite builds states.
+        self.period_end_days_before_payday = 6
         self.raises = raises or []
         self.lines = lines or []
         self.pay_stubs = []

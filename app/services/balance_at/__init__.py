@@ -91,6 +91,11 @@ kill.
   the per-assertion plug that telescopes.  It is the post-cutover balance
   function evaluated today, so what it measures is what plan step X-f3c-5's
   flip will leave unexplained.  See :mod:`._outstanding`.
+  :func:`cash_last_record_on` is not a balance either: it is the latest
+  day on or before NOW the books hold a record (a settled row or a
+  true-up), which is where the bank comparison's drawn days end when the
+  records run past the last statement line (finding BAL-651, rulings
+  plan#2346, plan#2399 and plan#2400).
 * The ASSERTION REPLAY (:func:`assertion_corrections`, its record
   :class:`CashAnchorCorrection`) is published for the LEDGER, which is not a
   screen: each assertion's balance just before it and the jump it booked, over
@@ -272,6 +277,7 @@ from ._cash_flow import (
     cash_balance_map,
     cash_daily_balance_series,
     cash_daily_facts_series,
+    cash_last_record_on,
     records_balance_at,
     rows_counted_from_their_date,
 )
@@ -409,6 +415,7 @@ __all__ = [
     "cash_balance_map",
     "cash_daily_balance_series",
     "cash_daily_facts_series",
+    "cash_last_record_on",
     "cash_outstanding_difference",
     "confirmed_view",
     "definition_books",

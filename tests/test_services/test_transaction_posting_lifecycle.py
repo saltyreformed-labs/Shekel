@@ -7,7 +7,10 @@ payback-delete paths, and carry-forward -- so settling, editing, reverting,
 deleting, and carrying forward a transaction keep the append-only double-entry
 ledger in step.  These tests drive transactions END TO END through those
 handlers (NOT by calling ``posting_service`` directly -- that is Commit 4's unit
-suite) and assert the resulting ledger state.
+suite) and assert the resulting ledger state.  A figure is the worked-out read,
+which follows the records and holds no reversal, so where a test's subject is the
+door's act on the store it also ends on ``assert_ledger_parity``, and that line is
+what grades the act.
 
 The load-bearing wiring properties, each pinned by a test below:
 
@@ -26,7 +29,7 @@ The load-bearing wiring properties, each pinned by a test below:
   * carry-forward posts the confirmed effect of each envelope source it settles.
 
 After each mutation the per-account reconciliation invariant is asserted in
-its Build-Order Step 5 ABSOLUTE form: ``account_posting_total == opening
+its Build-Order Step 5 ABSOLUTE form: the account's worked-out net ``== opening
 anchor + settled_transfer_effect + posted_purchase_effect``.  The seed
 Checking carries its $1000.00 opening correction from fixture time, and every
 settle in this suite is stamped at SERVER now (the seam's ``db.func.now()``,
@@ -46,7 +49,7 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import LedgerAccountClassEnum, StatusEnum
 from app.extensions import db
-from app.models.journal_entry import JournalEntry, Posting
+from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services.balance_at import BalanceContext
@@ -54,21 +57,27 @@ from app.services import (
     carry_forward_service,
     credit_workflow,
     entry_service,
-    ledger_account_service,
     posting_service,
 )
 from app.services.entry_service import EntryDetails
-from app.services.posting_reads import _ledger_account_for
+from app.services.ledger_lines import category_key, linked_key
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import (
+    account_net,
+    family_movement_ids,
+    ledger_net,
+    period_nets_of_movements,
+    scenario_lines,
+)
+from tests._stored_ledger import family_journal_filter
 from tests._test_helpers import (
-    typed,
-    family_journal_filter,
-    figure_source_columns,
     add_txn,
     an_entered_day,
     create_envelope_txn,
-    linked_ledger_account,
+    figure_source_columns,
     reassert_balance_on,
     settle_instant_on,
+    typed,
 )
 from tests.test_routes.test_cc5_4a5_popover_presses import dialog_delete_values
 from app.services import cash_ledger
@@ -81,50 +90,20 @@ from tests._legacy_credit import plant_old_credit
 # ---------------------------------------------------------------------------
 
 
-def _linked_ledger_id(account):
-    """Return the LINKED ledger account id for *account* (never its twin)."""
-    return linked_ledger_account(db.session, account.id).id
+def _category_chart_key(seed_user, category_name, ledger_class):
+    """Return the chart key of a seed category's account."""
+    return category_key(seed_user["categories"][category_name].id, ledger_class)
 
 
-def _category_ledger_id(seed_user, category_key, ledger_class):
-    """Return the category / fallback ledger account id for a seed category.
-
-    Idempotent: returns the row the go-forward reconcile created during the
-    test (the resolver respects the partial unique), so a leg can be asserted
-    against it.  ``category_key=None`` resolves the per-(owner, class)
-    Uncategorized fallback.
-    """
-    category_id = (
-        None if category_key is None
-        else seed_user["categories"][category_key].id
-    )
-    return ledger_account_service.get_or_create_category_ledger_account(
-        seed_user["user"].id, category_id, ledger_class,
-    ).id
-
-
-def _cc_payback_ledger_id(seed_user):
-    """Return the Expense ledger account id for the user's CC Payback category."""
+def _cc_payback_chart_key(seed_user):
+    """Return the chart key of the Expense account of the user's CC Payback category."""
     cc_category = credit_workflow.get_or_create_cc_category(seed_user["user"].id)
-    return ledger_account_service.get_or_create_category_ledger_account(
-        seed_user["user"].id, cc_category.id, LedgerAccountClassEnum.EXPENSE,
-    ).id
+    return category_key(cc_category.id, LedgerAccountClassEnum.EXPENSE)
 
 
-def _ledger_total(ledger_account_id):
-    """Return the net of every posting leg on one ledger account.
-
-    The counter-account (category / fallback) analog of
-    ``posting_service.account_posting_total``, which keys off a REAL account's
-    linked ledger and so cannot be pointed at a category ledger account.
-    """
-    return (
-        db.session.query(
-            db.func.coalesce(db.func.sum(Posting.amount), Decimal("0"))
-        )
-        .filter(Posting.ledger_account_id == ledger_account_id)
-        .scalar()
-    )
+def _ledger_total(seed_user, key):
+    """Return the worked-out net of chart account *key* in the owner's baseline."""
+    return ledger_net(db.session, key, seed_user["scenario"].id)
 
 
 def _entries_for_transaction(transaction_id):
@@ -161,33 +140,17 @@ def _entries_for_purchase(entry_id):
     )
 
 
-def _category_nets(scenario_id):
-    """Return ``{ledger_account_id: net}`` over every posting in *scenario_id*.
-
-    The window the category-leg tests grade a re-category through: a MOVE shows
-    as the old account netting to zero while the new one carries the amount, and
-    only a whole-scenario view can see both at once.
-    """
-    rows = (
-        db.session.query(
-            Posting.ledger_account_id, db.func.sum(Posting.amount),
-        )
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(JournalEntry.scenario_id == scenario_id)
-        .group_by(Posting.ledger_account_id)
-        .all()
-    )
-    return {ledger_id: net for ledger_id, net in rows}
+def _family_nets(transaction_id, scenario_id):
+    """Return ``{period id: {chart key: net}}`` over the lines of the row's movements."""
+    return period_nets_of_movements(family_movement_ids(transaction_id), scenario_id)
 
 
-def _legs_by_ledger(entry_id):
-    """Return ``{ledger_account_id: amount}`` for one journal entry's legs."""
-    return {
-        leg.ledger_account_id: leg.amount
-        for leg in db.session.query(Posting)
-        .filter_by(journal_entry_id=entry_id)
-        .all()
-    }
+def _purchase_lines(entry_id, scenario_id):
+    """Return the worked-out lines of one purchase."""
+    return [
+        line for line in scenario_lines(db.session, scenario_id)
+        if line.movement_id == entry_id
+    ]
 
 
 def _add_purchase(seed_user, txn, amount, *, is_credit=False):
@@ -241,7 +204,7 @@ def _assert_reconciles(scenario_id, *accounts):
     purchases' legs added up to) went with the leg.
     """
     for account in accounts:
-        posted = posting_service.account_posting_total(account.id, scenario_id)
+        posted = account_net(db.session, account.id, scenario_id)
         effect = (
             posting_service.settled_transfer_effect(account.id, scenario_id)
             + posting_service.posted_purchase_effect(account.id, scenario_id)
@@ -285,14 +248,13 @@ class TestMarkDoneRoutePostsTransaction:
             resp = auth_client.post(f"/transactions/{txn_id}/mark-done")
             assert resp.status_code == 200
 
-            entries = _entries_for_transaction(txn_id)
-            assert len(entries) == 1
-            legs = _legs_by_ledger(entries[0].id)
-            assert legs[_linked_ledger_id(checking)] == Decimal("-50.00")
-            assert legs[_category_ledger_id(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            )] == Decimal("50.00")
-            assert sum(legs.values()) == Decimal("0.00")
+            assert len(_entries_for_transaction(txn_id)) == 1
+            assert _family_nets(txn_id, scenario_id) == {seed_periods[0].id: {
+                linked_key(checking): Decimal("-50.00"),
+                _category_chart_key(
+                    seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
+                ): Decimal("50.00"),
+            }}
             _assert_reconciles(scenario_id, checking)
 
     def test_income_mark_done_posts(
@@ -318,14 +280,13 @@ class TestMarkDoneRoutePostsTransaction:
             resp = auth_client.post(f"/transactions/{txn_id}/mark-done")
             assert resp.status_code == 200
 
-            entries = _entries_for_transaction(txn_id)
-            assert len(entries) == 1
-            legs = _legs_by_ledger(entries[0].id)
-            assert legs[_linked_ledger_id(checking)] == Decimal("2000.00")
-            assert legs[_category_ledger_id(
-                seed_user, "Salary", LedgerAccountClassEnum.INCOME,
-            )] == Decimal("-2000.00")
-            assert sum(legs.values()) == Decimal("0.00")
+            assert len(_entries_for_transaction(txn_id)) == 1
+            assert _family_nets(txn_id, scenario_id) == {seed_periods[0].id: {
+                linked_key(checking): Decimal("2000.00"),
+                _category_chart_key(
+                    seed_user, "Salary", LedgerAccountClassEnum.INCOME,
+                ): Decimal("-2000.00"),
+            }}
             _assert_reconciles(scenario_id, checking)
 
     def test_mark_done_manual_actual_posts_actual_not_estimate(
@@ -354,13 +315,13 @@ class TestMarkDoneRoutePostsTransaction:
             )
             assert resp.status_code == 200
 
-            entries = _entries_for_transaction(txn_id)
-            assert len(entries) == 1
-            legs = _legs_by_ledger(entries[0].id)
-            assert legs[_linked_ledger_id(checking)] == Decimal("-75.00")
-            assert legs[_category_ledger_id(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            )] == Decimal("75.00")
+            assert len(_entries_for_transaction(txn_id)) == 1
+            assert _family_nets(txn_id, seed_user["scenario"].id) == {seed_periods[0].id: {
+                linked_key(checking): Decimal("-75.00"),
+                _category_chart_key(
+                    seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
+                ): Decimal("75.00"),
+            }}
             _assert_reconciles(seed_user["scenario"].id, checking)
 
 
@@ -404,16 +365,17 @@ class TestPatchPostingLifecycle:
             )
             assert resp.status_code == 200
 
-            assert _ledger_total(_category_ledger_id(
+            assert _ledger_total(seed_user, _category_chart_key(
                 seed_user, "Rent", LedgerAccountClassEnum.EXPENSE,
             )) == Decimal("50.00")
-            assert _ledger_total(_category_ledger_id(
+            assert _ledger_total(seed_user, _category_chart_key(
                 seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
             )) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                checking.id, seed_user["scenario"].id,
+            assert account_net(
+                db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("950.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_revert_and_recategorize_reconciles(
         self, app, auth_client, seed_user, seed_periods,
@@ -440,10 +402,10 @@ class TestPatchPostingLifecycle:
             db.session.commit()
             txn_id = txn.id
             auth_client.post(f"/transactions/{txn_id}/mark-done")
-            groceries_ledger = _category_ledger_id(
+            groceries_ledger = _category_chart_key(
                 seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_total(groceries_ledger) == Decimal("50.00")
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("50.00")
 
             # Revert + recategorize in one PATCH (the lock lifts on the revert).
             resp = auth_client.patch(
@@ -454,14 +416,14 @@ class TestPatchPostingLifecycle:
                 },
             )
             assert resp.status_code == 200
-            rent_ledger = _category_ledger_id(
+            rent_ledger = _category_chart_key(
                 seed_user, "Rent", LedgerAccountClassEnum.EXPENSE,
             )
             # OLD category reversed to zero; NEW category never touched yet.
-            assert _ledger_total(groceries_ledger) == Decimal("0.00")
-            assert _ledger_total(rent_ledger) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("0.00")
+            assert _ledger_total(seed_user, rent_ledger) == Decimal("0.00")
+            assert account_net(
+                db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
 
@@ -471,9 +433,10 @@ class TestPatchPostingLifecycle:
                 data={"status_id": str(done_id)},
             )
             assert resp.status_code == 200
-            assert _ledger_total(rent_ledger) == Decimal("50.00")
-            assert _ledger_total(groceries_ledger) == Decimal("0.00")
+            assert _ledger_total(seed_user, rent_ledger) == Decimal("50.00")
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("0.00")
             _assert_reconciles(scenario_id, checking)
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_notes_only_edit_posts_nothing(
         self, app, auth_client, seed_user, seed_periods,
@@ -505,8 +468,8 @@ class TestPatchPostingLifecycle:
             assert resp.status_code == 200
             # Still exactly one entry -- no reconcile fired.
             assert len(_entries_for_transaction(txn_id)) == 1
-            assert posting_service.account_posting_total(
-                checking.id, seed_user["scenario"].id,
+            assert account_net(
+                db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("950.00")
 
 
@@ -537,8 +500,8 @@ class TestCancelPostsNothing:
             resp = auth_client.post(f"/transactions/{txn_id}/cancel")
             assert resp.status_code == 200
             assert _entries_for_transaction(txn_id) == []
-            assert posting_service.account_posting_total(
-                seed_user["account"].id, seed_user["scenario"].id,
+            assert account_net(
+                db.session, seed_user["account"].id, seed_user["scenario"].id,
             ) == Decimal("1000.00")
 
 
@@ -579,13 +542,13 @@ class TestEnvelopePostingLifecycle:
             assert resp.status_code == 200
 
             # The close wrote nothing: the one entry is the dated purchase's.
-            entries = _entries_for_transaction(txn_id)
-            assert len(entries) == 1
-            legs = _legs_by_ledger(entries[0].id)
-            assert legs[_linked_ledger_id(checking)] == Decimal("-60.00")
-            assert legs[_category_ledger_id(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            )] == Decimal("60.00")
+            assert len(_entries_for_transaction(txn_id)) == 1
+            assert _family_nets(txn_id, seed_user["scenario"].id) == {seed_periods[0].id: {
+                linked_key(checking): Decimal("-60.00"),
+                _category_chart_key(
+                    seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
+                ): Decimal("60.00"),
+            }}
             _assert_reconciles(seed_user["scenario"].id, checking)
 
     # The three cases below graded ``_resync_after_entry_change``'s ledger
@@ -634,10 +597,10 @@ class TestEnvelopePostingLifecycle:
             self._posted_purchase(seed_user, txn, "40.00")
             db.session.commit()
             txn_id = txn.id
-            groceries_ledger = _category_ledger_id(
+            groceries_ledger = _category_chart_key(
                 seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_total(groceries_ledger) == Decimal("40.00")
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("40.00")
 
             late = entry_service.create_entry(
                 txn_id, user_id,
@@ -652,11 +615,12 @@ class TestEnvelopePostingLifecycle:
             )
             db.session.commit()
 
-            assert _ledger_total(groceries_ledger) == Decimal("70.00")
-            assert posting_service.account_posting_total(
-                checking.id, seed_user["scenario"].id,
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("70.00")
+            assert account_net(
+                db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("930.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_entry_credit_flip_on_a_posted_envelope_resyncs(
         self, app, auth_client, seed_user, seed_periods,
@@ -681,21 +645,23 @@ class TestEnvelopePostingLifecycle:
             entry = self._posted_purchase(seed_user, txn, "40.00")
             db.session.commit()
             entry_id = entry.id
-            groceries_ledger = _category_ledger_id(
+            groceries_ledger = _category_chart_key(
                 seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_total(groceries_ledger) == Decimal("40.00")
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("40.00")
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
             entry_service.update_entry(entry_id, user_id, on_card=True)
             db.session.commit()
 
             moved = db.session.get(TransactionEntry, entry_id)
             assert (moved.account_id, moved.settled_on) == (visa.id, None)
-            assert _ledger_total(groceries_ledger) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                checking.id, seed_user["scenario"].id,
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("0.00")
+            assert account_net(
+                db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("1000.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_entry_delete_on_a_posted_envelope_resyncs(
         self, app, auth_client, seed_user, seed_periods,
@@ -716,19 +682,20 @@ class TestEnvelopePostingLifecycle:
             doomed = self._posted_purchase(seed_user, txn, "30.00")
             db.session.commit()
             doomed_id = doomed.id
-            groceries_ledger = _category_ledger_id(
+            groceries_ledger = _category_chart_key(
                 seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_total(groceries_ledger) == Decimal("70.00")
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("70.00")
 
             entry_service.delete_entry(doomed_id, user_id)
             db.session.commit()
 
-            assert _ledger_total(groceries_ledger) == Decimal("40.00")
-            assert posting_service.account_posting_total(
-                checking.id, seed_user["scenario"].id,
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("40.00")
+            assert account_net(
+                db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("960.00")
             _assert_reconciles(seed_user["scenario"].id, checking)
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_recording_a_posting_day_moves_the_leg_onto_its_own_day(
         self, app, auth_client, seed_user, seed_periods,
@@ -819,16 +786,16 @@ class TestEnvelopePostingLifecycle:
             # a re-date that reversed it -- where recording the day FIRST
             # meant the close had nothing left to post; since plan step
             # ``balance:X-bi-4a`` a close never has.
-            purchase_entries = _entries_for_purchase(entry_id)
-            assert len(purchase_entries) == 1
-            assert purchase_entries[0].entry_date == purchased_on
-            assert _legs_by_ledger(purchase_entries[0].id)[
-                _ledger_account_for(checking.id).id
-            ] == Decimal("-40.00")
+            assert len(_entries_for_purchase(entry_id)) == 1
+            assert [
+                (line.entry_date, line.amount)
+                for line in _purchase_lines(entry_id, seed_user["scenario"].id)
+                if line.key == linked_key(checking)
+            ] == [(purchased_on, Decimal("-40.00"))]
             # And the ledger now equals the balance the owner declared, rather
             # than that balance minus a purchase it already contained.
-            assert posting_service.account_posting_total(
-                checking.id, seed_user["scenario"].id,
+            assert account_net(
+                db.session, checking.id, seed_user["scenario"].id,
             ) == Decimal("1000.00")
             # ``_assert_reconciles`` is deliberately NOT called here, and its
             # own docstring says why: it grades ledger == opening + source
@@ -884,13 +851,13 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             )
             db.session.commit()
 
-            posted, = _entries_for_purchase(entry_id)
-            assert posted.entry_date == seed_periods[0].start_date
-            legs = _legs_by_ledger(posted.id)
-            assert legs[_ledger_account_for(checking.id).id] == Decimal(
-                "-40.00",
-            )
-            assert sorted(legs.values()) == [
+            assert len(_entries_for_purchase(entry_id)) == 1
+            lines = _purchase_lines(entry_id, seed_user["scenario"].id)
+            assert {line.entry_date for line in lines} == {seed_periods[0].start_date}
+            assert {line.key: line.amount for line in lines}[
+                linked_key(checking)
+            ] == Decimal("-40.00")
+            assert sorted(line.amount for line in lines) == [
                 Decimal("-40.00"), Decimal("40.00"),
             ]
 
@@ -920,10 +887,9 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
                 entry.id, user_id, settle_day=an_entered_day(seed_periods[0].start_date),
             )
             db.session.commit()
-            old_category_ledger = ledger_account_service.\
-                get_or_create_category_ledger_account(
-                    user_id, txn.category_id, LedgerAccountClassEnum.EXPENSE,
-                ).id
+            old_category = category_key(
+                txn.category_id, LedgerAccountClassEnum.EXPENSE,
+            )
             txn_id = txn.id
 
             resp = auth_client.patch(
@@ -932,14 +898,11 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             )
             assert resp.status_code == 200
 
-            new_category_ledger = ledger_account_service.\
-                get_or_create_category_ledger_account(
-                    user_id, seed_user["categories"]["Car Payment"].id,
-                    LedgerAccountClassEnum.EXPENSE,
-                ).id
-            nets = _category_nets(seed_user["scenario"].id)
-            assert nets.get(old_category_ledger, Decimal("0")) == Decimal("0")
-            assert nets[new_category_ledger] == Decimal("40.00")
+            assert _ledger_total(seed_user, old_category) == Decimal("0")
+            assert _ledger_total(seed_user, _category_chart_key(
+                seed_user, "Car Payment", LedgerAccountClassEnum.EXPENSE,
+            )) == Decimal("40.00")
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_moving_the_parent_between_periods_re_files_its_purchases_legs(
         self, app, auth_client, seed_user, seed_periods,
@@ -969,8 +932,10 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
                 entry_id, user_id, settle_day=an_entered_day(seed_periods[0].start_date),
             )
             db.session.commit()
-            posted, = _entries_for_purchase(entry_id)
-            assert posted.pay_period_id == seed_periods[0].id
+            scenario_id = seed_user["scenario"].id
+            assert list(period_nets_of_movements([entry_id], scenario_id)) == [
+                seed_periods[0].id,
+            ]
 
             resp = auth_client.patch(
                 f"/transactions/{txn_id}",
@@ -978,18 +943,14 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             )
             assert resp.status_code == 200
 
-            by_period = {}
-            for journal in _entries_for_purchase(entry_id):
-                legs = _legs_by_ledger(journal.id)
-                by_period[journal.pay_period_id] = (
-                    by_period.get(journal.pay_period_id, Decimal("0"))
-                    + sum(legs.values(), Decimal("0"))
-                    + legs[_ledger_account_for(txn.account_id).id]
-                )
-            assert by_period[seed_periods[0].id] == Decimal("0.00"), (
+            by_period = period_nets_of_movements([entry_id], scenario_id)
+            assert seed_periods[0].id not in by_period, (
                 "the period the row left must hold nothing for this purchase"
             )
-            assert by_period[seed_periods[1].id] == Decimal("-40.00")
+            assert by_period[seed_periods[1].id][
+                linked_key(seed_user["account"])
+            ] == Decimal("-40.00")
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
 
     def test_deleting_a_purchase_reverses_its_leg_before_the_row_goes(
         self, app, seed_user, seed_periods,
@@ -1012,8 +973,8 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             entry = _add_purchase(seed_user, txn, "40.00", is_credit=False)
             db.session.commit()
             entry_id = entry.id
-            before = posting_service.account_posting_total(
-                checking.id, seed_user["scenario"].id,
+            before = account_net(
+                db.session, checking.id, seed_user["scenario"].id,
             )
             entry_service.update_entry(
                 entry_id, user_id, settle_day=an_entered_day(seed_periods[0].start_date),
@@ -1027,8 +988,8 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             entry_service.delete_entry(entry_id, user_id)
             db.session.commit()
 
-            assert posting_service.account_posting_total(
-                checking.id, seed_user["scenario"].id,
+            assert account_net(
+                db.session, checking.id, seed_user["scenario"].id,
             ) == before
             # The pair survives the delete with its links SET NULL, which is
             # what keeps every ledger account netting correctly.
@@ -1048,10 +1009,11 @@ class TestDeleteReversesPostings:
     ):
         """Hard-deleting a Paid ad-hoc expense reverses its postings first.
 
-        The $50 expense posts -50 / +50; the hard delete reverses to zero
-        BEFORE the row goes, so after the delete every ledger account nets to
-        zero (the original + reversal survive as a net-zero pair with their
-        movement link SET NULL as the movement goes with the row).
+        The $50 expense posts -50 / +50, and after the delete the read holds no
+        line for it, so every account is back where it was.  On the store the
+        delete reverses to zero BEFORE the row goes (the original + reversal
+        survive as a net-zero pair with their movement link SET NULL as the
+        movement goes with the row), which the parity line grades.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -1063,10 +1025,10 @@ class TestDeleteReversesPostings:
             db.session.commit()
             txn_id = txn.id
             auth_client.post(f"/transactions/{txn_id}/mark-done")
-            groceries_ledger = _category_ledger_id(
+            groceries_ledger = _category_chart_key(
                 seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_total(groceries_ledger) == Decimal("50.00")
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("50.00")
 
             resp = auth_client.delete(f"/transactions/{txn_id}")
             assert resp.status_code == 200
@@ -1074,11 +1036,12 @@ class TestDeleteReversesPostings:
             # Row is gone with its movement; the link SET-NULLed on both entries.
             assert db.session.get(Transaction, txn_id) is None
             assert _entries_for_transaction(txn_id) == []
-            assert _ledger_total(groceries_ledger) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("0.00")
+            assert account_net(
+                db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_soft_delete_template_settled_reverses(
         self, app, auth_client, seed_user, seed_periods,
@@ -1102,10 +1065,10 @@ class TestDeleteReversesPostings:
             db.session.commit()
             txn_id = txn.id
             auth_client.post(f"/transactions/{txn_id}/mark-done")
-            groceries_ledger = _category_ledger_id(
+            groceries_ledger = _category_chart_key(
                 seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
             )
-            assert _ledger_total(groceries_ledger) == Decimal("40.00")
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("40.00")
 
             # Pressed as the card's Delete sends it: the purchase its dialog
             # names (plan step credit_card:CC-5-4a-5, ruling R-CC131).
@@ -1127,11 +1090,12 @@ class TestDeleteReversesPostings:
                 transaction_id=txn_id,
             ).count() == 0
             assert _entries_for_transaction(txn_id) == []
-            assert _ledger_total(groceries_ledger) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert _ledger_total(seed_user, groceries_ledger) == Decimal("0.00")
+            assert account_net(
+                db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_settled_payback_reversed_on_unmark_credit(
         self, app, auth_client, seed_user, seed_periods,
@@ -1140,8 +1104,9 @@ class TestDeleteReversesPostings:
 
         Mark an $80 expense Credit (creating a Projected payback), settle that
         payback (posting -80 / +80 on the CC Payback account), then un-mark the
-        source.  ``delete_payback_on_credit_revert`` reverses the payback's
-        postings BEFORE deleting it, so the CC Payback ledger nets to zero.
+        source: the CC Payback ledger nets to zero.  On the store
+        ``delete_payback_on_credit_revert`` reverses the payback's postings BEFORE
+        deleting it, which the parity line grades.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -1158,19 +1123,20 @@ class TestDeleteReversesPostings:
             db.session.commit()
             payback_id = payback.id
             auth_client.post(f"/transactions/{payback_id}/mark-done")
-            cc_ledger = _cc_payback_ledger_id(seed_user)
-            assert _ledger_total(cc_ledger) == Decimal("80.00")
+            cc_ledger = _cc_payback_chart_key(seed_user)
+            assert _ledger_total(seed_user, cc_ledger) == Decimal("80.00")
 
             credit_workflow.unmark_credit(source_id, user_id)
             db.session.commit()
 
             # Payback gone, its postings reversed to zero before deletion.
             assert db.session.get(Transaction, payback_id) is None
-            assert _ledger_total(cc_ledger) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert _ledger_total(seed_user, cc_ledger) == Decimal("0.00")
+            assert account_net(
+                db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_recursive_payback_chain_reverses_on_source_delete(
         self, app, auth_client, seed_user, seed_periods,
@@ -1178,9 +1144,10 @@ class TestDeleteReversesPostings:
         """Deleting a source reverses a settled payback DEEP in the credit chain.
 
         source -> payback1 -> payback2, with payback2 settled (posted -100 /
-        +100 on CC Payback).  Deleting the source recurses through the chain,
-        reversing payback2's postings at its level before each row is removed,
-        so the CC Payback ledger nets to zero.
+        +100 on CC Payback).  Deleting the source recurses through the chain, and
+        the CC Payback ledger nets to zero.  On the store payback2's postings
+        reverse at its level before each row is removed, which the parity line
+        grades.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -1198,19 +1165,20 @@ class TestDeleteReversesPostings:
             db.session.commit()
             payback2_id = payback2.id
             auth_client.post(f"/transactions/{payback2_id}/mark-done")
-            cc_ledger = _cc_payback_ledger_id(seed_user)
-            assert _ledger_total(cc_ledger) == Decimal("100.00")
+            cc_ledger = _cc_payback_chart_key(seed_user)
+            assert _ledger_total(seed_user, cc_ledger) == Decimal("100.00")
 
             resp = auth_client.delete(f"/transactions/{source_id}")
             assert resp.status_code == 200
 
             # Whole chain gone; payback2's deep postings reversed to zero.
             assert db.session.get(Transaction, payback2_id) is None
-            assert _ledger_total(cc_ledger) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
+            assert _ledger_total(seed_user, cc_ledger) == Decimal("0.00")
+            assert account_net(
+                db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
             _assert_reconciles(scenario_id, checking)
+            assert_ledger_parity(db.session, scenario_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1251,13 +1219,13 @@ class TestCarryForwardPostsSettledSources:
             )
             db.session.commit()
 
-            entries = _entries_for_transaction(source_id)
-            assert len(entries) == 1
-            legs = _legs_by_ledger(entries[0].id)
-            assert legs[_linked_ledger_id(checking)] == Decimal("-30.00")
-            assert legs[_category_ledger_id(
-                seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
-            )] == Decimal("30.00")
+            assert len(_entries_for_transaction(source_id)) == 1
+            assert _family_nets(source_id, scenario_id) == {seed_periods[0].id: {
+                linked_key(checking): Decimal("-30.00"),
+                _category_chart_key(
+                    seed_user, "Groceries", LedgerAccountClassEnum.EXPENSE,
+                ): Decimal("30.00"),
+            }}
             _assert_reconciles(scenario_id, checking)
 
     def test_carry_forward_empty_envelope_posts_nothing(
@@ -1285,6 +1253,6 @@ class TestCarryForwardPostsSettledSources:
             db.session.commit()
 
             assert _entries_for_transaction(source_id) == []
-            assert posting_service.account_posting_total(
-                seed_user["account"].id, scenario_id,
+            assert account_net(
+                db.session, seed_user["account"].id, scenario_id,
             ) == Decimal("1000.00")

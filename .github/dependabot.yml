@@ -2,16 +2,29 @@
 # ruling 2026-09-19: pinned dependencies stay pinned; drift arrives as
 # CI-gated pull requests instead of waiting for a human to run pip-audit).
 #
-# Every pin in this repo is exact (requirements*.txt ``==``, Dockerfile and
-# compose ``image@sha256:`` digests, workflow ``uses:`` commit SHAs with a
+# Dependabot moves the images and the CI actions.  Every Python package is
+# the Monday refresh's (.github/workflows/updates.yml, after this file's
+# 06:00 run; ruling plan#2351), which moves every package uv.lock holds,
+# indirect ones included, within pyproject.toml's ranges and exclusions, and
+# opens each move that needs a card (a new major among them) as a pull
+# request of its own.  So no entry here
+# covers Python: a pip entry would find only pyproject.toml and could raise
+# a floor there without moving uv.lock, which ``uv sync --locked`` refuses.
+#
+# Every pin these entries move is exact (Dockerfile and compose
+# ``image:tag@sha256:`` digests, workflow ``uses:`` commit SHAs with a
 # version comment), and Dependabot rewrites each in place, digest and
-# comment included.  Who lands these PRs is ruled but not yet built: a
-# grouped minor or patch update is to merge itself on green (R-BAL295), but a
-# bump of a file production runs lands only on a card a session takes it
-# onto (R-BAL362, which amends it), so X-em (plan#1183) re-derives the
-# auto-merge at its claim.  Until it lands no session is named to land
-# them, and they wait.  A major version arrives as its own PR so its
-# changelog is read on its own.
+# comment included.
+#
+# Who lands these PRs is the daily queue (updates.yml's queue job; rulings
+# plan#2351 and plan#2449): it puts a Dependabot pull request into dev's
+# merge queue, with no card, once the landing check's own walk finds it
+# moves pinned versions alone, none across a major, and every check at its
+# head passed.  A major waits for a session to claim a card and take its
+# change (ruling plan#2450), so each opens alone: in a group with minor and
+# patch moves it would hold all of them back.  A security update, which
+# Dependabot opens into main whatever ``target-branch`` says, is retargeted
+# to dev by the same queue and judged there on its next run.
 #
 # Every ``ignore`` below is a developer ruling written as configuration
 # rather than prose, so the first run after this file lands proposes
@@ -21,48 +34,14 @@
 # hijacked or broken release is usually pulled upstream.
 version: 2
 updates:
-  # Python: requirements.txt (runtime) and requirements-dev.txt (tools),
-  # both at the repo root.  Minor and patch moves are grouped into one
-  # weekly PR; a major is left out of the group and opens alone.
-  - package-ecosystem: pip
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-      timezone: America/New_York
-    target-branch: dev
-    cooldown:
-      default-days: 7
-    groups:
-      python-minor-and-patch:
-        patterns: ["*"]
-        update-types: [minor, patch]
-    ignore:
-      # (rumdl and djlint were held here until the 2026-09-20 UI leaf read
-      # their findings and moved both pins; a lint-tool release that flags
-      # unchanged files now arrives as a red grouped PR, which is the
-      # signal to read its findings the same way.)
-      # rumdl 0.2.79 and 0.3.0 re-wrap a checkbox item that has nested
-      # sub-items wrongly: the "[x] " counts as zero width, so their own
-      # fix writes lines over 100 characters, and one item has no form
-      # 0.2.79 accepts at all (developer ruling R-BAL332, 2026-10-20).
-      # Exact versions, not a range: every later release is still
-      # proposed, and polyglot-lint judges it.
-      - dependency-name: rumdl
-        versions: ["0.2.79", "0.3.0"]
-      # redis-py 8.x is out of reach while limits (Flask-Limiter's storage
-      # layer) declares redis<8.0.0 in its redis extra -- an extra nothing
-      # pinned requests, so pip alone would not refuse it.
-      - dependency-name: redis
-        update-types: ["version-update:semver-major"]
-    commit-message:
-      prefix: "chore(deps)"
-
   # The application image's base (Dockerfile FROM ... @sha256).  A digest
-  # PR rewrites the two FROM lines only: the hand-maintained version block
-  # above them (Python, Debian, OpenSSL, pip) is re-measured by whoever
-  # merges it, from the image, before the merge.
+  # PR rewrites the FROM lines only, and no comment beside them restates
+  # what they pin, so nothing is left to re-measure (ruling plan#2443): the
+  # build's own upgrade keeps OpenSSL at Debian's newest, and the runtime
+  # image deletes the base image's pip.  The uv stage's FROM line
+  # moves here too: it is the one home of uv's version and digest, and the
+  # stage is what .github/actions/dockerfile-uv exports for every CI job
+  # that runs uv.  Each image opens a PR of its own, a major included.
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -75,8 +54,8 @@ updates:
       default-days: 7
     ignore:
       # The Python version moves only in its own deliberate change: the
-      # Dockerfile, the workflows' eleven python-version settings and the
-      # local venv in ONE pull request, after X-bi-6-4d's release
+      # Dockerfile's FROM tags and .python-version, which every CI job and
+      # the local venv read, in ONE pull request, after X-bi-6-4d's release
       # (developer rulings R-BAL292 and R-BAL297, 2026-10-14).  A tag move
       # proposed here alone would ship one Python while CI tests another.
       # Digest updates within the current tag still arrive.
@@ -85,10 +64,11 @@ updates:
     commit-message:
       prefix: "chore(deps)"
 
-  # The compose files' service images (postgres, redis, nginx pins).  The
-  # postgres digest must move in docker-compose.yml and
+  # The compose files' service images (postgres, valkey, nginx pins).  The
+  # postgres and valkey digests must each move in docker-compose.yml and
   # docker-compose.dev.yml in the SAME commit (their comments say so), so
-  # both files sit under one directory entry.
+  # both files sit under one directory entry.  Each image opens a PR of its
+  # own, a major included.
   - package-ecosystem: docker-compose
     directory: /
     schedule:
@@ -99,19 +79,20 @@ updates:
     target-branch: dev
     cooldown:
       default-days: 7
-    ignore:
-      # Redis stays on the 7.x-alpine line: docker-compose.yml's redis
-      # service documents the ACL/CONFIG re-validation an 8.x move needs,
-      # and its WUD label fences the same range.
-      - dependency-name: redis
-        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "chore(deps)"
 
   # GitHub Actions: SHA-pinned ``uses:`` lines with a version comment;
-  # Dependabot updates both.  jactionlint and zizmor gate the result.
+  # Dependabot updates both.  jactionlint and zizmor gate the result, and the
+  # landing check and the daily queue land one with no card only where each
+  # moved commit is the one the action's repository tags with that release
+  # (tools/quill/_versions.py, ruling plan#2474).  ``/``
+  # reaches the workflows alone (and a root action.yml, which there is
+  # not), so the local composite actions' directories are listed too.
+  # Minor and patch moves are grouped into one weekly PR; a major is left
+  # out of the group and opens alone.
   - package-ecosystem: github-actions
-    directory: /
+    directories: ["/", "/.github/actions/*"]
     schedule:
       interval: weekly
       day: monday
@@ -123,5 +104,6 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+        update-types: [minor, patch]
     commit-message:
       prefix: "ci(deps)"

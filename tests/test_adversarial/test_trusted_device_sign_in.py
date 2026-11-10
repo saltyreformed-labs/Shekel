@@ -29,9 +29,9 @@ import sqlalchemy
 
 from app.config import ProdConfig
 from app.extensions import db
-from app.models.trusted_device import TrustedDevice
+from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig
-from app.services import mfa_service, trusted_device_service
+from app.services import known_device_service, mfa_service
 from scripts.reset_mfa import reset_mfa
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
@@ -101,7 +101,15 @@ def _signed_in(response):
 
 def _devices_of(user_id):
     """Return how many device rows *user_id* holds."""
-    return db.session.query(TrustedDevice).filter_by(user_id=user_id).count()
+    return db.session.query(KnownDevice).filter_by(user_id=user_id).count()
+
+
+def _trusts_of(user_id):
+    """Return the ``trusted_at`` of each of *user_id*'s device rows."""
+    return [
+        device.trusted_at for device in
+        db.session.query(KnownDevice).filter_by(user_id=user_id)
+    ]
 
 
 def _device_cookie_header(response, user_id):
@@ -116,7 +124,7 @@ def _device_cookie_header(response, user_id):
 def _move_the_trust_back(seed_user, interval):
     """Move the seed owner's device trust back by the SQL *interval*, committed."""
     db.session.execute(sqlalchemy.text(
-        "UPDATE auth.trusted_devices "
+        "UPDATE auth.known_devices "
         "SET trusted_at = trusted_at - CAST(:interval AS interval) "
         "WHERE user_id = :id"
     ), {"interval": interval, "id": seed_user["user"].id})
@@ -141,7 +149,9 @@ def _browser_trusted_through_the_service(app, user_id):
     test whose one code another act needs (replay prevention refuses a second
     inside its thirty-second step).
     """
-    token = trusted_device_service.trust_device(user_id, "")
+    token = known_device_service.record_sign_in(
+        user_id, None, "", now=datetime.now(timezone.utc), trust=True,
+    )
     db.session.commit()
     browser = app.test_client()
     browser.set_cookie(f"shekel_device_{user_id}", token)
@@ -197,7 +207,11 @@ class TestTheTrust:
         assert "Secure" not in header
 
     def test_an_unticked_code_trusts_nothing(self, app, seed_user):
-        """No row, no cookie, and the next sign-in asks for the code."""
+        """The browser is known and holds no trust: the next sign-in asks the code.
+
+        Ruling plan#2994: every finished sign-in writes the record and the
+        cookie, so what an unticked box leaves out is the trust alone.
+        """
         user_id = seed_user["user"].id
         secret = enable_mfa(db.session, user_id)
         browser = app.test_client()
@@ -207,14 +221,18 @@ class TestTheTrust:
         )
         browser.post("/logout")
 
-        assert _device_cookie_header(response, user_id) is None
-        assert _devices_of(user_id) == 0
+        assert _device_cookie_header(response, user_id) is not None
+        assert _trusts_of(user_id) == [None]
         assert _asked_the_code(
             _password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD),
         )
 
     def test_a_backup_code_never_trusts_even_ticked(self, app, seed_user):
-        """A crafted post ticking the box beside a backup code trusts nothing."""
+        """A crafted post ticking the box beside a backup code trusts nothing.
+
+        The browser is known all the same: it finished a sign-in (ruling
+        plan#2994).
+        """
         user_id = seed_user["user"].id
         enable_mfa(db.session, user_id, backup_codes=[_BACKUP_CODE])
         browser = app.test_client()
@@ -227,8 +245,8 @@ class TestTheTrust:
         })
 
         assert _signed_in(response)
-        assert _device_cookie_header(response, user_id) is None
-        assert _devices_of(user_id) == 0
+        assert _device_cookie_header(response, user_id) is not None
+        assert _trusts_of(user_id) == [None]
 
     def test_the_trust_and_the_skip_are_logged(self, app, seed_user, caplog):
         """``device_trusted`` at the trust, ``trusted_device_sign_in`` at the skip."""

@@ -456,7 +456,7 @@ def a_bank_line(
 def a_sighting(
     seed_user, statement, line, *, description="ACH DEBIT DUKEENERGY",
     merchant=None, transaction_on=None, source_category=None,
-    external_id=None, running_balance=None,
+    running_balance=None,
 ):
     """Stage and return *statement*'s sighting of *line*.
 
@@ -480,7 +480,6 @@ def a_sighting(
             **R-BI16**), which is the fact the app records.
         transaction_on: The day this source states it was made, or ``None``.
         source_category: This source's category string, or ``None``.
-        external_id: This source's own id for the line, or ``None``.
         running_balance: The balance this source stated after it, or ``None``.
 
     Returns:
@@ -498,7 +497,6 @@ def a_sighting(
         ),
         transaction_on=transaction_on,
         source_category=source_category,
-        external_id=external_id,
         running_balance=(
             None if running_balance is None else Decimal(running_balance)
         ),

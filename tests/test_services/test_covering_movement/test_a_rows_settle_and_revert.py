@@ -19,10 +19,12 @@ from app.services.entry_service import EntryDetails
 from app.services.settle_day import SettleDay
 from app.services.transaction_service._row_rules import settles_from_entries
 from app.services.transaction_service._settle import settle_from_entries
+from tests._ledger_reads import (
+    ledger_net,
+    linked_key_of,
+)
 from tests._test_helpers import (
     create_savings_account,
-    ledger_net,
-    linked_ledger_account,
     planted_basis,
     state_template_price,
     typed,
@@ -152,11 +154,11 @@ class TestTheMovementIsTheBalance:
         """
         with app.app_context():
             txn = _bill(seed_user, seed_periods[0])
-            cash = linked_ledger_account(db.session, txn.account_id)
-            before = ledger_net(db.session, cash.id, txn.scenario_id)
+            cash = linked_key_of(db.session, txn.account_id)
+            before = ledger_net(db.session, cash, txn.scenario_id)
             _settle(txn)
             db.session.flush()
-            after = ledger_net(db.session, cash.id, txn.scenario_id)
+            after = ledger_net(db.session, cash, txn.scenario_id)
             assert after - before == Decimal("-148.32")
 
 
@@ -177,14 +179,14 @@ class TestARevertUnDatesAndAReSettleReDates:
     ):
         with app.app_context():
             txn = _bill(seed_user, seed_periods[0])
-            cash = linked_ledger_account(db.session, txn.account_id)
-            before = ledger_net(db.session, cash.id, txn.scenario_id)
+            cash = linked_key_of(db.session, txn.account_id)
+            before = ledger_net(db.session, cash, txn.scenario_id)
             _settle(txn)
             db.session.flush()
             movement = _only_movement(txn)
             movement_id = movement.id
             assert movement.reconciled_by_id is None
-            assert ledger_net(db.session, cash.id, txn.scenario_id) - before == Decimal("-148.32")
+            assert ledger_net(db.session, cash, txn.scenario_id) - before == Decimal("-148.32")
 
             _revert(txn)
             db.session.flush()
@@ -198,10 +200,9 @@ class TestARevertUnDatesAndAReSettleReDates:
             assert survivor.amount == Decimal("148.32")
             assert survivor.figure_source_id == _source(MovementFigureSourceEnum.RESOLVED)
             assert txn.purchases == []
-            # The door's family reconcile reversed the un-dated movement's
-            # legs (it posts nothing without a day); the parent's zero leg had
-            # nothing to reverse.  Net: back to before.
-            assert ledger_net(db.session, cash.id, txn.scenario_id) == before
+            # An un-dated movement books no line, so the ledger is back to
+            # before.
+            assert ledger_net(db.session, cash, txn.scenario_id) == before
 
     def test_a_revert_un_dates_a_typed_movement_and_both_homes_retain_the_figure(
         self, app, seed_user, seed_periods,

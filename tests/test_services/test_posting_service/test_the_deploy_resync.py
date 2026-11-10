@@ -17,6 +17,7 @@ from app.enums import PostingSourceEnum
 from app.extensions import db as _db
 from app.models.journal_entry import JournalEntry, Posting
 from app.services import anchor_service, posting_service
+from tests._stored_ledger import stored_ledger_net
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_cash_transaction,
@@ -29,7 +30,6 @@ from ._helpers import (
     _transit_ledger_id,
     _covering_movement_of_side,
     _entries_for_transaction,
-    _ledger_total,
 )
 
 
@@ -211,7 +211,9 @@ class TestTheDeployResync:
             _db.session.commit()
             checking_ledger = _ledger_id(checking)
             savings_ledger = _ledger_id(savings)
-            assert _ledger_total(checking_ledger) == Decimal("820.00")
+            assert stored_ledger_net(
+                _db.session, checking_ledger, seed_user["scenario"].id,
+            ) == Decimal("820.00")
             anchor_service.apply_anchor_true_up(
                 account=checking, new_balance=Decimal("820.00"),
                 observed_on=day,
@@ -241,8 +243,12 @@ class TestTheDeployResync:
             assert _real_account_nets_by_day(
                 checking_ledger, savings_ledger,
             ) == before
-            assert _ledger_total(_transit_ledger_id(seed_user)) == Decimal("0.00")
-            assert _ledger_total(checking_ledger) == Decimal("820.00")
+            assert stored_ledger_net(
+                _db.session, _transit_ledger_id(seed_user), seed_user["scenario"].id,
+            ) == Decimal("0.00")
+            assert stored_ledger_net(
+                _db.session, checking_ledger, seed_user["scenario"].id,
+            ) == Decimal("820.00")
             assert posting_service.resync_all_cash_postings() == (0, 0)
 
     def test_the_one_re_check_corrects_what_the_transfer_re_book_moved(
@@ -287,7 +293,9 @@ class TestTheDeployResync:
                 observed_on=earlier,
             )
             checking_ledger = _ledger_id(checking)
-            assert _ledger_total(checking_ledger) == Decimal("900.00")
+            assert stored_ledger_net(
+                _db.session, checking_ledger, seed_user["scenario"].id,
+            ) == Decimal("900.00")
             _db.session.execute(
                 _db.text(
                     "UPDATE budget.transaction_entries "
@@ -305,7 +313,9 @@ class TestTheDeployResync:
             assert _new_anchor_correction_legs(newest, checking_ledger) == [
                 Decimal("100.00"),
             ]
-            assert _ledger_total(checking_ledger) == Decimal("1000.00")
+            assert stored_ledger_net(
+                _db.session, checking_ledger, seed_user["scenario"].id,
+            ) == Decimal("1000.00")
 
     def test_the_one_re_check_corrects_what_a_row_re_date_moved(
         self, app, db, seed_user,
@@ -337,7 +347,9 @@ class TestTheDeployResync:
                 observed_on=earlier,
             )
             checking_ledger = _ledger_id(checking)
-            assert _ledger_total(checking_ledger) == Decimal("970.00")
+            assert stored_ledger_net(
+                _db.session, checking_ledger, seed_user["scenario"].id,
+            ) == Decimal("970.00")
             _db.session.execute(
                 _db.text(
                     "UPDATE budget.transactions SET settled_on = :day "
@@ -362,7 +374,9 @@ class TestTheDeployResync:
             assert _new_anchor_correction_legs(newest, checking_ledger) == [
                 Decimal("30.00"),
             ]
-            assert _ledger_total(checking_ledger) == Decimal("1000.00")
+            assert stored_ledger_net(
+                _db.session, checking_ledger, seed_user["scenario"].id,
+            ) == Decimal("1000.00")
 
 
 def _new_anchor_correction_legs(after_entry_id, ledger_id):

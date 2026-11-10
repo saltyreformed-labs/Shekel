@@ -122,7 +122,7 @@ def _real_hero(seed_user):
         seed_user: The seeded user bundle.
 
     Returns:
-        The :class:`~app.services.statement_match._reconcile.Hero`.
+        The :class:`~app.services.statement_match._hero.Hero`.
     """
     return reconcile_page(
         a_scope(seed_user), _real_agreement(seed_user), Tab.TO_EXPLAIN,

@@ -53,7 +53,7 @@ What this package offers
 ------------------------
 
 * :func:`resolve` -- ``(spec, calendar) -> ResolvedRecurrence``, the two-axis
-  meaning.  Pure: no Flask, no ORM, no clock, no database.
+  meaning.  No Flask, no ORM, no clock, no database read.
   Its ``starts_on`` is the rule's FIRST OCCURRENCE, with ONE meaning for every
   unit (ruling **R-R16**, plan ledger row **D28**), and it is what
   ``budget.recurrence_rules.starts_on`` holds.  ``anchor_date`` and the
@@ -111,10 +111,16 @@ What lives where
   the cadence's third value took that module past pylint's line ceiling; the
   argument for deriving the offer from what a rule can DO stays in
   ``_frequency``'s docstring.
-* ``_nominal_day`` -- the 0-or-1 day a short month clamped: its domain, the
-  join into the day a rule fires on, which days a date leaves open, and the
-  pair refusal both value types hold.  Split out of ``_resolution`` at the
-  same step, for the same reason, the same way.
+* ``_nominal_day`` -- the 0-or-1 day a short month clamped: its domain,
+  which days a date leaves open, and the pair refusal both value types hold.
+  Split out of ``_resolution`` at the same step, for the same reason, the
+  same way.
+* ``_month_coordinate`` -- the day of each month a month-measured cadence
+  lands on (plan step R8-c): how the first date is READ (its day of the
+  month, the nth weekday, or the last weekday), the join of the rule's fields
+  into one coordinate of three shapes that the walk walks and the describer
+  words, which weekday readings a date allows, and the pair refusal both
+  value types hold.
 * ``_resolution`` -- :class:`RecurrenceSpec`, :class:`ResolvedRecurrence` and
   :func:`resolve`, the pure derivation of what a recurrence means AGAINST a
   schedule.  Since plan step R7c-b that derivation is TWO things -- the
@@ -219,8 +225,16 @@ from app.services.recurrence._offer import (
     follows_card_due_dates,
     is_authorable,
 )
+from app.services.recurrence._month_coordinate import (
+    DayOfMonth,
+    LastWeekday,
+    MonthCoordinate,
+    NthWeekday,
+    WeekdayReading,
+    month_coordinate,
+    offerable_weekday_readings,
+)
 from app.services.recurrence._nominal_day import (
-    cadence_day_of_month,
     is_offerable_nominal_day,
     offerable_nominal_days,
 )
@@ -268,20 +282,26 @@ from app.services.recurrence._reading import (
     stored_cadence,
 )
 from app.services.recurrence._resolution import (
-    RecurrenceSpec,
     ResolvedRecurrence,
     resolve,
 )
+from app.services.recurrence._spec import RecurrenceSpec
 from app.services.recurrence._row_date import compute_due_date, period_of_occurrence
 from app.services.recurrence._picker import (
     CadenceOption,
     EndBoundOption,
+    MonthReading,
     PickerModel,
     SelectedCadence,
     cadence_options,
     end_bound_options,
+    month_reading_choices,
+    month_reading_from_token,
     picker_model,
     selected_cadence,
+    stored_month_reading,
+    weekday_reading_choices,
+    weekday_reading_options,
 )
 from app.services.recurrence._vocabulary import (
     UNREADABLE_CADENCE_MESSAGE,
@@ -304,6 +324,7 @@ __all__ = [
     "CadenceReading",
     "ClosesOn",
     "Closing",
+    "DayOfMonth",
     "DerivedStop",
     "EndBound",
     "EndBoundColumns",
@@ -313,7 +334,11 @@ __all__ = [
     "EndsAfterOccurrences",
     "EndsOnDate",
     "Indefinite",
+    "LastWeekday",
+    "MonthCoordinate",
+    "MonthReading",
     "NeverEnds",
+    "NthWeekday",
     "OccurrencePlacement",
     "PickerModel",
     "RecurrenceDescription",
@@ -327,11 +352,11 @@ __all__ = [
     "ResolvedRecurrence",
     "RuleReading",
     "SelectedCadence",
+    "WeekdayReading",
     "author_rule",
     "authorable_cadences",
     "build_transient_rule",
     "can_repeat_within_month",
-    "cadence_day_of_month",
     "cadence_of",
     "cadence_options",
     "cadences_without_a_card",
@@ -352,9 +377,13 @@ __all__ = [
     "is_offerable_nominal_day",
     "modelled_placement",
     "modelled_unit",
+    "month_coordinate",
+    "month_reading_choices",
+    "month_reading_from_token",
     "occurrence_placements",
     "occurrence_walk",
     "offerable_nominal_days",
+    "offerable_weekday_readings",
     "occurrences",
     "picker_model",
     "place",
@@ -373,4 +402,7 @@ __all__ = [
     "scheduling_day_of_month",
     "selected_cadence",
     "stored_cadence",
+    "stored_month_reading",
+    "weekday_reading_choices",
+    "weekday_reading_options",
 ]

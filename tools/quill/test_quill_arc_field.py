@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from tools.quill._command import _label
 from tools.quill._fake import FakeTracker, run
-from tools.quill._state import next_step
+from tools.quill._next import next_step
 from tools.quill.setup_tracker import FILING
 
 

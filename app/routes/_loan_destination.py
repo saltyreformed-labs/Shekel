@@ -83,7 +83,7 @@ from app.routes._redirect_target import RedirectTarget
 from app.schemas.validation import (
     RECURRENCE_END_BOUND_KEY,
     RECURRENCE_NEEDS_A_START,
-    RECURRENCE_NOMINAL_DAY_KEY,
+    RECURRENCE_REPEATS_ON_KEY,
     RECURRENCE_STARTS_ON_KEY,
 )
 from app.services import loan_loaders, loan_recurrence_sync
@@ -92,6 +92,7 @@ from app.services.recurrence import (
     NEVER_ENDS,
     UNREADABLE_CADENCE_MESSAGE,
     EndBound,
+    MonthReading,
     stored_cadence,
 )
 
@@ -273,7 +274,11 @@ def settle_loan_start(
 
     Args:
         data: The validated payload, mutated in place: ``starts_on`` and
-            ``nominal_day`` are written.
+            ``repeats_on`` are written -- the loan's first contractual
+            installment, read by the contract's day (ruling **R-R96**), so a
+            weekday reading posted beside a date this replaces is replaced
+            with it (plan step recurrence:R8-c): it read a date the rule will
+            not carry.
         params: The destination loan's terms, loaded by the caller -- each
             door loads them ONCE, after the destination is ownership-checked
             (an unchecked read would be an IDOR), and decides on the answer
@@ -290,7 +295,9 @@ def settle_loan_start(
     """
     cadence_start = loan_recurrence_sync.loan_cadence_start(unit, params)
     data[RECURRENCE_STARTS_ON_KEY] = cadence_start.starts_on
-    data[RECURRENCE_NOMINAL_DAY_KEY] = cadence_start.nominal_day
+    data[RECURRENCE_REPEATS_ON_KEY] = MonthReading(
+        nominal_day=cadence_start.nominal_day,
+    )
     return cadence_start
 
 
@@ -493,7 +500,7 @@ def settle_destination_for_update(
             Read for its stored destination, rule, settings row and active
             flag; NOT mutated -- the field loop moves the column afterwards.
         data: The validated partial payload, mutated in place on the standing
-            branch: the derived ``starts_on`` and ``nominal_day`` are
+            branch: the derived ``starts_on`` and ``repeats_on`` are
             written, and the stored cadence keys for a partial move (rule
             2).  Every FK in it must already be ownership-checked -- this
             reads the destination's loan parameters, so an unchecked id would

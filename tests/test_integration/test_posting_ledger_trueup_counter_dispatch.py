@@ -31,7 +31,6 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import bindparam
 
 from app import ref_cache
 from app.enums import (
@@ -40,18 +39,24 @@ from app.enums import (
     PostingSourceEnum,
 )
 from app.extensions import db as _db
+from app.models.account import Account
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
 from app.services import account_posting_service, ledger_report_service
 from app.services.ledger_report_service import StatementWindow
 from app.utils.dates import display_today
 from app.services.pay_calendar import calendar_for
+from app.services.ledger_lines import (
+    account_counter_key,
+    chart_record_type,
+    linked_key,
+)
+from tests._ledger_parity import assert_ledger_parity
+from tests._ledger_reads import ledger_net, owner_worked_out_lines
+from tests._stored_ledger import ledger_account_of_kind
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
-    ledger_account_of_kind,
-    ledger_net,
-    linked_ledger_account,
 )
 
 # The account types this step's dispatch actually separates, and the counter
@@ -72,57 +77,27 @@ _TRUE_UP_COUNTER_BY_TYPE = [
 
 
 def _correction_legs(account_id, source_kind):
-    """Return ``{(kind name, class name): net}`` over one correction family.
+    """Return ``{(kind name, class name): net}`` of one correction kind on an account.
 
-    A test-authored read of the posted ledger: every leg of every
-    ``account_opening`` / ``account_trueup`` entry that touches ANY of the
-    account's own chart rows, grouped by the KIND and CLASS of the chart row it
-    landed in.  Reads the chart's ``kind_id`` / ``class_id`` back through
-    ``ref`` NAMES deliberately -- the app is forbidden to branch on those
-    strings, which is exactly what makes them a second opinion here.
-
-    **Scoped to the account's ROWS, not its linked row**, for the reason the
-    reader under test is: a re-point delta touches only counter rows, so a
-    linked-scoped oracle would be blind to exactly the entries this module
-    exists to check.
+    Off the worked-out read, over every key whose record is the account: its own
+    line and its correction counters, because a re-typed true-up moves only the
+    counter side.  A cell netting ``$0.00`` is left out.  Named by the enums' string
+    values so a case states the row it means.
     """
-    entry_ids = (
-        _db.session.query(Posting.journal_entry_id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(LedgerAccount.account_id == account_id)
-    )
-    rows = (
-        _db.session.execute(_db.text("""
-            SELECT k.name, c.name, SUM(p.amount)
-            FROM budget.account_postings p
-            JOIN budget.journal_entries je ON p.journal_entry_id = je.id
-            JOIN budget.ledger_accounts la ON p.ledger_account_id = la.id
-            JOIN ref.ledger_account_kinds k ON la.kind_id = k.id
-            JOIN ref.ledger_account_classes c ON la.class_id = c.id
-            JOIN ref.posting_sources s ON je.source_kind_id = s.id
-            WHERE s.name = :source AND je.id IN :entry_ids
-            GROUP BY k.name, c.name
-        """).bindparams(
-            # Expanded by SQLAlchemy into one bind per id, the spelling the two
-            # data-boundary migrations use: psycopg 3 binds server-side and
-            # cannot spread one tuple parameter into an ``IN`` list the way
-            # psycopg2's client-side interpolation did (plan step
-            # balance:X-dj).  An empty list is a valid, empty ``IN``.
-            bindparam(
-                "entry_ids", [row[0] for row in entry_ids.all()], expanding=True,
-            ),
-            source=source_kind.value,
-        ))
-        .all()
-    )
-    return {(kind, klass): net for kind, klass, net in rows if net != 0}
+    source_kind_id = ref_cache.posting_source_id(source_kind)
+    owner_id = _db.session.get(Account, account_id).user_id
+    nets = {}
+    for _scenario_id, line in owner_worked_out_lines(_db.session, owner_id):
+        if (
+            line.source_kind_id == source_kind_id
+            and chart_record_type(line.key) is Account
+            and line.key.record_id == account_id
+        ):
+            cell = (line.key.kind.value, line.key.ledger_class.value)
+            nets[cell] = nets.get(cell, Decimal("0")) + line.amount
+    return {cell: net for cell, net in nets.items() if net != 0}
 
 
-# How long after its opening every fixture true-up is observed.  The opening
-# itself is three days back (:func:`_opened_account`), so the true-up lands on
-# ``display_today() - 2`` -- inside the reported window on every clock the
-# suite runs at, and never in the future, which a balance sheet as-of today
-# would exclude whole.
 _TRUE_UP_DAYS_AFTER_OPENING = 1
 
 
@@ -185,20 +160,13 @@ def _true_up(account, balance, days_after_opening=None):
 
 
 def account_asset_class_name(account):
-    """Return the linked ledger row's CLASS name for *account* (Asset/Liability).
+    """Return the class name of *account*'s own line.
 
-    Read off the posted chart rather than re-derived, so a case asserting on a
-    correction's legs states the class the row actually carries instead of
-    assuming Asset -- which the negatively-anchored liability shapes elsewhere
-    in this suite would falsify.
+    So a case asserting on a correction's legs states the class the line actually
+    carries instead of assuming Asset -- which the negatively-anchored liability
+    shapes elsewhere in this suite would falsify.
     """
-    linked = linked_ledger_account(_db.session, account.id)
-    return (
-        _db.session.query(LedgerAccount)
-        .filter_by(id=linked.id)
-        .one()
-        .ledger_account_class.name
-    )
+    return linked_key(account).ledger_class.value
 
 
 def _fund_before_the_opening(seed_user, account, amount):
@@ -374,13 +342,8 @@ class TestTheTrueUpCounterLegNamesTheDifference:
 
             _true_up(account, "1150.00")
 
-            gain = ledger_account_of_kind(
-                _db.session, account.id,
-                LedgerAccountKindEnum.UNREALIZED_CHANGE,
-            )
-            assert gain is not None, (
-                "a market gain after an opening the records explained was "
-                "booked as capital, which is the defect R-FO closes"
+            gain = account_counter_key(
+                LedgerAccountKindEnum.UNREALIZED_CHANGE, account.id,
             )
             # +$1,000.00 from the opening-day correction, less the $150.00
             # market gain.  **The $1,000.00 is finding N-378 wearing this
@@ -393,8 +356,11 @@ class TestTheTrueUpCounterLegNamesTheDifference:
             # it at the write door; until then this is what the ledger says and
             # a test that hid it would be worse than one that states it.
             assert ledger_net(
-                _db.session, gain.id, seed_user["scenario"].id,
-            ) == Decimal("850.00")
+                _db.session, gain, seed_user["scenario"].id,
+            ) == Decimal("850.00"), (
+                "a market gain after an opening the records explained was "
+                "booked as capital, which is the defect R-FO closes"
+            )
 
     def test_a_zero_opening_is_still_the_opening(
         self, app, db, seed_user,
@@ -447,11 +413,11 @@ class TestTheTrueUpCounterLegNamesTheDifference:
                 _true_up(account, "1150.00")
 
             scenario_id = seed_user["scenario"].id
-            plain_linked = linked_ledger_account(_db.session, plain.id)
-            modelled_linked = linked_ledger_account(_db.session, modelled.id)
-            assert ledger_net(_db.session, plain_linked.id, scenario_id) == Decimal("1150.00")
-            assert ledger_net(_db.session, modelled_linked.id, scenario_id) == (
-                ledger_net(_db.session, plain_linked.id, scenario_id)
+            plain_linked = linked_key(plain)
+            modelled_linked = linked_key(modelled)
+            assert ledger_net(_db.session, plain_linked, scenario_id) == Decimal("1150.00")
+            assert ledger_net(_db.session, modelled_linked, scenario_id) == (
+                ledger_net(_db.session, plain_linked, scenario_id)
             )
 
 
@@ -471,9 +437,10 @@ class TestThePostedLedgerSelfMigrates:
         production modelled account is in the moment this code deploys.
 
         Two things are asserted because either alone would pass a broken
-        implementation: the equity row nets to ZERO (the old leg was reversed,
-        not left behind, which would double-count equity), and the linked
-        ledger is UNCHANGED (the migration is balance-neutral).
+        implementation: the true-up's $150.00 leaves equity for the gain line, and
+        the linked ledger is UNCHANGED (the migration is balance-neutral).  The
+        read holds no reversal, so the parity line grades that the store reversed
+        the old leg rather than leaving it behind to double-count equity.
         """
         with app.app_context():
             account = _opened_account(
@@ -482,33 +449,33 @@ class TestThePostedLedgerSelfMigrates:
             _true_up(account, "1150.00")
 
             scenario_id = seed_user["scenario"].id
-            equity = ledger_account_of_kind(
-                _db.session, account.id, LedgerAccountKindEnum.ANCHOR_EQUITY,
+            equity = account_counter_key(
+                LedgerAccountKindEnum.ANCHOR_EQUITY, account.id,
             )
-            linked = linked_ledger_account(_db.session, account.id)
-            assert ledger_net(_db.session, equity.id, scenario_id) == (
+            linked = linked_key(account)
+            assert ledger_net(_db.session, equity, scenario_id) == (
                 Decimal("-1150.00")
             )
-            linked_before = ledger_net(_db.session, linked.id, scenario_id)
+            linked_before = ledger_net(_db.session, linked, scenario_id)
 
             # The account is now an INVESTMENT, so the dispatch names a
             # different counter row for its true-up.
             _retype(account, "Roth IRA")
 
-            gain = ledger_account_of_kind(
-                _db.session, account.id, LedgerAccountKindEnum.UNREALIZED_CHANGE,
+            gain = account_counter_key(
+                LedgerAccountKindEnum.UNREALIZED_CHANGE, account.id,
             )
-            assert gain is not None
-            assert ledger_net(_db.session, gain.id, scenario_id) == (
+            assert ledger_net(_db.session, gain, scenario_id) == (
                 Decimal("-150.00")
             )
             # The opening stays on equity; only the true-up's $150.00 moved.
-            assert ledger_net(_db.session, equity.id, scenario_id) == (
+            assert ledger_net(_db.session, equity, scenario_id) == (
                 Decimal("-1000.00")
             )
-            assert ledger_net(_db.session, linked.id, scenario_id) == (
+            assert ledger_net(_db.session, linked, scenario_id) == (
                 linked_before
             )
+            assert_ledger_parity(db.session, scenario_id)
 
     def test_a_second_sync_after_the_re_point_writes_nothing(
         self, app, db, seed_user,
@@ -732,7 +699,7 @@ class TestTheStatementsReportTheDifference:
             assert income.comprehensive_income == income.net_income
             assert [
                 line.label for line in sheet.equity.lines
-                if line.ledger_account_id is None
+                if line.key is None
             ] == ["Retained Earnings"]
             assert sheet.tie_out.in_balance
 

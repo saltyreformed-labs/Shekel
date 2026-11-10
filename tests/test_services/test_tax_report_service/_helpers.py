@@ -35,18 +35,22 @@ def _make_profile(
     qualifying_children=0,
     other_dependents=0,
     sort_order=0,
+    first_payday=date(2026, 1, 2),
 ):
     """Build and flush an active salary profile for the seeded user.
 
     Mirrors the liability/withholding test profile helpers.  Salary
     defaults to 130,000 (5,000.00/period at 26, no residue).  ``name`` is a
     parameter because ``uq_salary_profiles_user_scenario_name`` forbids two
-    same-named profiles for one user + scenario.
+    same-named profiles for one user + scenario.  ``first_payday`` is the day
+    the pay list starts: the 2026 calendar's first payday unless a case
+    prices another year (2025's is 2025-01-03, 26 x 14 days earlier).
     """
     filing_status = (
         _db.session.query(FilingStatus).filter_by(name=filing_status_name).one()
     )
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         name=name,
@@ -60,10 +64,10 @@ def _make_profile(
         sort_order=sort_order,
     )
     _db.session.add(profile)
-    # From the 2026 calendar's first payday: every caller builds its profile
-    # BEFORE ``_make_full_year_periods``, when that day is still a PROJECTED
-    # payday off the seed owner's 2024 bootstrap (52 x 14 days on).
-    start_test_pay_list(profile, Decimal(pay), date(2026, 1, 2))
+    # From the 2026 calendar's first payday by default: every caller builds
+    # its profile BEFORE ``_make_full_year_periods``, when that day is still a
+    # PROJECTED payday off the seed owner's 2024 bootstrap (52 x 14 days on).
+    start_test_pay_list(profile, Decimal(pay), first_payday)
     _db.session.flush()
     return profile
 

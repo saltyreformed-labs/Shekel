@@ -339,6 +339,9 @@ _FENCED_MODULE_RULINGS = {
         "anchor_correction_counter_kind",
         "category_key",
         "chart_label",
+        # Which record a key names, its label's source (plan task plan#2771):
+        # a model class, never money.
+        "chart_record_type",
         "ledger_class_of",
         "linked_key",
         "linked_ledger_class",
@@ -387,6 +390,9 @@ _FENCED_MODULE_RULINGS = {
         # ``balance_at`` (X-ew's second leaf, plan#2515, moves the statements
         # onto these lines).
         "worked_out_lines",
+        # Whether an account holds one of those lines, the re-type refusal's
+        # question (ruling plan#2785): a yes or no, never money.
+        "accounts_hold_lines",
     })),
     # The account-KIND classifier -- why it is scoped is recorded once, at
     # :data:`_KIND_CLASSIFIER_MODULES`.  Its ``find_period_containing_date``

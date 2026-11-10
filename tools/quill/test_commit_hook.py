@@ -266,7 +266,7 @@ def _through_pre_commit(code, tmp_path, monkeypatch):
     stage that always fails, committed on the branch checked out; and the shim
     ``pre-commit install`` writes for each message stage, in a hooks directory of the test's.
     ``code``'s own interpreter, ``.venv/bin/python``, runs this test's, as a lane's ``.venv``
-    links the main checkout's, while the ``python`` first on ``PATH`` fails every run, as the
+    holds one, while the ``python`` first on ``PATH`` fails every run, as the
     host's did from a shell without the venv active (plan#1990).  The working directory's
     ``tools`` is put on the path the hook's ``python -m`` reads.  The command running ``git``
     with those hooks; ``git`` started through ``tools.ci.gitcmd``, bound to ``code`` alone."""

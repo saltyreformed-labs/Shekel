@@ -220,7 +220,8 @@ def _future_period_count(
     the render now runs the DERIVATION twice, where the SQL count ran it not at
     all.  That second derivation is unavoidable while the top-up precedes the
     pass, so it is pinned rather than removed:
-    ``test_one_read_pass_per_render.test_a_rolling_owner_derives_TWICE_and_that_is_the_bound``
+    ``test_a_rolling_owner_derives_twice_and_that_is_the_bound``, in
+    ``tests/test_arch/test_one_read_pass_per_render/test_calendar_derivations.py``,
     holds it at exactly two.  Its cost is a payday set and N frozen dataclasses
     rather than one integer -- 62 rows on production, immaterial there and
     growing with an owner's history, which is the axis nothing bounds.

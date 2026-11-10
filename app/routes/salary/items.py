@@ -20,7 +20,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from flask import Response, abort, flash, redirect, request, url_for
+from flask import Response, abort, flash, request, url_for
 from flask_login import current_user
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -46,14 +46,13 @@ from app.routes._commit_helpers import (
     handle_db_error,
     regenerate_commit_or_report,
 )
-from app.routes._form_errors import load_form_or_redirect
+from app.routes._form_errors import load_form_or_redirect, load_form_or_refuse
 from app.routes._recurrence_form_helpers import (
     author_recurrence_for_create,
     recurrence_spec_for_create,
     resolve_recurrence_rule_for_update,
 )
 from app.routes._recurrence_form_refusals import RecurrenceFormContext
-from app.routes._redirect_target import RedirectTarget
 from app.schemas.validation import (
     RECURRENCE_END_BOUND_KEY,
     RECURRENCE_MAX_PER_MONTH_KEY,
@@ -69,6 +68,8 @@ from app.routes.salary._helpers import (
     _PAYCHECK_LINES_UNIQUE_CONSTRAINT,
     _RAISE_UPDATE_FIELDS,
     _SALARY_RAISES_UNIQUE_CONSTRAINT,
+    RaiseRefusal,
+    _edit_page,
     _line_schema,
     _line_update_schema,
     _raise_schema,
@@ -80,14 +81,12 @@ from app.routes.salary._helpers import (
 
 logger = logging.getLogger(__name__)
 
-
-def _edit_page(profile_id: int) -> RedirectTarget:
-    """Where every refused or failed line-item submission sends the user: the profile's edit page.
-
-    Twelve literal spellings of one target until plan step salary:R15-c
-    added four more; one function is the answer to a review that counted them.
-    """
-    return RedirectTarget("salary.edit_profile", {"profile_id": profile_id})
+#: What the update door says of a raise another action changed while the form
+#: was open: at the stale-form pre-check and at the flush-time check alike.
+_RAISE_STALE_MESSAGE = (
+    "This raise was changed by another action while you were "
+    "editing.  Please reload and try again."
+)
 
 
 # ── Raises ─────────────────────────────────────────────────────────
@@ -96,17 +95,25 @@ def _edit_page(profile_id: int) -> RedirectTarget:
 @salary_bp.route("/salary/<int:profile_id>/raises", methods=["POST"])
 @require_owner
 def add_raise(profile_id):
-    """Add a raise to a salary profile."""
+    """Add a raise to a salary profile.
+
+    The payload is loaded ONCE through the shared loader
+    (:func:`~app.routes._form_errors.load_form_or_refuse`, task
+    plan#3125), so a refused raise is said in the schema's own words --
+    a yearly raise from February 29, an unanswered end year, both or neither
+    of a percentage and a flat amount -- rather than the generic prompt.
+    On an htmx request the Raises card is redrawn with the reason and the
+    form as typed (:class:`~app.routes.salary._helpers.RaiseRefusal`, task
+    plan#3136); a plain post flashes it.
+    """
     profile = get_or_404(SalaryProfile, profile_id)
     if profile is None:
         abort(404)
 
-    errors = _raise_schema.validate(request.form)
-    if errors:
-        flash("Please correct the highlighted errors and try again.", "danger")
-        return redirect(url_for("salary.edit_profile", profile_id=profile_id))
-
-    data = _raise_schema.load(request.form)
+    payload = load_form_or_refuse(_raise_schema, RaiseRefusal(profile))
+    if isinstance(payload, Response):
+        return payload
+    data = payload
 
     # Convert percentage input (e.g. 3 → 0.03) for storage.
     if data.get("percentage") is not None:
@@ -121,11 +128,11 @@ def add_raise(profile_id):
     user_id = current_user.id
 
     try:
-        _regenerate_salary_transactions(profile)
+        _regenerate_salary_transactions(BalanceContext.build(user_id), profile)
         db.session.commit()
     except IntegrityError as exc:
         # Duplicate-raise double-submit (F-051 / C-23): the composite
-        # unique ``uq_salary_raises_profile_type_year_month`` rejects
+        # unique ``uq_salary_raises_profile_type_date`` rejects
         # the second INSERT when the user clicks Save twice in a row,
         # the browser retries on a flaky network, or the back button
         # is used to re-submit the form.  Roll back and treat as
@@ -141,7 +148,7 @@ def add_raise(profile_id):
                 user_id, profile_id,
             )
             flash("Failed to add raise. Please try again.", "danger")
-            return redirect(url_for("salary.edit_profile", profile_id=profile_id))
+            return _edit_page(profile_id).to_response()
         logger.info(
             "Duplicate salary raise prevented on profile %d "
             "(idempotent success)", profile_id,
@@ -197,7 +204,7 @@ def delete_raise(raise_id):
     db.session.delete(salary_raise)
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="delete_raise",
@@ -235,9 +242,8 @@ def update_raise(raise_id):
 
     Optimistic locking (commit C-18 / F-010): the edit form ships
     ``version_id`` as a hidden input populated by app.js.  A stale
-    submission is rejected with a flash + redirect; the
-    SQLAlchemy-tier check catches the truly-concurrent case at
-    flush time and produces the same response.
+    submission is refused with a warning; the SQLAlchemy-tier check catches
+    the truly-concurrent case at flush time and says the same sentence.
 
     Recoverable failures during the regenerate + commit are delegated to
     :func:`regenerate_commit_or_report`, which returns the flash +
@@ -246,7 +252,13 @@ def update_raise(raise_id):
     :class:`~sqlalchemy.exc.IntegrityError` (F-051/C-23, surfaced as a
     warning), and any other DB error (C-46/F-145, a danger flash).  The
     route keeps only the input-validation and stale-form pre-check guard
-    clauses.
+    clauses; the first loads the payload once through the shared loader, as
+    :func:`add_raise` does, so a refusal is said in its own words.  Both
+    answer through :class:`~app.routes.salary._helpers.RaiseRefusal` (task
+    plan#3136): on an htmx request the card is redrawn with the reason and
+    the form reopened in edit mode as typed, its posted version included, so
+    a stale form saved again is refused again rather than written over the
+    other action; a plain post flashes and redirects.
     """
     salary_raise = get_owned_via_parent(
         SalaryRaise, raise_id, "salary_profile",
@@ -255,13 +267,14 @@ def update_raise(raise_id):
         abort(404)
 
     profile = salary_raise.salary_profile
+    refuse = RaiseRefusal(
+        profile, edit_url=url_for("salary.update_raise", raise_id=raise_id),
+    )
 
-    errors = _raise_update_schema.validate(request.form)
-    if errors:
-        flash("Please correct the highlighted errors and try again.", "danger")
-        return redirect(url_for("salary.edit_profile", profile_id=profile.id))
-
-    data = _raise_update_schema.load(request.form)
+    payload = load_form_or_refuse(_raise_update_schema, refuse)
+    if isinstance(payload, Response):
+        return payload
+    data = payload
 
     # Stale-form check (commit C-18 / F-010).
     submitted_version = data.pop("version_id", None)
@@ -271,12 +284,7 @@ def update_raise(raise_id):
             "(submitted=%d, current=%d)",
             raise_id, submitted_version, salary_raise.version_id,
         )
-        flash(
-            "This raise was changed by another action while you were "
-            "editing.  Please reload and try again.",
-            "warning",
-        )
-        return redirect(url_for("salary.edit_profile", profile_id=profile.id))
+        return refuse(_RAISE_STALE_MESSAGE, "warning")
 
     # Convert percentage input (e.g. 3 → 0.03) for storage.
     if data.get("percentage") is not None:
@@ -287,15 +295,12 @@ def update_raise(raise_id):
             setattr(salary_raise, field_name, value)
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="update_raise",
             log_id=raise_id,
-            flash_message=(
-                "This raise was changed by another action while you were "
-                "editing.  Please reload and try again."
-            ),
+            flash_message=_RAISE_STALE_MESSAGE,
             redirect=_edit_page(profile.id),
         ),
         error_ctx=DbErrorContext(
@@ -306,7 +311,7 @@ def update_raise(raise_id):
             redirect=_edit_page(profile.id),
         ),
         # Duplicate-key collision on update (F-051 / C-23): the user edited
-        # this raise's (type, year, month) tuple onto one another active
+        # this raise's (type, start date) pair onto one another active
         # raise on the same profile already holds -- a recoverable warning,
         # not a 500.  Any other IntegrityError falls through to error_ctx.
         on_integrity=UniqueViolationContext(
@@ -484,8 +489,9 @@ def add_line(profile_id):
 
     # ONE read pass for the pre-write side (the 2026-08-16 ruling: a route
     # builds it, producers below take it): the calendar the line's rule is
-    # derived from and authored against.  Regeneration afterwards builds its
-    # own, as a writer must.
+    # derived from and authored against.  The regeneration afterwards is
+    # handed a second, built after the write; whether it may take this one
+    # is finding plan#1589's.
     ctx = BalanceContext.build(current_user.id)
     _settle_line_cadence(data, ctx, stored=None)
     spec = recurrence_spec_for_create(
@@ -535,7 +541,7 @@ def add_line(profile_id):
         )
         if isinstance(authored, Response):
             return authored
-        _regenerate_salary_transactions(profile)
+        _regenerate_salary_transactions(BalanceContext.build(user_id), profile)
         db.session.commit()
     except IntegrityError as exc:
         # Duplicate-deduction double-submit (F-052 / C-23): the
@@ -555,7 +561,7 @@ def add_line(profile_id):
                 user_id, profile_id,
             )
             flash("Failed to add payroll line. Please try again.", "danger")
-            return redirect(url_for("salary.edit_profile", profile_id=profile_id))
+            return _edit_page(profile_id).to_response()
         attempted_name = data.get("name", "")
         logger.info(
             "Duplicate payroll line prevented on profile %d "
@@ -630,7 +636,7 @@ def delete_line(line_id):
     db.session.delete(deduction)
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="delete_line",
@@ -745,7 +751,7 @@ def update_line(line_id):
             "were editing.  Please reload and try again.",
             "warning",
         )
-        return redirect(url_for("salary.edit_profile", profile_id=profile.id))
+        return _edit_page(profile.id).to_response()
 
     # Re-point, author, or clear the line's cadence rule from the payload
     # (plan step salary:R15-c), through the dispatcher every recurrence
@@ -753,9 +759,9 @@ def update_line(line_id):
     # (:func:`~app.routes._recurrence_form_helpers.resolve_recurrence_rule_for_update`)
     # once the derived facts are settled in (:func:`_settle_line_cadence`).
     # The pass is the PRE-WRITE one its refusals read (plan step R7d-f) and
-    # the calendar the re-author resolves against; regeneration below builds
-    # its own after the write.  The dispatcher pops every recurrence key, so
-    # the field loop below sees none.
+    # the calendar the re-author resolves against; the regeneration below is
+    # handed a second, built after the write (finding plan#1589).  The
+    # dispatcher pops every recurrence key, so the field loop below sees none.
     ctx = BalanceContext.build(current_user.id)
     _settle_line_cadence(data, ctx, stored=deduction.recurrence_rule)
     refusal = resolve_recurrence_rule_for_update(
@@ -784,7 +790,7 @@ def update_line(line_id):
             setattr(deduction, field_name, value)
 
     response = regenerate_commit_or_report(
-        lambda: _regenerate_salary_transactions(profile),
+        lambda: _regenerate_salary_transactions(BalanceContext.build(current_user.id), profile),
         stale_ctx=StaleConflictContext(
             logger=logger,
             log_label="update_line",

@@ -133,7 +133,7 @@
     <label class="form-label" for="assump-raise-end-mode-{{ ra.raise_id }}">
       {{ ra.raise_type|title }}
       {% if ra.percentage %}{{ "%.2f"|format(ra.percentage|to_percent) }}%{% else %}{{ money(ra.flat_amount) }}{% endif %}
-      from {{ ra.effective_month|month_name(abbr=true) }} {{ ra.effective_year }}
+      from {{ ra.effective_date.strftime('%b %-d, %Y') }}
     </label>
     <select id="assump-raise-end-mode-{{ ra.raise_id }}"
             name="{{ mode_name }}"
@@ -141,7 +141,7 @@
       <option value="none"{% if shown_mode == 'none' %} selected{% endif %}>no end year</option>
       <option value="year"{% if shown_mode == 'year' %} selected{% endif %}>ends after</option>
     </select>
-    <input type="number" step="1" min="{{ ra.effective_year }}" max="2100"
+    <input type="number" step="1" min="{{ ra.effective_date.year }}" max="2100"
            id="assump-raise-end-year-{{ ra.raise_id }}"
            name="{{ year_name }}" placeholder="year"
            class="form-control form-control-sm retire-assump-input retire-assump-input--year whatif-param js-whatif-input {% if errors and year_name in errors %}is-invalid{% endif %}"

@@ -21,7 +21,6 @@ from datetime import (
     timezone as _real_timezone,
 )
 from decimal import Decimal
-from html.parser import HTMLParser
 
 import pytest
 from sqlalchemy import exc as sa_exc
@@ -3517,6 +3516,7 @@ def make_salary_profile(
 
     filing = db_session.query(FilingStatus).first()
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         filing_status_id=filing.id,
@@ -3531,7 +3531,7 @@ def make_salary_profile(
 
 
 def make_recurring_raise(
-    profile_id, db_session, *, effective_year, effective_month=1,
+    profile_id, db_session, *, effective_date,
     percentage=None, terminal_year=None,
 ):
     """Build and add ONE recurring percentage raise on a profile (uncommitted).
@@ -3545,8 +3545,8 @@ def make_recurring_raise(
     Args:
         profile_id: The :class:`~app.models.salary_profile.SalaryProfile` id.
         db_session: The test ``db.session``.
-        effective_year: The year the raise first applies.
-        effective_month: The month within that year (default January).
+        effective_date: The day the raise starts, which it repeats on every
+            later year it is believed.
         percentage: The fractional raise (Decimal); defaults to
             ``Decimal("0.0500")``, a 5% merit raise.
         terminal_year: The last year it is believed, ``None`` for no end.
@@ -3563,8 +3563,7 @@ def make_recurring_raise(
     row = SalaryRaise(
         salary_profile_id=profile_id,
         raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
-        effective_month=effective_month,
-        effective_year=effective_year,
+        effective_date=effective_date,
         percentage=Decimal("0.0500") if percentage is None else percentage,
         is_recurring=True,
         terminal_year=terminal_year,
@@ -8725,7 +8724,7 @@ def counting_calls(*targets):
 
     **The ONE instrument for "how many times did this render run that"**,
     shared by the architecture gate
-    (``tests/test_arch/test_one_read_pass_per_render.py``) and the render
+    (``tests/test_arch/test_one_read_pass_per_render/``) and the render
     harness (``tests/manual/verify_retirement_render.py``) -- the same sharing
     :func:`counting_read_passes` below states its own case for, and for the
     same reason: two copies of a measuring instrument is the shape where one is
@@ -8776,7 +8775,7 @@ def counting_read_passes():
     """Count every ``BalanceContext.build`` while the block runs.
 
     **The ONE instrument for "how many read passes did this open"**, shared by
-    the architecture gate (``tests/test_arch/test_one_read_pass_per_render.py``)
+    the architecture gate (``tests/test_arch/test_one_read_pass_per_render/``)
     and the cutover harness (``tests/manual/verify_retirement_pass_cutover.py``)
     -- which is what plan step ``C2-f2d-1``'s adversarial code review asked for
     after both shipped their own copy of it. Two copies of a measuring
@@ -9976,89 +9975,6 @@ def build_pay_stub_world(owner):
     make_line_cadence_rule(db.session, lines["dental"], 12)
     db.session.commit()
     return profile, lines
-
-
-class _FormControls(HTMLParser):
-    """Every control of the ONE form posting to *action*, as a browser submits it.
-
-    Repeated names (the stub form's one-off rows) keep every value in order;
-    an ``<input>`` submits its ``value`` and a ``<select>`` its ``selected``
-    option, else its first, and a select with no option submits nothing.  A
-    control without a name submits nothing.  It reads only those two shapes:
-    any other control inside the form -- an input of any type but hidden,
-    text, number or date (a checkbox or radio, say), a ``<textarea>``, a named
-    button, a disabled input, a disabled or multiple select, a disabled
-    option or an option without a ``value`` in a named select (a browser
-    posts such an option's text), or a disabled ``<fieldset>`` or
-    ``<optgroup>`` -- fails the reading loudly rather than being posted as a
-    browser would not post it.  A disabled fieldset fails whole, even a
-    control in its first legend, which a browser does post: the safe side.
-    The reader of the pay stub form's and the stub setting's route suites
-    (plan step salary:S11-c-2b, its delta review's LOW-3 and LOW-4).
-    """
-
-    #: Input types a browser posts by their ``value`` alone.
-    _PLAIN_INPUTS = frozenset({"hidden", "text", "number", "date"})
-
-    def __init__(self, action):
-        super().__init__()
-        self.action = action
-        self.controls: "dict[str, list[str]]" = {}
-        self._inside = False
-        self._select = None
-        self._chosen = None
-
-    def handle_starttag(self, tag, attrs):
-        """Open the form, record an input, or read a select's options."""
-        attributes = dict(attrs)
-        if tag == "form":
-            self._inside = attributes.get("action") == self.action
-        elif self._inside and tag in ("textarea", "button") and attributes.get("name"):
-            raise AssertionError(f"the reader does not post a named <{tag}>")
-        elif self._inside and tag in ("fieldset", "optgroup") and "disabled" in attributes:
-            raise AssertionError(f"the reader does not post a disabled <{tag}>")
-        elif self._inside and tag == "input" and attributes.get("name"):
-            plain = attributes.get("type", "text") in self._PLAIN_INPUTS
-            if not plain or "disabled" in attributes:
-                raise AssertionError(f"the reader does not post {attributes}")
-            self.controls.setdefault(attributes["name"], []).append(attributes.get("value") or "")
-        elif self._inside and tag == "select":
-            if "disabled" in attributes or "multiple" in attributes:
-                raise AssertionError(f"the reader does not post {attributes}")
-            self._select, self._chosen = attributes.get("name"), None
-        elif self._select is not None and tag == "option":
-            if "value" not in attributes or "disabled" in attributes:
-                raise AssertionError(f"the reader does not post the option {attributes}")
-            if self._chosen is None or "selected" in attributes:
-                self._chosen = attributes["value"]
-
-    def handle_endtag(self, tag):
-        """Close a select, submitting its choice, or close the form."""
-        if tag == "select" and self._select is not None:
-            if self._chosen is not None:
-                self.controls.setdefault(self._select, []).append(self._chosen)
-            self._select = None
-        elif tag == "form":
-            self._inside = False
-
-
-def rendered_form_controls(html, action):
-    """What the form posting to *action* submits, read off the rendered *html*.
-
-    A route test posts this rather than a hand-picked payload, so a control
-    the template renders is posted as a browser posts it.
-
-    Args:
-        html: A rendered page.
-        action: The form's ``action``, as the page renders it.
-
-    Returns:
-        ``{name: [value, ...]}``, a repeated name's values in order.
-    """
-    reader = _FormControls(action)
-    reader.feed(html)
-    assert reader.controls, f"no form posts to {action}"
-    return reader.controls
 
 
 def add_test_pay_stub(profile, payday, base_pay, taxes, lines=()):

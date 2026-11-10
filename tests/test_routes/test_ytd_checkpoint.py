@@ -43,6 +43,7 @@ def _make_profile(seed_user, name="Checkpoint Route Profile"):
     """
     filing_status = db.session.query(FilingStatus).filter_by(name="single").one()
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         name=name,

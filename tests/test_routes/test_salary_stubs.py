@@ -50,13 +50,13 @@ from app.models.paycheck_line import PaycheckLine
 from app.models.salary_profile import SalaryProfile
 from app.services import pay_stub_service
 from app.services.balance_at import BalanceContext
+from tests._form_controls import rendered_form_controls
 from tests._test_helpers import (
     build_pay_stub_world,
     freeze_today,
     make_flat_paycheck_line,
     make_income_template,
     make_salary_profile,
-    rendered_form_controls,
 )
 
 _PAYDAY = "2026-03-27"

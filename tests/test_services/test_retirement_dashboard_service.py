@@ -159,6 +159,7 @@ class TestThePicturesPublishedSurface:
         with app.app_context():
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=filing.id,
@@ -221,10 +222,13 @@ def _paid(pay):
     salary:X-av-3a (ruling R-SAL59); with no raise the walk answers the
     entry's pay on every later payday, so a projected final year is exactly
     *pay* and the case's figures depend only on the arithmetic it grades.
+    Its pay periods end six days before payday (ruling plan#3096), as every
+    profile the suite builds states.
     """
-    return SalaryProfile(pay_entries=[
-        SalaryPayEntry(payday=_FIRST_PAYDAY, amount=Decimal(pay)),
-    ])
+    return SalaryProfile(
+        pay_entries=[SalaryPayEntry(payday=_FIRST_PAYDAY, amount=Decimal(pay))],
+        period_end_days_before_payday=6,
+    )
 
 
 def _gap_inputs(profile, cadence_days=14):
@@ -590,6 +594,7 @@ class TestTheRenderDayOpensTheSalaryPath:
         with app.app_context():
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 filing_status_id=filing.id,
@@ -961,6 +966,7 @@ class TestRetirementProjectionEntryAware:
             # Active salary profile so the gap path is reachable.
             filing = db.session.query(FilingStatus).first()
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=user.id,
                 scenario_id=scenario.id,
                 filing_status_id=filing.id,
@@ -1214,6 +1220,7 @@ def _seed_active_salary_profile(db_session, user, scenario):
     """
     filing = db_session.query(FilingStatus).first()
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user.id,
         scenario_id=scenario.id,
         filing_status_id=filing.id,

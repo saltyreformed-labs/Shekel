@@ -68,6 +68,7 @@ from app.schemas.validation import (
     SalaryProfileCreateSchema,
     SalaryProfileUpdateSchema,
 )
+from tests._stub_period import stub_period_on
 from tests._test_helpers import constraint_name_from, start_test_pay_list
 
 
@@ -88,7 +89,8 @@ CK_USER_SWR = "ck_user_settings_valid_safe_withdrawal"
 CK_USER_TAX_RATE = "ck_user_settings_valid_estimated_tax_rate"
 CK_DEDUCTION_INFL_RATE = "ck_paycheck_lines_valid_inflation_rate"
 CK_DEDUCTION_INFL_MONTH = "ck_paycheck_lines_valid_inflation_month"
-CK_RAISE_YEAR = "ck_salary_raises_valid_effective_year"
+CK_RAISE_DATE = "ck_salary_raises_valid_effective_date"
+CK_RAISE_LEAP_DAY = "ck_salary_raises_recurring_not_on_february_29"
 CK_STATE_TAX_DEDUCTION = "ck_state_tax_configs_nonneg_standard_deduction"
 CK_STATE_TAX_YEAR = "ck_state_tax_configs_valid_tax_year"
 CK_FICA_TAX_YEAR = "ck_fica_configs_valid_tax_year"
@@ -112,8 +114,7 @@ class TestRaiseSchemaBounds:
         """Build a baseline raise payload with valid required fields."""
         base = {
             "raise_type_id": "1",
-            "effective_month": "1",
-            "effective_year": "2026",
+            "effective_date": "2026-01-01",
             "is_recurring": "false",
         }
         base.update(overrides)
@@ -324,6 +325,7 @@ class TestSalaryProfileSchemaBounds:
             "name": "Test Profile",
             "pay_amount": "3846.15",  # $100,000.00 a year / 26
             "pay_payday": "2026-01-02",
+            **stub_period_on("2026-01-02"),
             "filing_status_id": str(single_id),
             "state_code": "NC",
         }
@@ -811,6 +813,7 @@ class TestPaycheckLineCheck:
             .filter_by(name="single").one().id
         )
         profile = SalaryProfile(
+            period_end_days_before_payday=6,
             user_id=seed_user["user"].id,
             scenario_id=seed_user["scenario"].id,
             filing_status_id=single_id,
@@ -889,7 +892,27 @@ class TestPaycheckLineCheck:
 
 
 class TestSalaryRaiseCheck:
-    """``salary.salary_raises.effective_year`` CHECK (F-077)."""
+    """``salary.salary_raises.effective_date`` CHECKs (F-077; plan#3048).
+
+    The year window moved onto the start DATE when migration ``6740ce13e174``
+    replaced the year and month with it (ruling plan#3090), and the date
+    gained the one rule the pair could not state: a recurring raise never
+    starts on February 29.
+    """
+
+    @staticmethod
+    def _insert(profile_id, type_id, starts, *, recurring=False):
+        """Raw-INSERT a 3% raise starting on *starts* (an SQL date literal or NULL)."""
+        db.session.execute(
+            text(
+                "INSERT INTO salary.salary_raises "
+                "(salary_profile_id, raise_type_id, effective_date, "
+                " percentage, is_recurring, version_id, created_at) "
+                f"VALUES (:pid, :tid, {starts}, 0.0300, :rec, 1, now())"
+            ),
+            {"pid": profile_id, "tid": type_id, "rec": recurring},
+        )
+        db.session.flush()
 
     def _make_profile(self, seed_user):
         """Insert a single filer's salary profile, its pay list started at $3,846.15."""
@@ -898,6 +921,7 @@ class TestSalaryRaiseCheck:
             .filter_by(name="single").one().id
         )
         profile = SalaryProfile(
+            period_end_days_before_payday=6,
             user_id=seed_user["user"].id,
             scenario_id=seed_user["scenario"].id,
             filing_status_id=single_id,
@@ -908,59 +932,50 @@ class TestSalaryRaiseCheck:
         db.session.commit()
         return profile
 
-    def test_effective_year_below_2000_rejected(self, app, seed_user):
-        """A raw INSERT of a raise effective in 1999 is refused by its 2000-2100 year CHECK."""
+    def _type_id(self, name):
+        """The id of the raise type *name*."""
+        return db.session.query(RaiseType).filter_by(name=name).one().id
+
+    @pytest.mark.parametrize("starts", ["DATE '1999-12-31'", "DATE '2101-01-01'"])
+    def test_a_start_outside_2000_to_2100_rejected(self, app, seed_user, starts):
+        """A raw INSERT starting a day outside the window is refused by its CHECK."""
         with app.app_context():
             profile = self._make_profile(seed_user)
-            type_id = (
-                db.session.query(RaiseType)
-                .filter_by(name="merit").one().id
-            )
             with pytest.raises(IntegrityError) as info:
-                db.session.execute(
-                    text(
-                        "INSERT INTO salary.salary_raises "
-                        "(salary_profile_id, raise_type_id, "
-                        " effective_year, effective_month, "
-                        " percentage, is_recurring, version_id, "
-                        " created_at) "
-                        "VALUES (:pid, :tid, 1999, 1, 0.0300, "
-                        "        false, 1, now())"
-                    ),
-                    {"pid": profile.id, "tid": type_id},
-                )
-                db.session.flush()
+                self._insert(profile.id, self._type_id("merit"), starts)
             db.session.rollback()
-            assert _constraint_name_from(info.value) == CK_RAISE_YEAR
+            assert _constraint_name_from(info.value) == CK_RAISE_DATE
 
-    def test_effective_year_null_rejected(self, app, seed_user):
-        """Storage rejects a NULL effective_year (DH-#57 NOT NULL).
+    def test_a_null_start_rejected(self, app, seed_user):
+        """Storage rejects a raise with no start date (NOT NULL).
 
-        The never-UI-reachable NULL-year recurring raise was retired:
-        ``effective_year`` is NOT NULL at the storage tier, in lockstep
-        with the create/update schema's ``required=True``.  A raw INSERT
-        of NULL must raise the not-null IntegrityError.
+        The never-UI-reachable NULL-year recurring raise was retired at
+        DH-#57, and the date that replaced the year is NOT NULL the same way,
+        in lockstep with the create/update schema's ``required=True``.
         """
         with app.app_context():
             profile = self._make_profile(seed_user)
-            type_id = (
-                db.session.query(RaiseType)
-                .filter_by(name="cola").one().id
-            )
             with pytest.raises(IntegrityError):
-                db.session.execute(
-                    text(
-                        "INSERT INTO salary.salary_raises "
-                        "(salary_profile_id, raise_type_id, "
-                        " effective_year, effective_month, "
-                        " percentage, is_recurring, version_id, "
-                        " created_at) "
-                        "VALUES (:pid, :tid, NULL, 1, 0.0300, "
-                        "        true, 1, now())"
-                    ),
-                    {"pid": profile.id, "tid": type_id},
+                self._insert(profile.id, self._type_id("cola"), "NULL", recurring=True)
+            db.session.rollback()
+
+    def test_a_recurring_start_on_february_29_rejected(self, app, seed_user):
+        """A recurring raise dated February 29 is refused by its own CHECK."""
+        with app.app_context():
+            profile = self._make_profile(seed_user)
+            with pytest.raises(IntegrityError) as info:
+                self._insert(
+                    profile.id, self._type_id("merit"), "DATE '2028-02-29'",
+                    recurring=True,
                 )
-                db.session.flush()
+            db.session.rollback()
+            assert _constraint_name_from(info.value) == CK_RAISE_LEAP_DAY
+
+    def test_a_one_time_start_on_february_29_accepted(self, app, seed_user):
+        """The leap-day rule binds only a raise that repeats."""
+        with app.app_context():
+            profile = self._make_profile(seed_user)
+            self._insert(profile.id, self._type_id("merit"), "DATE '2028-02-29'")
             db.session.rollback()
 
 

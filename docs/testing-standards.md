@@ -141,7 +141,12 @@ must-knows; a fact lives in one tier and the other tiers point at it.
   exactly (15,166 items, none in two shards, the container tests included). Quote none of these
   without the date.
 - **Test timeout:** 50 s per test, configured in `pytest.ini`; it covers setup + call + teardown,
-  and anything past it raises a timeout error rather than hanging the suite.
+  and anything past it raises a timeout error rather than hanging the suite. It is the one limit on
+  a test's idle time: the test cluster sets no idle-in-transaction limit (ruling plan#3027), so a
+  test idle on a seed fixture's open transaction is bounded only by this cap. One idle short of it
+  passes; one idle past it fails on it, named. The cluster still bounds one statement and one lock
+  wait (`scripts/private_cluster.py`, `_SETTINGS`), which raise PostgreSQL's own statement-timeout
+  or lock-timeout error in the test.
   **The cap is a hang detector sized to CI's clock, and CI's clock is not this host's.** Measured
   2026-09-22 under the six-shard layout (run 35808935180, five of six shards on the slowest CPU the
   fleet drew, an EPYC 7763): the slowest test was `test_pay_grid_month_kinds.py`'s

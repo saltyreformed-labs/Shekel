@@ -22,6 +22,7 @@ from app.schemas.validation._helpers import (
     RowId,
     _NON_NEGATIVE_MONETARY,
     _PERCENT_INPUT_RANGE,
+    _RAISE_DATE_RANGE,
     _RAISE_YEAR_RANGE,
     _normalize_empty_inputs,
 )
@@ -49,6 +50,8 @@ _PAY_AMOUNT_RANGE = validate.Range(
 )
 #: The window a pay entry's payday may be typed in: the calendar's own.
 _PAYDAY_RANGE = validate.Range(min=CALENDAR_DATE_MIN, max=CALENDAR_DATE_MAX)
+#: ``(month, day)`` of the one date a yearly repeat cannot land on every year.
+_LEAP_DAY = (2, 29)
 
 
 def _require_supported_state(value: str) -> None:
@@ -129,6 +132,12 @@ class SalaryProfileCreateSchema(BaseSchema):
     # rulings R-SAL102 and R-SAL105): "no", the column's own default, unless
     # the form says otherwise.
     stub_gross_includes_after_tax = fields.Boolean(load_default=False)
+    # One stub's Pay Date and Period End (plan#3048, ruling plan#3096: "a new
+    # job asks for the two dates when you set it up").  Whether the Pay Date
+    # is a payday, and what gap the two state, are the calendar's questions
+    # (``salary_pay_period.days_before_payday``).
+    stub_pay_date = fields.Date(required=True, validate=_PAYDAY_RANGE)
+    stub_period_end = fields.Date(required=True, validate=_PAYDAY_RANGE)
 
 
 class SalaryProfileUpdateSchema(BaseSchema):
@@ -172,6 +181,13 @@ class SalaryProfileUpdateSchema(BaseSchema):
     # of exactly that: an unticked checkbox submits nothing, so "no" could
     # never be saved over a "yes" (plan step salary:S11-c-2b, R-SAL105).
     stub_gross_includes_after_tax = fields.Boolean()
+    # The pay-period pair (ruling plan#3096), absent together to leave the
+    # stored gap alone like every field above.  One without the other states
+    # no gap, which ``salary_pay_period.days_before_payday`` refuses in words:
+    # this form flashes a schema error as "correct the highlighted errors"
+    # and highlights nothing.
+    stub_pay_date = fields.Date(validate=_PAYDAY_RANGE)
+    stub_period_end = fields.Date(validate=_PAYDAY_RANGE)
 
     # Optimistic-locking pin (commit C-18).
     version_id = RowId(validate=validate.Range(min=1))
@@ -209,10 +225,10 @@ class RaiseCreateSchema(BaseSchema):
         return _normalize_empty_inputs(self, data)
 
     raise_type_id = RowId(required=True)
-    effective_month = fields.Integer(
-        required=True, validate=validate.Range(min=1, max=12)
-    )
-    effective_year = fields.Integer(required=True, validate=_RAISE_YEAR_RANGE)
+    # The day the raise starts (plan step salary plan#3048, ruling plan#3090):
+    # the window is ``ck_salary_raises_valid_effective_date``'s, built from the
+    # one home of its years (``salary_raises.RAISE_YEAR_MIN`` / ``_MAX``).
+    effective_date = fields.Date(required=True, validate=_RAISE_DATE_RANGE)
     # F-011 / C-24: Tightened from Range(-100, 1000) to a positive,
     # column-fitting bound.  The user enters percent (e.g. "3" for a
     # 3% raise); the route divides by 100 before persistence into
@@ -232,7 +248,7 @@ class RaiseCreateSchema(BaseSchema):
         ),
     )
     # F-011 / C-24: Tightened from Range(-1e7, 1e7) to a positive,
-    # column-fitting bound on a flat-dollar raise per period.
+    # column-fitting bound on a flat-dollar raise, dollars a year (R-SAL65).
     # ``salary.salary_raises.flat_amount`` is ``Numeric(12, 2)``; the
     # DB CHECK ``flat_amount > 0`` rejects zero/negative.  $10M is
     # the schema-layer ceiling -- well above any realistic raise but
@@ -288,16 +304,15 @@ class RaiseCreateSchema(BaseSchema):
         generic failure; neither copy is the source of truth for the other,
         and the database's is the one that cannot be bypassed.
 
-        **The messages are not rendered on the control today**, and an
-        adversarial review of plan step salary:S3-c corrected a draft of this
-        paragraph that said they were.  ``salary.add_raise`` and
-        ``update_raise`` flash "Please correct the highlighted errors and try
-        again." and redirect, and ``_raises_section.html`` renders neither
-        ``errors`` nor the submitted values -- so nothing is highlighted and
-        the form comes back empty.  That is the raise form's long-standing
-        shape (``validate_one_method`` has always refused the same way), not
-        something this step introduced, and fixing it is a change to that
-        form rather than to this schema.
+        **Each message is said in its own words since task plan#3125**:
+        ``salary.add_raise`` and ``update_raise`` load through the shared
+        loader (:func:`~app.routes._form_errors.load_form_or_refuse`), whose
+        allowlist carries ``raise_end_mode`` and ``terminal_year``.  Until then
+        both doors flashed "Please correct the highlighted errors and try
+        again." for every refusal, on a form that highlights nothing.
+        Nothing is rendered ON the control: the message is the reason box
+        the Raises card is redrawn with on an htmx save (task plan#3136),
+        and the flash on a plain post.
 
         Raises:
             ValidationError: The end year contradicts the raise's kind, is
@@ -314,12 +329,12 @@ class RaiseCreateSchema(BaseSchema):
                 )
             return
 
-        # ``effective_year`` is required and this hook is skipped on field
+        # ``effective_date`` is required and this hook is skipped on field
         # errors (marshmallow's ``skip_on_field_errors`` default), so it is
         # present here.
         try:
             end_year_of(
-                data.get("raise_end_mode"), year, data["effective_year"],
+                data.get("raise_end_mode"), year, data["effective_date"].year,
             )
         except EndYearError as exc:
             raise ValidationError(
@@ -368,18 +383,48 @@ class RaiseCreateSchema(BaseSchema):
         mode = data.pop("raise_end_mode", None)
         if data.get("is_recurring", False):
             data["terminal_year"] = end_year_of(
-                mode, data.get("terminal_year"), data["effective_year"],
+                mode, data.get("terminal_year"), data["effective_date"].year,
             )
         data.setdefault("terminal_year", None)
         return data
 
     @validates_schema
+    def validate_recurring_start_day(self, data, **kwargs):
+        """Refuse a RECURRING raise that starts on February 29.
+
+        A recurring raise repeats on its start's month and day every year it
+        is believed (ruling **plan#3090**), and three years in four have no
+        February 29 to repeat on.  The form refuses it here, in words, before
+        ``ck_salary_raises_recurring_not_on_february_29`` could.  The rule is
+        the Recur box's and the date's together, so it lands under
+        marshmallow's whole-form key, which the shared loader's allowlist
+        carries (rulings **plan#3135** and **plan#3137**, task plan#3125): the
+        raise doors flash it, while a date merely missing keeps the generic
+        prompt.
+
+        Raises:
+            ValidationError: On a recurring raise dated February 29.
+        """
+        starts = data.get("effective_date")
+        if starts is None or not data.get("is_recurring", False):
+            return
+        if (starts.month, starts.day) == _LEAP_DAY:
+            raise ValidationError(
+                "A raise that repeats every year can't start on February 29, "
+                "because most years don't have one. Start it on February 28 "
+                "or March 1."
+            )
+
+    @validates_schema
     def validate_one_method(self, data, **kwargs):
         """Require exactly one of ``percentage`` or ``flat_amount``.
 
-        A raise is either a percentage bump or a flat per-period dollar
-        amount, never both and never neither; the two columns are
-        mutually exclusive in ``salary.salary_raises``.
+        A raise is either a percentage bump or a flat dollar amount a year,
+        never both and never neither; the two columns are mutually exclusive
+        in ``salary.salary_raises``.  The refusal belongs to neither control,
+        so it lands under marshmallow's whole-form key, which the shared
+        loader's allowlist carries (ruling **plan#3135**), and its words name
+        the two boxes by their labels on the form.
 
         Raises:
             ValidationError: If both fields are set, or neither is.
@@ -388,7 +433,8 @@ class RaiseCreateSchema(BaseSchema):
         has_flat = data.get("flat_amount") is not None
         if has_pct == has_flat:
             raise ValidationError(
-                "Specify exactly one of percentage or flat_amount."
+                "Enter the raise as either a percentage or a flat amount a "
+                "year, but not both."
             )
 
 

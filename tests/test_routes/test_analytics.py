@@ -1880,6 +1880,7 @@ def _seed_taxes_profile(seed_user, db):
         _db.session.query(FilingStatus).filter_by(name="single").one()
     )
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=seed_user["user"].id,
         scenario_id=seed_user["scenario"].id,
         name="Taxes Tab Profile",
@@ -2017,6 +2018,7 @@ class TestTaxesTab:
         with app.app_context():
             first = _seed_taxes_profile(seed_user, db)
             second = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id, scenario_id=seed_user["scenario"].id,
                 name="Second Job", filing_status_id=first.filing_status_id,
                 state_code="NC", is_active=True, sort_order=1,
@@ -2154,6 +2156,7 @@ class TestTaxesTab:
                 .filter_by(name="married_jointly").one()
             )
             profile = SalaryProfile(
+                period_end_days_before_payday=6,
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,
                 name="MFJ Four Kids",

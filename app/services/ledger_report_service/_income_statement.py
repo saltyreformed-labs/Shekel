@@ -69,7 +69,7 @@ def compute_income_statement(
     the reader picked it from two reads of one table on one render.  **The
     read files its corrections on that same calendar** (plan task
     plan#2771), so the render derives the owner's schedule once
-    (``tests/test_arch/test_one_read_pass_per_render.py``).
+    (``tests/test_arch/test_one_read_pass_per_render/``).
 
     **And it closed a hole the route had to guard.**  This was
     ``db.session.get(PayPeriod, window.period_id)`` -- UNSCOPED, so a foreign

@@ -2,6 +2,7 @@
 ``tests/test_routes/test_optimistic_locking_c18.py``, moved verbatim by ``tools/split``.
 """
 
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -201,6 +202,7 @@ def _make_salary_profile(user_id, scenario_id):
         db.session.query(FilingStatus).filter_by(name="single").one()
     )
     profile = SalaryProfile(
+        period_end_days_before_payday=6,
         user_id=user_id,
         scenario_id=scenario_id,
         filing_status_id=filing_status.id,
@@ -221,8 +223,7 @@ def _make_salary_raise(profile_id):
     sraise = SalaryRaise(
         salary_profile_id=profile_id,
         raise_type_id=raise_type.id,
-        effective_month=6,
-        effective_year=2027,
+        effective_date=date(2027, 6, 1),
         percentage=Decimal("0.03"),
     )
     db.session.add(sraise)

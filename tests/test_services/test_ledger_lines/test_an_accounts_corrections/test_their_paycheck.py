@@ -89,7 +89,7 @@ class TestCorrectionPeriodAttribution:
         return period
 
     def test_a_correction_on_a_paychecks_last_day_files_in_that_paycheck(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """Two assertions on a period's LAST day book in that period, not the next.
 
@@ -148,7 +148,7 @@ class TestCorrectionPeriodAttribution:
             ) == Decimal("550.00")
 
     def test_a_period_appearing_around_the_day_refiles_the_correction(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """Generating the period that contains the day moves the correction into it.
 

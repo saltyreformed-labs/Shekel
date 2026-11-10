@@ -46,7 +46,7 @@ class TestPostedPurchaseEffect:
     a card purchase by the movement's own flag, one row at a time.
     """
 
-    def test_effect_matches_the_worked_out_net(self, app, db, seed_user):
+    def test_effect_matches_the_worked_out_net(self, app, seed_user):
         """The signed movement effect rides on top of the opening.
 
         Arithmetic: a $50 Paid expense (-50) and a $2000 Received income

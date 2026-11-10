@@ -1256,16 +1256,6 @@ class TestAFigureAndACategoryOnASiblingsCard:
             assert sibling.category_id == groceries
 
 
-def _submit_only(auth_client, row, keep, **changes):
-    """PATCH with only the *keep* controls off the card plus *changes* -- any HTTP client's payload."""
-    rendered = form_fields(
-        _card(auth_client, row), f"/transactions/{row.id}", attribute="hx-patch",
-    )
-    payload = [pair for pair in rendered if pair[0] in keep and pair[0] not in changes]
-    payload.extend(changes.items())
-    return auth_client.patch(f"/transactions/{row.id}", data=MultiDict(payload))
-
-
 class TestUnlockEditLock:
     """The PATCH handler's act order across the LOCK (plan step X-bi-7c).
 

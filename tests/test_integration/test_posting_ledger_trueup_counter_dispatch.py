@@ -420,7 +420,7 @@ class TestThePostedLedgerSelfMigrates:
     """An equity true-up re-points to the new counter once the account is re-typed."""
 
     def test_an_equity_trueup_re_points_to_unrealized_change(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """The true-up moves to the gain line and the linked leg does not move.
 

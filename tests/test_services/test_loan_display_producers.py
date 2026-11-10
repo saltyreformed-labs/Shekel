@@ -22,7 +22,7 @@ settled payment is confirmed regardless of the wall clock.  All money is
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -63,11 +63,6 @@ _P1_ROW = LoanPaymentHistoryRow(
 )
 # The stored ledger's tables, by name: what the display's two surfaces never read.
 _STORED_LEDGER_TABLES = ("journal_entries", "account_postings", "ledger_accounts")
-
-
-def _paid_on(year: int, month: int, day: int) -> datetime:
-    """Return a noon-UTC settle instant, so its civil date is unambiguous."""
-    return datetime(year, month, day, 12, 0, tzinfo=timezone.utc)
 
 
 def _make_split_loan(seed_user, db_session, *, escrow_annual=None, name="Split Loan"):

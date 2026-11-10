@@ -330,7 +330,7 @@ class TestTheLoanRulesNameKeys:
             _assert_the_chart_is_untouched(statements)
 
     def test_a_split_missing_a_component_still_nets_to_zero(
-        self, app, db, seed_user, seed_periods, monkeypatch,
+        self, app, seed_user, seed_periods, monkeypatch,
     ):
         """$150,000.00 on a loan trued up to $100,000.00, then the excess planted out.
 

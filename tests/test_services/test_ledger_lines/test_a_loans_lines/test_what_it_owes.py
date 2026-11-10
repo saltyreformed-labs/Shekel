@@ -290,7 +290,7 @@ class TestPostedLoanBalanceSums:
             assert read(_AS_OF) == Decimal("98492.49")
 
     def test_a_future_as_of_carries_the_confirmed_sum_flat(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """Past today the sum is unchanged -- there is nothing later to add.
 
@@ -524,7 +524,6 @@ class TestPrePeriodAnchor:
             bmap = posted_loan_balance_map(
                 loan.id, scenario_id, seed_periods,
             )
-            assert bmap is not None
             assert len(bmap) == len(seed_periods)
             assert set(bmap.values()) == {Decimal("250000.00")}, (
                 f"a pre-period opening read unevenly across period boundaries: "

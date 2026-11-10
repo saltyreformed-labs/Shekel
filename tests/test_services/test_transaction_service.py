@@ -1128,7 +1128,7 @@ class TestApplyRequestedStatusTheDoorVerb:
         return generate_row_of(template, period)
 
     def test_a_status_change_reconciles_the_ledger(
-        self, app, db, seed_user, seed_periods,
+        self, app, seed_user, seed_periods,
     ):
         """A settled status books the row's effect, in the same call.
 
@@ -1666,7 +1666,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
         return txn
 
     def test_a_correction_with_a_status_IN_HAND_does_BOTH(
-        self, app, db, seed_user, seed_periods,
+        self, app, seed_user, seed_periods,
     ):
         """The identity case: the figure lands, the status stays, the ledger moves.
 

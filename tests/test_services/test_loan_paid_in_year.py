@@ -27,7 +27,7 @@ N-7).  ``today`` is frozen after the seed window so every settled payment is
 confirmed regardless of the wall clock.  All money is ``Decimal`` from strings.
 """
 
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -51,11 +51,6 @@ from tests._test_helpers import (
 _FROZEN_TODAY = date(2027, 1, 1)
 
 
-def _paid_on(year: int, month: int, day: int) -> datetime:
-    """Return a noon-UTC settle instant, so its civil date is unambiguous."""
-    return datetime(year, month, day, 12, 0, tzinfo=timezone.utc)
-
-
 def _split_loan(seed_user, *, escrow_annual=None):
     """Create the synthetic split loan (origination $250k, trued to $100k)."""
     return create_loan_with_trueup(
@@ -67,7 +62,7 @@ def _split_loan(seed_user, *, escrow_annual=None):
 
 
 def _settle(seed_user, loan, period, cash, *, settled_on):
-    """Settle one Checking -> loan payment (auto-posts its ledger split)."""
+    """Settle one Checking -> loan payment in the test's session."""
     return create_settled_transfer(
         seed_user, db.session, seed_user["account"], loan, period,
         amount=cash, settled_on=settled_on,

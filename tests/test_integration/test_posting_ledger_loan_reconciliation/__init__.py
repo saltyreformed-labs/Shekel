@@ -47,7 +47,7 @@ against a displayed balance.  The invariants below are plan Section 8.
      Invariants 1-5 pin the LEDGER against the resolver via the read's unbounded
      net of the loan's own line (``_ledger_balance``); this pins the
      ``entry_date``-BOUNDED read of the same lines -- at a point in time
-     (``_posted_balance``) and at every period boundary (``_posted_period_map``)
+     (``_posted_balance``) and at every period boundary (``posted_loan_balance_map``)
      -- proven == the resolver on-schedule and divergent by exactly the extra /
      short principal off-schedule, including a pre-true-up payment, a mid-life
      true-up, a calendar-year boundary, and two scenarios.  Both windows are the
@@ -98,9 +98,7 @@ hand-computed at the unit level in
 ``tests/test_services/test_ledger_lines/test_a_loans_lines/``; the lifecycle wiring
 (settle / revert / delete / restore / true-up / rate / N1 back-post) and the
 full-cash-reversal CRITICAL regression are driven through their real chokepoints
-in ``tests/test_integration/test_loan_posting_wiring.py``; the backfill's
-idempotency / coverage / deploy-hook contract in
-``tests/test_integration/test_loan_posting_backfill.py``.  This oracle does NOT
+in ``tests/test_integration/test_loan_posting_wiring.py``.  This oracle does NOT
 re-assert those; it adds the reconciliation-level checks those suites do not make
 -- the parallel run against the resolver, the production-wide superseding
 invariant + completeness + trial-balance sweep, scenario / owner isolation of the
@@ -109,11 +107,10 @@ sits above the cash lifecycle / backfill suites.
 
 Loans and payments are built through the SAME production primitives the other
 suites use: ``create_loan_with_trueup`` (the canonical account factory + a
-controlled latest anchor) and ``create_settled_transfer`` (the sole transfer
-writer, which auto-posts the Step-2 cash entry AND -- via the Commit-5 wiring --
-the Step-4 correction).  So every reconciled row was produced exactly as marking a
-loan payment Paid produces it.  "today" is frozen to 2026-05-15 (after every
-payment period used) so the wiring's and the resolver's ``date.today()`` as-of is
-deterministic and every settled payment is historical.  All money is ``Decimal``
+controlled latest anchor) and ``create_settled_transfer`` (which settles through
+``transfer_service``, the sole transfer writer).  So every reconciled row was
+produced exactly as marking a loan payment Paid produces it.  "today" is frozen to
+2026-05-15 (after every payment period used) so the resolver's ``date.today()``
+as-of is deterministic and every settled payment is historical.  All money is ``Decimal``
 from strings, with the arithmetic shown per the testing standard.
 """

@@ -146,7 +146,7 @@ class TestADeletedRecordLeavesNoLine:
     """The answer follows the records: a line goes with the record behind it."""
 
     def test_a_settled_transfer_deleted_leaves_no_line(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """A settled transfer makes a line, and its hard delete takes it away.
 

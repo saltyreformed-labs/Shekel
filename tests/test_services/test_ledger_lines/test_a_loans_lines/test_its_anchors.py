@@ -14,7 +14,6 @@ from tests._ledger_reads import (
     correction_net_in_period,
     linked_key_of,
     posted_loan_balance_at,
-    posted_loan_balance_map,
     scenario_lines,
 )
 from tests._test_helpers import (
@@ -162,7 +161,7 @@ class TestTheAnchorsBookTheOwedBalance:
     """The opening + true-up corrections land the loan's own line on -(owed)."""
 
     def test_the_opening_books_the_original_principal(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """An origination-only loan books the opening: own -P0, equity +P0.
 
@@ -195,7 +194,7 @@ class TestTheAnchorsBookTheOwedBalance:
             ) == []
 
     def test_opening_and_trueup_drive_linked_to_negative_verified(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """Opening + true-up land the loan's own line on -(verified balance).
 
@@ -223,7 +222,7 @@ class TestTheAnchorsBookTheOwedBalance:
             ) == Decimal("150000.00")
 
     def test_trueup_matching_the_walk_books_nothing(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """A trueup equal to the walked balance books no true-up line.
 

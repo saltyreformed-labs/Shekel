@@ -600,7 +600,7 @@ class TestLoadLoanAccountIdsForUser:
     """
 
     def test_enumerator_returns_only_the_users_loans(
-        self, app, db, seed_user, seed_second_user,
+        self, app, seed_user, seed_second_user,
     ):
         """It filters LoanParams by owner, ascending.
 

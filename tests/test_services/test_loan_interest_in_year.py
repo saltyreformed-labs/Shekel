@@ -23,7 +23,7 @@ deleted hybrid); the value assertions are hand-computed, never the producer as i
 own oracle (plan N-7).
 """
 
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
@@ -41,11 +41,6 @@ from tests._test_helpers import (
 )
 
 ZERO = Decimal("0.00")
-
-
-def _paid_utc(year, month, day):
-    """Return a noon-UTC settle instant, so its civil date is unambiguous."""
-    return datetime(year, month, day, 12, 0, tzinfo=timezone.utc)
 
 
 def _split_loan(seed_user):

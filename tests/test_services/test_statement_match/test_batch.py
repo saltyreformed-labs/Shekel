@@ -954,7 +954,7 @@ class TestWhatIsNOTCaughtPerItem:
     """
 
     def test_a_broken_invariant_fails_the_whole_pass(
-        self, app, db, seed_user, monkeypatch,
+        self, app, seed_user, monkeypatch,
     ):
         """A broken invariant is a fact about the account, not about an item.
 

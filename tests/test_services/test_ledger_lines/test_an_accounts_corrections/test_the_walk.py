@@ -227,7 +227,7 @@ class TestTheAccountWalk:
             assert corrections[1].ledger_before == Decimal("300.00")
 
     def test_a_movement_with_no_day_moves_no_correction(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """A dayless movement is worth nothing to the walk.
 

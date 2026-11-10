@@ -10,7 +10,6 @@ from decimal import Decimal
 
 from app.extensions import db as _db
 from app.models.account import Account
-from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
@@ -30,7 +29,6 @@ from tests._ledger_reads import (
     account_net,
     loan_correction_lines,
     posted_loan_balance_at,
-    posted_loan_balance_map,
     scenario_lines,
     trial_balance,
 )
@@ -172,10 +170,11 @@ def _settle(
 ):
     """Settle a Checking -> loan payment transfer through the service.
 
-    Routes through ``create_settled_transfer`` (the sole transfer writer), which
-    posts the Step-2 cash entry AND fires the Commit-5 wiring that posts the
-    Step-4 correction -- so the returned payment is fully posted, exactly as
-    marking it Paid produces it.
+    Routes through ``create_settled_transfer``, which settles it through
+    ``transfer_service`` (the sole transfer writer) exactly as marking it Paid
+    does.  It also posted the payment's stored ledger entries until plan step
+    plan#2914 stopped saves writing the stored ledger; the worked-out read books
+    the same lines from the records.
 
     Settles ON the period's start by default (``settled_on=None``), so the
     payment is visible from its period start under C2's settled-date clock -- the
@@ -369,30 +368,6 @@ def _posted_balance(
     assert result is not None, (
         f"posting window returned None for configured loan {loan_account_id} in "
         f"scenario {scenario_id} -- no OPENING posting where one was expected"
-    )
-    return result
-
-
-def _posted_period_map(
-    loan_account_id: int, scenario_id: int, periods: list[PayPeriod],
-) -> "dict[int, Decimal]":
-    """Return the dated posting window at every period END (the per-period form).
-
-    :func:`tests._ledger_reads.posted_loan_balance_map` -- the scalar window
-    applied at each period's END, which is what lets the early-settle parallel
-    run below check period boundaries past the frozen today (no posted entry in
-    these fixtures is dated later, so such a period carries the confirmed sum
-    flat).  Because it IS the scalar per period, never assert the two agree --
-    that identity cannot fail; the assertions here are against the independent
-    resolver.  Asserts non-``None`` for the same reason as
-    :func:`_posted_balance`.
-    """
-    result = posted_loan_balance_map(
-        loan_account_id, scenario_id, periods,
-    )
-    assert result is not None, (
-        f"posting window map returned None for configured loan {loan_account_id} "
-        f"in scenario {scenario_id} -- no OPENING posting where one was expected"
     )
     return result
 

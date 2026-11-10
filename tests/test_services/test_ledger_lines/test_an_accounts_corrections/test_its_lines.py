@@ -63,7 +63,7 @@ def _equity_key(account):
 class TestTheCorrectionsBookTheAssertedBalance:
     """The corrections land the account's own line on each asserted balance."""
 
-    def test_the_opening_books_the_anchor_against_equity(self, app, db, seed_user):
+    def test_the_opening_books_the_anchor_against_equity(self, app, seed_user):
         """The opening books own +anchor / equity -anchor, on its day, in its paycheck.
 
         Savings anchored $500.00: ONE ``account_opening`` line on each side --
@@ -125,7 +125,7 @@ class TestTheCorrectionsBookTheAssertedBalance:
             ] == []
 
     def test_trueup_books_its_delta_onto_the_absolute_balance(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """The CRITICAL-1 fixture lands on the absolute balance.
 
@@ -165,7 +165,7 @@ class TestTheCorrectionsBookTheAssertedBalance:
             ) == Decimal("-50.00")
 
     def test_a_pre_trueup_revert_re_bases_the_trueup(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """Reverting a pre-true-up settle re-bases the true-up.
 
@@ -212,7 +212,7 @@ class TestTheCorrectionsBookTheAssertedBalance:
             ) == Decimal("-150.00")
 
     def test_a_trueup_the_records_come_to_match_books_nothing(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """A true-up whose walked delta becomes zero books no line.
 
@@ -263,7 +263,7 @@ class TestTheCorrectionsBookTheAssertedBalance:
             ) == []
 
     def test_same_day_trueups_book_one_line_landing_later(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """Two same-day true-ups book ONE line, landing on the LATER value.
 
@@ -332,7 +332,7 @@ class TestASettleDayMoveAcrossAnAssertion:
     """
 
     def test_a_moved_day_moves_the_crossed_correction_only_both_ways(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """A $150.00 settle moved past a true-up, then back, through the door.
 
@@ -418,7 +418,7 @@ class TestEachScenarioAndALoan:
     """The corrections book per scenario, and never on a loan."""
 
     def test_each_scenario_reads_its_own_sources(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """The opening books in every scenario; each scenario's net is its own sources.
 
@@ -455,7 +455,7 @@ class TestEachScenarioAndALoan:
                     account.id, scenario_id, PostingSourceEnum.ACCOUNT_OPENING,
                 ) == Decimal("500.00")
 
-    def test_a_loan_books_no_account_correction(self, app, db, seed_user):
+    def test_a_loan_books_no_account_correction(self, app, seed_user):
         """A loan's anchors are the loan family's, never an account opening or true-up.
 
         The loan carries an ``AccountAnchorHistory`` row like every account,
@@ -488,7 +488,7 @@ class TestEachScenarioAndALoan:
                 ) == []
 
     def test_a_pre_assertion_settle_is_absorbed_by_the_origination(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """A settle before the origination assertion leaves the account on its anchor.
 

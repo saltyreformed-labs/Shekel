@@ -127,7 +127,7 @@ class TestEveryKindIsClassedAndLabelledByHand:
             )
             assert chart_label(key, None) == expected_label
 
-    def test_transit_is_the_owners_asset_bucket(self, app, db, seed_user):
+    def test_transit_is_the_owners_asset_bucket(self, app, db):
         """Transfers in transit is an Asset bucket with no record behind it."""
         with app.app_context():
             key = transit_key()
@@ -190,7 +190,7 @@ class TestLabelsAreTodaysNames:
     """Ruling plan#2518: "Statements show current names"."""
 
     def test_a_rename_relabels_counter_and_loan_lines(
-        self, app, db, seed_user,
+        self, app, seed_user,
     ):
         """A renamed account's counter and loan lines read the new name.
 

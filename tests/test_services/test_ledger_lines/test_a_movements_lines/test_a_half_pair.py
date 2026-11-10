@@ -24,7 +24,7 @@ class TestAHalfPair:
     """A pair with one side's record is the in-transit state."""
 
     def test_a_half_pair_reads_its_half_into_transit(
-        self, app, db, seed_user, savings,
+        self, app, seed_user, savings,
     ):
         """A transfer holding only its from-side record books that side, in transit.
 

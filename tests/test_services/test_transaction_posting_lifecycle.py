@@ -520,7 +520,7 @@ class TestEnvelopePostingLifecycle:
         )
 
     def test_entry_create_on_a_posted_envelope_books_the_purchase(
-        self, app, auth_client, seed_user, seed_periods,
+        self, app, seed_user, seed_periods,
     ):
         """Adding a purchase the bank took grows the envelope's posted outflow.
 
@@ -562,7 +562,7 @@ class TestEnvelopePostingLifecycle:
             _assert_reconciles(seed_user["scenario"].id, checking)
 
     def test_entry_credit_flip_on_a_posted_envelope_takes_its_cash_line_off(
-        self, app, auth_client, seed_user, seed_periods,
+        self, app, seed_user, seed_periods,
     ):
         """Flipping a posted purchase to credit reverses its checking outflow.
 
@@ -595,7 +595,7 @@ class TestEnvelopePostingLifecycle:
             _assert_reconciles(seed_user["scenario"].id, checking)
 
     def test_entry_delete_on_a_posted_envelope_takes_its_lines_off(
-        self, app, auth_client, seed_user, seed_periods,
+        self, app, seed_user, seed_periods,
     ):
         """Deleting a posted purchase shrinks the envelope's posted outflow.
 

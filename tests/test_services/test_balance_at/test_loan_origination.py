@@ -7,6 +7,8 @@ Split from ``tests/test_services/test_balance_at.py`` by ``tools/split`` (ruling
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from app.services import balance_at, liability_sign
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._resolution import resolved_loan
@@ -52,7 +54,7 @@ class TestLoanNotYetOriginated:
     AFTER_FIRST_PAYMENT = Decimal("199759.69")
     ZERO = Decimal("0.00")
 
-    def _upcoming_mortgage(self, seed_user, db_session, periods):
+    def _upcoming_mortgage(self, seed_user, db_session):
         """Create the mortgage that has not closed yet."""
         # pylint: disable=import-outside-toplevel
         from app.enums import AcctTypeEnum
@@ -65,8 +67,9 @@ class TestLoanNotYetOriginated:
             account_type=AcctTypeEnum.MORTGAGE,
         )
 
+    @pytest.mark.usefixtures("seed_periods")
     def test_scalar_owes_nothing_before_origination_then_its_opening(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """balance_at across all four regions of the trajectory.
 
@@ -75,8 +78,7 @@ class TestLoanNotYetOriginated:
         each read goes through ``liability_sign.owed``.
         """
         with app.app_context():
-            periods = seed_periods
-            acct = self._upcoming_mortgage(seed_user, db.session, periods)
+            acct = self._upcoming_mortgage(seed_user, db.session)
             bctx = BalanceContext.build(seed_user["user"].id)
             assert bctx.as_of == date(2026, 3, 20)
 
@@ -115,7 +117,7 @@ class TestLoanNotYetOriginated:
         """
         with app.app_context():
             periods = seed_periods
-            acct = self._upcoming_mortgage(seed_user, db.session, periods)
+            acct = self._upcoming_mortgage(seed_user, db.session)
             bctx = BalanceContext.build(seed_user["user"].id)
             bmap = balance_at.balance_map(acct, bctx)
 
@@ -192,13 +194,13 @@ class TestLoanNotYetOriginated:
             unclamped = positions(acct, bctx, [last_covered_day(current)])
             assert unclamped[last_covered_day(current)] == self.OPENING
 
+    @pytest.mark.usefixtures("seed_periods")
     def test_liability_band_owes_nothing_before_origination(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """The long-horizon liability band walks the same trajectory."""
         with app.app_context():
-            periods = seed_periods
-            acct = self._upcoming_mortgage(seed_user, db.session, periods)
+            acct = self._upcoming_mortgage(seed_user, db.session)
             bctx = BalanceContext.build(seed_user["user"].id)
             current = balance_at.balance_at(acct, bctx, bctx.as_of)
 
@@ -211,8 +213,9 @@ class TestLoanNotYetOriginated:
                 self.ZERO, self.OPENING, self.AFTER_FIRST_PAYMENT,
             ]
 
+    @pytest.mark.usefixtures("seed_periods")
     def test_seam_reports_nothing_owed_today(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """An unclosed mortgage owes $0.00 on every surface -- the fold's rule.
 
@@ -231,8 +234,7 @@ class TestLoanNotYetOriginated:
         to nothing.
         """
         with app.app_context():
-            periods = seed_periods
-            acct = self._upcoming_mortgage(seed_user, db.session, periods)
+            acct = self._upcoming_mortgage(seed_user, db.session)
             bctx = BalanceContext.build(seed_user["user"].id)
             resolved = resolved_loan(acct, bctx)
 
@@ -288,7 +290,7 @@ class TestLoanNotYetOriginated:
 
         with app.app_context():
             periods = seed_periods
-            acct = self._upcoming_mortgage(seed_user, db.session, periods)
+            acct = self._upcoming_mortgage(seed_user, db.session)
             checking = create_account_of_type(
                 seed_user, db.session, "Checking", "Chk",
                 anchor_balance=Decimal("9000.00"),
@@ -362,7 +364,7 @@ class TestLoanNotYetOriginated:
 
         with app.app_context():
             periods = seed_periods
-            acct = self._upcoming_mortgage(seed_user, db.session, periods)
+            acct = self._upcoming_mortgage(seed_user, db.session)
 
             freeze_today(monkeypatch, date(2026, 5, 7))
             bctx = BalanceContext.build(seed_user["user"].id)
@@ -395,7 +397,7 @@ class TestUpcomingLoanDoesNotCorruptTheSurfaces:
     MORTGAGE = Decimal("200000.00")
     AUTO = Decimal("100000.00")
 
-    def _both_loans(self, seed_user, db_session, periods):
+    def _both_loans(self, seed_user, db_session):
         """An unclosed mortgage beside a real, never-paid auto loan."""
         # pylint: disable=import-outside-toplevel
         from app.enums import AcctTypeEnum
@@ -415,8 +417,9 @@ class TestUpcomingLoanDoesNotCorruptTheSurfaces:
         )
         return auto, mortgage
 
+    @pytest.mark.usefixtures("seed_periods")
     def test_debt_track_does_not_count_an_unborrowed_loan_as_repaid(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """The dashboard debt marker: 0% repaid, not 66.67%.
 
@@ -457,8 +460,7 @@ class TestUpcomingLoanDoesNotCorruptTheSurfaces:
         from app.services import savings_dashboard_service
 
         with app.app_context():
-            periods = seed_periods
-            auto, mortgage = self._both_loans(seed_user, db.session, periods)
+            auto, mortgage = self._both_loans(seed_user, db.session)
             bctx = BalanceContext.build(seed_user["user"].id)
 
             # The fixture really is in the hazardous state: an unclosed mortgage
@@ -484,8 +486,9 @@ class TestUpcomingLoanDoesNotCorruptTheSurfaces:
             # The mortgage is in NEITHER sum -- it has not been borrowed.
             assert summary.principal_paid_fraction == Decimal("0")
 
+    @pytest.mark.usefixtures("seed_periods")
     def test_property_chart_keeps_a_mortgage_that_closes_next_month(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """The equity chart: the upcoming mortgage is charted, not dropped.
 
@@ -504,8 +507,7 @@ class TestUpcomingLoanDoesNotCorruptTheSurfaces:
         from tests._test_helpers import create_account_of_type
 
         with app.app_context():
-            periods = seed_periods
-            _auto, mortgage = self._both_loans(seed_user, db.session, periods)
+            _auto, mortgage = self._both_loans(seed_user, db.session)
             # The mortgage is secured BY a Property, as production's is: the seam
             # walks ``property_account.secured_loans``, so the fixture has to build
             # the real collateral link rather than hand the producer a list.
@@ -566,7 +568,7 @@ class TestBrokenLoanFailsLoud:
     """
 
     def _originated_loan(
-        self, seed_user, db_session, periods, origination_date=date(2024, 9, 1),
+        self, seed_user, db_session, origination_date=date(2024, 9, 1),
     ):
         """A configured $240,000 loan, originated on *origination_date*.
 
@@ -587,8 +589,9 @@ class TestBrokenLoanFailsLoud:
             account_type=AcctTypeEnum.MORTGAGE,
         )
 
+    @pytest.mark.usefixtures("seed_periods")
     def test_scalar_folds_a_never_paid_loan_flat_not_down_the_schedule(
-        self, app, db, seed_user, seed_periods,
+        self, app, db, seed_user,
     ):
         """balance_at answers an unpaid loan from the fold, not a raise (step C3b).
 
@@ -604,8 +607,7 @@ class TestBrokenLoanFailsLoud:
         ``liability_sign.owed``.
         """
         with app.app_context():
-            periods = seed_periods
-            acct = self._originated_loan(seed_user, db.session, periods)
+            acct = self._originated_loan(seed_user, db.session)
             bctx = BalanceContext.build(seed_user["user"].id)
 
             # Originated 2024-09-01, no payments: the fold holds the origination
@@ -629,7 +631,7 @@ class TestBrokenLoanFailsLoud:
         """
         with app.app_context():
             periods = seed_periods
-            acct = self._originated_loan(seed_user, db.session, periods)
+            acct = self._originated_loan(seed_user, db.session)
             bctx = BalanceContext.build(seed_user["user"].id)
 
             result = balance_at.balance_map(acct, bctx)
@@ -685,7 +687,7 @@ class TestBrokenLoanFailsLoud:
             # settled 2024-10-01 until plan step recurrence:R16-c-2 began
             # charging every installment from origination).
             acct = self._originated_loan(
-                seed_user, db.session, periods,
+                seed_user, db.session,
                 origination_date=date(2026, 1, 1),
             )
             create_settled_transfer(

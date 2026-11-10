@@ -20,6 +20,7 @@ from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.installment_calendar import monthly_due_date
 from app.services.balance_at import BalanceContext
 from app.services.liability_sign import owed
+from tests._ledger_reads import posted_loan_balance_map
 from tests._test_helpers import (
     amount_basis_for_scenario,
     create_account_of_type,
@@ -45,7 +46,6 @@ from ._helpers import (
     _resolver_balance,
     _ledger_balance,
     _posted_balance,
-    _posted_period_map,
     _assert_loan_reconciles,
 )
 
@@ -186,7 +186,7 @@ class TestReaderParallelRunAgainstResolver:
             _settle(seed_user, loan, seed_periods[_P2], amount=scheduled_pi)
             db.session.commit()
 
-            balance_map = _posted_period_map(loan.id, scenario_id, seed_periods)
+            balance_map = posted_loan_balance_map(loan.id, scenario_id, seed_periods)
             # Per-period parallel run: the map's value for each period equals the
             # resolver resolved as of that period's START (both select confirmed
             # postings / payments by pay-period start <= the date).
@@ -300,7 +300,7 @@ class TestReaderParallelRunAgainstResolver:
             # period the early installment comes due in and the tail after it,
             # where the pre-R1 ledger carried the raw cash (no interest backout)
             # and this assertion fails.
-            balance_map = _posted_period_map(loan.id, scenario_id, seed_periods)
+            balance_map = posted_loan_balance_map(loan.id, scenario_id, seed_periods)
             for period in seed_periods:
                 resolver_at_start = _resolver_balance(
                     loan.id, scenario_id, period.start_date,
@@ -699,7 +699,7 @@ class TestReaderParallelRunAgainstResolver:
             # -- so the replay DROPPED a payment that had genuinely been made,
             # and the resolver read HIGHER than the ledger.  That was the
             # per-period divergence (review M7 / Step-4 M2); it is now CLOSED.
-            balance_map = _posted_period_map(loan.id, scenario_id, seed_periods)
+            balance_map = posted_loan_balance_map(loan.id, scenario_id, seed_periods)
             assert balance_map[seed_periods[2].id] == reader
             assert balance_map[seed_periods[2].id] < balance_map[seed_periods[1].id]
             # The resolver's per-period view carries the SAME one-month gap, for

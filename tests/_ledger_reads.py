@@ -415,7 +415,7 @@ def assert_fold_matches_postings_every_day(
 
 
 def posted_loan_balance_map(loan_account_id, scenario_id, periods):
-    """Return each period's loan balance, keyed by period id, or ``None``.
+    """Return each period's loan balance, keyed by period id.
 
     :func:`posted_loan_balance_at` at each period's END, derived off the
     owner's calendar: a period's end is the day before the NEXT payday, so it
@@ -429,20 +429,27 @@ def posted_loan_balance_map(loan_account_id, scenario_id, periods):
     and answers a future one from the forward plan, where this carries the sum
     flat.
 
+    **It answers only a loan with an opening line**, and refuses any other.
+    Every caller builds a configured loan, so none asks the question the
+    scalar's ``None`` answers ("the ledger cannot answer"); it answered
+    ``None`` here too until plan task plan#3084, which no case reached and
+    each caller asserted away.
+
     Args:
-        loan_account_id: The loan.
+        loan_account_id: The loan, holding an opening line.
         scenario_id: The scenario.
         periods: The non-empty ``PayPeriod`` rows to key by, all one owner's,
             each in that owner's saved calendar.
 
     Returns:
-        ``{period.id: Decimal}`` in payday order, or ``None`` for a loan with
-        no opening line, so a caller can tell "the ledger cannot answer" from
-        "the ledger says zero".
+        ``{period.id: Decimal}`` in payday order.
     """
     lines = _opened_loan_lines(loan_account_id, scenario_id)
-    if lines is None:
-        return None
+    assert lines is not None, (
+        f"posted_loan_balance_map reads a loan with an opening line, and loan "
+        f"{loan_account_id} holds none in scenario {scenario_id}: read "
+        f"posted_loan_balance_at, which answers None for it"
+    )
     # Materialised once: the owner is read off the first row and the id set off
     # all of them, so a generator argument would be half consumed by then.
     rows = tuple(periods)

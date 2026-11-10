@@ -6,7 +6,6 @@ from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
-from app.models.scenario import Scenario
 from app.models.transaction_template import TransactionTemplate
 from app.models.recurrence_rule import RecurrenceRule
 from app.models.ref import TransactionType
@@ -14,7 +13,6 @@ from app import ref_cache
 from app.enums import BusinessDayShiftEnum
 from app.services import entry_service
 from app.services.pay_calendar import PayCalendar, calendar_for
-from app.services.recurrence import fires_on_day_of_month
 from app.services.recurrence import placed_periods, rule_occurrences
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 from tests._test_helpers import (

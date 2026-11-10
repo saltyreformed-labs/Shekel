@@ -49,15 +49,88 @@ description of live code.*
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from app import ref_cache, tax_law
 from app.enums import TaxTypeEnum
 from app.exceptions import UnsupportedStateError
-from app.tax_law import ChildDeductionTier, FederalRules, FicaRules
+from app.tax_law import Bracket, ChildDeductionTier, FicaRules
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class FederalTaxRules:
+    """One tax year's federal income-tax law as it applies to ONE filing status.
+
+    The law states the standard deduction and the bracket ladder per filing
+    status (:class:`app.tax_law.FederalRules`) and the per-child credits once
+    for every filer (:class:`app.tax_law.FederalCredits`, ruling plan#3340); a
+    profile files under one status, so this is that status's rules with the
+    year's credits beside them -- the tax RETURN's figures
+    :func:`app.services.tax_calculator.calculate_annual_federal_liability`
+    reads, and through :attr:`withholding_rules` what
+    :func:`~app.services.tax_calculator.calculate_federal_withholding` reads.
+    :func:`_federal_rules` builds it, as :func:`_state_rules` builds
+    :class:`StateTaxRules`.
+
+    Attributes:
+        standard_deduction: The status's standard deduction.
+        brackets: The status's bracket ladder.
+        child_credit_amount: The year's child tax credit per qualifying child.
+        other_dependent_credit_amount: The year's credit per other dependent.
+        child_credit_refundable_cap: The year's refundable Additional Child
+            Tax Credit cap per child.
+        withholding_standard_deduction: Pub 15-T's standard deduction for the
+            status where it differs from the return's, else ``None``.
+        withholding_child_credit_amount: Form W-4's per-child credit for the
+            year where it differs from the return's, else ``None``.
+    """
+
+    standard_deduction: Decimal
+    brackets: tuple[Bracket, ...]
+    child_credit_amount: Decimal
+    other_dependent_credit_amount: Decimal
+    child_credit_refundable_cap: Decimal
+    withholding_standard_deduction: Decimal | None = None
+    withholding_child_credit_amount: Decimal | None = None
+
+    @property
+    def withholding_rules(self) -> "FederalTaxRules":
+        """Return the rules federal WITHHOLDING prices on (ruling plan#3213).
+
+        The ONE producer of them:
+        :func:`app.services.tax_calculator.calculate_federal_withholding`
+        reads it off the rules it is handed, so no caller can withhold on the
+        return's figures where the year states others.  These rules
+        themselves when the year states no withholding figure; otherwise a
+        copy with each stated figure in place of the return's, stating none
+        itself (it is already what withholding prices on).
+
+        Returns:
+            The :class:`FederalTaxRules` the withholding formula prices on.
+        """
+        if (
+            self.withholding_standard_deduction is None
+            and self.withholding_child_credit_amount is None
+        ):
+            return self
+        return replace(
+            self,
+            standard_deduction=(
+                self.standard_deduction
+                if self.withholding_standard_deduction is None
+                else self.withholding_standard_deduction
+            ),
+            child_credit_amount=(
+                self.child_credit_amount
+                if self.withholding_child_credit_amount is None
+                else self.withholding_child_credit_amount
+            ),
+            withholding_standard_deduction=None,
+            withholding_child_credit_amount=None,
+        )
 
 
 @dataclass(frozen=True)
@@ -121,7 +194,7 @@ class ProfileTaxSeries:
     ruling **R-SAL129**.)
 
     Attributes:
-        bracket_sets: ``{tax_year: FederalRules}`` for the profile's filing
+        bracket_sets: ``{tax_year: FederalTaxRules}`` for the profile's filing
             status.
         state_configs: ``{tax_year: StateTaxRules}`` for the profile's state
             and filing status.
@@ -129,7 +202,7 @@ class ProfileTaxSeries:
             and no state.
     """
 
-    bracket_sets: "dict[int, FederalRules]"
+    bracket_sets: "dict[int, FederalTaxRules]"
     state_configs: "dict[int, StateTaxRules]"
     fica_configs: "dict[int, FicaRules]"
 
@@ -184,7 +257,7 @@ def profile_tax_series(profile) -> ProfileTaxSeries:
         )
     return ProfileTaxSeries(
         bracket_sets={
-            year.tax_year: year.federal[status]
+            year.tax_year: _federal_rules(year, status)
             for year in law.years
             if status is not None
         },
@@ -198,6 +271,33 @@ def profile_tax_series(profile) -> ProfileTaxSeries:
             if status is not None
         },
         fica_configs={year.tax_year: year.fica for year in law.years},
+    )
+
+
+def _federal_rules(year_law, status) -> FederalTaxRules:
+    """Slice one year of the law's federal rules to one filing status.
+
+    The status's standard deduction and ladder, with the year's per-child
+    credits beside them (ruling plan#3340): the ONE place the two meet, so
+    every surface pricing a profile reads the same credits for every status.
+
+    Args:
+        year_law: The :class:`app.tax_law.TaxYearLaw`.
+        status: The profile's :class:`~app.enums.FilingStatusEnum` member.
+
+    Returns:
+        The status's :class:`FederalTaxRules`.
+    """
+    rules = year_law.federal[status]
+    per_child = year_law.federal_credits
+    return FederalTaxRules(
+        standard_deduction=rules.standard_deduction,
+        brackets=rules.brackets,
+        child_credit_amount=per_child.child_credit_amount,
+        other_dependent_credit_amount=per_child.other_dependent_credit_amount,
+        child_credit_refundable_cap=per_child.child_credit_refundable_cap,
+        withholding_standard_deduction=rules.withholding_standard_deduction,
+        withholding_child_credit_amount=per_child.withholding_child_credit_amount,
     )
 
 

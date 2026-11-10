@@ -11,10 +11,12 @@ $15,000 single and married filing separately, $30,000 jointly and $22,500 head
 of household: Worksheet 1A line 1g's $8,600 ($12,900 jointly) plus the annual
 table's zero-rate row, $6,400 ($17,100 jointly, $13,900 head of household).
 Form W-4 (2025) Step 3 claims $2,000 a qualifying child.  So each filing
-status states those two as its withholding figures, and the difference --
-withheld on the old figures, owed on the new -- comes back in the refund the
-Taxes tab shows.  (Pub 15-T's ladder for married filing separately is the
-single filer's, which the law does not state: finding plan#3243.)
+status states its Pub 15-T deduction as its withholding figure, the year
+states the W-4's child credit once beside its other per-child credits (rulings
+plan#3340, plan#3342), and the difference -- withheld on the old figures, owed
+on the new -- comes back in the refund the Taxes tab shows.  (Pub 15-T's
+ladder for married filing separately is the single filer's, which the law
+does not state: finding plan#3243.)
 
 Until plan step salary:X-at-7 both priced on Rev. Proc. 2024-40's
 pre-P.L. 119-21 deduction (finding **salary:SAL-576**): the Taxes tab
@@ -30,6 +32,7 @@ from decimal import Decimal
 from app.enums import FilingStatusEnum
 from app.tax_law import _north_carolina
 from app.tax_law._types import (
+    FederalCredits,
     FederalRules,
     FicaRules,
     TaxYearLaw,
@@ -60,11 +63,7 @@ SOURCES = (
 _FEDERAL = {
     FilingStatusEnum.SINGLE: FederalRules(
         standard_deduction=Decimal("15750.00"),
-        child_credit_amount=Decimal("2200.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1700.00"),
         withholding_standard_deduction=Decimal("15000.00"),
-        withholding_child_credit_amount=Decimal("2000.00"),
         brackets=ladder(
             ("0.00", "11925.00", "0.1000"),
             ("11925.00", "48475.00", "0.1200"),
@@ -77,11 +76,7 @@ _FEDERAL = {
     ),
     FilingStatusEnum.MARRIED_JOINTLY: FederalRules(
         standard_deduction=Decimal("31500.00"),
-        child_credit_amount=Decimal("2200.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1700.00"),
         withholding_standard_deduction=Decimal("30000.00"),
-        withholding_child_credit_amount=Decimal("2000.00"),
         brackets=ladder(
             ("0.00", "23850.00", "0.1000"),
             ("23850.00", "96950.00", "0.1200"),
@@ -94,11 +89,7 @@ _FEDERAL = {
     ),
     FilingStatusEnum.MARRIED_SEPARATELY: FederalRules(
         standard_deduction=Decimal("15750.00"),
-        child_credit_amount=Decimal("2200.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1700.00"),
         withholding_standard_deduction=Decimal("15000.00"),
-        withholding_child_credit_amount=Decimal("2000.00"),
         brackets=ladder(
             ("0.00", "11925.00", "0.1000"),
             ("11925.00", "48475.00", "0.1200"),
@@ -111,11 +102,7 @@ _FEDERAL = {
     ),
     FilingStatusEnum.HEAD_OF_HOUSEHOLD: FederalRules(
         standard_deduction=Decimal("23625.00"),
-        child_credit_amount=Decimal("2200.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("1700.00"),
         withholding_standard_deduction=Decimal("22500.00"),
-        withholding_child_credit_amount=Decimal("2000.00"),
         brackets=ladder(
             ("0.00", "17000.00", "0.1000"),
             ("17000.00", "64850.00", "0.1200"),
@@ -127,6 +114,13 @@ _FEDERAL = {
         ),
     ),
 }
+
+_CREDITS = FederalCredits(
+    child_credit_amount=Decimal("2200.00"),
+    other_dependent_credit_amount=Decimal("500.00"),
+    child_credit_refundable_cap=Decimal("1700.00"),
+    withholding_child_credit_amount=Decimal("2000.00"),
+)
 
 _FICA = FicaRules(
     ss_rate=Decimal("0.0620"),
@@ -140,6 +134,7 @@ YEAR_2025 = TaxYearLaw(
     tax_year=2025,
     sources=SOURCES,
     federal=_FEDERAL,
+    federal_credits=_CREDITS,
     fica=_FICA,
     states={"NC": _north_carolina.state_year("0.0425")},
 )

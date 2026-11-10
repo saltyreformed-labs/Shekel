@@ -20,13 +20,15 @@ from app.extensions import db
 from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
 from app.services.tax_config_service import (
+    FederalTaxRules,
     StateTaxRules,
     configs_by_year,
     load_tax_configs_for_year,
     profile_tax_series,
     resolve_tax_year,
 )
-from app.tax_law import ChildDeductionTier, TaxLaw
+from app.tax_law import ChildDeductionTier, TaxLaw, ladder
+from tests._made_up_federal import made_up_credits, made_up_federal
 from tests._test_helpers import (
     EMPTY_TAX_LAW,
     made_up_fica,
@@ -84,6 +86,26 @@ def _state_slice(year_law, state_code="NC", status=FilingStatusEnum.SINGLE):
         flat_rate=state.flat_rate,
         standard_deduction=state.standard_deduction[status],
         child_deduction_tiers=state.child_deduction_tiers[status],
+    )
+
+
+def _federal_slice(year_law, status=FilingStatusEnum.SINGLE):
+    """Return the federal rules *year_law* holds for *status*, as the resolver hands them back.
+
+    The status's deduction and ladder with the year's credits beside them
+    (ruling plan#3340): the expected value a resolved ``bracket_set`` is
+    compared against, as :func:`_state_slice` is for the state.
+    """
+    rules = year_law.federal[status]
+    per_child = year_law.federal_credits
+    return FederalTaxRules(
+        standard_deduction=rules.standard_deduction,
+        brackets=rules.brackets,
+        child_credit_amount=per_child.child_credit_amount,
+        other_dependent_credit_amount=per_child.other_dependent_credit_amount,
+        child_credit_refundable_cap=per_child.child_credit_refundable_cap,
+        withholding_standard_deduction=rules.withholding_standard_deduction,
+        withholding_child_credit_amount=per_child.withholding_child_credit_amount,
     )
 
 
@@ -201,6 +223,46 @@ class TestProfileTaxSeries:
                 assert rules.standard_deduction == deductions[status], status
                 assert rules.child_deduction_tiers == tiers[status], status
 
+    def test_the_federal_rules_are_each_status_with_the_years_credits(
+        self, app, db, seed_user, tax_law,
+    ):
+        """A profile's federal rules are its OWN status's, with the year's ONE set of credits.
+
+        The law states the standard deduction and ladder per filing status
+        and the per-child credits once for every filer (ruling plan#3340).
+        Every status here carries a different made-up deduction, so rules
+        taken from the wrong status show as a different figure; the year's
+        credits, stated once, reach every status alike.
+        """
+        federal = {
+            status: dataclasses.replace(
+                made_up_federal(),
+                standard_deduction=Decimal(f"{14000 + 1000 * position}.00"),
+            )
+            for position, status in enumerate(FilingStatusEnum)
+        }
+        year = dataclasses.replace(
+            made_up_year(2026, states={"NC": made_up_state(Decimal("0.0450"))}),
+            federal=federal,
+            federal_credits=made_up_credits(),
+        )
+        tax_law(TaxLaw(years=(year,)))
+        with app.app_context():
+            profile = _make_profile(seed_user)
+            for status in FilingStatusEnum:
+                profile.filing_status_id = (
+                    db.session.query(FilingStatus).filter_by(name=status.value).one().id
+                )
+
+                rules = profile_tax_series(profile).bracket_sets[2026]
+
+                assert rules.standard_deduction == federal[status].standard_deduction
+                assert rules.brackets == federal[status].brackets, status
+                assert rules.child_credit_amount == Decimal("2000.00"), status
+                assert rules.other_dependent_credit_amount == Decimal("500.00"), status
+                assert rules.child_credit_refundable_cap == Decimal("0.00"), status
+                assert rules == _federal_slice(year, status), status
+
 
 class TestOneKindsYearsDoNotDecideAnotherKinds:
     """A year one kind lacks must not zero that kind, nor move the others.
@@ -226,19 +288,22 @@ class TestOneKindsYearsDoNotDecideAnotherKinds:
     ):
         """2027 lists no state; federal and FICA take 2027, the state stays on 2026."""
         year_2026 = _nc_year(2026, Decimal("0.0399"))
+        # 2027's federal rules and credits differ from 2026's zero ones, so a
+        # bracket set resolved on 2026 shows as unequal to 2027's slice.
         year_2027 = made_up_year(
             2027,
+            federal=made_up_federal(),
+            federal_credits=made_up_credits(),
             fica=dataclasses.replace(made_up_fica(), ss_wage_base=Decimal("190000.00")),
         )
         tax_law(TaxLaw(years=(year_2026, year_2027)))
+        assert _federal_slice(year_2027) != _federal_slice(year_2026)
         with app.app_context():
             profile = _make_profile(seed_user)
 
             for requested in (2027, 2028):
                 result = load_tax_configs_for_year(profile, requested)
-                assert result["bracket_set"] is year_2027.federal[
-                    FilingStatusEnum.SINGLE
-                ], requested
+                assert result["bracket_set"] == _federal_slice(year_2027), requested
                 assert result["fica_config"] is year_2027.fica, requested
                 assert result["fica_config"].ss_wage_base == Decimal("190000.00")
                 # The state resolves on its OWN series, so it takes the 2026
@@ -384,3 +449,64 @@ class TestConfigsByYear:
         with app.app_context():
             profile = _make_profile(seed_user)
             assert configs_by_year(profile_tax_series(profile), set()) == {}
+
+
+class TestWithholdingRules:
+    """``FederalTaxRules.withholding_rules``: what a paycheck withholds on (ruling plan#3213).
+
+    The ONE producer of the withholding figures: the return's rules
+    themselves where the year states none, else a copy with each stated
+    figure in the return's place.  The made-up return figures are a
+    15,000.00 standard deduction, a 2,000.00 child credit, 500.00 per other
+    dependent and a 1,500.00 refundable cap.
+    """
+
+    @staticmethod
+    def _rules(**overrides):
+        """Return made-up rules for one filing status, with *overrides* applied."""
+        fields = {
+            "standard_deduction": Decimal("15000.00"),
+            "brackets": ladder(("0.00", "10000.00", "0.1000"), ("10000.00", None, "0.1200")),
+            "child_credit_amount": Decimal("2000.00"),
+            "other_dependent_credit_amount": Decimal("500.00"),
+            "child_credit_refundable_cap": Decimal("1500.00"),
+        }
+        fields.update(overrides)
+        return FederalTaxRules(**fields)
+
+    def test_rules_stating_none_withhold_on_themselves(self):
+        """The default: withholding prices on the return's rules, the same object."""
+        rules = self._rules()
+        assert rules.withholding_standard_deduction is None
+        assert rules.withholding_child_credit_amount is None
+        assert rules.withholding_rules is rules
+
+    def test_each_stated_figure_takes_the_returns_place(self):
+        """Both stated: the withholding rules carry them and the rest of the return's."""
+        rules = self._rules(
+            withholding_standard_deduction=Decimal("14000.00"),
+            withholding_child_credit_amount=Decimal("1800.00"),
+        )
+        withheld = rules.withholding_rules
+        assert withheld.standard_deduction == Decimal("14000.00")
+        assert withheld.child_credit_amount == Decimal("1800.00")
+        assert withheld.other_dependent_credit_amount == Decimal("500.00")
+        assert withheld.child_credit_refundable_cap == Decimal("1500.00")
+        assert withheld.brackets == rules.brackets
+        # It states none itself: it already is what withholding prices on.
+        assert withheld.withholding_standard_deduction is None
+        assert withheld.withholding_child_credit_amount is None
+        assert withheld.withholding_rules is withheld
+        # The return's rules are unmoved.
+        assert rules.standard_deduction == Decimal("15000.00")
+        assert rules.child_credit_amount == Decimal("2000.00")
+
+    def test_a_figure_not_stated_stays_the_returns(self):
+        """One stated: the other withholding figure is the return's."""
+        deduction_only = self._rules(withholding_standard_deduction=Decimal("14000.00"))
+        assert deduction_only.withholding_rules.standard_deduction == Decimal("14000.00")
+        assert deduction_only.withholding_rules.child_credit_amount == Decimal("2000.00")
+
+        credit_only = self._rules(withholding_child_credit_amount=Decimal("1800.00"))
+        assert credit_only.withholding_rules.standard_deduction == Decimal("15000.00")
+        assert credit_only.withholding_rules.child_credit_amount == Decimal("1800.00")

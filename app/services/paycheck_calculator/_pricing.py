@@ -89,7 +89,8 @@ def calculate_paycheck(basis: PayrollBasis, period: DerivedPeriod, tax_configs,
         tax_configs:  dict with keys (as
                       :func:`app.services.tax_config_service.load_tax_configs_for_year`
                       resolves them):
-                      - bracket_set: :class:`app.tax_law.FederalRules`, whose
+                      - bracket_set:
+                        :class:`app.services.tax_config_service.FederalTaxRules`, whose
                         ``withholding_rules`` the withholding formula prices on
                       - state_config:
                         :class:`app.services.tax_config_service.StateTaxRules`

@@ -35,14 +35,18 @@ from app.services import (
     pay_schedule_service,
 )
 from app.tax_law import (
-    FederalRules,
     FicaRules,
     StateYearLaw,
     TaxLaw,
     TaxYearLaw,
-    ladder,
 )
 from app.utils.db_errors import sqlstate_of
+from tests._made_up_federal import (
+    made_up_credits,
+    made_up_federal,
+    zero_credits,
+    zero_federal,
+)
 
 
 #: The ``app`` package's directory, read off the package's own import origin,
@@ -7744,54 +7748,6 @@ MADE_UP_SOURCES = ("A test's made-up figures, not a published law",)
 EMPTY_TAX_LAW = TaxLaw(years=())
 
 
-def zero_federal():
-    """Return federal rules that price $0.00 at every income, with no credits.
-
-    What a made-up year states for its federal rules when the test's rows held
-    no bracket set: a year cannot lack federal rules, and a single 0% rung
-    prices what no row priced on a paycheck.  The two differ in two places no
-    test installing this reaches: the withholding adds the W-4's extra
-    withholding to a bracket figure, and the annual liability REFUSES a missing
-    bracket set where it prices these rules at $0.00.
-
-    Returns:
-        FederalRules: Zero deduction, zero credits, one 0% rung from $0.
-    """
-    return FederalRules(
-        standard_deduction=Decimal("0.00"),
-        child_credit_amount=Decimal("0.00"),
-        other_dependent_credit_amount=Decimal("0.00"),
-        child_credit_refundable_cap=Decimal("0.00"),
-        brackets=ladder(("0.00", None, "0.0000")),
-    )
-
-
-def made_up_federal():
-    """Return the made-up federal rules ``seed_tax_bracket_set`` wrote as rows.
-
-    The same deduction, credits and two rungs.  The rows' ladder STOPPED at
-    $47,150, which a law refuses (income above a closed top would be taxed by
-    nothing), so a 0% open rung carries it on: the tax on every income is the
-    rows' tax, and only :func:`app.services.tax_calculator.marginal_rate_for`
-    above $47,150 reads 0% where the rows read 12%.  The refundable credit cap
-    is the column default the rows took, $0.00.
-
-    Returns:
-        FederalRules: The made-up single filer's rules.
-    """
-    return FederalRules(
-        standard_deduction=Decimal("14600.00"),
-        child_credit_amount=Decimal("2000.00"),
-        other_dependent_credit_amount=Decimal("500.00"),
-        child_credit_refundable_cap=Decimal("0.00"),
-        brackets=ladder(
-            ("0.00", "11600.00", "0.1000"),
-            ("11600.00", "47150.00", "0.1200"),
-            ("47150.00", None, "0.0000"),
-        ),
-    )
-
-
 def zero_fica():
     """Return FICA rules that price $0.00 Social Security and Medicare.
 
@@ -7870,7 +7826,9 @@ def no_income_tax_state():
     )
 
 
-def made_up_year(tax_year=2026, *, federal=None, fica=None, states=None):
+def made_up_year(
+    tax_year=2026, *, federal=None, federal_credits=None, fica=None, states=None,
+):
     """Return one made-up tax year, one set of federal rules for every status.
 
     The rows these years replace carried ONE status (single); every status
@@ -7880,6 +7838,8 @@ def made_up_year(tax_year=2026, *, federal=None, fica=None, states=None):
         tax_year: The year.
         federal: The federal rules every filing status carries
             (default :func:`zero_federal`).
+        federal_credits: The year's per-child credits (default
+            :func:`zero_credits`).
         fica: The year's FICA rules (default :func:`zero_fica`).
         states: ``{state_code: StateYearLaw}`` (default none).
 
@@ -7891,6 +7851,9 @@ def made_up_year(tax_year=2026, *, federal=None, fica=None, states=None):
         tax_year=tax_year,
         sources=MADE_UP_SOURCES,
         federal={status: rules for status in FilingStatusEnum},
+        federal_credits=(
+            federal_credits if federal_credits is not None else zero_credits()
+        ),
         fica=fica if fica is not None else zero_fica(),
         states=states if states is not None else {},
     )
@@ -7900,7 +7863,8 @@ def bracket_set_law(*tax_years):
     """Return the law ``seed_tax_bracket_set`` wrote, once per year asked for.
 
     The rows held a bracket set and nothing else, so each year carries
-    :func:`made_up_federal` for every status, zero FICA and no state.
+    :func:`made_up_federal` for every status, :func:`made_up_credits`, zero
+    FICA and no state.
 
     Args:
         *tax_years: The years the rows were written for (default 2026 alone).
@@ -7909,7 +7873,9 @@ def bracket_set_law(*tax_years):
         TaxLaw: Those years, oldest first.
     """
     return TaxLaw(years=tuple(
-        made_up_year(year, federal=made_up_federal())
+        made_up_year(
+            year, federal=made_up_federal(), federal_credits=made_up_credits(),
+        )
         for year in sorted(tax_years or (2026,))
     ))
 

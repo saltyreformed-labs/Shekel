@@ -134,7 +134,7 @@ def calculate_federal_withholding(gross_pay, pay_periods, bracket_set, w4=W4Inpu
         gross_pay:              Gross pay for one pay period.
         pay_periods:            Number of pay periods per year (e.g. 26).
         bracket_set:            The year's federal rules for the filer's
-                                status (:class:`app.tax_law.FederalRules`),
+                                status (:class:`app.services.tax_config_service.FederalTaxRules`),
                                 whose ``withholding_rules`` carry
                                 .standard_deduction, .child_credit_amount,
                                 .other_dependent_credit_amount, and .brackets
@@ -423,7 +423,8 @@ def calculate_annual_federal_liability(annual_wage_income, bracket_set, w4=W4Inp
             base (a documented approximation -- Box-1 wages are the
             taxpayer's earned income here).  Constructed to ``Decimal`` from
             a string; a ``float`` argument is coerced via ``str`` first.
-        bracket_set: The year's :class:`app.tax_law.FederalRules` (or a stand-in) exposing
+        bracket_set: The year's federal rules for the filer's status
+            (:class:`app.services.tax_config_service.FederalTaxRules`, or a stand-in) exposing
             ``standard_deduction``, ``child_credit_amount``,
             ``other_dependent_credit_amount``, ``child_credit_refundable_cap``,
             and ``brackets``.

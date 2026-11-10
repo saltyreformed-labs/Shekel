@@ -192,7 +192,8 @@ def _federal_layer(
     cannot move the liability.
 
     Args:
-        bracket_set: The year's :class:`app.tax_law.FederalRules`, or None
+        bracket_set: The year's
+            :class:`~app.services.tax_config_service.FederalTaxRules`, or None
             (raises via the engine).
         profile: The SalaryProfile supplying the dependent counts.
         wage: The year's wage income (Decimal).

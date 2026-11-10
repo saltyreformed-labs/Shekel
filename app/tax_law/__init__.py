@@ -22,7 +22,8 @@ correction, is a release that edits these modules.  The copies' five tables went
 at plan step salary:X-at-2.
 
 **Adding a tax year** is a new ``_year_<YYYY>.py`` beside the others, listed
-in :data:`LAW` below.  Its federal rules must cover every filing status and it
+in :data:`LAW` below.  Its federal rules must cover every filing status, it
+states its per-child credits once for all of them (ruling plan#3340), and it
 must cite its sources, or importing it fails (:mod:`app.tax_law._types`); the
 bracket ladders are checked for gaps, and so are the years (none skipped).
 Which year's law prices a given year is the resolver's rule,
@@ -51,6 +52,7 @@ lands.  The one check behind every alarm is :mod:`app.services.tax_law_alarm`;
 from app.tax_law._types import (
     Bracket,
     ChildDeductionTier,
+    FederalCredits,
     FederalRules,
     FicaRules,
     StateYearLaw,
@@ -70,6 +72,7 @@ __all__ = [
     "LAW",
     "Bracket",
     "ChildDeductionTier",
+    "FederalCredits",
     "FederalRules",
     "FicaRules",
     "StateYearLaw",

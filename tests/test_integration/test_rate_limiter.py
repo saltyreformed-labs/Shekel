@@ -9,8 +9,9 @@ Asserts that the rate-limit posture introduced by audit Commit C-06
   4 of ~93 mutating routes were rate-limited pre-remediation.
 - The ``/health`` endpoint is exempt so the Docker / Nginx healthcheck
   loops do not burn through the per-IP budget every 30 seconds.
-- The configured key_func is ``rate_limit_key``, so each client and each
-  signed-in account has its own counter (plan#2170).
+- The configured key_func is ``rate_limit_key``, so each client has its
+  own counter (plan#2170), and each signed-in browser its known record's,
+  else its account's (ruling plan#3108).
 - A storage backend outage (Valkey unreachable in production)
   fail-closed surfaces as a server error, NOT a silent degradation
   to per-worker memory or to allowing the request through (which
@@ -75,7 +76,7 @@ def _enable_limiter_on_fresh_app():
     rate_app.config["RATELIMIT_ENABLED"] = True
 
     # pylint: disable=import-outside-toplevel
-    from app.extensions import limiter
+    from app.rate_limits import limiter
 
     limiter.enabled = True
     limiter.init_app(rate_app)
@@ -160,7 +161,7 @@ class TestDefaultLimitCeiling:
             return "ok", 200
 
         # pylint: disable=import-outside-toplevel
-        from app.extensions import limiter
+        from app.rate_limits import limiter
 
         limiter.enabled = True
         limiter.init_app(rate_app)
@@ -210,7 +211,7 @@ class TestDefaultLimitCeiling:
             return "ok", 200
 
         # pylint: disable=import-outside-toplevel
-        from app.extensions import limiter
+        from app.rate_limits import limiter
 
         limiter.enabled = True
         limiter.init_app(rate_app)
@@ -328,7 +329,7 @@ class TestFailClosedOnStorageOutage:
         rate_app.config["PROPAGATE_EXCEPTIONS"] = False
 
         # pylint: disable=import-outside-toplevel
-        from app.extensions import limiter
+        from app.rate_limits import limiter
 
         limiter.enabled = True
         limiter.init_app(rate_app)
@@ -384,7 +385,7 @@ class TestKeyFunctionIsTheOneKey:
         """The module-level limiter is constructed with key_func=rate_limit_key.
 
         The limiter is instantiated at module load time in
-        ``app/extensions.py``.  ``key_func`` is the only constructor
+        ``app/rate_limits.py``.  ``key_func`` is the only constructor
         argument we pass (everything else flows through app.config in
         init_app), so a regression that drops the argument would
         silently fall back to ``get_remote_address``, whose count a signed-out
@@ -392,8 +393,8 @@ class TestKeyFunctionIsTheOneKey:
         guards that exact construction.
         """
         # pylint: disable=import-outside-toplevel
-        from app.extensions import limiter
-        from app.utils.client_address import rate_limit_key
+        from app.rate_limits import limiter
+        from app.rate_limits import rate_limit_key
 
         # Flask-Limiter stores the key_func as ``_key_func`` on the
         # Limiter instance.  Comparing function identity (is) is
@@ -542,7 +543,13 @@ class TestEachClientHasItsOwnCounter:
 
 
 class TestEachAccountHasItsOwnCounter:
-    """A signed-in request counts against its account, wherever it comes from."""
+    """A signed-in browser counts against its own budget, wherever it comes from.
+
+    Each client here signs in at ``/login``, so it is a known browser and
+    spends its record's budget (ruling plan#3108); the account's, which a
+    browser no record names spends, is
+    ``tests/test_adversarial/test_a_signed_in_pages_budget.py``.
+    """
 
     @pytest.fixture
     def counted_app(self, app, monkeypatch):
@@ -561,7 +568,7 @@ class TestEachAccountHasItsOwnCounter:
             The app.
         """
         # pylint: disable=unused-argument,import-outside-toplevel
-        from app.extensions import limiter
+        from app.rate_limits import limiter
 
         # ``app.CONFIG_MAP``, the class ``create_app`` reads: importing
         # ``TestConfig`` here would find a newer class once a test that reloads
@@ -704,7 +711,7 @@ class TestRateLimitHeaders:
 
 class TestStorageBackendIsConfigDriven:
     """The Limiter's storage backend is resolved from app.config in
-    init_app(), NOT from a constructor argument in app/extensions.py.
+    init_app(), NOT from a constructor argument in app/rate_limits.py.
 
     This is the linchpin behavior that lets TestConfig force the
     in-memory backend regardless of the operator's environment, and
@@ -715,7 +722,7 @@ class TestStorageBackendIsConfigDriven:
     """
 
     def test_extensions_module_does_not_pin_storage_uri(self):
-        """app/extensions.py must NOT pass storage_uri at construction.
+        """app/rate_limits.py must NOT pass storage_uri at construction.
 
         A non-None ``_storage_uri`` on the Limiter instance after
         module load means the constructor pinned a backend, which would
@@ -731,7 +738,7 @@ class TestStorageBackendIsConfigDriven:
         symptom of a regression that re-pinned at construction.
         """
         # pylint: disable=import-outside-toplevel,protected-access
-        from app.extensions import limiter
+        from app.rate_limits import limiter
 
         # At this point the test session has already imported app and
         # called init_app(testing), whose store is TestConfig's
@@ -741,7 +748,7 @@ class TestStorageBackendIsConfigDriven:
         assert limiter._storage_uri is None or limiter._storage_uri == "memory://", (
             "Limiter._storage_uri should be None (constructor) or "
             "memory:// (TestConfig's store).  A valkey+unix:// or other "
-            "production URI here means app/extensions.py is pinning "
+            "production URI here means app/rate_limits.py is pinning "
             "storage at construction, which would override each "
             "configuration's RATELIMIT_STORAGE_URI."
         )

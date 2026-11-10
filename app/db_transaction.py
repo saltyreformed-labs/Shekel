@@ -94,7 +94,9 @@ statement: the page's own work was **eight** statements either way, and the
 machinery around it was **seven** and is now **two** -- one ``SET
 TRANSACTION`` and one user load.  (Eleven rather than ten in total for the
 first GET after a POST, on both sides, because that one inherits an open
-transaction and pays the refusal probe; the saving is the same.)
+transaction and pays the refusal probe; the saving is the same.)  With the
+rate limiter on, a signed-in browser that sends its device cookie pays one
+more, the limits' read of its record's id (:mod:`app.rate_limits`).
 ``request_started`` is sent by ``Flask.full_dispatch_request``
 immediately before ``preprocess_request``, which is what runs the
 before-request hooks, so a receiver there precedes every one of them by
@@ -151,9 +153,8 @@ the advisory lock of the user whose data the request acts on (a companion's
 linked owner, :attr:`app.models.user.User.data_owner_id`) before it reads any
 of that owner's data, so two of one owner's writes never overlap: the second
 waits for the first to commit, and every statement it then runs sees the
-first's rows.  The only rows read before it are the signed-in user's own,
-loaded to sign the request in, and the role row joined to it; the user's row
-is expired once the lock is held (:func:`_lock_the_open_transaction`).
+first's rows.  What is read before it, and why none of it is a row a write
+decides on, is listed once, in :func:`_lock_the_open_transaction`.
 **The request's first transaction takes it after the form-token check and
 the app-wide rate limit** (ruling
 **R-CC122**), in a before-request hook registered after theirs
@@ -728,7 +729,10 @@ def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") ->
     at ``/login``, also which users the browser's cookies name known records
     of, read as user ids alone
     (:func:`app.services.known_device_service.known_to`), so no record is
-    loaded.  A sign-in whose check committed holds no open transaction
+    loaded; and on a signed-in request, for the rate limits, which record the
+    browser's cookie names, read as its id alone
+    (:func:`app.services.known_device_service.known_browser_id`), so none is
+    loaded there either.  A sign-in whose check committed holds no open transaction
     here, so the lock is the next one's first act and nothing precedes it.
     The password, MFA and settings doors write the user's row, so it is
     EXPIRED once the lock is held, and its next use reloads it under the lock:

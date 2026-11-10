@@ -16,9 +16,10 @@ from app.config import CONFIG_MAP
 from app.context_processors import register_context_processors
 from app.db_transaction import register_transaction_boundary
 from app.error_handlers import register_error_handlers
-from app.extensions import csrf, db, limiter, login_manager, migrate
+from app.extensions import csrf, db, login_manager, migrate
 from app.jinja_filters import register_template_filters
 from app.login_gate import register_login_gate
+from app.rate_limits import limiter
 from app.routes.static_pass import static_file_version
 from app.url_converters import register_url_converters
 from app.utils.client_address import (

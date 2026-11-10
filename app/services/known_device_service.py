@@ -5,7 +5,8 @@ One browser, one record, one cookie (plan#2772, ruling plan#2994).  A finished
 sign-in writes the record; a trust is one fact on it, and skips only the
 two-factor code, never the password (plan#2173, ruling plan#2406).  This module
 owns the record's acts: read what a browser's token is worth (or, before any
-lock, only which users its tokens name known records of), record a finished
+lock, only which users its tokens name known records of, or which record one
+names, by its id), record a finished
 sign-in or re-confirm (each gives the browser a new token and clears its
 count), count a wrong guess, list a user's trusted devices, and forget one.
 Beside them, :func:`device_named_by` picks a browser's device out of a list
@@ -151,9 +152,10 @@ def _the_known_browsers(now: datetime, tokens: Mapping[int, str]) -> ColumnEleme
     the token *tokens* holds for them, and known at *now* (:func:`_known`): so
     a token no record holds, another user's token and a browser past its
     lifetime all match nothing.  The standing read under the lock
-    (:func:`_standing_at`, of one cookie) and ``/login``'s question before it
-    (:func:`known_to`, of every cookie the browser sent) both judge a cookie
-    by it.
+    (:func:`_standing_at`, of one cookie), ``/login``'s question before it
+    (:func:`known_to`, of every cookie the browser sent) and the rate limits'
+    question of a signed-in request (:func:`known_browser_id`, of its user's
+    cookie) all judge a cookie by it.
 
     The pairs are one list, bound when the statement runs, so the statement
     has one shape however many cookies it judges.  SQLAlchemy keeps a compiled
@@ -236,6 +238,37 @@ def known_to(tokens: Mapping[int, str]) -> frozenset[int]:
     return frozenset(db.session.execute(
         select(KnownDevice.user_id).where(_the_known_browsers(now, tokens))
     ).scalars())
+
+
+def known_browser_id(user_id: int, token: str | None) -> int | None:
+    """Return the id of the record *token* names for *user_id*, loading no record.
+
+    What a signed-in request's rate limits count against: its known browser's
+    own budget, by this id, else its account's (ruling plan#3108).  The id
+    comes from the record, never from the token, so a made-up cookie names
+    nothing and buys no budget of its own.  The cookie is judged by the
+    clause :func:`find_browser` judges it by (:func:`_the_known_browsers`).
+
+    The id alone, never the record, because the limits are asked before the
+    owner's lock: a record loaded then would hold its count as it stood
+    before the lock, for the reason :func:`known_to` gives.
+
+    Args:
+        user_id: The signed-in ``auth.users.id``.
+        token: The token the browser's cookie for *user_id* carries, or
+            ``None`` when it sent none.
+
+    Returns:
+        The ``auth.known_devices.id`` for which :func:`find_browser` would,
+        at this moment, answer a standing, or ``None`` for a stranger.  No
+        statement is sent when *token* is ``None``.
+    """
+    if token is None:
+        return None
+    now = datetime.now(timezone.utc)
+    return db.session.execute(
+        select(KnownDevice.id).where(_the_known_browsers(now, {user_id: token}))
+    ).scalar_one_or_none()
 
 
 def find_browser(user_id: int, token: str | None) -> BrowserStanding | None:

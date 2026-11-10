@@ -33,7 +33,7 @@ that could answer instead of the counters.
 
 import secrets
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pyotp
 import pytest
@@ -42,7 +42,9 @@ from app.extensions import db
 from app.models.known_device import KnownDevice
 from app.services import known_device_service
 from tests._guess_records import count_of, locked_until_of
-from tests._limited_app import limited_app, through_nginx
+from tests._limited_app import (
+    limited_app, signed_in_browser, stolen_session, through_nginx,
+)
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -287,6 +289,32 @@ class TestAKnownBrowserHasItsOwnTries:
             assert _refused_for_tries(_try_code(borrowed, "5.5.5.5", _next_code(secret)))
             assert _refused_for_tries(_try_code(owner, "7.7.7.7", _next_code(secret)))
 
+    def test_the_tries_are_not_the_code_forms_own_limit(self, rate_app, seed_user):
+        """Signed in with a code pending, a known browser still has five codes checked.
+
+        Signed in, the browser's tries and the code form's own limit count by
+        one key, its record's (ruling plan#3108): the tries' counters carry a
+        scope of their own, so each POST spends one of each.  As one counter,
+        each POST would spend two, and the third would be refused.  No flow
+        of the app leaves a session signed in with a code pending, so the
+        session is written here; the sign-in had no code to ask, so it spent
+        none of the code form's counters.
+        """
+        with rate_app.app_context():
+            user_id = seed_user["user"].id
+            owner = signed_in_browser(rate_app, "7.7.7.7")
+            enable_mfa(db.session, user_id)
+            with owner.session_transaction() as session:
+                session["_mfa_pending_user_id"] = user_id
+                session["_mfa_pending_at"] = datetime.now(timezone.utc).isoformat()
+
+            for _ in range(_CODE_TRIES):
+                response = _try_code(owner, "7.7.7.7", _NEVER_A_CODE)
+                assert response.status_code == 200
+                assert _INVALID_CODE in response.data
+
+            assert _refused_for_tries(_try_code(owner, "7.7.7.7", _NEVER_A_CODE))
+
 
 _INVALID_PASSWORD = b"Invalid password."
 
@@ -326,28 +354,6 @@ def _re_confirm_refused_for_tries(response):
     )
 
 
-def _signed_in_owner(rate_app, address):
-    """Return a browser that has finished a sign-in with no code, still signed in."""
-    browser = rate_app.test_client()
-    assert _signed_in(browser.post(
-        "/login", data={"email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD},
-        **through_nginx(address),
-    ))
-    return browser
-
-
-def _stolen_session(rate_app, owner):
-    """Return a new browser holding a copy of *owner*'s session cookie and nothing else.
-
-    Signed in as the owner, and a stranger at every door: the browser's own
-    cookie stayed with the owner.
-    """
-    name = rate_app.config["SESSION_COOKIE_NAME"]
-    thief = rate_app.test_client()
-    thief.set_cookie(name, owner.get_cookie(name).value)
-    return thief
-
-
 def _wrong_passwords_checked(browser, count):
     """Re-confirm *count* wrong passwords from the owner's address; assert each was checked."""
     for _ in range(count):
@@ -374,8 +380,8 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         password.
         """
         with rate_app.app_context():
-            owner = _signed_in_owner(rate_app, _OWNERS_ADDRESS)
-            thief = _stolen_session(rate_app, owner)
+            owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
+            thief = stolen_session(rate_app, owner)
             _wrong_passwords_checked(thief, _CODE_TRIES)
             assert _re_confirm_refused_for_tries(
                 _re_confirm(thief, _OWNERS_ADDRESS, _WRONG_PASSWORD),
@@ -394,14 +400,14 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         """
         with rate_app.app_context():
             user_id = seed_user["user"].id
-            owner = _signed_in_owner(rate_app, _OWNERS_ADDRESS)
+            owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             _wrong_passwords_checked(owner, _CODE_TRIES)
 
             assert _re_confirm_refused_for_tries(
                 _re_confirm(owner, _OWNERS_ADDRESS, _WRONG_PASSWORD),
             )
             assert _device_count(user_id, owner) == _CODE_TRIES
-            thief = _stolen_session(rate_app, owner)
+            thief = stolen_session(rate_app, owner)
             checked = _re_confirm(thief, _OWNERS_ADDRESS, _WRONG_PASSWORD)
             assert checked.status_code == 200
             assert _INVALID_PASSWORD in checked.data
@@ -420,11 +426,11 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         """
         with rate_app.app_context():
             user_id = seed_user["user"].id
-            owner = _signed_in_owner(rate_app, _OWNERS_ADDRESS)
-            _wrong_passwords_checked(_stolen_session(rate_app, owner), _CODE_TRIES)
+            owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
+            _wrong_passwords_checked(stolen_session(rate_app, owner), _CODE_TRIES)
 
-            strangers = _stolen_session(rate_app, owner)
-            made_up = _stolen_session(rate_app, owner)
+            strangers = stolen_session(rate_app, owner)
+            made_up = stolen_session(rate_app, owner)
             made_up.set_cookie(f"shekel_device_{user_id}", secrets.token_urlsafe(32))
 
             assert _re_confirm_refused_for_tries(_re_confirm(strangers, _OWNERS_ADDRESS))
@@ -443,7 +449,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         them for the whole page.
         """
         with rate_app.app_context():
-            owner = _signed_in_owner(rate_app, _OWNERS_ADDRESS)
+            owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             assert _re_confirmed(_re_confirm(owner, _OWNERS_ADDRESS))
 
             first = owner.get("/reauth", **through_nginx(_OWNERS_ADDRESS))
@@ -472,7 +478,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
             assert _refused_for_tries(_guess(rate_app, "8.8.9.0"))
 
             checked = _re_confirm(
-                _stolen_session(rate_app, owner), _OWNERS_ADDRESS, _WRONG_PASSWORD,
+                stolen_session(rate_app, owner), _OWNERS_ADDRESS, _WRONG_PASSWORD,
             )
 
             assert checked.status_code == 200
@@ -486,7 +492,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         """
         with rate_app.app_context():
             user_id = seed_user["user"].id
-            owner = _signed_in_owner(rate_app, _OWNERS_ADDRESS)
+            owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             for _ in range(_CODE_TRIES):
                 rejected = owner.post(
                     "/reauth", data={}, **through_nginx(_OWNERS_ADDRESS),
@@ -508,7 +514,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
         put the lock on, as a stranger who knows the email would.
         """
         with rate_app.app_context():
-            owner = _signed_in_owner(rate_app, _OWNERS_ADDRESS)
+            owner = signed_in_browser(rate_app, _OWNERS_ADDRESS)
             for octet in range(_LOCK_THRESHOLD):
                 rate_app.test_client().post(
                     "/login",
@@ -516,7 +522,7 @@ class TestAKnownBrowserHasItsOwnReConfirmTries:
                     **through_nginx(f"8.8.8.{octet}"),
                 )
             assert locked_until_of(SEED_USER_EMAIL) is not None
-            thief = _stolen_session(rate_app, owner)
+            thief = stolen_session(rate_app, owner)
             for _ in range(_CODE_TRIES):
                 refused = _re_confirm(thief, _OWNERS_ADDRESS)
                 assert refused.status_code == 200

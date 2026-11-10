@@ -7,9 +7,9 @@ that take none are named below).  **Since plan step
 ``balance:X-bn`` it is taken from exactly two modules** (rulings **R-CC106**,
 **R-CC114**, **R-CC115**, **R-CC121**): :mod:`app.db_transaction`, at the
 start of every command transaction a signed-in request opens -- before it
-reads any of the owner's data; the signed-in user's own row and the role row
-joined to it, read to sign the request in, are the only rows read first, and
-the user's row is re-read under the lock -- and at a sign-in right after the
+reads any of the owner's data; what it reads first, none of it a row a write
+decides on, is listed in :func:`app.db_transaction._lock_the_open_transaction`
+-- and at a sign-in right after the
 account is found; and this module's :func:`lock_every_user_writes`, at the
 start of each deploy reconcile.  No service takes it for itself any more, and
 ``tests/test_arch/test_the_owner_lock_has_one_home.py`` refuses one that

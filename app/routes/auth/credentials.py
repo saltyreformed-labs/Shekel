@@ -31,13 +31,14 @@ from marshmallow import ValidationError as MarshmallowValidationError
 from app import ref_cache
 from app.db_transaction import bind_sign_in_owner
 from app.enums import RoleEnum
-from app.extensions import db, limiter
+from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.schemas.validation import LoginSchema, RegisterSchema
 from app.services import auth_service, registration_service
 from app.services.guess_record_service import Held
 from app.services.known_device_service import BrowserStanding
 from app.exceptions import AuthError, ConflictError, ValidationError
+from app.rate_limits import limiter
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     _browser_standing,

@@ -31,7 +31,7 @@ from cryptography.fernet import InvalidToken
 from marshmallow import ValidationError as MarshmallowValidationError
 
 from app.db_transaction import bind_sign_in_owner, write_transaction
-from app.extensions import db, limiter
+from app.extensions import db
 from app.models.known_device import TRUST_LIFETIME
 from app.models.user import MfaConfig, User
 from app.schemas.validation import (
@@ -41,6 +41,7 @@ from app.schemas.validation import (
 )
 from app.services import auth_service, mfa_service
 from app.exceptions import AuthError
+from app.rate_limits import limiter
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     MFA_SETUP_PENDING_TTL,

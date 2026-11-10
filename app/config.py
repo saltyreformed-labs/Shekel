@@ -277,8 +277,8 @@ class BaseConfig:
     # there is no fallback.
     RATELIMIT_STORAGE_URI = "memory://"
 
-    # Default ceiling, per signed-in account or else per client
-    # (``rate_limit_key``), applied to every route that does NOT carry
+    # Default ceiling, per known browser, else per signed-in account, else
+    # per client (``rate_limit_key``), applied to every route that does NOT carry
     # an explicit ``@limiter.limit`` decorator.  As of audit verification
     # (Phase A 2026-04-15) only 4 of ~93 mutating routes have an explicit
     # rate limit.  Without this ceiling, an authenticated attacker could

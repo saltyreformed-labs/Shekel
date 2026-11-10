@@ -42,9 +42,10 @@ from marshmallow import ValidationError as MarshmallowValidationError
 
 from app import ref_cache
 from app.enums import RoleEnum
-from app.extensions import db, limiter
+from app.extensions import db
 from app.models.known_device import KnownDevice
 from app.models.user import User
+from app.rate_limits import limiter, whose_attempt
 from app.services import (
     auth_service, guess_record_service, known_device_service, mfa_service,
 )
@@ -198,12 +199,18 @@ def _tries_key() -> str:
     whose key is empty, so a missing key must raise, never wave a try through.
 
     Returns:
-        ``known-device:<id>`` or ``account:<id>``.
+        ``known-device:<id>`` or ``user:<id>``.
     """
     return getattr(g, _TRIES_KEY)
 
 
-@limiter.limit(_TRIES, key_func=_tries_key, override_defaults=False)
+#: The name the tries' counters carry beside their door's endpoint.
+_TRIES_SCOPE = "tries"
+
+
+@limiter.limit(
+    _TRIES, key_func=_tries_key, scope=_TRIES_SCOPE, override_defaults=False,
+)
 def _count_a_try() -> None:
     """Spend one try from the counter :func:`_tries_key` names.
 
@@ -213,7 +220,16 @@ def _count_a_try() -> None:
     A limit on a function the view calls, rather than on the view, is what
     lets it run after the view has read the browser's record under the
     owner's lock.  Its counters are scoped by the endpoint, as a limit on the
-    view would be, so each door's tries are its own.
+    view would be, so each door's tries are its own.  And by
+    :data:`_TRIES_SCOPE`, because the tries count by the rule the app's other
+    limits on a signed-in request count by
+    (:func:`~app.rate_limits.whose_attempt`): a counter is its key, scope and
+    limit, and ``/mfa/verify``'s own limit is the tries' limit, so without it
+    the two would be one counter for any key they shared.  They share one
+    only for a browser signed in with a code pending, which no flow of the
+    app leaves (only a finished sign-in signs a browser in, and it clears
+    the code's pending state), so the scope makes the two counters separate
+    by construction rather than by that flow.
 
     It adds to the app's default limits rather than replacing them
     (``override_defaults=False``).  Once a request has spent a try here,
@@ -233,7 +249,9 @@ def _spend_a_try(user: User, device: KnownDevice | None) -> None:
     password but not the phone at the code form (ruling plan#3023), or
     someone holding a stolen session at re-confirm (ruling plan#3071).  Every
     other browser spends the account's, which they all share, so moving
-    between addresses or browsers buys no more guesses.
+    between addresses or browsers buys no more guesses.  The rule is
+    :func:`~app.rate_limits.whose_attempt`, the one the app's
+    default limits on a signed-in page count by too (ruling plan#3108).
 
     The counter comes from *device*, the record
     :func:`~app.services.known_device_service.find_browser` verified under the
@@ -250,10 +268,7 @@ def _spend_a_try(user: User, device: KnownDevice | None) -> None:
         flask_limiter.RateLimitExceeded: The counter has no try left in this
             window.
     """
-    counter = (
-        f"account:{user.id}" if device is None
-        else f"known-device:{device.id}"
-    )
+    counter = whose_attempt(user.id, None if device is None else device.id)
     setattr(g, _TRIES_KEY, counter)
     _count_a_try()
 

@@ -175,7 +175,7 @@ class TestLogin:
             rate_app.config["RATELIMIT_ENABLED"] = True
 
             # Re-initialize limiter with rate limiting enabled.
-            from app.extensions import limiter
+            from app.rate_limits import limiter
             limiter.enabled = True
             limiter.init_app(rate_app)
 
@@ -2350,7 +2350,7 @@ class TestRegistration:
             rate_app = create_app("testing")
             rate_app.config["RATELIMIT_ENABLED"] = True
 
-            from app.extensions import limiter
+            from app.rate_limits import limiter
             limiter.enabled = True
             limiter.init_app(rate_app)
 
@@ -2443,7 +2443,7 @@ class TestMfaVerifySecurity:
             rate_app.config["RATELIMIT_ENABLED"] = True
 
             # Re-initialize limiter with rate limiting enabled.
-            from app.extensions import limiter  # pylint: disable=import-outside-toplevel
+            from app.rate_limits import limiter  # pylint: disable=import-outside-toplevel
             limiter.enabled = True
             limiter.init_app(rate_app)
 

@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import sqlalchemy
 from sqlalchemy.engine.interfaces import CacheStats
+from sqlalchemy.orm import Session
 
 from app.exceptions import NotFoundError
 from app.models.known_device import KnownDevice
@@ -94,6 +95,11 @@ class _Acts:
         """Ask at *moment* which users *tokens* name known records of."""
         self._at(moment)
         return known_device_service.known_to(tokens)
+
+    def record_id(self, moment, user_id, token):
+        """Ask at *moment* which of *user_id*'s records *token* names, by id."""
+        self._at(moment)
+        return known_device_service.known_browser_id(user_id, token)
 
 
 @pytest.fixture(name="acts")
@@ -439,6 +445,86 @@ class TestWhoTheBrowserIsKnownTo:
             sqlalchemy.event.remove(db.engine, "before_cursor_execute", on_execute)
 
         assert reports == [CacheStats.CACHE_HIT] * 3
+
+
+class TestWhichRecordTheBrowserNames:
+    """The rate limits' question of a signed-in request: its browser's record, by id.
+
+    Ruling plan#3108.  The cookie is judged as :func:`find_browser` judges
+    it, so the answer is the record's id exactly when that would answer a
+    standing.  It is asked before the owner's lock, so it loads no record.
+    """
+
+    def test_a_live_cookie_answers_its_records_id(self, app, db, acts, seed_user):
+        """The token a sign-in returned names that sign-in's record."""
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        assert acts.record_id(_T0, user_id, token) == _device_of(db, token).id
+
+    def test_a_made_up_token_answers_none(self, app, db, acts, seed_user):
+        """A token no record holds, beside a live record of the same user: none."""
+        user_id = seed_user["user"].id
+        acts.trust(_T0, user_id)
+
+        assert acts.record_id(_T0, user_id, "made-up") is None
+
+    def test_another_users_token_answers_none(
+        self, app, db, acts, seed_user, seed_second_user,
+    ):
+        """The first user's live token, asked of for the second user: none."""
+        token = acts.trust(_T0, seed_user["user"].id)
+
+        assert acts.record_id(_T0, seed_second_user["user"].id, token) is None
+
+    def test_thirty_days_after_the_sign_in_it_answers_none(
+        self, app, db, acts, seed_user,
+    ):
+        """Its id a second short of thirty days after the sign-in; none at thirty."""
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+        device_id = _device_of(db, token).id
+
+        assert acts.record_id(_T0 + _THIRTY_DAYS - _ONE_SECOND, user_id, token) == device_id
+        assert acts.record_id(_T0 + _THIRTY_DAYS, user_id, token) is None
+
+    def test_no_cookie_sends_no_statement(self, app, db, acts, seed_user):
+        """A browser that sent no cookie for the user: none, and nothing asked."""
+        user_id = seed_user["user"].id
+
+        answer, statements = capture_sql_statements(
+            lambda: acts.record_id(_T0, user_id, None),
+        )
+
+        assert answer is None
+        assert statements == []
+
+    def test_it_loads_no_record(self, app, db, acts, seed_user):
+        """Answering a live record's id loads no record into the session.
+
+        Counted by the load event rather than read from the identity map,
+        which holds rows weakly, and with the session emptied first, because
+        a record already in it is returned by a load without the event firing.
+        """
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+        device_id = _device_of(db, token).id
+        db.session.commit()
+        db.session.expunge_all()
+        loaded = []
+
+        def on_load(_session, instance):
+            if isinstance(instance, KnownDevice):
+                loaded.append(instance)
+
+        sqlalchemy.event.listen(Session, "loaded_as_persistent", on_load)
+        try:
+            answer = acts.record_id(_T0, user_id, token)
+        finally:
+            sqlalchemy.event.remove(Session, "loaded_as_persistent", on_load)
+
+        assert answer == device_id
+        assert loaded == []
 
 
 class TestTheList:

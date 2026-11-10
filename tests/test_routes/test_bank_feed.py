@@ -43,7 +43,7 @@ from app.utils.log_events import (
     EVT_STATEMENT_DOOR_REFUSED,
 )
 from tests.test_routes._statement_forms import form_fields
-from tests.test_services.test_bank_feed import (
+from tests.test_services.test_bank_feed._helpers import (
     _ACCESS_URL,
     _CHECKING,
     _CLAIM_URL,
@@ -73,7 +73,7 @@ def bridge(monkeypatch):
     """Bridge, faked and spied (the service tests' fake, shared)."""
     # Pylint: ``import-outside-toplevel`` -- the fixture's class is a test
     # helper of the sibling module, reached here rather than re-spelled.
-    from tests.test_services.test_bank_feed import _Bridge  # pylint: disable=import-outside-toplevel
+    from tests.test_services.test_bank_feed._helpers import _Bridge  # pylint: disable=import-outside-toplevel
     return _Bridge(monkeypatch)
 
 

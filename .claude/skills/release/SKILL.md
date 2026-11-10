@@ -94,21 +94,39 @@ mkdir "$R" && printf 'R="%s"\nW="%s"\n' "$R" "$(git rev-parse --show-toplevel)" 
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+: "${R:?}"
 git fetch --prune origin || exit 1
 C=$(sed -n 's/^CONTAINER_NAME="\${SHEKEL_CONTAINER_NAME:-\(.*\)}"$/\1/p' ~/projects/Shekel/deploy/shekel-deploy.sh)
 P=$(docker inspect "$C" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
 echo "container=$C production=$P main=$(git rev-parse origin/main)"
-[ -n "$C" ] && [ "$P" = "$(git rev-parse origin/main)" ] \
-    && printf 'C="%s"\nBASE="%s"\nCUT="%s"\n' "$C" "$P" "$(git rev-parse origin/dev)" \
+[ -n "$C" ] && [ -n "$P" ] || { echo "no container or no label"; exit 1; }
+if [ "$P" != "$(git rev-parse origin/main)" ]; then
+    git merge-base --is-ancestor "$P" origin/main || { echo "production is not in main"; exit 1; }
+    .venv/bin/python -m tools.release.release production --base "$P" --cut origin/main \
+        > "$R/production_beyond.txt" 2>&1; echo "beyond exit=$?"
+    case "$(tail -n 1 "$R/production_beyond.txt")" in
+        "verdict: 0 of production's files change;"*) ;;
+        *) echo "main changes what production runs, or nothing was judged"; exit 1 ;;
+    esac
+fi
+printf 'C="%s"\nBASE="%s"\nCUT="%s"\n' "$C" "$P" "$(git rev-parse origin/dev)" \
     >> ~/projects/shekel-handoffs/releases/current.sh; echo "pinned=$?"
 ```
 
-Production's image names the commit it was built from, and it must equal `origin/main`; only then
-are the container, the base and the cut appended (`pinned=0`). Otherwise never judge a new
+Production's image names the commit it was built from, `P`. Only when it equals `origin/main`, or
+`main` holds it and changes none of production's files beyond it, are the container, the base
+(always `P`, what production runs) and the cut appended (`pinned=0`). The second is a records-only
+merge into `main` (R-BAL363's door), and Josh's answer of 2026-11-04 is to judge from production:
+`production_beyond.txt` is its proof, kept in the record, and `plan` then reads the cards that
+merge records as carried, their work already live (finding plan#2899). Otherwise never judge a new
 release, since `plan` would not see what `main` holds beyond production:
 
 - An empty `container=` or `production=` (no such container, no label, or a deploy script whose
   `CONTAINER_NAME` line changed): STOP and tell Josh.
+- `production is not in main`, or `main changes what production runs, or nothing was judged`
+  where `production_beyond.txt` holds no `verdict:` line (exit 2 or a crash): STOP and tell Josh.
+  Where it does, `main` holds a change to what production runs that production lacks: the cases
+  below say which; none matching is a STOP.
 - A release whose record ends at "Not now" at step 10: resume it at step 9 by copying its record's
   `current.sh` back.
 - The start block refused with `an unfinished run`: a run that never reached step 13 (a lost
@@ -343,8 +361,8 @@ Header "Release ok". The question lists, in plain words with each id after its w
   A release whose verdict reads `0 of production's files change` still comes to this question,
   whether or not it moves a version. Say in plain words that no file of this repository's that the
   app runs changes, and that the run goes on as any other: the merge builds a new image and step 10
-  asks him to log out for its deploy, as step 1 refuses the next release until production's image
-  names `main`'s commit. Say too that the new image is not the old one byte for byte: each build
+  asks him to log out for its deploy, so production's image names `main`'s commit. Say too that
+  the new image is not the old one byte for byte: each build
   installs Debian's newest system packages (the `Dockerfile`'s `apt-get` lines: OpenSSL, the
   database client and its library) and compiles the database driver against them;
 - each card the release carries that `docs/runbook.md` 2.6 holds host steps for, in plain words:
@@ -545,6 +563,8 @@ Header "Deploy". "The release is merged and its image is built. Log out of Sheke
 then pick 'Logged out, deploy now'; I will tell you when to log back in." Options: "Logged out,
 deploy now" or "Not now". On "Not now" nothing deploys and `main` is ahead of production: the
 record says so, and the next `/release` stops at step 1 until this one resumes here at step 9.
+The one exception is a release that changes none of production's files: step 1 then judges the
+next release from production's commit, and that release carries this one's cards too.
 
 ## 11. Deploy, verify, read main's CI
 
@@ -611,9 +631,10 @@ sha, the resync PR and its merge sha (`RS`, `RM`), the image digest old -> new, 
 stamp, the dump's path, the host steps run and their snapshot (`HS`), step 4's trace of each changed
 table and column, and each verdict with its exit (plan, the row comparison, each kit, the checks,
 each queue run, the build, each host step, the dry run, the deploy, verify, main's CI, the census);
-a run that ended early says where and why, and names what it left open. Beside it: `plan.txt`,
-`production.txt`, `dump.txt`, `dump_err.txt`, `rows.txt`, `rows_report.txt`, `rehearsal.txt`
-(when a kit ran), each `host_<card>_<step>.txt`,
+a run that ended early says where and why, and names what it left open. Beside it:
+`production_beyond.txt` (when step 1 wrote it), `plan.txt`, `production.txt`, `dump.txt`,
+`dump_err.txt`, `rows.txt`, `rows_report.txt`, `rehearsal.txt` (when a kit ran), each
+`host_<card>_<step>.txt`,
 `checks_<PR>.txt`, `checks_<RS>.txt`, each
 `queue_<run>.txt`, `build_<run>.txt`, `build_log_<run>.txt`, `dryrun.txt`, `deploy_since.txt`,
 `deploy.txt`, `verify.txt`, `main_ci_<run>.txt`, `cleanup.txt`.

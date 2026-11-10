@@ -10,7 +10,7 @@ from starting rather than pricing a paycheck against it.
 **The checks replace the per-user tables' constraints, one for one, and are
 never narrower.**  Until plan step salary:X-at-1 each user's copy of the law sat
 in five ``salary`` tables (unread since, and dropped at plan step X-at-2) whose
-columns refuse a malformed row: amounts are ``Numeric(12, 2)`` and rates
+columns refused a malformed row: amounts were ``Numeric(12, 2)`` and rates
 ``Numeric(5, 4)``, both ``NOT NULL`` where the law requires a figure, every
 amount at least zero, the Social Security wage base and the Additional Medicare
 threshold above zero, every rate between 0 and 1, a bracket's upper bound at or
@@ -53,13 +53,13 @@ from app.enums import FilingStatusEnum, TaxTypeEnum
 _ZERO = Decimal("0")
 _ONE = Decimal("1")
 
-# The per-user tables' column types: amounts are ``Numeric(12, 2)`` (ten
-# digits before the point, two after) and rates ``Numeric(5, 4)`` (one and
-# four).
+# The per-user tables' column types, which the checks keep: amounts were
+# ``Numeric(12, 2)`` (ten digits before the point, two after) and rates
+# ``Numeric(5, 4)`` (one and four).
 _AMOUNT_DIGITS = (10, 2)
 _RATE_DIGITS = (1, 4)
 
-# The ``ck_*_valid_tax_year`` CHECKs' range.
+# The range those tables' ``ck_*_valid_tax_year`` CHECKs held.
 _FIRST_TAX_YEAR = 2000
 _LAST_TAX_YEAR = 2100
 
@@ -80,7 +80,7 @@ class Bracket:
     sort_order: int
 
     def __post_init__(self):
-        """Refuse a rung no ``salary.tax_brackets`` row could hold, or an empty one."""
+        """Refuse a rung no ``salary.tax_brackets`` row could have held, or an empty one."""
         _require_amount(self.min_income, "bracket min_income")
         _require_upper_bound(self.min_income, self.max_income, "bracket")
         _require_rate(self.rate, "bracket rate")
@@ -161,7 +161,7 @@ class FicaRules:
     medicare_surtax_threshold: Decimal
 
     def __post_init__(self):
-        """Refuse what the ``ck_fica_configs_*`` CHECKs refuse."""
+        """Refuse what the ``ck_fica_configs_*`` CHECKs refused."""
         _require_rate(self.ss_rate, "FICA ss_rate")
         _require_amount(self.ss_wage_base, "FICA ss_wage_base", above_zero=True)
         _require_rate(self.medicare_rate, "FICA medicare_rate")
@@ -188,7 +188,7 @@ class ChildDeductionTier:
     deduction_per_child: Decimal
 
     def __post_init__(self):
-        """Refuse a tier no ``salary.state_child_deductions`` row could hold."""
+        """Refuse a tier no ``salary.state_child_deductions`` row could have held."""
         _require_amount(self.agi_min, "child deduction agi_min")
         _require_upper_bound(self.agi_min, self.agi_max, "child deduction tier")
         _require_amount(self.deduction_per_child, "child deduction_per_child")
@@ -479,7 +479,7 @@ def _require_amount(value, what: str, *, above_zero: bool = False) -> None:
         value: The amount to check.
         what: What the amount is, for the error message.
         above_zero: Refuse zero too, as the ``ss_wage_base > 0`` and
-            ``medicare_surtax_threshold > 0`` CHECKs do.
+            ``medicare_surtax_threshold > 0`` CHECKs did.
 
     Raises:
         ValueError: If *value* is not a ``Decimal`` to the cent under

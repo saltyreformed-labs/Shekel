@@ -7,7 +7,7 @@ for the paycheck calculator and the Taxes tab.  The law itself is
 step **salary:X-at-1**); this module reads it and decides which of its years
 applies.  Until X-at-1 it read a copy of the law stored per user in five
 ``salary`` tables, which signup and every deploy copied in and the Settings
-page could overwrite.
+page could overwrite; plan step salary:X-at-2 dropped them.
 
 **Which year's law applies to a given year is ONE rule and it lives here**
 (:func:`resolve_tax_year`).  The app carries the years that have been

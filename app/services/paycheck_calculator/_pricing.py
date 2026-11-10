@@ -87,9 +87,9 @@ def calculate_paycheck(basis: PayrollBasis, period: DerivedPeriod, tax_configs,
                       sequence cost.
         period:       The ``DerivedPeriod`` this paycheck is for.
         tax_configs:  dict with keys:
-                      - bracket_set: TaxBracketSet
-                      - state_config: StateTaxConfig
-                      - fica_config: FicaConfig
+                      - bracket_set: :class:`app.tax_law.FederalRules`
+                      - state_config: :class:`~app.services.tax_config_service.StateTaxRules`
+                      - fica_config: :class:`app.tax_law.FicaRules`
         configs_by_year: ``{tax_year: configs dict}`` covering the year of
                       every pay stub that may price the paycheck
                       (:func:`~._stubs.tax_years_for`), or ``None`` when

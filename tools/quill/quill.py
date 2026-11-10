@@ -65,7 +65,9 @@ keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).  ``arc`` sets a card's 
 its arc label back to display it, ``label`` adds or removes a label a person chooses (ruling
 plan#2221), and ``priority`` and ``effort`` set or clear a card's Priority and Effort
 (plan#2491, :mod:`_arc_label`); ``file step`` and ``file finding`` file a card holding its
-Effort, the filing session's estimate (ruling plan#2492, :mod:`_filing`).
+Effort, the filing session's estimate (ruling plan#2492, :mod:`_filing`), and ``file step`` at
+the top level and ``file question`` one holding no Priority but the one the filing session
+suggests and its reason, GitHub's pending suggestion (rulings plan#3224, plan#3233).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -74,14 +76,15 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill release plan#N
     python -m tools.quill.quill show plan#N | OLD-ID
     python -m tools.quill.quill file step --arc ARC --title NAME --body-file SPEC
-                                         --effort SESSIONS [--parent plan#P]
+                                         --effort SESSIONS
+                                         (--suggest PRIORITY --why SENTENCE | --parent plan#P)
     python -m tools.quill.quill file finding --arc ARC --title NAME --owner plan#S --text SENTENCE
                                             --effort SESSIONS
     python -m tools.quill.quill file ruling --arc ARC --title NAME
                                 (--owner plan#S --question-file Q | [--owner plan#S]
                                  --from-question plan#Q) --answer-file A
     python -m tools.quill.quill file question --arc ARC --title NAME --body-file QUESTION
-                                             [--owner plan#S]
+                                             --suggest PRIORITY --why SENTENCE [--owner plan#S]
     python -m tools.quill.quill file task --parent plan#N --title NAME --body-file PIECE
                                          [--before plan#T]
     python -m tools.quill.quill start plan#T

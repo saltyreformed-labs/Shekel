@@ -13,7 +13,7 @@ from dataclasses import replace
 
 import pytest
 
-from tools.quill._fake import FailOnce, FakeTracker, leaf_filing, run
+from tools.quill._fake import SUGGESTED, FailOnce, FakeTracker, leaf_filing, run
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Board, Child, Tracker, TrackerError
 from tools.quill.setup_tracker import FILING, PLAN
@@ -235,7 +235,7 @@ def test_sync_after_a_person_closes_a_leaf_still_being_filed_gives_its_milestone
 
 
 @pytest.mark.parametrize("argv", [
-    ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Top"),
+    ("file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance", "--title", "Top"),
     ("file", "finding", "--effort", "1", "--arc", "balance", "--title", "Twice",
      "--owner", "plan#1", "--text", "The report counts a refund twice."),
 ])

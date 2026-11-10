@@ -16,12 +16,14 @@ import pytest
 
 from tools.quill import quill
 from tools.quill._fake import (
+    SUGGESTED,
     FailOnce,
     FakeTracker,
     finding_filing,
     leaf_filing,
     ruling_filing,
     run,
+    suggested,
 )
 from tools.quill._fields import EFFORT, EFFORT_FIELD, PRIORITY_FIELD
 from tools.quill._tracker import TrackerError
@@ -34,8 +36,8 @@ def _step(tmp_path, *effort):
     file, ``effort`` (``--effort`` and its value, or nothing) after it."""
     spec = tmp_path / "new.md"
     spec.write_text("New work.")
-    return ("file", "step", "--arc", "balance", "--title", "New", "--body-file", str(spec),
-            *effort)
+    return ("file", "step", *SUGGESTED, "--arc", "balance", "--title", "New", "--body-file",
+            str(spec), *effort)
 
 
 def _filings(tmp_path):
@@ -48,8 +50,8 @@ def _filings(tmp_path):
         "finding": ("file", "finding", "--arc", "balance", "--title", "Twice", "--owner",
                     "plan#1", "--text", "The report counts a refund twice."),
         "ruling": ruling_filing(tmp_path, "plan#1"),
-        "question": ("file", "question", "--arc", "balance", "--title", "Day", "--body-file",
-                     str(body)),
+        "question": ("file", "question", *SUGGESTED, "--arc", "balance", "--title", "Day",
+                     "--body-file", str(body)),
         TASK: ("file", TASK, "--parent", "plan#1", "--title", "Piece", "--body-file", str(body)),
     }
 
@@ -129,8 +131,8 @@ def test_a_filing_run_again_writes_the_effort_its_card_does_not_hold(code, tmp_p
     tracker.add(1, body="New work.", title="New", labels=("balance", FILING), effort=held,
                 on_board=False)
     assert run(tracker, code, *_step(tmp_path, "--effort", "3")) == 0
-    assert tracker.writes == [("set_field", 1, EFFORT_FIELD, "3"), ("board_add", 1),
-                              ("unmark", 1)]
+    assert tracker.writes == [("set_field", 1, EFFORT_FIELD, "3"), suggested(1),
+                              ("board_add", 1), ("unmark", 1)]
     assert tracker.cards_by_number[1].effort == "3"
     assert said in capsys.readouterr().out
 
@@ -141,7 +143,7 @@ def test_a_filing_run_again_over_a_card_holding_its_effort_writes_none(code, tmp
     tracker.add(1, body="New work.", title="New", labels=("balance", FILING), effort="3",
                 on_board=False)
     assert run(tracker, code, *_step(tmp_path, "--effort", "3")) == 0
-    assert tracker.writes == [("board_add", 1), ("unmark", 1)]
+    assert tracker.writes == [suggested(1), ("board_add", 1), ("unmark", 1)]
 
 
 def test_a_create_whose_effort_github_dropped_is_finished_holding_it(code, tmp_path, capsys,

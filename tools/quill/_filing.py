@@ -13,8 +13,11 @@ so is a question given ``--owner``, the step it is asked for, which its ruling k
 Priority cleared, and any Effort, as a ruling holds neither (rulings plan#2506, plan#2507); a
 leaf is filed in its split step's milestone while that step holds one, which it then gives up
 (:func:`_leaf_milestone`), and its filing clears its split step's Effort, as a split step holds
-none (ruling plan#2555, :func:`_finish`).  ``quill.py``'s module docstring is the command's
-usage.
+none (ruling plan#2555, :func:`_finish`).  A step at the top level and a question are filed
+with the Priority the filing session suggests and its reason (``check.takes_suggestion``),
+GitHub's own pending suggestion on the card's Priority, which quill's App writes before the
+mark comes off (rulings plan#3224, plan#3233, :func:`_suggest`); the Priority stays blank
+until the developer sets one.  ``quill.py``'s module docstring is the command's usage.
 
 Split out of the command module at X-cx L2's leaf C, whose change would otherwise take
 that module past the 1,000 lines ``too-many-lines`` allows (it has been ``quill.py``
@@ -38,8 +41,9 @@ from tools.quill._command import (
     on_board,
     with_closure,
 )
+from tools.quill._draft import Suggestion
 from tools.quill._exits import Refused
-from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS
+from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS, SUGGESTED_OPTIONS
 from tools.quill._state import (
     OWNED,
     done_tasks,
@@ -58,12 +62,15 @@ from tools.quill._state import (
 from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import (
     HOLDERS,
+    REASON_CAP,
+    SUGGESTED_KINDS,
     Draft,
     Owner,
     in_ruling_shape,
     normalized,
     ruling_body,
     ruling_question,
+    takes_suggestion,
     violations,
 )
 from tools.quill.setup_tracker import CHOSEN_LABELS, FILING, ISSUE_FIELDS, TASK, unmarked
@@ -232,7 +239,8 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
     labels = tuple(dict.fromkeys(getattr(args, "label", None) or ()))
     arc = None if args.kind == TASK else args.arc
     return _Filing(Draft(args.kind, args.title, body, labels, arc, held_by,
-                         effort=getattr(args, EFFORT, None)), parent, cards, reads, asked,
+                         effort=getattr(args, EFFORT, None), suggestion=_suggestion_of(args)),
+                   parent, cards, reads, asked,
                    _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
                    if args.kind == "step" and parent is not None else _NO_MILESTONE)
 
@@ -248,6 +256,19 @@ def _carried_owner(question: Card | None) -> int | None:
         raise Refused(f"{_label(question)} names no one owner step for its ruling to keep "
                       "(R-BAL395): name the step the ruling is for with --owner plan#S")
     return number
+
+
+def _suggestion_of(args) -> Suggestion | None:
+    """The suggested Priority ``args`` names, ``--suggest`` and its reason ``--why`` (rulings
+    plan#3224, plan#3236), the reason without the space around it; None when it names
+    neither.  Refused, before anything is written, when it names one alone."""
+    priority, why = getattr(args, "suggest", None), getattr(args, "why", None)
+    if priority is None and why is None:
+        return None
+    if priority is None or why is None:
+        raise Refused("--suggest PRIORITY and --why SENTENCE name a suggested Priority and its "
+                      "reason together: give both")
+    return Suggestion(priority, why.strip())
 
 
 def _owner(parent: Card, cards: dict[int, Card], shipped: frozenset[int]) -> Owner:
@@ -572,7 +593,9 @@ def file_parser(commands) -> None:
     ``too-many-lines`` allows.  ``--effort`` is required of each kind that may hold an Effort
     (``check.HOLDERS``, ruling plan#2506), its choices the field's options
     (``setup_tracker.ISSUE_FIELDS``): a step or a finding is sized when it is filed (ruling
-    plan#2492)."""
+    plan#2492).  ``--suggest`` and ``--why`` are each kind's that takes a suggested Priority
+    (``check.SUGGESTED_KINDS``), which :func:`cmd_file` requires of a step at the top level and
+    a question, as argparse cannot require them of a step without ``--parent`` alone."""
     kinds = commands.add_parser("file", help="file a step, finding, ruling, question or task")
     sub = kinds.add_subparsers(dest="kind", required=True)
     common = argparse.ArgumentParser(add_help=False)
@@ -606,6 +629,16 @@ def file_parser(commands) -> None:
     task.add_argument("--before", type=card_number,
                       help="the open task under the same card it is built before; else it goes "
                            "above the card's finishing tasks")
+    for kind in SUGGESTED_KINDS:
+        sub.choices[kind].add_argument(
+            "--suggest", choices=SUGGESTED_OPTIONS,
+            help="the Priority the filing session suggests, which the developer accepts or sets "
+                 "aside (rulings plan#2800, plan#3224): a step at the top level and a question "
+                 "name one, a leaf none (ruling plan#3229)")
+        sub.choices[kind].add_argument(
+            "--why", help=f"its reason, one sentence of at most {REASON_CAP} characters: what "
+                          "goes wrong for the developer if the card is never built, or for a "
+                          "question what waits on its answer")
     sized, ruling = HOLDERS[EFFORT]
     for kind in sized:
         sub.choices[kind].add_argument(
@@ -622,7 +655,8 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
     whose filing would write anything is refused under a claimed step
     (:func:`_refuse_under_a_claim`), beside an unfinished sibling
     (:func:`_refuse_beside_unfinished`) and under a step with a task still open
-    (:func:`_refuse_over_tasks`).
+    (:func:`_refuse_over_tasks`).  A step at the top level or a question is refused without
+    the Priority its filing suggests (``check.takes_suggestion``, rulings plan#2800, plan#3224).
 
     Every card is created marked, :data:`setup_tracker.FILING` sent in the call
     that creates it (by :meth:`_tracker.Tracker.create`, never through ``--label``,
@@ -637,6 +671,11 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
     filing = _filing_for(args, tracker, root)
     before = _before(tracker, args, filing)
     problems = violations(filing.draft)
+    if takes_suggestion(filing.draft) and filing.draft.suggestion is None:
+        problems.append("a step at the top level or a question is filed with the Priority its "
+                        "filing suggests, --suggest PRIORITY, and its reason, --why SENTENCE: "
+                        "what goes wrong for the developer if it is never built, or for a "
+                        "question what waits on its answer (rulings plan#2800, plan#3224)")
     if problems:
         raise Refused("not filed:\n  " + "\n  ".join(problems))
     if filing.asked is not None:
@@ -656,8 +695,9 @@ def _write(tracker: Tracker, filing: _Filing, earlier: Card | None,
            before: Card | None) -> None:
     """Every write of ``filing``, decided over already, each printed as it lands: ``earlier``,
     the card an earlier run made, finished, the field values it lacks written first
-    (:func:`_refield`), or with none a new card created (:func:`_created`), then the rest of
-    its filing (:func:`_finish`), a task placed above ``before`` when the filing names one."""
+    (:func:`_refield`), or with none a new card created (:func:`_created`), then its
+    suggested Priority (:func:`_suggest`), then the rest of its filing (:func:`_finish`), a
+    task placed above ``before`` when the filing names one."""
     card = earlier
     if card is None:
         card = _created(tracker, filing.draft, filing.milestone)
@@ -666,7 +706,35 @@ def _write(tracker: Tracker, filing: _Filing, earlier: Card | None,
               f"{FILING!r}), so this command finishes it rather than filing another (R-BAL186, "
               "R-BAL202)")
         _refield(tracker, card, filing.draft)
+    _suggest(tracker, card, filing.draft.suggestion)
     _finish(tracker, card, filing, before)
+
+
+def _suggest(tracker: Tracker, card: Card, suggestion: Suggestion | None) -> None:
+    """Write ``suggestion`` on ``card`` as GitHub's own pending suggestion on its Priority, by
+    quill's App, read back (:meth:`_suggestion.Suggestions.put`; rulings plan#3224, plan#3233),
+    while the card is still marked; nothing for None.  A run finishing a filing cut short
+    writes it only where quill's suggestion is not already pending as stated (R-BAL186): one
+    pending as stated is left, and one stating another is taken back first and this one put,
+    as :func:`_refield` states a field value again (a put over a pending one is not measured).
+    None is put on a card holding a Priority, which only a person or ``quill priority`` set on a
+    card still being filed: the Priority is decided, and the Inbox lists only a card holding
+    none (ruling plan#3231)."""
+    if suggestion is None:
+        return
+    if card.priority is not None:
+        print(f"  no suggested Priority: it holds the Priority {card.priority!r} already")
+        return
+    pending = tracker.suggestions.pending(card)
+    if pending is not None and pending.suggestion == suggestion:
+        print(f"  its suggested Priority {suggestion.priority!r} is pending already")
+        return
+    if pending is not None:
+        tracker.suggestions.withdraw(card, pending)
+        print(f"  took back its suggested Priority {pending.suggestion.priority!r}, another "
+              "run's")
+    tracker.suggestions.put(card, suggestion)
+    print(f"  suggested Priority {suggestion.priority!r}, its reason: {suggestion.why}")
 
 
 def _refield(tracker: Tracker, card: Card, draft: Draft) -> None:

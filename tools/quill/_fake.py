@@ -630,6 +630,17 @@ def two_tasks():
     return tracker
 
 
+#: The Priority the tests' filing of a step at the top level or a question suggests, and its
+#: reason (``--suggest``, ``--why``; rulings plan#3224, plan#3236), as each command line names it.
+SUGGESTED = ("--suggest", "Low", "--why", "A test card's reason: nothing waits on it.")
+
+
+def suggested(number):
+    """The write in the tracker's log of :data:`SUGGESTED` on card ``number``
+    (:meth:`FakeSuggestions.put`)."""
+    return ("suggest", number, SUGGESTED[1], SUGGESTED[3])
+
+
 def leaf_filing(tmp_path, title, parent="plan#1"):
     """``quill file step`` filing a leaf named ``title`` under ``parent``, sized at two
     sessions (ruling plan#2492), its spec written to a file."""

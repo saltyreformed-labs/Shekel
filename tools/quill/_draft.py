@@ -42,17 +42,20 @@ class Draft:  # pylint: disable=too-many-instance-attributes
     """A card as it would stand after the change; ``owner`` None when it has none
     (:class:`Owner`).
 
-    Pylint: too-many-instance-attributes (8/7) -- **eight because a card as a change leaves
-    it states eight facts**, each its own GitHub field or link -- its type, title, text,
-    labels, Arc, owner, Priority and Effort -- which the check and the create read between
-    them, and no subset of them travels apart from the others.
+    Pylint: too-many-instance-attributes (9/7) -- **nine because a card as a change leaves
+    it states nine facts**, each its own GitHub field, link or suggestion -- its type, title,
+    text, labels, Arc, owner, Priority, Effort and suggested Priority -- which the check and
+    the filing read between them, and no subset of them travels apart from the others.
 
     ``arc``: the value of its issue field Arc, None when it holds none;
     ``labels``: its labels but its arc's, which a filing writes beside them as display of its
     Arc (``_filed.filed_labels``), and which the check never reads (R-BAL354).
     ``priority`` and ``effort``: the values of its issue fields Priority and Effort
     (:mod:`_fields`, plan#2491), None for one it holds none of or the change does not write,
-    as the check reads them only where the change writes them."""
+    as the check reads them only where the change writes them.
+    ``suggestion``: the Priority its filing suggests (:class:`Suggestion`), None for a change
+    writing none: only a filing writes one, and no read of a card holds one, as quill keeps no
+    copy of a suggestion (ruling plan#3236)."""
 
     kind: str | None
     title: str
@@ -62,3 +65,4 @@ class Draft:  # pylint: disable=too-many-instance-attributes
     owner: Owner | None = None
     priority: str | None = None
     effort: str | None = None
+    suggestion: Suggestion | None = None

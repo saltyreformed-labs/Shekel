@@ -8,7 +8,8 @@ from __future__ import annotations
 import pytest
 import requests
 
-from tools.quill._fake import FailOnce, FakeTracker, claim, leaf_filing, run, ship
+from tools.quill._fake import (SUGGESTED, FailOnce, FakeTracker, claim, leaf_filing, run, ship,
+                              suggested)
 from tools.quill._tracker import Child, Edit, OutsideLink
 from tools.quill.check import ruling_body
 from tools.quill.setup_tracker import FILING, MOVES_MONEY_LABEL
@@ -84,10 +85,10 @@ def test_a_new_step_and_a_question_go_to_the_bottom(code, tmp_path):
     text.write_text("Which day?")
     tracker = FakeTracker()
     tracker.add(1)
-    assert run(tracker, code, "file", "question", "--arc", "recurrence", "--title", "Day",
-                "--body-file", str(text)) == 0
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
-                "--body-file", str(text), "--label", "moves-money") == 0
+    assert run(tracker, code, "file", "question", *SUGGESTED, "--arc", "recurrence", "--title",
+               "Day", "--body-file", str(text)) == 0
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "salary",
+               "--title", "New", "--body-file", str(text), "--label", "moves-money") == 0
     assert tracker.board.items == [1, 2, 3]
     assert tracker.cards_by_number[3].labels == ("moves-money", "salary")
 
@@ -274,8 +275,8 @@ def test_a_matching_card_under_another_owner_or_with_other_labels_is_refused_unw
     spec = tmp_path / "spec.md"
     spec.write_text("New work.")
     tracker.add(4, body="New work.", title="New", labels=("salary",), arc="salary")
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
-               "--body-file", str(spec), "--label", "moves-money") == 1
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "salary",
+               "--title", "New", "--body-file", str(spec), "--label", "moves-money") == 1
     assert "relabel it by hand" in capsys.readouterr().err
     assert not tracker.writes
 
@@ -289,11 +290,11 @@ def test_a_top_level_card_is_added_at_the_bottom_with_one_board_write(code, tmp_
     text.write_text("Which day?")
     tracker = FakeTracker()
     tracker.add(1)
-    assert run(tracker, code, "file", "question", "--arc", "recurrence", "--title", "Day",
-               "--body-file", str(text)) == 0
+    assert run(tracker, code, "file", "question", *SUGGESTED, "--arc", "recurrence", "--title",
+               "Day", "--body-file", str(text)) == 0
     assert tracker.writes == [
         ("create", 2, "question", "Day", (FILING, "recurrence"), "recurrence"),
-        ("board_add", 2), ("unmark", 2)]
+        suggested(2), ("board_add", 2), ("unmark", 2)]
 
 
 
@@ -302,8 +303,9 @@ def test_a_label_named_twice_files_the_card_once(code, tmp_path):
     text = tmp_path / "spec.md"
     text.write_text("New work.")
     tracker = FakeTracker()
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
-               "--body-file", str(text), "--label", "moves-money", "--label", "moves-money") == 0
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "salary",
+               "--title", "New", "--body-file", str(text), "--label", "moves-money",
+               "--label", "moves-money") == 0
     assert tracker.writes[0] == ("create", 1, "step", "New", (FILING, "moves-money", "salary"),
                                  "salary")
 
@@ -314,7 +316,7 @@ def test_a_security_step_is_filed_in_the_tooling_arc_carrying_its_label(code, tm
     text = tmp_path / "spec.md"
     text.write_text("Rate-limit each client.")
     tracker = FakeTracker()
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "tooling",
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "tooling",
                "--title", "Limits", "--body-file", str(text), "--label", "security") == 0
     assert tracker.writes[0] == ("create", 1, "step", "Limits", (FILING, "security", "tooling"),
                                  "tooling")
@@ -502,7 +504,7 @@ def test_a_top_level_filing_never_finishes_a_leaf(code, tmp_path, capsys):
     tracker = FakeTracker()
     tracker.add(1, children=(Child(2, "step", True),), on_board=False)
     tracker.add(2, body="New work.", title="New", parent=1)
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance",
                "--title", "New", "--body-file", str(spec)) == 1
     err = capsys.readouterr().err
     assert "a sub-issue of plan#1, not a top-level card" in err
@@ -521,8 +523,8 @@ def test_a_card_filed_is_said_before_its_read_back(code, tmp_path, capsys, monke
         raise requests.ConnectionError("connection reset")
 
     monkeypatch.setattr(tracker, "cards", unreachable)
-    assert run(tracker, code, "file", "question", "--arc", "recurrence", "--title", "Day",
-               "--body-file", str(text)) == 2
+    assert run(tracker, code, "file", "question", *SUGGESTED, "--arc", "recurrence", "--title",
+               "Day", "--body-file", str(text)) == 2
     assert tracker.writes[0][0] == "create"
     assert capsys.readouterr().out.startswith("filed plan#1\n")
 
@@ -535,7 +537,7 @@ def test_an_open_card_of_another_kind_is_never_finished_as_this_filing(code, tmp
     text.write_text("Which day?")
     tracker = FakeTracker()
     tracker.add(1, "question", body="Which day?", title="Day")
-    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "balance",
+    assert run(tracker, code, "file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance",
                "--title", "Day", "--body-file", str(text)) == 0
     assert capsys.readouterr().out.startswith("filed plan#2\n")
 
@@ -734,8 +736,8 @@ def test_a_card_filed_but_not_yet_readable_is_a_failed_call_not_a_refusal(code, 
     tracker = FakeTracker()
     real = tracker.cards
     monkeypatch.setattr(tracker, "cards", lambda numbers: {} if 1 in numbers else real(numbers))
-    assert run(tracker, code, "file", "question", "--arc", "recurrence", "--title", "Day",
-               "--body-file", str(text)) == 2
+    assert run(tracker, code, "file", "question", *SUGGESTED, "--arc", "recurrence", "--title",
+               "Day", "--body-file", str(text)) == 2
     captured = capsys.readouterr()
     assert captured.out.startswith("filed plan#1\n") and "run the same command again" in (
         captured.err)

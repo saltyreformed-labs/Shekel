@@ -15,8 +15,8 @@ from dataclasses import replace
 from tools.ci.scratch import elsewhere
 from tools.ci.scratch import run as _run
 from tools.quill import _git
-from tools.quill._fake import (AnswerLostOnce, FailOnce, FakeTracker, claim, leaf_filing,
-                              ruling_filing, run, ship, unship)
+from tools.quill._fake import (SUGGESTED, AnswerLostOnce, FailOnce, FakeTracker, claim,
+                              leaf_filing, ruling_filing, run, ship, unship)
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Child
 from tools.quill.check import ruling_body
@@ -172,7 +172,7 @@ def test_a_card_dropped_while_its_command_ran_is_never_filed_over(code, tmp_path
     restore it."""
     spec = tmp_path / "spec.md"
     spec.write_text("Build it.")
-    args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Alone",
+    args = ("file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance", "--title", "Alone",
             "--body-file", str(spec))
     tracker = FakeTracker()
     FailOnce(tracker.board, "add")
@@ -371,7 +371,7 @@ def test_a_card_dropped_while_marked_is_refused_whatever_the_listings_show(code,
     current listing filed a second card, and a second leaf beside the closed one."""
     spec = tmp_path / "spec.md"
     spec.write_text("Build it.")
-    args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Alone",
+    args = ("file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance", "--title", "Alone",
             "--body-file", str(spec))
     tracker = FakeTracker()
     FailOnce(tracker.board, "add")
@@ -479,7 +479,7 @@ def test_shipped_work_closed_while_marked_is_never_refused_nor_filed_again(code,
     it shipped."""
     spec = tmp_path / "spec.md"
     spec.write_text("Build it.")
-    args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Alone",
+    args = ("file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance", "--title", "Alone",
             "--body-file", str(spec))
     tracker = FakeTracker()
     FailOnce(tracker, "unmark")
@@ -593,7 +593,8 @@ def test_a_stray_marker_never_decides_a_question_dropped_while_marked(code, tmp_
     marked is refused as dropped, never told it "shipped in git"."""
     spec = tmp_path / "q.md"
     spec.write_text("Which day?")
-    args = ("file", "question", "--arc", "balance", "--title", "Day", "--body-file", str(spec))
+    args = ("file", "question", *SUGGESTED, "--arc", "balance", "--title", "Day", "--body-file",
+            str(spec))
     tracker = FakeTracker()
     FailOnce(tracker.board, "add")
     assert run(tracker, code, *args) == 2

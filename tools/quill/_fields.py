@@ -22,6 +22,9 @@ URGENT, HIGH, ON_HOLD = "Urgent", "High", "On hold"
 #: Priority's options, as the developer set them on the web (On hold on 2026-11-04, read by
 #: GraphQL at 07:49 EST, in this order).  Medium and Low hand a step out as a step holding none.
 PRIORITY_OPTIONS = (URGENT, HIGH, "Medium", "Low", ON_HOLD)
+#: The Priorities a filing may suggest for a card (``_draft.Suggestion``): each of Priority's
+#: options but On hold, as plan#2798's spec names them, Urgent, High, Medium or Low.
+SUGGESTED_OPTIONS = tuple(option for option in PRIORITY_OPTIONS if option != ON_HOLD)
 #: The issue field counting the sessions a card's work takes, a single select of
 #: ``setup_tracker.ISSUE_FIELDS``' options (ruling plan#2508).
 EFFORT_FIELD = "Effort"

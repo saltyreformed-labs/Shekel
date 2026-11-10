@@ -10,8 +10,8 @@ from dataclasses import replace
 
 import pytest
 
-from tools.quill._fake import (AnswerLostOnce, FailOnce, FakeTracker, claim, leaf_filing,
-                              ruling_filing, run, ship)
+from tools.quill._fake import (SUGGESTED, AnswerLostOnce, FailOnce, FakeTracker, claim,
+                              leaf_filing, ruling_filing, run, ship, suggested)
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Child
 from tools.quill.setup_tracker import FILING
@@ -63,13 +63,13 @@ def test_a_mark_removed_by_hand_mid_filing_fails_its_unmark_and_the_same_command
     tracker = FakeTracker()
     spec = tmp_path / "spec.md"
     spec.write_text("Build it.")
-    args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Alone",
+    args = ("file", "step", *SUGGESTED, "--effort", "2", "--arc", "balance", "--title", "Alone",
             "--body-file", str(spec))
     _HandUnmarks(tracker)
     assert run(tracker, code, *args) == 2
     assert "Label does not exist" in capsys.readouterr().err
     assert tracker.writes == [("create", 1, "step", "Alone", ("balance", FILING), "balance"),
-                              ("board_add", 1)]
+                              suggested(1), ("board_add", 1)]
     tracker.writes.clear()
     assert run(tracker, code, *args) == 0
     assert not tracker.writes and "filed already" in capsys.readouterr().out
@@ -374,7 +374,7 @@ def test_a_card_dropped_before_its_filing_finished_is_never_finished(code, tmp_p
     text.write_text("Which day?")
     tracker = FakeTracker()
     FailOnce(tracker.board, "add")
-    args = ("file", "question", "--arc", "recurrence", "--title", "Day", "--body-file",
+    args = ("file", "question", *SUGGESTED, "--arc", "recurrence", "--title", "Day", "--body-file",
             str(text))
     assert run(tracker, code, *args) == 2
     assert run(tracker, code, "drop", "plan#1", "--why", "asked elsewhere") == 0

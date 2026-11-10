@@ -19,7 +19,7 @@ from app.services import (
     transaction_service,
     transfer_service,
 )
-from app.services.account_resolver import resolve_owner_cash_flow_set
+from app.services.movement_account import owner_accounts
 from app.services.balance_at import BalanceContext
 from app.services.cash_ledger._amounts import _entry_aware_amount, _entry_checking_impact
 from app.services.cash_ledger._amount_source import resolve_transaction_amount
@@ -201,7 +201,7 @@ class TestAKeptMovementIsNotAPurchase:
             }
             listed = build_entry_lists_dict(
                 [envelope], budgets, periods,
-                resolve_owner_cash_flow_set(envelope.user_id),
+                owner_accounts(envelope.user_id),
                 envelope.user_id,
             )
             assert listed[envelope.id]["entries"] == []

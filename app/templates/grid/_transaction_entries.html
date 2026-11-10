@@ -6,11 +6,11 @@
    Expected context:
      txn               -- parent Transaction object
      entries           -- list of TransactionEntry objects (ordered by purchased_on)
-     accounts          -- the accounts a NEW purchase may name, in picker
-                          order with the row's own first (plan step
-                          credit_card:CC-5-2, ruling R-CC37:
-                          ``cash_flow_set.purchase_accounts``, the purchase
-                          door's own predicate).  The add form renders its
+     accounts          -- the accounts a NEW purchase may be paid from, in
+                          picker order with the row's own first, then every
+                          account of the owner's that holds cash (ruling
+                          plan#3227: ``movement_account.paid_from_accounts``,
+                          the purchase door's own predicate).  The add form renders its
                           Account picker only when there is more than one
                           (ruling R-CC34); with one, no control and the door
                           files the purchase on the row's account.
@@ -501,16 +501,16 @@
              class="form-control form-control-sm mw-px-130"
              aria-label="Purchase date"
              title="The day you made this purchase">
-      {#- The account this purchase's money moves through (plan step
+      {#- The account this purchase was paid from (plan step
           credit_card:CC-5-2, ruling R-CC15): the row's own, or one of the
-          owner's cash-flow accounts -- ``accounts`` is the purchase door's
-          own tuple (ruling R-CC37), the row's account first and selected.
-          Rendered ONLY when there is a choice (ruling R-CC34): with one
-          account the form carries no control and the door files the purchase
-          on the row's account, so an owner with no card is offered no picker
-          (and, since plan task plan#2930, no CC tick).  The CC tick beside it says the same
-          fact for a card (plan task plan#2930), so ticking it beside another
-          account is refused by the door with a banner naming which to use.
+          owner's accounts that hold cash, never a card (ruling plan#3227)
+          -- ``accounts`` is the purchase door's own tuple, the row's account
+          first and selected.  Rendered ONLY when there is a choice (ruling
+          R-CC34): with one account the form carries no control and the door
+          files the purchase on the row's account.  The CC tick beside it
+          puts the purchase on a card (plan task plan#2930), so ticking it
+          beside another account is refused by the door with a banner naming
+          which to use.
           Whitespace-controlled so the one-account form emits no bytes here. -#}
       {%- if accounts|length > 1 %}
       <select name="account_id" aria-label="Paid from"

@@ -31,11 +31,8 @@ from app.services.cash_ledger import (
     resolve_transfer_amount,
     settled_amounts_by_key,
 )
-from app.services.account_resolver import (
-    resolve_owner_and_view,
-    resolve_owner_cash_flow_set,
-)
-from app.services.cash_flow_set import CashFlowSet
+from app.services.account_resolver import resolve_cash_flow_set
+from app.services.movement_account import OwnerAccounts, owner_accounts
 from app.services.entry_service import build_entry_sums_dict
 from app.services.row_valuation import settled_figure
 from app.services.settle_day import SettleDay, is_evidence, recorded_settle_day
@@ -598,7 +595,9 @@ def fragment_balance_line(owner_id: int) -> Account | None:
 
     **It is the balance-line half of :func:`fragment_cash_flow`** since plan
     step ``credit_card:CC-5-2``; a fragment that also draws an envelope's
-    add-purchase picker reads both halves from that one walk.
+    add-purchase picker reads both halves there.  The other half is a read
+    of its own since plan task plan#3232, so a fragment drawing the balance
+    line alone reads only this.
 
     Args:
         owner_id: ``auth.users.id`` of the row or transfer being rendered.
@@ -609,40 +608,44 @@ def fragment_balance_line(owner_id: int) -> Account | None:
         balance line").  ``None`` too for an owner with no grid-eligible
         account, as the page's own context is.
     """
-    return fragment_cash_flow(owner_id).balance_line
+    if current_user.id != owner_id:
+        return None
+    view = resolve_cash_flow_set(
+        current_user.id, current_user.settings, _page_account_override(),
+    )
+    return view.balance if view is not None else None
 
 
 class FragmentCashFlow(NamedTuple):
-    """What a one-row fragment resolves about the owner's cash-flow set, once.
+    """What a one-row fragment resolves about the owner's accounts, once each.
 
     Attributes:
-        purchases: The OWNER's set with no override -- the accounts a purchase
-            under the row may name
-            (:func:`~app.services.cash_flow_set.purchase_accounts`, ruling
-            **R-CC37**) -- or ``None`` for an owner with no grid-eligible
-            account.  Resolved for the row's owner whoever the requester is: a
+        accounts: The OWNER's
+            :class:`~app.services.movement_account.OwnerAccounts` -- what a
+            payment or a purchase under the row may be paid from, and the
+            cards Credit and the CC tick may put it on (ruling plan#3227).
+            Resolved for the row's owner whoever the requester is: a
             companion records the owner's purchase (ruling **R-CC11**).
         balance_line: :func:`fragment_balance_line`'s answer -- the page's
             balance line for the owner, ``None`` for anyone else.
     """
 
-    purchases: CashFlowSet | None
+    accounts: OwnerAccounts
     balance_line: Account | None
 
 
 def fragment_cash_flow(owner_id: int) -> FragmentCashFlow:
-    """Resolve a one-row fragment's two cash-flow answers from ONE walk.
+    """Resolve a one-row fragment's two account answers, each read once.
 
     The mobile card draws an account chip (against the page's balance line)
-    AND an add-purchase picker (from the owner's set), and the HTMX entry
-    list draws the picker alone; each question is one resolve of the same
-    set, so a fragment that asked them apart paid the primary chain and the
-    cards query twice (the review of plan step ``credit_card:CC-5-2``).  For
-    the OWNER both come off
-    :func:`~app.services.account_resolver.resolve_owner_and_view` with the
-    page's override; for anyone else the balance line is ``None`` by
-    :func:`fragment_balance_line`'s rule and the picker is the owner's set by
-    :func:`~app.services.account_resolver.resolve_owner_cash_flow_set`.
+    AND an add-purchase picker (from the owner's accounts), the HTMX entry
+    list draws the picker alone, and the cell draws what its Credit press
+    does.  The two are different questions since plan task plan#3232 --
+    the balance line is the page's cash-flow view, and what "Paid from" may
+    name is every account of the owner's that holds cash (ruling
+    plan#3227), which that view does not hold -- so each is one read: the
+    balance line by :func:`fragment_balance_line`, and the accounts by
+    :func:`~app.services.movement_account.owner_accounts`.
 
     Args:
         owner_id: ``auth.users.id`` of the row being rendered.
@@ -650,16 +653,9 @@ def fragment_cash_flow(owner_id: int) -> FragmentCashFlow:
     Returns:
         The :class:`FragmentCashFlow` for this request.
     """
-    if current_user.id != owner_id:
-        return FragmentCashFlow(
-            purchases=resolve_owner_cash_flow_set(owner_id), balance_line=None,
-        )
-    sets = resolve_owner_and_view(
-        current_user.id, current_user.settings, _page_account_override(),
-    )
     return FragmentCashFlow(
-        purchases=sets.owner,
-        balance_line=sets.view.balance if sets.view is not None else None,
+        accounts=owner_accounts(owner_id),
+        balance_line=fragment_balance_line(owner_id),
     )
 
 
@@ -837,10 +833,9 @@ def render_transaction_cell(item: PlanItem, **extra: Any) -> str:
         account=cash_flow.balance_line,
         # What the C key and the palette's Credit do on this cell, from the
         # producer the grid page asks (plan task plan#3114): read off the
-        # OWNER's set, the one ``credit_cards`` takes, from the same walk as
-        # the balance line above.
+        # OWNER's accounts, the ones ``credit_cards`` takes.
         credit_opens_popover=credit_opens_the_popover_by_key(
-            [item], cash_flow.purchases,
+            [item], cash_flow.accounts,
         ),
         budgets=amounts.budgets,
         settled=amounts.settled,

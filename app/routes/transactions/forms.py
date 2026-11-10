@@ -27,12 +27,9 @@ from app.services import (
     status_seam,
     transaction_service,
 )
-from app.services.account_resolver import (
-    resolve_cash_flow_set,
-    resolve_owner_cash_flow_set,
-)
+from app.services.account_resolver import resolve_cash_flow_set
 from app.services.card_today import date_left_by_a_move
-from app.services.cash_flow_set import CashFlowSet, purchase_accounts
+from app.services.cash_flow_set import CashFlowSet
 from app.services.pay_calendar import FiledRow, calendar_for
 from app.services.scenario_resolver import get_baseline_scenario
 from app.utils.auth_helpers import require_owner
@@ -205,12 +202,12 @@ def render_full_edit(txn, *, page_refusal):
     # the refusal's merchant-rule arm and the dialog's pair sentence want the
     # same answer, and the delete verb threads it the same way.
     last_row_of_definition = definition_delete.is_last_row_of_its_definition(txn)
-    # The OWNER's set (this door is owner-only, so ``txn.user_id`` is the
-    # requester), read once for its two readers: the "Paid from" picker and
-    # the cards a Credit press could mean (plan task plan#3056).
-    owner_set = resolve_owner_cash_flow_set(txn.user_id)
-    tender_accounts, tender_account_id = _tender_picker(txn, owner_set)
-    credit_cards = movement_account.credit_cards(txn, owner_set)
+    # The OWNER's accounts (this door is owner-only, so ``txn.user_id`` is
+    # the requester), read once for their two readers: the "Paid from" picker
+    # and the cards a Credit press could mean (plan task plan#3056).
+    owner = movement_account.owner_accounts(txn.user_id)
+    tender_accounts, tender_account_id = _tender_picker(txn, owner)
+    credit_cards = movement_account.credit_cards(txn, owner)
     payment_withdraws = status_seam.pending_payment_withdrawal(txn)
     return render_template(
         "grid/_transaction_full_edit.html",
@@ -365,10 +362,11 @@ def render_full_edit(txn, *, page_refusal):
             txn, last_row_of_definition=last_row_of_definition,
         ),
         # **The "Paid from" picker** (plan step ``credit_card:CC-5-3``): the
-        # accounts a payment under this row may have moved through, in
-        # picker order -- the row's own first, then the OWNER's cash-flow set
-        # (ruling **R-CC39**; the SAME tuple the add-purchase form renders
-        # and both doors gate on) -- and which one to preselect: what the row
+        # accounts a payment under this row may have been paid from, in
+        # picker order -- the row's own first, then every account of the
+        # OWNER's that holds cash (ruling plan#3227; the SAME tuple the
+        # add-purchase form renders and both doors gate on,
+        # ``movement_account.paid_from_accounts``) -- and which one to preselect: what the row
         # RECORDS as its tender (the kept payment's account, else the row's
         # own; ``status_seam.tender_account_id_of``, the seam's one default),
         # so an untouched Save posts an echo the door drops and a reverted
@@ -376,7 +374,7 @@ def render_full_edit(txn, *, page_refusal):
         # **R-CC42**; one put on the card is home again, plan#3104).  The card
         # renders it only when there is a choice (ruling **R-CC34**).
         # Resolved for the OWNER (``txn.user_id``; this door is owner-only,
-        # so the two coincide) with no override, as every picker is.
+        # so the two coincide), as every picker is.
         tender_accounts=tender_accounts,
         tender_account_id=tender_account_id,
     )
@@ -422,17 +420,18 @@ def redraw_full_edit(txn_id, facts):
     )
 
 
-def _tender_picker(txn, owner_set):
+def _tender_picker(txn, owner):
     """Return ``(accounts, selected id)`` for the popover's "Paid from" picker.
 
     The accounts a payment under *txn* may NAME
-    (:func:`~app.services.cash_flow_set.purchase_accounts` over the OWNER's
-    set, the tuple both doors gate on) **plus the account the row RECORDS
-    when that is no longer among them** -- a card the owner has since
-    archived, or a checking account that was the primary when the bill was
-    paid.  The same shape this route gives an archived category one block
-    up, and for the same reason: a ``<select>`` whose preselected value is
-    missing submits its FIRST option, so without this arm an untouched Save
+    (:func:`~app.services.movement_account.paid_from_accounts` over the
+    OWNER's accounts, the tuple both doors gate on) **plus the account the
+    row RECORDS when that is no longer among them** -- an account the owner
+    has since archived, or a card a bill was paid from before "Paid from"
+    stopped offering one (ruling plan#3227).  The same shape this route
+    gives an archived category one block up, and for the same reason: a
+    ``<select>`` whose preselected value is missing submits its FIRST
+    option, so without this arm an untouched Save
     on a bill paid from a since-archived card would post the row's own
     account, read as a CORRECTION (not the echo the door drops), re-point
     the payment onto checking and release both clearing links -- and the
@@ -443,13 +442,14 @@ def _tender_picker(txn, owner_set):
 
     Args:
         txn: The row the popover is drawn for, with ``entries`` loaded.
-        owner_set: The row OWNER's cash-flow set with no override, read once
+        owner: The row OWNER's
+            :class:`~app.services.movement_account.OwnerAccounts`, read once
             by :func:`render_full_edit` for this picker and the Credit press.
 
     Returns:
         The tuple to render, in picker order, and the id to preselect.
     """
-    accounts = purchase_accounts(owner_set, txn)
+    accounts = movement_account.paid_from_accounts(txn, owner)
     recorded_id = status_seam.tender_account_id_of(txn)
     if recorded_id not in {account.id for account in accounts}:
         accounts = (*accounts, db.session.get(Account, recorded_id))

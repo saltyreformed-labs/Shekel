@@ -34,7 +34,7 @@ from app.enums import StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import status_seam, transaction_service
-from app.services.account_resolver import resolve_owner_cash_flow_set
+from app.services.movement_account import owner_accounts
 from app.services.grid_view_service import leg_dom_id
 from app.services.transfer_legs import cell_key, leg_of
 from app.utils.dates import display_today
@@ -454,7 +454,7 @@ class TestTheMapIsReadOnceForThePage:
 
         answers = transaction_service.credit_opens_the_popover_by_key(
             [hotel, kept, plain, leg],
-            resolve_owner_cash_flow_set(seed_user["user"].id),
+            owner_accounts(seed_user["user"].id),
         )
 
         assert answers == {
@@ -474,7 +474,7 @@ class TestTheMapIsReadOnceForThePage:
             db.session, seed_user, seed_user["bootstrap_period"], "Coffee", Decimal("4.00"),
         )
         db.session.commit()
-        owner_set = resolve_owner_cash_flow_set(seed_user["user"].id)
+        owner_set = owner_accounts(seed_user["user"].id)
         rows = [hotel, *kept, plain]
         # Warm the identity map: what is under count is the match read.
         transaction_service.credit_opens_the_popover_by_key(rows, owner_set)

@@ -232,11 +232,12 @@ def _render_entry_list(
     )
     # The accounts a new purchase may name (plan step credit_card:CC-5-2) and
     # the cards its CC tick offers (plan task plan#2930): the row's own plus
-    # the OWNER's cash-flow set, by the row's owner for
+    # every account of the OWNER's that holds cash (ruling plan#3227), and the
+    # owner's cards, by the row's owner for
     # the calendar's reason -- the purchase door gates against ``txn.user_id``
     # (ruling R-CC11), so a companion's refresh carries the owner's picker.
     # Through the fragment producer the mobile card and the cell share, so
-    # one request's fragments resolve the set by one rule.
+    # one request's fragments resolve them by one rule.
     # What each purchase's X and CC un-tick would leave unexplained on the
     # statement screen, and whether the session's user may be shown it (plan
     # step ``credit_card:CC-5-4a-5``, rulings **R-CC80** / **R-CC132**), read
@@ -244,7 +245,7 @@ def _render_entry_list(
     # (``get_entries_for_transaction`` returns ``txn.purchases``).
     view = entry_service.entry_list_view(
         entries, budgets[txn.id], period,
-        purchase_choices(txn, fragment_cash_flow(txn.user_id).purchases),
+        purchase_choices(txn, fragment_cash_flow(txn.user_id).accounts),
         entry_service.purchase_controls([txn], current_user.id)[txn.id],
     )
     return render_template(

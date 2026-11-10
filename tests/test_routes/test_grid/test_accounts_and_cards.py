@@ -11,7 +11,6 @@ import pytest
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
-from app.services.account_resolver import ResolvedCashFlow
 from app.services.cash_flow_set import CashFlowSet
 from app.services.grid_view_service import leg_dom_id
 from app import ref_cache
@@ -646,15 +645,13 @@ class TestTheChipMarksARowOnAnotherAccount:
             db.session.commit()
             phone_id = phone.id
             # The resolver the fragment producer reads for the OWNER branch
-            # (``resolve_owner_and_view`` since plan step credit_card:CC-5-2,
-            # one walk for the balance line and the picker): made to answer
-            # for anyone, so only the owner test stands between the companion
-            # and a chip.
+            # (``resolve_cash_flow_set`` since plan task plan#3232, the
+            # balance line's one read): made to answer for anyone, so only the
+            # owner test stands between the companion and a chip.
             monkeypatch.setattr(
-                "app.routes._render_helpers.resolve_owner_and_view",
-                lambda user_id, settings=None, override=None: ResolvedCashFlow(
-                    owner=CashFlowSet.single(checking),
-                    view=CashFlowSet.single(checking),
+                "app.routes._render_helpers.resolve_cash_flow_set",
+                lambda user_id, settings=None, override=None: CashFlowSet.single(
+                    checking,
                 ),
             )
             response = companion_client.post(

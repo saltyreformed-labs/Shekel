@@ -36,12 +36,12 @@ Architecture:
 from decimal import Decimal
 
 from app.models.transaction_entry import TransactionEntry
-from app.services.cash_flow_set import CashFlowSet
 from app.services.entry_service._removals import (
     PurchaseControls,
     purchase_controls,
 )
 from app.services.movement_account import (
+    OwnerAccounts,
     PurchaseChoices,
     on_a_card,
     purchase_card,
@@ -272,7 +272,7 @@ def build_entry_lists_dict(
     transactions: "list[PlanItem]",
     budgets: dict[int, Decimal],
     periods: "dict[int, DerivedPeriod]",
-    cash_flow: CashFlowSet | None,
+    owner: OwnerAccounts,
     viewer_id: int,
 ) -> dict[int, dict]:
     """Build a {txn_id: entry_list_data} mapping for envelope transactions.
@@ -330,11 +330,11 @@ def build_entry_lists_dict(
     :func:`~app.services.grid_view_service.due_captions_by_key` makes for the
     same shape one step earlier.
 
-    **The OWNER's cash-flow set arrives as an argument too** (plan step
+    **The OWNER's accounts arrive as an argument too** (plan step
     ``credit_card:CC-5-2``), for the add-purchase form's account picker and,
     since plan task plan#2930, its CC tick: each row's choices are
-    :func:`~app.services.movement_account.purchase_choices` over it, the one
-    spelling the purchase door tests against (ruling **R-CC37**).
+    :func:`~app.services.movement_account.purchase_choices` over them, the one
+    spelling the purchase door tests against (ruling plan#3227).
     An argument and NOT a default, so that a caller which forgets it fails
     loudly rather than rendering a form with no picker on the initial grid
     while the HTMX refresh renders one -- the exact two-callers shape
@@ -353,17 +353,15 @@ def build_entry_lists_dict(
             *budgets*' reason: a row whose paycheck is missing means the caller
             built this map from a different row set than it is rendering, and a
             silent skip would drop an out-of-period warning the screen owes.
-        cash_flow: The rows' OWNER's cash-flow set, resolved with NO override
-            (:func:`~app.services.account_resolver.resolve_cash_flow_set`), or
-            ``None`` for an owner with no grid-eligible account.  The owner's,
-            never the requester's: a companion's page renders the owner's
-            picker (ruling **R-CC11**).  Never the page's overridden set: an
-            override outside the set collapses it to one account, which is a
-            fact about the view and not about what a purchase may name.
+        owner: The rows' OWNER's
+            :class:`~app.services.movement_account.OwnerAccounts`
+            (:func:`~app.services.movement_account.owner_accounts`).  The
+            owner's, never the requester's: a companion's page renders the
+            owner's picker (ruling **R-CC11**).
         viewer_id: The SESSION's user -- the rows' owner on the grid and the
             phone card, a companion on the companion page -- so only the
             owner's lists name the owner's bank lines (rulings **R-CC130** /
-            **R-CC132**).  An argument and not a default, for *cash_flow*'s
+            **R-CC132**).  An argument and not a default, for *owner*'s
             reason: a caller that forgot it must fail rather than draw the
             owner's statement for whoever is looking.
 
@@ -391,7 +389,7 @@ def build_entry_lists_dict(
             txn.purchases,
             budgets[txn.id],
             periods[txn.pay_period_id],
-            purchase_choices(txn, cash_flow),
+            purchase_choices(txn, owner),
             controls[txn.id],
         )
         for txn in envelopes
@@ -476,9 +474,9 @@ def entry_list_view(
             stores beside them.
         choices: What the forms offer a purchase under this row
             (:func:`~app.services.movement_account.purchase_choices` over the
-            OWNER's cash-flow set): the accounts a NEW purchase may name, in
+            OWNER's accounts): the accounts a NEW purchase may name, in
             picker order with the row's own first (plan step
-            ``credit_card:CC-5-2``, ruling **R-CC37**; the purchase door admits
+            ``credit_card:CC-5-2``, ruling plan#3227; the purchase door admits
             exactly these, so the form offers what the door takes), and the
             cards the CC tick offers (plan task plan#2930).  A fourth argument
             the callers pair the way they pair *period*:

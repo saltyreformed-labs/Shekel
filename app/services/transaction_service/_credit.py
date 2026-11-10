@@ -64,10 +64,9 @@ from app.enums import SettledDayBasisEnum, StatusEnum
 from app.exceptions import ValidationError
 from app.models.account import Account
 from app.models.transaction import Transaction
-from app.services.cash_flow_set import CashFlowSet
 from app.services.credit_workflow import get_active_payback, unmark_credit
 from app.services.match_press import Press
-from app.services.movement_account import credit_cards, the_card
+from app.services.movement_account import OwnerAccounts, credit_cards, the_card
 from app.services.pay_calendar import FiledRow, PayCalendar, calendar_for
 from app.services.settle_day import SettleDay, recorded_settle_day
 from app.services.status_seam import (
@@ -354,7 +353,7 @@ def credit_offered(txn: Transaction) -> bool:
 
 
 def credit_opens_the_popover_by_key(
-    items: Iterable[PlanItem], cash_flow: CashFlowSet | None,
+    items: Iterable[PlanItem], owner: OwnerAccounts,
 ) -> dict[Hashable, bool | None]:
     """Return what the C key and the palette's Credit do on each of *items*, by cell key.
 
@@ -388,8 +387,8 @@ def credit_opens_the_popover_by_key(
     Args:
         items: The items being drawn, rows and transfer sides, a row's
             ``entries`` loaded or loadable.
-        cash_flow: The row OWNER's cash-flow set with no override, as
-            ``movement_account.credit_cards`` takes it.
+        owner: The rows' OWNER's ``movement_account.OwnerAccounts``, as
+            ``movement_account.credit_cards`` takes them.
 
     Returns:
         One entry per item, keyed by ``transfer_legs.cell_key``: ``None``
@@ -405,7 +404,7 @@ def credit_opens_the_popover_by_key(
         if isinstance(item, TransferLeg) or not credit_offered(item):
             answers[key] = None
             continue
-        cards = credit_cards(item, cash_flow)
+        cards = credit_cards(item, owner)
         if len(cards) != 1:
             answers[key] = True
         elif credit_moves_payment(item, cards):

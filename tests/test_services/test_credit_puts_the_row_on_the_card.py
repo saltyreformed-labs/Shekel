@@ -28,7 +28,6 @@ from app.exceptions import NotFoundError, ValidationError
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import credit_workflow, movement_account, status_seam, transaction_service
-from app.services.account_resolver import resolve_owner_cash_flow_set
 from app.services.cash_ledger import account_opening_fact
 from app.utils.dates import display_today
 from tests._cards import add_card
@@ -386,7 +385,7 @@ class TestTheCardsAPressCouldMean:
 
     def _cards(self, row):
         """The cards a press naming none could put *row* on."""
-        return movement_account.credit_cards(row, resolve_owner_cash_flow_set(row.user_id))
+        return movement_account.credit_cards(row, movement_account.owner_accounts(row.user_id))
 
     def test_none_one_and_two_cards(self, seed_user, seed_periods):
         """No card: none; the Visa: it; the Visa and the Amex: both, in member order."""

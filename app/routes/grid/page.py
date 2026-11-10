@@ -29,11 +29,12 @@ from app.services import (
     pay_period_rolling,
 )
 from app.services.account_resolver import (
-    resolve_owner_and_view,
+    resolve_cash_flow_set,
     serves_cash_detail,
 )
 from app.services.balance_at import BalanceContext
 from app.services.cash_flow_set import CashFlowSet
+from app.services.movement_account import OwnerAccounts, owner_accounts
 from app.services.entry_service import build_entry_lists_dict, build_entry_sums_dict
 from app.services.grid_view_service import RowKey
 from app.services.statement_match import awaiting_review_count
@@ -165,21 +166,21 @@ class _GridContext(NamedTuple):
         cash_flow: The VIEW of the owner's cash-flow set this page renders --
             checking and its cards, with the balance line's account named
             (developer ruling ``credit_card:R-CC16``, plan step CC-4-1;
-            :func:`~app.services.account_resolver.resolve_owner_and_view`) --
+            :func:`~app.services.account_resolver.resolve_cash_flow_set`) --
             or ``None`` when the user has no account rows at all (the
             post-Commit-3 user-with-zero-accounts edge case).  The rows this
             page loads are every member's; the balance, the anchor and the
             bank control are :attr:`account`'s.
-        owner_cash_flow: The OWNER's set with no override, from the same walk
-            -- what a purchase under any row on this page may name (plan step
-            ``credit_card:CC-5-2``, ruling **R-CC37**;
-            :func:`~app.services.cash_flow_set.purchase_accounts`).  A second
-            field rather than :attr:`cash_flow` because an override naming an
-            account OUTSIDE the set collapses the view to that one account --
-            the rows this page shows -- while what a purchase may name is the
-            owner's set whatever page it is recorded from, and the purchase
-            door tests against exactly that.  The same object as
-            :attr:`cash_flow` when the request names no override.
+        owner_accounts: The OWNER's accounts by the act that names them --
+            what a payment or a purchase under any row on this page may be
+            paid from (every account of the owner's that holds cash, ruling
+            plan#3227) and the cards Credit and the CC tick may put it on
+            (:class:`~app.services.movement_account.OwnerAccounts`, plan task
+            plan#3232).  Read for the owner whatever the page's override: an
+            override outside the cash-flow set collapses the view to one
+            account, while what a movement may name is the owner's whatever
+            page it is recorded from, and the doors test against exactly
+            that.
         num_periods: Count of visible pay-period columns.
         start_offset: Offset added to the current period's
             ``period_index`` for the leftmost visible column.
@@ -199,7 +200,7 @@ class _GridContext(NamedTuple):
 
     balance_ctx: BalanceContext
     cash_flow: CashFlowSet | None
-    owner_cash_flow: CashFlowSet | None
+    owner_accounts: OwnerAccounts
     num_periods: int
     start_offset: int
     current_period: DerivedPeriod
@@ -286,13 +287,10 @@ def _resolve_grid_context(user_id, request_args, settings):
     # that member's balance; one outside it (a savings account) is that
     # account's single-account grid as it always was.
     #
-    # Both halves from ONE walk (plan step credit_card:CC-5-2): the view this
-    # page shows, and the owner's set with no override for the add-purchase
-    # picker under every envelope -- the purchase door admits the row's own
-    # account plus the OWNER's members whatever page the row is recorded
-    # from, and an override outside the set has just collapsed the view to
-    # one account.
-    cash_flow_sets = resolve_owner_and_view(
+    # What a payment or a purchase under any row may name is the OWNER's
+    # accounts (``owner_accounts`` below, plan task plan#3232), not this view:
+    # an override outside the set has just collapsed the view to one account.
+    cash_flow = resolve_cash_flow_set(
         user_id, settings, request_args.get("account_id", type=integer_arg),
     )
 
@@ -313,8 +311,8 @@ def _resolve_grid_context(user_id, request_args, settings):
 
     return _GridContext(
         balance_ctx=balance_ctx,
-        cash_flow=cash_flow_sets.view,
-        owner_cash_flow=cash_flow_sets.owner,
+        cash_flow=cash_flow,
+        owner_accounts=owner_accounts(user_id),
         num_periods=num_periods,
         start_offset=start_offset,
         current_period=current_period,
@@ -463,7 +461,7 @@ class _GridEntryMaps(NamedTuple):
 
 
 def _build_entry_maps(
-    transactions, budgets, all_periods, owner_cash_flow,
+    transactions, budgets, all_periods, owner,
 ) -> _GridEntryMaps:
     """Build the two ENVELOPE maps, and the paycheck spans one of them needs.
 
@@ -503,9 +501,9 @@ def _build_entry_maps(
             it is handed.  Passing the visible slice instead would be a
             ``KeyError`` on a live render, which is why the two reads sit in
             one function rather than being resolved apart.
-        owner_cash_flow: ``ctx.owner_cash_flow`` -- the owner's set with no
-            override, from which each envelope's add-purchase picker is
-            derived (plan step ``credit_card:CC-5-2``).
+        owner: ``ctx.owner_accounts`` -- the owner's accounts, from which
+            each envelope's add-purchase picker and CC tick are derived (plan
+            step ``credit_card:CC-5-2``, plan task plan#3232).
 
     Returns:
         The :class:`_GridEntryMaps` for this render.
@@ -527,7 +525,7 @@ def _build_entry_maps(
         entry_lists=build_entry_lists_dict(
             transactions, budgets,
             {period.period_id: period for period in all_periods},
-            owner_cash_flow,
+            owner,
             # The OWNER is looking: the grid is owner-only, so its purchase
             # lists name the owner's bank lines (plan step
             # ``credit_card:CC-5-4a-5``).
@@ -844,7 +842,7 @@ def index():
     # entry-list builder filters before it asks anything else), and the card
     # macro reads both maps with ``.get``.
     entry_maps = _build_entry_maps(
-        items, amounts.budgets, ctx.all_periods, ctx.owner_cash_flow,
+        items, amounts.budgets, ctx.all_periods, ctx.owner_accounts,
     )
 
     return render_template(
@@ -931,10 +929,10 @@ def index():
         # What the C key and the palette's Credit do on each cell drawn (plan
         # task plan#3114, ruling plan#3112): press at once, or open the
         # popover.  The producer the cell fragment asks too
-        # (``_render_helpers.render_transaction_cell``), over the OWNER's set
-        # with no override, the one ``credit_cards`` takes.
+        # (``_render_helpers.render_transaction_cell``), over the OWNER's
+        # accounts, the ones ``credit_cards`` takes.
         credit_opens_popover=credit_opens_the_popover_by_key(
-            _drawn_items(row_data.matched_by_row_period), ctx.owner_cash_flow,
+            _drawn_items(row_data.matched_by_row_period), ctx.owner_accounts,
         ),
         **plan_view,
     )

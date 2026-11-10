@@ -21,7 +21,7 @@ from app.extensions import db
 from app.models.transaction_entry import TransactionEntry
 from app.models.ref import TransactionType
 from app.routes._render_helpers import fragment_amounts
-from app.services.account_resolver import resolve_owner_cash_flow_set
+from app.services.movement_account import OwnerAccounts, owner_accounts
 from app.services.entry_service import build_entry_lists_dict, build_entry_sums_dict
 from app.services.pay_calendar import FiledRow, calendar_for
 from app.services.settle_day import record_settle_day
@@ -95,12 +95,13 @@ def _lists(rows):
             FiledRow.for_row(row),
         )
         periods[period.period_id] = period
-    # The OWNER's cash-flow set with no override, as every route passes it
-    # (plan step credit_card:CC-5-2): every row here is one owner's, and an
-    # empty list has no owner (the builder never reads the set for it).
+    # The OWNER's accounts, as every route passes them (plan step
+    # credit_card:CC-5-2, plan task plan#3232): every row here is one
+    # owner's, and an empty list has no owner (the builder never reads them
+    # for it).
     return build_entry_lists_dict(
         rows, budgets, periods,
-        resolve_owner_cash_flow_set(rows[0].user_id) if rows else None,
+        owner_accounts(rows[0].user_id) if rows else OwnerAccounts(cash=(), cards=()),
         # The owner is looking, as on the grid (plan step CC-5-4a-5).
         rows[0].user_id if rows else None,
     )
@@ -443,7 +444,7 @@ class TestBuildEntryListsDict:
 
             with pytest.raises(KeyError):
                 build_entry_lists_dict(
-                    [txn], budgets, {}, resolve_owner_cash_flow_set(txn.user_id),
+                    [txn], budgets, {}, owner_accounts(txn.user_id),
                     txn.user_id,
                 )
 

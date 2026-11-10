@@ -197,12 +197,12 @@ def render_mobile_card(
         return render_transaction_cell(item)
     amounts = fragment_amounts(item)
     budgets = amounts.budgets
-    # The owner's cash-flow set, resolved ONCE for the two things this card
-    # draws from it (plan step credit_card:CC-5-2): the balance line its
-    # account chip is decided against, and the add-purchase picker's
-    # accounts -- the OWNER's set with no override, because the purchase
-    # door admits the row's own account plus the owner's members whatever
-    # page the card is on.  Two questions, one walk.
+    # The two account answers this card draws, each read once (plan step
+    # credit_card:CC-5-2; plan task plan#3232): the balance line its account
+    # chip is decided against, and the add-purchase picker's accounts -- the
+    # OWNER's, because the purchase door admits the row's own account plus
+    # every account of the owner's that holds cash whatever page the card is
+    # on (ruling plan#3227).
     cash_flow = fragment_cash_flow(owner_id)
     # The purchase list, drawn for an item that TRACKS PURCHASES and for no
     # other: the builder's own filter (``build_entry_lists_dict`` emits an
@@ -245,7 +245,7 @@ def render_mobile_card(
     if item.tracks_purchases:
         period = calendar_for(owner_id).require_period(FiledRow.for_row(item))
         entry_lists = build_entry_lists_dict(
-            [item], budgets, {period.period_id: period}, cash_flow.purchases,
+            [item], budgets, {period.period_id: period}, cash_flow.accounts,
             # The SESSION's user decides whether the card's purchase list may
             # name the owner's bank lines, never ``can_edit`` below, which the
             # browser posts back (plan step ``credit_card:CC-5-4a-5``).

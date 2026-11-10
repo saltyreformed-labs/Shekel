@@ -7,11 +7,12 @@ The rules are card ``plan#9``'s and the developer's (rulings ``balance:R-BAL279`
 - **Refused** (exit 1): two steps that move money, an undone one counting as one
   (R-BAL288); a deploy-together group the release leaves production holding in part
   (each member it lacks named; R-BAL288: wholly in production or wholly out); each thing
-  the card reader cannot read (nothing is declared, R-BAL287); and each money mover or
-  added migration the skill names UNREHEARSED, because it found no rehearsal kit for it
-  (R-BAL281's interim, as the developer confirmed it 2026-10-13: such a release is
-  refused in R-BAL280's shape).  Whether a kit exists is the skill's judgment, so it is
-  an input.  And, whatever the cut, a Monday update that has stopped (ruling plan#2351,
+  the card reader cannot read (nothing is declared, R-BAL287); and each money mover the
+  skill names UNREHEARSED, because it found no rehearsal kit for it (R-BAL281, as the
+  developer confirmed it 2026-10-13: such a release is refused in R-BAL280's shape).
+  Whether a kit exists is the skill's judgment, so it is an input.  A migration needs no
+  kit: the skill's row comparison rehearses every one at the cut it settles on (ruling
+  plan#2873).  And, whatever the cut, a Monday update that has stopped (ruling plan#2351,
   :mod:`tools.release._updates`): the release's refusal, never the cut's, so no earlier
   cut is offered for it.
 - **Needs the approval question to name it** (exit 3): two or more added migrations; and
@@ -35,8 +36,9 @@ branch's own commits, and an offered cut can hold a leaf's code without its clai
 (:class:`~tools.release._cards.Cards`): the cards the window of any cut on the cut's
 first-parent line names (every candidate's), read from the tracker once, so a card the
 cut reads as a money mover is one at every candidate.  A name the skill gave as
-unrehearsed refuses every candidate carrying it, and a candidate that adds a migration
-the cut does not add is refused, since the skill judged no rehearsal of it.
+unrehearsed refuses every candidate carrying it.  A candidate adding a migration the cut
+does not add is judged as any other: once the developer takes it, it is the cut, and the
+row comparison rehearses what it adds (ruling plan#2873).
 """
 from __future__ import annotations
 
@@ -112,8 +114,9 @@ class Plan:
 
 @dataclass(frozen=True)
 class Inputs:
-    """What the skill gives a judgment: each money mover or added migration it found no
-    rehearsal kit for; how to reach the tracker, which every judgment reads; how to read
+    """What the skill gives a judgment: each money mover it found no rehearsal kit for (a
+    migration needs none, ruling plan#2873); how to reach the tracker, which every judgment
+    reads; how to read
     the update workflow's runs, which a judgment reads once production's tree holds the
     workflow (:func:`tools.release._updates.read`); and the clock the update's age is read
     by.  No connection is made unless one is given: only the command line, run as
@@ -157,11 +160,9 @@ def _split(group: Group) -> str | None:
     return why + "; the group ships whole"
 
 
-def _refusals(found: Carried, changed: tuple[Migration, ...], unrehearsed: Collection[str],
-              cut_adds: Collection[str]) -> list[str]:
-    """Why a cut carrying ``found`` and changing the migrations ``changed`` is refused;
-    empty when it is not.  ``cut_adds`` holds the revisions the release's own cut adds:
-    an earlier cut adding any other was never put to the skill's rehearsal judgment."""
+def _refusals(found: Carried, unrehearsed: Collection[str]) -> list[str]:
+    """Why a cut carrying ``found`` is refused; empty when it is not.  No migration refuses
+    one: the row comparison rehearses whatever the cut settled on adds (ruling plan#2873)."""
     reasons = list(found.unreadable)
     movers = [step.key for step in found.steps if step.money]
     if len(movers) > 1:
@@ -170,11 +171,6 @@ def _refusals(found: Carried, changed: tuple[Migration, ...], unrehearsed: Colle
     reasons += [why for why in map(_split, found.groups) if why]
     reasons += [f"{key} moves money and has no rehearsal kit" for key in movers
                 if key in unrehearsed]
-    reasons += [f"migration {m.revision} ({m.path}) has no rehearsal kit"
-                for m in _added(changed) if m.revision in unrehearsed]
-    reasons += [f"it adds migration {m.revision} ({m.path}), which the release's cut does "
-                "not add, so no rehearsal of it was judged" for m in _added(changed)
-                if m.revision not in cut_adds]
     return reasons
 
 
@@ -209,8 +205,6 @@ class Judge:
             raise ReleaseError(f"{self.cut[:12]}'s work is the tracker's cards, and no way to "
                                "reach the tracker was given")
         self._known = _cards.read(root, self.base, self.cut, inputs.connect())
-        self._cut_adds = frozenset(m.revision for m in _added(migrations(root, self.base,
-                                                                         self.cut)))
 
     def verdict(self, cut: str, subject: str) -> Verdict:
         """``cut`` (the release's, or an earlier one) judged; ``subject`` is its commit's
@@ -218,8 +212,7 @@ class Judge:
         found = _cards.carried(self.root, self.base, cut, self._known)
         changed = migrations(self.root, self.base, cut)
         return Verdict(cut, subject, found, changed,
-                       tuple(_refusals(found, changed, self.unrehearsed, self._cut_adds)),
-                       tuple(_approvals(changed)))
+                       tuple(_refusals(found, self.unrehearsed)), tuple(_approvals(changed)))
 
     def line(self, cut: str) -> list[tuple[str, str]]:
         """``(sha, subject)`` for each cut ``dev`` stood at in ``<base>..<cut>``, newest
@@ -228,10 +221,10 @@ class Judge:
 
 
 def _unknown(verdict: Verdict, unrehearsed: Collection[str]) -> list[str]:
-    """Each unrehearsed name that is neither a money mover the cut carries nor a migration
-    it adds: a mistyped name would otherwise refuse nothing."""
+    """Each unrehearsed name that is not a money mover the cut carries: a mistyped name, or
+    a migration's revision, which needs no kit (ruling plan#2873), would otherwise refuse
+    nothing and read as rehearsed."""
     known = {step.key for step in verdict.carried.steps if step.money}
-    known |= {m.revision for m in verdict.added if m.revision is not None}
     return sorted(name for name in unrehearsed if name not in known)
 
 
@@ -239,8 +232,8 @@ def plan(root: Path, base: str, cut: str, inputs: Inputs = Inputs()) -> Plan:
     """The release ``<base>..<cut>`` judged, with the cuts to offer.
 
     Raises:
-        ReleaseError: when the range holds no commit; when an unrehearsed name is neither
-            a money mover the cut carries nor a migration it adds; when ``inputs`` gives
+        ReleaseError: when the range holds no commit; when an unrehearsed name is not a
+            money mover the cut carries; when ``inputs`` gives
             no way to reach the tracker; when the cards cannot be read
             (:func:`tools.release._cards.read`); or when the update workflow's runs must
             be read and cannot be reached (:func:`tools.release._updates.read`).
@@ -257,7 +250,7 @@ def plan(root: Path, base: str, cut: str, inputs: Inputs = Inputs()) -> Plan:
     unknown = _unknown(verdict, judge.unrehearsed)
     if unknown:
         raise ReleaseError(f"unrehearsed {', '.join(unknown)}: names no money mover this "
-                           "cut carries and no migration it adds")
+                           "cut carries, and a migration needs no kit (ruling plan#2873)")
     return Plan(judge.base, verdict, *_offers(judge, verdict, line[1:]),
                 _updates.read(root, judge.base, inputs.now(), inputs.actions))
 

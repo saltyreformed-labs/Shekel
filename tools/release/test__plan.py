@@ -161,19 +161,24 @@ def test_an_unrehearsed_money_mover_is_refused_and_the_cut_before_it_offered(rep
     assert judged.passing is not None and judged.passing.cut == first
 
 
-def test_an_unrehearsed_added_migration_is_refused(repo):
-    """An added migration with no kit refuses the release too; no earlier cut exists."""
+def test_an_added_migration_needs_no_kit_so_its_revision_judges_nothing(repo):
+    """Ruling plan#2873: the release's row comparison rehearses every migration, so an added
+    one with no kit refuses nothing, and its revision given as unrehearsed names nothing the
+    command judges: it stops rather than read as a kit looked for."""
     base, first, _ = _migration_history(repo)
-    judged = judge(repo, base, first, FakeTracker(), ["b2"])
-    assert judged.verdict.refusals == (
-        f"migration b2 ({VERSIONS}/b2_second.py) has no rehearsal kit",)
-    assert judged.passing is None
+    judged = judge(repo, base, first, FakeTracker())
+    assert [m.revision for m in judged.verdict.added] == ["b2"]
+    assert (judged.verdict.status, judged.verdict.refusals) == (CLEAN, ())
+    with pytest.raises(ReleaseError, match="unrehearsed b2: names no money mover this cut "
+                                           r"carries, and a migration needs no kit"):
+        judge(repo, base, first, FakeTracker(), ["b2"])
 
 
 @pytest.mark.parametrize("name", ["plan#41", "a1", "zz"])
 def test_an_unrehearsed_name_naming_no_mover_and_no_added_migration_judges_nothing(repo, name):
     """A card moving no money, an edited migration and a typo: each would refuse nothing,
-    so the command refuses to judge rather than read as rehearsed."""
+    so the command refuses to judge rather than read as rehearsed (an added migration's
+    revision too: :func:`test_an_added_migration_needs_no_kit_so_its_revision_judges_nothing`)."""
     base = repo.commit("base", {f"{VERSIONS}/a1_first.py": migration("a1", None)})
     cut = repo.commit("ship #41", {**ship(41),
                                    f"{VERSIONS}/a1_first.py": migration("a1", None) + "#\n"},
@@ -195,23 +200,23 @@ def test_an_unrehearsed_mover_refuses_every_earlier_cut_carrying_it(repo):
     assert judged.passing is None
 
 
-def test_an_earlier_cut_adding_a_migration_the_cut_does_not_is_refused(repo):
-    """dev took aa, then deleted it and took bb under a new id; bb has no kit.  The earlier
-    cut adds aa, which the skill never saw, so it is no cut to offer."""
+def test_an_earlier_cut_adding_a_migration_the_cut_does_not_is_offered(repo):
+    """dev took aa, then deleted it, took bb under a new id and shipped #40, a money mover
+    with no kit.  The cut is refused for #40 alone, and the cut after aa is offered: once
+    the developer takes it, it is the cut, and the row comparison rehearses aa (ruling
+    plan#2873), so no rehearsal of it is left unjudged."""
     base = repo.commit("base")
     first = repo.merge(base, repo.commit("add aa", {f"{VERSIONS}/aa_first.py":
                                                     migration("aa", None)}, parents=(base,)))
     cut = repo.merge(first, repo.commit("redo as bb", {f"{VERSIONS}/aa_first.py": None,
                                                        f"{VERSIONS}/bb_first.py":
-                                                       migration("bb", None)},
+                                                       migration("bb", None), **ship(40)},
                                         parents=(first,)))
-    tracker = FakeTracker()
-    judged = judge(repo, base, cut, tracker, ["bb"])
-    assert judged.verdict.refusals == (f"migration bb ({VERSIONS}/bb_first.py) has no "
-                                       "rehearsal kit",)
-    assert judged.passing is None
+    tracker = _tracker(40)
+    judged = judge(repo, base, cut, tracker, ["plan#40"])
+    assert judged.verdict.refusals == ("plan#40 moves money and has no rehearsal kit",)
+    assert judged.passing is not None and judged.passing.cut == first
+    assert [m.revision for m in judged.passing.added] == ["aa"]
     candidate = Judge(repo.root, base, cut, Inputs(connect=lambda: tracker)).verdict(
         first, "add aa")
-    assert candidate.refusals == (
-        f"it adds migration aa ({VERSIONS}/aa_first.py), which the release's cut does not "
-        "add, so no rehearsal of it was judged",)
+    assert (candidate.status, candidate.refusals) == (CLEAN, ())

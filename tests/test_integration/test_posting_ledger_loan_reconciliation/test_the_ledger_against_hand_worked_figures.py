@@ -1,5 +1,5 @@
-"""The loan's posted ledger run beside the resolver: the parallel run, the cash invariant it
-supersedes, the full sweep, scenario and owner isolation, and backfill against go-forward.
+"""The loan's posted ledger against hand-worked figures: on and off schedule, the cash invariant
+it supersedes, the full sweep, scenario and owner isolation, and backfill against go-forward.
 """
 
 from __future__ import annotations
@@ -43,13 +43,14 @@ from ._helpers import (
     _ANCHOR_DATE,
     _P1,
     _P2,
+    _SCHEDULED_PI,
+    _ONE_SCHEDULED_MONTH,
+    _TWO_SCHEDULED_MONTHS,
     _ORIGINATION_BEFORE_P1,
     _AS_OF,
     _make_loan,
-    _resolved_at,
     _settle,
     _per_loan_correction_net,
-    _resolver_balance,
     _ledger_balance,
     _posted_balance,
     _assert_loan_reconciles,
@@ -78,10 +79,10 @@ def _make_tracking_start_loan(
 
     The mid-life-import shape: origination is $250,000 (2025-01-01) but the
     confirmed ledger opens at *tracking_balance* as of *tracking_date* (default
-    the suite's $100,000 / 2026-01-10, before every payment period).  Both the
-    resolver and the genesis reader synthesize the opening from that tracking-start
-    (their shared ``load_loan_anchor_facts``), so the parallel run pits their
-    disjoint balance math against the SAME tracking-start anchor.
+    the suite's $100,000 / 2026-01-10, before every payment period).  The genesis
+    reader synthesizes the opening from that tracking-start
+    (``load_loan_anchor_facts``), so a payment's interest is charged on the
+    tracking balance and never on the origination principal.
     """
     loan = create_loan_account(
         user, _db.session, name=name, principal=_ORIGINATION_PRINCIPAL,
@@ -98,9 +99,8 @@ def _add_rate_change(loan, effective_date, rate):
     """Append a :class:`RateHistory` rate change (an ARM recast) to a loan.
 
     Mirrors the unit suite's helper (``test_loan_posting_service._add_rate_change``)
-    so both suites drive an ARM step the same way: the rate feed the walk AND
-    the resolver read (via ``load_rate_history`` / ``load_loan_context``) both
-    pick it up, so the rate step reaches both producers of the parallel run.
+    so both suites drive an ARM step the same way: the rate feed the walk reads
+    picks it up, so the step governs the installment due on its day.
     """
     _db.session.add(RateHistory(
         account_id=loan.id, effective_date=effective_date, interest_rate=rate,
@@ -134,126 +134,100 @@ def _loan_ledger_net(loan, kind, scenario_id: int) -> Decimal:
 
 
 # ---------------------------------------------------------------------------
-# 1. Parallel run vs the resolver (plan 8.2)
+# 1. The ledger against hand-worked figures (plan 8.2)
 # ---------------------------------------------------------------------------
 
 
-class TestParallelRunAgainstResolver:
-    """The posted ledger and the independent resolver agree on-schedule, diverge off."""
+class TestLedgerAgainstHandWorkedFigures:
+    """The posted ledger's balance equals a figure worked by hand, on and off schedule.
 
-    def test_on_schedule_payment_matches_resolver(
+    It graded the ledger against the old schedule replay until plan task plan#3384
+    (ruling plan#3383): that replay is deleted with walk 3, so every value here is
+    a literal with its arithmetic shown.  The literal is also the stronger check:
+    a replay that moved with the ledger could not see a bug they shared.
+    """
+
+    def test_a_scheduled_payment_books_its_hand_worked_principal(
         self, app, db, seed_user, seed_periods,
     ):
-        """Paying exactly the scheduled P&I keeps the ledger == the resolver.
+        """Paying exactly the contract's P&I books its principal, worked by hand.
 
-        The resolver reports the loan's scheduled monthly P&I (``period_pi``);
-        settling a payment of exactly that amount is on-schedule, so the ledger's
-        real principal (cash - interest) equals the resolver's scheduled principal
-        (period_pi - interest) and the two balances -- derived by disjoint code
-        paths from the SAME anchor -- must agree to the penny.  A payment did post
-        (the sweep is not vacuous), and Checking is untouched by the loan sync.
+        Arithmetic (:data:`_SCHEDULED_PI`): interest round(100000.00 * 0.005) =
+        500.00, principal 1498.88 - 500.00 = 998.88, so the ledger owes
+        100000.00 - 998.88 = 99,001.12.  The genesis linked net is the opening
+        (-250000) + the true-up (+150000) + that principal (+998.88) =
+        -99,001.12.  One correction posted (the sweep is not vacuous).
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
             loan = _make_loan(seed_user)
-            # The resolver's scheduled monthly P&I; paying exactly it is
-            # on-schedule (the loan carries no escrow, so cash == P&I).
-            scheduled_pi = _resolved_at(
-                loan.id, scenario_id, _AS_OF,
-            ).state.monthly_payment
-
             xfer = _settle(
-                seed_user, loan, seed_periods[_P1], amount=scheduled_pi,
+                seed_user, loan, seed_periods[_P1], amount=_SCHEDULED_PI,
             )
             db.session.commit()
 
-            ledger = _ledger_balance(loan.id, scenario_id)
-            resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            assert ledger == resolver, (
-                f"on-schedule ledger {ledger} != resolver {resolver}"
-            )
-            # Non-vacuity: the genesis linked total is opening (-250000) + true-up
-            # (+150000) + the real principal (scheduled P&I - round(100000*0.005)
-            # = -500.00 interest), i.e. principal - _ANCHOR_BALANCE.
+            assert _ledger_balance(loan.id, scenario_id) == _ONE_SCHEDULED_MONTH
             assert account_net(
                 _db.session, loan.id, scenario_id,
-            ) == scheduled_pi - Decimal("500.00") - _ANCHOR_BALANCE
+            ) == Decimal("-99001.12")
             assert len(
                 loan_correction_entries(db.session, xfer.id, loan.id),
             ) == 1
             _assert_loan_reconciles(loan, scenario_id)
 
-    def test_tracking_start_opening_matches_resolver(
+    def test_tracking_start_opening_books_from_the_tracking_balance(
         self, app, db, seed_user, seed_periods,
     ):
-        """A mid-life tracking-start loan: an on-schedule payment keeps ledger == resolver.
+        """A mid-life tracking-start loan accrues from the tracking balance, not origination.
 
         The opening is a tracking_start ($100,000 as of 2026-01-10), NOT the
-        $250,000 origination.  Both the genesis ledger reader and the independent
-        resolver seed from that tracking-start (their shared anchor facts), so an
-        on-schedule payment keeps the two disjoint balance paths locked to the
-        penny -- and the balance opens from $100,000, provably below the
-        origination principal.
+        $250,000 origination.  One payment of the contract's P&I then charges
+        round(100000.00 * 0.005) = 500.00 of interest and books 998.88 of
+        principal, so the ledger owes 99,001.12 (:data:`_SCHEDULED_PI`).  Had the
+        walk seeded from origination the interest would be
+        round(250000.00 * 0.005) = 1250.00 and the balance 249,751.12.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
             loan = _make_tracking_start_loan(seed_user)
-            scheduled_pi = _resolved_at(
-                loan.id, scenario_id, _AS_OF,
-            ).state.monthly_payment
 
-            _settle(seed_user, loan, seed_periods[_P1], amount=scheduled_pi)
+            _settle(seed_user, loan, seed_periods[_P1], amount=_SCHEDULED_PI)
             db.session.commit()
 
-            ledger = _ledger_balance(loan.id, scenario_id)
-            resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            assert ledger == resolver, (
-                f"tracking-start ledger {ledger} != resolver {resolver}"
-            )
-            # Opened at the tracking-start 100000, so the balance is far below
-            # the 250000 origination -- proving the walk did NOT seed from it.
-            assert ledger < _ORIGINATION_PRINCIPAL
+            assert _ledger_balance(loan.id, scenario_id) == _ONE_SCHEDULED_MONTH
             _assert_loan_reconciles(loan, scenario_id)
 
-    def test_on_schedule_multi_payment_matches_resolver(
+    def test_two_scheduled_payments_compound_on_the_lower_balance(
         self, app, db, seed_user, seed_periods,
     ):
-        """Two on-schedule payments keep the ledger == the resolver across the walk.
+        """Two on-schedule payments: the second month's interest is on the lower balance.
 
-        Both payments are exactly the scheduled P&I, in distinct due months, so
-        the ledger's real-principal walk and the resolver's scheduled-principal
-        walk stay locked step-for-step from the shared anchor -- the balances
-        agree after both.  This exercises the running-balance coupling that a
-        single payment cannot.
+        Arithmetic (:data:`_SCHEDULED_PI`): month 1 leaves 99,001.12; month 2
+        charges round(99001.12 * 0.005) = 495.01 and books 1498.88 - 495.01 =
+        1,003.87, leaving 97,997.25.  A walk that charged the first month's
+        $500.00 again would leave 98,002.24, so the running balance is what this
+        pins.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
             loan = _make_loan(seed_user)
-            scheduled_pi = _resolved_at(
-                loan.id, scenario_id, _AS_OF,
-            ).state.monthly_payment
 
-            _settle(seed_user, loan, seed_periods[_P1], amount=scheduled_pi)
-            _settle(seed_user, loan, seed_periods[_P2], amount=scheduled_pi)
+            _settle(seed_user, loan, seed_periods[_P1], amount=_SCHEDULED_PI)
+            _settle(seed_user, loan, seed_periods[_P2], amount=_SCHEDULED_PI)
             db.session.commit()
 
-            ledger = _ledger_balance(loan.id, scenario_id)
-            resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            assert ledger == resolver
+            assert _ledger_balance(loan.id, scenario_id) == _TWO_SCHEDULED_MONTHS
             _assert_loan_reconciles(loan, scenario_id)
 
-    def test_short_payment_diverges_and_ledger_owes_more(
+    def test_a_short_payment_books_its_real_principal(
         self, app, db, seed_user, seed_periods,
     ):
-        """A short payment: the ledger owes MORE than the contractual resolver.
+        """A short payment books only the principal the cash covers.
 
         Arithmetic (100000 @ 6%): interest 500.00; a $1,000 payment is short of
-        the ~$1,498.88 scheduled P&I, so the real principal is 1000 - 500 =
-        500.00 and the ledger balance is 100000 - 500 = 99,500.00 (hand-computed,
-        no need for the schedule).  The resolver books the FULL scheduled
-        principal (it ignores the cash), so it shows a LOWER balance -- they
-        diverge, and the ledger is the honest record of a partial paydown that the
-        resolver would need an anchor true-up to reflect.
+        the $1,498.88 contract P&I, so the real principal is 1000 - 500 =
+        500.00 and the ledger owes 100000 - 500 = 99,500.00 -- more than the
+        on-schedule 99,001.12, by the 498.88 the payment fell short.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -261,31 +235,22 @@ class TestParallelRunAgainstResolver:
             _settle(seed_user, loan, seed_periods[_P1], amount=Decimal("1000.00"))
             db.session.commit()
 
-            ledger = _ledger_balance(loan.id, scenario_id)
-            resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            # The ledger's real balance, hand-computed.
-            assert ledger == Decimal("99500.00")
+            assert _ledger_balance(loan.id, scenario_id) == Decimal("99500.00")
             # Genesis: opening (-250000) + true-up (+150000) + principal (+500).
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-99500.00")
-            # They DIVERGE, and the ledger (short paydown) owes MORE.
-            assert ledger != resolver
-            assert resolver < ledger
             _assert_loan_reconciles(loan, scenario_id)
 
-    def test_extra_principal_diverges_and_ledger_owes_less(
+    def test_extra_principal_books_the_whole_excess(
         self, app, db, seed_user, seed_periods,
     ):
-        """Extra principal: the ledger owes LESS than the contractual resolver.
+        """An overpayment books the whole excess as principal.
 
         Arithmetic (100000 @ 6%): interest 500.00; a $2,000 payment exceeds the
-        ~$1,498.88 scheduled P&I, so the real principal is 2000 - 500 = 1,500.00
-        and the ledger balance is 100000 - 1500 = 98,500.00 (hand-computed).  The
-        resolver books only the scheduled principal, so it shows a HIGHER balance
-        -- the extra $500-ish of principal the ledger captured automatically is
-        exactly what the resolver drops on the floor (and would need a true-up to
-        recover).
+        $1,498.88 contract P&I, so the real principal is 2000 - 500 = 1,500.00
+        and the ledger owes 100000 - 1500 = 98,500.00 -- less than the
+        on-schedule 99,001.12, by the 501.12 paid over.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -293,16 +258,11 @@ class TestParallelRunAgainstResolver:
             _settle(seed_user, loan, seed_periods[_P1], amount=Decimal("2000.00"))
             db.session.commit()
 
-            ledger = _ledger_balance(loan.id, scenario_id)
-            resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            assert ledger == Decimal("98500.00")
+            assert _ledger_balance(loan.id, scenario_id) == Decimal("98500.00")
             # Genesis: opening (-250000) + true-up (+150000) + principal (+1500).
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-98500.00")
-            # They DIVERGE, and the ledger (extra paydown) owes LESS.
-            assert ledger != resolver
-            assert ledger < resolver
             _assert_loan_reconciles(loan, scenario_id)
 
     def test_arm_rate_step_matches_a_hand_computed_post_step_balance(
@@ -310,33 +270,23 @@ class TestParallelRunAgainstResolver:
     ):
         """An ARM rate step: the ledger balance equals a HAND-COMPUTED literal.
 
-        The parallel run agrees on-schedule and diverges off, but BOTH the walk
-        and the resolver read the same ``rate_period_engine``, so a shared
-        rate-step bug would move the two producers together and the parallel run
-        alone would NOT catch it (review M4(b) / M7).  This case closes that gap
-        with a hand-computed post-step ledger balance -- the one producer a
-        shared-kernel bug cannot hide from -- which is exactly why the fixture
-        does NOT read the balance back from either producer.
-
         A rate step to 12% effective 2026-03-01 governs P2 (due 2026-03-01, the
         step's own day) while P1 (due 2026-02-01) keeps the 6% origination
         rate.  P2 and not a later installment since plan step
         recurrence:R16-c-2: every contractual installment is charged now, so a
         payment skipping March would clear March's interest too (the fixture
         is restated so nothing is left unpaid, ruling R-R103).  Each payment
-        is a $1,000 SHORT payment, so the ledger's REAL principal (cash - interest) is hand-computable without the
-        schedule (the same partition ``test_arm_rate_step_changes_interest``
-        pins at the unit level):
+        is a $1,000 SHORT payment, so the ledger's REAL principal (cash -
+        interest) is hand-computable without the schedule (the same partition
+        ``test_arm_rate_step_changes_interest`` pins at the unit level):
           P1 (6%):  interest = round(100000 * 0.06 / 12) = 500.00;
                     principal = 1000 - 500 = 500.00; balance 99,500.00.
           P2 (12%): interest = round( 99500 * 0.12 / 12) = 995.00;
                     principal = 1000 - 995 =   5.00; balance 99,495.00.
         So the ledger balance is 99,495.00 and the genesis linked total is
         opening (-250000) + true-up (+150000) + P1 principal (+500) + P2
-        principal (+5) = -99,495.00.  The reader reads that same ledger, so it
-        agrees to the penny; the resolver books the (recast, far larger)
-        SCHEDULED principal at each rate, so it shows a LOWER balance -- the
-        short-payment divergence, now proven to survive an ARM step.
+        principal (+5) = -99,495.00.  The dated reader reads that same ledger
+        bounded at today, which no line here is dated past, so it agrees.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -346,18 +296,11 @@ class TestParallelRunAgainstResolver:
             _settle(seed_user, loan, seed_periods[_P2], amount=Decimal("1000.00"))
             db.session.commit()
 
-            ledger = _ledger_balance(loan.id, scenario_id)
-            reader = _posted_balance(loan.id, scenario_id)
-            resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            # The hand-computed post-step balance -- the shared-kernel teeth.
-            assert ledger == Decimal("99495.00")
-            assert reader == Decimal("99495.00")
+            assert _ledger_balance(loan.id, scenario_id) == Decimal("99495.00")
+            assert _posted_balance(loan.id, scenario_id) == Decimal("99495.00")
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-99495.00")
-            # The resolver books scheduled principal at each rate; short payments
-            # mean it owes LESS -- divergence survives the rate step.
-            assert resolver < ledger
             _assert_loan_reconciles(loan, scenario_id)
 
     def test_pre_anchor_payment_is_correctly_summed_under_genesis(
@@ -368,15 +311,16 @@ class TestParallelRunAgainstResolver:
         Genesis retires the Step-4 pre-anchor exclusion (the read-switch boundary
         the prior draft carved out): the walk splits EVERY payment from
         origination, and the opening + true-up corrections absorb the pre-anchor
-        principal, so the from-origination sum-of-postings reproduces the resolver
-        with NO boundary rule.  With the trueup at 2026-02-15, P1 (due 2026-02-01)
-        is pre-trueup: it splits on the $250,000 origination balance (interest
-        round(250000 * 0.005) = 1250.00, principal 1000 - 1250 = -250.00, so the
-        walk carries 250250 to the trueup).  The opening books -250000 and the
-        true-up 250250 - 100000 = +150250; with P1's cash (+1000) and correction
-        loan leg (-1250) the loan-linked net is -100000.00 -- exactly -(the
-        resolver's 100000 anchor, which subsumes P1) -- so the pre-anchor payment
-        is summed correctly, never the old double-count.
+        principal, so the from-origination sum-of-postings lands on the verified
+        balance with NO boundary rule.  With the trueup at 2026-02-15, P1 (due
+        2026-02-01) is pre-trueup: it splits on the $250,000 origination balance
+        (interest round(250000 * 0.005) = 1250.00, principal 1000 - 1250 =
+        -250.00, so the walk carries 250250 to the trueup).  The opening books
+        -250000 and the true-up 250250 - 100000 = +150250; with P1's cash
+        (+1000) and correction loan leg (-1250) the loan-linked net is
+        -100000.00 -- exactly -(the verified $100,000 true-up, which subsumes
+        P1) -- so the pre-anchor payment is summed correctly, never the old
+        double-count.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -405,9 +349,7 @@ class TestParallelRunAgainstResolver:
             loan_posting_service.sync_loan_postings(loan.id, scenario_id)
             db.session.commit()
 
-            # -(linked net) reproduces the resolver's anchor, which subsumes P1.
-            resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            assert resolver == _ANCHOR_BALANCE  # 100000.00
+            # -(linked net) is the verified true-up, which subsumes P1.
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == -_ANCHOR_BALANCE  # -100000.00, no pre-anchor pollution
@@ -647,7 +589,8 @@ class TestBackfillEqualsGoForward:
     Two faces of the C7 backfill guarantee (plan 8.8 / Section 4 commit 7): a
     ledger rebuilt by the backfill reconciles identically to the go-forward one
     (leg for leg), and the dated posting window -- ``None`` while no opening is
-    posted -- reads back == the resolver to the penny once the backfill posts it.
+    posted -- reads back the hand-worked balance to the penny once the backfill
+    posts it.
     The second is the plan's "the oracle detects the unposted-opening gap before
     and zero mismatches after," proven at a point in time AND at every period
     boundary, so the historical-data path is pinned directly, not only by
@@ -696,10 +639,10 @@ class TestBackfillEqualsGoForward:
             assert stored_per_loan_net(loan.id, scenario_id) == forward_per_loan
             _assert_loan_reconciles(loan, scenario_id)
 
-    def test_reader_reads_none_before_backfill_then_matches_resolver_after(
+    def test_reader_reads_none_before_backfill_then_the_hand_worked_balance_after(
         self, app, db, seed_user, seed_periods,
     ):
-        """The reader shows the unposted-opening gap before backfill, == resolver after.
+        """The reader shows the unposted-opening gap before backfill, the true balance after.
 
         The read switch (plan Section 8) turns every displayed loan balance onto the
         genesis reader, so the C7 backfill is what makes that reader authoritative on
@@ -708,72 +651,55 @@ class TestBackfillEqualsGoForward:
         mismatches after," pinned on the exact producers the switch flips onto:
 
         * BEFORE the backfill (openings cleared) the reader returns ``None`` --
-          needs-setup, the unposted-opening GAP -- in BOTH forms of the window,
-          while the resolver, which never reads the ledger, still reports the true
-          balance unchanged.  Any surface reading the postings HERE would wrongly
-          show this loan needs-setup.
-        * AFTER the backfill both read back == the resolver to the penny.
+          needs-setup, the unposted-opening GAP -- in BOTH forms of the window.
+          Any surface reading the postings HERE would wrongly show this loan
+          needs-setup.
+        * AFTER the backfill both read back the hand-worked balance to the penny.
 
-        On-schedule (cash == scheduled P&I, no escrow), so the ledger's real
-        principal equals the resolver's scheduled principal and the two agree
-        exactly.  The resolver is invariant across the clear / backfill (the
-        teardowns remove only postings, not the anchors / transactions it replays),
-        so it is the stable independent reference both phases pin to.  Non-vacuity:
-        the after-balance is the $100,000 anchor less the real principal (scheduled
-        P&I - 500.00 interest), not the untouched anchor, and the map steps strictly
-        down as the payment lands.
+        Arithmetic (:data:`_SCHEDULED_PI`): one on-schedule payment in P1 (the
+        period starting 2026-01-16) books 998.88 of principal, so the scalar at
+        today is 99,001.12.  The map reads each period at its END: period 0
+        (2026-01-02 .. 01-15) holds the opening and the 2026-01-10 true-up and
+        no payment, so 100,000.00; every later period holds the payment too, so
+        99,001.12.  It went through the same go-forward value before the clear,
+        so backfill == go-forward on this figure as well.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
             loan = _make_loan(seed_user)
-            scheduled_pi = _resolved_at(
-                loan.id, scenario_id, _AS_OF,
-            ).state.monthly_payment
-            _settle(seed_user, loan, seed_periods[_P1], amount=scheduled_pi)
+            _settle(seed_user, loan, seed_periods[_P1], amount=_SCHEDULED_PI)
             db.session.commit()
 
-            # The resolver never reads the ledger, so its balance is invariant across
-            # the clear / backfill -- the stable reference for both phases.  The
-            # go-forward reader already matches it (the C6 gate); the contrast is the
-            # point: authoritative now, None in a moment, == again after.
-            resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
-            assert stored_loan_balance_at(loan.id, scenario_id, _AS_OF) == resolver
+            # The go-forward reader (the C6 gate); the contrast is the point:
+            # authoritative now, None in a moment, the same figure after.
+            assert stored_loan_balance_at(
+                loan.id, scenario_id, _AS_OF,
+            ) == _ONE_SCHEDULED_MONTH
 
             # Reproduce the pre-wiring historical state (no loan postings).
             _clear_all_loan_postings()
 
-            # BEFORE: the unposted-opening gap.  No OPENING leg -> the reader cannot
-            # produce a balance (both producers return None), yet the resolver -- which
-            # never read the ledger -- is unchanged, so the gap is purely the ledger's.
+            # BEFORE: the unposted-opening gap.  No OPENING leg -> the reader
+            # cannot produce a balance (both producers return None).
             assert stored_loan_balance_at(
                 loan.id, scenario_id, _AS_OF,
             ) is None
             assert stored_loan_balance_map(
                 loan.id, scenario_id, seed_periods,
             ) is None
-            assert _resolver_balance(loan.id, scenario_id, _AS_OF) == resolver
 
             loan_posting_service.backfill_all_loan_postings()
             db.session.commit()
 
-            # AFTER: zero mismatch.  The scalar (C8 producer) and every period of the
-            # map (C9 producer) read back == the resolver to the penny.
-            reader = stored_loan_balance_at(loan.id, scenario_id, _AS_OF)
-            assert reader == resolver, f"reader {reader} != resolver {resolver}"
+            # AFTER: zero mismatch.  The scalar (C8 producer) and every period of
+            # the map (C9 producer) read back the hand-worked balance.
+            assert stored_loan_balance_at(
+                loan.id, scenario_id, _AS_OF,
+            ) == _ONE_SCHEDULED_MONTH
             balance_map = stored_loan_balance_map(loan.id, scenario_id, seed_periods)
-            for period in seed_periods:
-                assert balance_map[period.id] == _resolver_balance(
-                    loan.id, scenario_id, period.start_date,
-                ), (
-                    f"period {derived_span(period).period_index}: "
-                    f"map {balance_map[period.id]} "
-                    f"!= resolver at {period.start_date}"
-                )
-            # Non-vacuity: the anchor less the real principal (not the untouched
-            # anchor), and the map steps strictly down as the payment lands.
-            assert reader == _ANCHOR_BALANCE - (scheduled_pi - Decimal("500.00"))
             assert balance_map[seed_periods[0].id] == _ANCHOR_BALANCE
-            assert (
-                balance_map[seed_periods[_P1].id]
-                < balance_map[seed_periods[0].id]
-            )
+            for period in seed_periods[_P1:]:
+                assert balance_map[period.id] == _ONE_SCHEDULED_MONTH, (
+                    f"period {derived_span(period).period_index}: "
+                    f"map {balance_map[period.id]} != {_ONE_SCHEDULED_MONTH}"
+                )

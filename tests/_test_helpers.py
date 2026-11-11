@@ -9851,14 +9851,10 @@ def unseeded_replay_balance(loan_id, scenario_id, as_of):
     forward override plans by that same slot and a feed the two disagree on
     drops a planned payment.  Stated once, a caller cannot forget it.
 
-    **The reconciliation oracle deliberately does NOT call this**, and that is
-    the one duplication left standing.  ``test_posting_ledger_loan_reconciliation
-    ._helpers._resolver_balance`` keeps its own body because
-    ``test_the_roots_cover_what_the_reference_calls`` reads the modules the
-    reference depends on off THAT FUNCTION'S OWN AST -- a delegation to a helper
-    in this file would make the closure check grade an empty root set, which is
-    the vacuity that control exists to prevent.  The reason is written at that
-    function too.
+    **The reconciliation oracle kept a second assembly of this replay**
+    (``test_posting_ledger_loan_reconciliation._helpers._resolver_balance``)
+    until plan task plan#3384 re-pointed its checks at hand-worked figures and
+    deleted it (ruling plan#3383); this one is the last.
 
     **It is AMOUNT-FREE.**  The replay reads three dates per payment and no
     figure, so the feed is ``loan_ledger.payment_installments`` and not the

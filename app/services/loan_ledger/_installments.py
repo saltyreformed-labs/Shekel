@@ -57,8 +57,9 @@ counting the roots and excluding the ``app`` package itself (its ``__init__`` is
 the application factory and reaches everything).  A package root seeds every
 module inside it.  Measured 2026-09-09 on ``e74f7d6d``, on ``2625963a`` and on
 this tree, by the reconciliation oracle's own closure walker
-(``test_posting_ledger_loan_reconciliation/test_the_resolver_is_ledger_free.py``), which
-is the code the check reads -- not a second implementation of the metric.*
+(``test_posting_ledger_loan_reconciliation/test_the_resolver_is_ledger_free.py`` at
+``aba764835``; plan task plan#3384 deleted it with the replay reference it guarded),
+which was the code the check read -- not a second implementation of the metric.*
 
 Pure except for :func:`payment_installments`, which reaches the loan loaders for
 its rows exactly as :func:`~app.services.loan_ledger.walk_loan_ledger` does.

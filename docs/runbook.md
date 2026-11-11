@@ -988,7 +988,8 @@ For complete secret rotation procedures, see `docs/runbook_secrets.md`.
    `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
 3. Update `TOTP_ENCRYPTION_KEY` in `.env`
 4. Restart the app: `docker compose restart app`
-5. Users re-enroll MFA via Settings > Security
+5. Owners re-enroll MFA from Security, in the menu under their name. A companion is held at
+   two-factor setup at her next sign-in and re-enrolls there.
 
 ### 4.4 Rotating POSTGRES_PASSWORD
 
@@ -1983,7 +1984,8 @@ docker exec shekel-prod-app python scripts/reset_mfa.py your-email@example.com
 # Output: MFA has been disabled for your-email@example.com.
 
 # Log in with email + password (MFA is now disabled).
-# Re-enable MFA in Settings > Security after logging in.
+# Re-enable MFA from Security, in the menu under your name, after logging in.
+# A companion is held at two-factor setup at her next sign-in instead.
 ```
 
 #### Locked out of Cloudflare Access

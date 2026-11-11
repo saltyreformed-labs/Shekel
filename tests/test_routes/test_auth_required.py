@@ -50,6 +50,7 @@ import re
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from flask import request
 
 from app import create_app
 from app.config import TestConfig
@@ -206,9 +207,6 @@ def gate_decisions(monkeypatch):
 
     def counting(manager):
         """Record the refusal, then answer exactly as the original does."""
-        # Pylint: ``import-outside-toplevel`` -- ``request`` is read inside
-        # the wrapper because the path is only known during a request.
-        from flask import request  # pylint: disable=import-outside-toplevel
         refused.append((request.path, request.endpoint))
         return original(manager)
 
@@ -240,9 +238,6 @@ def spy_on_the_hold(monkeypatch):
 
     def counting():
         """Record the hold, then answer exactly as the original does."""
-        # Pylint: ``import-outside-toplevel`` -- ``request`` is read inside the
-        # wrapper because the path is only known during a request.
-        from flask import request  # pylint: disable=import-outside-toplevel
         held.append((request.method, request.path, request.endpoint))
         return original()
 

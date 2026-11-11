@@ -86,7 +86,7 @@ def security() -> str:
 
 @auth_bp.route("/change-password", methods=["POST"])
 def change_password():
-    """Process a password change request from the Security settings section."""
+    """Process a password change request from the Security page."""
     # Schema-level validation enforces shape (current_password
     # presence, new_password length and byte cap, confirm match)
     # before bcrypt is invoked.  ``auth_service.change_password``

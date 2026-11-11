@@ -170,8 +170,11 @@ class User(UserMixin, TimestampMixin, db.Model):
         """Return whether this user has two-factor authentication turned on.
 
         A row whose setup was started and never confirmed is not two-factor:
-        ``is_enabled`` is what ``/mfa/confirm`` sets and ``/mfa/disable`` and
-        ``scripts/reset_mfa.py`` clear.
+        ``is_enabled`` is what ``/mfa/confirm`` sets, and what ``/mfa/disable``
+        and the one reset act clear
+        (:func:`~app.services.mfa_service.reset_two_factor`), which
+        ``scripts/reset_mfa.py`` and the owner's Reset two-factor for a
+        companion on Settings > Companions both run.
 
         Returns:
             True when the user's ``auth.mfa_configs`` row is enabled.

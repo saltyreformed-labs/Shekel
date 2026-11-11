@@ -25,6 +25,7 @@ import sqlalchemy
 from app.extensions import db
 from app.models.user import MfaConfig, User
 from app.services import auth_service, mfa_service
+from tests._companions import text_of
 from tests._test_helpers import enable_mfa
 from tests._trusted_devices import SAFARI_IPHONE, is_trusted, trust
 from tests._two_factor_sign_in import (
@@ -133,6 +134,44 @@ class TestThePage:
             response = auth_client.get("/settings?section=security")
 
             _lands_on_the_security_page(auth_client, response)
+
+
+class TestWhatForgetsEveryDevice:
+    """The Trusted Devices card names what forgets them for the reader's role.
+
+    Plan#3521: a companion cannot turn two-factor off (ruling plan#3434), and
+    the owner's reset forgets her devices (ruling plan#3441).
+    """
+
+    _OWNERS = (
+        "Changing your password, logging out all other sessions, turning off "
+        "two-factor authentication or signing in with a backup code forgets "
+        "every device."
+    )
+    _COMPANIONS = (
+        "Changing your password, logging out all other sessions or signing in "
+        "with a backup code forgets every device, and so does the budget's "
+        "owner resetting your two-factor authentication or setting you a new "
+        "password."
+    )
+
+    def test_an_owner_is_told_turning_it_off_does(self, app, auth_client):
+        """The owner's card names turning two-factor off, and no owner's reset."""
+        with app.app_context():
+            page = text_of(auth_client.get("/security").get_data(as_text=True))
+
+            assert self._OWNERS in page
+            assert self._COMPANIONS not in page
+
+    def test_a_companion_is_told_the_owners_reset_does(self, app, seed_companion):
+        """Her card names the owner's reset and password, and no turning it off."""
+        with app.app_context():
+            browser, _ = _companion_with_two_factor(app, seed_companion["user"].id)
+
+            page = text_of(browser.get("/security").get_data(as_text=True))
+
+            assert self._COMPANIONS in page
+            assert "turning off two-factor" not in page
 
 
 class TestEveryReturnPathLandsOnAPageSheCanOpen:

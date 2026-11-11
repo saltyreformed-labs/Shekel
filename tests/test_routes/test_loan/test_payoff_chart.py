@@ -466,7 +466,7 @@ class TestBandChartLongestBaseline:
         )
         params = load_loan_params(acct.id)
         balance_ctx = BalanceContext.build(seed_user["user"].id)
-        loan = load_loan_context(acct.id, balance_ctx.amounts(), params)
+        loan = load_loan_context(acct.id)
         scenarios = build_baseline_scenarios(
             _loan_inputs(params, loan), acct, balance_ctx,
         )

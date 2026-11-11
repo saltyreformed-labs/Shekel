@@ -384,11 +384,15 @@ class TestNoPaymentMovesTheRecordedStart:
             )
             db.session.commit()
 
-            resolved = resolved_loan(loan, BalanceContext.build(seed_user["user"].id))
+            ctx = BalanceContext.build(seed_user["user"].id)
+            resolved = resolved_loan(loan, ctx)
 
-            assert [
-                payment.dates.is_confirmed for payment in resolved.context.payments
-            ] == [True], "precondition: the payment is recorded"
+            # The loan's record, as the seam's own "has it been paid?" reads it
+            # (plan task plan#3387); the payment list this read until plan task
+            # plan#3388 is deleted.
+            assert len(ctx.loan_walk(loan).settled_splits) == 1, (
+                "precondition: the payment is recorded"
+            )
             assert resolved.recorded_start == date(2026, 3, 1)
             estimated = _back_projection_by_month(resolved)
             assert (

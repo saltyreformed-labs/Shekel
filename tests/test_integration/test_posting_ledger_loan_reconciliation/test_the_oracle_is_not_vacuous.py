@@ -23,13 +23,12 @@ from tests._stored_ledger import (
 
 from ._helpers import (
     _P1,
-    _AS_OF,
+    _SCHEDULED_PI,
+    _ONE_SCHEDULED_MONTH,
     _make_loan,
-    _resolved_at,
     _settle,
     _per_loan_correction_net,
     _independent_settled_income_cash,
-    _resolver_balance,
     _ledger_balance,
     _posted_balance,
     _assert_loan_reconciles,
@@ -215,21 +214,23 @@ class TestOracleIsNotVacuous:
     def test_walk_interest_injection_fails_the_value_checks_not_the_sweep(
         self, app, db, seed_user, seed_periods, monkeypatch,
     ):
-        """A +$10 interest bug in the walk fails the parallel run, survives the sweep.
+        """A +$10 interest bug in the walk fails the value checks, survives the sweep.
 
         The executable form of the review's "+$10 interest injection failed 9 of
         11 tests" evidence (previously only prose in commit messages and
         docstrings, so a later edit that weakened a value assertion lost the
         oracle's teeth undetected).  Injecting $10 of phantom interest into the
-        WALK's accrual -- and ONLY the walk; the resolver accrues through
-        ``rate_period_engine``'s separate import, so it stays the honest reference
-        -- makes every split book $10 too much interest and therefore $10 too
-        little principal, so both ledger producers over-state the debt by exactly
-        $10.  This proves two things at once, mirroring the manual experiment:
+        WALK's accrual makes every split book $10 too much interest and therefore
+        $10 too little principal, so both ledger producers over-state the debt by
+        exactly $10 against the hand-worked figure.  The honest reference is that
+        literal, 99,001.12 (:data:`_SCHEDULED_PI`: interest 500.00, principal
+        998.88); it was the old schedule replay until plan task plan#3384 deleted
+        it with walk 3 (ruling plan#3383).  This proves two things at once,
+        mirroring the manual experiment:
 
-        * the parallel-run VALUE assertions (``ledger == resolver`` and
-          ``reader == resolver``) -- the ones that actually PIN the split -- now
-          FAIL, so they have teeth and are not passing unconditionally; but
+        * the VALUE assertions (``ledger == 99,001.12`` and ``reader ==
+          99,001.12``) -- the ones that actually PIN the split -- now FAIL, so
+          they have teeth and are not passing unconditionally; but
         * the STRUCTURAL sweep ``_assert_loan_reconciles`` STILL PASSES, because
           it is an accounting identity -- the correction's loan leg and the
           per-loan leg both shift by the same $10, so ``linked == income -
@@ -240,19 +241,12 @@ class TestOracleIsNotVacuous:
         with app.app_context():
             scenario_id = seed_user["scenario"].id
             loan = _make_loan(seed_user)
-            # The honest scheduled P&I, read BEFORE injecting: paying exactly it
-            # is on-schedule, so absent the bug ledger == resolver to the penny.
-            scheduled_pi = _resolved_at(
-                loan.id, scenario_id, _AS_OF,
-            ).state.monthly_payment
 
-            # Inject $10 of phantom interest into the WALK's accrual only.  The
+            # Inject $10 of phantom interest into the WALK's accrual.  The
             # module binding ``_replay.installment_interest`` is patched -- it
             # was ``_split``'s until plan step X-au-g-2c-3b-2 moved the accrual
             # onto the shared replay, and ``accrue_monthly_interest`` until plan
-            # step recurrence:R16-d, and only the BINDING moved; the resolver's
-            # ``rate_period_engine.installment_interest`` is a DISTINCT import
-            # and stays honest, so the two diverge by exactly $10.
+            # step recurrence:R16-d, and only the BINDING moved.
             monkeypatch.setattr(
                 "app.services.loan_ledger._replay"
                 ".installment_interest",
@@ -264,21 +258,21 @@ class TestOracleIsNotVacuous:
 
             # Settle on-schedule WITH the bug active: the split posts $10 too much
             # interest -> $10 too little principal -> the ledger over-states debt.
-            _settle(seed_user, loan, seed_periods[_P1], amount=scheduled_pi)
+            _settle(seed_user, loan, seed_periods[_P1], amount=_SCHEDULED_PI)
             db.session.commit()
 
-            resolver = _resolver_balance(loan.id, scenario_id, _AS_OF)
             ledger = _ledger_balance(loan.id, scenario_id)
             reader = _posted_balance(loan.id, scenario_id)
-            # Both ledger producers over-state the debt by exactly the phantom $10.
-            assert ledger == resolver + Decimal("10.00")
-            assert reader == resolver + Decimal("10.00")
+            # Both ledger producers over-state the debt by exactly the phantom
+            # $10: 99001.12 + 10.00 = 99,011.12.
+            assert ledger == Decimal("99011.12")
+            assert reader == Decimal("99011.12")
 
             # The value checks that PIN the split now fail -- proving their teeth.
             with pytest.raises(AssertionError):
-                assert ledger == resolver
+                assert ledger == _ONE_SCHEDULED_MONTH
             with pytest.raises(AssertionError):
-                assert reader == resolver
+                assert reader == _ONE_SCHEDULED_MONTH
 
             # ...yet the structural sweep is (by design) blind to the split value
             # and STILL reconciles: per_loan and the loan leg both shifted by $10.

@@ -47,12 +47,16 @@ class AccountProjectionKind(Enum):
     The order reflects the canonical precedence the dual dispatchers
     expressed inconsistently pre-Commit-28 (S6-03):
 
-    1. :data:`AMORTIZING` -- loan amortization engine
-       (:func:`app.services.rate_period_engine.replay_schedule`
-       + :func:`app.services.amortization_engine.project_forward`, fed
-       by :func:`app.services.loan_resolver.resolve_loan` via the
+    1. :data:`AMORTIZING` -- the loan's one walk
+       (:func:`app.services.loan_ledger.replay_loan_events`) over its
+       recorded facts and the seam's forward plan, with the contract's
+       reference schedule from
+       :func:`app.services.amortization_engine.project_forward` (fed by
+       :func:`app.services.loan_resolver.resolve_loan` via the
        :func:`app.services.loan_resolver.compute_payoff_scenarios`
-       composer).
+       composer).  *The past half was*
+       ``rate_period_engine.replay_schedule`` *until that walk took it; plan
+       step recurrence:R16-e deleted the replay.*
     2. :data:`INTEREST` -- a modelled accrual over the account's folded
        cash balance, resolved by the seam's ONE event replay
        (:mod:`app.services.balance_at._asset_fold`).

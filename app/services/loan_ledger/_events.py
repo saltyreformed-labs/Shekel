@@ -145,12 +145,13 @@ def loan_event_stream(
     cash settled, so a late or out-of-order settlement can never reorder
     installments or re-split one (ruling R-A).  That derivation is threaded onto
     the event rather than recomputed downstream (plan step E1c), and it is the
-    SAME strict ``anchor_date < due_date`` post-anchor boundary the resolver's
-    replay uses (:func:`is_confirmed_payment_eligible`, fed the same derivation
-    via :attr:`~app.services.amortization_engine.PaymentDates.due_date`) -- the
-    two MUST stay on one derivation,
-    or the posted ledger and the replayed balance drift on which payments a given
-    anchor subsumes.
+    SAME strict ``anchor_date < due_date`` post-anchor boundary the forward plan
+    tests (:func:`app.services.rate_period_engine.due_after_anchor`).  The
+    resolver's replay applied it too, through ``is_confirmed_payment_eligible``
+    fed the same derivation, until plan step recurrence:R16-e deleted the
+    replay; while it stood the two had to stay on one derivation, or the posted
+    ledger and the replayed balance drifted on which payments an anchor
+    subsumed.
 
     **The CHARGES are the CONTRACT's**, every installment from origination
     through the stream's last fact (:func:`.._replay.with_contract_charges`,

@@ -68,7 +68,6 @@ from app.services.balance_at._resolution import resolved_loan
 from tests._ledger_reads import posted_loan_balance_at
 from tests._stored_ledger import stored_loan_balance_at
 from tests._test_helpers import (
-    amount_basis_for_scenario,
     clear_loan_ledger,
     create_loan_account,
     create_loan_with_trueup,
@@ -91,7 +90,8 @@ from tests._test_helpers import (
 _ORIGINATION_BEFORE_P1 = date(2026, 1, 1)
 
 # The evaluation date every "all payments visible" assertion reads at, and the
-# frozen today it must stay at or before (the view's domain is as_of <= today).
+# frozen today after it (the view answered only as_of <= today until plan step
+# recurrence:R16-e; a later read is pinned in ``test_the_contract_line_start``).
 _AS_OF = date(2026, 12, 31)
 _FROZEN_TODAY = date(2027, 1, 1)
 
@@ -161,8 +161,9 @@ def _economics(view):
 class TestConfirmedViewGuards:
     """When the view withholds an answer -- and the two cases it no longer does.
 
-    Every ``None`` routes the caller to the resolver's anchor replay, exactly the
-    pre-switch behaviour, so a withheld view is never a wrong one.
+    Every ``None`` seeds the resolver from the loan's latest assertion with no
+    history (the anchor replay it routed to until plan step recurrence:R16-e),
+    so a withheld view is never a wrong one.
     """
 
     def test_no_baseline_scenario_returns_none(self, app, db, seed_user):
@@ -174,23 +175,6 @@ class TestConfirmedViewGuards:
                 user_id=seed_user["user"].id, scenario=None, as_of=_AS_OF,
             )
             assert balance_at.confirmed_view(loan, ctx) is None
-
-    def test_a_future_as_of_returns_none(self, app, db, seed_user):
-        """A future ``as_of`` -> ``None`` (a projection, out of the view's domain).
-
-        The confirmed view answers only ``as_of <= today``; a later date is the
-        forward projection's question, so the view withholds and the resolver
-        projects rather than the confirmed history being stretched forward.  The
-        deleted ``confirmed_loan_view`` guarded the same way at the same place
-        (the LOWER-level posting reader raised, but the guard ran first and it was
-        never reached); this keeps that guard, and the resolver's fallback makes
-        it safe.
-        """
-        with app.app_context():
-            loan = _make_loan(seed_user)
-            db.session.commit()
-            assert _view(loan, seed_user, _FROZEN_TODAY) is not None
-            assert _view(loan, seed_user, date(2027, 6, 1)) is None
 
     def test_an_account_that_is_not_a_configured_loan_returns_none(
         self, app, db, seed_user,
@@ -217,8 +201,8 @@ class TestConfirmedViewGuards:
         answers ``0.00`` for a date before it -- correct ("nothing has happened")
         and exactly why it must never reach the forward projection: seeding zero
         collapsed a 360-row schedule to none and held $200,000 flat forever
-        (outage B-1).  The view withholds instead, and the replay owns the whole
-        timeline.
+        (outage B-1).  The view withholds instead, and the resolver seeds from
+        the latest assertion.
 
         NEGATIVE CONTROL: delete the origination guard in ``confirmed_view`` and
         this returns ``ConfirmedLedgerView(balance=0.00, history_rows=[])``.
@@ -313,7 +297,8 @@ class TestConfirmedViewGuards:
 
         The loan exists and its anchors fold, so the view ANSWERS: the trueup
         balance with an empty confirmed slice.  ``None`` here would wrongly send
-        the resolver back to its replay for a loan whose facts are complete.
+        the resolver back to the latest assertion for a loan whose facts are
+        complete.
         """
         with app.app_context():
             loan = _make_loan(seed_user)
@@ -327,10 +312,10 @@ class TestConfirmedViewGuards:
 class TestAWithheldViewResolvesExactlyAsTheUnseededResolver:
     """The load-bearing safety property behind every ``None``: nothing changes.
 
-    Every guard in :class:`TestConfirmedViewGuards` routes the resolver to its
-    anchor replay.  This pins what that is WORTH: the resolution is byte-identical
+    Every guard in :class:`TestConfirmedViewGuards` seeds the resolver from the
+    loan's latest assertion.  This pins what that is WORTH: the resolution is byte-identical
     to calling the pure resolver with no seed at all, so a withheld view can never
-    be a wrong one -- it is the pre-read-switch behaviour, exactly.
+    be a wrong one: it is the resolver's own answer from the latest assertion.
 
     Kept from the deleted ``resolve_loan_seeded`` suite, whose version used a loan
     with no OPENING posting; finding B-12 retired that premise (such a loan now
@@ -358,13 +343,10 @@ class TestAWithheldViewResolvesExactlyAsTheUnseededResolver:
             assert balance_at.confirmed_view(loan, ctx) is None
 
             params = _loan_params(loan)
-            loan_ctx = loan_payment_service.load_loan_context(
-                loan.id, amount_basis_for_scenario(seed_user["scenario"].id),
-                params,
-            )
+            loan_ctx = loan_payment_service.load_loan_context(loan.id)
             loan_inputs = loan_resolver.LoanInputs(
                 params, loan_loaders.load_loan_anchor_facts(params),
-                loan_ctx.payments, loan_ctx.rate_changes,
+                loan_ctx.rate_changes,
             )
             unseeded = loan_resolver.resolve_loan(
                 loan_inputs, before_origination,
@@ -420,30 +402,10 @@ class TestConfirmedViewRowEconomics:
                 (_CONTRACTUAL_PI, Decimal("0.00")),
             ]
             assert all(row.is_confirmed for row in view.history_rows)
-
-            # The compatibility pin, kept from the deleted reader's suite: on an
-            # ON-SCHEDULE loan these rows are byte-identical to the resolver's
-            # own contractual replay, FIELD BY FIELD.  That is what guarantees
-            # the amortization table does not visibly step at the confirmed /
-            # projected boundary -- and it is a genuinely independent producer
-            # (the replay derives principal as ``period_pi - interest`` from the
-            # schedule, never from the cash), which is why it can only be asked
-            # of the on-schedule shape.
-            params = _loan_params(loan)
-            loan_ctx = loan_payment_service.load_loan_context(
-                loan.id, amount_basis_for_scenario(seed_user["scenario"].id),
-                params,
-            )
-            replay = loan_resolver.resolve_loan(
-                loan_resolver.LoanInputs(
-                    params, loan_loaders.load_loan_anchor_facts(params),
-                    loan_ctx.payments, loan_ctx.rate_changes,
-                ),
-                _AS_OF,
-            )
-            assert view.history_rows == [
-                row for row in replay.schedule if row.is_confirmed
-            ]
+            # *A compatibility pin compared these rows, field by field, with the
+            # resolver's contractual replay on this on-schedule shape.  It went
+            # with the replay at plan step recurrence:R16-e (ruling plan#3382);
+            # the hand-worked figures above are what grade the rows.*
 
     def test_extra_payment_row_shows_the_actual_split_and_extra(
         self, app, db, seed_user, seed_periods,
@@ -902,7 +864,7 @@ class TestConfirmedViewShapeMatrix:
           true-up 03-15: resets to $100,000 (emits no row)
 
         So the row keeps its real economics -- from-origination history the
-        resolver's replay hides, because the replay starts at the latest anchor
+        resolver's deleted replay hid, because it started at the latest anchor
         -- while the view's balance is the asserted 100,000.00.  Its actual P&I
         (2000.00) exceeds the contractual 1498.88, so extra = 501.12.
         """

@@ -78,8 +78,8 @@ class ResolvedLoan:
     The unit of work :class:`~app.services.balance_at.BalanceContext`
     memoizes: a loan's loaded inputs AND the :class:`LoanState` they resolve to,
     bundled so that every surface reading any part of a loan -- its balance, its
-    schedule, its payment / rate / payoff, its payment feed -- reads ONE
-    resolution rather than triggering its own.
+    schedule, its payment / rate / payoff -- reads ONE resolution rather than
+    triggering its own.
 
     Before this bundle existed, a single ``/savings`` render ran the resolver
     ELEVEN times for two loans (measured 2026-07-13), because each consumer
@@ -98,10 +98,15 @@ class ResolvedLoan:
             anchor plus any balance true-ups), from
             :func:`~app.services.loan_loaders.load_loan_anchor_facts`.
         context: The loan's loaded :class:`~app.services.loan_payment_service.LoanContext`
-            (payments, rate changes, escrow lines, contractual P&I).  Carried
-            because the payment feed answers questions the ``LoanState`` cannot
-            -- "has this loan ever had a confirmed payment?" above all -- and
-            re-loading it was one of the redundant resolutions.
+            (its rate changes and escrow).  Carried so a reader of the loan's
+            rate-change feed -- the forward plan
+            (:func:`app.services.balance_at._plan.loan_plan`) -- reads this
+            resolution's load rather than its own, re-loading it having been
+            one of the redundant resolutions.  It carried the loan's PAYMENT
+            LIST too until plan task plan#3388 deleted it (ruling **R-R93**),
+            and that list answered "has this loan ever had a confirmed
+            payment?" until plan task plan#3387 moved the question onto the
+            loan's record.
         state: The resolved :class:`~app.services.loan_resolver.LoanState` as of
             the context's ``as_of``: the committed (plan-aware) schedule, the
             payment, the rate, and the life-of-loan interest.  No balance and no
@@ -202,7 +207,7 @@ def resolved_loan(
     :func:`resolve_loan_bundle` through the shared store-once primitive
     (``_memoize._memoize_once``), so a loan is loaded and resolved at most once per
     pass however many surfaces ask.  Every seam consumer that wants a loan's
-    schedule, payment, rate, payment feed, or standing extra goes through here, so
+    schedule, payment, rate, or standing payment goes through here, so
     the loan tile's figures, the net-worth hero, the liability band, and the debt
     card read ONE resolution -- identical BY CONSTRUCTION rather than by the luck
     of four producers agreeing.
@@ -230,7 +235,7 @@ def resolved_loan(
         account: The account to resolve.  Must belong to ``ctx.user_id`` (the
             caller owns the ownership check -- the loaders trust it).
         ctx: The read pass's :class:`~app.services.balance_at.BalanceContext`,
-            whose ``scenario`` scopes the payment history and whose ``as_of`` is
+            whose ``scenario`` scopes the confirmed seed and whose ``as_of`` is
             the date the loan is RESOLVED at.
 
     Returns:
@@ -304,7 +309,7 @@ def resolve_loan_bundle(
     """Load a loan's inputs ONCE and resolve it -- the whole-loan read.
 
     The single db-facing loan read the whole app resolves through: it loads the
-    loan's params, anchor facts, payment context and every definition paying
+    loan's params, anchor facts, contract context and every definition paying
     into it, seeds the pure resolver with the confirmed view, and returns all
     of it bundled as a :class:`ResolvedLoan`.  :func:`resolved_loan` memoizes
     it per pass, so a read pass resolves each loan exactly once no matter how many
@@ -323,7 +328,9 @@ def resolve_loan_bundle(
       a cold posting cache no longer drops a loan back to the money-blind anchor
       replay (finding B-12).  When the view cannot answer (``None`` -- no
       baseline scenario, or a loan that has not originated by ``ctx.as_of``) the
-      composer falls back to that replay, the pre-switch behaviour.  The loan's
+      composer seeds the contract from the loan's latest assertion, with no
+      history rows (the replay it fell back to went at plan step
+      recurrence:R16-e).  The loan's
       displayed BALANCE is not derived here at all (plan step D2a): the seam folds
       it from the same recorded events.
     * **The loan's DEFINITIONS**, loaded ONCE here: every active recurring
@@ -348,9 +355,9 @@ def resolve_loan_bundle(
         account: The loan account to resolve.  The caller owns the ownership
             check (the loaders trust it).
         ctx: The read pass's :class:`~app.services.balance_at.BalanceContext`.
-            Its ``scenario`` scopes the payment history AND the confirmed seed
-            (``None`` when the user has no baseline -- the loan then resolves from
-            its anchor with no payment feed, the documented degraded state), and
+            Its ``scenario`` scopes the confirmed seed (``None`` when the user
+            has no baseline -- the loan then resolves from its latest
+            assertion with no history rows, the documented degraded state), and
             its ``as_of`` is the date the loan is resolved AT (the resolver's
             "now": what counts as confirmed).
 
@@ -362,24 +369,14 @@ def resolve_loan_bundle(
     if params is None:
         return None
     anchor_facts = load_loan_anchor_facts(params)
-    # ``amounts_or_none``, deliberately, and it is the same nullability this
-    # line has always spelled: a loan's payment feed is the ONE scenario-scoped
-    # input to its resolution, and its params, anchors and rate history are
-    # contract facts.  With no baseline the feed is empty and the CONTRACT terms
-    # still resolve -- plan step C8e's rule, and what keeps escrow and rate
-    # editing working for a user whose baseline is missing.  Every other reader
-    # takes the raising ``amounts`` / ``scenario_id`` (ruling R-BX).
-    #
-    # It was ``ctx.scenario_id_or_none`` until plan step X-au-g-2c, which routed
-    # ``get_payment_history`` through the amount model: the loader now takes the
-    # BASIS that prices the feed rather than an id that only scopes it, so the
-    # feed and its figures cannot come from two different scenarios.  Passing
-    # the pass's own basis is also what keeps this read to ONE pricing pass --
-    # ``ctx.amounts()`` is memoized, so a render resolving several loans runs
-    # the paycheck engine once (findings N-268, N-269).
-    context = load_loan_context(
-        account.id, ctx.amounts_or_none(), params,
-    )
+    # No scenario reaches the load: the loan's params, anchors, rate history
+    # and escrow are contract facts, so they resolve the same with or without
+    # a baseline (plan step C8e's rule, and what keeps escrow and rate editing
+    # working for a user whose baseline is missing).  The payment list was the
+    # one scenario-scoped input, priced through the pass's ``amounts_or_none``
+    # basis, until plan task plan#3388 deleted it (ruling R-R93); the
+    # confirmed seed below is scoped by the pass itself.
+    context = load_loan_context(account.id)
     # ONE query for every definition into the loan (plan step R16-b-2); the
     # standing payment is its oldest member, read off the same list rather
     # than fetched again through the singular query (finding N-511's shape).
@@ -390,9 +387,7 @@ def resolve_loan_bundle(
         account.id, account.user_id,
     )
     state = loan_resolver.resolve_loan(
-        loan_resolver.LoanInputs(
-            params, anchor_facts, context.payments, context.rate_changes,
-        ),
+        loan_resolver.LoanInputs(params, anchor_facts, context.rate_changes),
         ctx.as_of,
         confirmed_view=confirmed_view(account, ctx),
     )
@@ -539,14 +534,15 @@ def contractual_schedule_from_origination(
 
     Forks NO amortization math: it seeds
     :func:`loan_resolver.compute_payoff_scenarios` with a synthesized ORIGINATION
-    anchor (:func:`loan_loaders.synthesize_origination_anchor`) and an empty
-    payment feed, evaluated as of ``origination_date``, and returns its
-    ``original_forward`` -- the pure contractual reference (no override, no
-    extra).  Seeding through the composer inherits the resolver's EXACT
-    first-payment-date and remaining-term convention (``next_pay_date`` one month
-    after origination on ``payment_day``, the full ``term_months`` remaining), so
-    the back-projection lands on the same monthly grid as the resolved schedule
-    and the two cannot drift at the seam.
+    anchor (:func:`loan_loaders.synthesize_origination_anchor`) and no confirmed
+    view, and returns its ``original_forward`` -- the pure contractual reference
+    (no override, no extra).  Seeding through the composer inherits the
+    resolver's EXACT first-payment-date and remaining-term convention (the first
+    installment after the anchor, which for the origination is
+    :func:`~app.services.installment_calendar.first_installment_date`, with the
+    full ``term_months`` remaining), so the back-projection lands on the same
+    monthly grid as the resolved schedule and the two cannot drift at the
+    seam.
 
     Pure: takes loaded data (the caller supplies ``rate_changes`` via
     :func:`loan_loaders.load_rate_changes`); performs no I/O.
@@ -570,10 +566,8 @@ def contractual_schedule_from_origination(
         loan_inputs=loan_resolver.LoanInputs(
             loan_params,
             [synthesize_origination_anchor(loan_params)],
-            None,
             rate_changes,
         ),
-        as_of=loan_params.origination_date,
         confirmed_view=None,
     )
     return list(scenarios.original_forward)

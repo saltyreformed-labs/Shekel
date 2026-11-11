@@ -82,7 +82,8 @@ class TestTheAmountModelsOwnEagerLoad:
     shadow-row pair priced rows loaded with ``pricing_load_options``, which
     composed this same tuple then, and
     ``test_loan_installments.test_the_priced_feed_reads_every_pricing_table``
-    pins it by a statement count.  What is new here is narrower: the old
+    pinned it by a statement count until plan task plan#3388 deleted the
+    priced feed it read (ruling R-R93).  What is new here is narrower: the old
     warm-up priced one leg, which loaded the one definition's ``settings``
     before the capture opened, and this warm-up pays the LOAN resolve and
     nothing else -- it asks the basis's loan derivation directly -- so

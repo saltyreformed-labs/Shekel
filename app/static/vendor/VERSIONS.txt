@@ -3,7 +3,7 @@
 # This file is the authoritative pin for every third-party asset under
 # app/static/vendor/.  Bumping a version requires (a) replacing the file,
 # (b) recomputing its SHA-384 below, and (c) verifying the page renders
-# correctly with the new asset.  See docs/runbook.md "CDN vendor refresh
+# correctly with the new asset.  See docs/runbook/4_security_operations.md "CDN vendor refresh
 # procedure" for the full process.
 #
 # These assets were vendored as part of remediation Commit C-02 (audit

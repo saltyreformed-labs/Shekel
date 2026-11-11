@@ -2,7 +2,7 @@
 # (ruling plan#2350).  Each compose file binds ./deploy/valkey beside it, so
 # a stack reads the copy in its own directory: dev, the checkout's; bundled
 # mode, the one the README's Quick Start downloads; production, the host copy
-# /opt/docker/shekel/deploy/valkey/ (docs/runbook.md 2.5).  A stack reads it
+# /opt/docker/shekel/deploy/valkey/ (docs/runbook/2_deployment.md 2.5).  A stack reads it
 # when its valkey container starts, so a changed copy is live only once that
 # container restarts.  The real-store test runs the pinned Valkey image under
 # this file.  deploy/valkey/start.sh reads it at boot: it

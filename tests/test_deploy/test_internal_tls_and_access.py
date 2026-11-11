@@ -104,7 +104,7 @@ class TestCloudflaredAccessPolicy:
     ``<AUD_TAG>``); these tests assert the structural shape, not the
     placeholder values themselves -- a runtime check that the
     placeholders have been replaced is the operator's responsibility
-    and is documented in docs/runbook.md §6.4a.
+    and is documented in docs/runbook/6_cloudflare.md §6.4a.
     """
 
     @pytest.fixture(scope="class")

@@ -607,7 +607,7 @@ def _register_security_headers(app):
         # header simply locks browsers into that posture for a year.
         # 'preload' is intentionally OFF.  Adding 'preload' is a one-way
         # commitment to the public HSTS preload list (delisting takes
-        # months); see docs/runbook.md "HSTS preload" for the procedure
+        # months); see docs/runbook/4_security_operations.md "HSTS preload" for the procedure
         # to enable it later if desired.  Audit finding F-018.
         response.headers["Strict-Transport-Security"] = (
             "max-age=31536000; includeSubDomains"

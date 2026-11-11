@@ -89,7 +89,7 @@
 # case the refusal still meets.  A re-pin is not a recovery when the fault is in something both
 # images meet: a missing audit trigger is counted by every image since C-13,
 # so the previous image refuses the same database and this script ends
-# "rollback container also unhealthy" (docs/runbook.md s.2.3 names the repair).
+# "rollback container also unhealthy" (docs/runbook/2_deployment.md s.2.3 names the repair).
 # The re-read stamp is still the only question; since X-cv it is read only
 # after the target image's container has been STOPPED, and FOR SHARE, so a
 # step 3 still in flight cannot commit behind the read
@@ -522,7 +522,7 @@ fi
 # not the suspect; something both images meet is (schema drift the stamp does
 # not record, the data, or the environment).  The dump is the recovery only
 # when the failed release's step 3 committed what the previous image now
-# refuses; docs/runbook.md s.2.3.  Also reached when the re-pin's own
+# refuses; docs/runbook/2_deployment.md s.2.3.  Also reached when the re-pin's own
 # `compose up` failed and usually nothing started (finding BAL-540).
 log "pre-deploy dump kept at: ${DUMP_PATH}"
 log "failed containers' logs: ${FAILED_LOG_PATH:-in Loki only}"

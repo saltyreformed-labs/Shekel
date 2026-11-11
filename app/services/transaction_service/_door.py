@@ -76,8 +76,10 @@ class StatedRecord:
             when the statement matcher stopped naming its own account.
             Read by the SETTLE arm, which hands it to the verb, and by the
             identity arm, which re-points a settled row's covering movement
-            when it names an account other than the recorded one; ``None``
-            means nobody named one.
+            when it names an account other than the recorded one -- but on
+            a row put on the card from another account, which refuses it
+            (``status_seam.tender_for_status``, plan task plan#3289);
+            ``None`` means nobody named one.
     """
 
     figure: StatedFigure | None = None
@@ -297,9 +299,11 @@ def _correction_for_status(
         ValidationError: When the status settles nothing (propagated from
             :func:`~app.services.status_seam.reject_figure_without_settled_status`
             / :func:`~app.services.status_seam.reject_tender_without_settled_status`),
-            when the row takes its figure from its own purchases, when a
-            tender arrives for a row recording no payment movement, or from
-            the tender gate.
+            when a tender arrives for a row put on the card from another
+            account, whose way off it is Undo CC (propagated from the
+            tender's reading, plan task plan#3289), when the row takes its
+            figure from its own purchases, when a tender arrives for a row
+            recording no payment movement, or from the tender gate.
         NotFoundError: When *tender_account_id* names no account of the row's
             owner (the gate's 404).
     """

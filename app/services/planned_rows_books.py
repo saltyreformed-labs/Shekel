@@ -693,7 +693,12 @@ def reject_revert_below_the_books(row, new_status_id: int) -> None:
     and is untouched: a transaction's actual figure and the account it was
     paid from, ``transaction_service._door._correction_for_status``, and a
     transfer's settle day per side, an identity pass through
-    ``transfer_service._status.apply_status_to_all_three``.)  Production
+    ``transfer_service._status.apply_status_to_all_three``.  But a row put
+    on the card from another account: its way off the card is Undo CC, a
+    revert (plan task plan#3289, ``status_seam.tender_for_status``), so
+    while this refuses that revert the row stays on the card until the
+    books are restated, as a locked field waits.  Production held no card
+    on 2026-11-10, so no row there can be in that state yet.)  Production
     held SIX such recurring rows on 2026-09-23, measured by this refusal
     itself over every settled templated row: four transactions (one of them
     CANCELLED, so it cannot be reactivated) and two transfers, every one

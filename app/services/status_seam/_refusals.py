@@ -7,28 +7,29 @@ because they are one subject -- what a row may and may not assert about its own
 money -- and because :func:`._seam.apply_status_change` runs five of them
 ahead of any mutation, so a refused call leaves the row untouched; the two
 form readings beside it (``figure_for_status``, ``tender_for_status``) run
-the other two for the edit doors, ahead of the seam.
+the other three for the edit doors, ahead of the seam.
 
 Split out of the single ``status_seam`` module at plan step **X-au-c3**; see
 :mod:`._record` for the ground the split was made on.
 
-Five of the seven are this project's answer to a rule that cannot be a CHECK
+Five of the eight are this project's answer to a rule that cannot be a CHECK
 constraint, and each says so in its own docstring: the settled-status
 questions need ``ref.statuses.is_settled``, which a constraint on
 ``budget.transactions`` cannot see, and the ref convention keeps status ids out
 of a schema; the stated-figure-over-purchases question is a count over
 another table (:func:`reject_stated_figure_over_purchases`).  One is the
 WORDS of a trigger: :func:`reject_settlement_on_a_deleted_row` says what
-:mod:`app.deleted_row_infrastructure` refuses.  (An eighth,
+:mod:`app.deleted_row_infrastructure` refuses.  (A ninth,
 ``reject_settle_day_without_a_record``, was the one that MIRRORED a CHECK --
 ``ck_transactions_settle_day_needs_a_record`` said in words -- and went with
 that CHECK and the row's figure columns at plan step ``balance:X-bi-4b-2``.)
 
-Pure but for one read: each reads columns and the settled-status predicate,
-raises or returns.  No mutation, no Flask, and one session read, in the
-deleted-row refusal's words -- whether the row's recurring item is archived
+Pure but for two reads: each reads columns and the settled-status predicate,
+raises or returns.  No mutation, no Flask, and two session reads: in the
+deleted-row refusal's words, whether the row's recurring item is archived
 (:meth:`app.utils.hidden_row.HiddenRow.of`, ruling **R-CC107**), asked only of
-a row it is refusing.
+a row it is refusing; and in :func:`reject_tender_off_the_card`, the row's
+covering movement and its account, where the caller has not loaded them.
 """
 
 from datetime import date
@@ -38,7 +39,11 @@ from app.exceptions import ValidationError
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.services.settle_day import SettleDay
-from app.services.status_seam._record import Settlement
+from app.services.status_seam._record import (
+    Settlement,
+    covering_movement_of,
+    revert_moves_payment_home,
+)
 from app.utils.balance_predicates import settled_status_ids
 from app.utils.dates import display_today
 from app.utils.hidden_row import HiddenRow
@@ -201,6 +206,41 @@ def reject_tender_without_settled_status(
         "nothing to record: it states which account the money MOVED through. "
         "Mark it paid to record the payment, or set it to Projected and leave "
         "the account as it was."
+    )
+
+
+def reject_tender_off_the_card(row: Transaction) -> None:
+    """Refuse a submitted TENDER on a row put on the card from another account.
+
+    Plan task plan#3289 (ruling plan#3227, with plan#3054's comment on plan
+    task plan#2931): "Paid from" names the account a bill was paid with, and
+    a row Credit put on the card is drawn Credit, its way off the card being
+    Undo CC (plan task plan#3055), after which Paid takes it from the
+    account the owner picks.  So the full-edit popover draws no "Paid from"
+    box on such a row, and a submission naming another account than the card
+    is refused here rather than re-pointing the payment off the card under
+    Paid.  The predicate is the one that box and the card's Undo CC caption
+    read (:func:`~._record.revert_moves_payment_home`), so the box and this
+    refusal cannot part.  A bill that lives on the card is not such a row:
+    its payment is on its own account.
+
+    Args:
+        row: The row the tender arrived for, with ``entries`` loaded or
+            loadable.  The CALLER establishes that a tender other than the
+            recorded one arrived -- this asks only whether the row may take
+            one.
+
+    Raises:
+        ValidationError: When *row* is on a card and its payment is not on
+            the row's own account.  A 400 at the route.
+    """
+    if not revert_moves_payment_home(row):
+        return
+    raise ValidationError(
+        f"{row.name} is on {covering_movement_of(row).account.name}, so "
+        "'Paid from' cannot move it to another account. Press Undo CC to "
+        "take it off the card, then mark it Paid from the account that paid "
+        "it."
     )
 
 

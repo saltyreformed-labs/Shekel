@@ -543,8 +543,9 @@ def settle_transaction(
             envelope branch's remaining preconditions, from an illegal
             transition, from the seam's settle-day refusals, or from the
             tender gate (an archived account, a credit card other than the
-            row's own, or one that holds no cash).  All are 400s at the
-            route.
+            row's own, or one that holds no cash) and the tender's reading
+            before it (a row put on the card, whose way off it is Undo CC,
+            plan task plan#3289).  All are 400s at the route.
         NotFoundError: When *tender_account_id* names no account of the ROW's
             owner (the security response rule: one answer for "not found"
             and "not yours").  A 404 at the route.

@@ -245,7 +245,10 @@ def render_full_edit(txn, *, page_refusal):
         # revert moves its payment home and out of every match naming it on
         # the card -- the lines ``payment_withdraws`` names, so the card's
         # Undo CC caption reads them.  The seam asks the same predicate as
-        # it reverts.  ``False`` for a bill that lives on the card.
+        # it reverts.  ``False`` for a bill that lives on the card.  The
+        # card draws no "Paid from" box where it is ``True``, Undo CC being
+        # the way off the card, and the seam's tender reading refuses a
+        # re-point there by the same predicate (plan task plan#3289).
         takes_off_the_card=status_seam.revert_moves_payment_home(txn),
         # **Whether Paid / Received would record $0.00** (plan step
         # ``credit_card:CC-5-4a-5``): such a settle takes a kept payment off
@@ -372,7 +375,8 @@ def render_full_edit(txn, *, page_refusal):
         # so an untouched Save posts an echo the door drops and a reverted
         # bill paid from another account shows that account (ruling
         # **R-CC42**; one put on the card is home again, plan#3104).  The card
-        # renders it only when there is a choice (ruling **R-CC34**).
+        # renders it only when there is a choice (ruling **R-CC34**), and
+        # never on a row put on the card (``takes_off_the_card``, above).
         # Resolved for the OWNER (``txn.user_id``; this door is owner-only,
         # so the two coincide), as every picker is.
         tender_accounts=tender_accounts,
@@ -427,18 +431,21 @@ def _tender_picker(txn, owner):
     (:func:`~app.services.movement_account.paid_from_accounts` over the
     OWNER's accounts, the tuple both doors gate on) **plus the account the
     row RECORDS when that is no longer among them** -- an account the owner
-    has since archived, or a card a bill was paid from before "Paid from"
-    stopped offering one (ruling plan#3227).  The same shape this route
-    gives an archived category one block up, and for the same reason: a
-    ``<select>`` whose preselected value is missing submits its FIRST
-    option, so without this arm an untouched Save
-    on a bill paid from a since-archived card would post the row's own
-    account, read as a CORRECTION (not the echo the door drops), re-point
-    the payment onto checking and release both clearing links -- and the
-    documented unlock path (Status = Projected) would be refused for a
-    tender nobody changed.  Found by the neutral review of this leaf.  The
-    recorded account never reaches the gate: an echo of it is dropped
-    before the gate is asked (``status_seam.tender_for_status``).
+    has since archived, or a card a Projected row's kept payment is still
+    on (a card bill reopened and its definition moved to checking, finding
+    plan#3105).  The same shape this route gives an archived category one
+    block up, and for the same reason: a ``<select>`` whose preselected
+    value is missing submits its FIRST option, so without this arm an
+    untouched Save on a checking bill paid from a since-archived savings
+    account would post checking, read as a CORRECTION (not the echo the
+    door drops), re-point the payment onto checking and release both
+    clearing links -- and the documented unlock path (Status = Projected)
+    would be refused for a tender nobody changed.  Found by the neutral
+    review of plan step ``credit_card:CC-5-3``, over a since-archived card;
+    a row put on the card from another account draws no box at all now
+    (plan task plan#3289).  The recorded account never reaches the gate: an
+    echo of it is dropped before the gate is asked
+    (``status_seam.tender_for_status``).
 
     Args:
         txn: The row the popover is drawn for, with ``entries`` loaded.

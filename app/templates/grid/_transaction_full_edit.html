@@ -44,9 +44,8 @@
     Save the door reads back as the stored Paid
     (`transaction_service.requested_status_id`).  What a box SAYS about the
     money stays keyed on the stored status: the row has settled, so the
-    Actual box and "Money moved on" correct what the card took and when, and
-    the "Paid from" picker shows the card (which accounts it offers there is
-    plan task plan#3289's). -#}
+    Actual box and "Money moved on" correct what the card took and when.  It
+    draws no "Paid from" picker: Undo CC is its way off the card. -#}
 {% set drawn = drawn_status(txn) %}
 {# Whether the settle verb would HONOUR a figure or an account typed here
    (ruling R-FF, the same sentence the reconcile panel's tick obeys): a row
@@ -63,26 +62,28 @@
 {% set correctable = amount_correctable if amount_correctable is defined else true %}
 {# **The "Paid from" picker's ONE render predicate** (plan step
    credit_card:CC-5-3, ruling R-CC15; the list is ruling plan#3227's): WHICH
-   ACCOUNT a payment under this row moved through -- the row's own, then
-   every account of the owner's that holds cash, then on money coming in
-   ("Received into") every card (ruling plan#3310)
-   (`movement_account.paid_from_accounts`, the add-purchase form's tuple, the
-   one every door gates on), PLUS the account the row RECORDS when that is no
-   longer nameable (an account since archived, or a card a bill was paid
-   from before plan task plan#3232), so the preselected option always exists and an untouched
-   Save is the echo the door drops (`tender_accounts`, the route's
-   `_tender_picker`).  Drawn only when
-   there is a choice (ruling R-CC34: a one-account owner's card is
-   byte-identical), only where the row can settle or has settled (a Cancelled
-   or Credit row books no payment), and only where the settle verb would
-   HONOUR it -- `correctable`, the Actual box's own gate: a row whose record
-   is its purchases has no ONE payment to book anywhere.  Stated once here
-   because two controls read it: the picker itself and the Paid / Received
-   buttons, which `hx-include` it so a one-click settle from this card names
-   the account shown.  The default keeps legacy render sites without the
-   context picker-less. #}
+   ACCOUNT a payment under this row moved through -- the row's own, then every
+   account of the owner's that holds cash, then on money coming in ("Received
+   into") every card (ruling plan#3310) (`movement_account.paid_from_accounts`,
+   the add-purchase form's tuple, the one every door gates on), PLUS the
+   account the row RECORDS when that is no longer nameable (an account since
+   archived, or the card a Projected row's kept payment is still on, finding
+   plan#3105), so the preselected option always exists and an untouched Save is
+   the echo the door drops (`tender_accounts`, the route's `_tender_picker`).
+   Drawn only when there is a choice (ruling R-CC34: a one-account owner's card
+   is byte-identical), only where the row can settle or has settled (a
+   Cancelled or old Credit row books no payment), never on a row put on the
+   card from another account, whose way off it is Undo CC (plan task plan#3289:
+   `put_on_the_card`, the route's `takes_off_the_card`, which the door's
+   refusal asks too), and only where the settle verb would HONOUR it
+   (`correctable`: a row whose record is its purchases has no ONE payment to
+   book anywhere).  Stated once here because two controls read it: the picker
+   itself and the Paid / Received buttons, which `hx-include` it so a one-click
+   settle from this card names the account shown.  The default keeps legacy
+   render sites without the context picker-less. #}
+{% set put_on_the_card = takes_off_the_card is defined and takes_off_the_card %}
 {% set tender_picker = tender_accounts is defined and tender_accounts|length > 1
-   and correctable
+   and correctable and not put_on_the_card
    and (txn.status_id == STATUS_PROJECTED or (txn.status and txn.status.is_settled)) %}
 {# **The ESTIMATE is withdrawn on a CC PAYBACK.**  A payback is worth the
    card spend of the row it repays, so a figure typed here is not a
@@ -140,11 +141,9 @@
     would otherwise press Paid unwarned.  Where a match names the payment on
     the card it is withdrawn too, and the caption names those lines
     (`off_card_frees`, the lines `payment_withdraws` names).
-    `takes_off_the_card` is the route's answer to whether the revert moves it
-    (`status_seam.revert_moves_payment_home`, the seam's own question); a
-    bill that lives on the card moves nothing. -#}
-{% set off_card_caption = takes_off_the_card is defined and takes_off_the_card %}
-{% set off_card_frees = withdraws_a_line and off_card_caption %}
+    `put_on_the_card` (set above; `status_seam.revert_moves_payment_home`)
+    says whether the revert moves it; a bill that lives on the card does not. -#}
+{% set off_card_frees = withdraws_a_line and put_on_the_card %}
 {#- **What Credit says before the press** (plan task plan#3056).  Credit is
     offered on a Projected expense whose purchases are not tracked (each
     purchase names its own account, so Credit is per purchase there):
@@ -347,7 +346,7 @@
     Undo CC, or setting Status back to Projected, deletes this row's CC payback and {{ frees_lines(payback_withdraws) }}.
   </div>
   {%- endif %}
-  {%- if off_card_caption %}
+  {%- if put_on_the_card %}
   <div class="form-text mb-2" id="off-card-{{ txn.id }}">
     Undo CC, or setting Status back to Projected, takes this off the card{% if off_card_frees %} and {{ frees_lines(payment_withdraws) }}{% endif %}. After that, Paid takes it from {{ txn.account.name }}, and Credit puts it back on the card.
   </div>
@@ -620,8 +619,8 @@
          offered only on a row drawn Credit and is disabled elsewhere.  Its
          title names the Credit button above on a row that offers it
          (`credit_offered`) and the purchases on a row tracking them; on any
-         other row it is the generic one.  (Until plan task plan#2931, Paid
-         with a card under "Paid from" also puts a row on the card.) #}
+         other row it is the generic one.  (Paid still puts a Projected row
+         on a card when its kept payment is there, finding plan#3105.) #}
       {% set allowed_ids = allowed_status_ids if allowed_status_ids is defined else none %}
       <div class="mb-2">
         <label class="form-label mb-0 small">Status</label>

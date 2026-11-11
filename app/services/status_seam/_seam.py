@@ -55,6 +55,7 @@ from app.services.status_seam._refusals import (
     reject_settlement_on_a_deleted_row,
     reject_settlement_without_settled_status,
     reject_stated_figure_over_purchases,
+    reject_tender_off_the_card,
     reject_tender_without_settled_status,
 )
 from app.utils.balance_predicates import (
@@ -302,6 +303,16 @@ def tender_for_status(
     (:func:`~._refusals.reject_tender_without_settled_status`), never
     dropped: the figure's twin measured what a silent drop costs.
 
+    **A different account on a row put on the card is refused too** (plan
+    task plan#3289, :func:`~._refusals.reject_tender_off_the_card`): its way
+    off the card is Undo CC, so the popover draws no box there and "Paid
+    from" may not move its payment off the card.  Asked before the
+    not-settling refusal, so a revert naming another account on such a row
+    is told Undo CC (which takes the payment home) rather than that nothing
+    is settling; a door that reads a submitted FIGURE first
+    (``transaction_service._door._correction_for_status``) may refuse that
+    figure before this is reached.
+
     Args:
         row: The row the submission is about, for the refusal's sentence.
         new_status_id: The ``ref.statuses.id`` the row is moving to -- the
@@ -315,15 +326,18 @@ def tender_for_status(
 
     Returns:
         *submitted_account_id* when it names an account other than the
-        recorded one and the row is settling or staying settled; ``None``
-        when nothing was submitted or the submission is an echo.
+        recorded one, the row is not one put on the card, and the row is
+        settling or staying settled; ``None`` when nothing was submitted or
+        the submission is an echo.
 
     Raises:
         ValidationError: When an account DIFFERING from the record arrives
-            beside a status that settles nothing.  A 400 at either route.
+            on a row put on the card from another account, or beside a
+            status that settles nothing.  A 400 at either route.
     """
     if submitted_account_id is None or submitted_account_id == recorded_account_id:
         return None
+    reject_tender_off_the_card(row)
     reject_tender_without_settled_status(row, new_status_id)
     return submitted_account_id
 

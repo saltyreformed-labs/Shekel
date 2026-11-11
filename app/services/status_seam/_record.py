@@ -536,6 +536,12 @@ def revert_moves_payment_home(row: Transaction) -> bool:
     bill that lives on the card is drawn Credit too, and its payment is
     already on its own account, so nothing moves.
 
+    **And so to "is Undo CC this row's way off the card"** (plan task
+    plan#3289, ruling plan#3227): the popover draws no "Paid from" box where
+    this is true, and the seam's tender reading refuses an account other
+    than the card there (``_refusals.reject_tender_off_the_card``), so the
+    box and that refusal cannot part either.
+
     Args:
         row: The transaction, with ``entries`` loaded or loadable, before
             its status moves.

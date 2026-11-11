@@ -5,9 +5,11 @@ the way out by a census that names anything left.
 What it is built from, each its one home's:
 
 * The image is ``scripts/build_test_db_image.py``'s, built or verified on every run as
-  ``test.sh`` does, and the cluster's whole life -- the token, the start, the stop and the URL
-  a caller connects by -- is ``scripts/private_cluster.py``'s.  Both run as subprocesses: the
-  orchestrator imports nothing from ``scripts`` (the package docstring says why).
+  ``test.sh`` does, under the locale this tree's ``Dockerfile`` pins, as ``test.sh`` exports
+  it first (:func:`builder_environment`), and the cluster's whole life -- the token, the
+  start, the stop and the URL a caller connects by -- is ``scripts/private_cluster.py``'s.
+  Both run as subprocesses: the orchestrator imports nothing from ``scripts`` (the package
+  docstring says why).
 * Git runs through :mod:`tools.ci.gitcmd`, which strips the variables that bind git to
   another repository (a hook run from a linked worktree sets them), and every worktree is
   ``git worktree add --detach``, never a checkout.
@@ -115,6 +117,11 @@ _GROUPS = ("--no-default-groups", "--group", "rehearsal")
 _BUILT_MARKER = ".rehearsal-built"
 #: How much of a failed uv's stderr a refusal quotes.
 _QUOTED_LINES = 20
+#: A tree's ``Dockerfile`` lines that set its image's environment.
+_IMAGE_ENV = re.compile(r"^ENV ([A-Z_][A-Z0-9_]*)=(\S+)$", re.MULTILINE)
+#: The variable naming the process locale, which ``create_app`` refuses to start without at
+#: the value the image pins (ruling ``recurrence:R-R92``).
+_LOCALE = "LC_ALL"
 
 
 class BenchError(RuntimeError):
@@ -246,17 +253,54 @@ def in_cluster(container: str, argv: list[str], *, stdin: IO[bytes] | None = Non
                 stdout=subprocess.PIPE if stdout is None else stdout)
 
 
+def dockerfile_environment(tree: Path) -> dict[str, str]:
+    """Every variable the ``Dockerfile`` of the tree at ``tree`` sets by a one-line ``ENV``,
+    by name: what its image gives each process it runs.  The one reader of it, for a side's
+    environment (``sides.image_environment``) and the image builder's
+    (:func:`builder_environment`).
+
+    Raises:
+        BenchError: when the file cannot be read.
+    """
+    try:
+        dockerfile = (tree / "Dockerfile").read_text(encoding="utf-8")
+    except OSError as exc:
+        raise BenchError(f"{tree} cannot give its image's environment: {exc}") from exc
+    return dict(_IMAGE_ENV.findall(dockerfile))
+
+
+def builder_environment(tree: Path, daemon: str) -> dict[str, str]:
+    """The environment the image builder of the tree at ``tree`` runs in: this process's,
+    with ``DOCKER_HOST`` naming ``daemon`` when the cluster module named one, and the locale
+    the tree's ``Dockerfile`` pins over any the shell has, as ``test.sh`` exports it before
+    its build.  The builder hands its template builder the locale it was given, and that
+    builder's ``create_app`` refuses to start under any other (ruling ``recurrence:R-R92``),
+    so a shell with none and no ``.env`` above the tree made every image build fail,
+    measuring nothing (finding plan#2900).
+
+    Raises:
+        BenchError: when the tree's ``Dockerfile`` cannot be read, or pins no locale.
+    """
+    pinned = dockerfile_environment(tree).get(_LOCALE)
+    if pinned is None:
+        raise BenchError(f"{tree / 'Dockerfile'} pins no {_LOCALE}, so the locale the image "
+                         "builder's create_app must start under is not known")
+    return {**os.environ, **({"DOCKER_HOST": daemon} if daemon else {}), _LOCALE: pinned}
+
+
 def image_tag() -> str:
     """The test-db image's tag, built or verified first, as ``test.sh`` has it done: on the
     daemon the cluster will run on, which ``private_cluster.py daemon`` names once it has
-    judged it (the module says why the bench asks it first).
+    judged it (the module says why the bench asks it first), under this tree's pinned locale
+    (:func:`builder_environment`).
 
     Raises:
-        BenchError: when the daemon is refused or the image cannot be prepared.
+        BenchError: when the daemon is refused, the locale is not known, or the image cannot
+            be prepared.
     """
     chosen = cluster("daemon").strip()
     done = run([sys.executable, str(_IMAGE_BUILDER), "--json"],
-                env={**os.environ, "DOCKER_HOST": chosen} if chosen else None)
+                env=builder_environment(arcs.REPO, chosen))
     if done.returncode:
         raise BenchError(f"build_test_db_image.py exited {done.returncode}: "
                          f"{(done.stderr or done.stdout).strip()}")

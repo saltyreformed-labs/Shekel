@@ -355,7 +355,11 @@ class TestTheEngine:
     def test_an_unlisted_state_is_refused_by_name(
         self, app, db, seed_user, seed_periods, law,
     ):  # pylint: disable=unused-argument
-        """QQ was priced $0.00; now the refusal names the profile, its state and the law's."""
+        """QQ was priced $0.00; now the refusal names the profile, its state and the law's.
+
+        The law's two states read "NC and ZZ", the one wording of a list of
+        states (ruling plan#3202; "NC, ZZ" until then).
+        """
         profile = make_salary_profile(
             seed_user, db.session, name="Day Job", pay=Decimal("3000.00"),
             state_code="QQ", pay_from=date(2026, 1, 2),
@@ -367,7 +371,7 @@ class TestTheEngine:
 
         assert str(refused.value) == (
             f'Salary profile "Day Job" (id {profile.id}) is in \'QQ\', which '
-            "Shekel's tax law does not list (it lists NC, ZZ).  Choose a state "
+            "Shekel's tax law does not list (it lists NC and ZZ).  Choose a state "
             "the law lists on the profile's edit page."
         )
 

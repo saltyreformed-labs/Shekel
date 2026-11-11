@@ -666,10 +666,10 @@ class TestThePaycheckSeesTheWholeSchedule:
             # at module scope it would read as a collaborator of the tests.
             from app.services import paycheck_calculator  # pylint: disable=import-outside-toplevel
             # Pylint: ``import-outside-toplevel`` -- see above.
-            from app.services.tax_config_service import (  # pylint: disable=import-outside-toplevel
-                load_tax_configs_for_year,
+            from tests._tax_configs import (  # pylint: disable=import-outside-toplevel
+                tax_configs_for,
             )
-            configs = load_tax_configs_for_year(profile, 2026)
+            configs = tax_configs_for(profile, 2026)
             # Pylint: ``import-outside-toplevel`` -- see above.
             from app.services.payroll_basis import (  # pylint: disable=import-outside-toplevel
                 PayrollBasis,

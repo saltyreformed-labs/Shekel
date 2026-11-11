@@ -30,8 +30,9 @@ tracker it reads is private: real production figures are allowed there
   for the cards they name) and every card it names -- in its path, or by its
   REST id -- a scratch card; a GraphQL write is one of the board's six (its
   four moves and its two Status writes), word for word, on the plan board, moving
-  or writing a scratch card's board item.  A body sent other than as JSON is
-  refused too.  Anything else is refused, unsent.
+  or writing a scratch card's board item, or one of the suggestion's two (its put and
+  its take-back, ruling plan#3257), word for word, naming a scratch card's node id.  A
+  body sent other than as JSON is refused too.  Anything else is refused, unsent.
 - **Every string an answer holds is redacted** (:data:`REDACTED`) unless its
   key is one of :data:`_KEPT` -- ids, states, names of labels, types and
   repositories, dates, error messages -- or it belongs to a scratch card, or it
@@ -47,7 +48,7 @@ tracker it reads is private: real production figures are allowed there
   the card the request's URL names, and the edit history and the comments of
   an object that carries a card's number (:data:`_OWN_CONTENT`); any other
   object, and a string in a list, shares its enclosing object's card, and
-  nothing encloses the answer.
+  nothing encloses the answer.  A card's pending suggestions are its own content too.
 
 What a recording can still hold: a string under a :data:`_KEPT` key, of any
 card (so a key enters that set only when no card's text can be stored under
@@ -72,6 +73,7 @@ from pathlib import Path
 import requests
 
 from tools.quill._github import API
+from tools.quill._suggestion import SUGGEST, WITHDRAW
 from tools.quill._tracker import (
     BOARD_ADD,
     BOARD_AFTER,
@@ -99,8 +101,9 @@ _KEPT = frozenset({
     "stateReason", "state_reason", "type",
 })
 #: The keys under which an object with no number is its enclosing card's own content: its
-#: saved versions and its comments.
-_OWN_CONTENT = frozenset({"userContentEdits", "comments"})
+#: saved versions, its comments, and its pending suggestions, each a suggested value and its
+#: reason (``_suggestion``, plan#2798).
+_OWN_CONTENT = frozenset({"userContentEdits", "comments", "pendingSuggestions"})
 #: GitHub's node-id prefix for a board (a ProjectV2).
 _BOARD_NODE = "PVT_"
 _GRAPHQL_URL = f"{API}/graphql"
@@ -108,6 +111,9 @@ _GRAPHQL_URL = f"{API}/graphql"
 #: the card's node id for an add, its board item for the rest.
 _BOARD_WRITES = {BOARD_ADD: "c", BOARD_REMOVE: "i", BOARD_TOP: "i", BOARD_AFTER: "i",
                  BOARD_STATUS_SET: "i", BOARD_STATUS_CLEAR: "i"}
+#: The suggestion's GraphQL writes a recording may send (ruling plan#3257), each naming the
+#: card it writes by its node id as ``$issue``.
+_CARD_WRITES = frozenset({SUGGEST, WITHDRAW})
 _MUTATION = re.compile(r"\bmutation\b")
 _REPOSITORY_ARGUMENTS = re.compile(r"\brepository\s*\(([^)]*)\)")
 _REPOSITORY_ALIAS = re.compile(r"\brepository\s*:")
@@ -223,9 +229,11 @@ def _rest_allows(method: str, url: str, body: dict, scratch: Scratch) -> bool:
 
 
 def _graphql_allows(body: dict, scratch: Scratch) -> bool:
-    """Whether a GraphQL request is a read, or one of the board's writes moving a scratch
-    card's item."""
+    """Whether a GraphQL request is a read, one of the board's writes moving a scratch
+    card's item, or one of the suggestion's writes naming a scratch card."""
     query = str(body.get("query", ""))
+    if query in _CARD_WRITES:
+        return (body.get("variables") or {}).get("issue") in scratch.nodes
     if query in _BOARD_WRITES:
         variables = body.get("variables") or {}
         moved = variables.get(_BOARD_WRITES[query])

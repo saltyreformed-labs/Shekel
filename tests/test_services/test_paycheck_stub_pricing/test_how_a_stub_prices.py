@@ -20,10 +20,10 @@ from app.services.payroll_basis import PayrollBasis
 from app.services.salary_paydays import paycheck_on
 from app.services.tax_config_service import (
     configs_by_year,
-    load_tax_configs_for_year,
     profile_tax_series,
 )
 from app.tax_law import TaxLaw
+from tests._tax_configs import tax_configs_for
 from tests._test_helpers import (
     add_test_pay_stub,
     made_up_federal,
@@ -34,10 +34,14 @@ from tests._test_helpers import (
 )
 from tests.test_services.test_paycheck_calculator._helpers import (
     FakeBracket,
-    FakeBracketSet,
-    FakeFicaConfig,
+    FakeFederalRules,
+    FakeFicaRules,
     FakeProfile,
-    FakeStateTaxConfig,
+    FakeStateTaxRules,
+)
+from tests.test_services.test_tax_report_service._helpers import (
+    _make_full_year_periods as _report_periods,
+    _make_profile as _report_profile,
 )
 
 from ._helpers import (
@@ -236,6 +240,45 @@ class TestAStubIsPricedOnItsOwnYearsLaw:
         assert breakdown.taxes.stub_payday == date(2026, 12, 18)
         assert breakdown.taxes.state == Decimal("114.40")
 
+    def test_a_2025_stub_prices_a_2026_paycheck_on_each_years_withholding_figures(
+        self, app, db, seed_user,
+    ):
+        """The shipped law: 2025's stub side withholds on Pub 15-T's and the W-4's figures.
+
+        Ruling plan#3213.  Married filing jointly, one child, 4,000.00 a
+        paycheck, no lines; the 2025-12-19 stub prints federal 250.00.
+
+          paycheck (2026, 32,200 and 2,200 -- 2026 states no withholding figure):
+            104000 - 32200 = 71,800.00
+            24800*0.10 + (71800-24800)*0.12 = 2480.00 + 5640.00 = 8,120.00
+            (8120 - 2200) / 26 = 227.6923... -> 227.69
+          stub (2025's withholding figures, 30,000 and 2,000):
+            104000 - 30000 = 74,000.00
+            23850*0.10 + (74000-23850)*0.12 = 2385.00 + 6018.00 = 8,403.00
+            (8403 - 2000) / 26 = 246.2692... -> 246.27
+          federal = 250.00 + 227.69 - 246.27 = 231.42
+
+        On the return's 2025 figures for the stub side too (31,500 and 2,200:
+        (8223 - 2200) / 26 = 231.65) it would read 250.00 + 227.69 - 231.65 =
+        246.04: the 14.62 a paycheck the ruling's option A would over-withhold
+        until a 2026 stub is entered (measured: with 2025's withholding
+        figures deleted, this test reads 246.04).
+        """
+        profile = _report_profile(
+            seed_user, filing_status_name="married_jointly", pay="4000.00",
+            qualifying_children=1, first_payday=date(2025, 12, 19),
+        )
+        _report_periods(seed_user["user"], count=2, start=date(2025, 12, 19))
+        add_test_pay_stub(
+            profile, date(2025, 12, 19), "4000.00",
+            taxes=_taxes("250.00", "140.00", "248.00", "58.00"),
+        )
+        db.session.commit()
+
+        breakdown = _priced({"profile": profile}, date(2026, 1, 2))
+        assert breakdown.taxes.stub_payday == date(2025, 12, 19)
+        assert breakdown.taxes.federal == Decimal("231.42")
+
     def test_one_years_law_refuses_a_stub_of_another_year(self, owner, db):
         """Handed 2027's law alone, a 2026 stub pricing a 2027 paycheck is refused."""
         _same_lines_stub(
@@ -249,7 +292,7 @@ class TestAStubIsPricedOnItsOwnYearsLaw:
         with pytest.raises(ValueError, match="R-SAL77"):
             paycheck_calculator.project_salary(
                 PayrollBasis(profile, ctx.calendar()), [period],
-                load_tax_configs_for_year(profile, 2027),
+                tax_configs_for(profile, 2027),
             )
 
     def test_a_per_year_law_missing_the_stubs_year_is_refused(self, owner, db):
@@ -364,15 +407,15 @@ class TestTheStubSideTakesTheRhythmOnItsOwnPayday:
                 )
             ],
         )]
-        state = FakeStateTaxConfig(flat_rate="0.045")
+        state = FakeStateTaxRules(flat_rate="0.045")
         state.standard_deduction = Decimal("12000.00")
         configs = {
-            "bracket_set": FakeBracketSet(
+            "bracket_set": FakeFederalRules(
                 standard_deduction=Decimal("0"),
                 brackets=[FakeBracket(Decimal("0"), None, Decimal("0"), 0)],
             ),
             "state_config": state,
-            "fica_config": FakeFicaConfig(),
+            "fica_config": FakeFicaRules(),
         }
         period = next(p for p in calendar.periods if p.start_date == date(2026, 7, 2))
 

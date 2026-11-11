@@ -1,9 +1,7 @@
 """
 Shekel Budget App -- Seed Reference Tables
 
-Populates ref-schema lookup tables for all phases: account types,
-transaction types, statuses, recurrence patterns, filing statuses,
-deduction timings, calc methods, tax types, and raise types.
+Populates every ref-schema lookup table.
 
 Uses upsert pattern to avoid duplicates on re-run; delegates to
 ``app.ref_seeds.seed_reference_data`` -- the single source of truth

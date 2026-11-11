@@ -98,7 +98,7 @@ Usage:
 
 Exit code 0 when every check passes, 1 on a failure, 2 when the preconditions
 are not met.  It is paced: the dev app runs the real Valkey limiter (30/minute
-per IP, prod behaviour), and a burst meets 429s.
+on each page per signed-in browser, prod behaviour), and a burst meets 429s.
 
 **Its drives live in three sibling modules** since plan#2680 split this
 script at 1,000 lines: ``_recurrence_form_kit.py`` (the shared instrument:

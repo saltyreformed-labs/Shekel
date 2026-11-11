@@ -365,18 +365,18 @@ def _delete_the_unreferenced_ref_row(db) -> None:
     db.session.commit()
 
 
-def _seeded(db, user_id: int) -> dict:
+def _seeded(db) -> dict:
     """Read, over a connection of its own, what the deploy's seed COMMITTED.
+
+    The deploy copied the tax law into each user's rows until plan step
+    salary:X-at-1 deleted that seed, and X-at-2 deleted the tables, so the
+    reference row is all there is to read.
 
     Args:
         db: The Flask-SQLAlchemy handle.
-        user_id: The user whose FICA rows are counted: the deploy copied the
-            tax law into them until plan step salary:X-at-1 deleted that seed.
 
     Returns:
-        ``ref_row`` (whether the deleted ref row is back) and ``fica`` (how
-        many FICA configurations the user holds; ``seed_user`` makes none, and
-        the deploy adds none).
+        ``ref_row``: whether the deleted ref row is back.
     """
     with db.engine.connect() as conn:
         return {
@@ -384,9 +384,6 @@ def _seeded(db, user_id: int) -> dict:
                 "SELECT count(*) FROM ref.statement_sources "
                 "WHERE name = 'secu_checking_csv'"
             )).scalar_one(),
-            "fica": conn.execute(text(
-                "SELECT count(*) FROM salary.fica_configs WHERE user_id = :u"
-            ), {"u": user_id}).scalar_one(),
         }
 
 
@@ -402,24 +399,23 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
     """
 
     def test_a_clean_run_commits_the_seed_with_the_migration(
-        self, app, db, seed_user, pending_migration, uncorrected_payment,
+        self, app, db, pending_migration, uncorrected_payment,
     ):
-        """The deleted ref row commits with the stamp, and no tax row is copied.
+        """The deleted ref row commits with the stamp.
 
         It also pins ruling R-BAL122's ORDER on an existing database: the ref
         row is missing when the deploy starts, so a cache read before the seed
         would refuse ``StatementSource.SECU_CHECKING_CSV`` and fail the deploy.
         """
         _delete_the_unreferenced_ref_row(db)
-        user_id = seed_user["user"].id
-        assert _seeded(db, user_id) == {"ref_row": 0, "fica": 0}
+        assert _seeded(db) == {"ref_row": 0}
 
         _INIT_DB.initialise_database()
 
         assert _committed(db, uncorrected_payment) == {
             "stamp": _PROBE_REVISION, "probe": True, "corrections": 1,
         }
-        assert _seeded(db, user_id) == {"ref_row": 1, "fica": 0}
+        assert _seeded(db) == {"ref_row": 1}
         # The deploy loaded ref_cache itself, from the seeded rows: the
         # re-inserted row has a NEW id, which only a load after the seed can
         # know (conftest's per-test load read the deleted row's id).
@@ -433,7 +429,7 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
         ) == new_id
 
     def test_a_missing_audit_trigger_rolls_everything_back(
-        self, app, db, seed_user, pending_migration, uncorrected_payment,
+        self, app, db, pending_migration, uncorrected_payment,
     ):
         """One audit trigger is gone: the check refuses and nothing commits.
 
@@ -446,7 +442,6 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
             "DROP TRIGGER audit_transactions ON budget.transactions"
         ))
         db.session.commit()
-        user_id = seed_user["user"].id
 
         with pytest.raises(
             RuntimeError,
@@ -461,7 +456,7 @@ class TestTheSeedsAndTheCheckAreInsideTheOneTransaction:
         assert _committed(db, uncorrected_payment) == {
             "stamp": pending_migration, "probe": False, "corrections": 0,
         }
-        assert _seeded(db, user_id) == {"ref_row": 0, "fica": 0}
+        assert _seeded(db) == {"ref_row": 0}
 
     def test_a_surplus_audit_trigger_is_not_refused(
         self, app, db, pending_migration, uncorrected_payment,

@@ -36,7 +36,8 @@ from urllib.parse import urlencode, urlsplit
 from werkzeug.datastructures import MultiDict
 
 from app import create_app
-from app.extensions import db, limiter, login_manager
+from app.extensions import db, login_manager
+from app.rate_limits import limiter
 from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
 from app.utils.session_helpers import login_session_stamps
 

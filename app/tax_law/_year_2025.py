@@ -1,14 +1,28 @@
 """The 2025 tax law, transcribed from the documents :data:`SOURCES` names.
 
-**One figure here is known to be superseded, and it stands as transcribed.**
-P.L. 119-21 (signed 2025-07-04) raised the 2025 federal standard deduction to
-$15,750 (single and married filing separately), $31,500 (married filing
-jointly) and $23,625 (head of household); the figures below are Rev. Proc.
-2024-40 sec. 3.15's $15,000 / $30,000 / $22,500, which is what the app has
-priced 2025 on since it was first seeded.  Plan step salary:X-at-1 moved the
-law into this module without changing a figure, so the correction -- which
-moves every 2025 liability for a bracket-priced filer -- is finding
-**salary:SAL-576**'s, not a side effect of the move.
+**2025's return and its paychecks price on different figures** (ruling
+plan#3213, plan step salary:X-at-7).  P.L. 119-21 (signed 2025-07-04) raised
+the year's standard deduction to $15,750 (single and married filing
+separately), $31,500 (married filing jointly) and $23,625 (head of household)
+-- Rev. Proc. 2025-32 sec. 3.01 -- and its child credit to $2,200 a child.
+The IRS left the 2025 withholding documents as it had printed them before the
+law (IR-2025-82).  Pub 15-T (2025) withholds on a standard deduction of
+$15,000 single and married filing separately, $30,000 jointly and $22,500 head
+of household: Worksheet 1A line 1g's $8,600 ($12,900 jointly) plus the annual
+table's zero-rate row, $6,400 ($17,100 jointly, $13,900 head of household).
+Form W-4 (2025) Step 3 claims $2,000 a qualifying child.  So each filing
+status states those two as its withholding figures, and the difference --
+withheld on the old figures, owed on the new -- comes back in the refund the
+Taxes tab shows.  (Pub 15-T's ladder for married filing separately is the
+single filer's, which the law does not state: finding plan#3243.)
+
+Until plan step salary:X-at-7 both priced on Rev. Proc. 2024-40's
+pre-P.L. 119-21 deduction (finding **salary:SAL-576**): the Taxes tab
+overstated 2025's tax by up to the $750 ($1,500 jointly, $1,125 head of
+household) times the marginal rate -- the bracket each taxed dollar fell in,
+and nothing where the tax was already zero after the credits -- and the
+paychecks withheld on the return's $2,200 child credit rather than the W-4's
+$2,000.
 """
 
 from decimal import Decimal
@@ -23,9 +37,15 @@ from app.tax_law._types import (
 )
 
 SOURCES = (
-    "IRS Rev. Proc. 2024-40, sec. 3.01 (tax rate tables) and sec. 3.15 "
-    "(standard deduction)",
+    "IRS Rev. Proc. 2024-40, sec. 3.01 (tax rate tables)",
+    "IRS Rev. Proc. 2025-32, sec. 3.01 (standard deduction as P.L. 119-21 "
+    "sec. 70102 amended it)",
     "P.L. 119-21 sec. 70104 (child tax credit $2,200 per child)",
+    "IRS Pub 15-T (2025), Worksheet 1A line 1g and the Annual Percentage "
+    "Method tables' STANDARD Withholding Rate Schedules (withholding "
+    "standard deduction)",
+    "Form W-4 (2025), Step 3 (withholding child credit $2,000 per qualifying "
+    "child)",
     "2025 Schedule 8812 instructions (refundable child tax credit $1,700 per "
     "child)",
     "IRC sec. 24(h)(4) (credit for other dependents $500)",
@@ -39,10 +59,12 @@ SOURCES = (
 
 _FEDERAL = {
     FilingStatusEnum.SINGLE: FederalRules(
-        standard_deduction=Decimal("15000.00"),
+        standard_deduction=Decimal("15750.00"),
         child_credit_amount=Decimal("2200.00"),
         other_dependent_credit_amount=Decimal("500.00"),
         child_credit_refundable_cap=Decimal("1700.00"),
+        withholding_standard_deduction=Decimal("15000.00"),
+        withholding_child_credit_amount=Decimal("2000.00"),
         brackets=ladder(
             ("0.00", "11925.00", "0.1000"),
             ("11925.00", "48475.00", "0.1200"),
@@ -54,10 +76,12 @@ _FEDERAL = {
         ),
     ),
     FilingStatusEnum.MARRIED_JOINTLY: FederalRules(
-        standard_deduction=Decimal("30000.00"),
+        standard_deduction=Decimal("31500.00"),
         child_credit_amount=Decimal("2200.00"),
         other_dependent_credit_amount=Decimal("500.00"),
         child_credit_refundable_cap=Decimal("1700.00"),
+        withholding_standard_deduction=Decimal("30000.00"),
+        withholding_child_credit_amount=Decimal("2000.00"),
         brackets=ladder(
             ("0.00", "23850.00", "0.1000"),
             ("23850.00", "96950.00", "0.1200"),
@@ -69,10 +93,12 @@ _FEDERAL = {
         ),
     ),
     FilingStatusEnum.MARRIED_SEPARATELY: FederalRules(
-        standard_deduction=Decimal("15000.00"),
+        standard_deduction=Decimal("15750.00"),
         child_credit_amount=Decimal("2200.00"),
         other_dependent_credit_amount=Decimal("500.00"),
         child_credit_refundable_cap=Decimal("1700.00"),
+        withholding_standard_deduction=Decimal("15000.00"),
+        withholding_child_credit_amount=Decimal("2000.00"),
         brackets=ladder(
             ("0.00", "11925.00", "0.1000"),
             ("11925.00", "48475.00", "0.1200"),
@@ -84,10 +110,12 @@ _FEDERAL = {
         ),
     ),
     FilingStatusEnum.HEAD_OF_HOUSEHOLD: FederalRules(
-        standard_deduction=Decimal("22500.00"),
+        standard_deduction=Decimal("23625.00"),
         child_credit_amount=Decimal("2200.00"),
         other_dependent_credit_amount=Decimal("500.00"),
         child_credit_refundable_cap=Decimal("1700.00"),
+        withholding_standard_deduction=Decimal("22500.00"),
+        withholding_child_credit_amount=Decimal("2000.00"),
         brackets=ladder(
             ("0.00", "17000.00", "0.1000"),
             ("17000.00", "64850.00", "0.1200"),

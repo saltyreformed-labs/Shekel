@@ -41,6 +41,7 @@ from app.services.statement_match import (
     as_reviewed,
 )
 from app.services.transfer_legs import TransferLeg
+from app.tax_law import name_states
 from app.utils.dates import month_name, to_display_tz
 
 # Months in a year -- named so the year conversion is not a bare literal.
@@ -307,3 +308,6 @@ def register_template_filters(app: Flask) -> None:
     app.add_template_filter(pay_cut, "pay_cut")
     app.add_template_filter(reviewed_token, "reviewed_token")
     app.add_template_filter(stated_difference, "stated_difference")
+    # The one wording of a list of states (ruling plan#3202), registered as
+    # itself so the tax-law banner and the refusals cannot word a list apart.
+    app.add_template_filter(name_states, "name_states")

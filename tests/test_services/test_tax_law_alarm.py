@@ -20,7 +20,7 @@ import pytest
 
 from app.extensions import db
 from app.models.ref import FilingStatus
-from app.services.tax_config_service import load_tax_configs_for_year
+from tests._tax_configs import tax_configs_for
 from app.services.tax_law_alarm import Gap, Stage, alarm, due_year, gaps, speaks_from
 from tests._test_helpers import EMPTY_TAX_LAW, made_up_law
 
@@ -227,7 +227,7 @@ class TestTheNoticeNamesTheYearTheFiguresUse:
         law = tax_law(made_up_law((2025, {"NC": "0.0425"}), (2026, {}), (2027, {})))
         with app.app_context():
             (gap_2026, gap_2027) = gaps(law, 2027)
-            priced = load_tax_configs_for_year(self._profile(), 2027)["state_config"]
+            priced = tax_configs_for(self._profile(), 2027)["state_config"]
 
             assert gap_2027 == Gap(tax_year=2027, state="NC", fallback_year=2025)
             assert gap_2026.fallback_year == 2025
@@ -239,7 +239,7 @@ class TestTheNoticeNamesTheYearTheFiguresUse:
         """2028 absent and 2027 lacking NC: FICA on 2027, NC on 2026 -- as the two gaps say."""
         law = tax_law(made_up_law((2026, {"NC": "0.0399"}), (2027, {})))
         with app.app_context():
-            priced = load_tax_configs_for_year(self._profile(), 2028)
+            priced = tax_configs_for(self._profile(), 2028)
 
             assert gaps(law, 2028)[1:] == (
                 Gap(tax_year=2028, state=None, fallback_year=2027, priced_older=(
@@ -254,7 +254,7 @@ class TestTheNoticeNamesTheYearTheFiguresUse:
         law = tax_law(made_up_law((2025, {"NC": "0.0425"}), (2026, {"NC": "0.0399"})))
         with app.app_context():
             gap_2028 = gaps(law, 2028)[-1]
-            priced = load_tax_configs_for_year(self._profile(), 2028)
+            priced = tax_configs_for(self._profile(), 2028)
 
             assert gap_2028 == Gap(tax_year=2028, state=None, fallback_year=2026)
             assert priced["fica_config"] is law.years[-1].fica

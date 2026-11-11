@@ -32,6 +32,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import time_machine
 
 from app.models.user import User
 from app.utils.log_events import AUTH
@@ -39,10 +40,14 @@ from app.utils.session_helpers import (
     FRESH_LOGIN_AT_KEY,
     SESSION_CREATED_AT_KEY,
     SESSION_LAST_ACTIVITY_KEY,
+    SESSION_SIGNED_IN_AT_KEY,
     SESSION_USER_ID_KEY,
     invalidate_other_sessions,
+    session_stamp,
     sign_in_created_at,
+    sign_in_is_live,
     stamp_login_session,
+    stamp_password_change,
     stamp_reauth_session,
     stamp_session_refresh,
 )
@@ -62,17 +67,20 @@ class _LogCapture:
     """
 
     def __init__(self, logger):
+        """Build a handler that keeps every record *logger* emits, unattached."""
         self._logger = logger
         self.records = []
         self._handler = logging.Handler()
-        self._handler.emit = lambda record: self.records.append(record)
+        self._handler.emit = self.records.append
 
     def __enter__(self):
+        """Attach the handler and open the logger to every level."""
         self._logger.addHandler(self._handler)
         self._logger.setLevel(logging.DEBUG)
         return self
 
     def __exit__(self, *exc):
+        """Detach the handler, so no record outside the block is kept."""
         self._logger.removeHandler(self._handler)
 
 
@@ -143,10 +151,10 @@ class TestInvalidateOtherSessionsHappyPath:
     ):
         """The cookie value parses with ``datetime.fromisoformat``.
 
-        ``app.load_user`` calls ``fromisoformat`` on the cookie value;
-        if the helper wrote a non-ISO format the cookie would round-
-        trip-explode and every authenticated request after the
-        invalidation would 500.
+        ``app.load_user`` reads the cookie value through
+        ``session_stamp``, which reads a non-ISO or naive value as no
+        stamp at all: had the helper written one, the session that
+        asked for the invalidation would be signed out by it.
         """
         user = seed_user["user"]
         with app.test_request_context("/") as ctx:
@@ -158,9 +166,9 @@ class TestInvalidateOtherSessionsHappyPath:
         parsed = datetime.fromisoformat(cookie_value)
         # Must be timezone-aware so the load_user comparison works.
         assert parsed.tzinfo is not None, (
-            "The cookie value must be timezone-aware ISO 8601; a naive "
-            "datetime would raise on the timezone-aware comparison in "
-            "load_user."
+            "The cookie value must be timezone-aware ISO 8601; "
+            "session_stamp reads a naive one as no stamp, and load_user "
+            "signs the session out."
         )
 
     def test_emits_other_sessions_invalidated_event_with_reason(
@@ -297,12 +305,12 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         activity stamp, and the developer confirmed that change on
         2026-10-30, so a bare request context no longer stands in for one.
         """
+        # Pylint: ``import-outside-toplevel``, ``protected-access`` -- the
+        # local import keeps the LoginManager dependency next to the
+        # test that needs it, and the loader callback is driven directly
+        # rather than through current_user, so the answer graded is the
+        # loader's alone.
         # pylint: disable=import-outside-toplevel,protected-access
-        # Local import keeps the LoginManager dependency next to the
-        # test that needs it.  protected-access is intentional: we
-        # are exercising the loader callback directly rather than
-        # through current_user, so the answer graded is the loader's
-        # alone.
         from app.extensions import login_manager
 
         user = seed_user["user"]
@@ -336,9 +344,10 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         refused too, and without the sign-in this test would pass on that
         instead, measuring nothing about the comparison it exists for.
         """
+        # Pylint: ``import-outside-toplevel``, ``protected-access`` -- as in
+        # test_current_cookie_value_passes_load_user_after_call above: the
+        # import stays local and the loader callback is driven directly.
         # pylint: disable=import-outside-toplevel,protected-access
-        # See test_current_cookie_value_passes_load_user_after_call
-        # above for the rationale on the protected-access waiver.
         from app.extensions import login_manager
 
         user = seed_user["user"]
@@ -427,7 +436,7 @@ class TestSignInCreatedAt:
             now = datetime.now(timezone.utc)
             stamp_login_session(now, _STAMPED_USER_ID)
 
-            assert sign_in_created_at(str(_STAMPED_USER_ID)) == now.isoformat()
+            assert sign_in_created_at(str(_STAMPED_USER_ID)) == now
 
     def test_another_user_gets_nothing(self, app):
         """Asked for any other user, as a remember-cookie restore asks: ``None``."""
@@ -538,11 +547,11 @@ class TestStampSessionRefresh:
 class TestStampHelpersWriteIsoStrings:
     """All three stamp helpers serialize as ``datetime.isoformat()``.
 
-    ``app.load_user`` and the decorators call ``fromisoformat`` on
-    every read; a regression that wrote a non-string (e.g. the raw
-    datetime, or ``str(now)`` which omits the timezone for naive
-    values) would round-trip-explode and 500 every authenticated
-    request after a successful login.
+    ``app.load_user`` and the decorators read every stamp through
+    ``session_stamp``, which reads a non-string or a naive value as no
+    stamp at all; a regression that wrote one (e.g. the raw datetime,
+    or ``str(now)`` of a naive value) would sign every session out, or
+    send it to /reauth, on its first request after a successful login.
     """
 
     def test_stamp_login_session_writes_iso_strings(self, app):
@@ -559,8 +568,9 @@ class TestStampHelpersWriteIsoStrings:
                 parsed = datetime.fromisoformat(value)
                 assert parsed.tzinfo is not None, (
                     f"{key} must round-trip as a timezone-aware "
-                    "datetime so the load_user / decorator subtraction "
-                    "does not raise on a naive value."
+                    "datetime: session_stamp reads a naive one as no "
+                    "stamp, which signs the session out or sends it to "
+                    "/reauth."
                 )
 
     def test_stamp_reauth_session_writes_iso_strings(self, app):
@@ -582,3 +592,109 @@ class TestStampHelpersWriteIsoStrings:
                 assert isinstance(value, str)
                 parsed = datetime.fromisoformat(value)
                 assert parsed.tzinfo is not None
+
+
+#: Ruling plan#3069's thirty days, spelled here as an oracle the model's
+#: constant cannot move silently.
+_THIRTY_DAYS = timedelta(days=30)
+
+
+class TestTheSignInStamp:
+    """Only a sign-in writes ``_signed_in_at``; a password change does not."""
+
+    def test_stamp_login_session_writes_it(self, app):
+        """The sign-in stamp carries the same ``now`` as the other three."""
+        with app.test_request_context("/") as ctx:
+            now = datetime.now(timezone.utc)
+            stamp_login_session(now, _STAMPED_USER_ID)
+
+            assert ctx.session[SESSION_SIGNED_IN_AT_KEY] == now.isoformat()
+
+    def test_stamp_password_change_writes_the_three_and_leaves_the_sign_in(
+        self, app,
+    ):
+        """Created, activity and fresh move to ``now``; the user and sign-in stay.
+
+        So a password change survives its own bump and restarts the step-up
+        window, and does not restart the session's thirty days.
+        """
+        with app.test_request_context("/") as ctx:
+            ctx.session[SESSION_USER_ID_KEY] = str(_STAMPED_USER_ID)
+            ctx.session[SESSION_SIGNED_IN_AT_KEY] = "the-sign-in"
+            now = datetime.now(timezone.utc)
+
+            stamp_password_change(now)
+
+            iso = now.isoformat()
+            assert ctx.session[SESSION_CREATED_AT_KEY] == iso
+            assert ctx.session[SESSION_LAST_ACTIVITY_KEY] == iso
+            assert ctx.session[FRESH_LOGIN_AT_KEY] == iso
+            assert ctx.session[SESSION_USER_ID_KEY] == str(_STAMPED_USER_ID)
+            assert ctx.session[SESSION_SIGNED_IN_AT_KEY] == "the-sign-in"
+
+
+class TestSessionStamp:
+    """``session_stamp`` reads a stamp, or ``None`` for one that cannot be read."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(None, id="missing"),
+            pytest.param("not-a-timestamp", id="malformed"),
+            pytest.param(12345, id="not-a-string"),
+            pytest.param("2026-03-01T12:00:00", id="naive"),
+        ],
+    )
+    def test_an_unreadable_stamp_is_none(self, app, value):
+        """Never an exception: each of these must read as "sign in again"."""
+        with app.test_request_context("/") as ctx:
+            if value is not None:
+                ctx.session[SESSION_SIGNED_IN_AT_KEY] = value
+
+            assert session_stamp(SESSION_SIGNED_IN_AT_KEY) is None
+
+    def test_an_aware_stamp_is_its_moment(self, app):
+        """A future one too: each check says what a clock jump means to it."""
+        with app.test_request_context("/") as ctx:
+            moment = datetime.now(timezone.utc) + timedelta(hours=1)
+            ctx.session[SESSION_SIGNED_IN_AT_KEY] = moment.isoformat()
+
+            assert session_stamp(SESSION_SIGNED_IN_AT_KEY) == moment
+
+
+class TestSignInIsLive:
+    """A sign-in younger than thirty days is live, for the user it stamped."""
+
+    @pytest.mark.parametrize(
+        "age, live",
+        [
+            pytest.param(_THIRTY_DAYS, False, id="thirty-days-to-the-second"),
+            pytest.param(
+                _THIRTY_DAYS - timedelta(seconds=1), True, id="a-second-younger",
+            ),
+            pytest.param(-timedelta(hours=1), True, id="in-the-future"),
+        ],
+    )
+    def test_its_age_decides(self, app, age, live):
+        """Frozen, so the age is exact: thirty days to the second is too old."""
+        moment = datetime.now(timezone.utc)
+        with time_machine.travel(moment, tick=False):
+            with app.test_request_context("/"):
+                stamp_login_session(moment - age, _STAMPED_USER_ID)
+
+                assert sign_in_is_live(str(_STAMPED_USER_ID)) is live
+
+    def test_another_users_session_is_not_live(self, app):
+        """Asked for any user but the one the sign-in stamped: ``False``."""
+        with app.test_request_context("/"):
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
+
+            assert sign_in_is_live(str(_STAMPED_USER_ID + 1)) is False
+
+    def test_a_session_with_no_sign_in_stamp_is_not_live(self, app):
+        """Every session signed in before the stamp existed is one."""
+        with app.test_request_context("/") as ctx:
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
+            del ctx.session[SESSION_SIGNED_IN_AT_KEY]
+
+            assert sign_in_is_live(str(_STAMPED_USER_ID)) is False

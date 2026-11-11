@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.ci.arcs import ARCS
-from tools.quill import _board_fields, setup_tracker
+from tools.quill import _board_fields, _board_views, setup_tracker
 from tools.quill.setup_tracker import Report
 
 
@@ -164,10 +164,33 @@ def _field(name, data_type, issue_field):
     return field
 
 
-def _board(fields, shown, cards=3):
-    """A private, linked board with no automation, holding ``cards`` cards, its one Plan view an
-    unsorted, ungrouped table of open cards showing the fields named ``shown``."""
+#: The real board's other three views, read by GraphQL 2026-11-10 at 12:1x EST, by number:
+#: each one's name, layout, the field it is sorted by, descending, if any, whether it is grouped
+#: by a column, and its columns.  View 4 is the Inbox, which the developer renamed from "Needs
+#: a Priority" and sorted on the web (ruling plan#3231); its filter is the board's argument.
+_BUCKET = ("Title", "Assignees", "Status", "Linked pull requests", "Sub-issues progress")
+_REAL_VIEWS = {
+    2: ("Status Buckets", "BOARD_LAYOUT", "Updated", 1, _BUCKET),
+    3: ("Arc Buckets", "BOARD_LAYOUT", None, 1, _BUCKET),
+    4: ("Inbox", "TABLE_LAYOUT", "Created", 0, (*_BUCKET, "Arc", "Priority")),
+}
+
+
+def _board(fields, shown, cards=3, inbox_filter=_board_views.INBOX.filter):
+    """A private, linked board with no automation, holding ``cards`` cards: its Plan view an
+    unsorted, ungrouped table of open cards showing the fields named ``shown``, and the real
+    board's other views (:data:`_REAL_VIEWS`), the Inbox filtered ``inbox_filter``."""
     by_name = {name: _field(name, kind, issue) for name, kind, issue in fields}
+    plan = ("Plan", "TABLE_LAYOUT", None, 0, shown)
+    views = []
+    for number, (name, layout, sort, grouped, columns) in {1: plan, **_REAL_VIEWS}.items():
+        keys = [{"direction": "DESC", "field": dict(by_name[sort])}] if sort else []
+        views.append({
+            "id": f"V{number}", "number": number, "name": name, "layout": layout,
+            "filter": {"Plan": "is:open", "Inbox": inbox_filter}.get(name, ""),
+            "sortByFields": {"totalCount": len(keys), "nodes": keys},
+            "groupByFields": {"totalCount": 0}, "verticalGroupByFields": {"totalCount": grouped},
+            "fields": {"nodes": [dict(by_name[column]) for column in columns]}})
     return {
         "id": "P", "title": setup_tracker.PROJECT_TITLE, "public": False,
         "url": "https://github.com/orgs/o/projects/1",
@@ -175,11 +198,7 @@ def _board(fields, shown, cards=3):
                          "nodes": [{"nameWithOwner": setup_tracker.PLAN.full_name}]},
         "fields": {"nodes": list(by_name.values())},
         "workflows": {"nodes": []},
-        "views": {"nodes": [{
-            "id": "V1", "number": 1, "name": "Plan", "filter": "is:open",
-            "layout": "TABLE_LAYOUT", "sortByFields": {"totalCount": 0},
-            "groupByFields": {"totalCount": 0}, "verticalGroupByFields": {"totalCount": 0},
-            "fields": {"nodes": [dict(by_name[name]) for name in shown]}}]},
+        "views": {"nodes": views},
         "items": {"totalCount": cards},
     }
 
@@ -222,6 +241,7 @@ def test_a_board_made_field_of_an_issue_field_s_name_is_still_a_difference():
     assert setup_tracker.board_differences(_board(fields, _PLAN_VIEW)) == [
         "the board stores a field, 'Arc'",
         "the 'Plan' view shows stored fields ['Arc']",
+        "the 'Inbox' view shows stored fields ['Arc']",
     ]
 
 
@@ -246,3 +266,19 @@ def test_apply_keeps_the_issue_field_columns_and_hides_a_stored_one():
     github = _GitHub(_board(_MEASURED, _PLAN_VIEW))
     setup_tracker.check_board(github, {"node_id": "R"}, apply=True, report=Report())
     assert not github.mutations
+
+
+def test_the_real_board_s_inbox_differs_by_its_filter_alone_which_apply_writes():
+    """plan#3248 on the real board: its views as read 2026-11-10 (its fields and its Plan
+    view's columns as read 2026-10-27, :data:`_MEASURED`).  The developer renamed "Needs a
+    Priority" to Inbox and sorted it by Created, descending, and its filter was still
+    ``is:open``, so the check's one difference is that filter; the two bucket views, of other
+    names, are none, board layouts, sorted and grouped as they are.  ``--apply`` writes the
+    declared filter in one write, to the Inbox alone."""
+    board = _board(_MEASURED, _PLAN_VIEW, inbox_filter="is:open")
+    assert setup_tracker.board_differences(board) == ["the 'Inbox' view's filter is 'is:open'"]
+    github = _GitHub(board)
+    setup_tracker.check_board(github, {"node_id": "R"}, apply=True, report=Report())
+    assert github.mutations == [
+        {"id": "V4", "name": "Inbox",
+         "filter": "is:open no:priority no:parent-issue type:step,question"}]

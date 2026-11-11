@@ -8,7 +8,7 @@ from functools import partial
 import pytest
 
 from tools.ci.arcs import ARCS
-from tools.quill import _board_fields, setup_tracker
+from tools.quill import _board_fields, _board_views, setup_tracker
 from tools.quill._github import GitHubError, app_credentials, app_jwt
 from tools.quill.setup_tracker import (
     APP_PERMISSIONS,
@@ -300,16 +300,33 @@ _FIELDS = {
 }
 
 
-def _view(index, name, view_filter, sorts):
-    """An ungrouped table view as the board query answers it, showing Title and Status."""
+def _view(index, name, view_filter, sorts=()):
+    """An ungrouped table view as the board query answers it, showing Title and Status, sorted
+    by ``sorts``, each ``(dataType, direction, name)`` of a field it is sorted by."""
     return {"id": f"V{index}", "number": index, "name": name, "filter": view_filter,
             "layout": "TABLE_LAYOUT",
-            "sortByFields": {"totalCount": sorts}, "groupByFields": {"totalCount": 0},
-            "verticalGroupByFields": {"totalCount": 0},
+            "sortByFields": {"totalCount": len(sorts), "nodes": [
+                {"direction": direction, "field": {"name": field_name, "dataType": data_type}}
+                for data_type, direction, field_name in sorts]},
+            "groupByFields": {"totalCount": 0}, "verticalGroupByFields": {"totalCount": 0},
             "fields": {"nodes": _visible("F1", "F2")}}
 
 
-def _project(cards=0, public=False, linked=True, views=(("View 1", "", 0),)):
+#: A sort the real board's Status Buckets view held, read 2026-11-10: by Updated, descending.
+_BY_UPDATED = (("UPDATED", "DESC", "Updated"),)
+#: The Inbox as declared (rulings plan#3229, plan#3231): its filter, sorted by Created,
+#: descending, as the developer sorted it on the web (read 2026-11-10).
+_INBOX = ("Inbox", _board_views.INBOX.filter, (("CREATED", "DESC", "Created"),))
+#: A board's views as declared: the Plan view, open cards unsorted, and the Inbox.
+_DECLARED_VIEWS = (("Plan", "is:open"), _INBOX)
+#: What the check reports of an Inbox ``--apply`` made, view 2 of a board it made the Plan view
+#: of: the API cannot sort a view, so the developer sorts it on the web.
+_UNSORTED_INBOX = ("DIFFERS the 'Inbox' view is unsorted, not sorted by Created, descending: the "
+                   "API cannot sort a view, so sort it at "
+                   "https://github.com/orgs/o/projects/1/views/2")
+
+
+def _project(cards=0, public=False, linked=True, views=(("View 1", ""),)):
     """A board as GitHub makes one: a Status field and its automations."""
     return {
         "id": "P",
@@ -422,8 +439,9 @@ class _Board(_GitHub):
         """Apply a view's creation or update."""
         views = self.project["views"]["nodes"]
         if name == "createProjectV2View":
-            views.append(_view("NEW", variables["name"], "", 0))
-            return {"createProjectV2View": {"projectV2View": {"id": "VNEW"}}}
+            index = len(views) + 1
+            views.append(_view(index, variables["name"], ""))
+            return {"createProjectV2View": {"projectV2View": {"id": f"V{index}"}}}
         for view in views:
             if view["id"] != variables["id"]:
                 continue
@@ -440,7 +458,8 @@ def test_apply_on_an_empty_board_deletes_rank_keeps_status_shown_and_no_automati
     GitHub refuses to delete its built-in Status and ignores emptying its choices
     (measured 2026-10-03), and quill writes it (ruling plan#1873), so it stays, shown in the
     plan view; any other stored field is deleted.  The same write shows the Parent issue
-    column (ruling plan#1814).
+    column (ruling plan#1814).  The Inbox is made beside it (ruling plan#3231), and its sort,
+    which the API cannot write, is the third difference.
     """
     github = _Board(_project(cards=0))
     report = Report()
@@ -450,8 +469,9 @@ def test_apply_on_an_empty_board_deletes_rank_keeps_status_shown_and_no_automati
     assert not [name for name, _ in sent if name in ("deleteProjectV2Workflow",
                                                      "updateProjectV2Field")]
     assert ("updateProjectV2View", {"id": "V1", "fields": ["F1", "F2", "F3"]}) in github.mutations
-    assert report.differences == 2
+    assert report.differences == 3
     assert any("'Item closed' is on" in line for line in report.lines)
+    assert _UNSORTED_INBOX in report.lines
     assert not any("'Auto-close issue'" in line for line in report.lines)
 
 
@@ -461,7 +481,7 @@ def test_an_automation_that_adds_cards_is_a_difference():
     ruling is no sub-issue since R-BAL395).  Nor may one hide a card since R-BAL352 ("The
     Done view holds all of history"): "Auto-archive items" would take closed cards out of
     it, so it is a difference too."""
-    project = _project(views=(("Plan", "is:open", 0),))
+    project = _project(views=_DECLARED_VIEWS)
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     project["workflows"]["nodes"] = [
@@ -483,8 +503,10 @@ def test_a_refused_field_deletion_is_still_a_difference():
     report = Report()
     setup_tracker.check_board(github, {"node_id": "R"}, apply=True, report=report)
     assert any("stores a field, 'Rank'" in line for line in report.lines)
-    # Rank, 'Item closed' on, and 'Auto-add sub-issues to project' on (R-BAL177).
-    assert report.differences == 3
+    # Rank, 'Item closed' on, 'Auto-add sub-issues to project' on (R-BAL177), and the Inbox
+    # it made, which the API cannot sort (ruling plan#3231).
+    assert report.differences == 4
+    assert _UNSORTED_INBOX in report.lines
 
 
 def test_status_is_shown_holding_exactly_its_four_options_and_a_custom_select_is_not_kept():
@@ -522,7 +544,7 @@ def test_a_status_on_an_item_that_is_no_card_differs_on_every_page_and_a_cards_d
     """Ruling plan#1905: a card's Status is quill sync's, which puts back any value but its own,
     so a card holding one is no difference; an item that is no card of the tracker -- a pull
     request, another repository's issue -- holding one is, since sync reads no such item."""
-    github = _Board(_project(cards=4, views=(("Plan", "is:open", 0),)),
+    github = _Board(_project(cards=4, views=_DECLARED_VIEWS),
                     status_pages=([_status_item(1, None), _status_item(2, "Todo")],
                                   [_status_item(3, "Done", kind="PULL_REQUEST"),
                                    _status_item(4, "Todo",
@@ -549,7 +571,7 @@ def test_a_draft_holding_a_status_is_a_difference_too():
 
 def test_a_renamed_status_is_a_difference():
     """Renamed, GitHub's Status cannot be read by name, so no card's Status could be checked."""
-    project = _project(views=(("Plan", "is:open", 0),))
+    project = _project(views=_DECLARED_VIEWS)
     project["fields"]["nodes"] = [_FIELDS["F1"]]
     project["workflows"]["nodes"] = []
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
@@ -559,7 +581,7 @@ def test_a_renamed_status_is_a_difference():
 
 def test_a_plan_view_laid_out_as_a_board_or_grouped_is_a_difference():
     """A board layout's columns are a stored field; a grouping splits the drag order."""
-    project = _project(views=(("Plan", "is:open", 0),))
+    project = _project(views=_DECLARED_VIEWS)
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["workflows"]["nodes"] = []
     view = project["views"]["nodes"][0]
@@ -573,7 +595,7 @@ def test_a_plan_view_laid_out_as_a_board_or_grouped_is_a_difference():
 
 def test_apply_sends_no_view_update_when_the_plan_view_shows_no_stored_field():
     """A view's columns are only sent when there is one to hide or to show."""
-    project = _project(cards=1, views=(("Plan", "is:open", 0),))
+    project = _project(cards=1, views=_DECLARED_VIEWS)
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     github = _Board(project)
     setup_tracker.check_board(github, {"node_id": "R"}, apply=True, report=Report())
@@ -610,7 +632,7 @@ def test_apply_creates_a_missing_board_and_reads_it_by_its_id():
 def test_apply_makes_a_public_board_private_and_links_it():
     """Both are corrected, and the re-read board shows neither difference."""
     github = _Board(_project(cards=2, public=True, linked=False,
-                             views=(("Plan", "is:open", 0),)))
+                             views=_DECLARED_VIEWS))
     report = Report()
     setup_tracker.check_board(github, {"node_id": "R"}, apply=True, report=report)
     names = [name for name, _ in github.mutations]
@@ -621,7 +643,7 @@ def test_apply_makes_a_public_board_private_and_links_it():
 
 def test_apply_filters_a_plan_view_on_a_board_holding_cards():
     """A view holds no card data, so its filter is corrected whatever the board holds."""
-    github = _Board(_project(cards=3, views=(("Plan", "", 0),)))
+    github = _Board(_project(cards=3, views=(("Plan", ""), _INBOX)))
     setup_tracker.check_board(github, {"node_id": "R"}, apply=True, report=Report())
     assert ("updateProjectV2View", {"id": "V1", "name": "Plan", "filter": "is:open"}) in (
         github.mutations
@@ -629,20 +651,22 @@ def test_apply_filters_a_plan_view_on_a_board_holding_cards():
 
 
 def test_apply_never_renames_a_view_someone_made():
-    """Only a lone view still named "View 1" becomes the plan view; otherwise one is made."""
-    github = _Board(_project(cards=5, views=(("Next up", "is:open label:balance", 0),
-                                             ("By arc", "", 0))))
+    """Only a lone view still named "View 1" becomes the plan view; otherwise one is made, and
+    the Inbox is made beside it (ruling plan#3231): each write is to a view it made."""
+    github = _Board(_project(cards=5, views=(("Next up", "is:open label:balance"),
+                                             ("By arc", ""))))
     setup_tracker.check_board(github, {"node_id": "R"}, apply=True, report=Report())
     touched = [variables.get("id") for name, variables in github.mutations
                if name == "updateProjectV2View"]
     assert [name for name, _ in github.mutations if name == "createProjectV2View"]
-    assert set(touched) == {"VNEW"}
-    assert [v["name"] for v in github.project["views"]["nodes"]] == ["Next up", "By arc", "Plan"]
+    assert set(touched) == {"V3", "V4"}
+    assert [v["name"] for v in github.project["views"]["nodes"]] == [
+        "Next up", "By arc", "Plan", "Inbox"]
 
 
 def test_check_mode_reports_a_plan_view_with_another_filter():
     """The filter is graded, not only the view's name."""
-    project = _project(views=(("Plan", "", 0),))
+    project = _project(views=(("Plan", ""), _INBOX))
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["workflows"]["nodes"] = []
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
@@ -651,7 +675,7 @@ def test_check_mode_reports_a_plan_view_with_another_filter():
 
 def test_a_sorted_view_is_a_difference():
     """A sort hides the drag order, which is the plan's order."""
-    project = _project(views=(("Plan", "is:open", 1),))
+    project = _project(views=(("Plan", "is:open", _BY_UPDATED), _INBOX))
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["workflows"]["nodes"] = []
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
@@ -667,8 +691,9 @@ def test_check_mode_sends_no_mutation_even_to_a_public_unlinked_board():
     setup_tracker.check_board(github, {"node_id": "R"}, apply=False, report=report)
     assert not github.writes()
     # Public, unlinked, Rank stored, 'Item closed' on, 'Auto-add sub-issues to
-    # project' on (R-BAL177), no 'Plan' view.
-    assert report.differences == 6
+    # project' on (R-BAL177), no 'Plan' view, no 'Inbox' view (ruling plan#3231).
+    assert report.differences == 7
+    assert "DIFFERS the board has no view named 'Inbox'" in report.lines
 
 
 def _app_setup(monkeypatch, *, owner="saltyreformed-labs", installation=None, repos=None,
@@ -817,7 +842,7 @@ def test_auto_archive_on_is_a_difference_and_off_or_unlisted_is_not(workflows, d
     "Auto-archive items" may not run (it replaces V3-10's report of it as the one automation
     allowed); off, or not listed (GitHub lists a built-in automation only once a board has
     it), it is no difference."""
-    project = _project(views=(("Plan", "is:open", 0),))
+    project = _project(views=_DECLARED_VIEWS)
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     project["workflows"]["nodes"] = workflows
@@ -832,7 +857,7 @@ def test_auto_archive_on_is_a_difference_and_off_or_unlisted_is_not(workflows, d
 def test_every_archived_item_is_a_difference_on_every_page():
     """An archived card is in no view (R-BAL352), so each one is named, a draft too, on
     every page of the one read of the board's items that the Status check makes."""
-    github = _Board(_project(cards=3, views=(("Plan", "is:open", 0),)),
+    github = _Board(_project(cards=3, views=_DECLARED_VIEWS),
                     status_pages=([_status_item(1, None), _status_item(2, None, archived=True)],
                                   [_status_item(None, None, "DRAFT_ISSUE", archived=True)]))
     report = Report()
@@ -849,7 +874,7 @@ def test_a_board_link_is_proven_by_a_read_that_names_it_and_unread_when_a_short_
     GitHub cut short that names it proves the link (a short read hides, never invents);
     one that does not name it says nothing either way, and says so -- and ``--apply``
     links only a board known to be unlinked."""
-    project = _project(views=(("Plan", "is:open", 0),))
+    project = _project(views=_DECLARED_VIEWS)
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     project["workflows"]["nodes"] = []
@@ -872,7 +897,7 @@ def test_a_board_link_is_proven_by_a_read_that_names_it_and_unread_when_a_short_
 
 def _as_declared():
     """A board as declared, its Plan view showing :data:`_DECLARED`."""
-    project = _project(views=(("Plan", "is:open", 0),))
+    project = _project(views=_DECLARED_VIEWS)
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"], _FIELDS["F3"]]
     project["workflows"]["nodes"] = []
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)

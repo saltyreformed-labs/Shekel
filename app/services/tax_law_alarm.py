@@ -85,8 +85,10 @@ class Gap:
             ``None`` only when the law carries no year at all.
         priced_older: On a whole-year gap only, one state :class:`Gap` for
             each listed state priced on an OLDER year than ``fallback_year``
-            (the newest year lacks it), so the notice can name each part's
-            year in one sentence (ruling salary:R-SAL91).  Empty otherwise.
+            (the newest year lacks it).  The notice reads whether it is empty
+            to choose "older rules" over ``fallback_year``'s (ruling
+            plan#3198), and the weekly email reads it to name each part's
+            year (ruling salary:R-SAL91).  Empty otherwise.
     """
 
     tax_year: int

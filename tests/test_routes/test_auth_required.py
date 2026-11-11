@@ -60,7 +60,7 @@ from app import login_gate
 from app.login_gate import PUBLIC_ENDPOINTS, TWO_FACTOR_SETUP_ENDPOINTS
 from tests._two_factor_sign_in import sign_in_seed_companion_by_password
 from tests.test_integration.test_rate_limiter import _disable_limiter
-from tests.test_routes.test_no_baseline_policy import _route_table_app
+from tests.test_routes.test_no_baseline_policy._helpers import _route_table_app
 
 #: The seven views an anonymous visitor may reach, plus Flask's own static
 #: route -- the front door and what it needs.  **A second spelling on

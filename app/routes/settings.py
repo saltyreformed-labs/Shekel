@@ -821,10 +821,16 @@ def companion_reset_two_factor(companion_id):
     setup until she enrols her authenticator again.
 
     A re-confirmed password first, as the other doors that change a
-    companion's account ask.  A companion with nothing to reset (her
-    two-factor never set up, or already reset) is told so and nothing is
-    written: the button shows only while hers is on, so that is a page left
-    open across a reset.
+    companion's account ask.  **A companion whose two-factor is not on is
+    told there is nothing to reset, and nothing is written** (plan#3515):
+    :attr:`~app.models.user.User.has_two_factor`, the button's own
+    condition, so that is a page left open across a reset or a form posted
+    by hand.  It includes a companion midway through setup, which every
+    companion held there is after her first page: her row holds the pending
+    key she may just have scanned, which
+    :func:`~app.services.mfa_service.reset_two_factor` counts as material,
+    and resetting her would end her sessions and kill that key.  Leftover
+    material on a row that is off is ``scripts/reset_mfa.py``'s to clear.
 
     Args:
         companion_id: The ``auth.users.id`` of the owner's companion; another
@@ -833,9 +839,12 @@ def companion_reset_two_factor(companion_id):
     """
     companion = _load_companion_or_404(companion_id)
     name = companion.display_name or companion.email
-    if not mfa_service.reset_two_factor(companion):
+    if not companion.has_two_factor:
         flash(f"{name} has no two-factor authentication to reset.", "info")
         return redirect(url_for("settings.show", section="companions"))
+    # Her row is on, so the act always clears it: its False (nothing to
+    # clear) cannot come back here.
+    mfa_service.reset_two_factor(companion)
     db.session.commit()
     log_event(
         logger, logging.WARNING, EVT_MFA_RESET, AUTH,

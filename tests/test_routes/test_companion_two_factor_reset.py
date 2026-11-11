@@ -211,6 +211,34 @@ class TestTheReset:
         assert db.session.get(User, companion.id).session_invalidated_at is None
         assert _config_of(companion.id) is None
 
+    def test_midway_through_setup_is_nothing_to_reset_and_her_key_survives(
+        self, app, auth_client, seed_companion,
+    ):
+        """Her setup opened once: told so, her session and her pending key kept.
+
+        Every companion the login gate holds has a pending key after her
+        first page, which the reset act counts as material; the door reads
+        whether her two-factor is on instead (plan#3515).
+        """
+        companion_id = seed_companion["user"].id
+        browser = sign_in_seed_companion_by_password(app)
+        assert browser.get(_SETUP).status_code == 200
+        pending = _config_of(companion_id).pending_secret_encrypted
+        key = mfa_service.decrypt_secret(pending)
+
+        response = auth_client.post(_reset_url(companion_id), follow_redirects=True)
+
+        assert (
+            "Companion User has no two-factor authentication to reset."
+        ) in text_of(landed_on_companions(response))
+        db.session.expire_all()
+        assert db.session.get(User, companion_id).session_invalidated_at is None
+        assert _config_of(companion_id).pending_secret_encrypted == pending
+        # Still signed in, and her next setup shows the key she scanned.
+        again = browser.get(_SETUP)
+        assert again.status_code == 200
+        assert f"<code>{key}</code>" in again.get_data(as_text=True)
+
     def test_the_script_and_the_door_run_the_one_act(
         self, auth_client, seed_user, seed_companion, monkeypatch,
     ):

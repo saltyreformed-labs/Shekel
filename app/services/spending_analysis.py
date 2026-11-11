@@ -62,7 +62,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.models.transaction import Transaction
-from app.services.account_projection import is_revolving
+from app.services.account_projection import pays_a_card
 from app.services.cash_flow_set import (
     AttributionSpan,
     CashFlowSet,
@@ -298,12 +298,16 @@ def _pays_a_card(item: PlanItem) -> bool:
     Args:
         item: A row or a transfer leg from the settled expense load.
 
+    The question itself is :func:`~app.services.account_projection
+    .pays_a_card`'s, which the Recurring page asks of a definition (plan task
+    plan#3530); this adds only that a row is never a payment.
+
     Returns:
         True when *item* is a :class:`~app.services.transfer_legs.TransferLeg`
-        whose transfer goes to a revolving account
-        (:func:`~app.services.account_projection.is_revolving`).
+        whose transfer pays a card
+        (:func:`~app.services.account_projection.pays_a_card`).
     """
-    return isinstance(item, TransferLeg) and is_revolving(item.transfer.to_account)
+    return isinstance(item, TransferLeg) and pays_a_card(item.transfer)
 
 
 def resolved_actual_amount(parent: PlanParent, basis: AmountBasis) -> Decimal:

@@ -116,6 +116,16 @@ returns ``None`` for rule-less / expired / missing-or-zero-amount templates, so
 those rows render with a blank equivalent and contribute nothing to any
 total (matching the retired /obligations kernel exactly).
 
+**A transfer into a card is listed and not totalled** (developer ruling
+plan#3527, plan task plan#3530).  The card's bills are in the Expenses section,
+and the card's payment pays those bills off, so adding both counted each bill
+twice: a ``$100`` phone bill every paycheck on the card read Expenses
+``$216.67`` and Transfers ``$216.67`` for a net of ``-$433.34``.  Such a row
+keeps its Amount and its monthly figure, takes no share, says why it is left
+out, and adds nothing to the Transfers subtotal or the band
+(:func:`~app.services.account_projection.pays_a_card`).  A fixed amount sent
+to the card is left out the same way, which is the ruling's stated cost.
+
 Boundary discipline (``CLAUDE.md`` Architecture): no Flask imports; inputs
 are already-loaded ORM template lists (or any duck-typed equivalent, as the
 tests build with ``types.SimpleNamespace``) plus the read pass; output is a
@@ -128,6 +138,8 @@ from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.models.recurrence_rule import RecurrenceRule
+from app.models.transfer_template import TransferTemplate
+from app.services.account_projection import pays_a_card
 from app.services.balance_at import BalanceContext
 from app.services.obligations_aggregator import (
     RecurringTemplate,
@@ -195,8 +207,8 @@ class RecurringRow:
             future recurring occurrence (no rule, or expired).
         share_pct: This row's monthly equivalent as a percentage (0-100) of
             its section's committed monthly total, for the share bar; ``None``
-            when the row does not contribute (non-recurring) or the section
-            total is zero.
+            when the row does not contribute (non-recurring, or
+            ``pays_a_card``) or the section total is zero.
         amount: What one occurrence commits on the read pass's day, for the
             Amount column and its sort key
             (:func:`~app.services.obligations_aggregator.todays_price`, ruling
@@ -209,6 +221,11 @@ class RecurringRow:
             **R-SAL73**), and this field read it for every definition but a
             salary one until plan step X-bp: the NEWEST stated price, so a
             scheduled rise showed before it took effect.
+        pays_a_card: True for a transfer definition whose money goes into a
+            card (:func:`~app.services.account_projection.pays_a_card`): its
+            Amount and monthly figure stand, and it is in no subtotal, share
+            or band figure, because the card's bills it pays are (ruling
+            plan#3527).  False for every other row.
     """
 
     template: RecurringTemplate
@@ -217,6 +234,7 @@ class RecurringRow:
     next_date: date | None
     share_pct: Decimal | None
     amount: Decimal
+    pays_a_card: bool
 
 
 @dataclass(frozen=True)
@@ -255,10 +273,14 @@ class RecurringSection:
 
     ``rows`` are ordered by monthly-equivalent cost descending (the locked
     default landing order), non-recurring rows last.  ``subtotal`` is the
-    section's committed total in both units; it equals
-    ``obligations_aggregator.committed_monthly`` for the section by
-    construction (same full-precision filter+sum, rounded once), so the two
-    surfaces cannot drift.
+    section's committed total in both units: the same full-precision
+    filter+sum ``obligations_aggregator.committed_monthly`` makes, rounded
+    once, over the rows that do not pay a card.  So it equals that aggregator
+    for the income and expense sections by construction, and for the
+    transfers section less any transfer into a card, which this leaves out
+    (ruling plan#3527) and the aggregator keeps: its emergency-fund floor on
+    ``/savings`` reads checking's definitions alone, the card's payment among
+    them and none of the card's bills, so each counts a bill on the card once.
     """
 
     rows: tuple[RecurringRow, ...]
@@ -275,7 +297,8 @@ class SummaryBand:
     Attributes:
         income: Committed recurring income, both units.
         expenses: Committed recurring expenses, both units.
-        transfers_out: Committed recurring transfers, both units.
+        transfers_out: Committed recurring transfers, both units, less any
+            into a card (ruling plan#3527; :attr:`RecurringRow.pays_a_card`).
         net: ``income - expenses - transfers_out`` per unit, computed from
             the rounded section subtotals so the tile equals what the shown
             figures subtract to.
@@ -435,6 +458,8 @@ class _PreparedRow:
             pass, or ``None`` exactly when *rule* is -- the two are set and
             cleared together, so a row cannot be described from a reading of a
             rule it does not have.
+        pays_a_card: Whether it is a transfer definition into a card, which
+            no total counts (:attr:`RecurringRow.pays_a_card`).
     """
 
     template: RecurringTemplate
@@ -442,6 +467,7 @@ class _PreparedRow:
     monthly_full: Decimal | None
     rule: RecurrenceRule | None
     reading: RuleReading | None
+    pays_a_card: bool
 
     @property
     def resolved(self) -> ResolvedRecurrence | None:
@@ -543,8 +569,11 @@ def _build_section(
     each row's share are measured against.  Rows are ordered by monthly cost
     descending with non-recurring rows last (the locked default), preserving
     the caller's incoming order among equals.  The subtotal rounds the
-    full-precision total once, so it equals ``committed_monthly`` for the
-    section by construction.
+    full-precision total once.  A transfer definition into a card is a row
+    with its monthly figure and adds nothing to that total (ruling plan#3527,
+    :attr:`RecurringRow.pays_a_card`), so the subtotal equals
+    ``committed_monthly`` for the section less such rows; :class:`RecurringSection`
+    says why the aggregator keeps them.
 
     **Each rule is READ once** (plan step R7a).  A row's cadence phrase, its
     next date and its monthly equivalent are three questions about one reading,
@@ -635,14 +664,18 @@ def _build_section(
             None if reading is None
             else monthly_or_none(template, reading, price, ctx)
         )
+        # Only a transfer definition names an account its money goes to; an
+        # income or expense definition never pays a card.
+        pays = isinstance(template, TransferTemplate) and pays_a_card(template)
         prepared.append(_PreparedRow(
             template=template,
             price=price,
             monthly_full=monthly_full,
             rule=rule,
             reading=reading,
+            pays_a_card=pays,
         ))
-        if monthly_full is not None:
+        if monthly_full is not None and not pays:
             section_total_full += monthly_full
 
     rows = [
@@ -654,8 +687,12 @@ def _build_section(
                 None if item.reading is None
                 else _next_occurrence(item.rule, item.reading, ctx.as_of)
             ),
-            share_pct=_share_pct(item.monthly_full, section_total_full),
+            share_pct=_share_pct(
+                None if item.pays_a_card else item.monthly_full,
+                section_total_full,
+            ),
             amount=item.price.amount,
+            pays_a_card=item.pays_a_card,
         )
         for item in prepared
     ]

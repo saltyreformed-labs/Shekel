@@ -586,11 +586,18 @@ def committed_monthly(
     ``round_money`` (ROUND_HALF_UP via ``app.utils.money``) -- intermediate
     sums stay at full Decimal precision so penny-level drift cannot accumulate.
 
-    This is the single canonical aggregator behind both the Recurring
-    surface's totals (the retired ``/obligations`` page's kernel) and the
-    ``/savings`` emergency-fund baseline + per-goal contribution-floor figures.
-    Per E-24 / HIGH-05, every consumer must call this function rather than
-    inline its own filter+sum loop.
+    This is the single canonical aggregator behind the ``/savings``
+    emergency-fund baseline + per-goal contribution-floor figures, and the
+    Recurring surface's totals sum the same filter per row (the retired
+    ``/obligations`` page's kernel, ``recurring_view._build_section``, which
+    holds each row's figure for its share).  Per E-24 / HIGH-05, every
+    consumer must call this function or that per-row filter rather than
+    inline its own.  **The two part at a transfer into a card** (ruling
+    plan#3527, plan task plan#3530): the Recurring surface leaves one out of
+    its totals, the card's bills being in them, and this counts one, its
+    emergency-fund caller reading checking's definitions alone -- the card's
+    payment and none of the card's bills -- so each counts a bill on the
+    card once.
 
     Args:
         templates: Iterable of ORM template instances (``TransactionTemplate``,

@@ -1377,7 +1377,7 @@ class TestTheValuesCannotDisagree:
         with pytest.raises(ValueError, match="rule and its reading"):
             recurring_view._PreparedRow(
                 template=tmpl, price=_PRICE_TEN, monthly_full=None,
-                rule=tmpl.recurrence_rule, reading=None,
+                rule=tmpl.recurrence_rule, reading=None, pays_a_card=False,
             )
 
     def test_a_prepared_row_refuses_a_reading_without_its_rule(
@@ -1392,5 +1392,5 @@ class TestTheValuesCannotDisagree:
         with pytest.raises(ValueError, match="rule and its reading"):
             recurring_view._PreparedRow(
                 template=tmpl, price=_PRICE_TEN, monthly_full=None, rule=None,
-                reading=reading,
+                reading=reading, pays_a_card=False,
             )

@@ -15,6 +15,11 @@
      view                -- RecurringView (band + income/expenses/transfers).
      show_per_paycheck   -- which unit is active (bool).
 
+   A transfer row with pays_a_card set (a payment into a card) keeps its
+   Amount and monthly figure, has no share (share_pct is None) and says it is
+   not in the totals: the card's bills it pays are, in Expenses (ruling
+   plan#3527).
+
    Self-contained imports so the standalone render has them too. #}
 {% from "_money_macros.html" import money %}
 {% from "_recurrence_macros.html" import recurrence_cell %}
@@ -189,6 +194,9 @@ data-sort-next="{{ row.next_date.isoformat() if row.next_date else '' }}"
           <td class="text-end">
             <span class="font-mono">{{ equiv(row.equivalent, show_pp) }}</span>
             {{ share_bar(row.share_pct) }}
+            {%- if row.pays_a_card %}
+            <small class="text-muted d-block">Not in the totals: it pays the card's bills, which are</small>
+            {%- endif %}
           </td>
           <td class="text-nowrap">{{ next_date_cell(row.next_date) }}</td>
           <td class="text-nowrap text-end">

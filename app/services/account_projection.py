@@ -15,9 +15,11 @@ see :func:`is_payroll_deduction_funded` for the replacement).  Since plan
 step credit_card:CC-1 it also holds :func:`is_revolving`, the ONE predicate
 every credit-card feature gates on: a schema flag on the account's type,
 which is the shape the payroll-funding comment below asks for rather than a
-copy of its enum tuple.
+copy of its enum tuple, and since plan task plan#3530 :func:`pays_a_card`,
+that predicate asked of the account a transfer or its definition pays into.
 
-Pure functions over Account / AccountType / int.  No Flask imports
+Pure functions over Account / AccountType / Transfer / TransferTemplate /
+int.  No Flask imports
 (the service-boundary rule from ``CLAUDE.md``).  Caller-supplied
 ``ref_cache_module`` keeps this module free of circular import
 worries with :mod:`app.ref_cache` while preserving the IDs-for-logic
@@ -39,6 +41,8 @@ before D1b, and :func:`classify_account` takes a live
 from enum import Enum
 
 from app.enums import AcctTypeEnum
+from app.models.transfer import Transfer
+from app.models.transfer_template import TransferTemplate
 
 
 class AccountProjectionKind(Enum):
@@ -162,6 +166,33 @@ def is_revolving(account) -> bool:
     if acct_type is None:
         return False
     return acct_type.has_revolving_credit
+
+
+def pays_a_card(transfer: Transfer | TransferTemplate) -> bool:
+    """Return True iff *transfer*'s money goes INTO a credit card.
+
+    The ONE test of "this transfer pays a card's bills off rather than moving
+    money anywhere else", asked of a transfer and of the definition that makes
+    its rows alike, since both name the account the money goes to
+    (``to_account``).  Two screens leave such a payment out of a total because
+    the card's bills are already in it, so counting the payment too counted
+    one purchase twice: the Spending report, of a settled leg
+    (``spending_analysis._pays_a_card``, plan task plan#2932, ruling
+    plan#2926), and the Recurring page, of a definition
+    (``recurring_view``, plan task plan#3530, ruling plan#3527).  A fixed
+    amount sent to the card is such a payment too, which is the cost ruling
+    plan#3527 states.
+
+    Args:
+        transfer: A :class:`~app.models.transfer.Transfer` or a
+            :class:`~app.models.transfer_template.TransferTemplate`, its
+            ``to_account`` and that account's type loaded or loadable.
+
+    Returns:
+        True when the account the money goes to is revolving
+        (:func:`is_revolving`).
+    """
+    return is_revolving(transfer.to_account)
 
 
 # Payroll-deduction-funded account types.  The schema does not

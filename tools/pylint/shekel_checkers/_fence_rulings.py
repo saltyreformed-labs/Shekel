@@ -410,6 +410,10 @@ _FENCED_MODULE_RULINGS = {
         # nothing -- the same metadata question as the two above, on a flag
         # the seed alone sets.
         "is_revolving",
+        # Whether a transfer or its definition pays into a card (plan task
+        # plan#3530): ``is_revolving`` of the account its money goes to, a
+        # yes or no that dates and sums nothing.
+        "pays_a_card",
     })),
     # The loan WALK leaf (plan step B1, renamed ``_fold`` -> ``_walk`` at D-fold):
     # the event stream, the split, and the one running-balance replay over them,

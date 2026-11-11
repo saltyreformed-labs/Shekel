@@ -107,9 +107,8 @@ def _a_savings_account(seed_user):
     """Create the far side a transfer needs.
 
     ``seed_user`` builds ONE account, so a transfer test builds its own second
-    one -- through the canonical factory, so the account carries the
-    origination assertion and ledger pairing a production account has and the
-    transfer's posting reconcile has somewhere real to post.
+    one -- through the canonical factory, so the account carries the opening
+    and origination assertion a production account has.
     """
     savings_type = (
         db.session.query(AccountType).filter_by(name="Savings").one()

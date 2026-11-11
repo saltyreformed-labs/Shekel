@@ -49,7 +49,7 @@ class TestDeleteTransfer:
       A paid transfer REMOVED for good is graded in two other files and is
       not written again here: ``test_transfer_posting_lifecycle.py``'s
       ``TestDeleteAndRestore::test_hard_delete_settled_reverses_and_pairs_survive_null_links``
-      (the row is gone, its posted legs reversed) and
+      (the row is gone, and its effect with it) and
       ``test_cc5_4a3_movement_removal.py``'s
       ``TestEveryDoorWithdrawsTheActItself`` case
       ``test_a_hard_transfer_delete_withdraws_the_act_naming_its_leg`` (the
@@ -62,7 +62,7 @@ class TestDeleteTransfer:
       (:meth:`test_hard_delete_soft_deleted_transfer_succeeds`, a planned
       transfer hidden first; a PAID one hidden and then removed is
       ``test_transfer_posting_lifecycle.py``'s ``TestDeleteAndRestore`` case
-      ``test_hard_delete_after_soft_delete_writes_no_more_entries``).
+      ``test_hard_delete_after_soft_delete_moves_nothing_more``).
     - Someone else's transfer, live or already hidden: not found, on either
       delete, and re-read after a COMMIT still there and still live or
       still hidden (:meth:`test_wrong_user_rejected`,

@@ -286,12 +286,12 @@ class TestForeignKeyActions:
         Account->LedgerAccount relationship is one-directional, so an ORM
         delete of the account emits the account DELETE and the database
         cascade removes the ledger row -- no orphan, no ORM SET-NULL
-        attempt.  An empty account (no transactions/transfers) is the only
-        account a delete can reach (see the model's impossibility argument).
+        attempt.  The delete door reaches the cascade for an account holding
+        only balance records too (ruling plan#2784), not only an empty one.
         """
         with app.app_context():
-            # $0 anchor: a truly EMPTY account (a non-zero one posts its
-            # Step-5 opening and is archive-only, never hard-deletable).
+            # $0 anchor: an account holding nothing.  A non-zero opening kept
+            # an account off the hard-delete path until ruling plan#2784.
             account = create_account_of_type(
                 seed_user, _db.session, "Savings", "Empty Savings",
                 anchor_balance=Decimal("0.00"),

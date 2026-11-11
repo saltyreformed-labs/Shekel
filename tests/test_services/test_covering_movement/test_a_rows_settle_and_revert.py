@@ -144,10 +144,10 @@ class TestTheMovementIsTheBalance:
             assert txn.settled_on not in without
             assert without == {}
 
-    def test_the_posted_ledgers_cash_net_moves_by_the_figure(
+    def test_the_ledgers_cash_net_moves_by_the_figure(
         self, app, seed_user, seed_periods,
     ):
-        """The verb's ledger reconcile posts the family in one pass.
+        """The settle verb's movement books the figure on the cash line.
 
         Measured as a DELTA: the fixture's own opening correction already
         sits on the same cash ledger.
@@ -169,12 +169,12 @@ class TestARevertUnDatesAndAReSettleReDates:
     assertion and KEEPS what moved, and the movement -- the record's mirror
     and the only home of who wrote the figure -- follows the record rather
     than the band.  Every revert here goes through the door production uses
-    (``transaction_service.apply_requested_status``), which runs the family
-    reconcile after the seam; the seam's own half is graded alone in
-    :class:`TestTheBareSeamUnDatesAndKeeps`.
+    (``transaction_service.apply_requested_status``), which ran the family
+    reconcile after the seam until plan task plan#3097; the seam's own half is
+    graded alone in :class:`TestTheBareSeamUnDatesAndKeeps`.
     """
 
-    def test_a_revert_un_dates_a_resolved_movement_and_the_door_reverses_its_legs(
+    def test_a_revert_un_dates_a_resolved_movement_and_its_lines_go(
         self, app, seed_user, seed_periods,
     ):
         with app.app_context():
@@ -525,8 +525,8 @@ class TestAMoveOutsideTheBandReadsNoRecord:
     sides' records (``test_no_path_reads_a_sides_record_alone``'s cancel
     case, plan#2138).  Each case holds a bill a revert left a kept movement
     under, so the arm would have a record to read.  Graded at the bare seam,
-    because a transaction's door loads the row's entries for its ledger
-    reconcile whatever the seam reads.  Measured at plan#2139: calling the
+    chosen while a transaction's door loaded the row's entries for its ledger
+    reconcile whatever the seam read (until plan#3097).  Measured at plan#2139: calling the
     arm for every move fails both cases, and the predicate answering True
     for a cancel fails the cancel case and the transfer's together.
     """

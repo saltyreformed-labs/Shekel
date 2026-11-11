@@ -562,11 +562,11 @@ class TestMultiScenarioIsolation:
 # ---------------------------------------------------------------------------
 
 
-class TestOwnerIsolationViaJournalEntry:
+class TestOwnerIsolation:
     """Owners never cross-contaminate."""
 
     @pytest.mark.server_clock
-    def test_two_owners_reconcile_independently_and_posting_has_no_user_id(
+    def test_two_owners_reconcile_independently(
         self, app, db, seed_user, seed_second_user,
     ):
         """Two independent owners settle transfers; neither sees the other's.

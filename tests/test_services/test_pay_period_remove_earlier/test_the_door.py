@@ -247,12 +247,13 @@ class TestTheEarliestRhythmKeepsAPaycheck:
     ):
         """R-PC110 refuses before the writer's first statement, so no savepoint is owed.
 
-        A head the gate lets go, holding template rows and the books' opening
-        (its line files by its day), and the later rhythm's first paycheck chosen: only
-        R-PC110 can refuse.  Read after a COMMIT and a fresh session
-        (``_unchanged``'s reason), with nothing rolled back here, so a delete
-        staged ahead of the refusal shows in the paydays, the rows or the
-        worked-out totals.
+        A head the gate lets go, holding template rows, and the later rhythm's
+        first paycheck chosen: only R-PC110 can refuse.  Read after a COMMIT
+        and a fresh session (``_unchanged``'s reason), with nothing rolled back
+        here, so a delete staged ahead of the refusal shows in the paydays, the
+        rows or the worked-out totals.  The books' opening sits inside those
+        totals; that the ledger files it in the head is graded by
+        ``test_what_a_paycheck_may_hold.py``'s ``TestAnOpeningIsReFiled``, not here.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -378,11 +379,12 @@ class TestAnAddUndoneLeavesNothingBehind:
     2024-01-04) with a monthly bill and a monthly transfer from 2025-11-24,
     both populated -- so the paychecks "Add earlier" records receive template
     rows and a recurring transfer, which the removal must take with them
-    (R-PC109's "template rows go").  Between the add and the removal the
-    worked-out ledger files the books' opening (dated 2024-01-04, before every
-    paycheck) in the earliest paycheck -- an added one (R-PC114's case).  (The
-    stored ledger was re-synced between them, as the loan and balance doors
-    did, until plan task plan#3132.)
+    (R-PC109's "template rows go").  The books' opening (dated 2024-01-04,
+    before every paycheck) sits inside the worked-out totals compared here.  That
+    the ledger files it in the earliest paycheck, an added one (R-PC114's
+    case), and that its re-filing moves no total, are graded by
+    ``test_what_a_paycheck_may_hold.py``'s ``TestAnOpeningIsReFiled`` and
+    ``TestNoWorkedOutTotalMoves``, not here.
     """
 
     def test_paydays_eras_rows_and_the_worked_out_totals_come_back(

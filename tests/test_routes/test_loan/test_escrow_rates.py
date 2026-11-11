@@ -19,7 +19,7 @@ from ._helpers import (
     _create_loan_account,
     _create_mortgage,
     _create_other_loan,
-    _make_sync_loan,
+    _make_clean_split_loan,
     _parse_band_chart,
 )
 
@@ -38,7 +38,7 @@ class TestAnEscrowWrite:
         then returns 200, writes the line, and leaves the linked line's nets
         identical per date.
         """
-        loan = _make_sync_loan(seed_user, db.session)
+        loan = _make_clean_split_loan(seed_user, db.session)
         scenario_id = seed_user["scenario"].id
         create_settled_transfer(
             seed_user, db.session, seed_user["account"], loan, seed_periods[1],

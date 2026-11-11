@@ -1435,10 +1435,10 @@ def create_hysa_account(  # pylint: disable=too-many-arguments,too-many-position
     return account
 
 
-# Default opening anchor balance for ledger-account-suite accounts.  The
-# Build-Order Step 2 suites never assert on a balance (Commit 2 touches no
-# balance math), so a single fixed value keeps the shared factory at four
-# parameters and the call sites free of an irrelevant amount.
+# Default opening anchor balance for an account whose suite names none, so a
+# call site carries no amount its test does not read.  Chosen for the
+# Build-Order Step 2 suites, which asserted on no balance (Commit 2 touched no
+# balance math); a suite needing another opening passes ``anchor_balance``.
 _LEDGER_SUITE_ANCHOR_BALANCE = Decimal("100.00")
 
 
@@ -1512,17 +1512,17 @@ def create_account_of_type(
 ):
     """Create an account of any built-in type via the canonical factory.
 
-    The shared "build an account of type X" helper for the ledger-account
-    (Build-Order Step 2) suites, so the stereotyped ``AccountType`` lookup +
-    ``AccountSpec`` + ``create_account`` block is not copied per file (a
-    duplicate-code finding).  It pairs no ``budget.ledger_accounts`` row:
-    ``create_account``'s sync hook did until plan task plan#3133, and a store
-    model test plants one (``tests._stored_ledger.chart_row_or_plant``).  The
-    opening anchor balance defaults to a fixed sentinel (the store suites
-    assert on rows, never on balance); the account-anchor suites pass an
-    explicit ``anchor_balance`` because the opening books exactly
-    that value.  The anchor period is resolved by the factory from the day the
-    opening is observed on.
+    The shared "build an account of type X" helper, first written for the
+    ledger-account (Build-Order Step 2) suites, so the stereotyped
+    ``AccountType`` lookup + ``AccountSpec`` + ``create_account`` block is not
+    copied per file (a duplicate-code finding).  It pairs no
+    ``budget.ledger_accounts`` row: ``create_account``'s sync hook did until
+    plan task plan#3133, and a store model test plants one
+    (``tests._stored_ledger.chart_row_or_plant``).  The opening anchor balance
+    defaults to a fixed sentinel; a suite whose arithmetic needs another
+    passes an explicit ``anchor_balance``, which the opening books exactly.
+    The factory derives no anchor period from the day (rulings R-EH, R-EO;
+    ``account_service.create_account``).
 
     **What it returns is an account that has ALREADY EXISTED**, and both halves
     of that are deliberate.

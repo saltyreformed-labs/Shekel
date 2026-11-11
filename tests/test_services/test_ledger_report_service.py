@@ -71,8 +71,8 @@ _RIDES_ON_TOP = date(2025, 6, 1)
 
 #: The day accounts these fixtures create are OPENED on -- before
 #: :data:`_RIDES_ON_TOP`, so the settle rides on top of the opening.  Passed to
-#: the factory rather than re-stamped, because it posts the opening's anchor
-#: correction keyed on this day.
+#: the factory, which dates the origination assertion on it; the worked-out
+#: ledger books the opening's correction on that day.
 _OPENED_BEFORE = date(2025, 1, 1)
 
 

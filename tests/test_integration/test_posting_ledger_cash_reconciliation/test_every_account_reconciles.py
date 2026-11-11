@@ -490,10 +490,10 @@ class TestMultiScenarioIsolation:
             _assert_full_reconciliation(whatif.id)
 
 
-class TestOwnerIsolationViaJournalEntry:
+class TestOwnerIsolation:
     """Owners never cross-contaminate."""
 
-    def test_two_owners_reconcile_independently_and_posting_has_no_user_id(
+    def test_two_owners_reconcile_independently(
         self, app, db, seed_user, seed_second_user,
     ):
         """Two independent owners settle cash; neither sees the other's.

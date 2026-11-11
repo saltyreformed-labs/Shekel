@@ -49,8 +49,8 @@ _Y = 2099
 #: The day every account these fixtures create is OPENED on -- the first of
 #: :data:`_Y`, so an opening precedes every settle the fixtures pin and a
 #: settle therefore rides ON TOP of it rather than being absorbed.  Passed to
-#: the account factory explicitly, never re-stamped afterwards: the factory
-#: posts the opening's anchor correction keyed on this day.
+#: the account factory explicitly, which dates the origination assertion on
+#: it; the worked-out ledger books the opening's correction on that day.
 _FIXTURE_OPENING = date(_Y, 1, 1)
 
 

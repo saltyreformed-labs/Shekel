@@ -2002,40 +2002,38 @@ class TestARowCarryingTheBanksDayIsStillWrittenIfItsPurchaseDayMoves:
         assert accepted.redated_count == 1
 
 
-class TestARedatedSettleLeavesNoPostingBehind:
-    """Finding **N-324**: every day assertion here had no posting to MOVE.
+class TestARedatedSettleLeavesNoMovementBehind:
+    """Finding **N-324**: every day assertion here had nothing on the OLD day.
 
     ``_builders.a_transaction`` writes ``status_id`` and ``settled_on``
     straight through the ORM and the covering movement through the seam's
     own writer, and that route is DELIBERATE -- a broken settle verb must not
-    also break the
-    fixture that would have caught it (the builders' own module docstring).
-    **What nobody stated was the consequence.**  Those rows carry no ledger
-    postings, so ``_apply_day`` reaches ``apply_requested_status``, which
-    reconciles and re-posts at the new day -- and a defect that left the OLD
-    day's posting behind, the classic double-count on a re-dated settle, was
-    invisible to every case in this file.  X-f6a-3c-2's batch-versus-per-act
-    control compares postings between the two paths and so could not see an
-    error common to both.
+    also break the fixture that would have caught it (the builders' own module
+    docstring).  **What nobody stated was the consequence.**  Those rows held
+    no ledger postings while the stored ledger lived, so a defect that left
+    the OLD day's posting behind on a re-dated settle, the classic
+    double-count, was invisible to every case in this file.  X-f6a-3c-2's
+    batch-versus-per-act control compares the two paths' ledgers, so it cannot
+    see an error common to both.
 
     **The remedy is a fixture built through the REAL settle door**
     (``tests._test_helpers.create_settled_cash_transaction``, which drives
-    ``status_seam.apply_status_change`` as the mark-done route does, and drove
-    ``posting_service.sync_transaction_postings`` after it until plan task
-    plan#3132), and an assertion about the OLD day rather than only the new
-    one.  It sits beside the ORM-built cases rather than replacing them,
-    because the two grade different things.
+    ``status_seam.apply_status_change`` as the mark-done route does), and an
+    assertion about the OLD day rather than only the new one.  It sits beside
+    the ORM-built cases rather than replacing them, because the two grade
+    different things.
 
-    **ONLY THE LEDGER CASE BELOW CATCHES A LEFTOVER POSTING, and that is worth
-    stating because it is the opposite of what one would assume.**  Planting
-    the defect ruling **R-FA** exists to prevent -- a matcher that stamps
-    ``settled_on`` itself instead of going through the status door, so the old
-    day's posting stands and no new one is written -- fails
-    ``test_the_rows_cash_NETS_to_the_banks_day_alone`` and leaves
-    ``test_the_OLD_days_balance_stops_carrying_the_row`` GREEN.  The balance
-    producer reads a row's ``settled_on``, not the journal, so a stale posting
-    moves no balance and no balance assertion can see one.  A class that
-    grades this defect with a balance alone grades nothing.
+    **BOTH CASES BELOW CATCH the defect ruling R-FA exists to prevent**: a
+    matcher that stamps the row's ``settled_on`` itself instead of going
+    through the status door, so the row's covering movement keeps the old day
+    (``status_seam._covering._mirror_assertion`` is what moves it).  The
+    balance walk and the ledger read both read that MOVEMENT's day
+    (:class:`app.services.cash_ledger.CashSourceFact`), never the row's.
+    Planted 2026-11-10, it failed each: the old day's balance read
+    ``Decimal('820.00')`` where ``820.00 + 180.00`` was due, and the ledger
+    still netted ``-180.00`` on the old day and nothing on the bank's.  Until
+    plan task plan#3396 this docstring said only the ledger case could see it;
+    the plant measured that false.
     """
 
     def test_the_OLD_days_balance_stops_carrying_the_row(
@@ -2048,10 +2046,10 @@ class TestARedatedSettleLeavesNoPostingBehind:
         day must carry it exactly once -- the account would otherwise be short
         by this amount on every day between the two.
 
-        **This is the PRODUCER's half and it cannot see a stale posting** (see
-        the class docstring): ``balance_at`` reads ``settled_on``, so the
-        sibling case below is what grades the ledger.  Both are here because a
-        defect can move one without the other.
+        **This is the PRODUCER's half**: the figure a screen shows.  The
+        sibling case below reads the same movement per day, where a leftover
+        on one day and a missing one on another cannot cancel inside a sum
+        (see the class docstring for the defect both catch).
         """
         period = seed_user["bootstrap_period"]
         guessed = period.start_date + timedelta(days=1)

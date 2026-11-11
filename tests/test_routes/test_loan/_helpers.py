@@ -174,15 +174,15 @@ def _create_other_loan(second_user, db_session,
     )
 
 
-# ── Escrow Posting-Sync Tests (E1b) ──────────────────────────────────
+# ── Escrow Write Tests (E1b) ─────────────────────────────────────────
 
 
-def _make_sync_loan(seed_user, db_session):
+def _make_clean_split_loan(seed_user, db_session):
     """Create a $100,000 / 6% mortgage originated 2026-01-01 (clean arithmetic).
 
     Interest on a payment folded against the origination principal is
     100000 * 0.06 / 12 = 500.00 exactly, so a $1,000 payment splits 500 interest /
-    500 principal with no rounding -- the shape the E1b sync tests fold against.
+    500 principal with no rounding -- the shape the E1b escrow-write test folds against.
     Originated the month before the one payment's 2026-02-01 installment (plan
     step recurrence:R16-c-2, ruling R-R101): every contractual installment from
     origination is charged now, so the 2023-06-01 it carried until then read as

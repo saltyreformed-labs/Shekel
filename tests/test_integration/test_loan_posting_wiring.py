@@ -1,31 +1,31 @@
-"""Build-Order Step 4 wiring: loan-payment splits post at the transfer chokepoints.
+"""Build-Order Step 4: every chokepoint that changes a loan's payments moves its split.
 
-Commit 4 built the loan-payment split-posting service (pure, unwired); Commit 5
-WIRES it into every chokepoint that changes a loan's confirmed payments -- the
+The chokepoints are every door that changes a loan's confirmed payments -- the
 transfer settle / revert / edit / delete / restore paths
 (:mod:`app.services.transfer_service`), the balance true-up
 (:func:`app.services.loan_anchor_service.apply_loan_anchor_true_up`), the ARM rate
-change and origination-rate / params edit routes, and loan-params creation (the
-N1 back-post).  These integration tests drive each chokepoint through its REAL
-entry point (the service call or the HTTP route), with NO manual loan sync
-call anywhere, and assert the ledger ends in the right state.  Each figure is the
-worked-out read, which follows the records and cannot see a sync, so what these
-tests grade is the ledger each chokepoint's records work out to; the stored
-ledger the sync writes is no longer graded (plan#2914).
+change and origination-rate / params edit routes, and loan-params creation (N1:
+a payment settled before setup splits once the loan resolves).  These
+integration tests drive each through its REAL entry point (the service call or
+the HTTP route) and assert the ledger ends in the right state.  Each figure is
+the worked-out read (:mod:`app.services.ledger_lines`), which books a payment's
+split from the records as they stand, so what these tests grade is the ledger
+each chokepoint's records work out to.  Commit 5 wired a split-posting sync into
+each of them; plan tasks plan#3075 and plan#3076 deleted those syncs (plan#2914).
 
 The load-bearing invariant (plan Section 5 / 8.5): a Step-4 correction links
 NO row -- it is a date-keyed correction since plan step ``balance:X-bi-6-3``
 (ruling **R-BAL102**), and carried a NULL ``transfer_id`` before that -- so
 the cash reader (movement-keyed, source-filtered) never sees it -- proven
-end-to-end by asserting a revert / delete of a corrected payment posts the
-FULL cash reversal (Checking returns to its $1000.00 opening), not a reversal
-short by the correction.
+end-to-end by asserting a revert / delete of a corrected payment takes the
+FULL cash off (Checking returns to its $1000.00 opening), not cash short by
+the correction.
 
 Loans use a $100,000 anchor at 6%, so the first month accrues exactly $500.00
 (``100000 * 0.06 / 12``); every asserted split is hand-computed in the docstring.
 "today" is frozen to 2026-05-15 (inside the seed-period range, after every
-payment period used) so the wiring's ``date.today()`` as-of is deterministic and
-every settled payment is historical.  All money is ``Decimal`` from strings.
+payment period used) so every read's today is deterministic and every settled
+payment is historical.  All money is ``Decimal`` from strings.
 """
 from __future__ import annotations
 
@@ -101,13 +101,13 @@ def _interest_key(loan):
     return loan_key(LedgerAccountKindEnum.LOAN_INTEREST, loan.id)
 
 
-class TestSettleWiringAutoPosts:
-    """Settling a loan payment auto-posts its split correction (no manual sync)."""
+class TestASettleBooksItsSplit:
+    """Settling a loan payment books its split correction."""
 
-    def test_settle_auto_posts_split_correction(
+    def test_settle_books_split_correction(
         self, app, db, seed_user, seed_periods,
     ):
-        """A single $1,000 settle posts Loan -500 / Interest +500 with no sync call.
+        """A single $1,000 settle books Loan -500 / Interest +500.
 
         Arithmetic: interest round(100000 * 0.005) = 500.00; principal 500.00.
         Right after create_settled_transfer the worked-out read holds the
@@ -124,7 +124,7 @@ class TestSettleWiringAutoPosts:
             _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
 
-            # Genesis: opening (-250000) + true-up (+150000) + principal (+500).
+            # The loan's lines: opening (-250000) + true-up (+150000) + principal (+500).
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-99500.00")
@@ -148,7 +148,7 @@ class TestSettleWiringAutoPosts:
         cash-DEPENDENT: a split that read the $100 estimate would under-cover
         (principal 98.50, no cap, NO refund).  Its presence therefore pins
         that the split reads effective (actual) cash.  With the opening
-        (-250000) and true-up (+249700 = 250000 - 300) also posted, the
+        (-250000) and true-up (+249700 = 250000 - 300) also booked, the
         loan-linked ledger nets 0.00 -- the loan is paid off (its 300.00
         principal exactly retires the 300 balance).
         """
@@ -175,18 +175,18 @@ class TestSettleWiringAutoPosts:
             ) == Decimal("0.00")
 
 
-class TestRevertAndDeletePostFullCashReversal:
+class TestRevertAndDeleteTakeTheFullCashOff:
     """The CRITICAL 8.5 regression: a correction never shortens the cash reversal."""
 
-    def test_revert_posts_full_cash_reversal_and_reverses_correction(
+    def test_revert_takes_the_full_cash_and_the_correction_off(
         self, app, db, seed_user, seed_periods,
     ):
         """Reverting a corrected payment returns Checking to its $1000.00 opening.
 
-        The correction (Loan -500 / Interest +500) carries a NULL transfer_id,
-        so the Step-2 cash reader sees only the +1,000 cash on the loan ledger
-        and posts the FULL -1,000 reversal: Checking returns to its $1000.00
-        opening (not 1500).  The
+        The correction (Loan -500 / Interest +500) links no row (ruling
+        **R-BAL102**), so the cash read sees only the +1,000 cash on the loan
+        ledger, and the reverted payment's movement books none of it: Checking
+        returns to its $1000.00 opening (not 1500).  The
         now-projected payment holds no split; the opening
         (-250000) + true-up (+150000) remain (the revert does not touch them), so
         the loan-linked ledger returns to the trued-up baseline -100000.00 ==
@@ -209,11 +209,11 @@ class TestRevertAndDeletePostFullCashReversal:
             )
             db.session.commit()
 
-            # Full cash reversal: Checking back to exactly its 1000 opening.
+            # The full cash off: Checking back to exactly its 1000 opening.
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
-            # Payment correction + cash reversed; opening + true-up remain, so the
+            # Payment correction + cash gone; opening + true-up remain, so the
             # loan returns to the trued-up baseline -(verified 100000).
             assert account_net(
                 _db.session, loan.id, scenario_id,
@@ -222,13 +222,13 @@ class TestRevertAndDeletePostFullCashReversal:
                 db.session, _interest_key(loan), scenario_id,
             ) == Decimal("0.00")
 
-    def test_hard_delete_strands_nothing_and_full_cash_reversal(
+    def test_hard_delete_strands_nothing_and_takes_the_full_cash_off(
         self, app, db, seed_user, seed_periods,
     ):
         """Hard-deleting a corrected payment strands nothing; the loan resets to baseline.
 
-        The teardown door posts the FULL cash reversal before the rows go (the
-        movement's link is what the CASCADE severs), and with the payment gone
+        The read books the payment's cash from its movements, so with the rows
+        gone the FULL cash is off, and with the payment gone
         its split at its own key is gone too -- the split links no row (ruling
         **R-BAL102**), so nothing about it needed the shadow to still exist.
         Nothing stranded: Checking returns to its
@@ -252,7 +252,7 @@ class TestRevertAndDeletePostFullCashReversal:
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
-            # Opening + true-up remain; only the payment correction is reversed.
+            # Opening + true-up remain; only the payment correction goes.
             assert account_net(
                 _db.session, loan.id, scenario_id,
             ) == Decimal("-100000.00")
@@ -260,10 +260,10 @@ class TestRevertAndDeletePostFullCashReversal:
                 db.session, interest_key, scenario_id,
             ) == Decimal("0.00")
 
-    def test_soft_delete_reverses_correction_and_full_cash(
+    def test_soft_delete_takes_the_correction_and_full_cash_off(
         self, app, db, seed_user, seed_periods,
     ):
-        """Soft-deleting a corrected payment reverses the correction and full cash."""
+        """Soft-deleting a corrected payment takes the correction and full cash off."""
         with app.app_context():
             scenario_id = seed_user["scenario"].id
             checking = seed_user["account"]
@@ -279,7 +279,7 @@ class TestRevertAndDeletePostFullCashReversal:
             assert account_net(
                 _db.session, checking.id, scenario_id,
             ) == Decimal("1000.00")
-            # Payment correction reversed; opening + true-up remain, so the loan
+            # Payment correction gone; opening + true-up remain, so the loan
             # returns to the trued-up baseline -(verified 100000).
             assert account_net(
                 _db.session, loan.id, scenario_id,
@@ -297,7 +297,7 @@ class TestRevertAndDeletePostFullCashReversal:
         clears February's arrears before its own month: interest
         round(100000*0.005) = 500.00 for February plus 500.00 for March, both
         on the anchor's $100,000 no payment has reduced -- 1,000.00, all of
-        P2's cash.  The ledger holds 1,000.00 after: P1's reversed, P2's
+        P2's cash.  The ledger holds 1,000.00 after: P1's gone, P2's
         re-split UP from 497.50.  Until R16-c-2 a month no payment occupied
         was never charged, so P2 re-split to 500.00; the developer approved
         the moved figure (rule 5).
@@ -323,16 +323,16 @@ class TestRevertAndDeletePostFullCashReversal:
             ) == Decimal("1000.00")
 
 
-class TestRestoreWiring:
+class TestRestore:
     """Restoring a soft-deleted loan payment that was Paid brings back a plan."""
 
-    def test_restore_brings_back_a_plan_and_reposts_nothing(
+    def test_restore_brings_back_a_plan_and_books_nothing(
         self, app, db, seed_user, seed_periods,
     ):
         """Settle (-99500), soft-delete (baseline -100000), restore (-100000: a plan).
 
         The loan-linked ledger carries the opening (-250000) + true-up (+150000)
-        throughout; the payment correction (+500 principal) is reversed on
+        throughout; the payment correction (+500 principal) goes on
         delete, and the restore brings the payment back as a PLAN, so the
         linked total moves -99500 -> -100000 -> -100000 (the -100000 baseline
         is the trued-up balance with no payment).
@@ -379,7 +379,7 @@ class TestRestoreWiring:
             ) == Decimal("-100000.00")
 
 
-class TestTrueUpWiring:
+class TestTrueUp:
     """A balance true-up re-bases every scenario's split; Checking is never touched."""
 
     def test_trueup_resplits_later_keeps_earlier_checking_untouched(
@@ -389,10 +389,10 @@ class TestTrueUpWiring:
 
         P1 (due 02-01) and P2 (due 03-01) settle against 100000 @ 01-10
         (interest 500.00 + 497.50 = 997.50).  A user-trueup of 90000 @ 02-15 falls
-        BETWEEN them: genesis keeps P1's 500.00 (it is due before the new trueup)
-        and re-splits P2 from 90000 to round(90000 * 0.005) = 450.00, so the
-        interest ledger holds 500 + 450 = 950.00 (Step 4 reversed P1 and left only
-        450.00).  Checking is unchanged from its -1000.00 (the $1000.00
+        BETWEEN them: the loan walk keeps P1's 500.00 (it is due before the new
+        trueup) and re-splits P2 from 90000 to round(90000 * 0.005) = 450.00, so the
+        interest ledger holds 500 + 450 = 950.00 (Step 4's writer reversed P1 and
+        left only 450.00).  Checking is unchanged from its -1000.00 (the $1000.00
         opening minus the two settles) -- the true-up moves only the loan's own
         ledgers.
         """
@@ -426,7 +426,7 @@ class TestTrueUpWiring:
                 _db.session, checking.id, scenario_id,
             ) == checking_before
 
-    def test_trueup_syncs_every_scenario(
+    def test_trueup_resplits_every_scenario(
         self, app, db, seed_user, seed_periods,
     ):
         """One true-up re-splits the payments in every scenario the loan has.
@@ -511,12 +511,12 @@ class TestTrueUpWiring:
 
 
 class TestNonLoanTransferIgnored:
-    """A non-loan transfer settle posts no loan-payment correction (wiring no-op)."""
+    """A non-loan transfer settle books no loan-payment correction."""
 
     def test_savings_transfer_posts_no_loan_correction(
         self, app, db, seed_user, seed_periods,
     ):
-        """Settling a Checking -> Savings transfer creates no loan_payment entry.
+        """Settling a Checking -> Savings transfer books no loan_payment line.
 
         classify_account(Savings) is not AMORTIZING, so the read books no
         loan-payment line at the transfer's to-side.
@@ -559,7 +559,7 @@ class TestNonLoanTransferIgnored:
             } == {loan.id}
 
 
-class TestRouteChokepointWiring:
+class TestRouteChokepoints:
     """The route chokepoints (rate change, params create) re-split the payments."""
 
     def test_rate_change_route_resplits_interest(
@@ -643,9 +643,9 @@ class TestRouteChokepointWiring:
         splits on the 100000 trueup (interest round(100000 * 0.005) = 500.00).
         POSTing /loan/params with payment_day=20 (rate unchanged) moves P1's due
         date to 2026-01-20 (the first day-20 on or after 01-16) -- now BEFORE the
-        2026-01-25 trueup, so genesis re-splits it on the $250,000 origination
-        balance: interest round(250000 * 0.005) = 1250.00 (Step 4 reversed it to
-        zero; genesis carries the split across the boundary instead).
+        2026-01-25 trueup, so the loan walk re-splits it on the $250,000 origination
+        balance: interest round(250000 * 0.005) = 1250.00 (Step 4's writer reversed
+        it to zero; the walk carries the split across the boundary instead).
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -681,13 +681,13 @@ class TestRouteChokepointWiring:
                 db.session, interest_key, scenario_id,
             ) == Decimal("1250.00")
 
-    def test_params_created_after_settle_backposts(
+    def test_params_created_after_settle_split_the_payment(
         self, app, db, seed_user, seed_periods, auth_client,
     ):
         """A payment settled before loan setup gets its correction on setup (N1).
 
         A bare amortizing-type account carries no LoanParams, so a payment
-        settled into it posts NO correction (the loan is not resolvable).
+        settled into it books NO correction (the loan is not resolvable).
         POSTing /loan/setup configures the loan (origination anchor 100000 @
         2026-01-01) and the payment now splits: the P1 correction holds
         interest round(100000 * 0.005) = 500.00.
@@ -710,7 +710,7 @@ class TestRouteChokepointWiring:
                     # Stated for the origination day: the setup door then
                     # records no assertion (plan step R20), and the loan's
                     # only anchor stays the synthesized origination the
-                    # back-posted split is measured against.
+                    # split is measured against.
                     "anchor_balance": "100000.00",
                     "anchor_date": "2026-01-01",
                     "interest_rate": "6.000",
@@ -723,7 +723,7 @@ class TestRouteChokepointWiring:
             )
             assert resp.status_code == 302
 
-            # Back-posted: the correction now holds interest 500.00.
+            # Set up: the correction now holds interest 500.00.
             assert ledger_net(
                 db.session, _interest_key(loan), scenario_id,
             ) == Decimal("500.00")

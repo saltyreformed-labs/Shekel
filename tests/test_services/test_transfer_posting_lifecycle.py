@@ -1,4 +1,4 @@
-"""Lifecycle tests for the transfer -> posting-ledger wiring (Step 2, Commit 5).
+"""Lifecycle tests for a transfer's ledger lines through its doors (Step 2, Commit 5).
 
 Commit 5 wired :func:`~app.services.posting_service.sync_transfer_postings`
 into the transfer service's mutation chokepoints (``update_transfer`` /
@@ -23,17 +23,16 @@ Transfers-in-transit account since plan step ``balance:X-bi-6-3``** (rulings
     brings back a plan, which books nothing;
   * hard-delete of a settled transfer takes its effect off with the row;
   * a double mark-done never double-books;
-  * settling and setting the figure in ONE call posts the RECORDED figure
-    (the reconcile runs after every kwarg is applied, NOT inside the
-    status-change helper -- the placement that makes the grid shadow-edit
-    path correct).
+  * settling and setting the figure in ONE call books the RECORDED figure
+    (what the sides' covering movements record; a reconcile at the end of
+    ``update_transfer`` read it until plan task plan#3075).
 
 After each mutation the per-account reconciliation invariant is asserted in
 its Build-Order Step 5 ABSOLUTE form: the account's worked-out net ``== opening
-anchor + settled_transfer_effect``.  ``create_account`` posts each fixture
-account's opening correction at create time (Checking $1000.00, the Savings
-$100.00 sentinel), and every settle here is stamped at server-now -- AFTER the
-origination assertion -- so the settled-shadow effect is exactly the
+anchor + settled_transfer_effect``.  The read books each fixture account's
+opening correction on its origination assertion's day (Checking $1000.00, the
+Savings $100.00 sentinel), and every settle here is stamped at server-now --
+AFTER the origination assertion -- so the settled effect is exactly the
 post-assertion effect riding on top of the opening.  All money is ``Decimal``
 from strings, with the arithmetic shown per the testing standard.
 """
@@ -85,12 +84,12 @@ def _family_nets(transfer, scenario_id):
 
 
 def _create_projected_transfer(seed_user, from_account, to_account, amount):
-    """Create a Projected ad-hoc transfer via the service (posts nothing yet).
+    """Create a Projected ad-hoc transfer via the service (books nothing yet).
 
     Routed through ``transfer_service.create_transfer`` -- the sole transfer
-    writer -- so the two shadows obey every transfer invariant.  A Projected
-    transfer never goes through the status seam and so posts no ledger
-    entry until it is settled.
+    writer -- so the transfer obeys every transfer invariant.  A Projected
+    transfer holds no dated side record, so the read books no line for it
+    until it is settled.
     """
     return transfer_service.create_transfer(
         transfer_service.TransferSpec(
@@ -123,13 +122,13 @@ def _settle(transfer, user_id, **extra):
 
 
 def _assert_reconciles(scenario_id, *accounts):
-    """Assert ledger == settled-shadow effect for each account (the oracle).
+    """Assert ledger == settled transfer effect for each account (the oracle).
 
     The per-account reconciliation invariant in its Step-5 ABSOLUTE form: the
-    net of an account's posting legs equals its opening anchor correction
-    (posted at create time; the origination row is each fixture account's
-    only assertion) plus the net effect of its settled, non-deleted transfer
-    shadows -- every settle in this suite is stamped at server-now, after the
+    net of an account's ledger lines equals its opening anchor correction
+    (booked on the origination row, each fixture account's only assertion)
+    plus the net effect of its settled, non-deleted transfers -- every settle
+    in this suite is stamped at server-now, after the
     assertion instant, so the effect rides on top of the opening.  Asserted
     from independent producers so a divergence fails loudly.
     """
@@ -149,8 +148,9 @@ def savings(app, db, seed_user):  # pylint: disable=unused-argument
 
     Created in the ``db`` fixture's app context (no nested context) so the
     returned account stays bound to the live session, the pattern ``seed_user``
-    uses.  ``create_account_of_type`` fires the Step-2 ledger-account sync
-    hook, so the account already carries its paired ledger account.
+    uses.  It pairs no ledger-account row: the read keys the account by its
+    own id (``ledger_lines.linked_key``), and the sync hook that paired one
+    went at plan task plan#3133.
     """
     acct = create_account_of_type(
         seed_user, _db.session, "Savings", "Lifecycle Savings",
@@ -160,17 +160,17 @@ def savings(app, db, seed_user):  # pylint: disable=unused-argument
 
 
 # ---------------------------------------------------------------------------
-# Settle: projected -> done posts one balanced entry
+# Settle: projected -> done books both sides against transit
 # ---------------------------------------------------------------------------
 
 
-class TestSettlePostsEntry:
-    """Settling a transfer through the service auto-posts its effect."""
+class TestSettleBooksBothSides:
+    """Settling a transfer through the service books its effect."""
 
-    def test_mark_done_posts_one_balanced_entry(
+    def test_mark_done_books_both_sides_against_transit(
         self, app, db, seed_user, savings,
     ):
-        """projected -> done posts -100 / +100 via transit; the ledger reconciles.
+        """projected -> done books -100 / +100 via transit; the ledger reconciles.
 
         Arithmetic: settling a $100 Checking -> Savings transfer books each
         side (plan step ``balance:X-bi-6-3``): -100.00 on Checking's own line
@@ -206,7 +206,7 @@ class TestSettlePostsEntry:
     ):
         """done -> settled books nothing more (already at target).
 
-        Arithmetic: the settle posted +100 to Savings (total 200.00 on the
+        Arithmetic: the settle booked +100 to Savings (total 200.00 on the
         $100.00 opening); archiving Done -> Settled keeps both movements
         dated under contributing parents, so nothing moves: Savings still
         nets 200.00 and the ledger still reconciles.
@@ -246,7 +246,7 @@ class TestRevertReverses:
     ):
         """done -> projected takes the effect off; Savings is back on its opening.
 
-        Arithmetic: the settle posted +100 on Savings and -100 on Checking
+        Arithmetic: the settle booked +100 on Savings and -100 on Checking
         (each against transit); reverting UN-DATES both covering movements
         (ruling **R-BAL61**), so neither side books anything.  The reverted
         transfer's side records are un-dated, so it drops from
@@ -355,7 +355,7 @@ class TestDeleteAndRestore:
             assert account_net(
                 _db.session, savings.id, scenario_id,
             ) == Decimal("100.00")
-            # The reverted shadows are soft-deleted, so the effect is 0 too.
+            # The soft delete took both side records off, so the effect is 0 too.
             _assert_reconciles(scenario_id, checking, savings)
 
             # Restore brings back a plan, which posts nothing.
@@ -371,7 +371,7 @@ class TestDeleteAndRestore:
             ) == Decimal("100.00")
             _assert_reconciles(scenario_id, checking, savings)
 
-    def test_hard_delete_after_soft_delete_writes_no_more_entries(
+    def test_hard_delete_after_soft_delete_moves_nothing_more(
         self, app, db, seed_user, savings,
     ):
         """Soft-delete then hard-delete: the second delete moves nothing more.
@@ -552,16 +552,17 @@ class TestSettleWithActualSameCall:
 
         A settle can state what moved (``figure``) in the same
         ``update_transfer`` call, and the settle (``_settle.settle``) records
-        it on the transfer through ``apply_status_to_all_three``.  The reconcile runs at the END
-        of ``update_transfer`` (NOT inside ``apply_status_to_all_three``), so
-        it reads the transfer's FINAL settled figure.
+        it on the transfer through ``apply_status_to_all_three``.  The read books
+        what each side's covering movement records, so the case grades that the
+        movements carry the FINAL settled figure.  (A reconcile at the END of
+        ``update_transfer`` read it until plan task plan#3075.)
 
         Arithmetic: nominal $100, settled figure $88.00 -> each side's
-        covering movement records $88.00, so the postings are -88.00 on
+        covering movement records $88.00, so the lines are -88.00 on
         Checking and +88.00 on Savings (each against transit), NOT -100 /
-        +100 (Savings total 100.00 opening + 88.00 = 188.00).  A reconcile
-        placed before the figure was applied would wrongly post the $100
-        estimate -- the regression this guards.
+        +100 (Savings total 100.00 opening + 88.00 = 188.00).  Movements that
+        recorded the $100 estimate would book -100 / +100 -- the regression
+        this guards.
         """
         with app.app_context():
             user_id = seed_user["user"].id

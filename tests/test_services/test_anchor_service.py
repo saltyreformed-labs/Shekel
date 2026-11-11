@@ -1994,7 +1994,7 @@ def _anchor_rows(account):
 
 
 class TestRecordLoanTrackingStart:
-    """The tracking-start opening flow appends a tracking_start event and re-syncs."""
+    """The tracking-start opening flow appends a tracking_start event."""
 
     def test_commits_appends_tracking_start_opening(
         self, app, db, seed_user, seed_periods_today,

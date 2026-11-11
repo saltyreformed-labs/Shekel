@@ -129,7 +129,7 @@ class TestAPaycheckIsCoveredInItsOwnDirection:
 
         The counter leg lands in an INCOME-class category account and both
         legs carry the ``income`` kind -- the parent's, read through the one
-        mapping the transaction writer uses (``ledger_lines.ledger_class_of``
+        mapping the worked-out read uses (``ledger_lines.ledger_class_of``
         / ``ledger_lines.posting_kind_of``).  Measured as a DELTA: the fixture's own
         opening correction already sits on the cash ledger.
         """
@@ -318,7 +318,7 @@ class TestATransferIsCoveredOnBothLegs:
                     + posted_purchase_effect(account.id, scenario_id)
                 )
 
-    def test_a_revert_un_dates_both_movements_and_the_ledger_reverses_the_pair(
+    def test_a_revert_un_dates_both_movements_and_the_pairs_lines_go(
         self, app, seed_user, seed_periods,
     ):
         with app.app_context():
@@ -542,11 +542,11 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPosition:
     the posted balance read identically with and without the movement");
     that was the interval ruling R-BAL40 accepted, and the pin is inverted
     with it: re-stating the payment as a close of nothing (a write around
-    the doors: a ``$0.00`` ``figure`` through
-    ``transfer_service.update_transfer`` records the close too, but reverses
-    what the records posted) now reads it as nothing moved, and moves the
-    loan's position with
-    it, and the worked-out ledger follows the records to the position.
+    the doors, kept from when a ``$0.00`` ``figure`` through
+    ``transfer_service.update_transfer``, which records the close too, also
+    reversed what the records posted, until plan task plan#3075) now reads it
+    as nothing moved, and moves the loan's position with it, and the
+    worked-out ledger follows the records to the position.
     Since plan step ``balance:X-bi-6-4d-2``'s 4d-4 half the figure
     the record states lives on the TRANSFER (rulings **R-BAL365**,
     **R-BAL366**), so the re-statement writes it there: ``0.00``, with both

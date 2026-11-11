@@ -2581,10 +2581,10 @@ class TestAPurchaseMayBeBornCarryingItsPostingDay:
     ):
         """One act, not two.
 
-        A follow-up ``update_entry`` would re-run the payback sync and the
-        posting reconcile against an intermediate state in which a purchase the
-        bank has already taken looks outstanding -- and would leave that state
-        committed if anything after it refused.
+        A follow-up ``update_entry`` would re-run the payback sync (and, until
+        plan task plan#3097, the posting reconcile) against an intermediate state
+        in which a purchase the bank has already taken looks outstanding -- and
+        would leave that state committed if anything after it refused.
         """
         with app.app_context():
             txn = db.session.get(

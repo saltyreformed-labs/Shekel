@@ -108,13 +108,13 @@ class TestRegistrationBuildsARealPayCalendar:
         fabricated period those two dates happened to coincide, which is
         exactly the conflation this step separates.
 
-        **It books no journal entry, and that is the documented rule rather
-        than a gap in this test**: ``account_service.create_account`` books
-        nothing for a ``$0.00`` opening (a zero anchor "books nothing and stays
-        hard-deletable"), and registration's default Checking account is always
-        ``$0.00``.  So the posting is not available as evidence, and the
-        property it would have evidenced is asserted directly instead: the
-        calendar CONTAINS sign-up day, so
+        **It books no line, and that is the documented rule rather than a gap
+        in this test**: the worked-out ledger books nothing for a ``$0.00``
+        opening (a correction whose anchor balance equals ``ledger_before``
+        "books NOTHING", ``ledger_lines._account_anchors``), and registration's
+        default Checking account is always ``$0.00``.  So no line is available
+        as evidence, and the property it would have evidenced is asserted
+        directly instead: the calendar CONTAINS sign-up day, so
         :meth:`~app.services.pay_calendar.PayCalendar.filing_period` files a
         record dated today under period 0 by containment rather than by its
         clamp -- the clamp exists for a loan opened years before the owner's

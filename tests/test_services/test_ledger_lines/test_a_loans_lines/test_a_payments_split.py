@@ -367,9 +367,10 @@ class TestAPaymentBooksItsSplit:
         """A payment settled before its period begins books its split AND shows at settle.
 
         Two properties meet here.  The 2026-07-02 review's R1 (fixing H2): the
-        cash line books the moment a payment settles, so the split must book
-        in the SAME moment or the loan's line holds raw cash with no interest
-        backout.  The C2 DISPLAY property: a payment is visible from its
+        cash line books from the day a payment settles, so the split must book
+        from the SAME day or the loan's line holds raw cash with no interest
+        backout (the read dates both by that day, ``ledger_lines._loan_payments``).
+        The C2 DISPLAY property: a payment is visible from its
         SETTLED date, so an EARLY settle shows immediately -- its REAL split,
         never the raw cash an unsplit ledger would have held.
 

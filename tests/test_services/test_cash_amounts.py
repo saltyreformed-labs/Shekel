@@ -430,8 +430,8 @@ class TestTheRecordedPostingDay:
     true-up over "every entry dated on or before the SERVER's today", so which
     bucket a purchase fell in was decided by the order two buttons were
     pressed.  The bucket is now ``coverage.is_cleared(entry)``, evaluated at
-    read time -- the same rule, in the same units, the read replay and the
-    posting walk apply to a settled transaction.
+    read time -- the same rule, in the same units, the read replay applies to
+    a settled transaction (the worked-out ledger frames its corrections off it).
 
     **No purchase here names a statement**, so every case exercises that rule's
     DATE fallback and answers exactly what it answered under R-DH (d).  That is

@@ -2,7 +2,7 @@
 
 Through the transfer service's verbs -- the ONE writer of a side's day
 (``transfer_service._status.apply_status_to_all_three``) and the doors onto it
--- on real rows, covering movements and ledger postings.  The pure day function
+-- on real rows, covering movements and the ledger's lines.  The pure day function
 is graded in ``test_transfer_side_days.py``; the evidence doors that state a
 side (the statement matcher, the reconcile tick) in their own suites; the
 popover's boxes in ``tests/test_routes/test_transfers/test_settle_day.py``.

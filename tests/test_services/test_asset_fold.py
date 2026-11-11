@@ -1,9 +1,9 @@
 """X-g1: the MODELLED fold, graded on a hand-computed oracle.
 
 Plan step X-g1 (``docs/audits/balance_architecture/README.md``).  Grades
-``app.services.balance_at._asset_fold`` -- the replay plan step X-g2 will point
-the three modelled kinds at.  The fold is ADDITIVE here: no production surface
-reads it yet, so nothing in this file can move a shipped balance.
+``app.services.balance_at._asset_fold`` -- the replay plan step X-g2 was to point
+the three modelled kinds at.  The fold was ADDITIVE when written: no production
+surface read it then, so nothing in this file could move a shipped balance.
 
 **Every expected figure below is HAND-COMPUTED and written out in the test that
 asserts it.**  None is taken from a shipping producer, and that is not a style
@@ -19,9 +19,9 @@ is the expected result and each one is classified.
 Six rulings are graded here, each with a control a wrong implementation fails:
 
 * **R-L / R-Y** -- ACCRUAL exists only from the LATEST assertion's own day
-  forward, for ALL modelled kinds (:class:`TestTheAccrualWindow`).  R-Y is the
-  half that is new: an INVESTMENT's or a Property's anchor PERIOD accrues today
-  from nothing at all.
+  forward, for ALL modelled kinds (:class:`TestTheAccrualWindow`).  R-Y was the
+  new half: an INVESTMENT's or a Property's growth in the period holding its
+  assertion, which accrued nothing at all before that ruling.
 * **R-S** -- an ASSERTION always wins and there is no backward model
   (:class:`TestAnAssertionAlwaysWins`).
 * **R-T** -- the grain is DAILY, so a balance moves inside a period and a date's
@@ -267,9 +267,9 @@ class TestTheAccrualWindow:
     Everything at or before that assertion is a bank FACT the user typed in, so
     modelling across those days adds money the assertion already contains.  The
     INTEREST half has shipped since plan step X-c2a; ruling R-Y is the
-    generalisation, and it is a figure move: today an INVESTMENT's growth starts
-    the period AFTER its anchor period (``period_index > anchor_idx``) and a
-    Property's does too, so the anchor period earns nothing at all.
+    generalisation, and it was a figure move: before it an INVESTMENT's growth
+    started the period AFTER its anchor period (``period_index > anchor_idx``;
+    ``anchor_idx`` is gone) and a Property's did too, so that period earned nothing.
     """
 
     def test_an_hysa_accrues_from_its_assertions_own_day(

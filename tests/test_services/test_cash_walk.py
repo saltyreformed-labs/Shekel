@@ -1068,9 +1068,9 @@ class TestTheWalkReadsNoClock:
     ):  # pylint: disable=unused-argument,too-many-arguments,too-many-positional-arguments
         """Freezing today at two dates yields byte-identical deltas.
 
-        A walk that read the clock would make the ledger a function of when the
-        sync happened to run -- the corruption generator plan step A3 removed
-        from the loan side (``4e46a0a8``).
+        A walk that read the clock would make the ledger a function of when it
+        is read (of when the sync ran, while the store was written) -- the
+        corruption generator plan step A3 removed from the loan side (``4e46a0a8``).
         """
         account, scenario = seed_user["account"], seed_user["scenario"]
         period = seed_periods[0]
@@ -1396,13 +1396,12 @@ class TestTheTwoStatementsOfTheLatestAssertedDay:
         suite stayed green, because every fixture in this class holds exactly
         one asserted account -- the shape a scoping clause is invisible to.
 
-        What it would cost is not abstract.  The three consumers are the entry
-        list's reconciled indicator, the posting self-heal's skip, and the
-        reconcile panel -- and the panel uses this day as an SQL bound AND
-        STAMPS it onto every ticked purchase as its posting day.  Unscoped, a
-        savings account trued up today would reconcile a checking envelope's
-        purchases against a balance checking never declared, emptying the
-        reservation and writing the wrong ``settled_on`` to the row.
+        What it would cost is not abstract.  It feeds the dashboard's pulse
+        alone (``dashboard_service._pulse``): the balance's as-of caption and its
+        staleness count.  The posting self-heal's skip read it too until plan
+        task plan#3133, and the entry list's indicator and the reconcile panel
+        before that.  Unscoped, a savings account trued up today would caption
+        checking as true today and mark its balance fresh.
 
         Hand-computed: Checking asserts for 2026-03-01, Savings for 2026-09-09
         five months later.  Checking's boundary is 2026-03-01, and it does NOT

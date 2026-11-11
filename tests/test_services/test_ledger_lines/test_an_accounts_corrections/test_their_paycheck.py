@@ -55,9 +55,9 @@ class TestCorrectionPeriodAttribution:
     its stored ``pay_period_id`` named the NEXT one; ruling R-EO deleted that
     column, so what these pin now is the day rule alone: the ledger files
     every correction in the period containing the day it asserts, which is
-    what ruling R-DH states
-    (``account_service.resolve_anchor_period_id``: "the period is DERIVED from
-    the day, not chosen beside it") and what the grid's "Book vs bank" row
+    what ruling R-DH states (as ``account_service.resolve_anchor_period_id``,
+    deleted at plan step X-f1c3c, put it: "the period is DERIVED from the day,
+    not chosen beside it") and what the grid's "Book vs bank" row
     already does (``balance_at._cash_periods._assertion_sums`` buckets on
     ``observed_on``).  A reader windowing the worked-out ledger by paycheck
     files each correction by its day (ruling plan#2519,

@@ -4,7 +4,9 @@ Ruling **R-CC54** (developer 2026-09-22), its first part: *"ONE act takes a
 payment or purchase off the books: it reverses its ledger, takes it out of any
 match (withdrawing a match left with nothing and saying which bank line that
 freed), then deletes it.  Every door calls it, including the popover's two
-paths."*  Finding **CC-358** is the door that did not: the status seam deleted
+paths."*  (Its ledger reversal went with the stored ledger's doors at plan task
+plan#3097; the worked-out ledger holds nothing of a deleted movement.)
+Finding **CC-358** is the door that did not: the status seam deleted
 a matched payment on a ``$0.00`` or ``purchases`` record and asked no match,
 so the act kept its bank line alone -- the review screen called the line
 unexplained, the day drill-down called it matched, and matching it again raised

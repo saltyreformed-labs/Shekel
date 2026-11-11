@@ -158,7 +158,7 @@ class TestASettleBooksOnTheTender:
         is on the card, owned by the row's owner, dated the act's day on the
         ``entered`` basis; the card's fold reads `-120.00` that day and
         checking's reads nothing; the posted ledger books the leg against the
-        CARD's ledger account and nothing against checking's; and the row is
+        CARD's linked ledger and nothing against checking's; and the row is
         worth `$120.00` to the grid exactly as a checking-settled bill is.
         """
         with app.app_context():

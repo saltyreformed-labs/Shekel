@@ -159,7 +159,7 @@ class TestPeriodAttribution:
     paycheck simply holds no line and the re-settle books into the new one.
     """
 
-    def test_revert_and_move_reverses_into_the_original_period(
+    def test_revert_and_move_leaves_the_settles_paycheck_no_line(
         self, app, db, seed_user, seed_periods,
     ):
         """The settle's paycheck holds nothing after the move; the re-settle books into F.
@@ -229,7 +229,7 @@ class TestPeriodAttribution:
                 },
             }
 
-    def test_transfer_revert_and_move_reverses_into_the_original_period(
+    def test_transfer_revert_and_move_leaves_the_settles_paycheck_no_line(
         self, app, db, seed_user, seed_periods, savings,
     ):
         """A transfer's revert-and-move leaves the settle's paycheck with no line, like a row's.

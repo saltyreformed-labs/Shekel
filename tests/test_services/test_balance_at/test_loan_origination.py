@@ -319,7 +319,7 @@ class TestLoanNotYetOriginated:
             # an unborrowed mortgage is not RETIRED either, so it stays charted.
             assert figures.is_retired is False
 
-    def test_the_day_it_closes_the_seam_answers_without_a_re_sync(
+    def test_the_day_it_closes_the_seam_answers_with_no_write_between(
         self, app, db, seed_user, seed_periods, monkeypatch,
     ):
         """B-1: the loan must not break simply because its closing date arrived.
@@ -327,15 +327,16 @@ class TestLoanNotYetOriginated:
         The loan is configured on 2026-03-20 (the suite's frozen today) to close
         on 2026-04-15.  Then the CLOCK MOVES to 2026-05-07 and nothing else
         happens -- which is production: no chokepoint fires because a date
-        arrived, so no sync re-runs between configuring the loan and reading it.
+        arrived, so nothing is written between configuring the loan and reading
+        it.
 
         Before A3 the write walk dropped any anchor dated after its as-of, so the
         params-create sync posted NO OPENING for this loan.  The moment the clock
         passed 2026-04-15 the seam considered it originated, found no opening, and
         raised the fail-loud error -- taking the loan card, /savings, the net-worth
         trend, the Horizon and the property equity chart down with a 500, fired by
-        the clock alone, with the user's data untouched and correct.  (A3 posts the
-        opening, so no raise fires here now; and since the seam folds a missing
+        the clock alone, with the user's data untouched and correct.  (A3 posted the
+        opening, so no raise fired after it; and since the seam folds a missing
         opening from source, steps C3b1/C3b3, that read-outage class is retired
         entirely.)
 
@@ -725,13 +726,14 @@ class TestBrokenLoanFailsLoud:
     ):
         """A Mortgage account whose loan terms were never filled in routes to CASH.
 
-        Two clicks in the UI produce it, and it has no OPENING posting either -- so
-        the ledger answers ``None`` for it exactly as a broken loan does.  What
-        keeps them apart is ORDER: the seam resolves the loan BEFORE reading the
-        ledger, and no schedule means "not a configured loan", not "corrupt".
+        Two clicks in the UI produce it, and it has no OPENING line either, so the
+        worked-out ledger answers ``None`` for it.  What keeps it off the fail-loud
+        path is ORDER: the seam resolves the loan BEFORE it folds, and no schedule
+        means "not a configured loan", not "corrupt".
 
-        Without that ordering the fail-loud raise would 500 the /savings page for a
-        user who did nothing wrong.
+        Without that ordering ``positions()``'s refusal of a schedule-less loan
+        (``balance_at/_positions.py``) would 500 the /savings page for a user who
+        did nothing wrong.
 
         The account is seeded owing $150,000.00, which it HOLDS as
         ``-150,000.00`` (ruling R-CC47; every door that takes a liability's

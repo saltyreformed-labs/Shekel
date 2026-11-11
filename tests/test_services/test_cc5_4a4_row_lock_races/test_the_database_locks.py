@@ -155,7 +155,11 @@ def _race_statements(
 
 
 def _posted_groceries(seed_user):
-    """Groceries ($300.00) holding a DATED $40.00 KROGER purchase, so its postings exist; returns its id."""
+    """Groceries ($300.00) holding a DATED $40.00 KROGER purchase; returns its id.
+
+    Dated so its stored postings existed for the delete to reverse inside the
+    measured statements, until plan task plan#3097 deleted that reversal.
+    """
     _template, row_id = _groceries(seed_user)
     day = seed_user["bootstrap_period"].start_date + timedelta(days=1)
     entry_service.create_entry(

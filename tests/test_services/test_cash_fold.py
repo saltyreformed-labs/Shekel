@@ -587,9 +587,9 @@ class TestSettledMoneyRidesOnTheAssertionItFollowed:
 
         Hand-computed: the transfer is attributed AFTER the assertion, so it
         rides on top of it and the fold reads $5,644.27 through 03-31 and
-        $3,644.27 from 04-01.  $3,644.27 is also what the posted double-entry
-        ledger holds for the real account, while every projected balance on
-        screen answers $5,644.27 -- the divergence is the finding.
+        $3,644.27 from 04-01.  $3,644.27 was also what the stored double-entry
+        ledger held for the real account, while every projected balance on
+        screen answered $5,644.27 -- the divergence was the finding.
 
         The transfer reaches the fold as its SHADOW rows (Transfer Invariant 5),
         exactly as it reaches the shipping projection; neither queries

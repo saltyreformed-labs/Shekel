@@ -46,9 +46,9 @@ def _revert(txn):
 
     ``transaction_service.apply_requested_status`` is what every revert of a
     transaction reaches (the popover's PATCH and the cancel route; the
-    matcher never reverts) -- the seam plus the family reconcile that
-    reverses the survivor's legs.  The seam alone is driven where the claim
-    is the seam's (:class:`TestTheBareSeamUnDatesAndKeeps`).
+    matcher never reverts) -- the seam (and, until plan task plan#3097, the
+    family reconcile that reversed the survivor's legs).  The seam alone is
+    driven where the claim is the seam's (:class:`TestTheBareSeamUnDatesAndKeeps`).
     """
     transaction_service.apply_requested_status(
         txn, ref_cache.status_id(StatusEnum.PROJECTED),

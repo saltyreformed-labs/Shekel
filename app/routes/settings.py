@@ -7,7 +7,9 @@ Settings dashboard consolidating all configuration sections.
 
 import logging
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint, Response, abort, flash, redirect, render_template, request, url_for,
+)
 from flask_login import current_user
 
 from app import ref_cache, tax_law
@@ -775,7 +777,7 @@ def companion_reactivate(companion_id):
     methods=["POST"],
 )
 @require_owner
-def companion_forget_device(companion_id, device_id):
+def companion_forget_device(companion_id: int, device_id: int) -> Response:
     """Forget one of a companion's trusted devices (ruling plan#3439).
 
     The owner's Forget beside each device Settings > Companions lists for her:
@@ -810,7 +812,7 @@ def companion_forget_device(companion_id, device_id):
 )
 @require_owner
 @fresh_login_required()
-def companion_reset_two_factor(companion_id):
+def companion_reset_two_factor(companion_id: int) -> Response:
     """Reset a companion's two-factor, for a lost or replaced phone (ruling plan#3441).
 
     The one reset act ``scripts/reset_mfa.py`` runs too

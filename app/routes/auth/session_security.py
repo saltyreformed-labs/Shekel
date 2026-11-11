@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 
 @auth_bp.route("/security", methods=["GET"])
-def security():
+def security() -> str:
     """Display the signed-in user's Security page (ruling plan#3435).
 
     Each user's own sign-in: password, two-factor, trusted devices and
@@ -198,7 +198,7 @@ def forget_trusted_device(device_id):
     return redirect(url_for("auth.security"))
 
 
-def _render_reauth_form(safe_next: str | None):
+def _render_reauth_form(safe_next: str | None) -> str:
     """Render the re-confirm form, from its five render sites.
 
     Its Cancel link goes where a sign-in lands this user (``_landing_page``):

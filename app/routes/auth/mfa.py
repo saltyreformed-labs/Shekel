@@ -14,8 +14,10 @@ backup-code consumer, and the setup TTL constant come from
 """
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import wraps
+from typing import ParamSpec
 
 from flask import (
     current_app,
@@ -26,6 +28,7 @@ from flask import (
     session as flask_session,
     url_for,
 )
+from flask.typing import ResponseReturnValue
 from flask_login import current_user
 
 from cryptography.fernet import InvalidToken
@@ -76,6 +79,9 @@ from app.utils.security_events import (
 from app.utils.session_helpers import invalidate_other_sessions
 
 logger = logging.getLogger(__name__)
+
+#: A guarded view's own parameters, which :func:`_refused_where_required` keeps.
+_ViewParams = ParamSpec("_ViewParams")
 
 
 def _check_mfa_code(mfa_config, user_id, totp_code, backup_code):
@@ -682,7 +688,9 @@ def regenerate_backup_codes():
     return render_template("auth/mfa_backup_codes.html", backup_codes=codes)
 
 
-def _refused_where_required(view):
+def _refused_where_required(
+    view: Callable[_ViewParams, ResponseReturnValue],
+) -> Callable[_ViewParams, ResponseReturnValue]:
     """Refuse a view that turns off two-factor to a user who must have it.
 
     Ruling plan#3434: every companion must use two-factor, and there is no
@@ -700,7 +708,9 @@ def _refused_where_required(view):
         saying why, and runs *view* for anyone else.
     """
     @wraps(view)
-    def guarded(*args, **kwargs):
+    def guarded(
+        *args: _ViewParams.args, **kwargs: _ViewParams.kwargs,
+    ) -> ResponseReturnValue:
         """Redirect a user who must have two-factor; else run the view."""
         if current_user.must_have_two_factor:
             flash(

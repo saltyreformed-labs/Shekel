@@ -16,6 +16,8 @@ signed-in user), so they belong with the routes, not in
 """
 
 import logging
+from datetime import datetime
+from typing import TypedDict
 
 from flask import abort
 from flask_login import current_user
@@ -31,7 +33,22 @@ from app.utils.log_events import AUTH, EVT_TRUSTED_DEVICE_FORGOTTEN, log_event
 logger = logging.getLogger(__name__)
 
 
-def trusted_device_rows(user_id: int) -> list[dict]:
+class TrustedDeviceRow(TypedDict):
+    """One trusted device as a page shows it, its five keys the template reads.
+
+    ``trusted_at`` and ``expires_at`` are aware UTC instants, never ``None``:
+    the rows are live trusted devices, each trusted at an instant
+    (:func:`~app.services.known_device_service.list_trusted_devices`).
+    """
+
+    id: int
+    browser: str
+    trusted_at: datetime
+    expires_at: datetime
+    is_this_browser: bool
+
+
+def trusted_device_rows(user_id: int) -> list[TrustedDeviceRow]:
     """Return *user_id*'s live trusted devices as rows a template only displays.
 
     The ONE builder of a trusted-device row (plan#2173, ruling plan#2406):
@@ -47,21 +64,21 @@ def trusted_device_rows(user_id: int) -> list[dict]:
         user_id: The ``auth.users.id`` whose devices to list.
 
     Returns:
-        One dict per live device, most recently trusted first, with ``id``,
-        ``browser``, ``trusted_at``, ``expires_at`` and ``is_this_browser``.
+        One :class:`TrustedDeviceRow` per live device, most recently trusted
+        first.
     """
     devices = known_device_service.list_trusted_devices(user_id)
     this_browser = known_device_service.device_named_by(
         devices, device_token(user_id),
     )
     return [
-        {
-            "id": device.id,
-            "browser": browser_label(device.user_agent),
-            "trusted_at": device.trusted_at,
-            "expires_at": device.trust_expires_at,
-            "is_this_browser": device is this_browser,
-        }
+        TrustedDeviceRow(
+            id=device.id,
+            browser=browser_label(device.user_agent),
+            trusted_at=device.trusted_at,
+            expires_at=device.trust_expires_at,
+            is_this_browser=device is this_browser,
+        )
         for device in devices
     ]
 

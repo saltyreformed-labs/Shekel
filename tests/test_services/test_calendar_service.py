@@ -691,8 +691,8 @@ class TestTheCalendarReadsTheCashFlowSet:
     (:func:`~app.services.cash_flow_set.own_rows_clause` for the rows and
     :func:`~app.services.cash_flow_set.leg_accounts_shown` for a transfer's leg,
     since leaf ``balance:X-bi-6-1b``; it was ``paycheck_rows_clause``); the balance
-    line, the month-end figure and the scope name stay ONE member's, and
-    ``account_id`` names that member the way the grid's override does.
+    line, the totals (ruling plan#3526) and the scope name stay ONE member's,
+    and ``account_id`` names that member the way the grid's override does.
 
     April flows, dated forward of the suite's frozen today (2026-03-20) so a
     projected row lands on its own day (ruling R-G): Rent $300.00 on
@@ -738,11 +738,11 @@ class TestTheCalendarReadsTheCashFlowSet:
     def test_a_bill_on_the_card_is_on_the_months_calendar(
         self, app, seed_user, seed_periods, db,
     ):
-        """The card's row is a day cell and a month total; the line is checking's.
+        """The card's row is drawn, marked as the card's, in no total (ruling plan#3526).
 
-        total_expenses = 300.00 + 45.00 = 345.00; the 5th holds "Phone";
-        ``account_name`` is Checking and the month-end balance is checking's
-        700.00 -- the rows are the set's, the balance one member's.
+        total_expenses = 300.00, checking's Rent alone (it read 345.00 until
+        plan task plan#3529); the 5th holds "Phone" on the card; the month-end
+        balance is checking's 700.00 -- the rows are the set's, the money one member's.
         """
         with app.app_context():
             card = self._card(seed_user, db.session)
@@ -753,8 +753,8 @@ class TestTheCalendarReadsTheCashFlowSet:
                 today=date(2026, 3, 20),
                 user_settings=None,
             )
-            assert result.total_expenses == Decimal("345.00")
-            assert [e.name for e in result.day_entries[5]] == ["Phone"]
+            assert result.total_expenses == Decimal("300.00")
+            assert [(e.name, e.other_member) for e in result.day_entries[5]] == [("Phone", card)]
             assert result.account_name == "Checking"
             assert result.projected_end_balance == Decimal("700.00")
             assert result.daily.daily_balances[30] == Decimal("700.00")
@@ -764,8 +764,8 @@ class TestTheCalendarReadsTheCashFlowSet:
     ):
         """``account_id=<card>`` is the same paycheck, seen from the card.
 
-        The rows are unchanged (345.00 of expenses, Rent still on the 2nd);
-        the scope name and the month-end balance are the card's, -545.00.
+        The rows are unchanged (Rent still on the 2nd, now checking's chip);
+        the totals (Phone's 45.00), the name and the month-end are the card's.
         """
         with app.app_context():
             card = self._card(seed_user, db.session)
@@ -776,8 +776,9 @@ class TestTheCalendarReadsTheCashFlowSet:
                 account_id=card.id, today=date(2026, 3, 20),
                 user_settings=None,
             )
-            assert result.total_expenses == Decimal("345.00")
-            assert [e.name for e in result.day_entries[2]] == ["Rent"]
+            assert result.total_expenses == Decimal("45.00")
+            [rent] = result.day_entries[2]
+            assert (rent.name, rent.other_member.id) == ("Rent", seed_user["account"].id)
             assert result.account_name == "Rewards Card"
             assert result.projected_end_balance == Decimal("-545.00")
             assert result.daily.daily_balances[30] == Decimal("-545.00")
@@ -823,7 +824,7 @@ class TestTheCalendarReadsTheCashFlowSet:
 
         A $75.00 fee on savings due 04-03 beside the class's two rows: the
         savings calendar holds 75.00 of expenses and neither Rent nor Phone;
-        checking's holds 345.00 and not the fee.
+        checking's holds Rent's 300.00 (Phone is the card's) and not the fee.
         """
         with app.app_context():
             card = self._card(seed_user, db.session)
@@ -847,7 +848,7 @@ class TestTheCalendarReadsTheCashFlowSet:
             )
             assert savings_view.total_expenses == Decimal("75.00")
             assert savings_view.account_name == "Savings"
-            assert checking_view.total_expenses == Decimal("345.00")
+            assert checking_view.total_expenses == Decimal("300.00")
 
     def test_an_archived_owned_account_is_refused_not_fallen_through(
         self, app, seed_user, seed_periods, db,
@@ -910,9 +911,9 @@ class TestTheCalendarReadsTheCashFlowSet:
     ):
         """The year's twelve months are the set's rows behind one line.
 
-        April's summary carries 345.00 of expenses on checking's line and,
-        with ``account_id=<card>``, the same 345.00 on the card's line with
-        the card's name.
+        April's summary carries checking's 300.00 of expenses on its line and,
+        with ``account_id=<card>``, the card's 45.00 with the card's name (each
+        line's own rows, ruling plan#3526; both read 345.00 until plan#3529).
         """
         with app.app_context():
             card = self._card(seed_user, db.session)
@@ -926,9 +927,9 @@ class TestTheCalendarReadsTheCashFlowSet:
                 user_id=seed_user["user"].id, year=2026, account_id=card.id,
                 user_settings=None,
             )
-            assert checking_year.months[3].total_expenses == Decimal("345.00")
+            assert checking_year.months[3].total_expenses == Decimal("300.00")
             assert checking_year.months[3].account_name == "Checking"
-            assert card_year.months[3].total_expenses == Decimal("345.00")
+            assert card_year.months[3].total_expenses == Decimal("45.00")
             assert card_year.months[3].account_name == "Rewards Card"
 
 
@@ -1908,10 +1909,10 @@ class TestATransferIsALegOfItsParent:
         self, app, seed_user, seed_periods, db,
     ):
         """A $300.00 savings -> card transfer on checking's calendar (set
-        ``(checking, card)``): one INCOME cell, the card's leg, 300.00 in --
-        R-CC23's one-endpoint arm end to end, the reader-level twin of
-        ``test_transfer_legs/test_the_grids_legs.py``'s case (the second
-        review of leaf X-bi-6-1b)."""
+        ``(checking, card)``): one INCOME cell, the card's leg, 300.00 in and
+        in no total, being the card's (ruling plan#3526) -- R-CC23's
+        one-endpoint arm end to end, the reader-level twin of
+        ``test_transfer_legs/test_the_grids_legs.py``'s case (X-bi-6-1b)."""
         with app.app_context():
             card = create_account_of_type(
                 seed_user, db.session, "Credit Card", "Rewards Card",
@@ -1933,9 +1934,8 @@ class TestATransferIsALegOfItsParent:
             [entry] = view.day_entries[6]
             assert entry.item_key == (transfer.id, card.id)
             assert entry.is_income is True
-            assert entry.amount == Decimal("300.00")
-            assert view.total_income == Decimal("300.00")
-            assert view.total_expenses == Decimal("0")
+            assert (entry.amount, entry.other_member) == (Decimal("300.00"), card)
+            assert (view.total_income, view.total_expenses) == (Decimal("0"), Decimal("0"))
 
     def test_a_cancelled_transfers_leg_is_not_a_cell(
         self, app, seed_user, seed_periods, db,

@@ -51,8 +51,10 @@ checking alone it is ``$665``, the ``$500`` grocery and the ``$165`` payment,
 and checking's balance moves by exactly that.  The far-leg query, the
 ``others`` view of the set and the seam's composed subtotal went together,
 having no reader left.  The dashboard's still-due totals follow the same rule
-(ruling plan#3524, plan task plan#3528) through :meth:`CashFlowSet.other_member`,
-the one test of which drawn items a screen's totals leave out.
+(ruling plan#3524, plan task plan#3528), and so do the analytics calendar's
+day, month and year totals (ruling plan#3526, plan task plan#3529), through
+:meth:`CashFlowSet.other_member`, the one test of which drawn items a screen's
+totals leave out.
 
 The rule's subject -- the transfers with both endpoints in the set -- is
 spelled ONCE, by :func:`leg_accounts_shown`'s test of a transfer its caller
@@ -189,9 +191,13 @@ class CashFlowSet:
         """Return the member *item* is on, or ``None`` when it is the balance account.
 
         The ONE test of whether a screen's totals count an item it draws
-        (developer rulings plan#2926 and plan#3524; plan tasks plan#2932 and
-        plan#3528).  A screen draws every member's items behind one account's
-        balance line, and its totals are that account's own, so an item on
+        (developer rulings plan#2926, plan#3524 and plan#3526; plan tasks
+        plan#2932, plan#3528 and plan#3529).  Its readers are the
+        dashboard's still due and the analytics calendar's folds; the grid
+        needs none, its totals being the balance seam's own column for the
+        one account rather than a sum of the items it draws.  A screen draws
+        every member's items behind one account's balance line, and its
+        totals are that account's own, so an item on
         another member is drawn, marked with that member's name, and not
         added in.  A purchase on the card is then counted once, by the card's
         payment out of checking.  A leg is on the account of the side the set

@@ -138,22 +138,25 @@ class MonthSummary:  # pylint: disable=too-many-instance-attributes
     because this is a cohesive single-return aggregate -- one calendar
     month's summary -- whose fields are flat columns read together by the
     calendar surface: the month and year templates render the money fields
-    and is_third_paycheck_month, and the CSV year export emits them as one
-    row per month.  The three money fields are the month's headline
-    numbers read individually, not a sub-object read as a unit, so there is
-    no section to extract; nesting would fragment one contract across the
-    templates and the exporter for no design gain.  ``day_totals`` is the
-    per-day income/expense map (parallel to ``day_entries``) the analytics
-    calendar route renders directly, so the route does no money math of
-    its own.  ``day_overflow`` is the parallel per-day "+N more" residual;
-    ``daily`` bundles the whole daily running-balance projection as one
-    cohesive sub-object (:class:`DailyView`), ``None`` for the year overview.
+    and is_third_paycheck_month (a CSV year export emitted them too, until
+    plan step P-AN4 removed it).  The three money fields are the month's
+    headline numbers read individually, not a sub-object read as a unit, so
+    there is no section to extract; nesting would fragment one contract
+    across the templates for no design gain.  ``day_totals`` is the per-day
+    income/expense fold (parallel to ``day_entries``) the month totals and
+    the flow strip's so-far / remaining split are summed from, so the route
+    does no money math of its own.  ``day_overflow`` is the parallel
+    per-day "+N more" residual; ``daily`` bundles the whole daily
+    running-balance projection as one cohesive sub-object
+    (:class:`DailyView`), ``None`` for the year overview.
     ``account_name`` is the BALANCE account's display name (the on-screen
     scope label the month template renders so the scope is stated, not silent
     -- the analytics-audit cross-cutting fix).  Since plan step CC-4-3 the
-    day cells hold the paycheck's rows across the owner's cash-flow set
-    (ruling ``R-CC16``) while the balance line, the month-end figure and this
-    name stay one member's.
+    day cells draw the paycheck's rows across the owner's cash-flow set
+    (ruling ``R-CC16``), and since plan task plan#3529 every figure here
+    counts the balance account's alone (ruling plan#3526): a row on another
+    member is drawn with that member's chip and is in no total, so the
+    month's figures and its balance line are one account's.
 
     ``projected_end_balance`` is the period-flat seam scalar at the last
     calendar day (the containing period's end); the month view's honest
@@ -211,6 +214,10 @@ def get_month_detail(  # pylint: disable=too-many-arguments
     step ``credit_card:CC-4-3``** (ruling ``R-CC16``): the primary grid
     account plus its active cards, read through the one clause every
     plan-item reader appends, with the balance line still ONE member's.
+    **The totals are that member's alone since plan task plan#3529** (ruling
+    plan#3526): every row is drawn, and one on another member is in no day,
+    month or year figure (:func:`~app.services.calendar_day_flows
+    .fold_income_expense`).
     ``account_id`` keeps the meaning the grid gives it -- a member puts its
     balance on the line behind the set's rows; an owned cash-flow account
     outside the set (a savings account) is that account's single-account
@@ -296,7 +303,7 @@ def get_month_detail(  # pylint: disable=too-many-arguments
     )
 
     ctx = _MonthBuildContext(
-        year=year, account=cash_flow.balance, periods=periods,
+        year=year, cash_flow=cash_flow, periods=periods,
         transactions=items,
         contributions=_contributions(items, balance_ctx),
         large_threshold=large_threshold,
@@ -355,7 +362,7 @@ def get_year_overview(
     )
 
     ctx = _MonthBuildContext(
-        year=year, account=cash_flow.balance, periods=periods,
+        year=year, cash_flow=cash_flow, periods=periods,
         transactions=items,
         contributions=_contributions(items, balance_ctx),
         large_threshold=large_threshold,
@@ -533,9 +540,11 @@ def _assign_transactions_to_days(
     :data:`MAX_VISIBLE_DAY_FLOWS` are the visible named lines and any beyond
     are summarized in :class:`DayOverflow` (count plus signed residual net).
 
-    **Which items count is the SQL's alone** (F-3 / W-065's locked Choice-2
-    predicate, in :func:`_query_transactions_for_range`, the one query whose
-    items this folds).  Every item was re-checked here against
+    **Which items are DRAWN is the SQL's alone** (F-3 / W-065's locked
+    Choice-2 predicate, in :func:`_query_transactions_for_range`, the one
+    query whose items this folds); which of those the figures COUNT is the
+    set's answer, carried on each entry (``other_member``, ruling plan#3526).
+    Every item was re-checked here against
     :func:`~app.utils.balance_predicates.is_balance_contributing` until ruling
     **plan#2262** deleted that -- the remediation's belt-and-suspenders, a
     second statement of the predicate over items the SQL had already
@@ -559,8 +568,9 @@ def _assign_transactions_to_days(
 
     Args:
         ctx: The build's :class:`_MonthBuildContext` -- its ``transactions``,
-            their ``contributions``, the ``year``, the ``large_threshold`` and
-            the ``pay_cadence``.  ``contributions`` is indexed with ``[]``: a
+            their ``contributions``, the ``year``, the ``large_threshold``, the
+            ``pay_cadence`` and the ``cash_flow`` set, which names the member
+            each row is on.  ``contributions`` is indexed with ``[]``: a
             row missing from it is a build that priced a different set, and a
             default would be a fabricated figure in a day cell.
         month: Target calendar month (1-12).
@@ -588,6 +598,7 @@ def _assign_transactions_to_days(
         seen.add(key)
         entry = build_day_entry(
             txn, ctx.contributions[key], threshold, ctx.pay_cadence,
+            ctx.cash_flow.other_member(txn),
         )
         day_map[display_day].append(entry)
 
@@ -617,10 +628,13 @@ class _MonthBuildContext:  # pylint: disable=too-many-instance-attributes
     ``get_year_overview`` resolves the cash-flow set, scenario, overlapping
     periods, and transaction set once and builds twelve summaries from
     them, varying only the month (``get_month_detail`` builds one).
-    ``account`` is the set's BALANCE line -- the member whose running
-    balance, month-end figure and name the summaries carry; the rows were
-    selected across the whole set before this context was built, so the set
-    itself does not ride here.
+    ``cash_flow`` is the set the rows were selected across, and its
+    :attr:`~app.services.cash_flow_set.CashFlowSet.balance` the member whose
+    running balance, month-end figure and name the summaries carry.  It
+    carried that member alone, as ``account``, until plan task plan#3529:
+    the day fold now asks the set which member each row is on (ruling
+    plan#3526), and the set holds the balance line, so one field answers
+    both.
     Bundling these into the context the build shares keeps
     :func:`_build_month_summary` a two-argument call and makes that
     resolved-once-reused relationship explicit.
@@ -651,15 +665,15 @@ class _MonthBuildContext:  # pylint: disable=too-many-instance-attributes
     Pylint: ``too-many-instance-attributes`` (9/7) -- these nine ARE one
     calendar build's inputs, read as a flat unit by
     :func:`_build_month_summary` and its helpers, with no cohesive sub-group to
-    nest: the year scopes the query and the account the balance line, the
+    nest: the year scopes the query and the set the balance line, the
     periods, transactions and their contributions are its result, and the
     threshold, context, clock and cadence are four independent per-build
     settings.  Mirrors
-    :class:`DayEntry`'s 10/7 here.
+    :class:`DayEntry`'s 11/7 here.
     """
 
     year: int
-    account: Account
+    cash_flow: CashFlowSet
     periods: PeriodWindow
     transactions: list[PlanItem]
     contributions: dict
@@ -678,7 +692,7 @@ def _build_month_summary(month: int, ctx: _MonthBuildContext) -> MonthSummary:
 
     Args:
         month: Target calendar month (1-12).
-        ctx: The year/account/periods/transactions/threshold/scenario
+        ctx: The year/set/periods/transactions/threshold/scenario
             shared across the build (see :class:`_MonthBuildContext`).
 
     Returns:
@@ -698,7 +712,7 @@ def _build_month_summary(month: int, ctx: _MonthBuildContext) -> MonthSummary:
     )
 
     end_balance = _compute_month_end_balance(
-        ctx.account, ctx.year, month, ctx.balance_ctx,
+        ctx.cash_flow.balance, ctx.year, month, ctx.balance_ctx,
     )
     # ONE read of "which paydays does this month hold", answering both the
     # markers and the three-paycheck flag (plan step **balance:X-bh-1**): two
@@ -732,7 +746,7 @@ def _build_month_summary(month: int, ctx: _MonthBuildContext) -> MonthSummary:
         day_overflow=overflow,
         paycheck_days=paycheck_days,
         daily=daily,
-        account_name=ctx.account.name,
+        account_name=ctx.cash_flow.balance.name,
     )
 
 
@@ -752,8 +766,9 @@ def _compute_daily_view(
     in the future all remaining.
 
     Args:
-        ctx: The build context (account, scenario, and display-tz ``today``,
-            which must not be ``None`` here -- the caller gates on it).
+        ctx: The build context (the set's balance account, the read pass,
+            and display-tz ``today``, which must not be ``None`` here -- the
+            caller gates on it).
         month: Target calendar month (1-12).
         day_totals: The per-day ``{day: (income, expense)}`` folds, split at
             ``today`` into the elapsed / remaining summary-strip figures.
@@ -764,7 +779,7 @@ def _compute_daily_view(
     first_day = date(ctx.year, month, 1)
     last_day = date(ctx.year, month, calendar.monthrange(ctx.year, month)[1])
     series = balance_at.cash_daily_balance_series(
-        ctx.account, ctx.balance_ctx, first_day, last_day,
+        ctx.cash_flow.balance, ctx.balance_ctx, first_day, last_day,
     )
     daily_balances = {day.day: balance for day, balance in series.items()}
 
@@ -931,13 +946,17 @@ def _compute_month_end_balance(
     actual last day of the month.  The cash-flow entry (not the
     kind-correct :func:`~app.services.balance_at.balance_at`) keeps this a
     pure transaction running-balance of the BALANCE account, the member
-    whose own rows among the day cells it reconciles with -- the cells hold
-    the whole set's rows since plan step CC-4-3, so the month's totals and
-    this line can differ by what moves on the other members, a divergence
-    with no reconciling term (the grid carried one, "On other accounts",
-    from plan step CC-4-1 until plan task plan#2932 made the grid's totals
-    the balance account's own); the balance account can be any cash-flow kind via an explicit
-    ``account_id``.  This is the HIGH-02 / W-277
+    whose rows the month's totals count.  The cells draw the whole set's
+    rows since plan step CC-4-3, and until plan task plan#3529 the totals
+    counted them all, so the month's net and this line differed by what
+    moved on the other members, with no reconciling term; the totals are
+    the balance account's alone now (ruling plan#3526), as the grid's have
+    been since plan task plan#2932.  What still separates the net from this
+    line is the basis :class:`DailyView` names (a settled row already in the
+    anchor, an envelope's reservation, a live override) and the day a row
+    is drawn on against the day its money moves
+    (:func:`_get_display_day`).  The balance account can be any cash-flow
+    kind via an explicit ``account_id``.  This is the HIGH-02 / W-277
     fix: pre-remediation the calendar walked a separate code path
     that (a) selected the last pay period whose ``end_date`` was on or
     before the calendar month-end (up to ~13 days stale when the

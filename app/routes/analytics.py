@@ -218,9 +218,10 @@ def calendar_tab():
         )
         return _render_month_view(data, year, month, low_balance, today)
     except CalendarAccountNotResolvableError:
-        # F-2: same contract as the CSV branch above -- 404 matches the
-        # project security rule ("404 for both 'not found' and 'not
-        # yours'", app/utils/auth_helpers.py).
+        # F-2: 404 matches the project security rule ("404 for both 'not
+        # found' and 'not yours'", app/utils/auth_helpers.py).  It named a
+        # CSV branch above as sharing it until plan task plan#3529; plan step
+        # P-AN4 had removed that export.
         abort(404)
 
 

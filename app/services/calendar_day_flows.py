@@ -28,6 +28,14 @@ negative EXPENSE, never an income; an expense that came back is not revenue,
 which is ruling **bank_import:R-II**'s own ground and the rule
 :mod:`~app.services.balance_at._cash_periods` states one surface over.
 
+**The two figures count the BALANCE account's entries alone** (developer
+ruling plan#3526, plan task plan#3529).  A day draws every item of the
+owner's cash-flow set, and an entry on another member -- a purchase on the
+card, seen from checking -- carries that member as
+:attr:`DayEntry.other_member` and is drawn but not added: the card's payment
+out of checking is what counts for it, so adding the purchase too counted one
+purchase twice.
+
 Pure: no database, no clock, no Flask.  Every fact arrives as an argument.
 """
 
@@ -35,6 +43,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.models.account import Account
 from app.services.calendar_infrequency import is_infrequent
 from app.services.pay_calendar import PayCadence
 from app.services.transfer_legs import PlanItem, cell_key
@@ -50,17 +59,18 @@ MAX_VISIBLE_DAY_FLOWS = 3
 class DayEntry:  # pylint: disable=too-many-instance-attributes
     """A single plan item's representation on a calendar day.
 
-    Pylint: ``too-many-instance-attributes`` (10/7) -- suppressed
+    Pylint: ``too-many-instance-attributes`` (11/7) -- suppressed
     because this is a cohesive value record -- one item's row on a
-    calendar day -- consumed verbatim by the calendar surface: the CSV
-    month export reads the display fields as adjacent columns (folding the
-    booleans into single Income/Expense, Status, Large, and Infrequent
-    columns), the month-detail table renders name/category/amount and the
-    income/paid flags as individual cells, and the route reads
-    amount/is_income for day totals.  The two category fields are read as
-    independent columns, never as a unit.  Every field is an irreducible
-    column of the row; splitting it would fragment one domain concept and
-    break every consumer for no design gain.
+    calendar day -- consumed verbatim by the calendar surface: the day
+    cell renders name/amount and the income/paid/infrequent flags, the
+    day-detail table renders name/category/amount and the paid flag as
+    individual cells, both draw ``other_member``'s chip, and the folds
+    read amount/is_income/other_member for the day totals.  The two
+    category fields are read as independent columns, never as a unit.
+    Every field is an irreducible column of the row; splitting it would
+    fragment one domain concept and break every consumer for no design
+    gain.  (It named a CSV month export among those consumers until plan
+    task plan#3529; plan step P-AN4 removed that export.)
 
     Attributes:
         item_key: The item's identity, :func:`~app.services.transfer_legs
@@ -72,6 +82,12 @@ class DayEntry:  # pylint: disable=too-many-instance-attributes
             expense** since ruling **bank_import:R-II**: a settled envelope is
             worth the sum of its entries, and a merchant refund is a negative
             one.  Every reader here states which way it takes that sign.
+        other_member: The member of the cash-flow set the item is on when
+            that is not the balance account, else ``None``:
+            :meth:`~app.services.cash_flow_set.CashFlowSet.other_member`'s
+            answer, verbatim.  An entry carrying one is drawn with that
+            account's chip and left out of both figures below (ruling
+            plan#3526).
     """
 
     item_key: int | tuple[int, int]
@@ -84,6 +100,7 @@ class DayEntry:  # pylint: disable=too-many-instance-attributes
     category_group: str | None
     category_item: str | None
     due_date: date | None
+    other_member: Account | None
 
 
 @dataclass(frozen=True)
@@ -93,8 +110,11 @@ class DayOverflow:
     A day cell renders at most :data:`MAX_VISIBLE_DAY_FLOWS` named flow lines;
     the remainder collapse to one "+N more" line.  This carries that line's
     two service-computed values so the template does no money math: the
-    ``count`` of hidden flows and their signed ``net`` (income positive,
-    expense negative).  Only days whose flow count exceeds the cap have one.
+    ``count`` of hidden flows -- every one, a card's too, as each is a line
+    the cell does not draw -- and their signed ``net`` (income positive,
+    expense negative) over the balance account's alone
+    (:func:`fold_income_expense`).  Only days whose flow count exceeds the
+    cap have one.
     """
 
     count: int
@@ -106,6 +126,7 @@ def build_day_entry(
     amount: Decimal,
     threshold: Decimal,
     pay_cadence: PayCadence | None,
+    other_member: Account | None,
 ) -> DayEntry:
     """Create a DayEntry from a plan item -- a row, or a transfer's leg.
 
@@ -129,6 +150,10 @@ def build_day_entry(
         pay_cadence: The owner's pay cadence for the infrequent badge, or
             ``None`` when no row in this build repeats
             (:func:`~app.services.calendar_infrequency.badge_cadence`).
+        other_member: The member *txn* is on when it is not the balance
+            account, else ``None`` -- the build's set answers it
+            (:meth:`~app.services.cash_flow_set.CashFlowSet.other_member`),
+            as this module holds no set.
 
     Returns:
         A frozen DayEntry dataclass.
@@ -148,6 +173,7 @@ def build_day_entry(
         category_group=txn.category.group_name if txn.category else None,
         category_item=txn.category.item_name if txn.category else None,
         due_date=txn.due_date,
+        other_member=other_member,
     )
 
 
@@ -184,6 +210,15 @@ def fold_income_expense(
     the month headline totals are then summed, so the per-day cells the
     calendar renders and the month total derive from one rule and cannot drift.
 
+    **Only the balance account's entries are folded** (developer ruling
+    plan#3526, plan task plan#3529): an entry whose
+    :attr:`DayEntry.other_member` is set is on another member of the set and
+    adds nothing.  ``$800`` of groceries on the card Jan 3, paid off by the
+    card's payment out of checking Jan 16, folded as ``$800`` on each day and
+    ``$1,600`` for January until that task, while checking's own balance fell
+    ``$800``; it is ``$0`` on Jan 3 and ``$800`` on Jan 16 now.  It folded the
+    whole set's entries from plan step CC-4-3 until then.
+
     **The expense leg took ``abs()`` until plan step
     ``bank_import:X-gj-2b-3``, and that was a MONEY DEFECT.**
     :attr:`DayEntry.amount` is
@@ -208,14 +243,17 @@ def fold_income_expense(
 
     Args:
         entries: The :class:`DayEntry` records for one day (or any collection
-            to fold); each carries ``amount`` and ``is_income``.
+            to fold); each carries ``amount``, ``is_income`` and
+            ``other_member``.
 
     Returns:
-        ``(income, expense)`` as a pair of ``Decimal`` values.
+        ``(income, expense)`` over the balance account's entries, as a pair of
+        ``Decimal`` values.
     """
-    income = sum((e.amount for e in entries if e.is_income), Decimal("0"))
+    counted = [e for e in entries if e.other_member is None]
+    income = sum((e.amount for e in counted if e.is_income), Decimal("0"))
     expense = sum(
-        (e.amount for e in entries if not e.is_income), Decimal("0"),
+        (e.amount for e in counted if not e.is_income), Decimal("0"),
     )
     return income, expense
 

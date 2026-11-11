@@ -576,8 +576,11 @@ def build_calendar_weeks(year, month, data, today):
     """Build a list of week rows for the calendar grid.
 
     Each week is a list of 7 day dicts with keys: number, entries,
-    is_paycheck, is_today, is_modeled, income_total, expense_total,
-    daily_balance, overflow.  ``daily_balance`` is the day's projected
+    is_paycheck, is_today, is_modeled, daily_balance, overflow.  The day's
+    (income, expense) fold is not one of them: no template draws it, and its
+    ``income_total`` / ``expense_total`` copies went at plan task plan#3529,
+    which made that fold the balance account's alone (ruling plan#3526).
+    ``daily_balance`` is the day's projected
     end-of-day running balance (``None`` before the pay-period horizon or
     when no daily view was computed); ``overflow`` is the day's "+N more"
     residual or ``None``.  ``is_modeled`` marks days AFTER today in the
@@ -604,8 +607,6 @@ def build_calendar_weeks(year, month, data, today):
                     "is_paycheck": False,
                     "is_today": False,
                     "is_modeled": False,
-                    "income_total": Decimal("0"),
-                    "expense_total": Decimal("0"),
                     "daily_balance": None,
                     "overflow": None,
                 })
@@ -616,12 +617,6 @@ def build_calendar_weeks(year, month, data, today):
                     and month == today.month
                     and day_num == today.day
                 )
-                # calendar_service folds the per-day income/expense totals
-                # (one rule, shared with the month headline); the route
-                # only renders them.
-                totals = data.day_totals.get(
-                    day_num, (Decimal("0"), Decimal("0")),
-                )
                 row.append({
                     "number": day_num,
                     "entries": entries,
@@ -631,8 +626,6 @@ def build_calendar_weeks(year, month, data, today):
                         (year, month, day_num)
                         > (today.year, today.month, today.day)
                     ),
-                    "income_total": totals[0],
-                    "expense_total": totals[1],
                     "daily_balance": daily_balances.get(day_num),
                     "overflow": data.day_overflow.get(day_num),
                 })

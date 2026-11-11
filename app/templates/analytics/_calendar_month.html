@@ -1,5 +1,6 @@
 {% from "_money_macros.html" import money %}
 {% from "analytics/_picker_macros.html" import period_picker %}
+{% from "grid/_grid_row_macros.html" import account_chip %}
 {# Month detail calendar -- the slice-1 flagship rebuild (analytics_audit.md,
    "Calendar rebuild decisions"), recomposed as a cockpit in S5 (P-AN3): one
    pulse canvas holding the balance hero (Balance today inside the current
@@ -19,7 +20,13 @@
    balance hero) are the PROJECTED running basis that reconciles with the
    grid; the So far / Remaining in-out pairs are the nominal flow fold shown
    on the day cells. Captions mark the projected figures, and days after
-   today render the tilde + secondary-ink modeled treatment. #}
+   today render the tilde + secondary-ink modeled treatment.
+
+   A row on another account of the set (entry.other_member: a bill on the
+   card, seen from checking) is drawn with that account's chip, the grid's
+   one macro, and is in no figure here: the day's "+N more" net, So far,
+   Remaining and the month and year totals count the balance account's
+   rows alone (ruling plan#3526). #}
 
 {% set is_current_month = today.year == year and today.month == month %}
 {% set is_past_month = (today.year, today.month) > (year, month) %}
@@ -178,6 +185,7 @@
           {%- if entry.is_paid %}<i class="bi bi-check2" title="Paid"></i> {% endif -%}
           {{ entry.name }}
         </span>
+        {%- if entry.other_member is not none %}{{ account_chip(entry.other_member.name) }}{% endif %}
         <span class="calendar-flow-amt font-mono {{ 'calendar-day-income' if entry.is_income else 'calendar-day-expense' }}">
           {{- money(entry.amount, cents=false) -}}
         </span>
@@ -245,7 +253,8 @@
       <tbody>
         {% for entry in day.entries %}
         <tr>
-          <td>{{ entry.name }}</td>
+          <td>{{ entry.name }}
+            {%- if entry.other_member is not none %}{{ account_chip(entry.other_member.name) }}{% endif %}</td>
           <td class="text-muted">{{ entry.category_group|default("--", true) }}</td>
           <td class="text-end font-mono {{ 'calendar-day-income' if entry.is_income else 'calendar-day-expense' }}">
             {{ money(entry.amount) }}

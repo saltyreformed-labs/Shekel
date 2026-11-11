@@ -18,6 +18,7 @@ the chain and the arithmetic are graded separately.
 from datetime import date
 from decimal import Decimal
 
+from app.models.account import Account
 from app.services.calendar_day_flows import (
     MAX_VISIBLE_DAY_FLOWS,
     DayEntry,
@@ -27,8 +28,11 @@ from app.services.calendar_day_flows import (
 )
 
 
-def _entry(amount, *, is_income=False, name="A row"):
-    """One day entry worth *amount*, with every display field held constant."""
+def _entry(amount, *, is_income=False, name="A row", other_member=None):
+    """One day entry worth *amount*, with every display field held constant.
+
+    On the balance account unless *other_member* names the member it is on.
+    """
     return DayEntry(
         item_key=abs(hash(name)) % 100000,
         name=name,
@@ -40,6 +44,7 @@ def _entry(amount, *, is_income=False, name="A row"):
         category_group=None,
         category_item=None,
         due_date=date(2026, 3, 2),
+        other_member=other_member,
     )
 
 
@@ -211,3 +216,51 @@ class TestTheDISPLAYORDERKeepsItsMagnitude:
         order_for_display(entries)
 
         assert [e.name for e in entries] == ["Big refund", "Bill"]
+
+
+class TestAnEntryOnAnotherMemberIsDrawnAndNotCounted:
+    """Ruling plan#3526 (plan task plan#3529): the figures are the balance account's.
+
+    A day draws every member's items, and one on another member -- a purchase
+    on the card seen from checking -- adds nothing to either figure: the card's
+    payment out of checking is what counts for it.  Before that task the fold
+    added every entry, so one purchase was counted on its own day and again on
+    the payment's.
+    """
+
+    _VISA = Account(name="Visa")
+
+    def test_the_fold_leaves_out_an_expense_and_an_income_on_another_member(self):
+        """$300.00 rent on checking, $800.00 groceries and a $50.00 refund-in on the card.
+
+        Income 0.00 and expense 300.00: neither card entry is checking's money.
+        """
+        assert fold_income_expense([
+            _entry("300.00", name="Rent"),
+            _entry("800.00", name="Groceries", other_member=self._VISA),
+            _entry("50.00", is_income=True, name="Into the Visa",
+                   other_member=self._VISA),
+        ]) == (Decimal("0"), Decimal("300.00"))
+
+    def test_a_day_of_the_cards_alone_folds_to_zero(self):
+        """The Jan 3 cell of plan#2932's fixture: $800.00 on the card and nothing else."""
+        assert fold_income_expense([
+            _entry("800.00", name="Groceries", other_member=self._VISA),
+        ]) == (Decimal("0"), Decimal("0"))
+
+    def test_the_residual_counts_a_hidden_card_line_and_nets_without_it(self):
+        """Three $1.00 rows shown, then $42.00 on checking and $800.00 on the card hidden.
+
+        Two lines are hidden, so the count is 2; their net is checking's
+        -42.00, the card's $800.00 adding nothing.  Staged as the hidden tail
+        directly, as the refund case above is: sorted, the $800.00 line would
+        be the day's first and shown.
+        """
+        entries = [_entry("1.00", name=f"Row {i}") for i in range(3)]
+        entries.append(_entry("800.00", name="Groceries", other_member=self._VISA))
+        entries.append(_entry("42.00", name="Gas"))
+
+        residual = day_overflow(entries)
+
+        assert residual.count == 2
+        assert residual.net == Decimal("-42.00")

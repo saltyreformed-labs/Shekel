@@ -565,6 +565,18 @@ wheels = [
 ]
 
 [[package]]
+name = "fido2"
+version = "2.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ba/ea/6f08c354b7aeb8019249d46a86c2153f8218499cced4d21bf16b6d49fc16/fido2-2.2.1.tar.gz", hash = "sha256:85787428a94c3f8eaf72f0ff30afba983b559a1b1b795c93318c81b4ad4062c4", size = 327147, upload-time = "2026-06-29T17:41:11.927Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/71/84/198d99c3312557ef6121cf78c38281efe9b3bc88cba0e2c05446f38a024d/fido2-2.2.1-py3-none-any.whl", hash = "sha256:ed397da981b9ab133da6ead7309e41f924b566b749956129efe286fae097749f", size = 238354, upload-time = "2026-06-29T17:41:09.921Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "4.2.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1465,6 +1477,7 @@ dependencies = [
     { name = "alembic" },
     { name = "bcrypt" },
     { name = "cryptography" },
+    { name = "fido2" },
     { name = "flask" },
     { name = "flask-limiter" },
     { name = "flask-login" },
@@ -1520,6 +1533,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.20.0,<2.0.0" },
     { name = "bcrypt", specifier = ">=5.0.0,<6.0.0" },
     { name = "cryptography", specifier = ">=50.0.2,<51.0.0" },
+    { name = "fido2", specifier = ">=2.2.1,<3.0.0" },
     { name = "flask", specifier = ">=3.1.3,<4.0.0" },
     { name = "flask-limiter", specifier = ">=4.1.1,<5.0.0" },
     { name = "flask-login", specifier = ">=0.6.3,<0.7.0" },

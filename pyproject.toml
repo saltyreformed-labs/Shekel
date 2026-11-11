@@ -67,6 +67,15 @@ dependencies = [
     "bcrypt>=5.0.0,<6.0.0",
     "pyotp>=2.10.0,<3.0.0",
     "qrcode[pil]>=8.2,<9.0",
+    # Passkey sign-in (plan#2538, ruling plan#3475): Yubico's WebAuthn
+    # library.  ``app/services/passkey_service.py`` uses its server half,
+    # ``fido2.server.Fido2Server``, to make and verify the registration and
+    # sign-in ceremonies, so the signature, origin and relying-party checks
+    # are a maintained library's rather than hand-written.  Chosen over
+    # Duo's ``webauthn`` because it needs only ``cryptography``, already
+    # locked here, where ``webauthn`` brings four more packages, one of them
+    # capping ``cryptography`` below 51.
+    "fido2>=2.2.1,<3.0.0",
     # quill's GitHub client signs its App token with it too
     # (``tools/quill/_github.py``).
     "cryptography>=50.0.2,<51.0.0",

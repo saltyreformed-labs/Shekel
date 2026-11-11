@@ -10,16 +10,13 @@ computer.  The route builds the URI once and hands it to both.
 
 import html
 import re
-import time
 from urllib.parse import parse_qs, urlsplit
-
-import pyotp
 
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
 from tests._two_factor_sign_in import (
-    SEED_COMPANION_EMAIL, sign_in_seed_companion_by_password,
+    SEED_COMPANION_EMAIL, code_now, sign_in_seed_companion_by_password,
 )
 
 _SETUP = "/mfa/setup"
@@ -71,7 +68,7 @@ def test_the_link_is_the_qr_codes_uri_for_the_pending_secret_and_it_confirms(
     assert query["issuer"] == ["Shekel"]
 
     confirmed = browser.post("/mfa/confirm", data={
-        "totp_code": pyotp.TOTP(query["secret"][0]).at(int(time.time())),
+        "totp_code": code_now(query["secret"][0]),
     })
 
     assert confirmed.status_code == 200

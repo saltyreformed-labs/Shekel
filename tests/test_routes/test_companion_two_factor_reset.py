@@ -17,15 +17,12 @@ inside one thirty-second step, so each secret a test makes is typed once.
 """
 
 import logging
-import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit
 
-import pyotp
 import pytest
 
 from app.extensions import db
-from app.models.user import MfaConfig, User
+from app.models.user import User
 from app.services import known_device_service, mfa_service
 from app.utils.session_helpers import FRESH_LOGIN_AT_KEY
 from scripts.reset_mfa import reset_mfa
@@ -36,8 +33,8 @@ from tests._companions import (
 from tests._test_helpers import enable_mfa
 from tests._trusted_devices import FIREFOX_LINUX, SAFARI_IPHONE, trust
 from tests._two_factor_sign_in import (
-    SEED_COMPANION_EMAIL, SEED_COMPANION_PASSWORD,
-    sign_in_seed_companion_by_password,
+    SEED_COMPANION_EMAIL, code_now, post_her_password, redirect_path,
+    sign_in_seed_companion_by_password, two_factor_row_of,
 )
 from tests.conftest import SEED_USER_EMAIL
 
@@ -49,29 +46,6 @@ _SETUP = "/mfa/setup"
 def _reset_url(companion_id):
     """Return the owner's Reset two-factor URL for a companion."""
     return f"/settings/companions/{companion_id}/reset-two-factor"
-
-
-def _code(secret):
-    """Return the authenticator code for *secret* at this instant."""
-    return pyotp.TOTP(secret).at(int(time.time()))
-
-
-def _path(response):
-    """Return the path a redirect sends the browser to, or ``""``."""
-    return urlsplit(response.headers.get("Location", "")).path
-
-
-def _her_password(browser):
-    """POST the seed companion's correct password to the sign-in form."""
-    return browser.post("/login", data={
-        "email": SEED_COMPANION_EMAIL, "password": SEED_COMPANION_PASSWORD,
-    })
-
-
-def _config_of(user_id):
-    """Return *user_id*'s two-factor row, read fresh, or ``None``."""
-    db.session.expire_all()
-    return db.session.query(MfaConfig).filter_by(user_id=user_id).one_or_none()
 
 
 def _her_browser_with_two_factor(app, companion_id):
@@ -133,7 +107,7 @@ class TestTheReset:
         """Refused at her next request; row cleared; her next sign-in is held at setup."""
         companion_id = seed_companion["user"].id
         browser = _her_browser_with_two_factor(app, companion_id)
-        before = _config_of(companion_id)
+        before = two_factor_row_of(companion_id)
         assert before.is_enabled and before.backup_codes
 
         response = auth_client.post(_reset_url(companion_id), follow_redirects=True)
@@ -146,9 +120,9 @@ class TestTheReset:
         ) in text_of(page)
         assert "Two-factor not set up" in text_of(companion_row(page))
         # Her live session is refused.
-        assert _path(browser.get(_HER_PAGE)) == "/login"
+        assert redirect_path(browser.get(_HER_PAGE)) == "/login"
         # Her secret and backup codes are gone, with every other material.
-        after = _config_of(companion_id)
+        after = two_factor_row_of(companion_id)
         assert after.is_enabled is False
         assert after.totp_secret_encrypted is None
         assert after.backup_codes is None
@@ -156,7 +130,7 @@ class TestTheReset:
         assert after.last_totp_timestep is None
         # Her next sign-in takes her password alone and is held at setup.
         again = sign_in_seed_companion_by_password(app)
-        assert _path(again.get(_HER_PAGE)) == _SETUP
+        assert redirect_path(again.get(_HER_PAGE)) == _SETUP
 
     def test_her_trusted_device_no_longer_skips_the_code(
         self, app, auth_client, seed_companion,
@@ -171,13 +145,13 @@ class TestTheReset:
         old_secret = enable_mfa(db.session, companion_id)
         browser = app.test_client()
         browser.environ_base["HTTP_USER_AGENT"] = FIREFOX_LINUX
-        assert _path(_her_password(browser)) == "/mfa/verify"
+        assert redirect_path(post_her_password(browser)) == "/mfa/verify"
         trusted = browser.post("/mfa/verify", data={
-            "totp_code": _code(old_secret), "trust_device": "1",
+            "totp_code": code_now(old_secret), "trust_device": "1",
         })
-        assert _path(trusted) == _HER_PAGE
+        assert redirect_path(trusted) == _HER_PAGE
         browser.post("/logout")
-        assert _path(_her_password(browser)) == _HER_PAGE
+        assert redirect_path(post_her_password(browser)) == _HER_PAGE
         browser.post("/logout")
         trust(companion_id, SAFARI_IPHONE)
 
@@ -185,16 +159,16 @@ class TestTheReset:
 
         assert not known_device_service.list_trusted_devices(companion_id)
         # She sets two-factor up again on the same browser.
-        assert _path(_her_password(browser)) == _HER_PAGE
+        assert redirect_path(post_her_password(browser)) == _HER_PAGE
         assert browser.get(_SETUP).status_code == 200
         new_secret = mfa_service.decrypt_secret(
-            _config_of(companion_id).pending_secret_encrypted,
+            two_factor_row_of(companion_id).pending_secret_encrypted,
         )
-        confirmed = browser.post("/mfa/confirm", data={"totp_code": _code(new_secret)})
+        confirmed = browser.post("/mfa/confirm", data={"totp_code": code_now(new_secret)})
         assert b"Save Your Backup Codes" in confirmed.data
         browser.post("/logout")
 
-        assert _path(_her_password(browser)) == "/mfa/verify"
+        assert redirect_path(post_her_password(browser)) == "/mfa/verify"
 
     @pytest.mark.usefixtures("seed_companion")
     def test_nothing_to_reset_is_said_and_nothing_written(self, auth_client):
@@ -209,7 +183,7 @@ class TestTheReset:
         ) in text_of(response.get_data(as_text=True))
         db.session.expire_all()
         assert db.session.get(User, companion.id).session_invalidated_at is None
-        assert _config_of(companion.id) is None
+        assert two_factor_row_of(companion.id) is None
 
     def test_midway_through_setup_is_nothing_to_reset_and_her_key_survives(
         self, app, auth_client, seed_companion,
@@ -223,7 +197,7 @@ class TestTheReset:
         companion_id = seed_companion["user"].id
         browser = sign_in_seed_companion_by_password(app)
         assert browser.get(_SETUP).status_code == 200
-        pending = _config_of(companion_id).pending_secret_encrypted
+        pending = two_factor_row_of(companion_id).pending_secret_encrypted
         key = mfa_service.decrypt_secret(pending)
 
         response = auth_client.post(_reset_url(companion_id), follow_redirects=True)
@@ -233,7 +207,7 @@ class TestTheReset:
         ) in text_of(landed_on_companions(response))
         db.session.expire_all()
         assert db.session.get(User, companion_id).session_invalidated_at is None
-        assert _config_of(companion_id).pending_secret_encrypted == pending
+        assert two_factor_row_of(companion_id).pending_secret_encrypted == pending
         # Still signed in, and her next setup shows the key she scanned.
         again = browser.get(_SETUP)
         assert again.status_code == 200
@@ -265,8 +239,8 @@ class TestTheReset:
         reset_mfa(SEED_USER_EMAIL)
 
         assert reset == [companion_id, owner_id]
-        assert _config_of(companion_id).is_enabled is False
-        assert _config_of(owner_id).is_enabled is False
+        assert two_factor_row_of(companion_id).is_enabled is False
+        assert two_factor_row_of(owner_id).is_enabled is False
 
     def test_the_reset_is_logged(
         self, auth_client, seed_user, seed_companion, caplog,
@@ -300,8 +274,8 @@ class TestTheRefusals:
         response = auth_client.post(_reset_url(companion_id))
 
         assert response.status_code == 302
-        assert _path(response) == "/reauth"
-        assert _config_of(companion_id).is_enabled is True
+        assert redirect_path(response) == "/reauth"
+        assert two_factor_row_of(companion_id).is_enabled is True
 
     def test_another_owners_companion_is_404(
         self, auth_client, seed_companion, seed_second_user,
@@ -315,10 +289,10 @@ class TestTheRefusals:
         response = auth_client.post(_reset_url(foreign))
 
         assert response.status_code == 404
-        assert _config_of(foreign).is_enabled is True
+        assert two_factor_row_of(foreign).is_enabled is True
         # The pair: the same URL, with the owner's own companion.
         assert auth_client.post(_reset_url(companion_id)).status_code == 302
-        assert _config_of(companion_id).is_enabled is False
+        assert two_factor_row_of(companion_id).is_enabled is False
 
     def test_a_user_who_is_not_a_companion_is_404(
         self, auth_client, seed_user, seed_companion,
@@ -332,10 +306,10 @@ class TestTheRefusals:
         response = auth_client.post(_reset_url(owner_id))
 
         assert response.status_code == 404
-        assert _config_of(owner_id).is_enabled is True
+        assert two_factor_row_of(owner_id).is_enabled is True
         # The pair.
         assert auth_client.post(_reset_url(companion_id)).status_code == 302
-        assert _config_of(companion_id).is_enabled is False
+        assert two_factor_row_of(companion_id).is_enabled is False
 
     def test_a_companion_cannot_reach_the_door(
         self, auth_client, companion_client, seed_companion,
@@ -346,7 +320,7 @@ class TestTheRefusals:
         response = companion_client.post(_reset_url(companion_id))
 
         assert response.status_code == 404
-        assert _config_of(companion_id).is_enabled is True
+        assert two_factor_row_of(companion_id).is_enabled is True
         # The pair: the owner's browser, the same URL.
         assert auth_client.post(_reset_url(companion_id)).status_code == 302
-        assert _config_of(companion_id).is_enabled is False
+        assert two_factor_row_of(companion_id).is_enabled is False

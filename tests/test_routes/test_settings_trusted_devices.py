@@ -19,10 +19,8 @@ through the service, as the trust itself would make them.
 
 import logging
 import re
-import time
 from datetime import datetime, time as clock_time, timedelta, timezone
 
-import pyotp
 import sqlalchemy
 
 from app.extensions import db
@@ -32,6 +30,7 @@ from tests._test_helpers import enable_mfa
 from tests._trusted_devices import (
     CHROME_WINDOWS, FIREFOX_LINUX, SAFARI_IPHONE, is_trusted, move_trust_to, trust,
 )
+from tests._two_factor_sign_in import code_now
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: The Security page, a page of its own since ruling plan#3435.
@@ -40,11 +39,6 @@ _SECURITY_PAGE = "/security"
 #: The day format the page shows, the ``local_datetime`` filter's default,
 #: spelled here as an oracle.
 _DAY_FORMAT = "%b %-d, %Y"
-
-
-def _code(secret):
-    """Return the authenticator code for *secret* at this instant."""
-    return pyotp.TOTP(secret).at(int(time.time()))
 
 
 def _password(browser):
@@ -80,7 +74,7 @@ def _firefox_that_trusted_itself(app, secret):
     browser.environ_base["HTTP_USER_AGENT"] = FIREFOX_LINUX
     assert _asked_the_code(_password(browser))
     response = browser.post("/mfa/verify", data={
-        "totp_code": _code(secret), "trust_device": "1",
+        "totp_code": code_now(secret), "trust_device": "1",
     })
     assert _signed_in(response), (
         f"Setup failed: the trusting sign-in did not complete "

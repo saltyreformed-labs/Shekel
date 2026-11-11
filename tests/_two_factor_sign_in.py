@@ -18,6 +18,11 @@ them.  It cannot sit beside :mod:`tests._sign_in`, which imports
 step** (``mfa_service.verify_totp_code``), so a test signed in this way types
 no second code for her; a test that must, enrols her itself after a password
 sign-in and types its one code then (``tests/test_routes/test_security_page.py``).
+
+**The one home of what the two-factor tests type and read** (plan#3517):
+:func:`code_now`, the code to type for a secret, and its clock rule;
+:func:`post_her_password`; :func:`redirect_path`; and
+:func:`two_factor_row_of`, a user's two-factor row read fresh.
 """
 
 import time
@@ -26,7 +31,7 @@ from urllib.parse import urlsplit
 import pyotp
 
 from app.extensions import db
-from app.models.user import User
+from app.models.user import MfaConfig, User
 from tests._test_helpers import enable_mfa
 
 SEED_COMPANION_EMAIL = "companion@shekel.local"
@@ -34,6 +39,39 @@ SEED_COMPANION_PASSWORD = "companionpass"
 
 #: Where a finished sign-in lands a companion: her own page.
 _HER_PAGE = "/companion/"
+
+
+def code_now(secret):
+    """Return the authenticator code for *secret* at the verifier's instant.
+
+    The instant ``time.time()`` reads, which is the clock the verifier steps
+    by: ``pyotp``'s ``now()`` reads ``datetime`` instead, which a test that
+    fakes the calendar moves (measured 2026-11-11: nine ``test_entries`` cases
+    signed in with a code their fake day refused).
+    """
+    return pyotp.TOTP(secret).at(int(time.time()))
+
+
+def redirect_path(response):
+    """Return the path a redirect sends the browser to, or ``""``."""
+    return urlsplit(response.headers.get("Location", "")).path
+
+
+def two_factor_row_of(user_id):
+    """Return *user_id*'s ``auth.mfa_configs`` row, read fresh, or ``None``."""
+    db.session.expire_all()
+    return db.session.query(MfaConfig).filter_by(user_id=user_id).one_or_none()
+
+
+def post_her_password(browser):
+    """POST the seed companion's correct password to the sign-in form.
+
+    Returns:
+        The sign-in form's response, its redirect for the caller to read.
+    """
+    return browser.post("/login", data={
+        "email": SEED_COMPANION_EMAIL, "password": SEED_COMPANION_PASSWORD,
+    })
 
 
 def sign_in_seed_companion_by_password(app):
@@ -52,10 +90,8 @@ def sign_in_seed_companion_by_password(app):
         A fresh test client signed in as the seed companion.
     """
     browser = app.test_client()
-    response = browser.post("/login", data={
-        "email": SEED_COMPANION_EMAIL, "password": SEED_COMPANION_PASSWORD,
-    })
-    assert urlsplit(response.headers.get("Location", "")).path == _HER_PAGE, (
+    response = post_her_password(browser)
+    assert redirect_path(response) == _HER_PAGE, (
         f"Setup failed: her password answered {response.status_code} to "
         f"{response.headers.get('Location')!r}, not her page"
     )
@@ -80,20 +116,13 @@ def sign_in_seed_companion(app):
     secret = enable_mfa(db.session, companion.id)
     browser = app.test_client()
 
-    password = browser.post("/login", data={
-        "email": SEED_COMPANION_EMAIL, "password": SEED_COMPANION_PASSWORD,
-    })
-    assert urlsplit(password.headers.get("Location", "")).path == "/mfa/verify", (
+    password = post_her_password(browser)
+    assert redirect_path(password) == "/mfa/verify", (
         f"Setup failed: her password answered {password.status_code} to "
         f"{password.headers.get('Location')!r}, not the code form"
     )
-    # The code for the instant ``time.time()`` reads, which is the clock the
-    # verifier steps by: ``pyotp``'s ``now()`` reads ``datetime`` instead,
-    # which a test that fakes the calendar moves (measured 2026-11-11: nine
-    # ``test_entries`` cases signed in with a code their fake day refused).
-    typed = pyotp.TOTP(secret).at(int(time.time()))
-    code = browser.post("/mfa/verify", data={"totp_code": typed})
-    assert urlsplit(code.headers.get("Location", "")).path == _HER_PAGE, (
+    code = browser.post("/mfa/verify", data={"totp_code": code_now(secret)})
+    assert redirect_path(code) == _HER_PAGE, (
         f"Setup failed: her code answered {code.status_code} to "
         f"{code.headers.get('Location')!r}, not her page"
     )

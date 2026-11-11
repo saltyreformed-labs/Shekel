@@ -39,6 +39,7 @@ from app.utils.log_events import (
 from tests._guess_records import count_of, locked_until_of, set_record
 from tests._limited_app import limited_app, through_nginx
 from tests._sign_in import make_a_stranger
+from tests._two_factor_sign_in import code_now
 
 _EMAIL = "test@shekel.local"
 _PASSWORD = "testpass"
@@ -72,18 +73,6 @@ def _enable_mfa(user_id: int) -> str:
     ))
     db.session.commit()
     return secret
-
-
-def _right_code(secret: str) -> str:
-    """Return the code valid now for *secret*.
-
-    Args:
-        secret: The plaintext secret.
-
-    Returns:
-        A six-digit code.
-    """
-    return pyotp.TOTP(secret).at(int(time.time()))
 
 
 def _wrong_code(secret: str) -> str:
@@ -184,7 +173,7 @@ class TestTheCodeFormCounts:
         with app.app_context():
             user_id = seed_user["user"].id
             secret = _enable_mfa(user_id)
-            code = _right_code(secret)
+            code = code_now(secret)
             _type_password(client)
             assert client.post(
                 "/mfa/verify", data={"totp_code": code},
@@ -311,7 +300,7 @@ class TestTheCodeFormCounts:
             _set_lock_state(user_id, locked_for=timedelta(minutes=10))
 
             response = client.post(
-                "/mfa/verify", data={"totp_code": _right_code(secret)},
+                "/mfa/verify", data={"totp_code": code_now(secret)},
             )
 
             assert response.status_code == 302
@@ -335,7 +324,7 @@ class TestTheCodeFormCounts:
             assert _count(user_id) == 1
 
             response = client.post(
-                "/mfa/verify", data={"totp_code": _right_code(secret)},
+                "/mfa/verify", data={"totp_code": code_now(secret)},
             )
 
             assert response.status_code == 302
@@ -353,7 +342,7 @@ class TestTheCodeFormCounts:
             _type_password(client)
             assert _locked_until(user_id) is not None
 
-            client.post("/mfa/verify", data={"totp_code": _right_code(secret)})
+            client.post("/mfa/verify", data={"totp_code": code_now(secret)})
             assert _locked_until(user_id) is None
 
 
@@ -481,7 +470,7 @@ class TestReauthCounts:
             assert _count(user_id) == 4
 
             response = stranger_client.post("/reauth", data={
-                "password": _PASSWORD, "totp_code": _right_code(secret),
+                "password": _PASSWORD, "totp_code": code_now(secret),
             })
 
             assert response.status_code == 302
@@ -588,7 +577,7 @@ class TestDisableTwoFactorCounts:
             secret = _enable_mfa(user_id)
 
             response = stranger_client.post("/mfa/disable", data={
-                "current_password": "wrong", "totp_code": _right_code(secret),
+                "current_password": "wrong", "totp_code": code_now(secret),
             }, follow_redirects=True)
 
             assert b"Invalid password" in response.data
@@ -621,7 +610,7 @@ class TestDisableTwoFactorCounts:
 
             response = stranger_client.post("/mfa/disable", data={
                 "current_password": _PASSWORD,
-                "totp_code": _right_code(secret),
+                "totp_code": code_now(secret),
             }, follow_redirects=True)
 
             assert _LOCKED_MESSAGE in response.data
@@ -636,7 +625,7 @@ class TestDisableTwoFactorCounts:
 
             response = stranger_client.post("/mfa/disable", data={
                 "current_password": _PASSWORD,
-                "totp_code": _right_code(secret),
+                "totp_code": code_now(secret),
             }, follow_redirects=True)
 
             assert b"has been disabled" in response.data
@@ -742,7 +731,7 @@ class TestARefusedGuessLogsItsAddress:
 
             with caplog.at_level(logging.WARNING, logger="app.routes.auth.mfa"):
                 client.post(
-                    "/mfa/verify", data={"totp_code": _right_code(secret)},
+                    "/mfa/verify", data={"totp_code": code_now(secret)},
                     **through_nginx(self._CLIENT),
                 )
 
@@ -777,7 +766,7 @@ class TestARefusedGuessLogsItsAddress:
 
             with caplog.at_level(logging.WARNING, logger="app.routes.auth.mfa"):
                 client.post("/mfa/disable", data={
-                    "current_password": "wrong", "totp_code": _right_code(secret),
+                    "current_password": "wrong", "totp_code": code_now(secret),
                 }, **through_nginx(self._CLIENT))
 
             assert self._addresses(caplog, EVT_REAUTH_FAILED) == [self._CLIENT]
@@ -956,7 +945,7 @@ class TestTheCodeFormIsLimitedByThePendingAccount:
                 **through_nginx("8.8.8.8"),
             ).status_code == 302
             response = owner.post(
-                "/mfa/verify", data={"totp_code": _right_code(secret)},
+                "/mfa/verify", data={"totp_code": code_now(secret)},
                 **through_nginx("8.8.8.8"),
             )
 

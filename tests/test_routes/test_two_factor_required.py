@@ -13,18 +13,15 @@ pinned beside the anonymous gate's, in ``tests/test_routes/test_auth_required.py
 Who must have two-factor is ``User.must_have_two_factor``, its one home.
 """
 
-import time
 from urllib.parse import urlsplit
 
-import pyotp
 import pytest
-import sqlalchemy
 
 from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.models.user import MfaConfig, User
+from app.models.user import User
 from app.services import mfa_service
 from scripts.reset_mfa import reset_mfa
 from tests._test_helpers import enable_mfa, generate_row_of, make_expense_template
@@ -32,8 +29,10 @@ from tests.test_routes.test_auth_required import spy_on_the_hold
 from tests._two_factor_sign_in import (
     SEED_COMPANION_EMAIL,
     SEED_COMPANION_PASSWORD,
+    code_now,
     sign_in_seed_companion,
     sign_in_seed_companion_by_password,
+    two_factor_row_of,
 )
 
 _SETUP = "/mfa/setup"
@@ -55,11 +54,6 @@ _REFUSED = (
 _DISABLE_LINK = b'href="/mfa/disable"'
 
 
-def _code(secret):
-    """Return the authenticator code for *secret* at the verifier's instant."""
-    return pyotp.TOTP(secret).at(int(time.time()))
-
-
 def _companion_visible_bill(seed_user, period):
     """A companion-visible Projected bill in *period*; return its id."""
     template = make_expense_template(
@@ -77,16 +71,8 @@ def _status_of(txn_id):
     return db.session.get(Transaction, txn_id).status_id
 
 
-def _her_config(companion_id):
-    """Her one two-factor row, read fresh."""
-    db.session.expire_all()
-    return db.session.execute(
-        sqlalchemy.select(MfaConfig).where(MfaConfig.user_id == companion_id)
-    ).scalar_one()
-
-
-@pytest.fixture()
-def holds(monkeypatch):
+@pytest.fixture(name="holds")
+def _holds(monkeypatch):
     """Record ``(method, path, endpoint)`` for each request the hold ends.
 
     The hold's decision, observed through the one spy on it
@@ -224,10 +210,10 @@ class TestACompanionWithoutTwoFactorIsHeldAtSetup:
             browser = sign_in_seed_companion_by_password(app)
             assert browser.get(_SETUP).status_code == 200
             secret = mfa_service.decrypt_secret(
-                _her_config(companion_id).pending_secret_encrypted,
+                two_factor_row_of(companion_id).pending_secret_encrypted,
             )
 
-            codes = browser.post("/mfa/confirm", data={"totp_code": _code(secret)})
+            codes = browser.post("/mfa/confirm", data={"totp_code": code_now(secret)})
 
             assert codes.status_code == 200
             assert b"Save Your Backup Codes" in codes.data
@@ -296,13 +282,13 @@ class TestSheCannotTurnItOff:
 
             response = browser.post("/mfa/disable", data={
                 "current_password": SEED_COMPANION_PASSWORD,
-                "totp_code": _code(secret),
+                "totp_code": code_now(secret),
             })
 
             assert response.status_code == 302
             assert response.headers["Location"] == "/security"
             assert _REFUSED in browser.get("/security").data
-            config = _her_config(companion_id)
+            config = two_factor_row_of(companion_id)
             assert config.is_enabled is True
             assert config.totp_secret_encrypted is not None
             assert config.last_totp_timestep is None

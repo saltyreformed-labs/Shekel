@@ -23,10 +23,11 @@ import pytest
 from cryptography.fernet import Fernet
 
 from app.extensions import db
-from app.models.user import MfaConfig
 from app.services import mfa_service
 from scripts.reset_mfa import reset_mfa
-from tests._two_factor_sign_in import sign_in_seed_companion_by_password
+from tests._two_factor_sign_in import (
+    code_now, sign_in_seed_companion_by_password, two_factor_row_of,
+)
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 _SETUP = "/mfa/setup"
@@ -45,15 +46,9 @@ def _key_on(response):
     return re.search(r"<code>([A-Z2-7]+)</code>", response.get_data(as_text=True)).group(1)
 
 
-def _config_of(user_id):
-    """Return *user_id*'s two-factor row, read fresh."""
-    db.session.expire_all()
-    return db.session.query(MfaConfig).filter_by(user_id=user_id).one()
-
-
 def _set_expiry(user_id, instant):
     """Move *user_id*'s pending setup's expiry to *instant*, committed."""
-    config = _config_of(user_id)
+    config = two_factor_row_of(user_id)
     config.pending_secret_expires_at = instant
     db.session.commit()
 
@@ -70,11 +65,6 @@ def _owner_signed_in_again(app):
     })
     assert urlsplit(response.headers["Location"]).path not in ("/login", "/mfa/verify")
     return browser
-
-
-def _code(secret):
-    """Return the authenticator code for *secret* at this instant."""
-    return pyotp.TOTP(secret).at(int(time.time()))
 
 
 def _a_wrong_code(secret):
@@ -97,13 +87,13 @@ class TestThePendingKeyIsShownAgain:
         """The same key on both loads; the ciphertext and expiry are as the first left them."""
         user_id = seed_user["user"].id
         first = _key_on(auth_client.get(_SETUP))
-        stored = _config_of(user_id)
+        stored = two_factor_row_of(user_id)
         ciphertext, expiry = stored.pending_secret_encrypted, stored.pending_secret_expires_at
 
         second = _key_on(auth_client.get(_SETUP))
 
         assert second == first
-        after = _config_of(user_id)
+        after = two_factor_row_of(user_id)
         assert after.pending_secret_encrypted == ciphertext
         assert after.pending_secret_expires_at == expiry
 
@@ -116,7 +106,7 @@ class TestThePendingKeyIsShownAgain:
 
         assert _key_on(auth_client.get(_SETUP)) == first
 
-        assert _config_of(user_id).pending_secret_expires_at == near_the_end
+        assert two_factor_row_of(user_id).pending_secret_expires_at == near_the_end
 
     def test_a_wrong_code_brings_back_the_same_key_and_its_code_confirms(
         self, auth_client, seed_user,
@@ -129,10 +119,10 @@ class TestThePendingKeyIsShownAgain:
 
         assert urlsplit(typo.headers["Location"]).path == _SETUP
         assert _key_on(auth_client.get(_SETUP)) == key
-        confirmed = auth_client.post("/mfa/confirm", data={"totp_code": _code(key)})
+        confirmed = auth_client.post("/mfa/confirm", data={"totp_code": code_now(key)})
         assert confirmed.status_code == 200
         assert b"Save Your Backup Codes" in confirmed.data
-        assert _config_of(user_id).is_enabled is True
+        assert two_factor_row_of(user_id).is_enabled is True
 
     @pytest.mark.usefixtures("seed_companion")
     def test_a_companion_held_at_setup_sees_the_key_she_scanned(self, app):
@@ -161,7 +151,7 @@ class TestANewKeyIsMade:
         second = _key_on(auth_client.get(_SETUP))
 
         assert second != first
-        after = _config_of(user_id)
+        after = two_factor_row_of(user_id)
         assert mfa_service.decrypt_secret(after.pending_secret_encrypted) == second
         assert (
             before + _WINDOW - _SLACK
@@ -175,7 +165,7 @@ class TestANewKeyIsMade:
         """Written under a key the app no longer holds: a new key, readable, fresh window."""
         user_id = seed_user["user"].id
         _key_on(auth_client.get(_SETUP))
-        config = _config_of(user_id)
+        config = two_factor_row_of(user_id)
         config.pending_secret_encrypted = Fernet(Fernet.generate_key()).encrypt(
             b"JBSWY3DPEHPK3PXP",
         )
@@ -183,7 +173,7 @@ class TestANewKeyIsMade:
 
         key = _key_on(auth_client.get(_SETUP))
 
-        after = _config_of(user_id)
+        after = two_factor_row_of(user_id)
         assert mfa_service.decrypt_secret(after.pending_secret_encrypted) == key
         assert key != "JBSWY3DPEHPK3PXP"
 
@@ -195,7 +185,7 @@ class TestANewKeyIsMade:
 
         reset_mfa(SEED_USER_EMAIL)
 
-        assert _config_of(seed_user["user"].id).pending_secret_encrypted is None
+        assert two_factor_row_of(seed_user["user"].id).pending_secret_encrypted is None
         assert _key_on(_owner_signed_in_again(app).get(_SETUP)) != first
 
     def test_after_confirming_and_a_reset_the_next_setup_makes_a_new_key(
@@ -205,9 +195,9 @@ class TestANewKeyIsMade:
         user_id = seed_user["user"].id
         first = _key_on(auth_client.get(_SETUP))
         assert auth_client.post(
-            "/mfa/confirm", data={"totp_code": _code(first)},
+            "/mfa/confirm", data={"totp_code": code_now(first)},
         ).status_code == 200
-        assert _config_of(user_id).pending_secret_encrypted is None
+        assert two_factor_row_of(user_id).pending_secret_encrypted is None
         reset_mfa(SEED_USER_EMAIL)
 
         assert _key_on(_owner_signed_in_again(app).get(_SETUP)) != first

@@ -12,17 +12,15 @@ every user, and each key failure at ``/mfa/confirm`` lands on it.  With the key
 set, setup is what it was.
 """
 
-import time
 from urllib.parse import urlsplit
 
-import pyotp
 import pytest
 
-from app.extensions import db
-from app.models.user import MfaConfig
 from app.services import mfa_service
 from tests.test_routes.test_auth_required import spy_on_the_hold
-from tests._two_factor_sign_in import sign_in_seed_companion_by_password
+from tests._two_factor_sign_in import (
+    code_now, sign_in_seed_companion_by_password, two_factor_row_of,
+)
 
 _SETUP = "/mfa/setup"
 _CONFIRM = "/mfa/confirm"
@@ -70,11 +68,6 @@ def _page(response):
     return " ".join(response.get_data(as_text=True).split())
 
 
-def _code(secret):
-    """Return the authenticator code for *secret* at the verifier's instant."""
-    return pyotp.TOTP(secret).at(int(time.time()))
-
-
 def _assert_says_the_key_is_missing(response):
     """Assert *response* is setup's in-place message: a 200, no way to set it up.
 
@@ -97,12 +90,6 @@ def _assert_no_flashes(browser):
         assert "_flashes" not in session, session.get("_flashes")
 
 
-def _pending_of(user_id):
-    """The user's two-factor row, read fresh, or ``None``."""
-    db.session.expire_all()
-    return db.session.query(MfaConfig).filter_by(user_id=user_id).one_or_none()
-
-
 class TestWithTheKeyUnset:
     """Setup says so in place, and nothing sends a held companion round a loop."""
 
@@ -120,7 +107,7 @@ class TestWithTheKeyUnset:
 
         assert _WHY_HELD in _assert_says_the_key_is_missing(response)
         assert holds == []
-        assert _pending_of(seed_companion["user"].id) is None
+        assert two_factor_row_of(seed_companion["user"].id) is None
         _assert_no_flashes(browser)
 
     @pytest.mark.usefixtures("seed_companion")
@@ -150,7 +137,7 @@ class TestWithTheKeyUnset:
         response = auth_client.get(_SETUP)
 
         assert _WHY_HELD not in _assert_says_the_key_is_missing(response)
-        assert _pending_of(seed_user["user"].id) is None
+        assert two_factor_row_of(seed_user["user"].id) is None
         _assert_no_flashes(auth_client)
 
     def test_confirm_with_the_key_gone_lands_on_setup_which_says_so(
@@ -165,15 +152,15 @@ class TestWithTheKeyUnset:
         browser = sign_in_seed_companion_by_password(app)
         assert _QR_CODE in _page(browser.get(_SETUP))
         secret = mfa_service.decrypt_secret(
-            _pending_of(companion_id).pending_secret_encrypted,
+            two_factor_row_of(companion_id).pending_secret_encrypted,
         )
         _unset_the_key(monkeypatch)
 
-        response = browser.post(_CONFIRM, data={"totp_code": _code(secret)})
+        response = browser.post(_CONFIRM, data={"totp_code": code_now(secret)})
 
         assert response.status_code == 302, response.status_code
         assert urlsplit(response.headers["Location"]).path == _SETUP
-        config = _pending_of(companion_id)
+        config = two_factor_row_of(companion_id)
         assert config.pending_secret_encrypted is None
         assert config.pending_secret_expires_at is None
         assert config.is_enabled is False
@@ -195,7 +182,7 @@ class TestWithTheKeyUnset:
         browser = sign_in_seed_companion_by_password(app)
         browser.get(_SETUP)
         secret = mfa_service.decrypt_secret(
-            _pending_of(companion_id).pending_secret_encrypted,
+            two_factor_row_of(companion_id).pending_secret_encrypted,
         )
         real_encrypt = mfa_service.encrypt_secret
 
@@ -210,11 +197,11 @@ class TestWithTheKeyUnset:
 
         monkeypatch.setattr(mfa_service, "encrypt_secret", encrypt_after_the_key_goes)
 
-        response = browser.post(_CONFIRM, data={"totp_code": _code(secret)})
+        response = browser.post(_CONFIRM, data={"totp_code": code_now(secret)})
 
         assert response.status_code == 302, response.status_code
         assert urlsplit(response.headers["Location"]).path == _SETUP
-        config = _pending_of(companion_id)
+        config = two_factor_row_of(companion_id)
         assert config.is_enabled is False
         assert config.totp_secret_encrypted is None
         _assert_says_the_key_is_missing(browser.get(_SETUP))

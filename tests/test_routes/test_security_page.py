@@ -20,9 +20,6 @@ inside one thirty-second step.  Trusted devices are made through the service,
 as a trusting sign-in would make them.
 """
 
-import time
-
-import pyotp
 import sqlalchemy
 
 from app.extensions import db
@@ -31,7 +28,7 @@ from app.services import auth_service, mfa_service
 from tests._test_helpers import enable_mfa
 from tests._trusted_devices import SAFARI_IPHONE, is_trusted, trust
 from tests._two_factor_sign_in import (
-    SEED_COMPANION_PASSWORD, sign_in_seed_companion_by_password,
+    SEED_COMPANION_PASSWORD, code_now, sign_in_seed_companion_by_password,
 )
 
 
@@ -43,11 +40,6 @@ _CARDS = (
 
 #: Where a sign-in lands a companion: her own page.
 _HER_PAGE = "/companion/"
-
-
-def _code(secret):
-    """Return the authenticator code for *secret* at this instant."""
-    return pyotp.TOTP(secret).at(int(time.time()))
 
 
 def _companion_with_two_factor(app, companion_id):
@@ -165,7 +157,7 @@ class TestEveryReturnPathLandsOnAPageSheCanOpen:
             secret = mfa_service.decrypt_secret(config.pending_secret_encrypted)
 
             codes_page = browser.post(
-                "/mfa/confirm", data={"totp_code": _code(secret)},
+                "/mfa/confirm", data={"totp_code": code_now(secret)},
             )
 
             assert codes_page.status_code == 200
@@ -242,7 +234,7 @@ class TestEveryReturnPathLandsOnAPageSheCanOpen:
             )
 
             response = browser.post("/reauth", data={
-                "password": SEED_COMPANION_PASSWORD, "totp_code": _code(secret),
+                "password": SEED_COMPANION_PASSWORD, "totp_code": code_now(secret),
             })
 
             assert response.status_code == 302

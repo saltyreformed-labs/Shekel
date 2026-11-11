@@ -20,11 +20,8 @@ so once, and makes any other device she trusted through the service
 
 import logging
 import re
-import time
 from datetime import datetime, time as clock_time, timedelta, timezone
-from urllib.parse import urlsplit
 
-import pyotp
 import pytest
 import sqlalchemy
 
@@ -39,9 +36,7 @@ from tests._test_helpers import enable_mfa
 from tests._trusted_devices import (
     CHROME_WINDOWS, FIREFOX_LINUX, SAFARI_IPHONE, is_trusted, move_trust_to, trust,
 )
-from tests._two_factor_sign_in import (
-    SEED_COMPANION_EMAIL, SEED_COMPANION_PASSWORD,
-)
+from tests._two_factor_sign_in import code_now, post_her_password, redirect_path
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: The day format the page shows, the ``local_datetime`` filter's default,
@@ -75,23 +70,6 @@ def _forget_action(entry):
     return re.search(r'action="([^"]+)"', entry).group(1)
 
 
-def _code(secret):
-    """Return the authenticator code for *secret* at this instant."""
-    return pyotp.TOTP(secret).at(int(time.time()))
-
-
-def _path(response):
-    """Return the path a redirect sends the browser to, or ``""``."""
-    return urlsplit(response.headers.get("Location", "")).path
-
-
-def _her_password(browser):
-    """POST the seed companion's correct password to the sign-in form."""
-    return browser.post("/login", data={
-        "email": SEED_COMPANION_EMAIL, "password": SEED_COMPANION_PASSWORD,
-    })
-
-
 def _her_firefox_that_trusted_itself(app, secret):
     """Return a Firefox browser she signed in on with a code and "Trust this device".
 
@@ -100,11 +78,11 @@ def _her_firefox_that_trusted_itself(app, secret):
     """
     browser = app.test_client()
     browser.environ_base["HTTP_USER_AGENT"] = FIREFOX_LINUX
-    assert _path(_her_password(browser)) == "/mfa/verify"
+    assert redirect_path(post_her_password(browser)) == "/mfa/verify"
     response = browser.post("/mfa/verify", data={
-        "totp_code": _code(secret), "trust_device": "1",
+        "totp_code": code_now(secret), "trust_device": "1",
     })
-    assert _path(response) == "/companion/", (
+    assert redirect_path(response) == "/companion/", (
         f"Setup failed: her trusting sign-in answered {response.status_code} "
         f"to {response.headers.get('Location')!r}"
     )
@@ -219,7 +197,7 @@ class TestHerDevices:
         owner = browser.post("/login", data={
             "email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD,
         })
-        assert _path(owner) not in ("/login", "/mfa/verify"), owner.headers
+        assert redirect_path(owner) not in ("/login", "/mfa/verify"), owner.headers
         trust(companion_id, SAFARI_IPHONE)
 
         row = companion_row(browser.get(COMPANIONS_PAGE).get_data(as_text=True))
@@ -280,14 +258,14 @@ class TestTheOwnerForgetsOne:
             app, enable_mfa(db.session, companion_id),
         )
         browser.post("/logout")
-        assert _path(_her_password(browser)) == "/companion/"
+        assert redirect_path(post_her_password(browser)) == "/companion/"
         browser.post("/logout")
         row = companion_row(auth_client.get(COMPANIONS_PAGE).get_data(as_text=True))
         (entry,) = _device_entries(row)
 
         assert auth_client.post(_forget_action(entry)).status_code == 302
 
-        assert _path(_her_password(browser)) == "/mfa/verify"
+        assert redirect_path(post_her_password(browser)) == "/mfa/verify"
 
     def test_the_forget_is_logged_with_who_pressed_it(
         self, auth_client, seed_user, seed_companion, caplog,

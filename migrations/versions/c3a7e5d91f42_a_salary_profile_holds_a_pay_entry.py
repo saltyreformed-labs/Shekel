@@ -29,7 +29,7 @@ so it loses no stored fact and restores the schema exactly; no ``Review:``
 line is owed.
 
 Revision ID: c3a7e5d91f42
-Revises: 5f2c46a35a79
+Revises: 08fda2e0b18b
 Create Date: 2026-11-10
 """
 import sqlalchemy as sa
@@ -42,7 +42,13 @@ from app.pay_entry_infrastructure import (
 
 # revision identifiers, used by Alembic.
 revision = "c3a7e5d91f42"
-down_revision = "5f2c46a35a79"
+# The head of ``dev`` at ``21ddd9963``, measured on this branch after its merge
+# (merge commit ``592523c77``).  It was ``5f2c46a35a79`` at authoring, until
+# plan#1245 landed ``08fda2e0b18b`` on it first.  Another lane landing a
+# revision first makes two heads, which git merges cleanly and ``flask db
+# upgrade`` refuses: re-point this at the measured head as the last edit before
+# the pull request.
+down_revision = "08fda2e0b18b"
 branch_labels = None
 depends_on = None
 

@@ -159,13 +159,17 @@ class TestTheEditFormSaysWhatAMoveDoes:
         note = " ".join(
             html[html.index('id="account-help"'):].split("</div>", 1)[0].split()
         )
+        # The middle clause names the page that asks before a row changed by
+        # hand moves (ruling plan#3230, task plan#3237; it said such rows
+        # stay where they are, silently, under task plan#2931).
         assert (
             'Changing this moves the unpaid entries from the paycheck holding the '
             '"Amount effective from" date onward, or from today\'s paycheck if '
             "that date is blank. Entries already paid, received or cancelled stay "
-            "where they are, and so do entries whose amount or paycheck you changed "
-            "by hand. Purchases already recorded stay on the account they were "
-            "paid from."
+            "where they are. If you changed an entry's amount or paycheck by hand, "
+            "the Confirm recurring change page lists it before anything is saved "
+            "and asks whether it moves too. Purchases already recorded stay on the "
+            "account they were paid from."
         ) in note
 
     @pytest.mark.usefixtures("seed_periods_today")
@@ -276,14 +280,18 @@ class TestTheMoveDoesWhatTheNoteSays:
     def test_a_move_takes_the_unpaid_rows_from_todays_paycheck_and_no_others(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """Unpaid rows from today's paycheck on move; paid, hand-changed and earlier stay.
+        """Unpaid rows from today's paycheck on move; paid and earlier stay; hand-changed asks.
 
         The note under the box says a blank "Amount effective from" moves the
-        unpaid entries from today's paycheck onward, and that paid entries and
-        entries changed by hand stay.  One bill on checking, every paycheck:
-        the next paycheck's row paid early, the one after re-priced by hand,
-        then the bill moved to savings with the date left blank.  Both kept
-        rows sit inside the moved range, so neither stays merely by its date.
+        unpaid entries from today's paycheck onward, that paid entries stay,
+        and that an entry changed by hand is listed before anything saves.
+        One bill on checking, every paycheck: the next paycheck's row paid
+        early, the one after re-priced by hand, then the bill moved to savings
+        with the date left blank.  Both rows sit inside the moved range, so
+        neither is left behind merely by its date.  The save stops on the
+        chooser (ruling plan#3230: under task plan#2931 it went through and
+        left the re-priced row behind, unasked), and its Apply answering
+        "Keep on Checking" leaves that row where it is.
         """
         today = _TODAYS_PERIOD_INDEX
         earlier, paid, hand = (seed_periods_today[i].id for i in (today - 1, today + 1, today + 2))
@@ -307,8 +315,15 @@ class TestTheMoveDoesWhatTheNoteSays:
             repriced_by_the_owner(rows[hand], "1500.00")
             db.session.commit()
 
+            edit = {"name": "Rent", "account_id": str(savings)}
+            asked = auth_client.post(f"/templates/{tid}", data=edit)
+            assert asked.status_code == 200, "the save did not stop to ask"
+            assert f'name="conflict_account_{rows[hand].id}"' in asked.get_data(
+                as_text=True,
+            )
             resp = auth_client.post(f"/templates/{tid}", data={
-                "name": "Rent", "account_id": str(savings),
+                **edit, "conflict_apply": "1",
+                f"conflict_account_{rows[hand].id}": "keep",
             })
             assert resp.status_code == 302, resp.get_data(as_text=True)
 

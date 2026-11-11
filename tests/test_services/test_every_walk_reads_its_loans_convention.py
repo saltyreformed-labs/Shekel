@@ -11,8 +11,17 @@ and named ``MONTHLY_1_12`` itself would pass any test that only compared
 members.  Each test here replaces the one reading with a SENTINEL that passes
 every type check (a ``MagicMock`` specced on the enum) and asserts the
 sentinel is what arrives, so a hardcoded member anywhere on the path fails.
+
+**Where it arrives is the one interest producer**
+(:func:`app.utils.money.installment_interest`), spied on in every module that
+calls it (:data:`_WALKS`, held to the modules that import it by a census), so
+each walk is graded on what it HANDS the producer: the loan's convention and
+the window its installment charges for.
 """
 
+import ast
+import pathlib
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -22,15 +31,47 @@ import pytest
 
 from app import ref_cache
 from app.enums import InterestAccrualConventionEnum
-from app.services import loan_resolver
-from app.services.amortization_engine import PeriodTerms, RateChangeRecord
+from app.services import debt_strategy_service, loan_resolver
+from app.services.amortization_engine import (
+    PaymentDates,
+    PeriodTerms,
+    ProjectionInputs,
+    RateChangeRecord,
+    project_forward,
+)
 from app.services.installment_calendar import installment_dates
-from app.services.loan_ledger import LoanCalendar
+from app.services.loan_ledger import (
+    LoanCalendar,
+    LoanCashEvent,
+    LoanEventStream,
+    LoanResetEvent,
+    replay_loan_events,
+    with_contract_charges,
+)
 from app.services.loan_ledger._charges import contract_charges
+from app.services.rate_period_engine import BalanceAnchor, replay_schedule
+from app.utils.money import installment_interest
+from tests._test_helpers import create_loan_account
 from tests.oracles.loan_monthly_composition import rate_period
 
 _MONTHLY = InterestAccrualConventionEnum.MONTHLY_1_12
 _ORIGINATION = date(2026, 1, 15)
+_PRINCIPAL = Decimal("100000.00")
+
+# Anchored to THIS file, so the census grades the tree from any working directory.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+#: Every module that calls the one interest producer, by the walk it is: the
+#: posted ledger's replay, the contractual schedule (its replay rows and its
+#: walk between two rate periods), the forward projection, and the payoff
+#: strategy.  :class:`TestTheSpiesSeeEveryCaller` holds this to the modules
+#: that import the producer, so a sixth caller cannot charge interest unspied.
+_WALKS = {
+    "replay": "app.services.loan_ledger._replay",
+    "schedule": "app.services.rate_period_engine",
+    "projection": "app.services.amortization_engine._projection",
+    "strategy": "app.services.debt_strategy_service",
+}
 
 
 def _params(**overrides) -> SimpleNamespace:
@@ -69,6 +110,50 @@ def _sentinel_convention(monkeypatch):
         lambda convention_id: sentinel,
     )
     return sentinel
+
+
+@dataclass(frozen=True)
+class _Call:
+    """What one walk handed the producer: the window and the convention."""
+
+    start: date
+    end: date
+    convention: object
+
+
+@pytest.fixture(name="producer_calls")
+def _producer_calls(monkeypatch, sentinel_convention):
+    """Spy on the producer in every walk: record each call, then price it for real.
+
+    The sentinel cannot be priced (the producer's rule table is keyed by real
+    members, so it is a ``KeyError``), so the spy hands the producer
+    ``MONTHLY_1_12`` IN ITS PLACE and only there: a walk that named a member
+    itself passes that member through, and is recorded holding it.
+
+    Returns:
+        ``{walk: [_Call, ...]}`` for each walk in :data:`_WALKS`, filled as
+        the test runs.
+    """
+    calls: dict[str, list[_Call]] = {walk: [] for walk in _WALKS}
+
+    def spy_for(walk: str):
+        """The producer, recording into *walk*'s list first."""
+        def spy(balance, annual_rate, start, end, convention):
+            calls[walk].append(_Call(start, end, convention))
+            return installment_interest(
+                balance, annual_rate, start, end,
+                _MONTHLY if convention is sentinel_convention else convention,
+            )
+        return spy
+
+    for walk, module in _WALKS.items():
+        monkeypatch.setattr(f"{module}.installment_interest", spy_for(walk))
+    return calls
+
+
+def _windows(calls: list[_Call]) -> list[tuple[date, date]]:
+    """The windows a walk handed the producer, in order."""
+    return [(call.start, call.end) for call in calls]
 
 
 class TestTheConventionEntersOnce:
@@ -150,3 +235,248 @@ class TestEachChargeCarriesItsWindow:
         )
         first = contract_charges(calendar, date(2026, 2, 1))[0]
         assert (first.opens_on, first.on_date) == (date(2026, 1, 1), date(2026, 2, 1))
+
+
+class TestEveryWalkHandsTheProducerTheLoansConvention:
+    """Each walk asks the one producer under the loan's convention, over its own window.
+
+    A fixed-rate loan from Jan 15, 2026, due the 1st, read through the loan's
+    own periods and terms, so the convention reaches each walk from the one
+    reading and from nowhere else.
+    """
+
+    def test_the_posted_replay_charges_each_installment_under_it(
+        self, producer_calls, sentinel_convention,
+    ):
+        """``loan_ledger._replay``: one call per installment, over that installment's window.
+
+        Payments Mar 1 and Apr 1 stand the stream's charges at Feb 1, Mar 1
+        and Apr 1 (the first installment falls the month after origination),
+        each opening on the due day before it: the windows abut.
+        """
+        calendar = LoanCalendar(
+            origination_date=_ORIGINATION,
+            payment_day=1,
+            periods=loan_resolver.resolve_periods(_params(), _origination_rate()),
+            escrow_lines=[],
+        )
+        stream = with_contract_charges(
+            LoanEventStream(
+                charges=(),
+                payments=[
+                    LoanCashEvent(
+                        on_date=due, cash=Decimal("600.00"), source=None,
+                        visible_on=due,
+                    )
+                    for due in (date(2026, 3, 1), date(2026, 4, 1))
+                ],
+                resets=[LoanResetEvent(
+                    on_date=_ORIGINATION, balance=_PRINCIPAL, source=None,
+                    is_opening=True, is_tracking_start=False,
+                )],
+            ),
+            calendar,
+        )
+        replay_loan_events(Decimal("0.00"), stream)
+
+        assert _windows(producer_calls["replay"]) == [
+            (charge.opens_on, charge.on_date) for charge in stream.charges
+        ] == [
+            (date(2026, 1, 1), date(2026, 2, 1)),
+            (date(2026, 2, 1), date(2026, 3, 1)),
+            (date(2026, 3, 1), date(2026, 4, 1)),
+        ]
+        assert all(
+            call.convention is sentinel_convention
+            for call in producer_calls["replay"]
+        )
+
+    def test_the_schedule_replay_charges_each_payment_under_it(
+        self, producer_calls, sentinel_convention,
+    ):
+        """``rate_period_engine._replay_payment_row``: each payment's installment window.
+
+        One period, so building it walks nothing forward and every call
+        recorded is a replayed row's: Feb 1's and Mar 1's.
+        """
+        periods = loan_resolver.resolve_periods(_params(), _origination_rate())
+        assert producer_calls["schedule"] == []
+
+        replay_schedule(
+            periods=periods,
+            anchor=BalanceAnchor(balance=_PRINCIPAL, as_of_date=_ORIGINATION),
+            payments=[
+                PaymentDates(period_start=due, due_date=due, settled_on=due)
+                for due in (date(2026, 2, 1), date(2026, 3, 1))
+            ],
+            payment_day=1,
+            as_of=date(2026, 3, 1),
+        )
+
+        assert _windows(producer_calls["schedule"]) == [
+            (date(2026, 1, 1), date(2026, 2, 1)),
+            (date(2026, 2, 1), date(2026, 3, 1)),
+        ]
+        assert all(
+            call.convention is sentinel_convention
+            for call in producer_calls["schedule"]
+        )
+
+    def test_the_walk_between_two_periods_charges_under_it(
+        self, producer_calls, sentinel_convention,
+    ):
+        """``rate_period_engine._amortize_forward``: the months from one period to the next.
+
+        A rate change Apr 15 starts a second period, so the first is walked
+        forward its three months, Jan 15 to Apr 15, to find the balance the
+        second's payment amortizes; each month's window opens on the start's
+        day.
+        """
+        loan_resolver.resolve_periods(_params(), [
+            *_origination_rate(),
+            RateChangeRecord(
+                effective_date=date(2026, 4, 15), interest_rate=Decimal("0.07"),
+            ),
+        ])
+
+        assert _windows(producer_calls["schedule"]) == [
+            (date(2026, 1, 15), date(2026, 2, 15)),
+            (date(2026, 2, 15), date(2026, 3, 15)),
+            (date(2026, 3, 15), date(2026, 4, 15)),
+        ]
+        assert all(
+            call.convention is sentinel_convention
+            for call in producer_calls["schedule"]
+        )
+
+    def test_the_projection_charges_each_row_under_it(
+        self, producer_calls, sentinel_convention,
+    ):
+        """``amortization_engine._projection``: each row's installment window.
+
+        Three rows from Feb 1.  The first row's window opens Jan 1, the due
+        day before it, never on the projection's own starting day: a window
+        inside one month would charge nothing.
+        """
+        rows = project_forward(ProjectionInputs(
+            starting_balance=_PRINCIPAL,
+            starting_date=date(2026, 2, 1),
+            remaining_months=3,
+            payment_day=1,
+            terms_schedule=loan_resolver.engine_terms(
+                _params(), _origination_rate(),
+            ),
+        ))
+
+        assert [row.payment_date for row in rows] == [
+            date(2026, 2, 1), date(2026, 3, 1), date(2026, 4, 1),
+        ]
+        assert _windows(producer_calls["projection"]) == [
+            (date(2026, 1, 1), date(2026, 2, 1)),
+            (date(2026, 2, 1), date(2026, 3, 1)),
+            (date(2026, 3, 1), date(2026, 4, 1)),
+        ]
+        assert all(
+            call.convention is sentinel_convention
+            for call in producer_calls["projection"]
+        )
+
+    def test_the_payoff_strategy_charges_a_stored_loan_under_it(
+        self, auth_client, seed_user, db, seed_periods_today,
+        producer_calls, sentinel_convention,
+    ):
+        """``debt_strategy_service``: a stored loan's convention reaches the payoff projection.
+
+        Through the page itself, so the path the convention travels is the
+        production one: the loan row, the balance seam's terms, the page's
+        :class:`~app.services.debt_strategy_service.DebtAccount`, the
+        simulation.  Every call the page made, the strategy's and the
+        balance read's alike, carried the sentinel.
+        """
+        create_loan_account(
+            seed_user, db.session, name="Van", principal=Decimal("25000.00"),
+            rate=Decimal("0.05500"), term=60, origination_date=date(2025, 1, 1),
+            payment_day=15,
+        )
+        db.session.commit()
+
+        resp = auth_client.post("/debt-strategy/calculate", data={
+            "extra_monthly": "200", "strategy": "avalanche",
+        })
+
+        assert resp.status_code == 200
+        assert b"Van" in resp.data
+        assert producer_calls["strategy"]
+        assert producer_calls["replay"]
+        assert all(
+            call.convention is sentinel_convention
+            for calls in producer_calls.values() for call in calls
+        )
+
+    def test_the_payoff_strategy_charges_each_simulated_month(
+        self, producer_calls, sentinel_convention,
+    ):
+        """``debt_strategy_service._accrue_interest``: month ``m`` is the month ending ``m`` months in.
+
+        Started Jan 31, 2026, so the windows re-clamp from the meant day: the
+        month to Feb 28, then the month to Mar 31.  A debt carrying the
+        sentinel hands it over unchanged.
+        """
+        debt_strategy_service.calculate_strategy(
+            debt_strategy_service.StrategyRequest(
+                debts=[debt_strategy_service.DebtAccount(
+                    account_id=1, name="Van", current_principal=Decimal("1000.00"),
+                    interest_rate=Decimal("0.06"),
+                    minimum_payment=Decimal("100.00"),
+                    convention=sentinel_convention,
+                )],
+                extra_monthly=Decimal("0.00"),
+                strategy=debt_strategy_service.STRATEGY_AVALANCHE,
+                start_date=date(2026, 1, 31),
+                max_horizon_months=2,
+            ),
+        )
+
+        assert _windows(producer_calls["strategy"]) == [
+            (date(2026, 1, 31), date(2026, 2, 28)),
+            (date(2026, 2, 28), date(2026, 3, 31)),
+        ]
+        assert all(
+            call.convention is sentinel_convention
+            for call in producer_calls["strategy"]
+        )
+
+
+class TestTheSpiesSeeEveryCaller:
+    """The walks spied on above are every module in ``app/`` that charges interest."""
+
+    def test_every_importer_of_the_producer_is_a_walk_spied_on(self):
+        """Census of ``app/``: who imports the producer, by either of its names.
+
+        ``installment_interest`` and the unrounded ``accrued_interest`` beneath
+        it; savings' own ``accrued_interest`` (``interest_projection``) is a
+        different function, outside ``app.utils.money``, until plan#3356
+        folds it in.  A module importing ``app.utils.money`` whole would hide
+        from this, so the census refuses that shape too.
+        """
+        importers: set[str] = set()
+        whole_module: set[str] = set()
+        for path in (_REPO_ROOT / "app").rglob("*.py"):
+            module = ".".join(
+                path.relative_to(_REPO_ROOT).with_suffix("").parts,
+            ).removesuffix(".__init__")
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.ImportFrom) and node.module == "app.utils.money":
+                    if {alias.name for alias in node.names} & {
+                        "installment_interest", "accrued_interest",
+                    }:
+                        importers.add(module)
+                elif isinstance(node, ast.ImportFrom) and node.module == "app.utils":
+                    if any(alias.name == "money" for alias in node.names):
+                        whole_module.add(module)
+                elif isinstance(node, ast.Import):
+                    if any(alias.name == "app.utils.money" for alias in node.names):
+                        whole_module.add(module)
+
+        assert importers == set(_WALKS.values())
+        assert not whole_module

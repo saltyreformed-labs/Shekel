@@ -145,8 +145,8 @@ from decimal import Decimal
 from app.services.rate_period_engine import RatePeriod, period_for_date
 from app.utils.money import (
     PaymentCashSplit,
-    accrue_monthly_interest,
     apply_payment_cash,
+    installment_interest,
 )
 
 from ._charges import AccrualCharge, LoanCalendar, contract_charges
@@ -772,7 +772,10 @@ def _accrued(
     if balance <= _ZERO_MONEY:
         return _NOTHING_DUE
     return _Due(
-        interest=accrue_monthly_interest(balance, charge.period.annual_rate),
+        interest=installment_interest(
+            balance, charge.period.annual_rate, charge.opens_on,
+            charge.on_date, charge.period.convention,
+        ),
         escrow=charge.escrow,
         extra=(
             extra_per_period
@@ -795,7 +798,7 @@ def replay_loan_events(
     -- accumulating each accrual period's charge and allocating each payment's
     cash against whatever stands
     (:func:`~app.utils.money.apply_payment_cash`, the ONE allocation, over
-    :func:`~app.utils.money.accrue_monthly_interest`, the ONE accrual).
+    :func:`~app.utils.money.installment_interest`, the ONE accrual).
 
     A CLOSED loan (``balance <= 0``) accrues nothing and impounds nothing
     (:func:`_accrued`), so its charge adds nothing to what stands; a payment
@@ -806,8 +809,8 @@ def replay_loan_events(
     distinguishes it** -- an adversarial review deleted the skip and all 101
     tests in the loan files stayed green, which is worth recording rather than
     hiding.  The reason it cannot be observed today: a balance reaches ``<= 0``
-    only at exactly ``0.00`` (principal caps at the balance), ``accrue_monthly_
-    interest(0, r)`` is ``0.00`` anyway, and whatever escrow the arm would
+    only at exactly ``0.00`` (principal caps at the balance), the interest
+    on a zero balance is ``0.00`` anyway, and whatever escrow the arm would
     accumulate is discarded by the allocator's own closed-loan arm at the next
     payment, or cleared by the next balance statement first.  It is kept
     because it is not unobservable in PRINCIPLE: without it,

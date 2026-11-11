@@ -763,7 +763,7 @@ class TestLoanPaymentWindowResolver:
         contractual installments and nineteen from the extension, 20 months
         past the contractual 2027-01-01.  It read 2028-06-01 while the skipped
         months charged nothing (B-9's holds-flat, repealed by the ruling).
-        Re-derived with ``accrue_monthly_interest`` / ``apply_payment_cash``
+        Re-derived with ``installment_interest`` / ``apply_payment_cash``
         after an adversarial review found this paragraph's first count wrong.
 
         **"Never paid" is a fact the OWNER states since plan step R16-b-2, and

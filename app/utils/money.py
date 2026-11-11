@@ -38,11 +38,12 @@ able to reach it.
 
 **The two halves of a loan payment's arithmetic BOTH live here, and plan step
 X-au-g-2c-3a is why the second one moved.** A loan payment is one CHARGE
-(:func:`accrue_monthly_interest`, what time has cost) and one ALLOCATION
+(:func:`installment_interest`, what time has cost) and one ALLOCATION
 (:func:`apply_payment_cash`, how the cash covers it), and every walk over a
-loan needs both. The charge has been shared from this leaf since E-24 and its
-docstring already claims the property that buys -- "byte-identical by
-construction". The allocation was NOT shared: it sat in
+loan needs both. The charge has been shared from this leaf since E-24 (as
+``accrue_monthly_interest`` until plan step recurrence:R16-d), which is what
+makes every walk's interest "byte-identical by construction". The allocation
+was NOT shared: it sat in
 ``loan_ledger._split``, whose import closure is 23 modules, ABOVE two of the
 four walks that need it. ``amortization_engine`` (closure 2) and
 ``rate_period_engine`` (closure 3) structurally COULD NOT call it -- reaching
@@ -222,53 +223,6 @@ def percent_complete(total: Decimal, target: Decimal) -> Decimal:
     if pct < ZERO:
         return ZERO
     return pct
-
-
-def accrue_monthly_interest(balance: Decimal, annual_rate: Decimal) -> Decimal:
-    """Return one month's interest on ``balance`` at ``annual_rate``.
-
-    The single monthly-accrual primitive every amortization surface shares:
-    ``round_money(balance * (annual_rate / 12))`` with a zero-rate guard.  The
-    historical replay (``rate_period_engine._replay_payment_row``), the forward
-    projection (``amortization_engine`` schedule), the contractual balance walk
-    (``rate_period_engine._amortize_forward``), and the posting-ledger loan-payment
-    split (``loan_posting_service``) ALL call this one function, so the interest
-    they accrue is byte-identical by construction -- a drifting copy of the
-    formula can no longer desynchronise a displayed loan balance from a posted
-    one (the whole premise of the parallel-run posting ledger).  ``ROUND_HALF_UP``
-    via :func:`round_money` is the project's only rounding boundary; the
-    intermediate ``balance * (annual_rate / 12)`` stays at full Decimal precision
-    and rounds exactly once.
-
-    **The parenthesisation is load-bearing and this docstring stated it wrongly
-    until plan step X-au-g-2c-3a** -- it read ``balance * annual_rate / 12``,
-    which is ``(balance * annual_rate) / 12``, the OTHER association.  The code
-    was right and the description was wrong, so nothing moved; what it cost is
-    that the canonical reference for five spellings of one formula described a
-    different formula.  ``debt_strategy_service._accrue_interest`` computes
-    ``(balance * rate) / 12`` under a docstring claiming ``balance * (rate /
-    12)`` -- the two descriptions are exactly SWAPPED, so an auditor comparing
-    them by docstring concludes the copy is canonical.  The two associations are
-    NOT the same function: measured 2026-09-02 over 500,000 randomised draws
-    they differ on one, ``$271,375.20`` at ``0.025`` giving ``$565.37`` against
-    ``$565.36``.  Finding **D52** owns the duplicate; this paragraph exists so
-    the surviving statement of the rule cannot be re-inverted by someone
-    "simplifying" the brackets.
-
-    Args:
-        balance: The outstanding balance before this month's payment.  ``float``
-            is rejected by :func:`round_money` at the boundary, as everywhere.
-        annual_rate: The governing period's annual rate as a decimal fraction
-            (e.g. ``Decimal("0.06875")`` for 6.875%).  A non-positive rate
-            accrues no interest (a zero-interest period).
-
-    Returns:
-        The month's interest quantized to cents, or ``Decimal("0.00")`` when
-        ``annual_rate <= 0``.
-    """
-    if annual_rate <= 0:
-        return Decimal("0.00")
-    return round_money(balance * (annual_rate / MONTHS_PER_YEAR))
 
 
 def _monthly_1_12(

@@ -14,9 +14,10 @@ from decimal import Decimal
 import pytest
 
 from app.enums import InterestAccrualConventionEnum
+from app.utils.dates import add_months
 from app.utils.money import (
     MONTHS_PER_YEAR,
-    accrue_monthly_interest,
+    installment_interest,
     round_money,
 )
 from app.services.debt_strategy_service import (
@@ -808,13 +809,14 @@ class TestResultStructure:
 
 
 class TestTheAccrualIsTheSharedPrimitive:
-    """The simulation charges interest through the ONE monthly-accrual primitive.
+    """The simulation charges interest through the ONE interest producer.
 
     Plan step **X-au-g-2c-3c**.  ``_accrue_interest`` was a FIFTH inline
     spelling of the monthly accrual and it was not the same function as the
-    primitive: it associated ``(balance * rate) / 12`` where
-    :func:`~app.utils.money.accrue_monthly_interest` associates
-    ``balance * (rate / 12)``.  Finding **D52** recorded the duplicate under the
+    primitive: it associated ``(balance * rate) / 12`` where the primitive
+    (``accrue_monthly_interest``, folded into
+    :func:`~app.utils.money.installment_interest` at plan step
+    recurrence:R16-d) associates ``balance * (rate / 12)``.  Finding **D52** recorded the duplicate under the
     evidence *"the two orderings agree on 200,000 randomised draws"*; that
     sentence is refuted by the pinned case below.
 
@@ -827,6 +829,8 @@ class TestTheAccrualIsTheSharedPrimitive:
     # the two associations part.  (b*r)/12 -> 565.37;  b*(r/12) -> 565.36.
     DIVERGENT_BALANCE = Decimal("271375.20")
     DIVERGENT_RATE = Decimal("0.025")
+    #: The simulation's first month, the window month 1 charges for.
+    FIRST_MONTH = (FIXED_START, add_months(FIXED_START, 1))
 
     def test_the_two_associations_really_do_differ_on_the_pinned_case(self):
         """The premise, asserted rather than assumed.
@@ -837,13 +841,13 @@ class TestTheAccrualIsTheSharedPrimitive:
         retired_spelling = round_money(
             self.DIVERGENT_BALANCE * self.DIVERGENT_RATE / MONTHS_PER_YEAR,
         )
-        assert retired_spelling == Decimal("565.37")
-        assert accrue_monthly_interest(
-            self.DIVERGENT_BALANCE, self.DIVERGENT_RATE,
-        ) == Decimal("565.36")
-        assert retired_spelling != accrue_monthly_interest(
-            self.DIVERGENT_BALANCE, self.DIVERGENT_RATE,
+        producers_figure = installment_interest(
+            self.DIVERGENT_BALANCE, self.DIVERGENT_RATE, *self.FIRST_MONTH,
+            InterestAccrualConventionEnum.MONTHLY_1_12,
         )
+        assert retired_spelling == Decimal("565.37")
+        assert producers_figure == Decimal("565.36")
+        assert retired_spelling != producers_figure
 
     def test_the_simulation_charges_the_primitives_figure(self):
         """One month on the pinned case yields the primitive's cent.
@@ -864,5 +868,5 @@ class TestTheAccrualIsTheSharedPrimitive:
         assert result.per_account[0].total_interest == Decimal("565.36"), (
             "the simulation charged the RETIRED spelling's figure -- "
             "_accrue_interest is no longer routing through "
-            "accrue_monthly_interest"
+            "installment_interest"
         )

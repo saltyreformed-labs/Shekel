@@ -33,12 +33,15 @@ from datetime import date
 from decimal import Decimal
 
 from app.enums import InterestAccrualConventionEnum
-from app.services.installment_calendar import due_in_following_month
+from app.services.installment_calendar import (
+    accrual_window,
+    due_in_following_month,
+)
 from app.utils.dates import clamped_day, month_ordinal, months_between
 from app.utils.money import (
     MONTHS_PER_YEAR,
-    accrue_monthly_interest,
     apply_payment_cash,
+    installment_interest,
     round_money,
 )
 
@@ -714,7 +717,15 @@ def project_forward(
         # rate-period engine's figures, never re-derived from the
         # projection's own balance (DH-#1 / E-02).
         terms = _governing_terms(terms_schedule, pay_date)
-        interest = accrue_monthly_interest(balance, terms.annual_rate)
+        # The installment's own window, never one opened on the starting
+        # day: row 1 falls in ``starting_date``'s month, and a window inside
+        # one month charges nothing under ``MONTHLY_1_12`` (plan step
+        # recurrence:R16-d).
+        window_start, window_end = accrual_window(pay_date, inputs.payment_day)
+        interest = installment_interest(
+            balance, terms.annual_rate, window_start, window_end,
+            terms.convention,
+        )
         # Contractual + extra.  The final scheduled month absorbs the residue
         # regardless of extra.
         principal_portion, actual_payment, extra, balance = (

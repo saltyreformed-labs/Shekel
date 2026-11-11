@@ -49,11 +49,14 @@ from app.services.amortization_engine import (
     PaymentDates,
     calculate_monthly_payment,
 )
-from app.services.installment_calendar import due_in_following_month
+from app.services.installment_calendar import (
+    accrual_window,
+    due_in_following_month,
+)
 from app.utils.dates import add_months, has_settled_by, months_between
 from app.utils.money import (
-    accrue_monthly_interest,
     apply_payment_cash,
+    installment_interest,
     round_money,
 )
 
@@ -394,33 +397,48 @@ def _recorded_pi_at_date(
 
 def _amortize_forward(
     balance: Decimal,
-    annual_rate: Decimal,
-    level_payment: Decimal,
+    period: RatePeriod,
     months: int,
 ) -> Decimal:
-    """Walk ``months`` of level-payment amortization and return the balance.
+    """Walk ``months`` of *period*'s level-payment amortization and return the balance.
 
     Pure contractual walk used to find a period's start balance from
     the prior period's start balance (so an unrecorded recast P&I can
-    be derived).  Each month: ``interest = round_money(balance *
-    rate/12)``, ``principal = level_payment - interest``, ``balance =
-    round_money(balance - principal)``, floored at zero.  A zero rate
-    accrues no interest.
+    be derived).  Each month: the interest the period's convention
+    charges for that month (:func:`~app.utils.money.installment_interest`),
+    ``principal = period_pi - interest``, ``balance = round_money(balance
+    - principal)``, floored at zero.  A zero rate accrues no interest.
+
+    **Its months are the period's own, counted from its start** (plan step
+    recurrence:R16-d): month ``k`` is the window ending ``k`` months after
+    ``period.start_date``, through the one window helper
+    (:func:`~app.services.installment_calendar.accrual_window`) with that
+    start's day as the meant day.  The walk holds no payment day --
+    :class:`LoanTerms` carries none, and its step count is the whole months
+    between two boundaries -- so its windows are month-shaped rather than
+    installment-shaped.  Under ``MONTHLY_1_12``, which counts months, the two
+    charge the same; a convention that counts days is taught to the loan's
+    walks at plan#3355 (ruling plan#3345).
 
     Args:
         balance: Starting balance.
-        annual_rate: Annual rate (decimal fraction).
-        level_payment: The period's level P&I.
+        period: The :class:`RatePeriod` walked: its ``start_date``,
+            ``annual_rate``, level ``period_pi`` and ``convention``.
         months: Number of months to walk (``<= 0`` returns ``balance``).
 
     Returns:
         The balance after ``months`` payments, quantized to cents.
     """
-    for _ in range(max(0, months)):
+    for month in range(1, max(0, months) + 1):
         if balance <= 0:
             return ZERO_MONEY
-        interest = accrue_monthly_interest(balance, annual_rate)
-        principal = level_payment - interest
+        start, end = accrual_window(
+            add_months(period.start_date, month), period.start_date.day,
+        )
+        interest = installment_interest(
+            balance, period.annual_rate, start, end, period.convention,
+        )
+        principal = period.period_pi - interest
         if principal >= balance:
             return ZERO_MONEY
         balance = round_money(balance - principal)
@@ -557,7 +575,7 @@ def build_rate_periods(
                 start_date, boundaries[index + 1],
             )
             balance = _amortize_forward(
-                balance, annual_rate, period_pi, months_in_period,
+                balance, periods[-1], months_in_period,
             )
     return periods
 
@@ -684,13 +702,14 @@ def confirmed_amortization_row(row: ConfirmedRowInputs) -> AmortizationRow:
 def _replay_payment_row(
     balance: Decimal,
     period: RatePeriod,
-    pay_date: date,
+    window: tuple[date, date],
     origination_date: date,
 ) -> AmortizationRow:
     """Apply one scheduled payment and return its row (carrying the new balance).
 
-    Interest accrues on ``balance`` at the period rate
-    (:func:`~app.utils.money.accrue_monthly_interest`); the cash -- here the
+    Interest accrues on ``balance`` at the period rate over the installment's
+    window, under the period's convention
+    (:func:`~app.utils.money.installment_interest`); the cash -- here the
     period's contractual P&I -- is then divided against it by
     :func:`~app.utils.money.apply_payment_cash`, the ONE allocation.  A
     principal that would overrun the balance is capped so the loan closes
@@ -716,14 +735,19 @@ def _replay_payment_row(
 
     Args:
         balance: Outstanding balance before this payment (> 0).
-        period: The :class:`RatePeriod` governing ``pay_date``.
-        pay_date: The payment's date.
+        period: The :class:`RatePeriod` governing the payment.
+        window: The ``(start, end)`` window its installment charges for, the
+            end being the payment's date
+            (:func:`~app.services.installment_calendar.accrual_window`).
         origination_date: Loan origination, for the row's month index.
 
     Returns:
         The :class:`AmortizationRow` for this confirmed payment.
     """
-    interest = accrue_monthly_interest(balance, period.annual_rate)
+    window_start, pay_date = window
+    interest = installment_interest(
+        balance, period.annual_rate, window_start, pay_date, period.convention,
+    )
     # The ONE allocation, not a fourth statement of it -- see the docstring.
     parts = apply_payment_cash(period.period_pi, balance, interest, ZERO_MONEY)
     principal = parts.principal
@@ -819,7 +843,8 @@ def replay_schedule(
             (:func:`is_confirmed_payment_eligible`), which is ``False`` for a
             payment that has not settled at all.
         payment_day: Day of month payments are due.  Drives ``next_pay_date``
-            (the due dates themselves arrive on the records).
+            and each replayed installment's accrual window (the due dates
+            themselves arrive on the records).
         as_of: Evaluation date; payments whose cash has not moved by it are
             not replayed.
 
@@ -906,7 +931,10 @@ def replay_schedule(
         # the read", and finding N-36 owns the key.
         period = period_for_date(periods, payment.period_start)
         due_date = payment.due_date
-        row = _replay_payment_row(balance, period, due_date, origination_date)
+        row = _replay_payment_row(
+            balance, period, accrual_window(due_date, payment_day),
+            origination_date,
+        )
         balance = row.remaining_balance
         rows.append(row)
 

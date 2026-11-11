@@ -214,11 +214,15 @@ class TestTheCellSaysPressOrOpen:
         _row, movement = _payment(row.id)
         assert (movement.account_id, movement.amount) == (visa.id, _EIGHT_HUNDRED)
 
-    def test_a_bill_on_a_card_presses_onto_its_own_card(
+    def test_a_bill_on_a_card_presses_onto_the_other_card(
         self, auth_client, seed_user, seed_periods_today,
     ):
-        """Two cards, the bill living on the Amex: the row names its card, so it presses there."""
-        add_card(seed_user)
+        """Two cards, the bill living on the Amex: one other card, so it presses onto the Visa.
+
+        Ruling plan#3225: Paid with the Amex picked records that it went on
+        the Amex, so Credit on it means another card.
+        """
+        visa = add_card(seed_user)
         amex = add_card(seed_user, name="Amex")
         db.session.commit()
         row = _groceries(seed_user, seed_periods_today, account=amex)
@@ -231,7 +235,20 @@ class TestTheCellSaysPressOrOpen:
         response = _press_as_the_c_key_does(auth_client, row.id)
 
         assert response.status_code == 200
-        assert _payment(row.id)[1].account_id == amex.id
+        assert _payment(row.id)[1].account_id == visa.id
+
+    def test_a_bill_on_the_only_card_offers_no_credit(
+        self, auth_client, seed_user, seed_periods_today,
+    ):
+        """The Visa alone, the bill living on it: no other card, so neither stamp is drawn."""
+        visa = add_card(seed_user)
+        db.session.commit()
+        row = _groceries(seed_user, seed_periods_today, account=visa)
+
+        span = _cell_span(auth_client, row.id)
+
+        assert "data-can-credit" not in span
+        assert "data-credit-opens-popover" not in span
 
 
     def test_a_zero_row_presses_and_the_door_says_why(

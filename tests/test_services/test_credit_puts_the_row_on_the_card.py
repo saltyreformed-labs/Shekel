@@ -331,14 +331,47 @@ class TestWhichCard:
         row = _press(db.session.get(Transaction, row.id), card_account_id=second.id)
         assert [(m.account_id, m.amount) for m in row.entries] == [(second.id, _EIGHT_HUNDRED)]
 
-    def test_a_row_on_a_card_goes_on_its_own_card(self, seed_user, seed_periods):
-        """A row living on the Amex, with two cards and none named: on the Amex."""
-        _card(seed_user)
+    def test_a_row_on_a_card_goes_on_the_other_card(self, seed_user, seed_periods):
+        """A row living on the Amex, with two cards and none named: on the Visa, the other one.
+
+        Ruling plan#3225: on a bill that lives on a card, Paid with its card
+        picked records that it went on it, so Credit means another card.
+        """
+        visa = _card(seed_user)
         amex = add_card(seed_user, name="Amex")
         db.session.commit()
         row = _press(_groceries(seed_user, seed_periods[0], account=amex))
 
-        assert [m.account_id for m in row.entries] == [amex.id]
+        assert [(m.account_id, m.amount) for m in row.entries] == [(visa.id, _EIGHT_HUNDRED)]
+        assert status_seam.drawn_status_id(row) == ref_cache.status_id(StatusEnum.CREDIT)
+
+    def test_a_row_on_the_only_card_is_refused_in_words(self, seed_user, seed_periods):
+        """The Visa alone, the row living on it: no other card to put it on, nothing written."""
+        visa = _card(seed_user)
+        db.session.commit()
+        row = _groceries(seed_user, seed_periods[0], account=visa)
+
+        with pytest.raises(ValidationError, match=(
+            "Groceries cannot go on another credit card: Groceries lives on Visa, "
+            "your only card. Add the card it went on under Accounts, then press Credit again."
+        )):
+            transaction_service.mark_as_credit(row)
+        _assert_untouched(row.id)
+
+    def test_a_row_on_one_of_three_cards_must_name_another(self, seed_user, seed_periods):
+        """Visa, Amex and Discover, the row on the Amex, none named: refused, naming two others."""
+        _card(seed_user)
+        amex = add_card(seed_user, name="Amex")
+        add_card(seed_user, name="Discover")
+        db.session.commit()
+        row = _groceries(seed_user, seed_periods[0], account=amex)
+
+        with pytest.raises(ValidationError, match=(
+            "Groceries lives on Amex, and you have 2 other credit cards: "
+            "pick the one Groceries went on."
+        )):
+            transaction_service.mark_as_credit(row)
+        _assert_untouched(row.id)
 
     def test_a_named_account_of_another_owner_is_not_found(
         self, seed_user, seed_second_user, seed_periods,
@@ -400,14 +433,25 @@ class TestTheCardsAPressCouldMean:
         db.session.commit()
         assert [c.id for c in self._cards(row)] == [visa.id, amex.id]
 
-    def test_a_row_on_a_card_means_its_own_card(self, seed_user, seed_periods):
-        """A row living on the Amex, beside the Visa: the Amex alone."""
-        _card(seed_user)
+    def test_a_row_on_a_card_means_the_other_cards(self, seed_user, seed_periods):
+        """A row on the Visa alone: none; beside the Amex: the Amex alone (ruling plan#3225)."""
+        visa = _card(seed_user)
+        db.session.commit()
+        row = _groceries(seed_user, seed_periods[0], account=visa)
+        assert not self._cards(row)
+        assert transaction_service.credit_offered(row, self._cards(row)) is False
+
         amex = add_card(seed_user, name="Amex")
         db.session.commit()
-        row = _groceries(seed_user, seed_periods[0], account=amex)
 
         assert [c.id for c in self._cards(row)] == [amex.id]
+        assert transaction_service.credit_offered(row, self._cards(row)) is True
+
+    def test_a_row_on_checking_with_no_card_still_offers_credit(self, seed_user, seed_periods):
+        """No card at all, the row on checking: offered, drawn beside the ask to add one."""
+        row = _groceries(seed_user, seed_periods[0])
+
+        assert transaction_service.credit_offered(row, self._cards(row)) is True
 
     def test_only_a_kept_payment_off_the_card_is_moved(self, seed_user, seed_periods):
         """No payment kept: no move; Paid on checking and reverted: its payment moves."""
@@ -424,8 +468,15 @@ class TestTheCardsAPressCouldMean:
 
         assert transaction_service.credit_moves_payment(row, self._cards(row))
 
-    def test_a_bill_on_the_card_keeps_its_payment_there(self, seed_user, seed_periods):
-        """A bill living on the Visa, Paid and reverted: its payment is on the Visa, no move."""
+    def test_a_bill_on_the_card_moves_its_payment_only_onto_another(
+        self, seed_user, seed_periods,
+    ):
+        """A Visa bill, Paid and reverted: no move with the Visa alone; onto the Amex beside it.
+
+        Its payment is kept on the Visa.  Credit there means another card
+        (ruling plan#3225), so with the Visa alone it has none to press onto,
+        and beside the Amex it would move the payment there.
+        """
         visa = _card(seed_user)
         db.session.commit()
         row = _groceries(seed_user, seed_periods[0], account=visa)
@@ -436,8 +487,12 @@ class TestTheCardsAPressCouldMean:
         )
         db.session.commit()
         assert [m.account_id for m in row.entries] == [visa.id], "precondition: kept on the Visa"
-
         assert not transaction_service.credit_moves_payment(row, self._cards(row))
+
+        add_card(seed_user, name="Amex")
+        db.session.commit()
+
+        assert transaction_service.credit_moves_payment(row, self._cards(row))
 
 
 class TestWhatIsAlreadyCredit:

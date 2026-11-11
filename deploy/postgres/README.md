@@ -11,9 +11,15 @@ Commit C-37).
 | `server.crt` | `scripts/generate_pg_cert.sh` | `0644` | `root` | `/etc/postgresql/certs/server.crt:ro` |
 | `server.key` | `scripts/generate_pg_cert.sh` | `0600` | uid `70` (`postgres` in alpine) | `/etc/postgresql/certs/server.key:ro` |
 
-Both files are listed in `.gitignore`; this directory is committed empty (apart from this README) so
-the bind-mount source path resolves cleanly on a fresh clone but the secret material never reaches
-the repo.
+Both files are listed in `.gitignore`, so the bind-mount source path resolves cleanly on a fresh
+clone but the secret material never reaches the repo.
+
+The directory also holds `provision_roles.sh`, the one place a Shekel database login is made or its
+password set (rulings plan#3412, plan#3413): it makes `shekel_owner`, which owns the database and
+runs the deploy, and `shekel_app`, the web server's login, and hands the owner every object the
+superuser owns. It runs inside the `db` container, as the superuser over the container's socket,
+when the image first creates the cluster and whenever an operator runs it by hand; its header says
+when and how.
 
 ## Generating
 

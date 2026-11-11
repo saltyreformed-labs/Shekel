@@ -781,9 +781,10 @@ class TestGenerateCertScript:
 
 class TestPostgresDirectoryShape:
     """deploy/postgres/ exists in the repo as the bind-mount source
-    path for the cert/key.  The directory ships with only a README
-    (the cert/key are gitignored).  Audit finding F-154 / Commit
-    C-37.
+    path for the cert/key.  It ships with a README and the logins'
+    provisioning script (``provision_roles.sh``, rulings plan#3412 and
+    plan#3413), never the cert/key, which are gitignored.  Audit finding
+    F-154 / Commit C-37.
     """
 
     def test_directory_exists(self) -> None:

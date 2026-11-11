@@ -152,6 +152,17 @@
 {%- if value > 0 %}+{% endif %}{{ money(value, cents=cents) }}
 {%- endmacro %}
 
+{% macro account_chip(name, chip_class='ms-1') -%}
+{#- The ONE spelling of the chip naming the account an item's money is on
+    when that is not the balance line's: `account_chips` below draws it on
+    the grid's surfaces, and the dashboard's due-soon street draws it for a
+    bill on a card (plan task plan#3528, ruling plan#3524).  The shared
+    non-money marker's NEUTRAL variant (`.flag-chip--neutral`,
+    components.css), told apart by its text, never by colour; it emits no
+    whitespace of its own. -#}
+<span class="flag-chip flag-chip--neutral {{ chip_class }}" title="On {{ name }}">{{ name }}</span>
+{%- endmacro %}
+
 {% macro account_chips(item, account, is_leg, chip_class='ms-1') -%}
 {#- The account chips of one plan item, on every surface that draws it: the
     desktop cell, the mobile card and the Plan row (plan steps
@@ -172,9 +183,8 @@
     no chip.  Accounts are compared by id and a NAME is read only for a
     chipped one (`Transaction.account` is a joined load; a movement's
     account is lazy and identity-mapped, so a movement on a member of the
-    owner's set reads no query -- measured at CC-5-2).  The chip is the
-    shared non-money marker's NEUTRAL variant (`.flag-chip--neutral`,
-    components.css), told apart by its text, never by colour.
+    owner's set reads no query -- measured at CC-5-2).  The chip itself is
+    `account_chip` above, the one spelling the dashboard draws too.
 
     Emits NOTHING -- no bytes at all -- when there is no chip, so a caller
     can capture the output and wrap it only when it is non-empty (the cell
@@ -187,7 +197,7 @@
 {%- for candidate in ([item] if is_leg else [item] + item.entries|list) %}
 {%- if candidate.account_id not in ns.seen %}
 {%- set ns.seen = ns.seen + [candidate.account_id] %}
-<span class="flag-chip flag-chip--neutral {{ chip_class }}" title="On {{ candidate.account.name }}">{{ candidate.account.name }}</span>
+{{ account_chip(candidate.account.name, chip_class) }}
 {%- endif %}
 {%- endfor %}
 {%- endif %}

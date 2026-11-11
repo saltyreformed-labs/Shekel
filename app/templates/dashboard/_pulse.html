@@ -18,10 +18,13 @@
        next_period_start, next_period_end (dates|None)
      pulse.street: {days_total: int, today_offset: int}
      pulse.due_soon: bill dicts (txn_to_bill_dict anatomy, plus
-       day_offset: int|None and undated: bool) -- consumed ONLY by the
-       street below; the due-soon list itself was removed by developer
-       ruling (per-bill rows live on the grid) #}
+       day_offset: int|None, undated: bool and on_account: the name of
+       the card a bill is on, or None) -- consumed ONLY by the street
+       below; the due-soon list itself was removed by developer ruling
+       (per-bill rows live on the grid).  A bill on a card is drawn with
+       its account chip and is not in "still due" (ruling plan#3524). #}
 {% from "_money_macros.html" import money %}
+{% from "grid/_grid_row_macros.html" import account_chip %}
 
 <div class="pulse-canvas">
   {# Sky: hero + chips + Open Grid. The due-soon LIST was removed by
@@ -144,6 +147,7 @@
         {% for ev in st.visible_items %}
         <span class="street__station-item{% if ev.entry_over_budget %} street__station-item--over{% endif %}">
           <span class="street__station-name">{{ ev.name }}</span>
+          {%- if ev.on_account is not none %}{{ account_chip(ev.on_account) }}{% endif %}
           <span class="street__station-amt font-mono">
             {%- if ev.is_tracked|default(false) and ev.entry_total is not none -%}
             {{ money(ev.entry_total) }} / {{ money(ev.amount) }}
@@ -181,6 +185,7 @@
     <span class="text-muted">Anytime this period:</span>
     {% for ev in undated %}
     <span>{{ ev.name }}
+      {%- if ev.on_account is not none %}{{ account_chip(ev.on_account) }}{% endif %}
       <span class="font-mono{% if ev.entry_over_budget %} text-danger fw-semibold{% endif %}">
         {%- if ev.is_tracked|default(false) and ev.entry_total is not none -%}
         {{ money(ev.entry_total) }} / {{ money(ev.amount) }}

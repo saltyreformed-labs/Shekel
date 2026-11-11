@@ -1087,16 +1087,14 @@ class TestTheBillsAreThePaychecksAcrossTheSet:
             due_date=due_date,
         )
 
-    def test_a_bill_on_the_card_is_a_bill_the_paycheck_owes(
+    def test_a_bill_on_the_card_is_listed_with_its_chip_and_not_still_due(
         self, app, seed_user, seed_periods, db,
     ):
-        """A projected expense ON the card is due-soon and still-due.
+        """Rent $300.00 on checking due 03-22, the phone $45.00 on the card due 03-25.
 
-        Rent $300.00 on checking due 03-22 and the phone bill $45.00 on the
-        card due 03-25, both in the current period: still-due for the
-        current period is 300.00 + 45.00 = $345.00, the due-soon list holds
-        both rows in due-date order, and the hero is still checking's --
-        the balance line is one account's whatever the rows are.
+        Still-due is checking's $300.00 alone (ruling plan#3524: the card's
+        payment counts the phone); the due-soon list holds both rows, the
+        phone chipped to the card, and the hero is checking's.
         """
         with app.app_context():
             card = self._card(seed_user, db.session)
@@ -1117,8 +1115,10 @@ class TestTheBillsAreThePaychecksAcrossTheSet:
             assert section.account.id == seed_user["account"].id
 
             result = dashboard_service.compute_pulse_section(section)
-            assert result["still_due"]["current_period"] == Decimal("345.00")
-            assert [b["name"] for b in result["due_soon"]] == ["Rent", "Phone"]
+            assert result["still_due"]["current_period"] == Decimal("300.00")
+            assert [(b["name"], b["on_account"]) for b in result["due_soon"]] == [
+                ("Rent", None), ("Phone", "Rewards Card"),
+            ]
             assert result["hero"]["account_id"] == seed_user["account"].id
 
     def test_a_transfer_between_members_is_one_bill_from_the_balance_lines_side(

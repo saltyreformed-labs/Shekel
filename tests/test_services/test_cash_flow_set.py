@@ -40,11 +40,13 @@ from app.services.account_resolver import (
 from app.services.cash_flow_set import (
     CashFlowSet,
     own_rows_clause,
+    set_transfer_legs,
 )
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_account,
     create_savings_account,
+    create_transfer,
     one_off_row_of,
 )
 
@@ -358,6 +360,78 @@ class TestOwnRowsClause:
 
             assert grocery.id in loaded
             assert loaded == expected
+
+
+class TestOtherMember:
+    """``CashFlowSet.other_member``: which drawn items a screen's totals leave out.
+
+    Ruling plan#3524 (plan task plan#3528): a screen draws every member's
+    items behind one account's balance line and counts that account's own, so
+    a bill on the card is counted once, by the card's payment out of checking.
+    """
+
+    @pytest.mark.usefixtures("seed_periods_today")
+    def test_a_row_is_counted_on_its_own_accounts_line_only(
+        self, app, db, seed_user, seed_periods_today,
+    ):
+        """Rent on checking and the phone on the card, seen from each line."""
+        with app.app_context():
+            checking = seed_user["account"]
+            card = _card(seed_user)
+            period = seed_periods_today[3]
+            rent = _expense_row(seed_user, period, checking, "Rent", "300.00")
+            phone = _expense_row(seed_user, period, card, "Phone", "45.00")
+            db.session.commit()
+            from_checking = resolve_cash_flow_set(seed_user["user"].id)
+            from_card = from_checking.seen_from(card)
+
+            assert from_checking.other_member(rent) is None
+            assert from_checking.other_member(phone).id == card.id
+            assert from_card.other_member(phone) is None
+            assert from_card.other_member(rent).id == checking.id
+
+    @pytest.mark.usefixtures("seed_periods_today")
+    def test_a_payment_into_the_card_is_the_drawn_sides(
+        self, app, db, seed_user, seed_periods_today,
+    ):
+        """A checking -> card payment is drawn from the line's side, and that side counts.
+
+        From checking's line the set draws checking's leg (ruling R-CC23), on
+        the balance account; from the card's line, the card's leg.  Either
+        way the payment is the line's own: it leaves checking, or it reaches
+        the card.
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+            card = _card(seed_user)
+            payment = create_transfer(
+                seed_user, db.session, checking, card, seed_periods_today[3],
+                amount=Decimal("165.00"),
+            )
+            db.session.commit()
+            from_checking = resolve_cash_flow_set(seed_user["user"].id)
+            from_card = from_checking.seen_from(card)
+
+            for cash_flow, side in ((from_checking, checking), (from_card, card)):
+                (leg,) = set_transfer_legs(cash_flow, [payment])
+                assert leg.account_id == side.id
+                assert cash_flow.other_member(leg) is None
+
+    @pytest.mark.usefixtures("seed_periods_today")
+    def test_an_item_on_no_member_is_refused(
+        self, app, db, seed_user, seed_periods_today,
+    ):
+        """A savings row is no member's, so the set has no answer and says so."""
+        with app.app_context():
+            savings = create_savings_account(
+                seed_user, db.session, "Savings", Decimal("500.00"),
+            )
+            fee = _expense_row(seed_user, seed_periods_today[3], savings, "Fee", "5.00")
+            db.session.commit()
+            cash_flow = resolve_cash_flow_set(seed_user["user"].id)
+
+            with pytest.raises(ValueError, match="not a member of the set"):
+                cash_flow.other_member(fee)
 
 
 class TestRevolvingFilter:

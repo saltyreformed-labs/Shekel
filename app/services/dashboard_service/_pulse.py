@@ -231,10 +231,12 @@ def compute_pulse_section(
     # round trip -- and splitting it in memory avoids a second identical
     # load on the ``balanceChanged`` refresh path.  The items are the
     # paycheck's across the owner's cash-flow set (ruling R-CC16, plan step
-    # CC-4-3) where the hero, the chart and the trough above are the balance
-    # account's alone: a bill on the card is still a bill this paycheck owes.
-    # Since leaf X-bi-6-1b they are the set's own ROWS and the expense LEGS
-    # of its transfers, read off the parents (the loader's docstring).
+    # CC-4-3): the set's own ROWS and the expense LEGS of its transfers, read
+    # off the parents (the loader's docstring).  The due-soon list draws them
+    # all; the still-due totals count only the balance account's, as the
+    # hero, the chart and the trough above are (ruling plan#3524, plan task
+    # plan#3528), so a bill on the card is counted once, by the card's
+    # payment out of checking.
     period_ids = [current_period.period_id]
     if next_period is not None:
         period_ids.append(next_period.period_id)
@@ -263,9 +265,7 @@ def compute_pulse_section(
     # status-dependent -- so a contribution cannot stand in for it.
     budgets = cash_ledger.amounts_by_key(unpaid, balance_ctx.amounts())
 
-    due_soon = _due_soon(
-        unpaid, contributions, budgets, current_period, balance_ctx.as_of,
-    )
+    due_soon = _due_soon(unpaid, contributions, budgets, current_period, section)
 
     return {
         # The key is present BY CONSTRUCTION since pay-calendar plan step
@@ -294,7 +294,8 @@ def compute_pulse_section(
             forward_periods, end_balances, current_period,
         ),
         "still_due": _still_due(
-            unpaid, contributions, budgets, current_period, next_period,
+            [item for item in unpaid if section.cash_flow.other_member(item) is None],
+            contributions, budgets, current_period, next_period,
         ),
         "street": _street(current_period, balance_ctx.as_of),
         "due_soon": due_soon,
@@ -680,20 +681,29 @@ def _still_due(
         negative that would understate the total (its overspend already
         left the as-of-today balance).
       * A transfer's EXPENSE LEG IS included (B4b): a still-due total is
-        an obligation figure -- what the paycheck still owes across the
-        owner's cash-flow set (plan step CC-4-3), a card's bill included --
-        and the loader carries each transfer in as the leg on the side its
-        money leaves (leaf X-bi-6-1b; it was the transfer-out shadow row).
+        an obligation figure -- what the paycheck still owes out of the
+        balance account -- and the loader carries each transfer in as the
+        leg on the side its money leaves (leaf X-bi-6-1b; it was the
+        transfer-out shadow row).
+      * Only the balance account's items count (ruling plan#3524, plan task
+        plan#3528): the caller hands in the items
+        :meth:`~app.services.cash_flow_set.CashFlowSet.other_member` answers
+        ``None`` for.  A bill on the card is paid off by the card's payment
+        out of checking, a leg this total counts, so adding the bill too
+        counted one purchase twice: ``$800`` on the card Jan 3 read ``$800``
+        still due in the Jan 2 paycheck and ``$800`` in Jan 16's, where
+        ``$0`` and ``$800`` leave checking.  It was the whole set's from plan
+        step CC-4-3 until that task.
 
     Each period's total is summed in full ``Decimal`` precision and
     rounded once at the boundary with :func:`round_money`.
 
     Args:
-        rows: The current+next periods' unpaid expense items -- rows and
-            expense legs -- from the shared :func:`_query_unpaid_expense_rows`
-            load (made once by :func:`compute_pulse_section` and shared with
-            :func:`_due_soon`); each item is bucketed by its
-            ``pay_period_id``.
+        rows: The current+next periods' unpaid expense items on the balance
+            account -- rows and expense legs -- of the shared
+            :func:`_query_unpaid_expense_rows` load (made once by
+            :func:`compute_pulse_section` and shared with :func:`_due_soon`);
+            each item is bucketed by its ``pay_period_id``.
         contributions: ``{cell_key: Decimal}`` over exactly those items,
             from the caller's one :func:`~app.services.cash_ledger
             .contributions_by_key` call, and
@@ -833,7 +843,7 @@ def _due_soon(
     contributions: dict,
     budgets: dict,
     current_period: "DerivedPeriod",
-    as_of: date,
+    section: DashboardSection,
 ) -> list[dict]:
     """Build the current period's due-soon rows (the street / mobile list).
 
@@ -848,6 +858,11 @@ def _due_soon(
         an undated row.
       * ``undated`` -- ``True`` when the row has no ``due_date`` (it lands
         on the "anytime this period" shelf, not a day position).
+      * ``on_account`` -- the NAME of the member the item is on when that is
+        not the balance account (a bill on the card), which the template
+        draws as the item's account chip; ``None`` for the balance account's
+        own.  Such an item is listed but not in the still-due totals (ruling
+        plan#3524, :meth:`~app.services.cash_flow_set.CashFlowSet.other_member`).
 
     Only the current period's unpaid rows are returned (the audit's
     Tier-2 scope: overdue + rest of current period; prior-period unpaid
@@ -871,12 +886,14 @@ def _due_soon(
             same way -- the E-21 base an entry-tracked bill's amount cell and
             its progress fields both answer on.
         current_period: The period containing the pass's day.
-        as_of: The read pass's pinned day, which each bill's
-            ``days_until_due`` counts from.  It was a ``date.today()`` of this
-            function's own until pay-calendar plan step C2-f2e -- a third clock
-            on one render, beside the street marker's and the hero staleness
-            count's -- so a bill could read "due today" under a street band
-            that had already moved to tomorrow.
+        section: The render's :class:`~._section.DashboardSection`: its cash-flow
+            set names the account each bill is on, and its read pass's pinned
+            day is what each bill's ``days_until_due`` counts from.  That day
+            was a ``date.today()`` of this function's own until pay-calendar
+            plan step C2-f2e -- a third clock on one render, beside the street
+            marker's and the hero staleness count's -- so a bill could read
+            "due today" under a street band that had already moved to
+            tomorrow.
 
     Returns:
         A list of bill dicts (see :func:`txn_to_bill_dict`) each carrying
@@ -887,7 +904,11 @@ def _due_soon(
         if txn.pay_period_id != current_period.period_id:
             continue
         key = cell_key(txn)
-        bill = txn_to_bill_dict(txn, as_of, contributions[key], budgets[key])
+        bill = txn_to_bill_dict(
+            txn, section.balance_ctx.as_of, contributions[key], budgets[key],
+        )
+        other = section.cash_flow.other_member(txn)
+        bill["on_account"] = None if other is None else other.name
         if txn.due_date is not None:
             bill["day_offset"] = (txn.due_date - current_period.start_date).days
             bill["undated"] = False

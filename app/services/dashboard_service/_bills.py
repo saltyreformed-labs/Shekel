@@ -2,8 +2,9 @@
 Shekel Budget App -- Dashboard: the shared bill query and bill dict.
 
 The ONE Projected-expense item load the dashboard's two bill surfaces
-read (the still-due totals and the due-soon list, both in
-:func:`~._pulse.compute_pulse_section`) -- the set's own rows and the
+read (the still-due totals, the balance account's items alone, and the
+due-soon list, every item, both in :func:`~._pulse.compute_pulse_section`)
+-- the set's own rows and the
 expense legs of its transfers since leaf ``balance:X-bi-6-1b`` -- plus the
 render-ready bill dict those items become, with the E-21 single-base entry
 progress.  Defined here once rather than per producer, so the item set, the
@@ -72,6 +73,12 @@ def _query_unpaid_expense_rows(
     the balance line, where it is an income leg); a transfer with one
     endpoint outside the set (card -> savings) shows from its member
     endpoint, as a checking -> savings transfer always has.
+
+    **The due-soon list draws every item; the still-due totals count only
+    the balance account's** (ruling plan#3524, plan task plan#3528):
+    :meth:`~app.services.cash_flow_set.CashFlowSet.other_member` names the
+    member a bill on the card is on, which the list marks it with, and the
+    card's payment out of checking is what the totals count for it.
 
     **The dashboard's scope, stated once** (plan step **plan#2130**): the
     set, the scenario, these paychecks, still projected, expenses only --

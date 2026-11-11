@@ -493,10 +493,10 @@ class TestIncomeStatementTab:
     """Tests for GET /analytics/income-statement HTMX partial endpoint.
 
     Build-Order Step 5: the confirmed-ledger income statement.  The
-    money queries read the double-entry posting ledger, so content
+    money queries read the ledger worked out from the records, so content
     tests settle through ``create_settled_cash_transaction`` (the real
-    go-forward posting path) -- a directly-inserted transaction never
-    posts and would not appear.
+    settle path) -- a directly-inserted row has no covering movement, so
+    it books nothing and would not appear.
     """
 
     def test_income_statement_requires_auth(self, app, client):
@@ -583,14 +583,14 @@ class TestIncomeStatementTab:
         """Outside every period, a bare pay_period window uses the most recent.
 
         The frozen today (2026-03-20) sits outside seed_user's only period
-        (the 2024-01-05 bootstrap anchor period), so ``_resolve_window_params``
+        (the 2024-01-05 bootstrap period), so ``_resolve_window_params``
         falls back from "current period" to the user's most recent one.  The
         S6/D8 empty state names its window, which pins WHICH period the
         fallback chose -- the old "this window" wording only proved that
         something empty rendered, and hid that this test never reached the
-        no-periods-at-all month fallback its docstring used to claim (every
-        seeded account requires a bootstrap anchor period, so that branch is
-        unreachable through fixtures).
+        no-periods-at-all month fallback its docstring used to claim (account
+        create refused an owner with no pay period until ruling plan#3318, so
+        that branch was unreachable through fixtures).
         """
         with app.app_context():
             resp = auth_client.get(
@@ -605,8 +605,8 @@ class TestIncomeStatementTab:
         """A settled income + expense in a period section and net out.
 
         Income 2000, expense 300 -> net income 1700.  Both settle through
-        the real posting path so they land on the confirmed ledger the
-        statement reads.
+        the real settle path, so the ledger the statement reads books
+        them.
         """
         with app.app_context():
             create_settled_cash_transaction(
@@ -839,14 +839,12 @@ class TestBalanceSheetTab:
     """Tests for GET /analytics/balance-sheet HTMX partial endpoint.
 
     Build-Order Step 5: the confirmed-ledger balance sheet.  The seed
-    Checking's $1000 opening is dated by its origination ``created_at``
-    (the real DB clock), which the module's frozen 2026-03-20 ``today``
-    predates, so the default as-of does NOT fold it.  Content is therefore
-    exercised with a settled transaction whose settle day is pinned inside
-    the frozen range; the opening is excluded but as a WHOLE entry, so the
-    tie-out still closes.  A far-future ``today`` refreeze is avoided
-    deliberately: Flask-Login would treat the real-clock session as
-    idle-expired and redirect the request to login.
+    Checking's $1000 opening is dated the day before its 2024-01-05
+    assertion (ruling R-HG), so the module's frozen 2026-03-20 ``today``
+    folds it.  Content is exercised with a settled transaction whose settle
+    day is pinned inside the frozen range.  A far-future ``today`` refreeze
+    is avoided deliberately: Flask-Login would treat the real-clock session
+    as idle-expired and redirect the request to login.
     """
 
     def test_balance_sheet_requires_auth(self, app, client):
@@ -924,10 +922,10 @@ class TestBalanceSheetTab:
         A $500 income settled on a day inside the frozen range
         (2026-02-15) folds into the default as-of (2026-03-20): Checking
         +500 (Asset) and Retained Earnings +500 (Income closed into
-        equity).  The seed opening's journal entry_date is the real-clock
-        origination ``created_at`` (after the frozen today), so it is
-        excluded -- but as a WHOLE entry (both its Asset and Equity legs),
-        so the tie-out still closes.  A far-future refreeze is avoided
+        equity).  The seed opening is dated the day before its 2024-01-05
+        assertion (ruling R-HG), long before the as-of, so it folds in too,
+        its Asset and Equity legs together, and the tie-out closes over
+        both.  A far-future refreeze is avoided
         deliberately: it would make Flask-Login treat the real-clock
         session as idle-expired.
         """
@@ -950,15 +948,17 @@ class TestBalanceSheetTab:
             assert "Equity" in html
             assert "Checking" in html
             assert "Retained Earnings" in html
-            assert "$500.00" in html
+            assert "$500.00" in html  # Retained Earnings
+            assert "$1,500.00" in html  # Checking: the $1,000 opening + $500
+            assert "$1,000.00" in html  # the opening's equity twin
             assert "In balance" in html
 
     def test_balance_sheet_before_opening_is_empty(self, app, auth_client,
                                                    seed_user):
         """An as-of before any posted source shows the empty state.
 
-        The seed opening is dated no earlier than the account's
-        origination, so an as-of of 2001-01-01 folds nothing.
+        The seed opening is dated 2024-01-04, the day before its origination
+        assertion (ruling R-HG), so an as-of of 2001-01-01 folds nothing.
         """
         with app.app_context():
             resp = auth_client.get(

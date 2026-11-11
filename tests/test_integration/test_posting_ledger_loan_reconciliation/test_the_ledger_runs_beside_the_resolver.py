@@ -106,7 +106,7 @@ class TestParallelRunAgainstResolver:
         real principal (cash - interest) equals the resolver's scheduled principal
         (period_pi - interest) and the two balances -- derived by disjoint code
         paths from the SAME anchor -- must agree to the penny.  A payment did post
-        (the sweep is not vacuous), and Checking is untouched by the loan sync.
+        (the sweep is not vacuous).
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id

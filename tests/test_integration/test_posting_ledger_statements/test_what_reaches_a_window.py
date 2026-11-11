@@ -90,12 +90,15 @@ class TestAttributionEdgeCases:
     ):
         """An 8:05pm-ET Dec-31 settle lands in that year on both statements.
 
-        A $500.00 Groceries expense paid at 2099-01-01 01:05 UTC -- 2098-12-31
-        8:05pm Eastern (EST, UTC-5).  L9 attributes it to Dec 31 2098 (the user's
-        wall clock), so the 2098 income statement includes it and 2099 does not,
-        even though the STORED ``entry_date`` is the Jan-1 2099 the instant
-        becomes in UTC.  The balance sheet as of 2098-12-31 already reflects it,
-        confirming the readers attribute on the SAME display-timezone basis.
+        A $500.00 Groceries expense settled on 2098-12-31, the user's wall-clock
+        day for 2099-01-01 01:05 UTC (8:05pm Eastern, EST, UTC-5).  The record
+        carries that civil day itself since plan step X-f1, and the worked-out
+        line's ``entry_date`` is it, so the 2098 income statement includes the
+        spend and 2099 does not.  The balance sheet as of 2098-12-31 already
+        reflects it, confirming the readers attribute on the SAME day.  (Until
+        X-f1 the fixture settled at that UTC instant and L9 attributed it to
+        Dec 31 2098; the stored ``entry_date`` was its UTC Jan-1 2099 until
+        ruling R-DH (b) dated it by the display day.)
         """
         with app.app_context():
             user_id = seed_user["user"].id

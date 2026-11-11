@@ -416,7 +416,7 @@ class TestTheTrueUpCounterLegNamesTheDifference:
             )
 
 
-class TestThePostedLedgerSelfMigrates:
+class TestARetypeRePointsTheTrueUp:
     """An equity true-up re-points to the new counter once the account is re-typed."""
 
     def test_an_equity_trueup_re_points_to_unrealized_change(

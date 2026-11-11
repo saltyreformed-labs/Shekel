@@ -284,7 +284,7 @@ class TestTransferSettleDayEditDoor:
     def test_correcting_the_day_moves_both_sides_and_the_ledger(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """PATCHing both sides' day boxes re-dates the pair and its postings (R-ED).
+        """PATCHing both sides' day boxes re-dates the pair; the ledger follows (R-ED).
 
         The gate ruling R-ED names for this half in terms: a test that EDITS a
         settled row's day and asserts the LEDGER followed.  Both sides' payment
@@ -339,7 +339,7 @@ class TestTransferSettleDayEditDoor:
         payment records being undated (read off the records, not the twins,
         which keep no day since plan step ``balance:X-bi-6-4d-2``: ruling
         R-BAL167 class 1, plan step balance:X-bi-6-4d-2), AND on the ledger
-        being reversed.
+        holding none of its effect.
 
         **That last clause was a docstring overclaim until a neutral review
         measured it.**  The body asserted only the status and the shadows, so a

@@ -317,25 +317,27 @@ class TestTrueUpAfterLastPaymentIsRead:
             assert confirmed_rows[-1].remaining_balance != ledger
 
 
-class TestDueDateEditReconcilesTheLedger:
-    """Editing a loan payment's due_date re-derives the posted ledger.
+class TestADueDateEditMovesTheLedger:
+    """Editing a loan payment's due_date moves the worked-out ledger.
 
     ``due_date`` became a POSTING INPUT with the installment-basis fix: the
     genesis walk orders payments by it and applies its strict
     ``anchor_date < due_date`` post-anchor boundary against it, so moving it
     changes which payments an anchor SUBSUMES and therefore the POSTED balance.
 
-    It was NOT in ``transfer_service._POSTING_RELEVANT_FIELDS``, because before
-    the fix the walk derived the due date from ``pay_period_id`` (which IS in the
-    set).  Left out, a due-date edit would move every live READER (the history
-    rows, the payment table, the resolver's replay) while the posted ledger kept
-    the old numbers -- a silent ledger-vs-resolver divergence that would persist
-    until some unrelated chokepoint happened to fire.  Since plan#2914 the
-    figures here are the worked-out read, which follows the due date itself, so
-    this grades the ledger the edit leaves and not the re-sync of the store.
+    The fix added it to ``transfer_service._POSTING_RELEVANT_FIELDS``, where it
+    had not been, because the walk had derived the due date from
+    ``pay_period_id`` (already in the set).  Left out, a due-date edit would
+    have moved every live READER (the history rows, the payment table, the
+    resolver's replay) while the stored ledger kept the old numbers -- a silent
+    ledger-vs-resolver divergence that would have persisted until some
+    unrelated chokepoint happened to fire.  The set went with the stored
+    ledger's transfer doors at plan task plan#3075; since plan step plan#2913
+    the figures here are the worked-out read, which follows the due date
+    itself, so this grades the ledger the edit leaves.
     """
 
-    def test_editing_due_date_reposts_the_balance(
+    def test_editing_due_date_moves_the_balance(
         self, app, db, seed_user, seed_periods,
     ):
         """A due-date edit alone moves the ledger, and it stays self-consistent."""

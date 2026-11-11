@@ -1,13 +1,16 @@
 """The loan-payment reconciliation oracle (Build-Order Step 4, Commit 7).
 
 The correctness gate for the loan half of the double-entry posting ledger.  Steps
-2 / 3 posted settled transfer and cash movements; Step 4 layers a balanced
+2 / 3 posted settled transfer and cash movements; Step 4 layered a balanced
 CORRECTION on each confirmed loan payment's Step-2 cash entry that backs the
 interest / escrow / (payoff) refund off the loan, so the loan-linked ledger nets
-to the REAL principal paid.  Reads still flow through the resolver / ``balance_at``
-seam (Step 4 changes no read path), so -- exactly as in Steps 2 / 3 -- the ledger
-is validated against the SOURCE (the payments' cash records and the anchor), never
-against a displayed balance.  The invariants below are plan Section 8.
+to the REAL principal paid.  The ledger worked out from the records books the
+same correction (``ledger_lines._loan_payments``), and is the one graded here
+since plan step plan#2913.  Balances still flow through the resolver /
+``balance_at`` seam (Step 4 changed no read path), so -- exactly as in Steps 2 /
+3 -- the ledger is validated against the SOURCE (the payments' cash records and
+the anchor), never against a displayed balance.  The invariants below are plan
+Section 8.
 
   1. **Parallel run vs the resolver (the headline, plan 8.2).**  The ledger's view
      of the current balance is the genesis ``-(sum of the loan's linked-ledger
@@ -96,7 +99,7 @@ as the Step-2 / Step-3 oracles.  The SPLIT VALUES are pinned by the first and th
 (on-schedule / extra / short / payoff-refund / ARM / escrow-effective-dating) are
 hand-computed at the unit level in
 ``tests/test_services/test_ledger_lines/test_a_loans_lines/``; the lifecycle wiring
-(settle / revert / delete / restore / true-up / rate / N1 back-post) and the
+(settle / revert / delete / restore / true-up / rate / N1's split at setup) and the
 full-cash-reversal CRITICAL regression are driven through their real chokepoints
 in ``tests/test_integration/test_loan_posting_wiring.py``.  This oracle does NOT
 re-assert those; it adds the reconciliation-level checks those suites do not make

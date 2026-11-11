@@ -202,10 +202,11 @@ class TestScenarioAndOwnerIsolation:
     ):
         """A purchase moved under the other owner's category refuses, unlabelled.
 
-        No key ties a transaction's category to its owner, so the row can exist, though
-        the stored ledger's writer refuses to book one: it is moved there after its
-        settle.  The labels are loaded under this owner alone, so the read finds no
-        record for the line, where a load by id would label it with the other's name.
+        No key ties a transaction's category to its owner, so the row can exist; it is
+        moved there by SQL after its settle, a shape left from the stored ledger's
+        writer, which refused to book one until plan task plan#3133.  The labels
+        are loaded under this owner alone, so the read finds no record for the
+        line, where a load by id would label it with the other's name.
         """
         with app.app_context():
             theirs_id = seed_second_user["categories"]["Rent"].id

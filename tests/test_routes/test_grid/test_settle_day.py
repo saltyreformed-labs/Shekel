@@ -212,9 +212,9 @@ class TestSettleDayLifecycle:
             db.session.refresh(txn)
             assert txn.settled_on == display_today()
 
-            # Back-date THROUGH the seam and re-reconcile, so the posted ledger
-            # follows the column and the assertions below start from the state a
-            # genuinely week-old settle is really in.
+            # Back-date THROUGH the seam, so the movement the ledger books is
+            # re-dated with the column and the assertions below start from the
+            # state a genuinely week-old settle is really in.
             settled_a_week_ago = display_today() - timedelta(days=7)
             status_seam.apply_status_change(
                 txn,
@@ -288,10 +288,10 @@ class TestSettleDayLifecycle:
             db.session.refresh(txn)
             assert txn.settled_on == display_today()
 
-            # Back-date THROUGH the seam and re-reconcile, so the posted ledger
-            # follows the column.  Writing the attribute directly would leave
-            # the entries dated today and the ledger assertion below could pass
-            # on a stale ledger rather than on a preserved one.
+            # Back-date THROUGH the seam, so the movement the ledger books is
+            # re-dated with the column.  Writing the attribute directly would
+            # leave the movement dated today and the ledger assertion below could
+            # pass on a stale movement rather than on a preserved one.
             settled_a_week_ago = display_today() - timedelta(days=7)
             status_seam.apply_status_change(
                 txn,
@@ -459,8 +459,8 @@ class TestSettleDayLifecycle:
                 "invariant"
             )
             # The WHOLE mapping, not just the old day.  Checking only that the
-            # settled day cleared would pass a revert that reversed that day and
-            # re-posted the effect at some OTHER date -- money still spent, just
+            # settled day cleared would pass a revert that cleared that day but
+            # left the effect booked at some OTHER date -- money still spent, just
             # moved.  A neutral review found this side asserting the weak form
             # while its transfer sibling asserted the strong one, and the
             # sibling's docstring claiming the asymmetry had already been fixed.

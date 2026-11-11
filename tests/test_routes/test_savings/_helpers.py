@@ -27,15 +27,11 @@ def _create_savings_account(
             $5,000.00).  Pass an explicit value when the test
             assertion depends on a non-default anchor; this routes
             through ``account_service.create_account`` so the dated
-            ``AccountAnchorHistory`` SoT (E-19, Commit 4) and the
-            cache columns agree from t0.  Required by Commit 6:
-            ``cash_ledger.resolve_anchor`` reads history, so
-            mutating only the cache columns after creation no longer
-            propagates to ``/savings``.
-        anchor_period_id: Pay period to anchor the new account
-            against.  ``None`` falls back to
-            ``account_service.resolve_anchor_period_id`` (the
-            user's earliest pay period at create time).
+            ``AccountAnchorHistory`` SoT (E-19, Commit 4) holds it from
+            t0.  Required by Commit 6: ``cash_ledger.resolve_anchor``
+            reads history, so mutating only the cache columns after
+            creation stopped propagating to ``/savings`` (the columns
+            went with ruling R-EH).
 
     Returns:
         Account: the new savings account, COMMITTED.  Committed rather than

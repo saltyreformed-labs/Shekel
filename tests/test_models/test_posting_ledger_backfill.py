@@ -4,13 +4,14 @@ The Commit-3 migration creates the ledger tables and then backfills one
 balanced journal entry per historical settled, non-deleted transfer.  The
 migration is already at HEAD when these tests run (the template builder
 upgraded base->head against an EMPTY ``budget.transfers`` table, so the
-in-chain backfill was a no-op).  Each test therefore engineers a transfer
-through ``transfer_service`` (the sole writer, so the shadows are real) and
-invokes the migration's idempotent
+in-chain backfill was a no-op).  Each test therefore engineered a transfer
+through ``transfer_service`` (the sole writer, so the shadows were real) and
+invoked the migration's idempotent
 :func:`_backfill_settled_transfers` directly -- the same pattern the
 ``ledger_accounts`` / ``loan_anchor_events`` backfill tests use.
 
-Since Commit 5 wired the transfer service to auto-post on settle, each
+Because Commit 5 wired the transfer service to auto-post on settle (until plan
+task plan#3075 deleted the sync), each
 settled-transfer test first cleared those go-forward postings (raw SQL, via the
 shared ``clear_postings_for_transfer`` helper -- the ORM blocks deletes on the
 append-only tables) to reproduce the pre-ledger historical state the backfill
@@ -45,13 +46,15 @@ reproduced.  (An earlier draft said the latter; a neutral review corrected it.)
 **One of the deleted ten was NOT redundant, and naming it is the point.**  The
 zero-effective-transfer exclusion has no survivor anywhere.  Nor do the
 ``TestBackfillAndGoForwardAgree`` cases deleted from the two live reconciliation
-oracles in the same pass: the two surviving "backfill == go-forward" tests
-(``test_posting_ledger_account_backfill.py``, ``test_loan_posting_backfill.py``)
-reuse the go-forward builder, so they are true by construction rather than an
-independent second opinion.  The ledger these entries built is graded instead by the live
-reconciliation oracles (``tests/test_integration/test_posting_ledger_*.py``),
-which assert the stronger property: that the posted ledger reconciles to the
-source rows, whatever wrote it.
+oracles in the same pass: the two "backfill == go-forward" tests that survived
+it (``test_posting_ledger_account_backfill.py``, ``test_loan_posting_backfill.py``,
+both deleted at plan task plan#3077 with the deploy's ledger hooks) reused the
+go-forward builder, so they were true by construction rather than an
+independent second opinion.  The ledger these entries built was graded instead
+by the reconciliation oracles (``tests/test_integration/test_posting_ledger_*``),
+which asserted the stronger property: that the posted ledger reconciles to the
+source rows, whatever wrote it.  They grade the ledger worked out from the
+records since plan step plan#2913.
 
 The executable migration up/down round-trip was verified manually against the
 prod-clone dev DB during development (downgrade dropped both tables, the

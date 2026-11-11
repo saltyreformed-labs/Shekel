@@ -219,20 +219,21 @@ class TestReaderParallelRunAgainstResolver:
     def test_early_settled_payment_keeps_the_parallel_run_exact(
         self, app, db, monkeypatch, seed_user, seed_periods,
     ):
-        """A payment settled a month before its installment never desyncs the ledger.
+        """A payment settled a month before its installment keeps the ledger exact.
 
         The R1 regression lock for the 2026-07-02 review's H2 ("early settle,
         then time passes"): with today re-frozen MID-window (2026-02-10), the
         2026-03-01 installment is paid on 2026-01-30 -- a month EARLY.  Its
-        Step-2 cash entry posts at settle -- and since R1 its split correction
-        posts in the SAME moment -- so when that installment later comes due,
+        Step-2 cash entry books from the settle, and its split correction with
+        it (the store posted both in the SAME moment since R1), so when that
+        installment later comes due,
         the linked ledger nets to the REAL principal, not the raw cash.  Pinned
         via the independent resolver: the map equals the un-seeded replay at
         EVERY period start, through the early-settled period and the
         carried-flat tail (on-schedule cash, so the two producers must agree to
-        the penny).  On the pre-R1 ledger the map read LOW by the payment's
-        full interest from the settle forward until the next loan write --
-        exactly what this parallel run catches.
+        the penny).  On the pre-R1 stored ledger the map read LOW by the
+        payment's full interest from the settle forward until the next loan
+        write re-posted it -- exactly what this parallel run catches.
 
         **"Early" is measured against the INSTALLMENT here, which is what a
         borrower means by paying early -- and it is the widest early settle
@@ -251,7 +252,7 @@ class TestReaderParallelRunAgainstResolver:
         Today's displays stay untouched: the scalar reader at the frozen today
         equals the resolver at today.  The full reconciliation sweep runs last
         -- completeness now covers the early-settled payment (its correction
-        must exist at settle).
+        books with its cash, from the settle).
         """
         with app.app_context():
             frozen = date(2026, 2, 10)
@@ -298,8 +299,8 @@ class TestReaderParallelRunAgainstResolver:
 
             # The parallel run holds at EVERY period start -- including the
             # period the early installment comes due in and the tail after it,
-            # where the pre-R1 ledger carried the raw cash (no interest backout)
-            # and this assertion fails.
+            # where the pre-R1 stored ledger carried the raw cash (no interest
+            # backout) and this assertion failed.
             balance_map = posted_loan_balance_map(loan.id, scenario_id, seed_periods)
             for period in seed_periods:
                 resolver_at_start = _resolver_balance(
@@ -428,8 +429,9 @@ class TestReaderParallelRunAgainstResolver:
 
         After a $1,000 payment the reader owes 99,500.00.  The user reconciles the
         statement and asserts the real balance is $95,000 on 2026-03-01 -- an
-        append-only true-up correction posted through the real chokepoint
-        (``loan_anchor_service.apply_loan_anchor_true_up``), not an edit.  The reader
+        append-only true-up recorded through the real chokepoint
+        (``loan_anchor_service.apply_loan_anchor_true_up``), not an edit, which
+        the ledger books as a correction.  The reader
         jumps to 95,000.00 (the true-up's ``owed_before`` absorbs the earlier
         payment) and the resolver, reseeded from the new latest anchor, agrees --
         95,000 is distinct from both the pre-true-up 99,500 and the 100,000 anchor,

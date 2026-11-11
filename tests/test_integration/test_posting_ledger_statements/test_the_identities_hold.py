@@ -27,12 +27,12 @@ from ._helpers import (
 
 
 # ---------------------------------------------------------------------------
-# 3. A = L + E at multiple as-of dates (incl. inside an anchor period)
+# 3. A = L + E at multiple as-of dates (incl. either side of a true-up's day)
 # ---------------------------------------------------------------------------
 
 
 class TestAccountingIdentityAtMultipleAsOf:
-    """The identity and tie-out hold at every as-of, including mid-anchor-period."""
+    """The identity and tie-out hold at every as-of, either side of a true-up too."""
 
     def test_identity_holds_before_and_after_a_true_up(
         self, app, db, seed_user,
@@ -50,9 +50,10 @@ class TestAccountingIdentityAtMultipleAsOf:
         Savings walks 500 -> 300 -> 350 -> 250 across the as-of ladder, with
         THREE as-of dates placed EXACTLY on an event day so the balance sheet's
         inclusive ``<= as_of`` fold is pinned (a ``< as_of`` mutant mis-states
-        Savings by that day's whole entry).  One as-of falls inside the anchor
-        period BEFORE the assertion (2099-06-05, the first spend) and one AFTER
-        it (2099-06-12) -- the balance-sheet case of the civil-day partition.  With
+        Savings by that day's whole entry).  One as-of falls BEFORE the
+        assertion's day (2099-06-05, the first spend) and one AFTER it
+        (2099-06-12) -- the balance-sheet case of the civil-day partition (an
+        assertion carries a day and no period since ruling R-EO).  With
         the seeded Checking ($1000.00):
 
           2099-06-01  A = 1000 + 500 = 1500  (only openings folded)
@@ -148,10 +149,12 @@ class TestArticulation:
               + retained earnings 500)                               = 1600.00
           equity delta = 1600 - 1000 = 600.00 = 500 (income) + 100 (corrections)
 
-        The identity relates three INDEPENDENTLY-obtained quantities (two reader
-        equity totals, one reader net income, one raw-posting equity-correction
-        sum), so it fails if the income statement and balance sheet attribute
-        inconsistently -- the whole point of the shared read core.
+        The identity relates three SEPARATELY-folded quantities over the one
+        worked-out ledger (two reader equity totals, one reader net income, and
+        one equity-correction sum folded here by entry date), so it fails if the
+        income statement and balance sheet attribute inconsistently -- the whole
+        point of the shared read core.  The hand-computed literals below are
+        what make it non-tautological.
         """
         with app.app_context():
             user_id = seed_user["user"].id

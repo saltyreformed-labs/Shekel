@@ -26,7 +26,7 @@ from ._helpers import _create_savings_account, _create_goal
 
 
 def _create_investment_account_with_params(seed_user, seed_periods):
-    """Create a 401k account with investment params and anchor period.
+    """Create a 401k account with investment params (no anchor period, ruling R-EH).
 
     Returns:
         (Account, InvestmentParams)

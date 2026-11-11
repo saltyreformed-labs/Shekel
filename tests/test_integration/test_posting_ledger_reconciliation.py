@@ -1,10 +1,10 @@
 """The posting-ledger reconciliation oracle (Build-Order Step 2, Commit 6).
 
-This is the correctness gate for the double-entry posting ledger.  Reads stay
-on the ``balance_at`` seam over ``budget.transactions`` (Step 2 changes no read
-path), so the ledger is validated against the **settled-transfer subset** of
-transactions rather than against full projected balances.  The invariants
-below are exactly plan Section 6:
+This is the correctness gate for the double-entry ledger's transfer half: the
+ledger worked out from the records since plan step plan#2913, and the stored
+one before it (whose Step 2 changed no read path).  The ledger is validated
+against the **settled-transfer subset** of transactions rather than against
+full projected balances.  The invariants below are exactly plan Section 6:
 
   1. **Per-account reconciliation** (asset AND liability legs): for each real
      account A, the net of A's posting legs equals the net effect of A's
@@ -470,10 +470,10 @@ class TestEverySettledTransferPosts:
 # ---------------------------------------------------------------------------
 
 
-class TestPerEntryAndTrialBalance:
+class TestTrialBalance:
     """The whole worked-out ledger sums to zero."""
 
-    def test_every_entry_balances_and_trial_balance_is_zero(
+    def test_the_trial_balance_is_zero(
         self, app, db, seed_user,
     ):
         """Two settled transfers book balanced lines; trial balance 0.
@@ -624,10 +624,11 @@ class TestOwnerIsolation:
 # its own point in the chain, long before the drop, over an empty table, and
 # ``a3f7c8e21b64``'s downgrade REFUSES so Alembic cannot rewind past the drop --
 # so the case graded a producer that can never run again against one that runs
-# every day.  What it asserted, and what the rest of this oracle still asserts
-# without it: the two producers post leg-for-leg identical entries for one
-# settled transfer, and the ledger reconciles either way.  The GO-FORWARD half of
-# that is covered by every other case here; the historical half has no future.
+# every day.  What it asserted: the two producers posted leg-for-leg identical
+# entries for one settled transfer, and the ledger reconciled either way.  Every
+# other case here still asserts the second half, of the ledger worked out from
+# the records since plan step plan#2913; the go-forward writer went at plan
+# task plan#3133, and the historical half has no future.
 
 
 # ---------------------------------------------------------------------------

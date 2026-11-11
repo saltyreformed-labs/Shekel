@@ -33,8 +33,8 @@ than it does is this arc's most expensive recurring lesson:
   POSTs, and they stay outside the sweep (ruling R-CB); the mutating-request
   contract is pinned by :class:`TestTheHandlerItself` instead;
 * it proves nothing about surfaces that resolve the baseline WITHOUT the
-  balance seam.  Fifteen such sites remain in ``app/`` -- forms, template
-  generation, posting sync -- and they are finding **N-117**, owned by plan
+  balance seam.  Fifteen such sites were counted in ``app/`` (forms, template
+  generation, a posting sync deleted since) as finding **N-117**, owned by plan
   step **X-y**.  One of them is inside the sweep and answers 400 with a bare
   text body rather than the policy's card (``carry_forward_preview``); the
   sweep is green on it because 400 is under 500, which is the limit of what it

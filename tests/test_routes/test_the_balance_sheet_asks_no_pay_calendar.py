@@ -6,8 +6,9 @@ true-up in a paycheck and asked the owner's pay calendar to do it.  So an owner
 holding a correction and no pay schedule, which ``calendar_for`` refuses, got
 the pay-calendar recovery handler (``app/error_handlers.py``), which answers a
 safe-method htmx request with ``204`` and no body, where they had a sheet to
-read.  No owner is in that state today (account creation refuses an owner with
-no pay periods); this case builds it by stripping the seed owner's schedule.
+read.  No owner is in that state today (no door produces an owner with no pay
+period, finding plan#3283; account creation also refused one until ruling
+plan#3318); this case builds it by stripping the seed owner's schedule.
 """
 
 import re

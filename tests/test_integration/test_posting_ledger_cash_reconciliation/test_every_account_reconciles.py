@@ -174,12 +174,12 @@ class TestPerLinkedAccountReconciliation:
 
 
 # ---------------------------------------------------------------------------
-# 2. Per counter account: category / fallback / orphan, by transaction_id link
+# 2. Per counter account: category / Uncategorized, by transaction_id link
 # ---------------------------------------------------------------------------
 
 
 class TestPerCounterAccountReconciliation:
-    """Category, fallback, and orphan counter accounts reconcile by linkage."""
+    """Category and Uncategorized counter keys reconcile by linkage."""
 
     def test_category_and_fallback_counter_accounts_reconcile(
         self, app, db, seed_user,
@@ -238,10 +238,10 @@ class TestPerCounterAccountReconciliation:
 
             _assert_full_reconciliation(scenario_id)
 
-    def test_orphan_counter_account_reconciles_after_category_delete(
+    def test_a_deleted_categorys_row_reconciles_on_uncategorized(
         self, app, db, seed_user,
     ):
-        """A deleted category's former counter account reconciles by linkage.
+        """A deleted category's row books on the Uncategorized key and reconciles.
 
         A $50 expense in a fresh "Leisure: Hobbies" category books its counter
         line on that category's key.  Deleting the budget category (the
@@ -324,14 +324,14 @@ class TestPerCounterAccountReconciliation:
 
 
 # ---------------------------------------------------------------------------
-# 3 + 4. Global trial balance
+# 3. Global trial balance
 # ---------------------------------------------------------------------------
 
 
-class TestPerEntryAndTrialBalance:
+class TestTrialBalance:
     """The whole worked-out ledger sums to zero."""
 
-    def test_every_entry_balances_and_trial_balance_is_zero(
+    def test_the_trial_balance_is_zero(
         self, app, db, seed_user,
     ):
         """A transfer plus a cash expense and income book balanced lines.
@@ -366,7 +366,7 @@ class TestPerEntryAndTrialBalance:
 
 
 # ---------------------------------------------------------------------------
-# 5. Per-transaction completeness (no settled cash row is silently unposted)
+# 4. Per-transaction completeness (no settled cash row is silently unposted)
 # ---------------------------------------------------------------------------
 
 
@@ -424,7 +424,7 @@ class TestEverySettledTransactionPosts:
 
 
 # ---------------------------------------------------------------------------
-# 6. Multi-scenario and owner isolation
+# 5. Multi-scenario and owner isolation
 # ---------------------------------------------------------------------------
 
 

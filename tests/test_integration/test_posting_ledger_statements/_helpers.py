@@ -198,7 +198,7 @@ def _windowed_equity_corrections(
     falls in ``[first_day, last_day]``, summed as their debit nets and NEGATED
     into natural (credit-normal) terms -- the articulation identity's
     "windowed equity corrections" term, computed here from the worked-out lines
-    so the articulation test relates three independently-obtained quantities.
+    so the articulation test relates three separately-folded quantities.
     Equity lines are only sourceless corrections (dated by ``entry_date``), so an
     entry-date fold is the correct window.
 

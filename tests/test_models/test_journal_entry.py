@@ -12,10 +12,12 @@ jointly guarantee:
   * the tenancy CASCADE (a deleted pay period) disposes of the entry AND
     its legs -- a database-level cascade that runs outside the ORM and so is
     NOT blocked by the immutability guards.  The movement link's SET NULL on
-    a source delete (the immutable posted fact survives) is the transfer
-    posting lifecycle suite's: ``test_transfer_posting_lifecycle.py``
-    hard-deletes a settled transfer and reads its four movement entries
-    surviving with ``transaction_entry_id`` NULL.  The two older links this
+    a source delete (the immutable posted fact survives) is
+    ``test_audit_migration.py``'s ``test_movement_delete_set_null_survives_revoke``,
+    which deletes a movement and reads its entry surviving with
+    ``transaction_entry_id`` NULL; ``test_transfer_posting_lifecycle.py`` read a
+    hard-deleted transfer's four movement entries so until plan step plan#2914
+    took the store off its grading.  The two older links this
     file pinned the same way, ``transfer_id`` and ``transaction_id``, are gone
     (plan step ``balance:X-bi-6-5``'s second leaf, card plan#1845);
   * ``posting_kind_id`` / ``source_kind_id`` are RESTRICT (the seeded ref

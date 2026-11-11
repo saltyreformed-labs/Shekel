@@ -121,19 +121,16 @@ class TestAccountCreate:
     def test_create_account_stores_the_submitted_observed_on(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """A back-dated "Balance as of" is stored, and sets the anchor period.
+        """A back-dated "Balance as of" is stored as the assertion's day.
 
         The user is entering an account they already had: they type today's
-        balance but say it was true on a day inside an EARLIER pay period.  Two
-        things must follow (ruling R-DH, plan step 2):
-
-        * the origination row's ``observed_on`` is the submitted day, not the
-          day the form was submitted -- it is the day the whole anchor/settle
-          partition compares settled rows against;
-        * the anchor PERIOD is resolved FROM that day, not from today.  A row
-          asserting an earlier day while filed against today's period would put
-          its correction's journal entry in a period its own ``entry_date``
-          falls outside.
+        balance but say it was true on a day inside an EARLIER pay period.  The
+        origination row's ``observed_on`` is the submitted day, not the day the
+        form was submitted -- it is the day the whole anchor/settle partition
+        compares settled rows against (ruling R-DH, plan step 2).  A second rule
+        held until rulings R-EO and R-EH deleted the period columns: the anchor
+        PERIOD was resolved FROM that day, not from today, so the correction's
+        journal entry fell in the period its own ``entry_date`` did.
         """
         with app.app_context():
             savings_type = (

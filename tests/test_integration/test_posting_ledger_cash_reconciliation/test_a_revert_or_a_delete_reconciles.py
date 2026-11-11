@@ -51,14 +51,15 @@ from ._helpers import (
 # its own point in the chain, long before the drop, over an empty table, and
 # ``a3f7c8e21b64``'s downgrade REFUSES so Alembic cannot rewind past the drop --
 # so the case graded a producer that can never run again against one that runs
-# every day.  What it asserted, and what the rest of this oracle still asserts
-# without it: the two producers post leg-for-leg identical entries for one
-# settled source, and the ledger reconciles either way.  The GO-FORWARD half of
-# that is covered by every other case here; the historical half has no future.
+# every day.  What it asserted: the two producers posted leg-for-leg identical
+# entries for one settled source, and the ledger reconciled either way.  Every
+# other case here still asserts the second half, of the ledger worked out from
+# the records since plan step plan#2913; the go-forward writer went at plan
+# task plan#3133, and the historical half has no future.
 
 
 # ---------------------------------------------------------------------------
-# 8. Revert-and-recategorize regression lock (plan Section 2.8 CRITICAL)
+# 6. Revert-and-recategorize regression lock (plan Section 2.8 CRITICAL)
 # ---------------------------------------------------------------------------
 
 
@@ -141,12 +142,13 @@ class TestRevertAndMoveReconciles:
         The route-level R2 regression (the 2026-07-02 adversarial review's H1
         class): a Paid $50 expense in period P is reverted to Projected AND
         moved to a future period F in ONE PATCH (the finalised lock lifts on
-        the revert), then re-settled.  The handler applies the new
-        ``pay_period_id`` BEFORE the end-of-handler reconcile (since ruling
-        **R-BAL58** the revert's own reconcile runs first and the handler
-        reconciles again after the move; this case holds under both).  Where
-        the STORE's reversal of P's entry lands (in P, by the R2 attribution
-        rule) is no longer graded here (plan#2914); the worked-out read holds
+        the revert), then re-settled.  The handler applies the revert first and
+        the new ``pay_period_id`` after it (ruling **R-BAL58**).  Until plan
+        task plan#3097 the handler reconciled the stored ledger after the move,
+        and since that ruling the revert reconciled it first too; this case
+        held either way.  Where the STORE's reversal of P's entry landed (in P,
+        by the R2 attribution rule) went off the grading at plan#2914, and the
+        reversal itself at plan task plan#3097; the worked-out read holds
         no reversal, so while the row is reverted P and F hold no line of it,
         after the re-settle F carries exactly the -50/+50 and P still nothing,
         and the whole sweep ties after every step.
@@ -520,18 +522,19 @@ class TestASettledEnvelopesUndatedPurchasePostsNothing:
 class TestHardDeletedTransactionReconcilesAtZero:
     """A hard-deleted settled cash transaction leaves nothing booked."""
 
-    def test_hard_delete_settled_cash_reconciles_via_null_linkage(
+    def test_hard_delete_settled_cash_leaves_nothing_booked(
         self, app, db, auth_client, seed_user, seed_periods_today,
     ):
-        """Hard-deleting a Paid ad-hoc expense severs the link but stays balanced.
+        """Hard-deleting a Paid ad-hoc expense books nothing of it and stays balanced.
 
         Arithmetic: a $50 Groceries expense books -50 / +50.  Deleting the ad-hoc
         (template-less) row hard-deletes it with its movement.  The worked-out
         read holds no line for a movement that is gone, so Groceries-Expense reads
         0.00 and Checking its opening.  This is the route-driven production path
-        (``delete_transaction``) the oracle claims to cover; what that path does
-        to the STORED postings (a reversal, then the FK SET NULL) is no longer
-        graded here (plan#2914).
+        (``delete_transaction``) the oracle claims to cover; what that path did
+        to the STORED postings (a reversal, then the FK SET NULL) went off the
+        grading at plan#2914, and its reversal with the doors' syncs at plan
+        task plan#3097.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -552,7 +555,7 @@ class TestHardDeletedTransactionReconcilesAtZero:
                 _db.session, groceries_counter, scenario_id,
             ) == Decimal("50.00")
 
-            # Hard delete (ad-hoc row): reverse-before-delete, then SET NULL.
+            # Hard delete (ad-hoc row): the row goes, and its movement with it.
             assert auth_client.delete(
                 f"/transactions/{txn_id}",
             ).status_code == 200

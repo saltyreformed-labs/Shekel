@@ -107,10 +107,10 @@ class TestGridRowScoping:
     def _hidden_period(self, seed_user, seed_periods_today):
         """Return a period that is NOT in the default visible window.
 
-        The anchor period sits at ``seed_periods_today[0]``, ~8 weeks
-        before today.  With ``grid_default_periods=6`` the visible
-        window starts at the current period, so the anchor is
-        historical and hidden in compact view.
+        ``seed_periods_today[0]`` sits ~8 weeks before today.  With
+        ``grid_default_periods=6`` the visible window starts at the
+        current period, so that period is historical and hidden in
+        compact view.
         """
         # pylint: disable=unused-argument
         return seed_periods_today[0]

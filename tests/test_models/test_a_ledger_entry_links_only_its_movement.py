@@ -130,9 +130,9 @@ def _world(seed_user, seed_periods):
     A settled transfer Checking -> Savings and a second Checking -> Reserve
     (their covering movements' ``transfer_movement`` entries are what a delete
     must leave alone), a plain row for the links to name, the seed Checking's
-    opening, and three accounts' linked ledgers (found, or planted by SQL once
-    plan task plan#3133 stops ``create_account`` pairing them).  Plain ids, read
-    before the downgrade.
+    opening, and three accounts' linked ledgers (planted by SQL, since plan task
+    plan#3133 stopped ``create_account`` pairing them).  Plain ids, read before
+    the downgrade.
 
     **The entries that stay are planted by SQL after the downgrade, as the
     legacy plants are** (:func:`_plant`): one ``transfer_movement`` entry

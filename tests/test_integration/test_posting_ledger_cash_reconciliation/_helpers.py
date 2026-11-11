@@ -132,7 +132,7 @@ def _independent_movement_effect(account_id: int, scenario_id: int) -> Decimal:
     **It replaced two helpers** that between them spelled the pre-4a rule --
     ``effective - Sigma(credit)`` over SETTLED rows, plus the purchases posted
     under UNSETTLED parents -- an oracle that would have stayed green had the
-    writer regressed to posting the row's own leg beside its movement.
+    ledger regressed to booking the row's own leg beside its movement.
 
     Restated in SQL rather than shared with ``ledger_lines.purchase_posts``
     or ``cash_ledger.movement_cash_leg``, for the reason every helper in this

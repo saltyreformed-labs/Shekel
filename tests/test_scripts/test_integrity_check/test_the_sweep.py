@@ -101,11 +101,11 @@ class TestRunAllChecks:
             f"{[(r.check_id, r.description, r.detail_count) for r in critical_failures]}"
         )
         # Total check count should cover all 4 categories:
-        # 12 FK + 5 OR + 3 BA + 9 DC = 29 checks (DC-01 removed
-        # 2026-06-11 -- estimated-only settles are a legal state; DC-10
-        # added at plan step balance:X-bi-3e-2, where a revert began
-        # keeping the covering movement un-dated and its ledger legs became
-        # the door's to reverse).
+        # 15 FK + 5 OR + 3 BA + 9 DC = 32 checks (DC-01 removed
+        # 2026-06-11 -- estimated-only settles are a legal state; DC-10,
+        # added at plan step balance:X-bi-3e-2 when a revert began keeping
+        # the covering movement un-dated and its ledger legs became the
+        # door's to reverse, removed at plan task plan#3077).
         # It was 30 from plan step X-f1c3c, where FK-03 and BA-02 both
         # queried ``accounts.current_anchor_*`` and went with the columns;
         # BA-06 was added 2026-08-11 beside the deletion of pay_calendar

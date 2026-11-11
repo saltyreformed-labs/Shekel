@@ -28,6 +28,7 @@ from app.enums import (
     CalcMethodEnum,
     CompoundingFrequencyEnum,
     FilingStatusEnum,
+    InterestAccrualConventionEnum,
     PaycheckLineKindEnum,
     EmployerContributionTypeEnum,
     GoalModeEnum,
@@ -671,6 +672,28 @@ def compounding_frequency_id(member):
     """
     require_init()
     return cache().enum_ids[CompoundingFrequencyEnum][member]
+
+
+def interest_accrual_convention_id(member):
+    """Return the integer primary key for an InterestAccrualConventionEnum member.
+
+    The id a loan row stores (``loan_params.interest_accrual_convention_id``,
+    plan step recurrence:R16-d); KeyError for a non-member, RuntimeError
+    before the cache is initialized.
+    """
+    require_init()
+    return cache().enum_ids[InterestAccrualConventionEnum][member]
+
+
+def interest_accrual_convention_member(convention_id):
+    """Return the InterestAccrualConventionEnum member a stored id names.
+
+    :func:`interest_accrual_convention_id`'s inverse: a loan's terms read the
+    row's id back as the member the one interest producer takes.  ``None``
+    for an id the cache does not hold; RuntimeError before init.
+    """
+    require_init()
+    return cache().enum_members[InterestAccrualConventionEnum].get(convention_id)
 
 
 def ledger_account_class_id(member):

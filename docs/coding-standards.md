@@ -234,7 +234,7 @@ canonical table list lives in `app/audit_infrastructure.py:AUDITED_TABLES`.
 
 ### Reference Tables
 
-- **IDs for logic, strings for display only.** Enums in `app/enums.py`. Cache in `app/ref_cache/`.
+- **IDs for logic, strings for display only.** Enums in `app/enums/`. Cache in `app/ref_cache/`.
   NEVER compare against string `name` columns. Use boolean columns for grouping logic. Use FK
   references for category groupings, not bare strings.
 

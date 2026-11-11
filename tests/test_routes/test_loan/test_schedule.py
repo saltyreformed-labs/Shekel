@@ -7,7 +7,7 @@ import re
 from datetime import date
 from decimal import Decimal
 
-from app.enums import AcctTypeEnum, StatusEnum
+from app.enums import AcctTypeEnum, InterestAccrualConventionEnum, StatusEnum
 from app.models.loan_features import RateHistory
 from app.models.ref import AccountType
 from app.services import account_service
@@ -571,6 +571,7 @@ class TestAmortizationSchedule:
                     start_date=starting_date,
                     annual_rate=rate,
                     monthly_pi=contractual,
+                    convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                 )],
             ),
         )

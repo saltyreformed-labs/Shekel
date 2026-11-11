@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from app.enums import InterestAccrualConventionEnum
 from app.services.amortization_engine import (
     PaymentDates,
     PaymentRecord,
@@ -37,6 +38,7 @@ def _terms(
         start_date=start_date,
         annual_rate=annual_rate,
         monthly_pi=monthly_pi,
+        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
     )]
 
 
@@ -1059,6 +1061,7 @@ class TestPeriodTermsValidation:
                 start_date=date(2026, 1, 1),
                 annual_rate=Decimal("-0.01"),
                 monthly_pi=Decimal("1500.00"),
+                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
             )
 
     def test_negative_pi_raises_value_error(self):
@@ -1068,6 +1071,7 @@ class TestPeriodTermsValidation:
                 start_date=date(2026, 1, 1),
                 annual_rate=Decimal("0.06"),
                 monthly_pi=Decimal("-1.00"),
+                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
             )
 
     def test_float_pi_raises_type_error(self):
@@ -1077,6 +1081,7 @@ class TestPeriodTermsValidation:
                 start_date=date(2026, 1, 1),
                 annual_rate=Decimal("0.06"),
                 monthly_pi=1500.00,
+                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
             )
 
     def test_string_date_raises_type_error(self):
@@ -1086,6 +1091,7 @@ class TestPeriodTermsValidation:
                 start_date="2026-01-01",
                 annual_rate=Decimal("0.06"),
                 monthly_pi=Decimal("1500.00"),
+                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
             )
 
     def test_empty_terms_schedule_rejected(self):
@@ -1280,11 +1286,13 @@ class TestProjectForward:
                         start_date=self.STARTING_DATE,
                         annual_rate=self.RATE,
                         monthly_pi=contractual,
+                        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                     ),
                     PeriodTerms(
                         start_date=date(2027, 2, 1),
                         annual_rate=Decimal("0.075"),
                         monthly_pi=recast_pi,
+                        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                     ),
                 ],
             ),
@@ -1332,11 +1340,13 @@ class TestProjectForward:
                         start_date=self.STARTING_DATE,
                         annual_rate=self.RATE,
                         monthly_pi=contractual,
+                        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                     ),
                     PeriodTerms(
                         start_date=date(2027, 2, 1),
                         annual_rate=Decimal("0.075"),
                         monthly_pi=recorded,
+                        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                     ),
                 ],
             ),

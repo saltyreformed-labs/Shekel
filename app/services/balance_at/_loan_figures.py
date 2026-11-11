@@ -39,7 +39,9 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.enums import InterestAccrualConventionEnum
 from app.models.account import Account
+from app.services import loan_resolver
 from ._context import BalanceContext
 from ._fold import last_closed_on
 from . import _plan_fold
@@ -120,6 +122,13 @@ class LoanTerms:
             net-worth trend's gate (ruling **R-R112**) read it here, where
             each read a schedule row's date until plan step
             recurrence:R16-c-2.
+        convention: How the loan's note accrues interest
+            (:class:`~app.enums.InterestAccrualConventionEnum`), through the
+            one reading of the stored id
+            (:func:`app.services.loan_resolver.accrual_convention`, plan step
+            recurrence:R16-d).  A contract fact like the rate beside it:
+            /debt-strategy charges its payoff projection under it, so that
+            page needs no ``ResolvedLoan`` to learn it.
     """
 
     monthly_payment: Decimal
@@ -127,6 +136,7 @@ class LoanTerms:
     is_originated: bool
     is_arm: bool
     recorded_start: date
+    convention: InterestAccrualConventionEnum
 
 
 @dataclass(frozen=True)
@@ -279,6 +289,7 @@ def _terms_from(resolved: ResolvedLoan, as_of: date) -> LoanTerms:
         is_originated=_is_originated(resolved, as_of),
         is_arm=bool(resolved.params.is_arm),
         recorded_start=resolved.recorded_start,
+        convention=loan_resolver.accrual_convention(resolved.params),
     )
 
 

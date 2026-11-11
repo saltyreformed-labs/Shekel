@@ -44,6 +44,7 @@ from app.routes.auth._helpers import (
     _MFA_PENDING_AT_KEY,
     _MFA_PENDING_NEXT_KEY,
     _MFA_PENDING_USER_ID_KEY,
+    _SIGN_IN_TRIES_PER_ADDRESS,
     _browser_standing,
     _complete_sign_in,
     _first_validation_message,
@@ -167,7 +168,7 @@ def _check_the_password(email: str, password: str) -> _PasswordChecked:
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
-@limiter.limit("5 per 15 minutes", methods=["POST"])
+@limiter.limit(_SIGN_IN_TRIES_PER_ADDRESS, methods=["POST"])
 def login():
     """Display the login form and handle authentication.
 

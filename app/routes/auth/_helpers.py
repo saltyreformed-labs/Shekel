@@ -19,8 +19,9 @@ only harmlessly.  :func:`_users_knowing_this_browser` is the one question
 and :func:`_spend_a_try` the one spending of a door's tries from it, at the
 code form and at re-confirm.
 :func:`_complete_sign_in` is the ONE completion of a sign-in, whichever proof
-finished it: a password with no second factor, a password and a code, or a
-password on a trusted device (plan#2173), so the three cannot drift on what a
+finished it: a password with no second factor, a password and a code, a
+password on a trusted device (plan#2173), or a passkey (plan#2538, in
+:mod:`~app.routes.auth.passkeys`), so the four cannot drift on what a
 signed-in session carries, what the browser holds afterwards (plan#2772) or
 where it lands.
 :func:`_verify_totp_with_replay_logging` (and its
@@ -206,6 +207,11 @@ def _known_device(user) -> KnownDevice | None:
     return None if standing is None else standing.device
 
 
+#: How many sign-ins one internet address may try at a sign-in door in its
+#: window: ``/login``'s password form, and the passkey sign-in, which is
+#: limited as that form is (ruling plan#3469).  Each door counts its own.
+_SIGN_IN_TRIES_PER_ADDRESS = "5 per 15 minutes"
+
 #: How many passwords or codes one counter lets a door check in its window:
 #: the code form's and re-confirm's alike (rulings plan#3023, plan#3071).
 _TRIES = "5 per 15 minutes"
@@ -304,8 +310,9 @@ def _complete_sign_in(
     """Sign *user* in and return the redirect to where they land.
 
     The one completion of a sign-in, called once the proof is in: the
-    ``/login`` password with no second factor, ``/mfa/verify``'s code, or
-    the ``/login`` password on a trusted device (plan#2173).  It clears any
+    ``/login`` password with no second factor, ``/mfa/verify``'s code, the
+    ``/login`` password on a trusted device (plan#2173), or a passkey
+    (plan#2538), which asks no code and is never trusted.  It clears any
     pending code state (a completed sign-in leaves none behind), clears the
     account's wrong-guess count now that every check has passed (ruling
     plan#3007) if the record still holds what the checks saw, *checked*,
@@ -340,7 +347,9 @@ def _complete_sign_in(
             code form's read of the lock
             (:func:`~app.services.auth_service.read_the_lock`).  ``None`` for
             a known browser, whose sign-in leaves the strangers' record alone,
-            and for a stranger whose checks found no record.  Keyword-only
+            for a stranger whose checks found no record, and for a passkey,
+            which neither asks nor clears that record (ruling plan#3469): a
+            known proof refills no stranger's guesses.  Keyword-only
             with no default, so no caller can forget it.
         trust: Whether the user typed a code and asked to trust this browser.
 

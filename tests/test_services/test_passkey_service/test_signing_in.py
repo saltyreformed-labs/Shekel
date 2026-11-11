@@ -11,6 +11,7 @@ from app.models.passkey import Passkey
 from app.services import passkey_service
 from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
 from tests._passkeys import BE, BS, ORIGIN, RP_ID, UP, UV, SoftwareAuthenticator, padding
+from tests._test_helpers import capture_sql_statements
 from tests.test_services.test_passkey_service._helpers import (
     ADDED_AT,
     T0,
@@ -32,6 +33,13 @@ def _clock(monkeypatch):
 def _user(bare_user):
     """The account signing in."""
     return bare_user["user"]
+
+
+def _refused_account(response_json, state):
+    """Look up the account for *response_json*; return the refusal it raised."""
+    with pytest.raises(PasskeyRefused) as caught:
+        passkey_service.sign_in_account(response_json, state=state)
+    return caught.value.refusal
 
 
 def _refused(user, response, *, state):
@@ -86,7 +94,7 @@ class TestTheAccount:
 
         event.listen(session, "loaded_as_persistent", count)
         try:
-            found = passkey_service.sign_in_account(response)
+            found = passkey_service.sign_in_account(response, state=state)
             assert found.id == user_id
             assert Passkey not in loaded
             passkey_service.complete_sign_in(found, response, origin=ORIGIN, state=state)
@@ -101,14 +109,36 @@ class TestTheAccount:
     ])
     def test_a_response_that_is_not_a_credential_names_no_one(self, user, clock, response):
         """Refused alike with an unknown id: the caller cannot tell them apart."""
-        assert passkey_service.sign_in_account(response) is None
+        _, state = passkey_service.sign_in_options(origin=ORIGIN)
+        assert passkey_service.sign_in_account(response, state=state) is None
 
     def test_an_unknown_credential_names_no_one(self, user, clock):
         """A key no account added."""
         add(clock, user)
-        options, _ = passkey_service.sign_in_options(origin=ORIGIN)
+        options, state = passkey_service.sign_in_options(origin=ORIGIN)
         response = SoftwareAuthenticator().get(options, user_handle=None)
-        assert passkey_service.sign_in_account(json.dumps(response)) is None
+        assert passkey_service.sign_in_account(json.dumps(response), state=state) is None
+
+    @pytest.mark.parametrize("lapsed", [False, True])
+    def test_no_live_ceremony_refuses_before_anything_is_read(self, user, clock, lapsed):
+        """No state, or one a lifetime old: EXPIRED for a real passkey and a stranger's alike.
+
+        Asked before the account is looked up, so the refusal tells a stranger
+        nothing about which passkeys exist, and no statement is issued: the
+        lookup would be the first.
+        """
+        _, authenticator = add(clock, user)
+        options, state = passkey_service.sign_in_options(origin=ORIGIN)
+        if lapsed:
+            clock.at(T0 + passkey_service.CHALLENGE_LIFETIME)
+        held = state if lapsed else None
+        for key in (authenticator, SoftwareAuthenticator()):
+            response = json.dumps(key.get(options))
+            refusal, statements = capture_sql_statements(
+                lambda response=response: _refused_account(response, held),
+            )
+            assert refusal is PasskeyRefusal.EXPIRED
+            assert statements == []
 
 
 class TestASignIn:
@@ -262,8 +292,10 @@ class TestOneAnswerOnce:
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         response = authenticator.get(options)
         clock.at(T0 + timedelta(seconds=1))
-        user_found = passkey_service.sign_in_account(json.dumps(response))
-        passkey_service.complete_sign_in(user_found, json.dumps(response), origin=ORIGIN, state=state)
+        user_found = passkey_service.sign_in_account(json.dumps(response), state=state)
+        passkey_service.complete_sign_in(
+            user_found, json.dumps(response), origin=ORIGIN, state=state,
+        )
         clock.at(T0 + timedelta(seconds=2))
         refusal = _refused(user, response, state=state)
         assert refusal.refusal is PasskeyRefusal.REPLAYED
@@ -301,7 +333,7 @@ class TestTheCounter:
 
     @pytest.mark.parametrize("reported", [2, 1])
     def test_a_counter_that_does_not_rise_is_refused(self, user, clock, reported):
-        """Kept at 2 by its add's sign-in: 2 again (equal) or 1 (fallen) is refused, the count kept at 2."""
+        """Kept at 2 by its add's sign-in: 2 again or 1 (fallen) is refused, the count kept at 2."""
         passkey, authenticator = add(clock, user, SoftwareAuthenticator(counts=True))
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
         refusal = _refused(user, authenticator.get(options, counter=reported), state=state)

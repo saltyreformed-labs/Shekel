@@ -14,9 +14,11 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="mb-3">
             <label for="email" class="form-label">Email</label>
+            {# ``webauthn`` lets the phone offer a passkey from this box's
+               autofill (conditional mediation), which passkey.js asks for. #}
             <input type="email" class="form-control" id="email" name="email"
                    required autofocus placeholder="admin@shekel.local"
-                   autocomplete="email">
+                   autocomplete="username webauthn">
           </div>
           <div class="mb-3">
             <label for="password" class="form-label">Password</label>
@@ -33,6 +35,23 @@
           </div>
           <button type="submit" class="btn btn-primary w-100">Sign In</button>
         </form>
+        <div class="d-flex align-items-center my-3 text-body-secondary small">
+          <hr class="flex-grow-1 my-0"><span class="px-2">or</span><hr class="flex-grow-1 my-0">
+        </div>
+        {# A passkey sign-in (plan#2538): passkey.js asks this page's options,
+           has the device sign them, and posts its answer in ``credential``. #}
+        <form method="POST" action="{{ url_for('auth.passkey_sign_in') }}"
+              data-passkey-sign-in
+              data-options-url="{{ url_for('auth.passkey_sign_in_options') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="credential" value="">
+          <button type="button" class="btn btn-outline-primary w-100"
+                  data-action="passkey-sign-in">
+            <i class="bi bi-person-lock" aria-hidden="true"></i> Sign in with a passkey
+          </button>
+          <div class="alert alert-warning small mt-3 mb-0" role="alert"
+               data-passkey-message hidden></div>
+        </form>
         {% if config.REGISTRATION_ENABLED %}
         <div class="text-center mt-3">
           <a href="{{ url_for('auth.register_form') }}">Create an account</a>
@@ -48,4 +67,5 @@
 {# Show/hide eye icon on the login password input.  No strength meter
    here because no zxcvbn analysis applies to an existing password. #}
 <script src="{{ url_for('static', filename='js/password_toggle.js') }}"></script>
+<script src="{{ url_for('static', filename='js/passkey.js') }}"></script>
 {% endblock scripts %}

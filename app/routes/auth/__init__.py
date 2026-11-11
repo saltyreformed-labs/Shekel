@@ -35,6 +35,8 @@ Module map:
 * :mod:`app.routes.auth.session_security` -- authenticated-session
   security (``change_password``, ``invalidate_sessions``, ``reauth``,
   ``dismiss_security_event``).
+* :mod:`app.routes.auth.passkeys` -- signing in with a passkey
+  (``passkey_sign_in_options``, ``passkey_sign_in``; plan#2538).
 """
 
 # Re-export ``auth_bp`` from the leaf declaration module so consumers
@@ -48,6 +50,7 @@ from app.routes.auth._bp import auth_bp
 # on what is, by design, a deferred-import side-effect registration.
 from app.routes.auth import credentials  # noqa: F401, E402
 from app.routes.auth import mfa  # noqa: F401, E402
+from app.routes.auth import passkeys  # noqa: F401, E402
 from app.routes.auth import session_security  # noqa: F401, E402
 
 

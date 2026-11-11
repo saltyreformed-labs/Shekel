@@ -178,7 +178,9 @@ def re_confirm_options(
     )
 
 
-def sign_in_account(response_json: str) -> User | None:
+def sign_in_account(
+    response_json: str, *, state: Mapping[str, str | int] | None,
+) -> User | None:
     """Return the account whose passkey *response_json* names, before any lock.
 
     A sign-in's first read: the route takes the account's owner lock between
@@ -188,15 +190,28 @@ def sign_in_account(response_json: str) -> User | None:
     sign-in reads before the lock, and the account's row is the one it
     expires once the lock is held.
 
+    **The ceremony is asked first**, before anything is read: with no sign-in
+    in flight, or one past :data:`CHALLENGE_LIFETIME`, every answer is refused
+    alike, so a stranger holding no live ceremony cannot tell a passkey that
+    exists from one that does not, and takes no lock.  :func:`complete_sign_in`
+    asks again, at its own moment, after the lock's wait.
+
     Args:
         response_json: The browser's ``navigator.credentials.get()`` result,
             as JSON.
+        state: What :func:`sign_in_options` returned, as the route kept it,
+            or ``None``.
 
     Returns:
         The :class:`~app.models.user.User`, or ``None`` alike for a response
         that is not a credential and for one no passkey has the id of, so
         neither the caller nor the browser can tell them apart.
+
+    Raises:
+        PasskeyRefused: ``EXPIRED``, when no sign-in is in flight or its
+            challenge has lapsed.
     """
+    _ceremony.read_state(state, _ceremony.now(), Ceremony.SIGN_IN)
     try:
         credential_id, _ = read_credential(response_json)
     except PasskeyRefused:

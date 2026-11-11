@@ -37,7 +37,8 @@ the repository root's own (``gunicorn.conf.py``, ``run.py``):
   by ``user_write_lock.py`` alone, so no module can take the same lock under
   its own statement; ``bind_request_actor`` (where a request's owner becomes
   known) by the logging hook that signs the request in;
-  ``bind_sign_in_owner`` by the two sign-in routes; the two private
+  ``bind_sign_in_owner`` by the three sign-in routes (the password, the
+  code and the passkey; the passkey's added by ruling plan#3584); the two private
   functions that do the locking by ``db_transaction`` itself; and the two
   ``g`` keys that arm the listener for an owner -- ``_OWNER_KEY`` and
   ``_PENDING_OWNER_KEY`` reached as ``db_transaction``'s attributes or
@@ -130,6 +131,7 @@ _HOMES: dict[str, frozenset[str]] = {
     _SIGN_IN_OWNER: frozenset({
         "app/routes/auth/credentials.py",
         "app/routes/auth/mfa.py",
+        "app/routes/auth/passkeys.py",
     }),
     _LOCK_OPEN: frozenset({_DB_TRANSACTION}),
     _REQUEST_HOOK: frozenset({_DB_TRANSACTION}),

@@ -11,8 +11,10 @@ reads any of the owner's data; what it reads first, none of it a row a write
 decides on, is listed in :func:`app.db_transaction._lock_the_open_transaction`
 -- and at a sign-in (:func:`app.db_transaction.bind_sign_in_owner`): the code
 step and a known browser's password step right after the account is found,
-before their checks, and a stranger's password step only once its check has
-committed and found the password right (ruling plan#3110); and this module's
+before their checks, a stranger's password step only once its check has
+committed and found the password right (ruling plan#3110), and a passkey
+sign-in once the passkey has named its account, before the passkey is read
+(plan#2538); and this module's
 :func:`lock_every_user_writes`, at the start of each deploy reconcile.  No
 service takes it for itself any more, and
 ``tests/test_arch/test_the_owner_lock_has_one_home.py`` refuses one that

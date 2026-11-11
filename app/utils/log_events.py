@@ -187,6 +187,17 @@ EVT_MFA_LOGIN_SUCCESS = _register(
     "mfa_login_success", AUTH,
     "User completed login including the MFA factor.",
 )
+EVT_PASSKEY_SIGN_IN = _register(
+    "passkey_sign_in", AUTH,
+    "User signed in with a passkey at /login/passkey (plan#2538); passkey_id "
+    "names which.",
+)
+EVT_PASSKEY_SIGN_IN_FAILED = _register(
+    "passkey_sign_in_failed", AUTH,
+    "A passkey sign-in was refused; refusal says why (unknown_credential for "
+    "an answer that names no passkey, readable or not), and user_id is the "
+    "account the passkey named, when it named one.",
+)
 EVT_MFA_ENABLED = _register(
     "mfa_enabled", AUTH,
     "User enrolled an authenticator and confirmed the first TOTP.",

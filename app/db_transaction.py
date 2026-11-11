@@ -194,7 +194,9 @@ reading its codes, and a known browser's password step before its check
 (ruling **R-CC121**); a stranger's password step takes it only once its check
 has committed and found the password right, on the way to signing in (ruling
 plan#3110), so no stranger's try waits on it while bcrypt runs, and the wait
-is no clue to which emails have accounts.  A CLI script, a deploy reconcile
+is no clue to which emails have accounts.  A passkey sign-in takes it once the
+passkey has named its account and before the passkey itself is read
+(plan#2538).  A CLI script, a deploy reconcile
 and Alembic hold no request, so nothing here locks for them: the three deploy
 reconciles lock every owner at their own start
 (:func:`app.services.user_write_lock.lock_every_user_writes`), and a script
@@ -682,16 +684,19 @@ def bind_sign_in_owner(user_id: int, owner_id: "int | None") -> None:
 
     Sign-in is the one writer of a committed user's rows that no signed-in
     request covers: the code step (``backup_codes``, ``last_totp_timestep``,
-    ``session_invalidated_at``), a known browser's count on its record, and
-    the completion's records run before anyone is signed in, so
+    ``session_invalidated_at``), a known browser's count on its record, a
+    passkey's last use and counter, and the completion's records run before
+    anyone is signed in, so
     :func:`bind_request_actor` never saw an owner.  Unlocked, a backup-code
     sign-in racing "Regenerate backup codes" wrote the old codes back over the
     new ones, one backup or authenticator code signed in two devices, and a
     known browser's two wrong passwords counted once.  So the code step takes
-    it right after finding the account, before it reads the codes, and a known
+    it right after finding the account, before it reads the codes, a known
     browser's password step before its check (ruling **R-CC121**, "Lock, then
-    check").  A stranger's password step takes it only once its check has
-    committed and found the password right, and re-reads the account under it
+    check"), and a passkey sign-in once the passkey has named the account,
+    before it reads the passkey (plan#2538).  A stranger's password step takes
+    it only once its check has committed and found the password right, and
+    re-reads the account under it
     (ruling plan#3110): a stranger's count is the record of the email typed
     (``auth.guess_records``), whose own row lock serialises it, and a wait on
     this lock through the check took twice as long for two tries at a real
@@ -705,8 +710,8 @@ def bind_sign_in_owner(user_id: int, owner_id: "int | None") -> None:
     they are attributed to is not this ruling's to change.
 
     Args:
-        user_id: The ``auth.users.id`` being signed in, found by email or by
-            the pending-MFA session key.
+        user_id: The ``auth.users.id`` being signed in, found by email, by
+            the pending-MFA session key, or by the passkey that answered.
         owner_id: That user's :attr:`~app.models.user.User.data_owner_id`;
             ``None`` for a companion with no linked owner, who takes no lock.
     """
@@ -729,7 +734,11 @@ def _lock_the_open_transaction(user_id: "int | None", owner_id: "int | None") ->
     at ``/login``, also which users the browser's cookies name known records
     of, read as user ids alone
     (:func:`app.services.known_device_service.known_to`), so no record is
-    loaded; and on a signed-in request, for the rate limits, which record the
+    loaded; at the passkey sign-in, the account is found by one statement that
+    joins the passkey the answer names and loads the account alone
+    (:func:`app.services.passkey_service.sign_in_account`), so no passkey is
+    loaded before the lock, and the completion reads it ``FOR UPDATE`` under
+    it; and on a signed-in request, for the rate limits, which record the
     browser's cookie names, read as its id alone
     (:func:`app.services.known_device_service.known_browser_id`), so none is
     loaded there either.  A sign-in whose check committed holds no open transaction

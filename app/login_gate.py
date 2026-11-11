@@ -69,10 +69,11 @@ from app.extensions import login_manager
 #: also swallows every future path that happens to start the same way, and
 #: a name either resolves in the route table or it does not.
 #:
-#: The seven views are the front door and what it needs: the login and
+#: The nine views are the front door and what it needs: the login and
 #: registration forms with their POSTs, the second factor's verify page (its
 #: visitor has a password accepted and no session yet, which is the one state
-#: between anonymous and authenticated this application has), the container
+#: between anonymous and authenticated this application has), the passkey
+#: sign-in's two POSTs, its options and its answer (plan#2538), the container
 #: health probe, and the two PWA files a browser fetches before any session
 #: exists.  ``static`` is Flask's own: the login page's CSS and JS.
 #:
@@ -86,6 +87,8 @@ PUBLIC_ENDPOINTS = frozenset({
     "auth.register_form",
     "auth.register",
     "auth.mfa_verify",
+    "auth.passkey_sign_in_options",
+    "auth.passkey_sign_in",
     "health.health_check",
     "static",
     "static_pass.web_manifest",

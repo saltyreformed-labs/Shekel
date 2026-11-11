@@ -95,7 +95,7 @@ def sign_in(authenticator, *, state=None, options=None, **get):
     if state is None:
         options, state = passkey_service.sign_in_options(origin=ORIGIN)
     response = json.dumps(authenticator.get(options, **get))
-    user = passkey_service.sign_in_account(response)
+    user = passkey_service.sign_in_account(response, state=state)
     return passkey_service.complete_sign_in(user, response, origin=ORIGIN, state=state)
 
 

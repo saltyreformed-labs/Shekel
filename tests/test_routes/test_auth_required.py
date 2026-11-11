@@ -54,7 +54,7 @@ from app.login_gate import PUBLIC_ENDPOINTS
 from tests.test_integration.test_rate_limiter import _disable_limiter
 from tests.test_routes.test_no_baseline_policy import _route_table_app
 
-#: The seven views an anonymous visitor may reach, plus Flask's own static
+#: The nine views an anonymous visitor may reach, plus Flask's own static
 #: route -- the front door and what it needs.  **A second spelling on
 #: purpose**: ``PUBLIC_ENDPOINTS`` is the policy the gate enforces, and this is
 #: the pin that makes adding a name to it a diff in two files rather than a
@@ -65,6 +65,8 @@ _THE_FRONT_DOOR = frozenset({
     "auth.register_form",
     "auth.register",
     "auth.mfa_verify",
+    "auth.passkey_sign_in_options",
+    "auth.passkey_sign_in",
     "health.health_check",
     "static",
     "static_pass.web_manifest",

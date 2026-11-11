@@ -35,7 +35,10 @@ class SalaryPayEntry(OptimisticLockMixin, TimestampMixin, db.Model):
     A profile holds at least one entry, and every door keeps it so: the
     create form writes the first, and Remove (plan step salary:X-av-3b) takes
     any entry but the only one (**R-SAL68**,
-    :func:`~app.services.pay_list_service.remove_entry`).
+    :func:`~app.services.pay_list_service.remove_entry`).  The database
+    refuses the state for every other writer, at commit
+    (:mod:`app.pay_entry_infrastructure`, task plan#3167), a profile's own
+    delete taking its entries with it.
 
     Optimistic locking: see :class:`Transaction` for the ``version_id_col``
     contract.  Two tabs fixing one entry race for the bump; the loser raises

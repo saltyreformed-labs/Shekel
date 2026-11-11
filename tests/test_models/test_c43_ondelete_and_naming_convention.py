@@ -104,7 +104,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from tests._rewind_tax_tables import rewind_the_per_user_tax_tables
-from tests._test_helpers import rewind_paycheck_lines_rename
+from tests._test_helpers import make_salary_profile, rewind_paycheck_lines_rename
 
 from app.extensions import SHEKEL_NAMING_CONVENTION
 from app.models.paycheck_line import PaycheckLine
@@ -558,28 +558,21 @@ class TestRestrictBehavior:
         RESTRICT.
         """
         with app.app_context():
-            # ``seed_user`` returns a dict; the canonical scenario
-            # row it seeds (the "Baseline" scenario for the test
-            # user) is enough to satisfy salary_profiles.scenario_id
-            # without manufacturing a new row.  We only need a
-            # salary_profile row to take an FK against
-            # ``ref.filing_statuses``.
-            user_id = seed_user["user"].id
-            scenario_id = seed_user["scenario"].id
-            db.session.execute(text(
-                "INSERT INTO salary.salary_profiles "
-                "(user_id, scenario_id, filing_status_id, state_code, "
-                "period_end_days_before_payday) "
-                "VALUES (:uid, :sid, 1, 'NC', 6)"
-            ), {"uid": user_id, "sid": scenario_id})
+            # The shared builder, so the profile holds its first pay
+            # entry: the database refuses a profile with none at commit
+            # (task plan#3167).  Its filing status is the row in use, read
+            # before the commit: the rewound schema (``_c43_schema``) lacks
+            # columns the model's joined loads name, so no row is reloaded.
+            profile = make_salary_profile(seed_user, db.session)
+            filing_status_id = profile.filing_status_id
             db.session.commit()
             try:
                 # Attempt to delete the in-use ref row.  RESTRICT
                 # must refuse immediately.
                 with pytest.raises(IntegrityError):
                     db.session.execute(text(
-                        "DELETE FROM ref.filing_statuses WHERE id = 1"
-                    ))
+                        "DELETE FROM ref.filing_statuses WHERE id = :id"
+                    ), {"id": filing_status_id})
                     db.session.flush()
             finally:
                 db.session.rollback()

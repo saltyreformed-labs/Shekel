@@ -7,19 +7,20 @@ Removing a transfer, soft or hard.  It removed both shadow
 orphan one -- until plan step ``balance:X-bi-6-4d-2`` deleted the shadows; its
 leaf 3b deleted the delete's last query and flags over them.
 
-The ORDER inside is the whole of the module: the posted cash effect is
-reversed while the rows still exist to link against, because a hard delete
-SET-NULLs those links on its way out, and the anchor corrections are
-re-checked once the records are gone -- both inside the one removal act, which
-this hands every record the pair holds (ruling **plan#2564**); the
-loan-payment split links no row
-(ruling **R-BAL102**) and was re-derived AFTER the payment was gone, until
-plan task plan#3075 deleted that re-sync (the loan's walk reads its remaining
-payments as they stand); and a soft
-delete that took a settled transfer's payments off returns it to a plan only
-once it is hidden (ruling **R-BAL246**, through ``_status.return_to_plan``),
-because the books' revert refusal does not reach a hidden row (ruling
-**R-BAL248**).
+The ORDER inside is the whole of the module: every record the pair holds
+goes off the books through the one removal act -- out of its matches, then
+deleted -- and is flushed before the transfer goes, because the side keys are
+NO ACTION and a transfer still holding a record refuses its own delete; and a
+soft delete that took a settled transfer's payments off returns it to a plan
+only once it is hidden (ruling **R-BAL246**, through
+``_status.return_to_plan``), because the books' revert refusal does not reach
+a hidden row (ruling **R-BAL248**).  Until plan task plan#3097 that act also
+reversed the pair's stored postings while the rows still existed to link
+against and re-checked the anchor corrections once the records were gone
+(ruling **plan#2564**); the loan-payment split links no row (ruling
+**R-BAL102**) and was re-derived after the payment was gone until plan task
+plan#3075 deleted that re-sync (the loan's walk reads its remaining payments
+as they stand).
 
 Flask-isolated like the rest of the package: plain data in, ORM rows out, no
 ``request`` / ``session`` imports.  Flushes; does NOT commit.

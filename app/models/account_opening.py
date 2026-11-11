@@ -68,7 +68,8 @@ by ``loan_loaders.synthesize_origination_anchor``.
 
 **It carries the DAY as well as the amount, and fixing only the amount would
 have left half of defect 1 alive.**  ``opened_on`` is the civil day the books
-opened.  The posted ``account_opening`` journal entry is dated on it; before
+opened.  The worked-out ledger's ``account_opening`` correction is dated on
+it, as the stored ledger's journal entry was until plan task plan#3133; before
 this step that entry was dated on whichever assertion sorted first, so
 back-dating still silently re-dated the opening posting and demoted the
 previous one to a true-up.  With the day stored, ``is_opening`` stops existing

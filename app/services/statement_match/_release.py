@@ -606,15 +606,16 @@ def _remove(row: PlannedRemoval, owner_id: int) -> None:
     """Remove one row an act created, through the door that owns its table.
 
     A PURCHASE goes through ``entry_service.delete_entry``, which is the one
-    door for removing one: it reverses the purchase's own dated cash leg while
-    ``journal_entries.transaction_entry_id`` still links it, re-derives the
-    envelope's CC Payback, and reconciles the family.  **Its settled-parent
-    refusal is what plan step X-f6f corrected at the root** rather than
-    bypassed here: removing a purchase that carries a posting day cannot change
-    what a ``purchases``-basis close booked, measured `0.00` -> `0.00` on the
-    envelope's own leg with only the purchase's own `$57.96` leg reversed.  A
-    matcher that deleted around that refusal would have been a second
-    purchase-delete door restating a money rule.
+    door for removing one: it takes the purchase off the books through the one
+    removal act (``movement_removal.remove_movements``) and re-derives the
+    envelope's CC Payback.  **Its settled-parent refusal is what plan step
+    X-f6f corrected at the root** rather than bypassed here: removing a
+    purchase that carries a posting day cannot change what a
+    ``purchases``-basis close booked, measured at that step on the stored
+    ledger, `0.00` -> `0.00` on the envelope's own leg with only the
+    purchase's own `$57.96` leg reversed.  A matcher that deleted around that
+    refusal would have been a second purchase-delete door restating a money
+    rule.
 
     A TRANSACTION -- a group's residual, or an emptied container -- goes
     through ``transaction_service.delete_transaction``, for exactly the reason

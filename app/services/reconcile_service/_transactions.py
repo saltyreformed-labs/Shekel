@@ -31,7 +31,8 @@ record_clearing`` works out from the statement's own account.
 **Its settle is a service verb, and that is the difference from the purchase
 arm.**  A purchase settles by stamping one column and moves no status, so that
 arm's writer is a bulk ``UPDATE``.  A transaction settles through the status
-seam, an amount rule and a posting reconcile -- so this writer dispatches to
+seam and an amount rule (and a posting reconcile, until plan task plan#3097)
+-- so this writer dispatches to
 ``transaction_service.settle_transaction`` per row, which is the verb the
 grid's Mark Paid calls (ruling **R-FA**).  Two doors restating one money rule
 is this arc's own root cause 1.
@@ -111,7 +112,7 @@ def _cash_amount(txn: Transaction, booked: Decimal) -> "Decimal | None":
 
     **It prints both rather than changing what a tick books**, which is the
     only correct direction: ``actual_amount`` legitimately IS total spend, the
-    posted ledger already leaves both terms out (a card purchase is a movement
+    cash ledger already leaves both terms out (a card purchase is a movement
     that moves nothing and a dated purchase posts on its own day,
     ``cash_ledger.movement_cash_leg``), and moving the booked figure would make
     the panel disagree with the grid and the analytics.

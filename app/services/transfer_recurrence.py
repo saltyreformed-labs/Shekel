@@ -458,8 +458,8 @@ def regenerate_for_template(template, schedule, scenario_id, effective_from=None
 
       1. the rule names the period and an auto-generated transfer is there --
          the fields that DIFFER from :class:`DerivedTransferFields` are applied
-         through ``transfer_service.update_transfer``, which reconciles the
-         ledger;
+         through ``transfer_service.update_transfer``, the one door every write
+         of a transfer goes through;
       2. the rule names the period and nothing is there -- a transfer is
          created, exactly as :func:`generate_for_template` would;
       3. the rule NO LONGER names the period -- the transfer is removed through
@@ -807,12 +807,13 @@ def _apply_maintain_work(work, derived, template, scenario_id, projected_id):
     # the rule stopped naming the row's OCCURRENCE (plan step R17) AND the
     # transfer carries nothing
     # of the owner's.  Routed through the canonical hard-delete path (Transfer
-    # Invariant 4): ``delete_transfer`` reverses any posted cash effect while
-    # the rows still exist to link against (and re-synced a loan the payment
-    # left, its split linking no row, ruling **R-BAL102**, until plan task
-    # plan#3075) and emits
-    # ``EVT_TRANSFER_HARD_DELETED`` per deletion; its orphan self-check went
-    # with the twins at plan step ``balance:X-bi-6-4d-2``.  See audit B6-03 / LOW-02.
+    # Invariant 4): ``delete_transfer`` takes both sides' records off the
+    # books before the transfer goes and emits ``EVT_TRANSFER_HARD_DELETED``
+    # per deletion.  It also reversed their posted cash effect until plan task
+    # plan#3097, and re-synced a loan the payment left (its split linking no
+    # row, ruling **R-BAL102**) until plan task plan#3075; its orphan
+    # self-check went with the twins at plan step ``balance:X-bi-6-4d-2``.
+    # See audit B6-03 / LOW-02.
     for xfer in work.retire:
         transfer_service.delete_transfer(xfer.id, template.user_id, soft=False)
 

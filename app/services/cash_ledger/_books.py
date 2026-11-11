@@ -173,13 +173,15 @@ def reject_movement_before_books_open(account_id: int, day: date) -> None:
     # cannot hide a pending opening from this read, and the reason is stated
     # precisely because the whole paragraph is about autoflush: the ONE writer
     # (``opening_service.stage_account_opening``) only ever stages, and BOTH
-    # of its entrances emit the row before returning, each through the
-    # autoflush of the first query after it (measured 2026-09-29, statement by
-    # statement): a restatement's opening INSERT is statement 9 of
-    # ``apply_opening_restatement``, sent by the posting reconcile's first
-    # query at 10, and an origination's is statement 4 of ``create_account``,
-    # sent by ``stage_anchor_true_up``'s first read,
-    # ``cash_ledger.governing_anchor``, at 5.  *That read sends it since plan
+    # of its entrances emit the row before anything else reads: a
+    # restatement's opening INSERT is sent by ``apply_opening_restatement``'s
+    # own commit, the door's next act (the posting reconcile's first query
+    # sent it, statement 10 after the INSERT's 9, measured 2026-09-29, until
+    # plan task plan#3076 deleted that re-sync), and an origination's is
+    # statement 4 of ``create_account``, sent through the autoflush of
+    # ``stage_anchor_true_up``'s first read,
+    # ``cash_ledger.governing_anchor``, at 5 (measured 2026-09-29, statement
+    # by statement).  *That read sends it since plan
     # step ``balance:X-bn`` deleted ``stage_anchor_true_up``'s advisory-lock
     # statement, which sent it before (measured 2026-08-31 at statement 6).*
     # Neither leaves an unflushed opening for a settle in the same transaction

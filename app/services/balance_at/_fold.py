@@ -23,7 +23,8 @@ does it the way the whole arc turns on (Section 3):
 
 **Why the fold is in the seam and the walk is not.**  Because it lives here, a
 consumer that legitimately holds a :class:`~app.services.loan_ledger.LoanLedgerWalk`
-(the writer, the read pass) cannot reach a balance from a public leaf name -- the
+(the worked-out ledger, the read pass; the posting writer too, until plan task
+plan#3133) cannot reach a balance from a public leaf name -- the
 only code that turns a walk into money is seam-private.  That is what lets the walk
 shed its fence entry (a walk one call from a balance had to be fenced; a walk that is
 not, does not).  It WAS the balance-side twin of a forward fold

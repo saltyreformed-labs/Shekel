@@ -51,9 +51,11 @@ and the plan says so in as many words: that floor is a rule about ASSERTIONS
 window and seeds contribution history -- and applying it here would make an
 account's books unopenable before the owner's calendar begins.  Which is the
 common case for a real account: the bank opened it years before Shekel knew
-about it.  The opening's journal entry needs no period of its own either;
-:meth:`app.services.pay_calendar.PayCalendar.filing_period` CLAMPS a
-pre-calendar day onto the earliest period rather than refusing it.
+about it.  The opening's ledger line needs no period of its own either: a
+reader windowing the ledger by paycheck files it through
+:meth:`app.services.pay_calendar.PayCalendar.filing_period` (finding
+plan#2875), which CLAMPS a pre-calendar day onto the earliest period rather
+than refusing it.
 
 This service is Flask-isolated per the project architecture rule: plain data
 in, a plain discriminant out, no ``request`` / ``session`` import.
@@ -490,9 +492,10 @@ def apply_opening_restatement(
     **A restatement moves more than the amount.**  ``budget.account_openings``
     is read by BOTH the balance fold and the worked-out ledger (ruling
     **R-GX**): ``ledger_lines._account_walk.account_corrections`` books the
-    ``account_opening`` entry dated on ``opened_on`` and seeds every later
-    correction's ``ledger_before`` from the equity, so moving either re-keys
-    that entry -- ``(source kind, pay period, entry date)`` -- and changes the
+    ``account_opening`` correction dated on ``opened_on`` and seeds every
+    later correction's ``ledger_before`` from the equity, so moving either
+    re-keys that correction -- ``(source kind, None, entry date)``, an opening
+    being budgeted in no paycheck (finding plan#2875) -- and changes the
     delta of every true-up after it.  The worked-out ledger reads the new row
     as it stands, so nothing is left to re-sync.  *Until plan task plan#3076
     this door re-synced the stored ledger here, which walked the UNION of the
@@ -570,7 +573,7 @@ def apply_opening_restatement(
         source=AccountOpeningSourceEnum.USER_DECLARED,
     ):
         # Ruling R-EQ: the submission IS the governing opening, so there is
-        # nothing to append and nothing for the reconcile to move.  Roll back
+        # nothing to append.  Roll back
         # rather than returning on an open transaction -- the transaction holds
         # the owner's write lock (taken before it read any of the owner's data,
         # plan step ``balance:X-bn``), and only a commit or a rollback releases

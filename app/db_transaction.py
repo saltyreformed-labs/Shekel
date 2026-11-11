@@ -21,17 +21,20 @@ committed append answer ``(1, 2)`` under ``READ COMMITTED`` and ``(1, 1)`` under
 this module's query mode.
 
 **Why a command may NOT have one snapshot, which is the harder half.**  The
-posting-ledger reconciles are read-modify-write under the owner's write lock
-(:func:`take_owner_write_lock`, below): hold the lock, re-read what is posted,
-write the difference.  The waiting transaction's re-read is
-*required* to see the winner's just-committed postings, and only ``READ
-COMMITTED`` shows them -- under one snapshot the waiter would re-read its own
-pre-lock picture and reconcile to a stale target, which is the divergence ruling
-**R-EN** measured at ``$4,000.00`` asserted against ``$1,000.00`` settled, with
-the trial balance still ``$0.00`` because the anchor-equity leg mirrors the
-error.  A snapshot is therefore not a strictly better setting to run everything
-at; it is right for reads and wrong for writes, and the line between them is
-what this module draws.
+writes the owner's write lock serialises (:func:`take_owner_write_lock`,
+below) read and then write: the anchor doors read the assertion that governs
+and append only when the submission differs from it (ruling **R-EQ**,
+:mod:`app.services.anchor_service`), and the pay-period doors read the
+owner's recorded paydays and append after the last one.  The waiting
+transaction's read is *required* to see the winner's just-committed rows, and
+only ``READ COMMITTED`` shows them -- under one snapshot the waiter would read
+its own pre-lock picture and act on a stale one.  The case measured was the
+posting-ledger reconciles' (read what is posted, write the difference), whose
+divergence ruling **R-EN** measured at ``$4,000.00`` asserted against
+``$1,000.00`` settled; no door has run those reconciles since plan step
+plan#2914.  A snapshot is therefore not a strictly better setting to run
+everything at; it is right for reads and wrong for writes, and the line
+between them is what this module draws.
 
 **Why ``READ ONLY`` and not merely ``REPEATABLE READ``.**  It costs nothing and
 it converts "a render wrote" from a thing a reviewer must notice into a thing
@@ -213,8 +216,8 @@ adopting :func:`write_transaction` so their render falls outside the command,
 which moves the transaction boundary of every write door in the application and
 is not this step's to take.
 
-Non-request callers -- the CLI scripts, the deploy reconciles, Alembic -- never
-reach the hook that records a mode, so :func:`_is_query_request` answers
+Non-request callers -- the CLI scripts, the deploy, Alembic -- never reach the
+hook that records a mode, so :func:`_is_query_request` answers
 ``False`` for them and nothing about their transactions changes.  So does a
 request CONTEXT that was never dispatched, which is not a pedantic distinction:
 ``pytest-flask`` pushes one around every test in this suite.
@@ -331,7 +334,7 @@ def _is_query_request() -> bool:
     transaction a request opens is bound the same way and the decision has a
     single site (:func:`_open_this_request_s_own_transaction`).  Absent means
     command:
-    a CLI script, a deploy reconcile, Alembic, and a request context nobody
+    a CLI script, the deploy, Alembic, and a request context nobody
     dispatched all take the transaction they have always had.
 
     Returns:
@@ -794,9 +797,9 @@ def write_transaction() -> Iterator[None]:
         raise RuntimeError(
             "write_transaction() is for a QUERY request that must write, and "
             "no dispatched request is running here. Outside one there is "
-            "nothing to leave and return to: a CLI script, a deploy reconcile "
-            "and a migration all hold the writable transaction they always "
-            "had, and had no snapshot taken from them."
+            "nothing to leave and return to: a CLI script, the deploy and a "
+            "migration all hold the writable transaction they always had, "
+            "and had no snapshot taken from them."
         )
     if mode == _COMMAND:
         raise RuntimeError(

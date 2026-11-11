@@ -227,8 +227,9 @@ def create_account():
     # whose account crossed asset <-> liability since the form opened; this
     # form picks its type in the same submission, so the only race left is a
     # CUSTOM type whose category is edited in another tab between render and
-    # POST (permitted while none of its accounts has postings) -- the figure is
-    # then crossed by the category the type has NOW.
+    # POST (permitted unless one of its accounts carries an active goal,
+    # rulings R-CC87 / R-CC91) -- the figure is then crossed by the category
+    # the type has NOW.
     anchor_balance = liability_sign.held_balance(account_type, entered)
 
     # E-19 (Commit 3): the canonical factory in
@@ -687,15 +688,15 @@ def hard_delete_account(account_id):
           the database refuses of a hidden row.  Their series rows cascade
           with them; the merchant rules that could name one cascade with the
           ACCOUNT already (``fk_merchant_rules_owner``).
-        - A loan's per-loan chart rows, whose RESTRICT key would refuse the
-          account otherwise.
       CASCADE-FK dependents (LoanParams, InterestParams,
       InvestmentParams, AccountAnchorHistory, AnchorRelease, SavingsGoal,
-      LoanFeatures, and the account's own chart rows and every stored leg on
-      them) are auto-deleted by PostgreSQL when the account row is removed.
-      A stored entry with a leg elsewhere keeps that leg: the running app
-      holds no DELETE on the journal, nothing reads a leg its movement has
-      left, and X-ew's third leaf (plan#2516) deletes the store.
+      LoanFeatures) are auto-deleted by PostgreSQL when the account row is
+      removed.  The stored ledger's tables hold no row since migration
+      ``d913d743c78c`` emptied them (ruling plan#3068), and X-ew's third
+      leaf (plan#2516) deletes them; until plan task plan#3133 a loan's
+      per-loan chart rows were cleared here ahead of their RESTRICT key, and
+      the account's own chart rows and every stored leg on them cascaded
+      with it.
     """
     account = get_or_404(Account, account_id)
     if account is None:

@@ -4,8 +4,8 @@
 re-key of the override flip pushed that module to ``max-module-lines``; the
 cut is the one X-au-j made for :mod:`._gates`, one step later in the same
 handler: the gates run BEFORE this step, and what follows it
-(``apply_requested_status``, the posting reconcile, the commit) stays with the
-handler.
+(``apply_requested_status`` and the commit) stays with the handler, as the
+posting reconcile between them did until plan task plan#3097.
 
 **Since plan step ``balance:X-bi-7b`` (leaf 7b-2) this step forks on the
 row's SHAPE.**  A one-off is a rule-less definition plus its placed row
@@ -199,8 +199,9 @@ def _apply_field_updates(
        response's own load serves it from the identity map).  NEW: for a
        placed row the ITEM fields (:data:`_ITEM_FIELDS`) are taken out of
        ``data`` here, so the row loop never writes a definition's field
-       onto the row and the handler's posting pre-filter never sees a
-       ``category_id`` the propagation has already reconciled.
+       onto the row (nor, until plan task plan#3097, did the handler's
+       posting pre-filter see a ``category_id`` the propagation had already
+       reconciled).
     1. the ``setattr`` loop over the ROW's fields.  ``status_id`` and
        ``settled_on`` are BOTH excluded and routed through the status verb
        instead: a bare ``setattr`` would assign the column but skip the
@@ -243,7 +244,8 @@ def _apply_field_updates(
        are applied to ``txn.template`` -- a changed name reaches every row of
        the definition through the bulk rename -- and the rows it holds are
        brought into line, the row's own category and TEMPLATE ownership
-       included, with their postings reconciled.  The flags need no
+       included (their postings were reconciled with them until plan task
+       plan#3097).  The flags need no
        propagation: the row reads them off its definition.  A row the
        interim detached (``is_override``) and NOT re-priced in this request
        is skipped by that propagation, as any overridden row is (its category
@@ -261,9 +263,9 @@ def _apply_field_updates(
        the next settle posted to it.  Found by 7b-2's adversarial review and
        left as crafted-only; the suite's own posting-lifecycle cases posted
        the pair once their rows became placed, and the handler now applies a
-       lock-lifting transition before this step and reconciles the ledger
-       after it (*unlock, edit, lock*, ruling **R-BAL58**), so the
-       propagation finds the row projected.
+       lock-lifting transition before this step (*unlock, edit, lock*,
+       ruling **R-BAL58**; it reconciled the ledger after it too until plan
+       task plan#3097), so the propagation finds the row projected.
     5. **NEW -- the figure's OTHER half.**  A placed row whose definition
        holds ANOTHER row (a bank-born envelope's, one per paycheck) takes
        the figure as its OWN with the flag beside it, one occurrence among

@@ -53,9 +53,9 @@ on:
 It is one KEY per user, so no transaction has to order two of them against
 each other.
 
-*The second kind was every posting-ledger RECONCILE until plan step plan#2914*
-stopped the doors and the deploy calling them, and plan task plan#3133 deleted
-them: the cash anchor reconcile
+*A third kind went with the stored ledger: every posting-ledger RECONCILE,
+until plan step plan#2914* stopped the doors and the deploy calling them, and
+plan task plan#3133 deleted them: the cash anchor reconcile
 (``account_posting_service``) and the loan reconcile
 (``loan_posting_service``), each reading what the ledger had posted,
 subtracting it from what the account's facts said it should hold, and writing

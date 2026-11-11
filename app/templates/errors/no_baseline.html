@@ -9,8 +9,10 @@
   card, so a fragment refresh cannot replace a live region with a setup page.
 
   It carries the REPAIR, which is why the handler renders a page at all:
-  ``POST /grid/create-baseline`` mints the scenario AND resyncs both posting
-  ledgers in one transaction (``baseline_service``).
+  ``POST /grid/create-baseline`` mints the scenario and commits
+  (``baseline_service``).  The worked-out ledger reads it from the records, so
+  nothing else is written; until plan task plan#3076 the repair also resynced
+  both posting ledgers in the same transaction.
 #}
 {% extends "base.html" %}
 {% block title %}Setup Required -- Shekel{% endblock title %}

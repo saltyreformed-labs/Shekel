@@ -502,8 +502,9 @@ EVT_STATEMENT_MATCH_RELEASED = _register(
     "An owner undid a match; the bank lines it explained are unexplained "
     "again.  It MOVES MONEY where the act had CREATED a row -- a group's "
     "recorded difference states nothing once the grouping is released, so "
-    "the release removes it and reverses its postings (plan step "
-    "bank_import:X-f6d-4).  ``removed_count`` is how many such rows went.",
+    "the release removes it and its money leaves the books with it (plan "
+    "step bank_import:X-f6d-4).  ``removed_count`` is how many such rows "
+    "went.",
 )
 
 EVT_STATEMENT_MATCH_WITHDRAWN = _register(
@@ -516,8 +517,8 @@ EVT_STATEMENT_MATCH_WITHDRAWN = _register(
     "credit_card:CC-5-4a-1, credit_card:CC-5-4a-3).  The SIBLING of "
     "statement_match_released and not the same act: a release is the owner "
     "undoing a decision, and this is the decision losing its subject.  It "
-    "moves NO money of its own -- a removal's act reverses the movement's "
-    "legs itself, and a moved movement keeps its money -- and rows the "
+    "moves NO money of its own -- a removal's act takes the movement off "
+    "the books itself, and a moved movement keeps its money -- and rows the "
     "withdrawn acts had CREATED are LEFT standing, which kept_row_count "
     "reports.  transaction_ids names the "
     "rows involved, transfer_ids the transfers whose payments left (since "

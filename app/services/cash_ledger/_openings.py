@@ -51,9 +51,9 @@ class CashOpeningFact:
         opening_id: The ``budget.account_openings`` row's own id -- the
             restatement this fact is, so a reader can tell two apart.
         account_id: The account whose books these are.
-        opened_on: The civil day the books opened.  The ``account_opening``
-            journal entry is dated on it, which is what stops a back-dated
-            assertion re-dating that entry.
+        opened_on: The civil day the books opened.  The worked-out
+            ledger's ``account_opening`` correction is dated on it, which is
+            what stops a back-dated assertion re-dating that correction.
         opening_equity: The capital the books opened with, LEDGER-NATIVE and
             in the same sign convention as
             :attr:`CashAnchorFact.anchor_balance`.

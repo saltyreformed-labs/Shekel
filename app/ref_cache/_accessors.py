@@ -732,12 +732,15 @@ def ledger_class_is_debit_normal(class_id):
 def ledger_account_kind_id(member):
     """Return the integer primary key for a LedgerAccountKindEnum member.
 
-    Used by the chart-of-accounts resolver and the loan-payment posting
-    service (Build-Order Step 4) to stamp and read a ledger account's
-    explicit row-kind discriminator via ``budget.ledger_accounts.kind_id``,
-    and by chart readers that enumerate by kind -- always via the integer
-    ID, never the string ``name``.  Matches the project-wide IDs-for-logic
-    invariant.
+    The id of a stored ledger account's explicit row-kind discriminator,
+    ``budget.ledger_accounts.kind_id`` -- always via the integer ID, never
+    the string ``name``, the project-wide IDs-for-logic invariant.  No app
+    code reads it: the chart-of-accounts resolver and the loan-payment
+    posting service (Build-Order Step 4) stamped and read it until plan task
+    plan#3133 deleted them, and the model and migration tests under
+    ``tests/test_models/`` read it now, to plant and grade
+    ``budget.ledger_accounts`` rows.  It stands with the reference table
+    until X-ew's third leaf (plan#2516) deletes the stored ledger.
 
     Args:
         member: A ``LedgerAccountKindEnum`` member

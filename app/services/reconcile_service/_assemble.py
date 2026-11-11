@@ -482,9 +482,11 @@ def record_reconciliation(submission: ReconcileSubmission) -> int:
     **The order is KEPT and is now a CONVENTION, and saying which it is is the
     point.**  Nothing this step could establish still depends on it -- an
     envelope's settled figure is the sum of ALL its entries whatever their
-    posting days, and the ledger reconcile each arm runs is idempotent and
-    order-free (``_post_stamped_purchases`` reconciles the whole family, so both
-    orders converge on the same legs).  A rule whose reason has been deleted
+    posting days, and the worked-out ledger reads the records the act leaves,
+    not the order it wrote them in.  The ledger reconcile each arm ran until
+    plan task plan#3097 was idempotent and order-free too (the purchase arm's,
+    in what is now ``_refresh_stamped_purchases``, reconciled the whole family,
+    so both orders converged on the same legs).  A rule whose reason has been deleted
     must not go on presenting itself as an invariant: the next reader would
     defend it for a cause that no longer exists, which is the shape this arc's
     own stale citations are made of.  If a later step finds a real dependency,

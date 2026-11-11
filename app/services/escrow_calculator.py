@@ -620,8 +620,10 @@ def _escrow_unchanged_by_merge(source, target, merged_versions: list) -> bool:
     it holds, no payment's escrow (settled or projected) moves, so the merge
     preserves every derived split byte-for-byte: the split reads escrow by amount
     via :func:`escrow_monthly_as_of`, so escrow that is byte-identical on every date
-    leaves every derived split byte-identical too (a posting reconcile after the
-    merge therefore re-derives the same ledger -- an idempotent no-op).
+    leaves every derived split byte-identical too, and with it every ledger line
+    the loan's walk reads off them.  (The posting reconcile each escrow write ran
+    after the merge re-derived the same stored ledger, an idempotent no-op, until
+    plan task plan#3076 deleted it.)
 
     Args:
         source: The line being folded in.
@@ -661,9 +663,9 @@ def plan_escrow_line_merge(source, target) -> EscrowMergePlan:
 
     Only source versions are ever moved or dropped, so a merge cannot be used to
     mutate the target's own history.  Because escrow-per-date is preserved, the
-    forward-only guard is subsumed (no settled split moves), so a posting reconcile
-    after a merge re-derives the same ledger -- an idempotent no-op (the postings
-    store the escrow amount, never a line id).
+    forward-only guard is subsumed (no settled split moves), so the worked-out
+    ledger reads the same lines after a merge as before it (each split reads the
+    escrow amount, never a line id).
 
     Args:
         source: The :class:`~app.models.escrow_line.EscrowLine` to fold in and

@@ -36,15 +36,22 @@ the loan page walked the loan three times: the pass's walk and one per
 surface.  The two walks are not the same function.  The pass's replays the
 facts VISIBLE by its ``as_of`` (ruling **R-R91**), where the ledger's replays
 every recorded fact and each surface then filtered it by ``as_of``.  For a
-pass on or after every recorded fact they are one walk, and the page's pass
-is built at today, on or after every settle day and assertion date the write
-doors admit: the census :func:`app.services.loan_ledger.load_loan_stream`
-states, which rests on what no code enforces.  Where a pass pinned earlier
-parts them --
-for one, by a payment due before a visible one whose cash moved after the
-pass's day, which the ledger's walk splits first -- the pass's walk is the
-answer the rest of the page already shows, so the two tables now agree with
-the balance and the chips beside them rather than with the ledger's walk.
+pass on or after every fact's VISIBLE day they are one walk, and the page's
+pass is not always one.  It is built at today, on or after every settle day
+and assertion date the write doors admit (the census
+:func:`app.services.loan_ledger.load_loan_stream` states, which rests on what
+no code enforces), but a ``$0.00`` close is dated by the installment it skips
+(``loan_ledger._visible.payment_visible_on``, rulings **R-BAL139** /
+**R-R107**), which can fall after today.  So the page's own pass can part
+the two walks, as can a pass pinned earlier -- by a payment due before a
+visible one whose cash moved after the pass's day, which the ledger's walk
+splits first.  Measured 2026-11-10 at a pass on 2026-02-20: a close of the
+03-01 installment and an early 04-01 payment read ``$1,500.00`` interest and
+``-$500.00`` principal on the page's table, against ``$505.00`` and
+``$495.00`` in the ledger's walk.  Where they part, the pass's walk is the
+answer the rest of the page already shows, so the two tables agree with the
+balance and the chips beside them rather than with the ledger's walk;
+finding **plan#3391** owns the root cause (under X-db, plan#1041).
 
 **A loan with no terms reads an empty list** (ruling **plan#2917**).  It walks
 to nothing, no anchor and no payment, so both surfaces read ``[]``.  Until

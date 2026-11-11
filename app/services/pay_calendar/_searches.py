@@ -464,8 +464,9 @@ def require_period(
     * **A picture assembled from more than one moment** -- balance finding
       **N-358**, owned by ``balance:X-i5``.  ``balance:X-i3-a`` binds a GET to
       ``REPEATABLE READ, READ ONLY`` and leaves every other method at
-      ``READ COMMITTED``, which the posting reconciles' lock-then-reread
-      depends on.  **How exposed a caller is depends on the ORDER of its own
+      ``READ COMMITTED``, which the writes the owner's lock serialises
+      depend on (their read under the lock must see the winner's rows,
+      :mod:`app.db_transaction`).  **How exposed a caller is depends on the ORDER of its own
       two reads -- whether it derives its calendar before or after it loads the
       row -- so each states its own** rather than inheriting a sentence from
       here.  What is NOT the rule is "a GET is one snapshot": ``/grid`` and
@@ -539,8 +540,10 @@ def materialised_periods(
     """Return the periods of *periods* a foreign key can point at.
 
     **The single "is this period SAVED" rule**, shared by
-    :meth:`PayCalendar.filing_period` -- which must answer a row
-    ``journal_entries.pay_period_id`` can name -- and by
+    :meth:`PayCalendar.filing_period` -- which must answer a period a
+    foreign key can point at (:meth:`app.services.ledger_lines.LedgerLine
+    .filed_period_id`; a stored ``journal_entries.pay_period_id`` until plan
+    task plan#3133) -- and by
     :meth:`PayCalendar.saved`, whose window keys the balance seam's per-period
     maps by ``budget.pay_periods.id``.  Two implementations of the predicate
     would be two answers to "which of these periods exists in the table", and

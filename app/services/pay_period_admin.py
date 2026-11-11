@@ -15,9 +15,10 @@ changes ``budget.pay_periods``.  That single home is why plan step
 ``pay_calendar:C4-c`` could drop ``end_date`` and ``period_index`` in one
 place: while they were stored, the rule that they equalled the derivation
 over the owner's paydays lived there and nowhere else.  What stays here is
-the orchestration -- the doors, and which reconciles a wipe owes; the two
-gates they consult (which periods may go: the lock classifier and the discard
-count) moved to :mod:`app.services.pay_period_gates` at plan step
+the orchestration -- the doors, and which ledger re-syncs a wipe owed until
+plan task plan#3076 deleted them; the two gates they consult (which periods
+may go: the lock classifier and the discard count) moved to
+:mod:`app.services.pay_period_gates` at plan step
 ``pay_calendar:C14-f``.
 
 **Nothing here REPOPULATES any more, and that is ruling R-R38** (plan step
@@ -249,9 +250,11 @@ def remove_earlier_pay_periods(user_id: int, start_from_period_id: int) -> int:
       amending **R-PC114**, which refused a removal that moved a booked
       total).  Worked out from the records
       (:func:`~app.services.ledger_lines.worked_out_lines`), a total moves
-      only if a record holding money goes.  The delete reaches only rows,
-      transfers and journal entries, the three tables keyed to a paycheck,
-      and the gate refuses a row or a transfer holding money.  An opening or
+      only if a record holding money goes.  The delete reaches only rows and
+      transfers, the tables keyed to a paycheck that hold money (the stored
+      ledger's journal entries are keyed to one too, and hold no row since
+      migration ``d913d743c78c`` emptied them), and the gate refuses a row
+      or a transfer holding money.  An opening or
       a true-up holds no paycheck of its own: a reader windowing the ledger
       by paycheck files one dated before the first paycheck in the earliest
       (``ledger_lines.LedgerLine.filed_period_id``), so an added paycheck can
@@ -263,7 +266,7 @@ def remove_earlier_pay_periods(user_id: int, start_from_period_id: int) -> int:
 
     Nothing is populated: a removal records no payday.  Deletion is the
     writer's one bulk ``DELETE``, whose cascade takes the template rows and
-    transfers the gate let go and the head's journal entries.  **Every
+    transfers the gate let go.  **Every
     refusal is asked before any write**: the gate's before the writer is
     called, R-PC110's inside it before its first write, so a refusal leaves
     nothing behind whoever called.
@@ -651,7 +654,7 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     measured equal on 82 journal entries (2026-08-27); this is why it is equal.
 
     **The other direction is what R7d-c-2 made load-bearing**, while the
-    re-syncs stood.  The wipe CASCADE-deletes the loan's genesis entries, so
+    re-syncs stood.  The wipe CASCADE-deleted the loan's genesis entries, so
     the OLD order generated against an EMPTIED loan ledger and the new one
     against the re-posted ledger.  Before plan step R7d-c-2 nothing on the generation
     path read a loan (its reads off the schedule were four of
@@ -701,26 +704,23 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
         ValidationError: ``record_paydays`` rejects the batch (an invalid
             start date or cadence).
     """
-    # Reset is gated on zero settled, non-deleted rows and transfers.
-    # Build-Order Step 3 note: this same gate keeps the CASH double-entry
-    # postings consistent across a reset -- the wipe below deletes the user's
-    # pay periods, and journal_entries.pay_period_id is ON DELETE CASCADE, so a
-    # period holding settled (posted) rows or transfers would dispose its cash
-    # journal entries + legs at the DB tier (outside the ORM, where the
-    # balanced-journal trigger never fires on DELETE).  Because any settled,
-    # non-deleted row or transfer blocks the reset entirely, no live settled
-    # item's posting is ever wiped.  Whoever relaxes this gate MUST first
-    # account for those postings: the one act that takes a movement off the
-    # books (movement_removal.remove_movements, ruling plan#2564) reversed a
-    # row's and a transfer's alike until plan task plan#3097.
+    # Reset is gated on zero settled, non-deleted rows and transfers, so no
+    # settled paycheck's history is rewritten under it (the docstring's
+    # reason).  While the stored ledger was written the same gate also kept
+    # its CASH double-entry postings consistent across a reset (Build-Order
+    # Step 3): journal_entries.pay_period_id is ON DELETE CASCADE, so a period
+    # holding settled (posted) rows or transfers would have disposed of their
+    # cash journal entries + legs at the DB tier.  No door has written that
+    # ledger since plan task plan#3097, and migration d913d743c78c emptied its
+    # tables (ruling plan#3068), so the cascade has nothing to take.
     #
-    # The gate does NOT protect a LOAN's stored genesis postings: a loan's
-    # opening / true-up entries exist without any settled row or transfer, so
-    # the wipe DOES CASCADE-delete them.  That is safe because nothing reads
-    # them and their source facts (LoanParams, the loan's statements) survive
-    # the wipe, which the worked-out ledger reads.  (A re-sync below re-posted
-    # them onto the rebuilt schedule in this same transaction until plan task
-    # plan#3076, review M2 / R7.)
+    # The gate never protected a LOAN's stored genesis postings: a loan's
+    # opening / true-up entries existed without any settled row or transfer,
+    # so the wipe CASCADE-deleted them, safely, because nothing read them and
+    # their source facts (LoanParams, the loan's statements) survive the wipe,
+    # which the worked-out ledger reads.  (A re-sync below re-posted them onto
+    # the rebuilt schedule in this same transaction until plan task plan#3076,
+    # review M2 / R7.)
     settled = pay_period_gates.settled_item_count(user_id)
     if settled > 0:
         raise PayPeriodResetBlocked(settled_count=settled)
@@ -753,7 +753,6 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     # wipe CASCADEd the loans' genesis entries and the accounts' opening /
     # true-up ENTRIES with the old periods, and they re-posted them onto the
     # rebuilt schedule.  The worked-out ledger files each one by its day, and
-    # every journal entry the wipe reaches carries a ``pay_period_id`` and goes
-    # WHOLE -- both legs of each balanced pair -- so the store it leaves stays
-    # balanced.
+    # the stored ledger's tables hold no row for the wipe's cascade to reach
+    # (migration d913d743c78c).
     return new_periods

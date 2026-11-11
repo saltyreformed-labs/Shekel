@@ -78,9 +78,10 @@ the reader since finding plan#2875, never here), because
 ``budget.loan_anchor_events`` carries no ``pay_period_id`` column at all (and
 the origination anchor is SYNTHESIZED from ``LoanParams``, so it has no row to
 carry one).  **The account twin makes the identical call** (ruling R-EA): a
-cash assertion does store a period, and the twin deliberately does not read it,
-because that column is a cache of this same derivation and a clock split made
-it disagree with its own day on real data.  An earlier draft of this paragraph
+cash assertion stored a period, and the twin deliberately did not read it,
+because that column was a cache of this same derivation and a clock split made
+it disagree with its own day on real data; ruling R-EO has since deleted the
+column.  An earlier draft of this paragraph
 read *"a cash assertion stores its own period and the account twin reads it"*;
 that was true of the first build of plan step X-ai-r and was left standing when
 the ruling changed, which is exactly the stale-sentence-beside-a-rewritten-one

@@ -373,10 +373,12 @@ def apply_status_change(
          before it renders.
 
     It deliberately writes no ledger and does NOT commit: the caller owns the
-    session boundary.  A transaction's door reconciled the stored ledger at
-    the END of its handler, never at the status flip (Build-Order Step 3,
-    Commit 6), until plan task plan#3097 deleted those reconciles; a
-    transfer's still does (``transfer_service.update_transfer``).  **The two
+    session boundary.  The worked-out ledger reads the records, so no door
+    reconciles one after a flip.  A transaction's door reconciled the stored
+    ledger at the END of its handler, never at the status flip (Build-Order
+    Step 3, Commit 6), until plan task plan#3097 deleted those reconciles,
+    and a transfer's did (``transfer_service.update_transfer``) until plan
+    task plan#3075.  **The two
     exceptions are the covering movement's own**, and each may FLUSH: a
     payment a ``$0.00`` or ``purchases`` record takes off the books has its
     matches withdrawn before it is deleted (``_covering._withdraw`` through

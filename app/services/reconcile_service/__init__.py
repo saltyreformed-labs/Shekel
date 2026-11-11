@@ -45,8 +45,9 @@ over THREE row kinds whose settle verbs are genuinely different:
 
 * a PURCHASE settles by stamping one column, and moves no status
   (:mod:`._purchases`);
-* a TRANSACTION settles through the status seam and a posting reconcile, at
-  the verb the grid's Mark Paid shares (ruling **R-FA**), and a BILL's tick may
+* a TRANSACTION settles through the status seam (and a posting reconcile,
+  until plan task plan#3097), at the verb the grid's Mark Paid shares (ruling
+  **R-FA**), and a BILL's tick may
   correct its amount while an envelope's close may not (ruling **R-FB**) --
   plan step X-f2-c2.  Two scopes share that verb since plan step
   ``credit_card:CC-5-4b`` (ruling **R-CC44**): the rows on this account, and

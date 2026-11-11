@@ -76,10 +76,12 @@ beside the movement-linked one -- entries whose movement link
 delete -- precisely so its running total "stays equal to the live linked total
 even if the reverse-before-delete discipline is ever violated".  A source-row
 walk cannot see a posting whose source row is gone, by construction, so moving
-the writer onto this walk at plan task plan#2525 decided it: a residue that does
-not net to zero is now a LOUD difference between the stored ledger and the
-records, which the parity proof of plan step plan#2513 names, rather than one
-the corrections silently absorb.  Measured on production 2026-11-01: four
+the writer onto this walk at plan task plan#2525 decided it: a residue that did
+not net to zero became a LOUD difference between the stored ledger and the
+records, which the parity proof of plan step plan#2513 named until plan task
+plan#3080 deleted it, rather than one the corrections silently absorbed.  The
+worked-out ledger reads the records alone, so it holds no residue to carry.
+Measured on production 2026-11-01: four
 ``purchase`` residue entries (two reversal pairs), netting ``$0.00`` per ledger
 account and per (paycheck, day).
 

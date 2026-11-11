@@ -29,7 +29,7 @@ from tests._test_helpers import (
     transfer_amount,
     transfer_repriced_by_the_owner,
 )
-from tests.conftest import log_in_seed_user
+from tests._seed_owner_fixtures import log_in_seed_user
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 from tests._definition_price import newest_price
 

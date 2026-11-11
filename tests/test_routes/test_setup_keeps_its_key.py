@@ -41,7 +41,7 @@ from scripts.reset_mfa import reset_mfa
 from tests._two_factor_sign_in import (
     code_now, redirect_path, sign_in_seed_companion_by_password, two_factor_row_of,
 )
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 _SETUP = "/mfa/setup"
 

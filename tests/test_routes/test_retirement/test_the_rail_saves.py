@@ -15,7 +15,7 @@ from app.services.balance_at import BalanceContext
 from app.utils.dates import display_today
 from tests._csrf_tokens import without_csrf_tokens
 from tests._test_helpers import freeze_today, make_recurring_raise
-from tests.conftest import log_in_seed_user
+from tests._seed_owner_fixtures import log_in_seed_user
 
 from ._helpers import (
     _create_salary_profile,

@@ -42,7 +42,7 @@ from tests._test_helpers import (
     governing_opening_row,
     last_covered_day,
 )
-from tests.conftest import (
+from tests._seed_owner_fixtures import (
     SEED_USER_BOOTSTRAP_START,
     SEED_USER_CADENCE_DAYS,
     _reset_seed_calendar,

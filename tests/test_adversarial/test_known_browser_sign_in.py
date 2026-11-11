@@ -49,7 +49,7 @@ from app.utils.session_helpers import SESSION_SIGNED_IN_AT_KEY
 from tests._guess_records import count_of, locked_until_of
 from tests._sign_in import make_a_stranger
 from tests._test_helpers import enable_mfa
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 _SECOND_EMAIL = "second@shekel.local"
 _SECOND_PASSWORD = "secondpass12"

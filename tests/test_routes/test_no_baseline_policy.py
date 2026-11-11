@@ -127,19 +127,8 @@ from tests._test_helpers import (
     make_salary_profile,
     state_template_price,
 )
-# The world builders and the registry live in ``tests/conftest.py`` beside the
-# worker-database plumbing they drive.  Importing them from there is safe and
-# is the same module object pytest loaded -- ``tests`` is a package, so pytest
-# imports its conftest as ``tests.conftest`` and this resolves out of
-# ``sys.modules`` rather than executing it a second time (verified: a second
-# execution would re-run ``_bootstrap_worker_database`` and create a second
-# database).  Whether the seam should instead be its own module is a placement
-# question raised with the developer, not settled here.
-from tests.conftest import (
-    build_periods_today,
-    build_seed_user,
-    register_seeded_state,
-)
+from tests._seed_owner_fixtures import build_periods_today, build_seed_user
+from tests._seeded_start_states import register_seeded_state
 
 
 #: The PAGE endpoints measured to raise before plan step X-v1 shipped its

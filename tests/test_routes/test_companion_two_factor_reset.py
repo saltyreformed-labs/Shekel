@@ -36,7 +36,7 @@ from tests._two_factor_sign_in import (
     SEED_COMPANION_EMAIL, code_now, post_her_password, redirect_path,
     sign_in_seed_companion_by_password, two_factor_row_of,
 )
-from tests.conftest import SEED_USER_EMAIL
+from tests._seed_owner_fixtures import SEED_USER_EMAIL
 
 #: Where a sign-in lands a companion, and where the hold sends her.
 _HER_PAGE = "/companion/"

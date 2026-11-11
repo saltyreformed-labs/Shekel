@@ -53,7 +53,7 @@ from tests._test_helpers import (
     bound_lock_waits,
     owner_lock_key,
 )
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 _WRONG = "not-the-password"
 _NO_ACCOUNT = "nobody@shekel.local"

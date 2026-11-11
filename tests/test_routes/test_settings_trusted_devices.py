@@ -31,7 +31,7 @@ from tests._trusted_devices import (
     CHROME_WINDOWS, FIREFOX_LINUX, SAFARI_IPHONE, is_trusted, move_trust_to, trust,
 )
 from tests._two_factor_sign_in import code_now
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: The Security page, a page of its own since ruling plan#3435.
 _SECURITY_PAGE = "/security"

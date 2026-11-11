@@ -37,7 +37,7 @@ from tests._trusted_devices import (
     CHROME_WINDOWS, FIREFOX_LINUX, SAFARI_IPHONE, is_trusted, move_trust_to, trust,
 )
 from tests._two_factor_sign_in import code_now, post_her_password, redirect_path
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+from tests._seed_owner_fixtures import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
 #: The day format the page shows, the ``local_datetime`` filter's default,
 #: spelled here as an oracle.

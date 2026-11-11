@@ -15,6 +15,7 @@ If any of these tests starts failing, the F-031 fix has regressed.
 Related: ``shekel-audits/security-2026-04-15/remediation-plan.md`` C-05.
 """
 
+import hashlib
 import time
 from datetime import datetime, timedelta, timezone
 from os import getenv
@@ -132,8 +133,9 @@ class TestMfaSetupSecretIsServerSide:
         The C-05 design: each user's setup owns the pending columns, so no
         two pending secrets are ever valid together.  Since ruling plan#3470 a
         second visit inside the window shows the SAME pending secret (it was
-        a new one per visit until then); once the window closes the next
-        visit replaces it, and the replaced secret no longer confirms.
+        a new one per visit until then), and since ruling plan#3523 only in
+        the browser that made it; once the window closes the next visit
+        replaces it, and the replaced secret no longer confirms.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -172,6 +174,43 @@ class TestMfaSetupSecretIsServerSide:
             assert replaced.status_code == 302
             db.session.refresh(config)
             assert config.is_enabled is False
+
+    def test_the_session_holds_the_keys_fingerprint_never_the_key_or_its_ciphertext(
+        self, app, auth_client, seed_user
+    ):
+        """The session names the pending key by a SHA-256 digest of its ciphertext.
+
+        Ruling plan#3523: ``/mfa/setup`` shows the pending key again only in
+        the browser that made it, which it tells by a fingerprint it stores in
+        that browser's session.  The cookie is signed but not encrypted, so
+        the C-05 rule holds for the fingerprint too: the payload carries the
+        digest, and no value of it holds the key or its ciphertext, under any
+        key name.  The digest is spelled here with ``hashlib``, never read
+        from the route's helper.
+        """
+        with app.app_context():
+            auth_client.get("/mfa/setup")
+            config = (
+                db.session.query(MfaConfig)
+                .filter_by(user_id=seed_user["user"].id)
+                .one()
+            )
+            ciphertext = config.pending_secret_encrypted
+            plaintext_secret = mfa_service.decrypt_secret(ciphertext)
+
+            payload = _decode_session_cookie(
+                app, _get_session_cookie_value(auth_client),
+            )
+
+            assert hashlib.sha256(ciphertext).hexdigest() in payload.values()
+            for value in payload.values():
+                assert value != ciphertext, "The ciphertext is in the session."
+                assert ciphertext.decode("ascii") not in str(value), (
+                    f"The ciphertext is in a session value: {value!r}"
+                )
+                assert plaintext_secret not in str(value), (
+                    f"The plaintext key is in a session value: {value!r}"
+                )
 
     def test_cross_user_cannot_consume_pending(
         self, app, auth_client, seed_user, second_auth_client, seed_second_user

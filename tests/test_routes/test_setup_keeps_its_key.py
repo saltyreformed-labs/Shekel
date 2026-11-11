@@ -1,16 +1,24 @@
-"""Setup shows the same key while a setup is pending (ruling plan#3470).
+"""Setup keeps its key only for the browser that made it, 15 fresh minutes a load.
 
-Plan#2407, task plan#3502.  Until the ruling every load of ``/mfa/setup`` made
-a new key and threw the pending one away (pinned then by
+Plan#2407, tasks plan#3502 and plan#3531.  Until ruling plan#3470 every load of
+``/mfa/setup`` made a new key and threw the pending one away (pinned then by
 ``test_mfa_setup_replaces_previous_pending`` in ``test_auth.py``, which this
 file replaces), so a reload between scanning the QR code and typing its code
-killed the entry just added to the authenticator app.  Now, while a setup is
-pending, every load shows its key: for 15 minutes from when the key was made,
-not stretched by reloads.  A new key is made only when none is pending, the
-pending one has expired, or it does not decrypt.
+killed the entry just added to the authenticator app.  Ruling plan#3470 kept
+the pending key for every signed-in browser of the account, for 15 minutes
+from when it was made.  Ruling plan#3523 replaced that: the key is shown again
+only in the browser that made it, which its session names by a fingerprint,
+and each load there gives it 15 fresh minutes.  Any other browser gets a new
+key, which replaces it, as does a load with no key pending, an expired one, or
+one that does not decrypt.
 
 **One code per secret per test**: replay prevention refuses a second code
 inside one thirty-second step, so each secret a test makes is typed once.
+
+**The clock**: a test that moves it travels with ``time_machine`` and
+``tick=False``, which moves ``time.time()``, the clock the code verifier and
+:func:`~tests._two_factor_sign_in.code_now` read, and ``datetime.now``, the
+one the route's expiry is written and judged by.
 """
 
 import re
@@ -20,13 +28,14 @@ from urllib.parse import urlsplit
 
 import pyotp
 import pytest
+import time_machine
 from cryptography.fernet import Fernet
 
 from app.extensions import db
 from app.services import mfa_service
 from scripts.reset_mfa import reset_mfa
 from tests._two_factor_sign_in import (
-    code_now, sign_in_seed_companion_by_password, two_factor_row_of,
+    code_now, redirect_path, sign_in_seed_companion_by_password, two_factor_row_of,
 )
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 
@@ -46,6 +55,11 @@ def _key_on(response):
     return re.search(r"<code>([A-Z2-7]+)</code>", response.get_data(as_text=True)).group(1)
 
 
+def _pending_key_of(user_id):
+    """Return the key *user_id*'s pending setup holds, decrypted."""
+    return mfa_service.decrypt_secret(two_factor_row_of(user_id).pending_secret_encrypted)
+
+
 def _set_expiry(user_id, instant):
     """Move *user_id*'s pending setup's expiry to *instant*, committed."""
     config = two_factor_row_of(user_id)
@@ -56,8 +70,9 @@ def _set_expiry(user_id, instant):
 def _owner_signed_in_again(app):
     """Return a fresh browser signed in as the seed owner with her password.
 
-    A reset ends every session of the user it resets, so a test that resets
-    the owner and then loads setup does so in a new sign-in.
+    A second browser of the account, beside ``auth_client``'s; or the one a
+    test signs in after a reset, which ends every session of the user it
+    resets.
     """
     browser = app.test_client()
     response = browser.post("/login", data={
@@ -80,33 +95,95 @@ def _a_wrong_code(secret):
     )
 
 
+def _a_code_only(secret, other):
+    """Return a code *secret* accepts at this instant and *other* refuses.
+
+    One of the three steps *secret*'s drift window accepts, and none of
+    *other*'s, so a refusal of it is *secret*'s and cannot be a code that
+    happened to match *other*.
+    """
+    now = int(time.time())
+    steps = (now - 30, now, now + 30)
+    accepted_by_other = {pyotp.TOTP(other).at(t) for t in steps}
+    return next(
+        code for code in (pyotp.TOTP(secret).at(t) for t in steps)
+        if code not in accepted_by_other
+    )
+
+
 class TestThePendingKeyIsShownAgain:
-    """Inside its window, every load shows the one pending key."""
+    """In the browser that made it, every load shows the one pending key."""
 
-    def test_two_loads_show_one_key_and_write_nothing(self, auth_client, seed_user):
-        """The same key on both loads; the ciphertext and expiry are as the first left them."""
+    def test_two_loads_show_one_key_and_the_second_gives_it_fifteen_fresh_minutes(
+        self, auth_client, seed_user,
+    ):
+        """Five minutes on, the second load shows the same key and moves its expiry.
+
+        Ruling plan#3523.  Under ruling plan#3470 this test pinned that the
+        second load wrote nothing, so the expiry stayed where the first left
+        it.
+        """
         user_id = seed_user["user"].id
-        first = _key_on(auth_client.get(_SETUP))
-        stored = two_factor_row_of(user_id)
-        ciphertext, expiry = stored.pending_secret_encrypted, stored.pending_secret_expires_at
+        start = datetime.now(timezone.utc)
+        with time_machine.travel(start, tick=False):
+            first = _key_on(auth_client.get(_SETUP))
+        made = two_factor_row_of(user_id)
+        ciphertext = made.pending_secret_encrypted
+        assert made.pending_secret_expires_at == start + _WINDOW
+        later = start + timedelta(minutes=5)
 
-        second = _key_on(auth_client.get(_SETUP))
+        with time_machine.travel(later, tick=False):
+            second = _key_on(auth_client.get(_SETUP))
 
         assert second == first
         after = two_factor_row_of(user_id)
         assert after.pending_secret_encrypted == ciphertext
-        assert after.pending_secret_expires_at == expiry
+        assert after.pending_secret_expires_at == later + _WINDOW
 
-    def test_a_reload_does_not_stretch_the_window(self, auth_client, seed_user):
-        """One minute left: the load shows the key, and one minute is still left."""
+    def test_a_key_reached_at_minute_fourteen_still_confirms_at_minute_sixteen(
+        self, auth_client, seed_user,
+    ):
+        """The load at minute 14 gives the key until minute 29 (ruling plan#3523).
+
+        Under ruling plan#3470 a reload did not stretch the window (this
+        file's ``test_a_reload_does_not_stretch_the_window``), so this key
+        died at minute 15.  The control is
+        :meth:`test_a_key_not_shown_again_no_longer_confirms_at_minute_sixteen`,
+        the same steps without the load at minute 14.
+        """
+        start = datetime.now(timezone.utc)
+        with time_machine.travel(start, tick=False):
+            key = _key_on(auth_client.get(_SETUP))
+        with time_machine.travel(start + timedelta(minutes=14), tick=False):
+            assert _key_on(auth_client.get(_SETUP)) == key
+
+        with time_machine.travel(start + timedelta(minutes=16), tick=False):
+            confirmed = auth_client.post("/mfa/confirm", data={"totp_code": code_now(key)})
+
+        assert confirmed.status_code == 200
+        assert b"Save Your Backup Codes" in confirmed.data
+        assert two_factor_row_of(seed_user["user"].id).is_enabled is True
+
+    def test_a_key_not_shown_again_no_longer_confirms_at_minute_sixteen(
+        self, auth_client, seed_user,
+    ):
+        """The control: with no load since minute 0, the window closed at minute 15.
+
+        ``/mfa/confirm`` refuses the right code, sends her back to setup and
+        clears the expired key.
+        """
         user_id = seed_user["user"].id
-        first = _key_on(auth_client.get(_SETUP))
-        near_the_end = datetime.now(timezone.utc) + timedelta(minutes=1)
-        _set_expiry(user_id, near_the_end)
+        start = datetime.now(timezone.utc)
+        with time_machine.travel(start, tick=False):
+            key = _key_on(auth_client.get(_SETUP))
 
-        assert _key_on(auth_client.get(_SETUP)) == first
+        with time_machine.travel(start + timedelta(minutes=16), tick=False):
+            refused = auth_client.post("/mfa/confirm", data={"totp_code": code_now(key)})
 
-        assert two_factor_row_of(user_id).pending_secret_expires_at == near_the_end
+        assert redirect_path(refused) == _SETUP
+        after = two_factor_row_of(user_id)
+        assert after.is_enabled is False
+        assert after.pending_secret_encrypted is None
 
     def test_a_wrong_code_brings_back_the_same_key_and_its_code_confirms(
         self, auth_client, seed_user,
@@ -136,13 +213,69 @@ class TestThePendingKeyIsShownAgain:
         assert _key_on(browser.get(_SETUP)) == key
 
 
+class TestAnotherBrowserNeverSeesIt:
+    """Another browser of the account gets a new key, which replaces the pending one.
+
+    Ruling plan#3523's case: someone with her password opens setup on a
+    laptop, then she opens it on her phone.  Under ruling plan#3470 the phone
+    showed the laptop's key, and the laptop's user could make her codes once
+    she scanned it.
+    """
+
+    def test_a_second_browser_gets_a_new_key_and_the_first_no_longer_confirms(
+        self, app, auth_client, seed_user,
+    ):
+        """Her phone's key replaces the laptop's; the laptop's code confirms nothing.
+
+        The phone's code then confirms, so the laptop's refusal is the
+        replacement's and not a broken setup.
+        """
+        user_id = seed_user["user"].id
+        laptop_key = _key_on(auth_client.get(_SETUP))
+        phone = _owner_signed_in_again(app)
+
+        phone_key = _key_on(phone.get(_SETUP))
+
+        assert phone_key != laptop_key
+        assert _pending_key_of(user_id) == phone_key
+        refused = auth_client.post(
+            "/mfa/confirm", data={"totp_code": _a_code_only(laptop_key, phone_key)},
+        )
+        assert redirect_path(refused) == _SETUP
+        assert two_factor_row_of(user_id).is_enabled is False
+        confirmed = phone.post("/mfa/confirm", data={"totp_code": code_now(phone_key)})
+        assert confirmed.status_code == 200
+        assert b"Save Your Backup Codes" in confirmed.data
+        assert two_factor_row_of(user_id).is_enabled is True
+
+    def test_the_first_browser_back_at_setup_sees_neither_key(
+        self, app, auth_client, seed_user,
+    ):
+        """The laptop's next load makes a third key rather than showing her phone's.
+
+        Its session still holds the fingerprint of the key it made, which
+        names no key the row holds once her phone's replaced it.
+        """
+        user_id = seed_user["user"].id
+        laptop_key = _key_on(auth_client.get(_SETUP))
+        phone_key = _key_on(_owner_signed_in_again(app).get(_SETUP))
+
+        again = _key_on(auth_client.get(_SETUP))
+
+        assert again not in (laptop_key, phone_key)
+        assert _pending_key_of(user_id) == again
+
+
 class TestANewKeyIsMade:
     """No pending key to show: expired, unreadable, or none."""
 
     def test_after_the_window_closes_with_fresh_fifteen_minutes(
         self, auth_client, seed_user,
     ):
-        """A load just past the expiry makes a new key, which the row now holds."""
+        """A load just past the expiry makes a new key, which the row now holds.
+
+        The next load shows it again, so the session now names the new key.
+        """
         user_id = seed_user["user"].id
         first = _key_on(auth_client.get(_SETUP))
         _set_expiry(user_id, datetime.now(timezone.utc) - timedelta(seconds=1))
@@ -158,6 +291,7 @@ class TestANewKeyIsMade:
             <= after.pending_secret_expires_at
             <= before + _WINDOW + _SLACK
         )
+        assert _key_on(auth_client.get(_SETUP)) == second
 
     def test_a_pending_key_that_does_not_decrypt_is_replaced(
         self, auth_client, seed_user,

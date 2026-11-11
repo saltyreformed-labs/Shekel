@@ -33,8 +33,9 @@
 
     {# The otpauth:// URI the QR code encodes, which a phone hands to its
        authenticator app (ruling plan#3442).  Coming back from the app may
-       reload this page; it shows the same key while the setup is pending
-       (ruling plan#3470), so the entry just added keeps working. #}
+       reload this page; in the browser that made the key it shows the same
+       key while the setup is pending, with fifteen fresh minutes each load
+       (ruling plan#3523), so the entry just added keeps working. #}
     <div class="d-grid my-3">
       <a class="btn btn-outline-primary" href="{{ totp_uri }}">
         <i class="bi bi-box-arrow-up-right"></i> Open in my authenticator app

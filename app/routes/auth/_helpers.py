@@ -98,6 +98,15 @@ _MFA_PENDING_KEYS = (
     _MFA_PENDING_AT_KEY,
 )
 
+# Session-cookie key naming the browser that made a pending setup key (ruling
+# plan#3523): ``/mfa/setup`` stores a fingerprint of the key's ciphertext here
+# when it makes the key, and shows the key again only to a session holding it.
+# A fingerprint, never the key or the ciphertext, because the cookie is signed
+# but not encrypted (audit finding F-031 / commit C-05).  Not one of
+# ``_MFA_PENDING_KEYS``, which carry a sign-in's pending code and which a
+# finished sign-in clears: a setup's browser stays its browser across one.
+_MFA_SETUP_FINGERPRINT_KEY = "_mfa_setup_fingerprint"
+
 
 def _clear_mfa_pending_state():
     """Pop every MFA pending key from the request session.

@@ -62,6 +62,7 @@ difference at the cash cutover (``balance:X-f3c``).
 from ._adapters import parse_statement, supported_sources
 from ._identity import record_identity
 from ._anchor import (
+    CoverageGap,
     ImportedBalance,
     KnownOpening,
     recorded_opening_before,
@@ -69,6 +70,7 @@ from ._anchor import (
     resolve_anchor,
     solve_effective_day,
     weaker_of,
+    window_opening,
 )
 from ._balance import (
     BankAnchor,
@@ -124,6 +126,7 @@ __all__ = [
     "BankAnchor",
     "BankBalances",
     "Checkpoint",
+    "CoverageGap",
     "GroupPairing",
     "ImportOutcome",
     "ImportedBalance",
@@ -173,4 +176,5 @@ __all__ = [
     "supported_sources",
     "verify_running_balance",
     "weaker_of",
+    "window_opening",
 ]

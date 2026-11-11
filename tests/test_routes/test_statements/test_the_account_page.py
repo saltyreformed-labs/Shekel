@@ -7,6 +7,7 @@ import logging
 import re
 
 from app.models.statement_import import StatementImport
+from app.services.statement_import import bank_levels
 from app.utils.log_events import EVT_STATEMENT_IMPORTED
 from tests.test_services.test_statement_import import _csv_builder as build
 
@@ -327,6 +328,52 @@ class TestTheAccountPageLinksHere:
         assert "no balance was recorded from it" in message
         assert category == "warning"
 
+    def test_a_file_after_a_GAP_says_the_record_did_not_reach_it(
+        self, auth_client, db, seed_user,
+    ):
+        """Ruling **bank_import:R-BI35**, on the receipt.
+
+        A level stands (the first file's, at 03-03: 100.00 - 25.00 +
+        1,500.00 = 1,575.00, solved on its own chain) and this file opens on
+        03-10 with 03-04..03-09 imported by nobody, so nothing recorded
+        prices the day before it.  Until the ruling this took the ASSUMED
+        arm and read as an ordinary placement at 03-10.  Now the claim is
+        unsolved for a cause the other unplaced sentence does not name -- the
+        record did not REACH the file, rather than reaching it and
+        disagreeing -- and the receipt says which, and what closes it (the
+        span that is missing).
+        """
+        _upload(auth_client, seed_user["account"].id, _payload())
+
+        response = _upload(
+            auth_client, seed_user["account"].id,
+            build.build(
+                build.chained(
+                    "100.00",
+                    [(date(2026, 3, 10), "-4.00", "POINT OF SALE DEBIT L340 X")],
+                    with_running=False,
+                ),
+                balance_as_of="03/10/2026", stated_balance="1571.00",
+            ),
+            filename="after-a-gap.csv",
+        )
+        toasts = _flash_toasts(response.get_data(as_text=True))
+
+        assert len(toasts) == 1
+        category, message = toasts[0]
+        assert (
+            "It states 1571.00 as of 2026-03-10, but nothing already recorded "
+            "for this account reaches back to the day before 2026-03-10"
+            in message
+        )
+        assert "Importing the span that is missing" in message
+        assert "no balance was recorded from it" in message
+        assert "which no day it covers reconciles" not in message
+        assert category == "warning"
+        # ...and it placed nothing: the first file's level stands alone.
+        [(level, _release)] = bank_levels(seed_user["account"].id)
+        assert level.observed_on == date(2026, 3, 3)
+
     def test_a_file_stating_NO_balance_says_there_was_none_to_check(
         self, auth_client, db, seed_user,
     ):
@@ -627,21 +674,26 @@ class TestTheAccountPageLinksHere:
         )
         assert "inserted.csv" not in badge.group(1)
 
-    def test_the_NOT_PLACED_badge_states_its_one_cause(
+    def test_the_NOT_PLACED_badge_names_both_causes(
         self, auth_client, db, seed_user,
     ):
-        """A figure never placed: no day of the file reconciled it.
+        """A figure never placed, and the badge names the two ways.
 
-        The one state left in this branch once a release is told apart, so
-        the sentence names it alone -- the date-range export shape, whose
-        header states a figure its own lines cannot reach.
+        Once a release is told apart, TWO states reach this branch since
+        ruling **bank_import:R-BI35**: the record reached the file and no day
+        reconciled it (this case: the date-range export shape, whose header
+        states a figure its own lines cannot reach), or nothing recorded
+        reached back to the file's first day (a file after a coverage gap
+        while a level stands,
+        ``test_a_file_after_a_GAP_says_the_record_did_not_reach_it``).  The
+        row cannot tell them apart -- the cause is known at the resolve
+        alone, and the receipt says it -- so the badge names both.  *It said
+        "its one cause" until the ruling, whose arm created the second.*
         """
         _upload(auth_client, seed_user["account"].id, _payload())
         # ADJACENT to the first file's last day, so the recorded opening is
         # known (the first import's placement reaches it) and the header's
-        # figure fails to reconcile on any day -- a file the walk could not
-        # reach would be placed by ASSUMPTION instead, which is a different
-        # state and a different badge.
+        # figure fails to reconcile on any day.
         _upload(
             auth_client, seed_user["account"].id,
             build.build(
@@ -662,14 +714,11 @@ class TestTheAccountPageLinksHere:
             page,
         )
         assert badge is not None, "the unplaced figure renders no badge"
-        assert badge.group(1) == (
-            "No day holds this figure: no day this file covers reconciled it "
-            "with what was already recorded before the file&#39;s first day. "
-            "A later import can place a balance again."
-        ) or badge.group(1) == (
-            "No day holds this figure: no day this file covers reconciled it "
-            "with what was already recorded before the file's first day. "
-            "A later import can place a balance again."
+        assert badge.group(1).replace("&#39;", "'") == (
+            "No day holds this figure: either no day this file covers "
+            "reconciled it with what was already recorded before the file's "
+            "first day, or nothing already recorded reached back that far to "
+            "check it. A later import can place a balance again."
         )
         assert "released" not in badge.group(1)
 

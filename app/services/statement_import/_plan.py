@@ -40,7 +40,7 @@ from app.models.line_source_id import LineSourceId
 from app.models.statement_import import BankStatementLine
 
 from ._adapters import parse_statement
-from ._anchor import ImportedBalance, recorded_opening_before, resolve_anchor
+from ._anchor import ImportedBalance, resolve_anchor, window_opening
 from ._errors import (
     StatementLineConflict,
     StatementLineIdMoved,
@@ -698,10 +698,11 @@ def plan_statement(
     # Read BEFORE the import row exists, so the walk sees only what was
     # recorded before this act -- and resolve the anchor here, with the other
     # refusals, because an unexplained balance must refuse the file rather
-    # than be discovered after its lines are staged.
+    # than be discovered after its lines are staged.  The opening read tells
+    # a coverage gap from a true first import (ruling **bank_import:R-BI35**),
+    # which send the claim to different arms.
     balance = resolve_anchor(
-        parsed,
-        recorded_opening_before(account_id, parsed.declared_start),
+        parsed, window_opening(account_id, parsed.declared_start),
     )
     return StatementPlan(
         parsed=parsed,

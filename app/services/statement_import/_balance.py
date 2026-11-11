@@ -230,6 +230,22 @@ class BankBalances:
     runs: "list[RecordedRun]"
     balances: "dict[date, Decimal]"
 
+    @property
+    def prices_any_day(self) -> bool:
+        """Return whether ANY run of the bank's record is anchored, so prices a day.
+
+        What tells a gap in coverage from an account the bank's record prices
+        nowhere (ruling **bank_import:R-BI35**,
+        :func:`~._anchor.window_opening`): an anchored run prices at least its
+        anchor's own day, and an account with none has nothing an import
+        could be checked against.  Read off the runs this fold already holds,
+        so the question costs no second read of the levels -- and it is the
+        RUNS' answer rather than "a standing level exists": a standing level
+        that no run reaches anchors nothing (:func:`_recorded_runs`), so it
+        prices no day and must not count as one.
+        """
+        return any(run.anchor is not None for run in self.runs)
+
     def anchor_for(self, day: date) -> "BankAnchor | None":
         """Return the anchor that prices *day*, or ``None`` when none does.
 

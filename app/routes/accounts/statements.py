@@ -273,6 +273,22 @@ def _balance_sentence(outcome):
     if outcome.balance is None:
         return "It states no balance, so there was none to check."
     if not outcome.balance.is_anchored:
+        if outcome.balance.opening_known is False:
+            # Nothing recorded PRICES the day before this file while the record
+            # prices other days (ruling **bank_import:R-BI35**): a coverage gap
+            # lies between them -- a span nobody imported, or a raw day the
+            # bank feed is still re-fetching.  The remedy is the missing span,
+            # which is what the sentence points at; the sentence below names
+            # a figure the record REACHED and could not reconcile, which calls
+            # for a different act.
+            return (
+                f"It states {outcome.balance.stated} as of "
+                f"{outcome.balance.stated_on}, but nothing already recorded "
+                f"for this account reaches back to the day before "
+                f"{outcome.declared_start}, so the figure could not be "
+                f"checked and no balance was recorded from it.  Importing "
+                f"the span that is missing lets a later import place one."
+            )
         # **It asserts no cause** (plan step ``bank_import:X-gr``, finding
         # **BI-489**, developer ruling 2026-09-12).  This arm is
         # :func:`~app.services.statement_import.resolve_anchor` finding no

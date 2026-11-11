@@ -242,11 +242,15 @@
                   {% else %}
                   <span class="text-muted">as of {{ row.balance.stated_on }}</span>
                   <br>
-                  {# Never placed, and since balance:X-bj-1 the ONLY state
-                     that reaches this branch: a released placement is told
-                     apart above.  So the sentence states the one cause. #}
+                  {# Never placed: a released placement is told apart above.
+                     TWO states reach this branch since bank_import:R-BI35 --
+                     the record reached the file and no day reconciled it, or
+                     nothing recorded reached back to the file's first day --
+                     and the row cannot tell them apart (the cause is known at
+                     the resolve alone, and the receipt says it), so the
+                     sentence names both. #}
                   <span class="badge text-bg-warning"
-                        title="No day holds this figure: no day this file covers reconciled it with what was already recorded before the file's first day. A later import can place a balance again.">not placed</span>
+                        title="No day holds this figure: either no day this file covers reconciled it with what was already recorded before the file's first day, or nothing already recorded reached back that far to check it. A later import can place a balance again.">not placed</span>
                   {% endif %}
                   {% else %}
                   <span class="text-muted">no balance stated</span>

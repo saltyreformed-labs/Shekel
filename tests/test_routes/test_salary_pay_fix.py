@@ -680,3 +680,37 @@ class TestTheRhythmNotice:
 
             assert page.status_code == 200
             assert "Your pay rhythm changes on" not in page.get_data(as_text=True)
+
+    def test_the_page_says_the_first_rhythm_carried_back(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """The first pay is weekly from the switch: the paychecks before it are carried back, said.
+
+        1,000.00 x 52 / 26 = 2,000.00 every two weeks, from the yearly
+        1,000.00 x 52 = 52,000.00 (task plan#3171, finding plan#1586).  The
+        one entry is moved onto the switch's payday through the model, as the
+        case above plants its second: no door records pay that far ahead
+        (R-SAL90).
+        """
+        with app.app_context():
+            switch = max(period.start_date for period in seed_periods) + timedelta(days=28)
+            pay_era_write.mint_era(seed_user["user"].id, era_of(switch, 7))
+            db.session.commit()
+            profile = create_through_the_form(
+                auth_client, seed_user, "2000.00", "2026-03-13",
+            )
+            entry = profile.pay_entries[0]
+            entry.payday = switch
+            entry.amount = Decimal("1000.00")
+            db.session.commit()
+
+            page = auth_client.get(f"/salary/{profile.id}/edit")
+
+            assert page.status_code == 200
+            text = " ".join(page.get_data(as_text=True).split())
+            assert (
+                f"Your pay rhythm changes on {switch.isoformat()} and no pay is "
+                "recorded before then: priced at $2,000.00 from your yearly "
+                "$52,000.00."
+            ) in text
+            assert "recorded from then" not in text

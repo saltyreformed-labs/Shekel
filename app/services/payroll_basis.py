@@ -33,8 +33,7 @@ from app.services.pay_calendar import (
     PayCalendar,
     cadence_on,
     days_paid_for,
-    first_day_paid_at,
-    first_payday_of,
+    first_paycheck_at,
     previous_payday,
 )
 from app.services.recurrence import (
@@ -127,7 +126,7 @@ class _WalkedCadence:
 
 @dataclass(frozen=True)
 class RhythmChangeWithoutPay:
-    """A change of rhythm no pay entry is recorded from, as the salary page names it.
+    """A change of rhythm whose pay on one side is carried, as the salary page names it.
 
     Plan step **salary:X-av-3a**, ruling **R-SAL82** ("Yearly pay carries,
     said"): where the owner's rhythm changes and no entry is recorded from the
@@ -136,17 +135,52 @@ class RhythmChangeWithoutPay:
     count -- and the salary page says so rather than believing the figure
     silently.
 
+    **And the first rhythm, when no pay is recorded at it** (task plan#3171,
+    finding plan#1586): every paycheck before the first entry is priced from
+    it (ruling **R-SAL59**), so when the first entry is dated after a change
+    of count, the paychecks before the change are that entry's yearly pay
+    carried BACK to the earlier count, and the page names that change too:
+    :attr:`before_the_change`.
+
     Attributes:
-        first_payday: The new rhythm's first payday.
-        per_paycheck: The pay carried to the new rhythm, in force from the
-            first day its first paycheck pays for.
+        first_payday: The payday of the first paycheck at the new rhythm
+            (:func:`~app.services.pay_calendar.first_paycheck_at`): the
+            change.
+        per_paycheck: The carried pay: at the new rhythm, in force from the
+            first day its first paycheck pays for; or, before the change, at
+            the first rhythm, in force on every day before it.
         carried_annual: The yearly pay carried across: the pay just before
-            the change times the paychecks a year it was paid at.
+            the change times the paychecks a year it was paid at; before the
+            change, the first entry's yearly pay.
+        before_the_change: ``True`` when the carried pay is the first
+            rhythm's, before the change; ``False`` when it is the new
+            rhythm's, from the change on.
     """
 
     first_payday: date
     per_paycheck: Decimal
     carried_annual: Decimal
+    before_the_change: bool = False
+
+
+@dataclass(frozen=True)
+class _Seam:
+    """One change of rhythm as the walk reads it: an era after the first.
+
+    Private to :class:`PayrollBasis`.
+
+    Attributes:
+        payday: The payday of the era's first paycheck
+            (:func:`~app.services.pay_calendar.first_paycheck_at`).
+        first: The first day that paycheck pays for: the change takes effect
+            from it, so every day one paycheck pays for is paid at that
+            paycheck's rhythm and a pay period never straddles one.
+        index: The era's index in the calendar's eras.
+    """
+
+    payday: date
+    first: date
+    index: int
 
 
 @dataclass(frozen=True)
@@ -501,19 +535,18 @@ class PayrollBasis:
         return chosen
 
     @cached_property
-    def _seams(self) -> "tuple[tuple[date, int], ...]":
-        """``(first day, era index)`` of every era after the first, ascending.
+    def _seams(self) -> "tuple[_Seam, ...]":
+        """Every era after the first as a :class:`_Seam`, ascending.
 
         A change of rhythm takes effect from the first day its first paycheck
-        pays for (:func:`~app.services.pay_calendar.first_day_paid_at`), so
-        every day one paycheck pays for is paid at that paycheck's rhythm and
-        a pay period never straddles one.
+        (:func:`~app.services.pay_calendar.first_paycheck_at`) pays for, read
+        through :meth:`_paid_days_of` as every other paycheck's days are.
         """
-        gap = self.profile.period_end_days_before_payday
-        return tuple(
-            (first_day_paid_at(self.calendar, index, gap), index)
-            for index in range(1, len(self.calendar.eras))
-        )
+        seams = []
+        for index in range(1, len(self.calendar.eras)):
+            payday = first_paycheck_at(self.calendar, index)
+            seams.append(_Seam(payday, self._paid_days_of(payday).first, index))
+        return tuple(seams)
 
     def _rhythm_on(self, day: date) -> PayCadence:
         """Return the rhythm in force on *day*: the latest era whose first day is on or before it.
@@ -522,10 +555,10 @@ class PayrollBasis:
         too, because that era alone runs backward (ruling **R-PC66**).
         """
         index = 0
-        for first, era_index in self._seams:
-            if first > day:
+        for seam in self._seams:
+            if seam.first > day:
                 break
-            index = era_index
+            index = seam.index
         return PayCadence(self.calendar.eras[index].rhythm.cadence)
 
     @cached_property
@@ -586,9 +619,9 @@ class PayrollBasis:
         carried = None
         applications = applications_between(self.raises, entry.opens, day)
         events = [
-            (first, 0, 0, index)
-            for first, index in self._seams
-            if entry.opens < first <= day
+            (seam.first, 0, 0, seam.index)
+            for seam in self._seams
+            if entry.opens < seam.first <= day
         ] + [
             (landed, 1, method_rank, raise_obj)
             for landed, method_rank, raise_obj in applications
@@ -896,20 +929,45 @@ class PayrollBasis:
         recorded from.  A change keeping the count (a new phase at the same
         rhythm) carries nothing and is not named.  The change takes effect on
         the first day its first paycheck pays for (:attr:`_seams`), and it
-        carries when no entry opens on that day.
+        carries when no entry opens on that day.  **Each is named by that
+        paycheck's payday**, the first paycheck paid at the new rhythm, saved
+        or projected (task plan#3171, finding plan#1587): it was the era's
+        first PLANNED payday until then, which a record paid a day early or
+        late is not, while the walk prices that record at the new rhythm.
+        Made-up: biweekly records 01-02 and 01-16, and weekly from 02-02,
+        recorded as paid on 02-01 or on 02-03; the notice said 02-02.
+
+        **The first rhythm too, when its pay is carried** (finding
+        plan#1586): every paycheck before the first entry is priced from it
+        (ruling **R-SAL59**), carried to each day's count, so a first entry
+        dated after a change of count prices the earlier rhythm's paychecks
+        by carrying its yearly pay BACK.  That change is named by the same
+        payday, :attr:`RhythmChangeWithoutPay.before_the_change` set, with the
+        pay in force on the last day before it.  Before this task no notice
+        named it, because a change was looked for only from the change on.
+        Made-up: $1,000.00 weekly from 2027-01-07, after every-two-weeks
+        paychecks: those pay $1,000.00 x 52 / 26 = $2,000.00 from the yearly
+        $52,000.00.
 
         Returns:
             One :class:`RhythmChangeWithoutPay` per such change, oldest
-            first; empty for an owner with one rhythm.
+            first, the first rhythm's ahead of its change's own; empty for an
+            owner with one rhythm.
         """
         changes = []
-        for first, index in self._seams:
-            in_force = self._in_force_on(first)
-            if in_force.carried is not None and in_force.carried[0] == first:
+        if self._seams:
+            first = self._seams[0]
+            before = self._in_force_on(first.first - timedelta(days=1))
+            if before.carried is not None:
                 changes.append(RhythmChangeWithoutPay(
-                    first_payday_of(self.calendar.eras[index]),
-                    in_force.rate.per_paycheck,
-                    in_force.carried[1],
+                    first.payday, before.rate.per_paycheck, before.carried[1],
+                    before_the_change=True,
+                ))
+        for seam in self._seams:
+            in_force = self._in_force_on(seam.first)
+            if in_force.carried is not None and in_force.carried[0] == seam.first:
+                changes.append(RhythmChangeWithoutPay(
+                    seam.payday, in_force.rate.per_paycheck, in_force.carried[1],
                 ))
         return changes
 

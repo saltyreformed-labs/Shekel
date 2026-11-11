@@ -16,13 +16,16 @@
   </div>
   <div class="card-body">
     {# A change of rhythm no pay is recorded from is priced by carrying the
-       yearly pay across it, and says so (R-SAL82). #}
+       yearly pay across it, and says so (R-SAL82).  So is the first rhythm
+       when no pay is recorded at it: the paychecks before the change are the
+       first entry carried back (task plan#3171), "before then". #}
     {% for change in rhythm_changes %}
     <div class="alert alert-warning py-2" role="status">
       <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
       Your pay rhythm changes on {{ change.first_payday.isoformat() }} and no
-      pay is recorded from then: priced at {{ money(change.per_paycheck) }}
-      from your yearly {{ money(change.carried_annual) }}.
+      pay is recorded {{ 'before' if change.before_the_change else 'from' }}
+      then: priced at {{ money(change.per_paycheck) }} from your yearly
+      {{ money(change.carried_annual) }}.
     </div>
     {% endfor %}
     <div class="table-responsive">

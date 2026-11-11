@@ -415,6 +415,86 @@ class TestYearlyPayCarries:
         basis = _basis(_biweekly(), [(date(2026, 1, 1), "2000.00")], _EVERY_JULY)
         assert basis.rhythm_changes_without_pay() == []
 
+    def test_the_first_rhythm_carried_back_is_named(self):
+        """The first entry is $1,000.00 weekly from 2027-01-07: 2026's paychecks are carried back, and said.
+
+        Finding plan#1586: every paycheck before the first entry is priced
+        from it (R-SAL59), so the every-two-weeks paychecks of 2026 pay
+        1,000.00 x 52 / 26 = 2,000.00, from the yearly 1,000.00 x 52 =
+        52,000.00.  Nothing named them until task plan#3171: a change was
+        looked for only from the change on, where this entry IS recorded.
+        """
+        basis = _basis(_biweekly_then_weekly(), [(date(2027, 1, 7), "1000.00")])
+        assert _pay(basis, date(2026, 12, 24)) == Decimal("2000.00")
+        assert _pay(basis, date(2027, 1, 7)) == Decimal("1000.00")
+        assert basis.rhythm_changes_without_pay() == [
+            RhythmChangeWithoutPay(
+                date(2027, 1, 7), Decimal("2000.00"), Decimal("52000.00"),
+                before_the_change=True,
+            ),
+        ]
+
+
+class TestAChangeIsNamedByItsFirstPaycheck:
+    """The notice names the first paycheck paid at the new rhythm (finding plan#1587).
+
+    Made-up: biweekly records 2026-01-02 and 01-16, weekly from 02-02, and
+    $2,307.69 a paycheck from 01-02; the weekly rhythm's first paycheck is
+    carried 2,307.69 x 26 / 52 = 1,153.845 -> 1,153.85, from the yearly
+    2,307.69 x 26 = 59,999.94.  The notice named the era's planned 02-02
+    until task plan#3171, whatever day the record was paid.
+    """
+
+    @staticmethod
+    def _notice(third_record):
+        """The notice when the third record, the weekly rhythm's first paycheck, is *third_record*."""
+        calendar = _calendar(
+            [date(2026, 1, 2), date(2026, 1, 16), third_record],
+            (_era(date(2026, 1, 2), 14), _era(date(2026, 2, 2), 7)),
+        )
+        basis = PayrollBasis(
+            _Profile([_Entry(date(2026, 1, 2), Decimal("2307.69"))]), calendar, (),
+        )
+        # The record IS the weekly rhythm's first paycheck: priced at 52.
+        assert _pay(basis, third_record) == Decimal("1153.85")
+        assert basis.base_pay_on(third_record).periods_per_year == Decimal("52")
+        return basis.rhythm_changes_without_pay()
+
+    def test_a_record_paid_a_day_early(self):
+        """Recorded on 02-01: the notice names 02-01."""
+        assert self._notice(date(2026, 2, 1)) == [
+            RhythmChangeWithoutPay(date(2026, 2, 1), Decimal("1153.85"), Decimal("59999.94")),
+        ]
+
+    def test_a_record_paid_a_day_late(self):
+        """Recorded on 02-03: the notice names 02-03, not the 02-02 before any weekly paycheck."""
+        assert self._notice(date(2026, 2, 3)) == [
+            RhythmChangeWithoutPay(date(2026, 2, 3), Decimal("1153.85"), Decimal("59999.94")),
+        ]
+
+    def test_a_payday_the_convention_moves_is_named_where_it_is_paid(self):
+        """Weekly from Saturday 2027-01-09 under ``prior``: first paid, and named, Friday 01-08.
+
+        The era's planned first payday is already moved under its own
+        convention, so this case named the right day before task plan#3171
+        too; it pins the claim that the planned day and the first paycheck
+        part only at a record paid on another day.  2,000.00 x 26 / 52 =
+        1,000.00, from the yearly 52,000.00.
+        """
+        biweekly = [date(2026, 1, 8) + timedelta(days=14 * step) for step in range(26)]
+        weekly = Era(
+            effective_from=date(2027, 1, 9),
+            rhythm=Rhythm(FixedDays(7), BusinessDayShiftEnum.PRIOR),
+        )
+        basis = _basis(
+            _calendar(biweekly, (_era(date(2026, 1, 8), 14), weekly)),
+            [(date(2026, 1, 8), "2000.00")],
+        )
+        assert _pay(basis, date(2027, 1, 8)) == Decimal("1000.00")
+        assert basis.rhythm_changes_without_pay() == [
+            RhythmChangeWithoutPay(date(2027, 1, 8), Decimal("1000.00"), Decimal("52000.00")),
+        ]
+
 
 class TestThePayChangeBadge:
     """R-SAL84 / R-SAL85, and yearly pay across a seam."""

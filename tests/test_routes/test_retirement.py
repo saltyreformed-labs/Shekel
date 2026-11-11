@@ -4,7 +4,6 @@ Tests for retirement planning routes.
 
 import logging
 import re
-from pathlib import Path
 from datetime import date
 from decimal import Decimal
 
@@ -30,6 +29,7 @@ from app.models.ref import (
 )
 from app.utils.dates import display_today
 from tests._csrf_tokens import without_csrf_tokens
+from tests._repo_root import REPO_ROOT
 from tests._test_helpers import (
     freeze_today, make_every_period_rule, make_recurring_raise, start_test_pay_list,
 )
@@ -3134,7 +3134,7 @@ class TestTheRailRegionIsSpelledOnce:
 
     @staticmethod
     def _source(relative):
-        return (Path(__file__).resolve().parents[2] / relative).read_text()
+        return (REPO_ROOT / relative).read_text()
 
     def test_the_rail_region_selector_matches_every_spelling(self):
         """The route's selector is the dashboard's id, the forms' target, the JS's guard."""

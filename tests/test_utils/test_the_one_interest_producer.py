@@ -80,10 +80,14 @@ class TestMonthlyOneTwelfthChargesPerCalendarMonth:
         """$1,000.00 at 5% for two months: ``(balance * (rate / 12)) * 2``.
 
         By hand: the one-month figure 4.166666666666666666666666667, doubled,
-        is 4.166...667 x 2 = 8.333333333333333333333333334.  The other bracket,
-        ``balance * (rate * 2 / 12)``, is 1,000 x 0.008333...333 =
-        8.333333333333333333333333333 -- a different 28th digit, so this pins
-        the association the docstring states.
+        is 4.166...667 x 2 = 8.333333333333333333333333334.  Folding the months
+        into the rate instead, ``balance * (rate * 2 / 12)``, is 1,000 x
+        0.008333...333 = 8.333333333333333333333333333 -- a different 28th
+        digit, so this pins where the month count enters: after the twelfth is
+        taken.  It does NOT separate ``balance * (rate / 12)`` from ``(balance
+        * rate) / 12``, which agree here to the last digit; the pinned
+        $271,375.20 case (:class:`TestOneInstallmentIsTheChargeEveryLoanHasBorne`)
+        is what tells those two apart.
         """
         assert accrued_interest(
             _ONE_THOUSAND, _FIVE_PERCENT,

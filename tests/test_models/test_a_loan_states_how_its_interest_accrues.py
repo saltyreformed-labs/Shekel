@@ -2,7 +2,8 @@
 
 The convention list ``ref.interest_accrual_conventions``, the key a loan row
 holds into it (``budget.loan_params.interest_accrual_convention_id``), the one
-door that writes a loan row, and migration ``08fda2e0b18b`` in both directions.
+door that writes a loan row, and migration ``08fda2e0b18b`` in both directions,
+with its refusal of a loan the backfill missed.
 
 The list has ONE member, ``monthly_1_12`` (developer ruling plan#3354), so
 every case here expects that one id: a loan cannot name any other because no
@@ -191,5 +192,37 @@ class TestTheMigration:
             ), {"ids": account_ids}).all()
             assert sorted(stored) == sorted(
                 (account_id, "monthly_1_12") for account_id in account_ids
+            )
+            db.session.rollback()
+
+    def test_a_loan_the_backfill_missed_stops_the_revision(
+        self, app, db, seed_user,
+    ):
+        """A NULL left after the backfill refuses the revision, naming the count and the SELECT.
+
+        No real upgrade reaches the refusal: the backfill names the row the
+        same revision has just seeded.  So the state it reads is built by
+        hand -- the revision downgraded, then the column re-added nullable and
+        empty under the one loan -- and the refusal is run on it, so its
+        message is code that has run.
+        """
+        with app.app_context():
+            create_loan_account(seed_user, db.session, name="Missed Loan")
+            run_migration_callable(_MIGRATION.downgrade, db.session)
+            db.session.execute(sqlalchemy.text(
+                "ALTER TABLE budget.loan_params "
+                "ADD COLUMN interest_accrual_convention_id integer"
+            ))
+
+            with pytest.raises(RuntimeError) as refusal:
+                run_migration_callable(
+                    _MIGRATION._refuse_a_surviving_null, db.session,
+                )
+
+            assert str(refusal.value) == (
+                "1 budget.loan_params row(s) hold no interest accrual "
+                "convention after the backfill to 'monthly_1_12'.  Inspect "
+                "with: SELECT id, account_id FROM budget.loan_params WHERE "
+                "interest_accrual_convention_id IS NULL;"
             )
             db.session.rollback()

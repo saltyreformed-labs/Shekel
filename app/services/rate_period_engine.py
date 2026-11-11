@@ -8,11 +8,13 @@ plain values; every function returns plain data.
 ## Why this exists
 
 A conventional monthly-accrual mortgage (and an ARM inside any one of
-its fixed-rate periods) accrues interest as ``balance * annual_rate /
-12`` and is repaid by a level payment that is fixed for the whole
-period.  The level payment recasts ONLY at a rate adjustment, never
-month to month, and never because the borrower prepaid or because a
-displayed balance was corrected.  The earlier resolver modeled only
+its fixed-rate periods) accrues a twelfth of its annual rate each month,
+``balance * (annual_rate / 12)`` -- the ``MONTHLY_1_12`` convention, which
+every walk here charges through :func:`app.utils.money.installment_interest`
+-- and is repaid by a level payment that is fixed for the whole period.
+The level payment recasts ONLY at a rate adjustment, never month to
+month, and never because the borrower prepaid or because a displayed
+balance was corrected.  The earlier resolver modeled only
 the first ARM window and, past it, re-amortized the payment every
 month over a shrinking term -- the few-dollar "creep" the user
 reported.  This module replaces that with the correct model:
@@ -151,8 +153,11 @@ class LoanTerms:  # pylint: disable=too-many-instance-attributes
     is one cohesive value record, the facts the loan's note fixes at
     origination, read as a unit by the period builder.  The eighth, the
     accrual convention (plan step recurrence:R16-d), is one more fact of the
-    same note; splitting the record would fragment one concept for no design
-    gain.
+    same note.  One split WOULD gain: the three ARM cadence fields as one
+    value, absent for a fixed loan, bring the record to six and delete the
+    guards :func:`_period_boundary_dates` keeps over their meaningless
+    combinations.  That changes the ARM path, so it is finding plan#3462,
+    owned by plan#2307, and not this step's.
 
     Bundled so the period builder takes one cohesive value object rather
     than a long parameter list, and so the same identity threads through

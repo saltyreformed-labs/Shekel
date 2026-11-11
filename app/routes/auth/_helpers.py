@@ -62,14 +62,15 @@ from app.utils.session_helpers import session_stamp, stamp_login_session
 
 logger = logging.getLogger(__name__)
 
-# Maximum time between scanning the QR/typing the manual key on /mfa/setup
-# and submitting the verification code on /mfa/confirm.  Bounds the
-# server-side window in which an unconfirmed TOTP secret remains
-# promotable to an active credential.  Long enough to accommodate users
-# who fumble with an authenticator app and short enough that an attacker
-# who briefly compromised the account cannot revisit /mfa/confirm later
-# to silently enrol their own device.  See audit finding F-031 / commit
-# C-05 of the 2026-04-15 security remediation plan.
+# How long a pending setup key stays promotable after the latest load of
+# /mfa/setup that showed it: each such load, in the sign-in that made the
+# key, moves its expiry to this from now (ruling plan#3523), and /mfa/confirm
+# refuses it once that has passed.  Bounds the server-side window in which an
+# unconfirmed TOTP secret remains promotable to an active credential.  Long
+# enough to accommodate users who fumble with an authenticator app and short
+# enough that an attacker who briefly compromised the account cannot revisit
+# /mfa/confirm later to silently enrol their own device.  See audit finding
+# F-031 / commit C-05 of the 2026-04-15 security remediation plan.
 MFA_SETUP_PENDING_TTL = timedelta(minutes=15)
 
 # Maximum time between the password POST that establishes pending MFA
@@ -102,9 +103,12 @@ _MFA_PENDING_KEYS = (
 # plan#3523): ``/mfa/setup`` stores a fingerprint of the key's ciphertext here
 # when it makes the key, and shows the key again only to a session holding it.
 # A fingerprint, never the key or the ciphertext, because the cookie is signed
-# but not encrypted (audit finding F-031 / commit C-05).  Not one of
-# ``_MFA_PENDING_KEYS``, which carry a sign-in's pending code and which a
-# finished sign-in clears: a setup's browser stays its browser across one.
+# but not encrypted (audit finding F-031 / commit C-05).  Every finished
+# sign-in clears it (:func:`_complete_sign_in`), so the key is kept for the
+# sign-in that made it: whoever signs in next on that browser, the user or
+# anyone else with their password, is shown a new key.  Not one of
+# ``_MFA_PENDING_KEYS``, which carry a sign-in's pending code: the code
+# form's failed exits clear those too, and a setup has nothing to do with them.
 _MFA_SETUP_FINGERPRINT_KEY = "_mfa_setup_fingerprint"
 
 
@@ -315,7 +319,9 @@ def _complete_sign_in(
     The one completion of a sign-in, called once the proof is in: the
     ``/login`` password with no second factor, ``/mfa/verify``'s code, or
     the ``/login`` password on a trusted device (plan#2173).  It clears any
-    pending code state (a completed sign-in leaves none behind), clears the
+    pending code state (a completed sign-in leaves none behind) and any setup
+    key's fingerprint (a pending setup key is shown again only in the sign-in
+    that made it, ruling plan#3523), clears the
     account's wrong-guess count now that every check has passed (ruling
     plan#3007) if the record still holds what the checks saw, *checked*,
     records the browser (plan#2772,
@@ -359,6 +365,9 @@ def _complete_sign_in(
         dashboard.
     """
     _clear_mfa_pending_state()
+    # A pending setup key is shown again only in the sign-in that made it
+    # (ruling plan#3523): this one, whoever's, starts with no fingerprint.
+    flask_session.pop(_MFA_SETUP_FINGERPRINT_KEY, None)
     auth_service.clear_failed_attempts(checked)
     # One instant for the record and the session's stamps: a session ends
     # KNOWN_LIFETIME after its sign-in stamp (ruling plan#3069), and one read

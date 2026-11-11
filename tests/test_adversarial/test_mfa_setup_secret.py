@@ -26,6 +26,7 @@ from cryptography.fernet import Fernet, MultiFernet
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.services import mfa_service
+from app.utils.session_helpers import SESSION_LAST_ACTIVITY_KEY
 
 
 def _decode_session_cookie(app, cookie_value: str) -> dict:
@@ -134,7 +135,7 @@ class TestMfaSetupSecretIsServerSide:
         two pending secrets are ever valid together.  Since ruling plan#3470 a
         second visit inside the window shows the SAME pending secret (it was
         a new one per visit until then), and since ruling plan#3523 only in
-        the browser that made it; once the window closes the next visit
+        the sign-in that made it; once the window closes the next visit
         replaces it, and the replaced secret no longer confirms.
         """
         with app.app_context():
@@ -175,42 +176,48 @@ class TestMfaSetupSecretIsServerSide:
             db.session.refresh(config)
             assert config.is_enabled is False
 
-    def test_the_session_holds_the_keys_fingerprint_never_the_key_or_its_ciphertext(
+    def test_setup_adds_only_the_keys_fingerprint_to_the_session(
         self, app, auth_client, seed_user
     ):
-        """The session names the pending key by a SHA-256 digest of its ciphertext.
+        """The session gains one value at setup: a SHA-256 digest of the ciphertext.
 
         Ruling plan#3523: ``/mfa/setup`` shows the pending key again only in
-        the browser that made it, which it tells by a fingerprint it stores in
+        the sign-in that made it, which it tells by a fingerprint it stores in
         that browser's session.  The cookie is signed but not encrypted, so
-        the C-05 rule holds for the fingerprint too: the payload carries the
-        digest, and no value of it holds the key or its ciphertext, under any
-        key name.  The digest is spelled here with ``hashlib``, never read
-        from the route's helper.
+        the C-05 rule holds for the fingerprint too.  The payload after setup
+        is the payload before it, with the activity stamp every request moves
+        and with the digest added, and nothing else: no value holds the key or
+        its ciphertext in any encoding, under any name.  The digest is spelled
+        here with ``hashlib``, never read from the route's helper.
         """
         with app.app_context():
-            auth_client.get("/mfa/setup")
+            assert auth_client.get("/security").status_code == 200
+            before = _decode_session_cookie(
+                app, _get_session_cookie_value(auth_client),
+            )
+
+            assert auth_client.get("/mfa/setup").status_code == 200
+            after = _decode_session_cookie(
+                app, _get_session_cookie_value(auth_client),
+            )
+
             config = (
                 db.session.query(MfaConfig)
                 .filter_by(user_id=seed_user["user"].id)
                 .one()
             )
-            ciphertext = config.pending_secret_encrypted
-            plaintext_secret = mfa_service.decrypt_secret(ciphertext)
-
-            payload = _decode_session_cookie(
-                app, _get_session_cookie_value(auth_client),
-            )
-
-            assert hashlib.sha256(ciphertext).hexdigest() in payload.values()
-            for value in payload.values():
-                assert value != ciphertext, "The ciphertext is in the session."
-                assert ciphertext.decode("ascii") not in str(value), (
-                    f"The ciphertext is in a session value: {value!r}"
-                )
-                assert plaintext_secret not in str(value), (
-                    f"The plaintext key is in a session value: {value!r}"
-                )
+            added = after.keys() - before.keys()
+            assert len(added) == 1, f"Setup added {sorted(added)} to the session."
+            (fingerprint_name,) = added
+            assert after == {
+                **before,
+                SESSION_LAST_ACTIVITY_KEY: after[SESSION_LAST_ACTIVITY_KEY],
+                fingerprint_name: hashlib.sha256(
+                    config.pending_secret_encrypted,
+                ).hexdigest(),
+            }
+            # The one value let change is a timestamp, nothing else.
+            assert datetime.fromisoformat(after[SESSION_LAST_ACTIVITY_KEY]).tzinfo
 
     def test_cross_user_cannot_consume_pending(
         self, app, auth_client, seed_user, second_auth_client, seed_second_user

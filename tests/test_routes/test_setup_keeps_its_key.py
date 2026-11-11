@@ -7,8 +7,8 @@ file replaces), so a reload between scanning the QR code and typing its code
 killed the entry just added to the authenticator app.  Ruling plan#3470 kept
 the pending key for every signed-in browser of the account, for 15 minutes
 from when it was made.  Ruling plan#3523 replaced that: the key is shown again
-only in the browser that made it, which its session names by a fingerprint,
-and each load there gives it 15 fresh minutes.  Any other browser gets a new
+only in the browser that made it, which its session names by a fingerprint
+that every sign-in clears, and each load there gives it 15 fresh minutes.  Any other browser gets a new
 key, which replaces it, as does a load with no key pending, an expired one, or
 one that does not decrypt.
 
@@ -23,15 +23,19 @@ one the route's expiry is written and judged by.
 
 import re
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 import pyotp
 import pytest
+import sqlalchemy
 import time_machine
 from cryptography.fernet import Fernet
 
 from app.extensions import db
+from app.models.user import MfaConfig
+from app.routes.auth import mfa as mfa_routes
 from app.services import mfa_service
 from scripts.reset_mfa import reset_mfa
 from tests._two_factor_sign_in import (
@@ -264,6 +268,117 @@ class TestAnotherBrowserNeverSeesIt:
 
         assert again not in (laptop_key, phone_key)
         assert _pending_key_of(user_id) == again
+
+
+class TestASignInStartsWithNoKeyToShow:
+    """The key is kept for the sign-in that made it, not for the browser alone.
+
+    A browser shared by two people is two sign-ins: someone who signs in as
+    her on her browser after she signed out, with her password, must not be
+    shown the key she scanned there.
+    """
+
+    def test_a_new_sign_in_in_the_same_browser_gets_a_new_key(
+        self, auth_client, seed_user,
+    ):
+        """Signed out and in again on one browser: a new key, which the row now holds."""
+        user_id = seed_user["user"].id
+        first = _key_on(auth_client.get(_SETUP))
+        assert redirect_path(auth_client.post("/logout")) == "/login"
+        signed_in = auth_client.post("/login", data={
+            "email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD,
+        })
+        assert redirect_path(signed_in) not in ("/login", "/mfa/verify")
+
+        again = _key_on(auth_client.get(_SETUP))
+
+        assert again != first
+        assert _pending_key_of(user_id) == again
+
+
+@contextmanager
+def _committed_first_on_its_own_connection(statement, real_block):
+    """Commit *statement* as another request would, then open setup's block.
+
+    Stands in for ``write_transaction`` in ``app.routes.auth.mfa``, so the
+    other request's commit lands after everything setup did before its
+    command and before everything inside it: where a deciding read taken
+    before the block would miss it.
+    """
+    with db.engine.begin() as connection:
+        connection.execute(statement)
+    with real_block():
+        yield
+
+
+class TestTheLoadDecidesUnderTheLock:
+    """Setup reads the row it decides on inside its command, after any commit before it.
+
+    ``/mfa/confirm`` takes the owner's lock at its request's start, and so
+    does setup's block, so a confirm commits wholly before the block's read or
+    wholly after its write.  Each test lands a confirm's commit in the one gap
+    a read taken before the block would leave.
+    """
+
+    @staticmethod
+    def _her_confirm_lands_as_the_block_opens(monkeypatch, user_id):
+        """Make her confirm, from another tab, commit just before setup's block."""
+        enabled = (
+            sqlalchemy.update(MfaConfig)
+            .where(MfaConfig.user_id == user_id)
+            .values(
+                is_enabled=True,
+                totp_secret_encrypted=MfaConfig.pending_secret_encrypted,
+                pending_secret_encrypted=None,
+                pending_secret_expires_at=None,
+            )
+        )
+        real_block = mfa_routes.write_transaction
+        monkeypatch.setattr(
+            mfa_routes, "write_transaction",
+            lambda: _committed_first_on_its_own_connection(enabled, real_block),
+        )
+
+    def test_another_browsers_load_puts_no_key_on_her_just_enabled_row(
+        self, app, auth_client, seed_user, monkeypatch,
+    ):
+        """The load sees her two-factor on and writes nothing, so no key waits there.
+
+        Read before the block, this load made a new key and wrote it onto her
+        enabled row, where a confirm with its code would replace her secret.
+        """
+        user_id = seed_user["user"].id
+        _key_on(auth_client.get(_SETUP))
+        laptop = _owner_signed_in_again(app)
+        self._her_confirm_lands_as_the_block_opens(monkeypatch, user_id)
+
+        response = laptop.get(_SETUP)
+
+        assert redirect_path(response) == "/security"
+        after = two_factor_row_of(user_id)
+        assert after.is_enabled is True
+        assert after.pending_secret_encrypted is None
+        assert after.pending_secret_expires_at is None
+
+    def test_her_own_reload_writes_no_expiry_onto_the_row_her_confirm_cleared(
+        self, auth_client, seed_user, monkeypatch,
+    ):
+        """A reload in her own browser sees the key confirmed and renews nothing.
+
+        Read before the block, the renewal wrote an expiry onto the row whose
+        key her confirm had just spent, leaving a pending expiry with no key.
+        """
+        user_id = seed_user["user"].id
+        _key_on(auth_client.get(_SETUP))
+        self._her_confirm_lands_as_the_block_opens(monkeypatch, user_id)
+
+        response = auth_client.get(_SETUP)
+
+        assert redirect_path(response) == "/security"
+        after = two_factor_row_of(user_id)
+        assert after.is_enabled is True
+        assert after.pending_secret_encrypted is None
+        assert after.pending_secret_expires_at is None
 
 
 class TestANewKeyIsMade:

@@ -14,7 +14,6 @@ from datetime import date
 from decimal import Decimal, ROUND_CEILING
 
 from flask import render_template, request
-from flask_login import current_user
 
 from app.routes.loan._bp import loan_bp
 from app.routes.loan._helpers import (
@@ -30,9 +29,6 @@ from app.routes.loan._helpers import (
 from app.services import amortization_engine, balance_at, loan_resolver
 from app.services.amortization_engine import AmortizationSummary
 from app.services.installment_calendar import first_installment_date
-from app.services.recurring_transfer_query import (
-    active_recurring_transfer_templates,
-)
 from app.utils.auth_helpers import require_owner
 from app.utils.dates import months_between
 from app.utils.money import round_money
@@ -323,14 +319,13 @@ def payoff_calculate(account_id):
             error="This loan is paid off. No payoff scenario available.",
         )
 
-    # Whether the loan has a plan of ITS OWN to compare with the contract: a
-    # recurring definition into it (the plan prices every occurrence, rows
-    # or not -- ruling R-R64) or a payment row.  A loan with neither folds
-    # the contract's own installments, and a comparison would read "on
-    # track, $0.00 saved" of a plan that is the contract.
-    has_plan = bool(ctx.loan.payments) or bool(
-        active_recurring_transfer_templates(account.id, current_user.id),
-    )
+    # Whether the loan has a plan of ITS OWN to compare with the contract --
+    # a payment in its record, a recurring definition into it, or a projected
+    # row its forward plan folds -- is the seam's answer, read off the loan's
+    # one record (``LoanFigures.has_own_plan``).  A loan with none folds the
+    # contract's own installments, and a comparison would read "on track,
+    # $0.00 saved" of a plan that is the contract.
+    has_plan = ctx.figures.has_own_plan
     if mode == "extra_payment":
         return _payoff_extra_payment_result(
             account, params, ctx, data, has_plan,

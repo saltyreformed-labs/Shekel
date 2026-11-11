@@ -174,7 +174,7 @@ zero outside test windows) and is the earliest queryable signal of a credential-
 that the per-route 5-per-15min ceiling is otherwise silently absorbing. Pair the rule with Grafana
 contact-point delivery (email or webhook) per the operator's preference.
 
-### 5.5 Health Checks
+### 5.6 Health Checks
 
 The `/health` endpoint returns the application and database status:
 

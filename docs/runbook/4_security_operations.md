@@ -380,7 +380,8 @@ Expected output:
 - `pg_stat_ssl` rows show `ssl = t`, a `version` of `TLSv1.2` or `TLSv1.3`, and a non-empty
   `cipher`.
 
-If `ssl = off` after the override is applied, see Troubleshooting §7.4 below.
+If `ssl = off` after the override is applied, see
+[Troubleshooting §7.1](7_troubleshooting.md#71-common-issues).
 
 #### 4.12.4 Rotating the certificate
 

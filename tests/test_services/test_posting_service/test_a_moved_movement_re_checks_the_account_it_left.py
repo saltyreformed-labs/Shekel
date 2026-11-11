@@ -8,9 +8,11 @@ was moved off a card reversed the card's leg and left the card's correction
 booked for money no longer there (review plan#2521, finding A1; a defect at
 the merge base too).  The self-heal now reads the accounts off the deltas'
 own legs, and these cases grade both sides of such a move through the door a
-user's correction runs (``transaction_service.apply_requested_status``).  The
-figures are the worked-out read, which holds them whatever the re-check did, so
-the parity lines are what grade the re-check.
+user's correction and Undo CC run (``transaction_service.apply_requested_status``).
+A payment leaves a card by Undo CC since plan task plan#3289, when "Paid from"
+stopped moving one off the card; it moves between cash accounts by "Paid
+from".  The figures are the worked-out read, which holds them whatever the
+re-check did, so the parity lines are what grade the re-check.
 """
 
 from __future__ import annotations
@@ -48,33 +50,42 @@ def _move_paid_from(row, account) -> None:
     _db.session.commit()
 
 
+def _undo_cc(row) -> None:
+    """Take *row* off the card with Undo CC, as the popover's press does."""
+    transaction_service.undo_credit(row)
+    _db.session.commit()
+
+
 class TestAMovedPaymentReChecksTheAccountItLeft:
     """The account a settled payment leaves keeps its asserted balance."""
 
-    def test_a_paid_from_moved_off_a_card_re_checks_the_card(
-        self, app, db, seed_user, seed_periods,
+    def test_undo_cc_off_a_card_re_checks_the_card(
+        self, app, seed_user, seed_periods,
     ):
-        """A $120.00 card payment moved to Checking: the card still reads -$500.00.
+        """A $120.00 card payment taken off the card by Undo CC: the card still reads -$500.00.
 
         The card opens at -$500.00, asserted on 2026-05-14, and a bill on
         Checking is put on the card that day, so the assertion absorbs it: the card's
         ledger reads the -500.00 opening, the -120.00 leg and a +120.00
-        true-up.  Moved to Checking, the leg reverses (+120.00 on the card)
-        and the card's records hold no payment, so its true-up must return
-        to 0.00:
+        true-up.  Undo CC sets the row back to Projected and moves its
+        payment home to Checking, un-dated (plan task plan#3055), so the leg
+        reverses (+120.00 on the card) and the card's records hold no
+        payment: its true-up must return to 0.00.  An un-dated payment posts
+        on no account, so Checking keeps its opening:
 
             card     -500.00 (asserted; the store reads -380.00 with the card
                      never re-checked)
-            Checking 1,000.00 opening (2024) - 120.00 riding on top = 880.00
+            Checking 1,000.00 opening (2024)
 
-        The bill reaches the card by a Credit press with the opening day
-        typed, which stores what a settle naming the card under "Paid from"
-        stored until plan task plan#3232 (ruling plan#3227 refuses a card
-        there): Paid, its payment on the card, the row on Checking.  Rows
-        paid from a card before then hold that shape too.  The row stays on
-        Checking so the account the payment leaves is one the row does not
-        name: a bill planned on the card would name it, and re-checking the
-        row's own account would pass here with the defect back.
+        It moved the payment to Checking by "Paid from" until plan task
+        plan#3289, which refuses that (Checking then read 880.00, the
+        payment dated on it); Undo CC is the way a payment leaves the card
+        now, through the same re-point.  The bill reaches the card by a
+        Credit press with the opening day typed: Paid, its payment on the
+        card, the row on Checking.  The row stays on Checking so the account
+        the payment leaves is one the row does not name: a bill planned on
+        the card would name it, and re-checking the row's own account would
+        pass here with the defect back.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -99,19 +110,20 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
             ) == Decimal("1000.00"), "CONTROL: Checking holds no payment yet"
             assert_ledger_parity(_db.session, scenario_id)
 
-            _move_paid_from(row, checking)
+            _undo_cc(row)
 
             assert row.covering_movements[0].account_id == checking.id
+            assert row.covering_movements[0].settled_on is None
             assert account_net(
                 _db.session, card.id, scenario_id,
             ) == Decimal("-500.00")
             assert account_net(
                 _db.session, checking.id, scenario_id,
-            ) == Decimal("880.00")
+            ) == Decimal("1000.00")
             assert_ledger_parity(_db.session, scenario_id)
 
     def test_a_paid_from_moved_off_checking_re_checks_checking(
-        self, app, db, seed_user, seed_periods,
+        self, app, seed_user, seed_periods,
     ):
         """A $120.00 payment from Checking moved to Savings: Checking still reads $1,000.00.
 

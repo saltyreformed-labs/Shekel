@@ -283,8 +283,16 @@ class TestThePopover:
     def test_a_row_on_the_card_is_credit_with_undo_cc_and_no_paid(
         self, auth_client, seed_user, seed_periods_today,
     ):
-        """Context line Credit; Undo CC; no Paid, no Credit press; "Paid from" shows the Visa."""
-        card, row = _on_the_card(seed_user, seed_periods_today)
+        """Context line Credit; Undo CC; no Paid, no Credit press; no "Paid from" box.
+
+        Undo CC is the row's way off the card (plan task plan#3289, ruling
+        plan#3227).  A Savings account is planted so the box would have a
+        choice: checking and Savings, beside the Visa it records, so only
+        that rule can withhold it (ruling R-CC34 draws none with one choice).
+        """
+        _card, row = _on_the_card(seed_user, seed_periods_today)
+        add_savings(seed_user)
+        db.session.commit()
 
         html = _popover(auth_client, row.id)
 
@@ -295,8 +303,8 @@ class TestThePopover:
         assert "Undo CC" in html
         assert 'aria-label="Mark as paid"' not in html
         assert 'aria-label="Mark as credit card"' not in html
-        picker = re.search(r'<select name="tender_account_id".*?</select>', html, re.S).group(0)
-        assert re.search(rf'<option value="{card.id}" selected>Visa</option>', picker)
+        assert 'name="tender_account_id"' not in html
+        assert "Paid from" not in html
 
     def test_the_status_dropdown_selects_credit_and_disables_paid(
         self, auth_client, seed_user, seed_periods_today,
@@ -368,6 +376,52 @@ class TestTheSave:
         assert movement.account_id == card.id
         assert (after.version_id, movement.id, movement.amount, after.settled_on) == snapshot
         assert "st-credit" in response.get_data(as_text=True)
+
+    @pytest.mark.parametrize("names", ["checking", "savings"])
+    def test_a_paid_from_posted_off_the_card_is_refused(
+        self, auth_client, seed_user, seed_periods_today, names,
+    ):
+        """A hand-built Save naming checking, or Savings: 400 naming Undo CC, still on the Visa.
+
+        The popover draws no box here (plan task plan#3289), so only a
+        hand-built post names an account; the door refuses it rather than
+        move the payment off the card under Paid.
+        """
+        card, row = _on_the_card(seed_user, seed_periods_today)
+        savings = add_savings(seed_user)
+        db.session.commit()
+        account = seed_user["account"] if names == "checking" else savings
+        before = _fresh(row.id)
+        movement = status_seam.covering_movement_of(before)
+        snapshot = (before.version_id, movement.id, movement.amount, before.settled_on)
+        payload = _the_save(_popover(auth_client, row.id))
+        payload["tender_account_id"] = str(account.id)
+
+        response = auth_client.patch(f"/transactions/{row.id}", data=payload)
+
+        assert response.status_code == 400
+        assert b"Press Undo CC to take it off the card" in response.data
+        after = _fresh(row.id)
+        movement = status_seam.covering_movement_of(after)
+        assert after.status_id == _status(StatusEnum.DONE)
+        assert movement.account_id == card.id
+        assert (after.version_id, movement.id, movement.amount, after.settled_on) == snapshot
+
+    def test_a_save_naming_the_card_itself_moves_nothing(
+        self, auth_client, seed_user, seed_periods_today,
+    ):
+        """A hand-built Save naming the Visa: the echo, 200, the $800.00 still on the Visa."""
+        card, row = _on_the_card(seed_user, seed_periods_today)
+        payload = _the_save(_popover(auth_client, row.id))
+        payload["tender_account_id"] = str(card.id)
+
+        response = auth_client.patch(f"/transactions/{row.id}", data=payload)
+
+        assert response.status_code == 200
+        after = _fresh(row.id)
+        movement = status_seam.covering_movement_of(after)
+        assert after.status_id == _status(StatusEnum.DONE)
+        assert (movement.account_id, movement.amount) == (card.id, _EIGHT_HUNDRED)
 
     def test_a_note_and_a_corrected_figure_save_on_the_card(
         self, auth_client, seed_user, seed_periods_today,

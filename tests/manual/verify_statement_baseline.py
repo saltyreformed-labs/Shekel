@@ -45,7 +45,7 @@ not".
 
     DATABASE_URL=postgresql://.../shekel_xf3d \\
         .venv/bin/python tests/manual/verify_statement_baseline.py before.json
-    # ... deploy the change and run the anchor backfill ...
+    # ... deploy the change ...
     DATABASE_URL=postgresql://.../shekel_xf3d \\
         .venv/bin/python tests/manual/verify_statement_baseline.py after.json
     diff before.json after.json

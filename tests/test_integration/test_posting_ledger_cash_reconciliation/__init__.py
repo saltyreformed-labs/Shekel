@@ -1,13 +1,11 @@
 """The cash-transaction reconciliation oracle (Build-Order Step 3, Commit 8).
 
 The correctness gate for the ordinary-transaction half of the double-entry
-posting ledger.  Build-Order Step 2 posts settled **transfer** shadows; Step 3
-backfills and posts settled **cash** (ordinary, non-transfer) transactions, so a
-real account's linked ledger now accumulates BOTH sources at once.  Reads stay on
-the ``balance_at`` seam over ``budget.transactions`` (Step 3 changes no read
-path), so -- exactly as in Step 2 -- the ledger is validated against the SOURCE
-transaction rows, never against a displayed balance.  The invariants below are
-plan Section 6.
+ledger.  Build-Order Step 2 posted settled **transfer** shadows; Step 3
+backfilled and posted settled **cash** (ordinary, non-transfer) transactions, so
+a real account's linked ledger accumulated BOTH sources at once.  The ledger is
+validated against the SOURCE transaction rows, never against a displayed
+balance, exactly as in Step 2.  The invariants below are plan Section 6.
 
 **The ledger they grade is the one worked out from the records since plan step
 plan#2913** (``tests/_ledger_reads.py``); they say "legs" and "postings" as they
@@ -32,20 +30,16 @@ bucket.
      -- it was
      ``COALESCE(actual_amount, estimated_amount)`` until plan step X-au-c3 made
      a settled row's figure its own record rather than a fallback to its plan.
-  2. **Per counter account (category / fallback / orphan).**  For each non-linked
-     (Income/Expense) ledger account CA, ``SUM(postings on CA)`` equals the
-     negation of the signed effects of the transactions whose legs CURRENTLY
-     reside on CA -- identified by the **linkage** (each leg's movement,
-     ``journal_entries.transaction_entry_id``, resolved to its parent row by
-     ``transaction_entries.transaction_id``), NOT by ``category_id`` matching.  The linkage formulation is
-     load-bearing for an **orphan** (a deleted category's former ledger account):
-     the transactions that posted to it now read ``category_id IS NULL`` -- so a
-     ``category_id`` match could no longer find them, while the
-     ``transaction_id`` linkage reconciles the orphan against exactly the
-     transactions whose legs landed on it (see the ``ledger_account.py``
-     "Reconciliation of orphans" note).  It is equally load-bearing through a
-     **recategorize** (A -> B): the transaction's reversal nets it to zero on A
-     (excluded by the non-zero-net guard) and posts its effect to B.
+  2. **Per counter account (category / Uncategorized / transit).**  For each
+     counter key CA, the lines on CA net, per parent (a row, or a transfer side's
+     record), to the negation of its signed effect, and a row's CA is the key its
+     CURRENT category and type give -- each line identified by its **movement**,
+     resolved to its parent by ``transaction_entries.transaction_id``, NOT by ``category_id`` matching
+     (``_assert_counter_accounts_reconcile``).  The store needed that linkage for
+     an **orphan** (a deleted category's former ledger account) and for a
+     **recategorize** (A -> B), whose reversal netted the row to zero on A and
+     posted its effect to B.  Worked out, a recategorized row books on B alone
+     and a deleted category's rows on the Uncategorized bucket.
   3. **Trial balance.**  The worked-out lines sum to ``0`` across the whole
      ledger, a cheap self-check.
   4. **Per-transaction completeness.**  Every settled, non-deleted, non-transfer

@@ -4,7 +4,7 @@ The seventh manual harness, and it exists because the six before it cannot see
 this step.  ``verify_balance_baseline.py`` samples the balance seam and would
 call ruling **R-FM** byte-identical wherever an assertion happens to close over
 the same day the purchase did; ``verify_statement_baseline.py`` reads the
-posting ledger but grades the anchor-correction family.  What X-f3b moves is a
+worked-out ledger but grades the anchor-correction family.  What X-f3b moves is a
 DAY: money the app booked when an envelope closed is booked when the bank took
 it, so the difference lives in the narrow window between those two dates and a
 coarser sample would report zero (the shape

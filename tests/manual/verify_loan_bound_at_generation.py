@@ -37,9 +37,9 @@ MUST move there.
   repopulates, so the pass that resolves the bound runs while the schedule is
   mid-rebuild.  It prints the window on both sides of the hole.
 * **DOOR 3 (planted) -- the template-edit MAINTAIN pass after the loan's
-  payoff has MOVED EARLIER**: a balance true-up is appended and reconciled
-  into the ledger (the shape ``loan_anchor_service.apply_loan_anchor_true_up``
-  records) WITHOUT the chokepoint's column sync, so the column still says the
+  payoff has MOVED EARLIER**: a balance true-up is appended (the shape
+  ``loan_anchor_service.apply_loan_anchor_true_up`` records; the stored ledger's
+  reconcile went at plan task plan#3076) WITHOUT the chokepoint's column sync, so the column still says the
   old payoff while the loan folds to zero sooner.  ``transfer_recurrence.
   regenerate_for_template`` is the one pass that can RETIRE rows: on the
   base tree it honours the stale column and retires nothing; on the branch

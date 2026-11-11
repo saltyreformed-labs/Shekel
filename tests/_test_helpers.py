@@ -1370,9 +1370,9 @@ def create_hysa_account(  # pylint: disable=too-many-arguments,too-many-position
     Args:
         seed_user: The ``seed_user`` fixture dict.
         db_session: The test ``db.session``.
-        anchor_period: The :class:`~app.models.pay_period.PayPeriod` to
-            anchor the account against; its ``id`` becomes the account's
-            ``current_anchor_period_id``.
+        anchor_period: The :class:`~app.models.pay_period.PayPeriod` whose
+            start day the opening is observed on; the account stores no period
+            (rulings R-EH, R-EO).
         balance: The opening anchor balance (Decimal -- construct from a
             string per the coding standard).
         apy: The annual percentage yield as a Decimal fraction (default
@@ -2232,9 +2232,9 @@ def load_init_database_module():
     mutates ``DATABASE_URL_APP`` to ``""`` at import time (its deploy-host
     owner-role override, which must run BEFORE the ``app`` import), a
     process-global side effect this restores around the load so it never leaks
-    into the test session.  Shared by the loan and account backfill suites so
-    the importlib + env-restore boilerplate lives in one place (a duplicate-code
-    finding otherwise).
+    into the test session.  Shared so the importlib + env-restore boilerplate
+    lives in one place (a duplicate-code finding otherwise); the loan and account
+    backfill suites it was first written for are gone.
 
     Returns:
         The loaded ``init_database`` module object, exposing
@@ -2955,8 +2955,8 @@ def create_settled_transfer(
 ):
     """Create an ad-hoc transfer and settle it (Paid), returning the parent.
 
-    The shared settled-transfer builder for the posting-ledger (Build-Order
-    Step 2) backfill / lifecycle suites.  Routes the whole thing through
+    The shared settled-transfer builder, first written for the posting-ledger
+    (Build-Order Step 2) backfill / lifecycle suites.  Routes the whole thing through
     ``transfer_service`` -- the sole transfer writer -- so the transfer and
     each side's payment record obey every transfer invariant, exactly as
     production produces them.  The transfer is created Projected, then
@@ -7025,9 +7025,9 @@ def make_appreciating_account(seed_user, db_session, anchor_period, balance, rat
     Args:
         seed_user: The ``seed_user`` fixture dict.
         db_session: The test ``db.session``.
-        anchor_period: The :class:`~app.models.pay_period.PayPeriod` to
-            anchor the account against; its ``id`` becomes the account's
-            ``current_anchor_period_id``.
+        anchor_period: The :class:`~app.models.pay_period.PayPeriod` whose
+            start day the opening is observed on; the account stores no period
+            (rulings R-EH, R-EO).
         balance: The user-set market value, used as the anchor balance
             (Decimal -- construct from a string per the coding standard).
         rate: The annual appreciation rate as a Decimal fraction (e.g.
@@ -7097,9 +7097,9 @@ def make_investment_account(
     Args:
         seed_user: The ``seed_user`` fixture dict.
         db_session: The test ``db.session``.
-        anchor_period: The :class:`~app.models.pay_period.PayPeriod` to
-            anchor the account against; its ``id`` becomes the account's
-            ``current_anchor_period_id``.
+        anchor_period: The :class:`~app.models.pay_period.PayPeriod` whose
+            start day the opening is observed on; the account stores no period
+            (rulings R-EH, R-EO).
         balance: The opening anchor balance (Decimal -- construct from a
             string per the coding standard).
         name: The account name (default ``"401k"``); parameterised so a
@@ -8857,8 +8857,8 @@ def open_owner_calendar(user_id, first_payday, num_periods=1, cadence_days=14):
     """Open *user_id*'s pay calendar through the writer that owns the table.
 
     **Plan step ``pay_calendar:C4-b-1``.**  For a test that hand-builds a
-    ``User`` and needs a pay period before ``account_service.create_account``,
-    which refuses an owner who has none.  The sites this replaced each carried
+    ``User`` and needs a pay period (``account_service.create_account``
+    refused an owner with none until ruling plan#3318).  The sites this replaced each carried
     the same five lines -- a bare ``PayPeriod(...)`` setting ``end_date`` and
     ``period_index``, the two values ``pay_period_write._write_derivation``
     DERIVES, and no ``budget.pay_schedule`` row beside them.  *No count is

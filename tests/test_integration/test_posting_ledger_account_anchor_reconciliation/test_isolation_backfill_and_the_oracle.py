@@ -51,13 +51,13 @@ class TestScenarioAndOwnerIsolation:
     ):
         """A scenario's FIRST activity on an account opens that ledger.
 
-        A scenario becomes live for an account the moment an entry first lands
-        on its linked ledger there.  The account-global sync only visits
-        scenarios that are ALREADY live, so the emission that makes a scenario
-        live is the one that has to mint its corrections -- and the
-        effect-time self-heal skipped it, because it tested only whether a
-        posted correction had gone STALE and a brand-new scenario has none to
-        stale.
+        While the store was written, a scenario became live for an account the
+        moment an entry first landed on its linked ledger there.  The
+        account-global sync visited only scenarios ALREADY live, so the emission
+        that made a scenario live was the one that had to mint its corrections
+        -- and the effect-time self-heal skipped it, because it tested only
+        whether a posted correction had gone STALE and a brand-new scenario had
+        none to stale.
 
         Hand-computed, in the shape production would reach it: Checking opened
         2026-01-02 at $1,000.00, a fresh scenario, one $70.00 expense settled
@@ -68,9 +68,9 @@ class TestScenarioAndOwnerIsolation:
         equity twin both missing, which is why the trial balance still closed
         while the account's balance was wrong by its entire opening.
 
-        Latent rather than live today -- production creates baseline scenarios
-        only, and a baseline carries its corrections from account-create time
-        -- so this is the guard for the scenario-clone feature that would
+        Latent rather than live -- production creates baseline scenarios only,
+        and the store's baseline carried its corrections from account-create
+        time -- so this is the guard for the scenario-clone feature that would
         otherwise ship on top of it.  The defect was the store's self-heal;
         since plan#2914 this grades the ledger worked out from the records,
         which opens the fresh scenario's ledger from the opening record.
@@ -285,10 +285,10 @@ class TestSettledTransferAttributionMutation:
     """A settled transfer's period / settle-day edit keeps the anchor sound (F1)."""
 
     @pytest.mark.server_clock
-    def test_settled_period_move_reposts_and_reconciles(
+    def test_settled_period_move_refiles_and_reconciles(
         self, app, db, seed_user,
     ):
-        """Moving a settled transfer's period re-posts its cash (R2) and reconciles.
+        """Moving a settled transfer's period re-files its cash (R2) and reconciles.
 
         A $150.00 Checking -> Savings transfer settled in the bootstrap period
         (riding on top of both openings; Savings 200 + 150 = 350).  Moving it to

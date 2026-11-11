@@ -1,14 +1,16 @@
 """The account-anchor reconciliation oracle (Build-Order Step 5, Commit 8).
 
-The correctness gate for the WRITE side of Step 5: every NON-loan account
-(checking, savings, investment, property, interest-bearing, non-loan liability)
-posts an OPENING equity correction for its earliest ``AccountAnchorHistory`` row
-and a TRUE-UP correction per later row, mirroring the shipped loan genesis
-pattern.  After this the trial balance closes app-wide and every linked ledger
-sums to an ABSOLUTE balance.  This oracle validates the POSTED ledger against an
-independent second opinion re-derived from the SOURCE tables
-(``budget.transactions`` + ``budget.account_anchor_history``), never against a
-displayed balance and never against the walk / reconcile that produced it.
+The correctness gate for Step 5's correction rule: the worked-out ledger books,
+for every NON-loan account (checking, savings, investment, property,
+interest-bearing, non-loan liability), an OPENING equity correction at its
+earliest ``AccountAnchorHistory`` row and a TRUE-UP correction per later row,
+mirroring the loan genesis pattern (``ledger_lines._account_anchors``).  So the
+trial balance closes app-wide and every linked ledger sums to an ABSOLUTE
+balance.  This oracle validates that ledger against an independent second
+opinion re-derived from the SOURCE tables (``budget.transactions`` +
+``budget.account_anchor_history``), never against a displayed balance and never
+against the read that produced it.  (The rule was the stored ledger's write
+side until plan task plan#3133 deleted its writer.)
 
 The absolute invariant, per non-loan account A in scenario S::
 

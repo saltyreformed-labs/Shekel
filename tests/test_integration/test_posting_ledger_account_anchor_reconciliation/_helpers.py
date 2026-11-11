@@ -52,9 +52,9 @@ def _latest_assertion(account_id: int) -> tuple[date, Decimal]:
     Reads ``account_anchor_history`` directly -- the row with the max
     ``(observed_on, created_at, id)``, exactly the row
     ``cash_ledger.resolve_anchor`` picks -- so the "latest anchor" the invariant
-    references is taken from the source of truth, not the
-    ``current_anchor_balance`` cache the writer also maintains (which a bug
-    could desync).
+    references is taken from the source of truth (the
+    ``current_anchor_balance`` cache that once stood beside it went with
+    ruling R-EH).
 
     **All THREE keys are load-bearing and this oracle ordered on only two until
     plan step X-f1.**  ``observed_on`` is the BUSINESS day the balance was true
@@ -111,8 +111,8 @@ def _independent_source_effect(txn) -> Decimal:
     The per-source truth the linked ledger must reflect: an ordinary cash
     transaction contributes ``effective - Sigma(credit entries)`` signed ``+``
     for income / ``-`` for an expense.  ``effective`` is the model property
-    (``actual`` over ``estimated``).  Independent of the posting builder (it
-    never imports ``_signed_cash_leg``); the linked leg for *txn* equals this.
+    (``actual`` over ``estimated``).  Independent of the worked-out read (it
+    reads nothing of ``ledger_lines``); the linked line for *txn* equals this.
     A transfer side's effect is its transfer's settled figure on its
     record's day, read by :func:`_independent_transfer_side_effects` (it was
     its shadow's settled figure here until plan step
@@ -343,8 +343,8 @@ def _assert_balance_at(account, balance, created_at) -> AccountAnchorHistory:
 def _settle_expense(seed_user, account, amount, settled_on):
     """Settle an expense on *account* on a pinned civil DAY; return it.
 
-    ``settled_on`` is the day the cash moved, pinned so the posted entry and the
-    walk's attribution agree, as in production.  Placed in the seed bootstrap
+    ``settled_on`` is the day the cash moved, pinned so the ledger's line and the
+    walk's attribution fall on one day, as in production.  Placed in the seed bootstrap
     period; the walk attributes by the settle DAY, so the period placement is
     immaterial.  It took an instant (or ``None``, for the period-start fallback)
     until plan step X-f1 removed both the derivation and the fallback.

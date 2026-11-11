@@ -33,7 +33,7 @@ step that first makes it reachable on live data:
   "$102.52 less interest than today's app", by design.
 
 Pure: no database, no app context.  Every figure is stated by hand and checked
-against :func:`~app.utils.money.accrue_monthly_interest` /
+against :func:`~app.utils.money.installment_interest` /
 :func:`~app.utils.money.apply_payment_cash`, the ONE accrual and the ONE
 allocation.
 """
@@ -44,6 +44,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.enums import InterestAccrualConventionEnum
 from app.services.loan_ledger import (
     LoanCalendar,
     LoanCashEvent,
@@ -54,7 +55,7 @@ from app.services.loan_ledger import (
     replay_loan_events,
     replay_loan_stream,
 )
-from app.utils.money import accrue_monthly_interest
+from app.utils.money import installment_interest
 from tests.oracles.loan_monthly_composition import accrual_charge, rate_period
 
 _ZERO = Decimal("0.00")
@@ -116,7 +117,10 @@ class TestAResetClearsWhatStands:
         )
         replay = replay_loan_events(_ZERO, stream)
         [outcome] = replay.payments
-        march = accrue_monthly_interest(Decimal("9000.00"), _RATE)
+        march = installment_interest(
+            Decimal("9000.00"), _RATE, date(2026, 2, 1), date(2026, 3, 1),
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        )
         assert march == Decimal("45.00")
         assert outcome.interest == march
         assert outcome.principal == Decimal("455.00")
@@ -784,8 +788,9 @@ class TestAProjectionNeverPrecedesAFact:
         )
         [_settled, projected] = replay_loan_stream(stream).payment_splits
         assert projected.charge_date == date(2026, 10, 1)
-        assert projected.interest == accrue_monthly_interest(
-            Decimal("9600.00"), _RATE,
+        assert projected.interest == installment_interest(
+            Decimal("9600.00"), _RATE, date(2026, 9, 1), date(2026, 10, 1),
+            InterestAccrualConventionEnum.MONTHLY_1_12,
         ) == Decimal("48.00")
 
     def test_the_extra_accrues_only_at_charges_after_the_facts(self):

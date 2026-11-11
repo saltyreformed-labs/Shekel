@@ -17,6 +17,8 @@ from decimal import Decimal
 from flask import abort, flash, redirect, request, url_for
 from flask_login import current_user
 
+from app import ref_cache
+from app.enums import InterestAccrualConventionEnum
 from app.exceptions import TrackingStartRefused
 from app.extensions import db
 from app.models.account import Account
@@ -133,7 +135,18 @@ def create_params(account_id):
     # the ``rate_history.interest_rate`` CHECK (0..1) accepts.
     origination_rate = data.pop("interest_rate")
 
-    params = LoanParams(account_id=account.id, **data)
+    # How the note accrues interest (plan step recurrence:R16-d).  The list
+    # holds one convention, ``monthly_1_12``, until a member's first consumer
+    # adds the next (ruling plan#3354), so the door states it rather than the
+    # form; the field that lets the owner choose arrives with plan#3355.  An
+    # FK id is not a static literal, so it is stated here, never defaulted.
+    params = LoanParams(
+        account_id=account.id,
+        interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        ),
+        **data,
+    )
     db.session.add(params)
     db.session.flush()
 

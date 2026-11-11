@@ -52,7 +52,7 @@ from app.services import (
     income_service,
     paycheck_calculator,
 )
-from tests._tax_configs import tax_configs_for
+from tests._tax_configs import hand_built_law, tax_configs_for
 from app.tax_law import FicaRules, TaxLaw
 from app.services.balance_at import BalanceContext
 from tests._test_helpers import (
@@ -1040,7 +1040,9 @@ class TestTheProjectionDoesNotMoveWhenTheCalendarYearTURNS:
             # The three ``None``s the retired rule produced on 2027-01-01.
             unresolved = paycheck_calculator.calculate_paycheck(
                 basis, derived_2027,
-                {"bracket_set": None, "state_config": None, "fica_config": None},
+                hand_built_law(
+                    2027, bracket_set=None, state_config=None, fica_config=None,
+                ),
             )
 
             # $104,000 / 26 = $4,000.00 gross, no pre-tax deductions, so each

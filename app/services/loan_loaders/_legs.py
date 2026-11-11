@@ -268,9 +268,11 @@ def settled_income_legs(
     later takes a later id; the transfer's id is immune to that.  The order is
     immaterial to the guards (they take a ``min`` / ``max`` / set), and
     load-bearing for the walk, so it
-    is applied ONCE here rather than by each caller.  The resolver's
-    biweekly-collision redistribution (a display fix) is NOT applied, and is
-    immaterial to a sequentially walked running balance.  ``pay_period`` is
+    is applied ONCE here rather than by each caller.  The biweekly-collision
+    slot assignment the resolver's replay applied
+    (``amortization_engine.slotted_dates``, deleted with that replay's date
+    feed at plan task plan#3389) was never applied here, and is immaterial to
+    a sequentially walked running balance.  ``pay_period`` is
     eager-loaded HERE, which reads it itself as the sort key.
 
     Args:

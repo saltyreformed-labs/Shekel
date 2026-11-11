@@ -2,7 +2,6 @@
 Tests for the amortization engine service.
 """
 
-import dataclasses
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -10,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from app.services.amortization_engine import (
-    PaymentDates,
     PayoffRequest,
     PeriodTerms,
     ProjectionInputs,
@@ -805,115 +803,12 @@ class TestAmortizationEngineRegression:
             )
 
 
-class TestPaymentDatesValidation:
-    """Tests for PaymentDates dataclass validation.
-
-    Validates that invalid inputs are caught at construction time
-    with clear error messages rather than producing silent wrong
-    results in the schedule loop.
-
-    **These guards were on ``PaymentRecord`` until plan step balance:X-bl-2b**,
-    which made a payment's three dates ONE value that both the priced record
-    and the loader's installment composed.  The tests moved with the guards:
-    grading the dates through a ``PaymentRecord`` wrapper would have been
-    grading the wrapper.  *The record, and the tests of what it added (its
-    amount and its composition guard), went at plan task plan#3388 (ruling
-    R-R93).*
-    """
-
-    def test_string_period_start_raises_type_error(self):
-        """String date must be rejected -- only date instances accepted."""
-        with pytest.raises(TypeError, match="period_start must be a date"):
-            PaymentDates(
-                period_start="2026-02-15",
-                due_date=date(2026, 2, 15),
-                settled_on=date(2026, 2, 15),
-            )
-
-    def test_string_due_date_raises_type_error(self):
-        """String due_date must be rejected -- only date instances accepted.
-
-        ``due_date`` is the installment the payment satisfies, and it is a
-        SEPARATE fact from ``period_start`` (the pay period funding it) and from
-        ``settled_on`` (the day its cash moved), so it carries the same
-        construction-time type guard: a value that conflated any two of them,
-        or carried a stringly-typed date, would mis-key every downstream
-        due-month lookup.
-        """
-        with pytest.raises(TypeError, match="due_date must be a date"):
-            PaymentDates(
-                period_start=date(2026, 2, 15),
-                due_date="2026-03-01",
-                settled_on=date(2026, 2, 15),
-            )
-
-    def test_string_settled_on_raises_type_error(self):
-        """String settled_on must be rejected -- only a date or None accepted.
-
-        ``settled_on`` is the replay-vs-projection cut (plan step X-an), so a
-        stringly-typed one would compare against ``as_of`` by lexicographic
-        accident rather than by chronology.  ``None`` is the one non-date value
-        it accepts, and it means the payment has not settled.
-        """
-        with pytest.raises(
-            TypeError, match="settled_on must be a date or None",
-        ):
-            PaymentDates(
-                period_start=date(2026, 2, 15),
-                due_date=date(2026, 2, 15),
-                settled_on="2026-02-15",
-            )
-
-    def test_bool_settled_on_raises_type_error(self):
-        """A bool settled_on must be rejected -- ``True`` is not a day.
-
-        ``settled_on is not None`` is what ``is_confirmed`` reads, so a ``bool``
-        reaching this field would report the value as confirmed and then fail
-        only deep inside the replay, where ``True <= as_of`` raises with no
-        mention of the value that produced it.  The guard earns its place on
-        the value, not on a migration path: no stale-caller shape reaches a
-        guard like this one, since a stale positional call raises on arity and
-        a stale keyword call on the unexpected keyword.
-        """
-        with pytest.raises(
-            TypeError, match="settled_on must be a date or None",
-        ):
-            PaymentDates(
-                period_start=date(2026, 2, 15),
-                due_date=date(2026, 2, 15),
-                settled_on=True,
-            )
-
-    def test_is_confirmed_is_derived_from_the_settle_day(self):
-        """``is_confirmed`` IS ``settled_on is not None`` -- never stored (X-an).
-
-        The two facts cannot disagree because there is only one of them: a
-        value carrying a day is confirmed, one carrying none is a plan, and
-        there is no third state to validate against.  Pinned so a future edit
-        that re-introduces the boolean has to delete this test to do it.
-        """
-        settled = PaymentDates(
-            period_start=date(2026, 2, 15),
-            due_date=date(2026, 3, 1),
-            settled_on=date(2026, 2, 28),
-        )
-        projected = PaymentDates(
-            period_start=date(2026, 3, 15),
-            due_date=date(2026, 4, 1),
-            settled_on=None,
-        )
-        assert settled.is_confirmed is True
-        assert projected.is_confirmed is False
-        assert "is_confirmed" not in {
-            f.name for f in dataclasses.fields(PaymentDates)
-        }
-
-
 class TestRateChangeRecordValidation:
     """Tests for RateChangeRecord dataclass validation.
 
-    Mirrors TestPaymentDatesValidation: validates that invalid inputs
-    are caught at construction time with clear error messages.
+    Validates that invalid inputs are caught at construction time with
+    clear error messages rather than producing silent wrong results in the
+    schedule loop.
     """
 
     def test_negative_rate_raises_value_error(self):
@@ -962,7 +857,7 @@ class TestPeriodTermsValidation:
     """Construction-time validation for PeriodTerms and the
     ProjectionInputs empty-terms guard.
 
-    Mirrors TestPaymentDatesValidation: invalid data must fail loudly
+    Mirrors TestRateChangeRecordValidation: invalid data must fail loudly
     at construction, not produce a silently wrong schedule.
     """
 

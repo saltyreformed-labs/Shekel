@@ -58,13 +58,12 @@ def due_in_following_month(reference: date, payment_day: int) -> date:
     The rule's one-month step: whatever day of its month *reference* is, the
     answer is *payment_day* in the NEXT calendar month, clamped to that
     month's end.  It seeds the loan's first installment from its origination
-    (:func:`first_installment_date`), steps to the installment after a
-    date's own (:func:`installment_after`), and the schedule-slot walk's step
-    past a contested month
-    (:func:`app.services.amortization_engine.schedule_dates`), whose own copy
-    of this step went at plan step recurrence:R25.  *It seeded the rate
-    engine's replayed schedule from its latest row or anchor too, until plan
-    step recurrence:R16-e deleted that replay (ruling plan#3382).*
+    (:func:`first_installment_date`) and steps to the installment after a
+    date's own (:func:`installment_after`).  *It seeded the rate engine's
+    replayed schedule from its latest row or anchor too, until plan step
+    recurrence:R16-e deleted that replay (ruling plan#3382), and stepped the
+    schedule-slot walk (``amortization_engine.schedule_dates``) past a
+    contested month until plan task plan#3389 deleted that walk.*
 
     Args:
         reference: Any date; only its month is read.

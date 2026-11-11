@@ -622,19 +622,12 @@ _FENCED_MODULE_RULINGS = {
             # since plan step balance:X-bi-6-4b.  It selects records, and
             # carries no balance of any kind.
             "confirmed_shadows_through",
-            # The payment feed's DATE half (plan step balance:X-bl-2a).  It
-            # returns dates and nothing else, and that is structural rather than
-            # incidental: ``PaymentInstallment`` has no money field to fill.  It
-            # selects the loan's payments -- each a leg of its transfer since
-            # plan step balance:X-bi-6-4b -- and states each one's three dates:
-            # the same ruling ``confirmed_shadows_through`` carries, over the
-            # same payments.  It hands back the leg, whose transfer and record
-            # are ORM rows, so a figure is reachable by relationship exactly as
-            # it is from that loader; what it cannot do is sum one, which is
-            # the fence's subject.  (``schedule_dates``, the
-            # slot assignment, is NOT here: it lives in the unfenced pure engine
-            # ``amortization_engine``, which no scoped package covers.)
-            "payment_installments",
+            # ``payment_installments``, the payment feed's DATE half (plan step
+            # balance:X-bl-2a), was ruled here on that loader's ground until
+            # plan task plan#3389 deleted it (plan step recurrence:R16-e).  Its
+            # entry goes in the same edit, for the reason the
+            # ``row_valuation`` entry gives: a ruling for a name the module no
+            # longer defines would un-fence whatever later takes the name.
         }),
     ),
     # The genesis loan-ledger package.  Scoped WHOLE, not one submodule: a new

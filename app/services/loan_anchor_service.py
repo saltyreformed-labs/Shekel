@@ -429,9 +429,10 @@ def _earliest_payment_moved_on(account: Account) -> date | None:
     **No amount is read, and none needs to be.**  A movement cannot carry
     ``$0.00`` (``ck_transaction_entries_positive_amount``), so a dated
     movement IS money that moved.  Until R-BAL155 this read each payment's
-    WALK day (:func:`app.services.loan_ledger.payment_installments`), which
-    dates a ``$0.00`` close by the installment it skips (ruling R-R107), so a
-    close named a day on which nothing was paid.
+    WALK day (:func:`app.services.loan_ledger.payment_visible_on`, through
+    the date feed ``loan_ledger.payment_installments`` that plan task
+    plan#3389 deleted), which dates a ``$0.00`` close by the installment it
+    skips (ruling R-R107), so a close named a day on which nothing was paid.
 
     **Within that set it parts from the walk twice.**  WHETHER: a ``$0.00``
     close is a member the walk still counts,

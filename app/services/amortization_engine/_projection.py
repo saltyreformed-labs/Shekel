@@ -3,12 +3,13 @@
 The forward half of the amortization engine: the value records
 (:class:`RateChangeRecord`, :class:`PeriodTerms`, :class:`AmortizationRow`,
 :class:`AmortizationSummary`, :class:`ProjectionInputs`), the standard
-payment formula, the schedule-slot helpers, and :func:`project_forward`
-itself.  It writes no date arithmetic of its own: a projected row's date is
-the one clamp's (:func:`app.utils.dates.clamped_day`) and a slot's step past
-a contested month the loan calendar's
-(:func:`app.services.installment_calendar.due_in_following_month`), since
-plan step recurrence:R25 deleted this module's month step and clamp.
+payment formula and :func:`project_forward` itself.  It writes no date
+arithmetic of its own: a projected row's date is the one clamp's
+(:func:`app.utils.dates.clamped_day`), since plan step recurrence:R25 deleted
+this module's month step and clamp.  *The schedule-slot helpers
+(``schedule_dates``, ``slotted_dates``) lived here until plan task plan#3389
+deleted them with the payment-dates chain they served (plan step
+recurrence:R16-e).*
 Pure functions, no database access -- operates only on values passed in.
 
 Per-month rate AND contractual P&I come from the projection's
@@ -26,12 +27,10 @@ both are re-exported flat from the package ``__init__`` so consumers
 keep importing from ``app.services.amortization_engine`` unchanged.
 """
 
-import dataclasses
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from app.services.installment_calendar import due_in_following_month
 from app.utils.dates import clamped_day, month_ordinal, months_between
 from app.utils.money import (
     MONTHS_PER_YEAR,
@@ -39,8 +38,6 @@ from app.utils.money import (
     apply_payment_cash,
     round_money,
 )
-
-from ._dates import PaymentDates
 
 
 @dataclass(frozen=True)
@@ -190,136 +187,6 @@ def calculate_monthly_payment(
     factor = (1 + monthly_rate) ** remaining_months
     payment = principal * (monthly_rate * factor) / (factor - 1)
     return round_money(payment)
-
-
-def schedule_dates(due_dates: list[date], payment_day: int) -> list[date]:
-    """Return one DISTINCT monthly schedule slot per payment, in the order given.
-
-    Biweekly pay periods sometimes place two loan payments in the same calendar
-    month; a monthly amortization engine sums same-month payments, double-counting
-    that month and leaving the next empty.  This walks the payments in the order
-    given and hands each the first free month at or after its own due month, so
-    the engine sees one payment per month.  At most one extra payment per month
-    (~2x/year) is expected, so cascading collisions are not, but the inner loop
-    handles them.
-
-    **It returns SLOTS, not records, and the caller decides what to do with
-    them.**  It was ``loan_payment_service._engine_prep
-    ._redistribute_to_distinct_months`` until plan step **balance:X-bl-2a** -- a
-    rewrite of the priced payment records (``PaymentRecord``, deleted at plan
-    task plan#3388), which meant only a caller holding PRICED records could ask
-    the question.  The question is about dates alone, so it is asked over dates
-    alone, and the amount-free feed
-    (:func:`app.services.loan_ledger.payment_installments`) reached the same
-    producer the priced path did.
-
-    **It lives HERE, in the pure primitives, and that is the second draft.**  It
-    first landed in ``loan_ledger._installments``, whose loaders put
-    ``loan_payment_service._engine_prep`` -- pure arithmetic, closure 14 -- on a
-    **42-module** closure to reach it (measured 2026-09-09).  That is the defect
-    this step exists to remove, so the rule sits in the primitives both tiers
-    already import, where neither loads a row to get it.  The one date rule it
-    calls is the loan calendar's
-    (:func:`app.services.installment_calendar.due_in_following_month`).
-
-    **Only the slot is invented; nothing here touches a fact.**  The funding
-    period and the cash day never enter, so a caller cannot accidentally
-    overwrite one with a slot -- the shape the previous version had to warn
-    against in prose.  Overwriting the funding period with the slot (the pre-fix
-    behaviour) costs a WRONG RATE PERIOD for that payment, which finding
-    **N-36** records as the reason the replay keeps its rate on the period start.
-
-    The collision key is the DUE MONTH, not the pay-period-start month: two pay
-    periods that both fall before the same ``payment_day`` (e.g. Apr 10 and
-    Apr 24, both due May 1) collide on the May schedule row, and the schedule and
-    the override map key everything by due month -- a pay-period-start key would
-    leave that collision unresolved and sum both into a single double payment.
-    *That key is the calendar MONTH, and it is no longer the installment
-    identity the walks use*: plan step recurrence:R16-c-2 deleted
-    ``loan_ledger.installment_slot`` and keys an installment by its contract
-    interval (ruling **R-R89**, finding **D55**).  This slotting fed the
-    schedule replay (walk 3) until plan step recurrence:R16-e deleted it,
-    and the prepared payment list until plan task plan#3388 deleted that;
-    nothing in ``app/`` calls it now.
-
-    Args:
-        due_dates: Each payment's own due date, in the order the caller
-            wants collisions resolved (the caller's order decides which payment
-            keeps a contested month, so it must be the chronology both the
-            replay and the priced feed use).
-        payment_day: The loan's contractual day-of-month due day, 1-31.  Only an
-            INVENTED slot uses it; a payment that keeps its own month keeps its
-            own date, day included.
-
-    Returns:
-        One slot date per element of ``due_dates``, positionally, all in
-        distinct calendar months.  A payment whose due month is uncontested gets
-        its own ``due_date`` back unchanged.
-    """
-    slots: list[date] = []
-    allocated_months: set[tuple[int, int]] = set()
-    for due in due_dates:
-        # A payment whose own month is free keeps its own DATE, day included --
-        # the uncontested case, which is every payment on both live loans.  A
-        # contested one walks forward a month at a time through the loan
-        # calendar's one "the due day in the next month, clamped to its last"
-        # step (``installment_calendar.due_in_following_month``), so a
-        # ``payment_day`` of 31 lands on the 28th in February here exactly as
-        # it does in a forward projection.
-        slot = due
-        while (slot.year, slot.month) in allocated_months:
-            slot = due_in_following_month(slot, payment_day)
-        slots.append(slot)
-        allocated_months.add((slot.year, slot.month))
-    return slots
-
-
-def slotted_dates(
-    dates: list[PaymentDates], payment_day: int,
-) -> list[PaymentDates]:
-    """Return *dates* with each payment's due date replaced by its schedule SLOT.
-
-    The APPLICATION of :func:`schedule_dates` to a payment feed, and the ONE
-    statement of it (plan step **balance:X-bl-2b**).  Both feeds a loan had --
-    the PRICED one (``loan_payment_service.prepare_payments_for_engine``,
-    deleted with that feed at plan task plan#3388) and the amount-free one built
-    on :func:`app.services.loan_ledger.payment_installments` -- reached the slot
-    through here, so a collision could not be resolved one way for the replay
-    that CONSUMED a month and another for the forward override that PLANNED it
-    (ruling **R-BAL7**).  Nothing in ``app/`` calls it now.
-
-    **Only the INSTALLMENT moves.**  The funding period and the cash day are
-    facts and are carried through untouched -- overwriting the funding period
-    with a slot costs a WRONG RATE PERIOD for that payment, which finding
-    **N-36** records as the reason the replay keys its rate on the period start.
-
-    **The caller's ORDER decides which payment keeps a contested month**, and
-    this function does not sort: it walks *dates* as given.  The determinism
-    lives in the FEED (:func:`app.services.loan_ledger.payment_installments`
-    keys ``(pay_period.start_date, id)``), which is a precondition rather than
-    a property of this call.
-
-    Args:
-        dates: The payments' :class:`._dates.PaymentDates`, in the order
-            collisions are to be resolved.
-        payment_day: The loan's contractual day-of-month due day, 1-31.  Only
-            an INVENTED slot uses it; a payment that keeps its own month keeps
-            its own date, day included.
-
-    Returns:
-        One :class:`._dates.PaymentDates` per element of *dates*,
-        positionally, whose ``due_date`` values all fall in distinct calendar
-        months.  A payment whose due month is uncontested is returned
-        unchanged.
-    """
-    return [
-        dataclasses.replace(payment, due_date=slot)
-        for payment, slot in zip(
-            dates,
-            schedule_dates([payment.due_date for payment in dates], payment_day),
-            strict=True,
-        )
-    ]
 
 
 @dataclass(frozen=True)

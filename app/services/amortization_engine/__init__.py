@@ -26,10 +26,10 @@ shape as the ``loan_resolver`` package) so existing imports from
 
 * :mod:`._dates` -- :class:`PaymentDates`, a loan payment's three dates as
   ONE value.  The package's lowest leaf (stdlib only), so every tier that holds
-  a payment names its dates from one home: :class:`PaymentRecord` composes it
-  and so does the loader's
-  :class:`~app.services.loan_ledger.PaymentInstallment` (plan step
-  **balance:X-bl-2b**).
+  a payment names its dates from one home: the loader's
+  :class:`~app.services.loan_ledger.PaymentInstallment` composes it (plan step
+  **balance:X-bl-2b**), as the priced ``PaymentRecord`` did until plan task
+  plan#3388 deleted it.
 * :mod:`._projection` -- the value records, the standard payment
   formula, the schedule-slot helpers, and :func:`project_forward` itself.
   It writes no date arithmetic of its own since plan step recurrence:R25,
@@ -54,7 +54,6 @@ from ._payoff import (
 from ._projection import (
     AmortizationRow,
     AmortizationSummary,
-    PaymentRecord,
     PeriodTerms,
     ProjectionInputs,
     RateChangeRecord,
@@ -69,7 +68,6 @@ __all__ = [
     "AmortizationRow",
     "AmortizationSummary",
     "PaymentDates",
-    "PaymentRecord",
     "PayoffRequest",
     "PeriodTerms",
     "ProjectionInputs",

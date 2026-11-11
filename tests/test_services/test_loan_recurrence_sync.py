@@ -40,8 +40,7 @@ from app.services.recurrence import (
 from app.services.loan_recurrence_sync import (
     loan_payment_window,
 )
-from app.services.loan_payment_service import compute_contractual_pi
-from app.services.loan_loaders import load_loan_params, load_rate_changes
+from app.services.loan_loaders import load_loan_params
 from app.models.transfer_template import TransferTemplate
 from tests._test_helpers import (
     bind_rule_to_loan,
@@ -864,9 +863,11 @@ class TestLoanPaymentWindowResolver:
         with app.app_context():
             loan = self._current_loan(seed_user, db.session)
             params = load_loan_params(loan.id)
-            contractual_pi = compute_contractual_pi(
-                params, load_rate_changes(loan.id),
-            )
+            # amortize(12000.00, 0.05, 24): r = 0.05 / 12, (1 + r)^24 =
+            # 1.104941, 12000 * r * 1.104941 / 0.104941 = 526.46.  Stated by
+            # hand since plan task plan#3388 deleted
+            # ``loan_payment_service.compute_contractual_pi``, which derived it.
+            contractual_pi = Decimal("526.46")
             tpl = make_loan_payment_template(
                 db.session, seed_user, loan,
                 amount=str(contractual_pi), derive_from_loan=False,

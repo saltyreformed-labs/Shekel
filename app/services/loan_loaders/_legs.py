@@ -115,8 +115,9 @@ def income_legs(
     order"** (plan step **balance:X-bl-2a**).  Every settled-payment consumer
     reaches this one -- the fold's event stream
     (:func:`app.services.loan_ledger.loan_event_stream`), the ledger's
-    per-payment principal reader, the escrow forward-only guard, the resolver's
-    payment feed -- so no two of them can classify a payment differently.  It was
+    per-payment principal reader, the escrow forward-only guard; the priced
+    payment list was one until plan task plan#3388 deleted it -- so no two of
+    them can classify a payment differently.  It was
     two narrowed queries and a third rule in
     ``loan_payment_service.get_payment_history``, which read ``txn.status.is_settled``
     where these filtered on ``settled_status_ids()``; the two agreed under a

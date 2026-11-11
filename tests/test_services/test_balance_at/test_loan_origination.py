@@ -306,9 +306,11 @@ class TestLoanNotYetOriginated:
             db.session.commit()
 
             bctx = BalanceContext.build(seed_user["user"].id)
-            resolved = resolved_loan(acct, bctx)
-            # The two clauses that would otherwise conspire.
-            assert any(p.dates.is_confirmed for p in resolved.context.payments)
+            # The two clauses that would otherwise conspire.  The record is read
+            # as the seam's own "has it been paid?" reads it (plan task
+            # plan#3387); the payment list this read until plan task plan#3388
+            # is deleted.
+            assert bctx.loan_walk(acct).settled_splits
             assert balance_at.balance_at(acct, bctx, bctx.as_of) == self.ZERO
 
             figures = balance_at.loan_figures(acct, bctx)

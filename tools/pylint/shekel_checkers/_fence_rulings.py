@@ -105,10 +105,13 @@ _LOAN_LEDGER_DEFINING_MODULES = frozenset({
 # The loan-payment LOADER module (plan step D3, from its adversarial review).
 # Its PRIVILEGE is gone -- plan step E1d-b took it off the reader allowlist above
 # with ``confirmed_loan_view`` -- but the scope STAYS, because privilege was never
-# the only reason: this is a public module holding every ingredient of a loan
-# balance (the payment feed, the escrow-netted amounts, the contractual P&I, the
-# whole loaded ``LoanContext``) OUTSIDE W9910's protection, exactly like
-# ``loan_ledger`` and the ``loan_resolver`` tier beside it.  The measured shape
+# the only reason: this is a public module holding ingredients of a loan
+# balance (the loaded ``LoanContext``: the rate-change feed and the escrow
+# lines) OUTSIDE W9910's protection, exactly like ``loan_ledger`` and the
+# ``loan_resolver`` tier beside it.  It held the payment feed, the
+# escrow-netted amounts and the contractual P&I too until plan task plan#3388
+# deleted them (ruling R-R93), and it is one module rather than a package since
+# that task; the key is exact either way.  The measured shape
 # that put it here: a documented public wrapper ``loan_balance_for_tile()``
 # returning ``confirmed_loan_balance_at(...)`` rated 10.00/10 under the full
 # fail-on set (the N-28 shape).  Dropping the scope now would be a LOOSENING
@@ -783,22 +786,21 @@ _FENCED_MODULE_RULINGS = {
     # was "the one reader-allowlisted module outside the defining package" until
     # plan step E1d-b took it off that allowlist with ``confirmed_loan_view``; the
     # scope stays on the surviving ground (see the constant's comment): a PUBLIC
-    # module holding every ingredient of a loan balance -- the payment feed, the
-    # escrow-netted amounts, the contractual P&I, the whole loaded
+    # module holding ingredients of a loan balance -- the whole loaded
     # ``LoanContext`` -- outside W9910's protection, so a public balance wrapper
     # born here would still be the N-28 shape.
     "app.services.loan_payment_service": (frozenset(), frozenset({
-        # The unified loan-context loader: params, payments, rate changes,
-        # escrow lines -- inputs a resolution is built FROM, no balance.
+        # The loan-context loader: rate changes and escrow lines -- inputs a
+        # resolution is built FROM, no balance.
         "load_loan_context",
-        # Payment ROWS (the transfer-shadow feed), chronological -- records,
-        # not a balance.
-        "get_payment_history",
-        # The contractual P&I sizing rule -- a payment amount, not a balance.
-        "compute_contractual_pi",
-        # PaymentRecord adaptation for the amortization engine -- shaping, no
-        # figure of any kind.
-        "prepare_payments_for_engine",
+        # ``get_payment_history`` (the payment ROWS, priced), ``compute_contractual_pi``
+        # (the contractual P&I sizing rule) and ``prepare_payments_for_engine``
+        # (the escrow-subtraction floor and the slot assignment) were ruled here
+        # as non-producers until plan task plan#3388 DELETED all three with the
+        # payment list (ruling R-R93).  Their entries go in the same edit: a
+        # ruling for a name its module no longer defines would silently un-fence
+        # whatever name later takes it (findings N-28 / N-31), which is what
+        # ``test_classification_sets_match_the_real_fenced_modules`` catches.
         # ``live_cash`` / ``derive_cash`` / ``config_by_transfer`` /
         # ``loan_pricing`` were ruled HERE until plan step X-au-g-2a moved
         # amount rule 4's producer down into ``cash_ledger`` -- and X-au-g-2c-2

@@ -108,9 +108,7 @@ def _figures(account: Account, day: date) -> dict:
     # bundle any out-of-cluster consumer assembles, so measuring it measures
     # what a consumer can actually reach.
     params = loan_loaders.load_loan_params(account.id)
-    context = loan_payment_service.load_loan_context(
-        account.id, ctx.amounts_or_none(), params,
-    )
+    context = loan_payment_service.load_loan_context(account.id)
     scenarios = loan_resolver.compute_payoff_scenarios(
         loan_inputs=loan_resolver.LoanInputs(
             params,

@@ -304,11 +304,11 @@ def payoff_calculate(account_id):
     data = _payoff_schema.load(request.form)
     mode = data["mode"]
 
-    # Shared loan context: payments, rate changes, seam balance + figures.
+    # Shared loan context: rate changes, seam balance + figures.
     # Identical to the dashboard's data loading so calculations are
     # consistent.  ``ctx.current_owed`` is the same dollar figure
     # rendered on the loan card (the seam's fold, plan C4).
-    ctx = _load_route_context(account, params)
+    ctx = _load_route_context(account)
 
     # A retired loan has no plan to accelerate: the seam's plan is empty for
     # it and its payoff ``None``, and a "Never" beside a "Paid off" chip
@@ -541,7 +541,7 @@ def refinance_calculate(account_id):
 
     # Shared loan context: seam balance + figures.  Identical to the dashboard's
     # data loading so the "current" refinance baseline matches the card.
-    ctx = _load_route_context(account, params)
+    ctx = _load_route_context(account)
 
     # Paid-off loan: no refinance comparison is meaningful.  Read the seam's
     # balance (the fold, plan C4) ONCE, and gate on it: a loan that owes nothing

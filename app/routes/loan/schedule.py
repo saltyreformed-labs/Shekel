@@ -51,7 +51,7 @@ def schedule(account_id):
     renders: the loan's escrow LINES go in, not one figure off them.
     """
     account, params, account_type = _require_configured_loan(account_id)
-    ctx = _load_route_context(account, params)
+    ctx = _load_route_context(account)
     scenarios = build_baseline_scenarios(
         _loan_inputs(params, ctx.loan), account, ctx.balance_ctx,
     )

@@ -20,10 +20,10 @@ The test drives the live ``transfer_service`` / ``transactions.py``
 assertions prove the assembled production pipeline behaves correctly:
 the transfer moves to a settled status and its loan side's payment record
 is dated (the income shadow carried both until plan step
-``balance:X-bi-6-4d-2``), :func:`loan_payment_service.get_payment_history`
-lists it as a
-confirmed :class:`PaymentRecord`, :func:`load_loan_context` prepares
-it for the engine, and :func:`loan_resolver.resolve_loan` reduces
+``balance:X-bi-6-4d-2``), ``loan_payment_service.get_payment_history``
+lists it as a confirmed ``PaymentRecord``, ``load_loan_context`` prepares
+it for the engine (the payment list those two names were, until plan task
+plan#3388 deleted it), and :func:`loan_resolver.resolve_loan` reduces
 ``current_balance`` by the principal portion only.
 
 Test IDs map to the Commit 14 plan in
@@ -347,8 +347,9 @@ class TestLoanPrincipalSettles:
         through ``transfer_service.settle_transfer`` so the transfer reaches
         the DONE status (``is_settled = True``; it is the one status, where
         both shadows were asserted until ruling R-BAL167 class 1, plan step
-        balance:X-bi-6-4d-2) and the loan-payment feed picks the transfer up
-        as a confirmed :class:`PaymentRecord`.
+        balance:X-bi-6-4d-2), and the loan's record holds it as a settled
+        payment (the loan-payment feed picked it up as a confirmed
+        ``PaymentRecord`` until plan task plan#3388 deleted the feed).
 
         Hand-computed expectation:
 

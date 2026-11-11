@@ -11,7 +11,6 @@ import pytest
 
 from app.services.amortization_engine import (
     PaymentDates,
-    PaymentRecord,
     PayoffRequest,
     PeriodTerms,
     ProjectionInputs,
@@ -815,9 +814,11 @@ class TestPaymentDatesValidation:
 
     **These guards were on ``PaymentRecord`` until plan step balance:X-bl-2b**,
     which made a payment's three dates ONE value that both the priced record
-    and the loader's installment compose.  The tests moved with the guards:
-    grading the dates through a ``PaymentRecord`` wrapper would be grading the
-    wrapper.
+    and the loader's installment composed.  The tests moved with the guards:
+    grading the dates through a ``PaymentRecord`` wrapper would have been
+    grading the wrapper.  *The record, and the tests of what it added (its
+    amount and its composition guard), went at plan task plan#3388 (ruling
+    R-R93).*
     """
 
     def test_string_period_start_raises_type_error(self):
@@ -870,9 +871,9 @@ class TestPaymentDatesValidation:
         reaching this field would report the value as confirmed and then fail
         only deep inside the replay, where ``True <= as_of`` raises with no
         mention of the value that produced it.  The guard earns its place on
-        the value, not on a migration path -- see
-        :meth:`TestPaymentRecordValidation.test_a_bare_date_as_dates_raises_type_error`
-        for why no stale-caller shape reaches a guard like this one.
+        the value, not on a migration path: no stale-caller shape reaches a
+        guard like this one, since a stale positional call raises on arity and
+        a stale keyword call on the unexpected keyword.
         """
         with pytest.raises(
             TypeError, match="settled_on must be a date or None",
@@ -908,97 +909,10 @@ class TestPaymentDatesValidation:
         }
 
 
-class TestPaymentRecordValidation:
-    """Tests for PaymentRecord dataclass validation.
-
-    What is left on the record itself since plan step balance:X-bl-2b: the
-    AMOUNT, which is the only part of a payment this type adds, and the guard
-    that it was handed a real :class:`PaymentDates` rather than something
-    shaped like one.  The three date guards are
-    :class:`TestPaymentDatesValidation` above.
-    """
-
-    def test_negative_amount_raises_value_error(self):
-        """Negative payment amount is nonsensical and must be rejected."""
-        with pytest.raises(ValueError, match="amount must be >= 0"):
-            PaymentRecord(
-                PaymentDates(
-                    period_start=date(2026, 2, 15),
-                    due_date=date(2026, 2, 15),
-                    settled_on=date(2026, 2, 15),
-                ),
-                amount=Decimal("-100.00"),
-            )
-
-    def test_float_amount_raises_type_error(self):
-        """Float amount is a precision bug and must be rejected."""
-        with pytest.raises(TypeError, match="amount must be a Decimal"):
-            PaymentRecord(
-                PaymentDates(
-                    period_start=date(2026, 2, 15),
-                    due_date=date(2026, 2, 15),
-                    settled_on=date(2026, 2, 15),
-                ),
-                amount=100.00,
-            )
-
-    def test_a_bare_date_as_dates_raises_type_error(self):
-        """A bare ``date`` must be rejected -- only a PaymentDates is accepted.
-
-        The composition's own guard: without it the record constructs and the
-        failure surfaces deep in the replay as a missing ``period_start``
-        attribute, naming neither the record nor the caller that built it.
-
-        **It is NOT the stale-caller case, and a first draft of this docstring
-        said it was.**  The record's fields were ``(payment_date, due_date,
-        settled_on, amount)`` before plan step balance:X-bl-2b and are
-        ``(dates, amount)`` after, so a stale POSITIONAL call raises on ARITY
-        and a stale KEYWORD call raises ``unexpected keyword argument`` -- and
-        neither reaches this guard.  That correction is the same one
-        ``test_bool_settled_on_raises_type_error`` already carried and this
-        step briefly deleted: the guard earns its place on the value, not on a
-        migration path.
-        """
-        with pytest.raises(TypeError, match="dates must be a PaymentDates"):
-            PaymentRecord(
-                date(2026, 2, 15),
-                amount=Decimal("100.00"),
-            )
-
-    def test_zero_amount_valid(self):
-        """Zero amount is valid -- represents a missed payment."""
-        record = PaymentRecord(
-            PaymentDates(
-                period_start=date(2026, 2, 15),
-                due_date=date(2026, 2, 15),
-                settled_on=None,
-            ),
-            amount=Decimal("0.00"),
-        )
-        assert record.amount == Decimal("0.00")
-
-    def test_valid_construction(self):
-        """Valid PaymentRecord construction succeeds."""
-        record = PaymentRecord(
-            PaymentDates(
-                period_start=date(2026, 2, 15),
-                due_date=date(2026, 2, 15),
-                settled_on=date(2026, 2, 15),
-            ),
-            amount=Decimal("1500.00"),
-        )
-        assert record.dates.period_start == date(2026, 2, 15)
-        assert record.amount == Decimal("1500.00")
-        assert record.dates.is_confirmed is True
-        assert "payment_date" not in {
-            f.name for f in dataclasses.fields(PaymentRecord)
-        }
-
-
 class TestRateChangeRecordValidation:
     """Tests for RateChangeRecord dataclass validation.
 
-    Mirrors TestPaymentRecordValidation: validates that invalid inputs
+    Mirrors TestPaymentDatesValidation: validates that invalid inputs
     are caught at construction time with clear error messages.
     """
 
@@ -1048,7 +962,7 @@ class TestPeriodTermsValidation:
     """Construction-time validation for PeriodTerms and the
     ProjectionInputs empty-terms guard.
 
-    Mirrors TestPaymentRecordValidation: invalid data must fail loudly
+    Mirrors TestPaymentDatesValidation: invalid data must fail loudly
     at construction, not produce a silently wrong schedule.
     """
 

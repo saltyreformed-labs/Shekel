@@ -1,9 +1,9 @@
 """A loan payment's THREE dates, as ONE value.
 
 Plan step **balance:X-bl-2b** (finding **N-432**).  Until this module the same
-three dates were spelled three times -- once in
-:class:`~app.services.amortization_engine.PaymentRecord` (as
-``payment_date`` / ``due_date`` / ``settled_on``), once in
+three dates were spelled three times -- once in the priced
+``amortization_engine.PaymentRecord`` (as ``payment_date`` / ``due_date`` /
+``settled_on``; deleted at plan task plan#3388), once in
 :class:`~app.services.loan_ledger.PaymentInstallment` (as ``period_start`` /
 ``due_date`` / ``settled_on``) and once in ``rate_period_engine
 .ConfirmedPayment`` (the replay's input, deleted by that step) -- so the FUNDING
@@ -137,11 +137,12 @@ class PaymentDates:
         caller-side filter (and the ``ConfirmedPayment`` type that existed to
         assert what it had removed) once it measured the two to be the same
         predicate.  This property is the answer for the readers that ask the
-        question directly -- the loan card's "has this loan ever been paid?"
-        (``balance_at._loan_figures``), whether the payment history prices a
-        payment off its record or its plan
-        (:func:`app.services.loan_payment_service.get_payment_history`), and
-        the suite.
+        question directly: the suite.  The loan card's "has this loan ever
+        been paid?" (``balance_at._loan_figures``) read it until plan task
+        plan#3387 moved that question onto the loan's record, and the payment
+        list (``loan_payment_service.get_payment_history``) chose by it whether
+        to price a payment off its record or its plan until plan task plan#3388
+        deleted the list.
 
         Returns:
             ``True`` for a payment from the settled half of
@@ -156,9 +157,9 @@ class PaymentDates:
         """Validate the three dates at construction time.
 
         Catches invalid data immediately rather than producing wrong results
-        deep in a schedule loop -- the same guard
-        :class:`~app.services.amortization_engine.PaymentRecord` carried for
-        these fields before they moved here.
+        deep in a schedule loop -- the same guard the priced
+        ``PaymentRecord`` (deleted at plan task plan#3388) carried for these
+        fields before they moved here.
 
         Raises:
             TypeError: If ``period_start`` or ``due_date`` is not a date, or a

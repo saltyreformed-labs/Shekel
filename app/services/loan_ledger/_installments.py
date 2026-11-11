@@ -3,8 +3,8 @@
 Plan step **balance:X-bl-2a** (finding **N-432**).  A loan payment has a RECORD
 half and a PLAN half, and until this module they arrived only fused: the sole
 producer of "which installment each of this loan's payments satisfies, and when
-its cash moved" was
-:func:`app.services.loan_payment_service.get_payment_history`, which also PRICES
+its cash moved" was the payment list ``loan_payment_service
+.get_payment_history`` (deleted at plan task plan#3388), which also PRICED
 every row through the amount model.  A consumer that needs the DATES therefore
 loaded the whole pricing tier and inherited its refusals, so an
 ``AmountUnresolvable`` broke readers that never look at a figure.  This module
@@ -86,11 +86,11 @@ class PaymentInstallment:
 
     **It COMPOSES the dates rather than restating them** (plan step
     **balance:X-bl-2b**).  :class:`~app.services.amortization_engine.PaymentDates`
-    is the one home for a payment's three dates, and
-    :class:`~app.services.amortization_engine.PaymentRecord` -- this value's
-    priced sibling -- composes the same type, so handing the replay an
-    amount-free feed is an attribute read rather than a projection that could
-    drift from the priced one.  The three fields lived here directly until that
+    is the one home for a payment's three dates, and the priced
+    ``PaymentRecord`` -- this value's sibling until plan task plan#3388 deleted
+    it -- composed the same type, so handing the replay an amount-free feed was
+    an attribute read rather than a projection that could drift from the
+    priced one.  The three fields lived here directly until that
     step, which is how the FUNDING basis came to carry two names (``period_start``
     here, ``payment_date`` there) for one fact.
 
@@ -137,13 +137,13 @@ def payment_installments(
 
     The project's single "which installment does each of this loan's payments
     satisfy, and has its cash moved?" derivation, and the amount-free half of
-    :func:`app.services.loan_payment_service.get_payment_history`, which is built
-    on it.  A consumer that needs only the chronology takes this and never
-    loads the amount model.  *The schedule replay's feed was the whole of it,
-    slotted by* :func:`app.services.amortization_engine.slotted_dates` *--
-    the same collision assignment the priced feed's*
-    :func:`~app.services.loan_payment_service.prepare_payments_for_engine`
-    *applies -- until plan step recurrence:R16-e deleted the replay.*
+    the payment list ``loan_payment_service.get_payment_history``, which was
+    built on it until plan task plan#3388 deleted that list; nothing in
+    ``app/`` calls it now.  *The schedule replay's feed was the whole of it,
+    slotted by* :func:`app.services.amortization_engine.slotted_dates` *-- the
+    same collision assignment the priced feed's preparation
+    (``prepare_payments_for_engine``, deleted with the list) applied -- until
+    plan step recurrence:R16-e deleted the replay.*
 
     **Settled-ness is read off the PARTITION, not derived here.**
     :func:`app.services.loan_loaders.income_legs` is the app's one answer to
@@ -195,14 +195,15 @@ def payment_installments(
             reads only the dates -- the schedule replay's reference, until
             plan step recurrence:R16-e deleted it -- and,
             since a settled leg is worth the figure its TRANSFER stores, a
-            column of the parent the producer loads, ``()`` for
-            ``get_payment_history`` too: nothing on that valuation's path
-            walks a relationship.  THIS function's own reads need only the
+            column of the parent the producer loads, ``()`` for the priced
+            payment list too, until plan task plan#3388 deleted it: nothing on
+            that valuation's path walked a relationship.  THIS function's own reads need only the
             pay period, and the producer loads that itself.
         leg_options: The same statement for the PROJECTED legs' parents,
             rooted at :class:`~app.models.transfer.Transfer`: ``()`` for the
             dates alone, ``transfer_pricing_load_options()`` for a caller that
-            prices them, which is what ``get_payment_history`` does.
+            prices them, which is what the payment list did until plan task
+            plan#3388 deleted it.
 
     Returns:
         Every non-excluded income payment on the account as a

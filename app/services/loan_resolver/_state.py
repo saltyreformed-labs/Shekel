@@ -108,13 +108,19 @@ def compute_monthly_payment_baseline(
 ) -> Decimal:
     """Return the loan's current monthly P&I -- the rate-period level payment.
 
-    Single source of truth for "what does the user pay each month",
-    used by
-    :func:`app.services.loan_payment_service.compute_contractual_pi`
-    to size the escrow-subtraction threshold so the schedule's
-    projected P&I matches the loan card's P&I exactly.  Returns the
-    same value as ``resolve_loan(...).monthly_payment`` for the same
-    inputs, without running the full schedule generation.
+    Single source of truth for "what does the user pay each month"
+    for a caller that needs the payment WITHOUT the full schedule
+    generation :func:`resolve_loan` runs.  Returns the same value as
+    ``resolve_loan(...).monthly_payment`` for the same inputs.
+
+    **It has NO caller in ``app/`` since plan task plan#3388**, and this
+    paragraph named the one it had: ``loan_payment_service
+    .compute_contractual_pi``, which sized the escrow-subtraction floor's
+    threshold and went with the floor (ruling **R-R93**, finding
+    **N-409**).  What is left is a public, fence-ruled name with no
+    production reader, as :func:`current_rate_baseline` beside it has
+    been since plan step X-au-g-2b; whether the two should go is a
+    decision of its own and is NOT taken here (rule 6).
 
     The monthly P&I is the level payment of the rate period containing
     ``as_of`` (see :func:`build_rate_periods`): held constant within the

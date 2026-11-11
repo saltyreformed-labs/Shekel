@@ -92,10 +92,11 @@ walk needs no fence (plan step D-fold).
 * :mod:`._installments` -- WHICH contractual payment each of a loan's rows
   satisfies (plan step **balance:X-bl-2a**), and which monthly schedule slot it
   consumes when two collide.  The payment feed's DATE half: the amount-free
-  producer :func:`app.services.loan_payment_service.get_payment_history` is
-  built on, so a consumer that needs only the chronology -- the schedule
-  replay's confirmed feed is the whole of it -- stops loading the amount model
-  to get it (finding **N-432**).
+  producer the priced payment list (``loan_payment_service
+  .get_payment_history``) was built on until plan task plan#3388 deleted that
+  list, so a consumer that needed only the chronology -- the schedule replay's
+  confirmed feed was the whole of it -- stopped loading the amount model to
+  get it (finding **N-432**).  Nothing in ``app/`` calls it now.
 
 Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes, no commits, and
 -- since plan step **C2-d** -- **no database session of its own**.

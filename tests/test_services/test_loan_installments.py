@@ -4,14 +4,14 @@ Plan step **balance:X-bl-2a** (finding **N-432**).  Two producers live here and
 they are graded on different grounds:
 
 * :func:`~app.services.amortization_engine.schedule_dates` is pure date arithmetic, so
-  it is pinned against HAND-COMPUTED slots.  Two of the cases below are the ones
-  ``TestPreparePaymentsForEngine`` already states through the public door
-  (``test_biweekly_redistribution``, ``test_december_to_january_rollover``);
-  those are deliberately NOT moved -- they grade that
-  ``prepare_payments_for_engine`` still APPLIES the rule, which is a different
-  claim from the rule being right, and both claims need a test.  What is new
-  here is the arithmetic no case reached before: a cascade past two allocated
-  months, and the day clamp a ``payment_day`` of 31 needs in February.
+  it is pinned against HAND-COMPUTED slots.  Two of the cases below were also
+  stated through the priced feed's preparation (``TestPreparePaymentsForEngine``'s
+  ``test_biweekly_redistribution`` and ``test_december_to_january_rollover``),
+  which graded that ``prepare_payments_for_engine`` APPLIED the rule, until
+  plan task plan#3388 deleted it with the payment list (ruling R-R93).  What
+  was new here is the arithmetic no case reached before: a cascade past two
+  allocated months, and the day clamp a ``payment_day`` of 31 needs in
+  February.
 * :func:`~app.services.loan_ledger.payment_installments` is a loader, so it is
   graded against the set it must not narrow.  The load-bearing case is
   :meth:`TestPaymentInstallments.test_the_two_halves_partition_the_transfers_into_the_loan`:
@@ -34,14 +34,12 @@ from sqlalchemy.engine import Engine
 from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
-from app.services.amortization_engine import schedule_dates, slotted_dates
+from app.services.amortization_engine import schedule_dates
 from app.services.loan_ledger import payment_installments
 from app.models.transfer import Transfer
 from app.services.loan_loaders import _legs
 from app.utils.balance_predicates import balance_excluded_status_ids
-from app.services.loan_payment_service import get_payment_history, load_loan_context
 from app.services import status_seam
-from app.services.cash_ledger import derived_amount_basis
 from app.services.transfer_legs import TransferLeg
 from app.services.transfer_service import (
     TransferSpec,
@@ -555,83 +553,6 @@ class TestPaymentInstallments:
             ) == []
 
 
-class TestBothFeedsReachOneSlotAssignment:
-    """The PRICED feed and the AMOUNT-FREE feed resolve a collision IDENTICALLY.
-
-    **The claim ``slotted_dates`` exists for, and until plan step
-    balance:X-bl-2b nothing graded it.**  Ruling **R-BAL7** put the
-    biweekly-collision assignment in the pure engine so BOTH of a loan's feeds
-    reach one producer -- and the reason is not tidiness: a slot the two do not
-    agree on is a month the replay CONSUMES and the forward override PLANS
-    separately, which silently drops a planned payment.  The two producers were
-    pinned only through their own halves (``TestPreparePaymentsForEngine`` on the
-    priced one, :class:`TestScheduleDates` on the arithmetic); nothing ran a
-    collision through both and compared, so an edit that slotted one feed and not
-    the other would have gone green.
-
-    The case is the smallest collision there is: two payments in ONE pay period,
-    so both satisfy the same monthly installment and the second must be pushed
-    to the next free month.  **The non-vacuity arms are asserted first** -- that
-    the two payments really do share a due month, and that the assignment really
-    does move one of them -- because an equality between two feeds that both
-    happened to leave the dates alone would pass over the defect this exists to
-    catch.
-    """
-
-    def test_a_collision_gets_the_same_slots_from_both_feeds(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Both feeds report the same due dates, and the facts are untouched."""
-        with app.app_context():
-            loan = _make_loan(seed_user)
-            db.session.commit()
-            for amount in (Decimal("1500.00"), Decimal("1600.00")):
-                _transfer_to_loan(
-                    seed_user, loan, seed_periods[1], amount,
-                    status_enum=StatusEnum.DONE,
-                    settled_on=seed_periods[1].start_date,
-                )
-            db.session.commit()
-
-            scenario_id = seed_user["scenario"].id
-            installments = payment_installments(
-                loan.id, scenario_id, loan_params_for(db.session, loan.id),
-                options=(), leg_options=(),
-            )
-            amount_free = slotted_dates(
-                [installment.dates for installment in installments],
-                _PAYMENT_DAY,
-            )
-            priced = load_loan_context(
-                loan.id,
-                derived_amount_basis(seed_user["user"].id, scenario_id),
-                loan_params_for(db.session, loan.id),
-            ).payments
-
-            # Non-vacuity 1: the two payments really do collide.
-            assert len(installments) == 2
-            assert (
-                installments[0].dates.due_date == installments[1].dates.due_date
-            ), "the fixture built no collision -- this case grades nothing"
-            # Non-vacuity 2: the assignment really does move the loser.
-            assert amount_free[1].due_date != installments[1].dates.due_date, (
-                "no slot was invented -- an assignment that did nothing would "
-                "make the equality below hold trivially"
-            )
-
-            # The claim: ONE assignment, reached by both feeds.
-            assert [dates.due_date for dates in amount_free] == [
-                payment.dates.due_date for payment in priced
-            ]
-            # ...and only the installment moved on either side.
-            assert [dates.period_start for dates in amount_free] == [
-                payment.dates.period_start for payment in priced
-            ]
-            assert [dates.settled_on for dates in amount_free] == [
-                payment.dates.settled_on for payment in priced
-            ]
-
-
 def _settled_ids():
     """Return the settled status ids -- the band the producer's settled set is.
 
@@ -652,7 +573,7 @@ def _statements_issued():
 
     At the Engine level rather than a session's, so it sees what the PROCESS
     issued whichever session issued it -- the same probe
-    ``test_loan_payment_service`` uses.  It cannot see ``BEGIN`` / ``COMMIT`` /
+    ``test_a_loans_price_reads_its_terms`` uses.  It cannot see ``BEGIN`` / ``COMMIT`` /
     ``ROLLBACK``, which psycopg issues through the connection, so the
     assertions below name TABLES rather than counting a total.
 
@@ -696,7 +617,7 @@ def _statements_issued():
 #: before it found nothing, and a control that names a table its fixture cannot
 #: reach grades the fixture.
 _PRICING_TABLE = "budget.transfer_templates"
-#: The PLAN relation, read exactly once PER HALF by either feed -- each half's
+#: The PLAN relation, read exactly once PER HALF by the feed -- each half's
 #: own statement (the projected half's since plan step balance:X-bi-6a, the
 #: settled half's since balance:X-bi-6-4b), asserted so a payment that arrived
 #: through a per-row walk would be seen.  *It was once, for the projected half
@@ -715,11 +636,11 @@ class TestTheCallerStatesItsOwnEagerLoad:
     **N-296** is the same defect inverted, seven batch callers reaching a loader
     without it and paying a query per definition.
 
-    **The pair below is DISJOINT on purpose.**  One case asserts the date feed
-    reads no pricing table, the other that the priced feed reads them all.  A
-    single case in either direction would pass over the wrong fix: dropping the
-    options everywhere satisfies the first, and restoring them to the loader
-    satisfies the second.
+    **It was a DISJOINT pair until plan task plan#3388**: this case asserted
+    the date feed reads no pricing table, and its sibling that the priced feed
+    (``loan_payment_service.get_payment_history``) read them all.  That task
+    deleted the priced feed and its case with it (ruling R-R93), so no caller
+    states a pricing load here any more and this case is the claim left.
     """
 
     def test_the_date_feed_reads_no_pricing_table(
@@ -770,45 +691,6 @@ class TestTheCallerStatesItsOwnEagerLoad:
                 "the plan relation was read other than once per half: each "
                 "half is loaded from it in ONE statement, whatever the caller "
                 "states"
-            )
-
-    def test_the_priced_feed_reads_every_pricing_table(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """``get_payment_history`` states the chain, so no leg walks per-row.
-
-        The other direction, and it is not the same assertion negated: this is
-        what fails if the options are simply deleted rather than moved to the
-        caller, which would turn every priced leg into a walk to its parent's
-        definition.
-        """
-        with app.app_context():
-            loan = _make_loan(seed_user)
-            db.session.commit()
-            _seam_shadows(seed_user, loan, seed_periods)
-            db.session.expire_all()
-            basis = derived_amount_basis(
-                seed_user["user"].id, seed_user["scenario"].id,
-            )
-
-            # Loaded before the window, so the reads counted are the feed's.
-            params = loan_params_for(db.session, loan.id)
-            with _statements_issued() as statements:
-                payments = get_payment_history(loan.id, basis, params)
-
-            assert len(payments) == _SEAM_SHADOWS, "the priced feed came back short"
-            reads = _reads_of(_PRICING_TABLE, statements)
-            assert reads == 1, (
-                f"the priced feed issued {reads} statements against "
-                f"{_PRICING_TABLE} over {_SEAM_PROJECTED} projected payments "
-                f"on {_SEAM_PROJECTED} definitions, not the ONE an eager load "
-                f"takes: a count of {_SEAM_PROJECTED} is the per-row walk "
-                f"finding N-296 is about, and a count of 0 means nothing was "
-                f"loaded at all"
-            )
-            assert _reads_of(_PLAN_TABLE, statements) == 2, (
-                "the plan relation was read other than once per half by the "
-                "priced feed"
             )
 
 

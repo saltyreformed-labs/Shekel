@@ -41,7 +41,6 @@ from app.services import (
 )
 from app.services.balance_at import BalanceContext
 from tests._test_helpers import (
-    amount_basis_for_scenario,
     create_loan_account,
     create_settled_transfer,
     loan_params_for,
@@ -341,10 +340,7 @@ def test_arm_monthly_payment_card_equals_resolver_constant(  # C15-2
             seed_user, seed_periods[0],
         )
 
-        ctx = loan_payment_service.load_loan_context(
-            account.id, amount_basis_for_scenario(seed_user["scenario"].id),
-            loan_params,
-        )
+        ctx = loan_payment_service.load_loan_context(account.id)
         resolver_state = loan_resolver.resolve_loan(
             loan_resolver.LoanInputs(
                 loan_params,

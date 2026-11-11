@@ -1,8 +1,7 @@
 """Amortization projection primitives.
 
 The forward half of the amortization engine: the value records
-(:class:`PaymentRecord`, :class:`RateChangeRecord`,
-:class:`PeriodTerms`, :class:`AmortizationRow`,
+(:class:`RateChangeRecord`, :class:`PeriodTerms`, :class:`AmortizationRow`,
 :class:`AmortizationSummary`, :class:`ProjectionInputs`), the standard
 payment formula, the schedule-slot helpers, and :func:`project_forward`
 itself.  It writes no date arithmetic of its own: a projected row's date is
@@ -42,67 +41,6 @@ from app.utils.money import (
 )
 
 from ._dates import PaymentDates
-
-
-@dataclass(frozen=True)
-class PaymentRecord:
-    """A single payment applied to a loan: its DATES and what it cost.
-
-    Used to replay actual or committed payments through the amortization
-    schedule so projections reflect real payment history rather than
-    assuming the contractual amount every month.
-
-    **It COMPOSES its dates rather than restating them** (plan step
-    **balance:X-bl-2b**, finding **N-432**).  The three dates and their
-    distinct jobs are :class:`._dates.PaymentDates`, the one home every tier
-    that holds a payment names them from; what this record adds is the AMOUNT,
-    which is the only part of a payment the pricing tier is qualified to
-    answer.  That is what lets a consumer of the CHRONOLOGY -- the schedule
-    replay, which reads three dates and no figure -- take a feed without the
-    amount model behind it, and it is why the loader's
-    :class:`~app.services.loan_ledger.PaymentInstallment` composes the same
-    value: the hand-off between the two is an attribute read rather than a
-    projection that could drift.
-
-    Attributes:
-        dates: The payment's :class:`~app.services.amortization_engine.PaymentDates`
-            -- its funding period, its own due date, and the day its cash
-            moved.  See that class for what each governs and for what
-            conflating any two of them costs.
-        amount: The total payment amount (principal + interest).  Must
-            be >= 0.  A zero amount represents a missed payment where
-            only interest accrues (negative amortization).
-    """
-
-    dates: PaymentDates
-    amount: Decimal
-
-    def __post_init__(self):
-        """Validate payment record fields at construction time.
-
-        Catches invalid data immediately rather than producing wrong
-        results deep in the schedule loop.  The three DATES validate
-        themselves (:meth:`PaymentDates.__post_init__`), so what is checked
-        here is this record's own two facts: that it was handed a dates value
-        at all, and its amount.
-
-        Raises:
-            TypeError: If ``dates`` is not a :class:`PaymentDates`, or
-                ``amount`` is not a Decimal.
-            ValueError: If amount is negative.
-        """
-        if not isinstance(self.dates, PaymentDates):
-            raise TypeError(
-                f"dates must be a PaymentDates, got {type(self.dates).__name__}"
-            )
-        if not isinstance(self.amount, Decimal):
-            raise TypeError(
-                f"amount must be a Decimal, got {type(self.amount).__name__}"
-            )
-        if self.amount < 0:
-            raise ValueError(
-                f"amount must be >= 0, got {self.amount}"
-            )
 
 
 @dataclass(frozen=True)
@@ -188,9 +126,10 @@ class AmortizationRow:  # pylint: disable=too-many-instance-attributes
     """A single month in an amortization schedule.
 
     The is_confirmed flag distinguishes historical fact from projection:
-    True when the row's payment came from a confirmed PaymentRecord
-    (a settled status), False when projected or computed from the
-    contractual payment formula.
+    True when the row is a recorded payment off the loan's confirmed view
+    (:func:`app.services.rate_period_engine.confirmed_amortization_row`),
+    False when projected or computed from the contractual payment
+    formula.
 
     Pylint: ``too-many-instance-attributes`` (9/7) -- suppressed
     because this is a cohesive value record -- one amortization-table
@@ -267,11 +206,12 @@ def schedule_dates(due_dates: list[date], payment_day: int) -> list[date]:
     **It returns SLOTS, not records, and the caller decides what to do with
     them.**  It was ``loan_payment_service._engine_prep
     ._redistribute_to_distinct_months`` until plan step **balance:X-bl-2a** -- a
-    rewrite of :class:`PaymentRecord` instances, which meant only a caller
-    holding PRICED records could ask the question.  The question is about dates
-    alone, so it is asked over dates alone, and the amount-free feed
-    (:func:`app.services.loan_ledger.payment_installments`) reaches the same
-    producer the priced path does.
+    rewrite of the priced payment records (``PaymentRecord``, deleted at plan
+    task plan#3388), which meant only a caller holding PRICED records could ask
+    the question.  The question is about dates alone, so it is asked over dates
+    alone, and the amount-free feed
+    (:func:`app.services.loan_ledger.payment_installments`) reached the same
+    producer the priced path did.
 
     **It lives HERE, in the pure primitives, and that is the second draft.**  It
     first landed in ``loan_ledger._installments``, whose loaders put
@@ -298,9 +238,9 @@ def schedule_dates(due_dates: list[date], payment_day: int) -> list[date]:
     identity the walks use*: plan step recurrence:R16-c-2 deleted
     ``loan_ledger.installment_slot`` and keys an installment by its contract
     interval (ruling **R-R89**, finding **D55**).  This slotting fed the
-    schedule replay (walk 3) until plan step recurrence:R16-e deleted it;
-    what is left of its reach is the prepared payment list that step deletes
-    after it.
+    schedule replay (walk 3) until plan step recurrence:R16-e deleted it,
+    and the prepared payment list until plan task plan#3388 deleted that;
+    nothing in ``app/`` calls it now.
 
     Args:
         due_dates: Each payment's own due date, in the order the caller
@@ -340,15 +280,13 @@ def slotted_dates(
     """Return *dates* with each payment's due date replaced by its schedule SLOT.
 
     The APPLICATION of :func:`schedule_dates` to a payment feed, and the ONE
-    statement of it (plan step **balance:X-bl-2b**).  Both feeds a loan has --
-    the PRICED one that
-    :func:`app.services.loan_payment_service.prepare_payments_for_engine`
-    prepares, and the amount-free one built on
-    :func:`app.services.loan_ledger.payment_installments` -- reach the slot
-    through here, so a collision cannot be resolved one way for the replay that
-    CONSUMES a month and another for the forward override that PLANS it.  That
-    disagreement is not hypothetical: split the two redistribution sets and one
-    planned payment is silently dropped (ruling **R-BAL7**).
+    statement of it (plan step **balance:X-bl-2b**).  Both feeds a loan had --
+    the PRICED one (``loan_payment_service.prepare_payments_for_engine``,
+    deleted with that feed at plan task plan#3388) and the amount-free one built
+    on :func:`app.services.loan_ledger.payment_installments` -- reached the slot
+    through here, so a collision could not be resolved one way for the replay
+    that CONSUMED a month and another for the forward override that PLANNED it
+    (ruling **R-BAL7**).  Nothing in ``app/`` calls it now.
 
     **Only the INSTALLMENT moves.**  The funding period and the cash day are
     facts and are carried through untouched -- overwriting the funding period

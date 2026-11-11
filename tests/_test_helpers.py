@@ -2944,7 +2944,7 @@ def contract_forward_references(loan_params, scenario_id, as_of, extra):
 
     Args:
         loan_params: The loan's :class:`LoanParams`.
-        scenario_id: The scenario to scope the feed and the confirmed view to.
+        scenario_id: The scenario to scope the confirmed view to.
         as_of: The evaluation date the confirmed view folds the record to.
         extra: The what-if extra per month; ``0.00`` makes ``with_extra`` the
             contract's own rows.
@@ -2962,10 +2962,7 @@ def contract_forward_references(loan_params, scenario_id, as_of, extra):
         ProjectionInputs, project_forward,
     )
 
-    ctx_loan = loan_payment_service.load_loan_context(
-        loan_params.account_id, amount_basis_for_scenario(scenario_id),
-        loan_params,
-    )
+    ctx_loan = loan_payment_service.load_loan_context(loan_params.account_id)
     confirmed = seam_confirmed_view(loan_params.account_id, scenario_id, as_of)
     scenarios = loan_resolver.compute_payoff_scenarios(
         loan_inputs=loan_resolver.LoanInputs(
@@ -9593,64 +9590,6 @@ def amount_basis_for(row):
     from app.services.cash_ledger import derived_amount_basis
 
     return derived_amount_basis(row.account.user_id, row.scenario_id)
-
-
-def amount_basis_for_scenario(scenario_id):
-    """Return the amount basis for *scenario_id*, deriving its owner from the scenario.
-
-    **The ONE spelling for a test helper that holds a scenario id and no
-    owner** (plan step balance:X-au-g-2c).  Routing
-    ``loan_payment_service.get_payment_history`` through the amount model gave
-    ``load_loan_context`` an :class:`~app.services.cash_ledger.AmountBasis`
-    where it took a bare ``scenario_id``, and a dozen replay helpers in this
-    suite hold exactly that id: they are built from a loan and a scenario,
-    never from a request with a ``current_user``.
-
-    A scenario belongs to exactly one owner (``budget.scenarios.user_id``), so
-    the owner is DERIVED here rather than taken beside the id.  Spelling both
-    at a dozen call sites would invite a pair naming one owner and another's
-    scenario, which is the mismatch
-    :func:`~app.services.cash_ledger.resolve_transaction_amount` refuses a row
-    for -- and a test is exactly where such a pair would be written by hand.
-
-    **The sibling of :func:`amount_basis_for` above, keyed differently.**  That
-    one takes a ROW and reads its account's owner and its own scenario; this
-    takes the SCENARIO because its callers are replay helpers built from a loan
-    id and a scenario id, with no row in hand at all.  Two keys, one
-    derivation, and neither may answer to the other's name.
-
-    Ruling **P54** is why this is a shared helper here rather than a
-    convenience on the production constructor: a production API with only test
-    callers is the speculative shape ``CLAUDE.md`` rule 13 forbids.
-    **Production has the same asymmetry and it is filed, not fixed here**
-    (finding **N-432**): ``derived_amount_basis`` takes an owner AND a
-    scenario and nothing checks they agree, where the scenario already states
-    its owner.  (``amount_basis`` itself reads the owner off the pass's pricer
-    since plan step salary:C12, so the pass-side door no longer has the pair.)
-
-    Args:
-        scenario_id: The scenario the rows being priced belong to.
-
-    Returns:
-        The unresolved :class:`~app.services.cash_ledger.AmountBasis` for that
-        scenario's owner and that scenario.
-
-    Raises:
-        NoResultFound: When no scenario carries that id -- loud, because a
-            basis built for a scenario that does not exist would price every
-            row it is handed as belonging to another.
-    """
-    # Pylint: ``import-outside-toplevel`` -- this module imports no app or ORM
-    # symbols at top level (its collection-time-safety convention).
-    # pylint: disable=import-outside-toplevel
-    from app.extensions import db
-    from app.models.scenario import Scenario
-    from app.services.cash_ledger import derived_amount_basis
-
-    scenario = db.session.query(Scenario).filter(
-        Scenario.id == scenario_id,
-    ).one()
-    return derived_amount_basis(scenario.user_id, scenario_id)
 
 
 def count_amount_bases(monkeypatch):

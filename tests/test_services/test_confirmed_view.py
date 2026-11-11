@@ -68,7 +68,6 @@ from app.services.balance_at._resolution import resolved_loan
 from tests._ledger_reads import posted_loan_balance_at
 from tests._stored_ledger import stored_loan_balance_at
 from tests._test_helpers import (
-    amount_basis_for_scenario,
     clear_loan_ledger,
     create_loan_account,
     create_loan_with_trueup,
@@ -344,10 +343,7 @@ class TestAWithheldViewResolvesExactlyAsTheUnseededResolver:
             assert balance_at.confirmed_view(loan, ctx) is None
 
             params = _loan_params(loan)
-            loan_ctx = loan_payment_service.load_loan_context(
-                loan.id, amount_basis_for_scenario(seed_user["scenario"].id),
-                params,
-            )
+            loan_ctx = loan_payment_service.load_loan_context(loan.id)
             loan_inputs = loan_resolver.LoanInputs(
                 params, loan_loaders.load_loan_anchor_facts(params),
                 loan_ctx.rate_changes,

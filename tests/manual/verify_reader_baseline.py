@@ -62,14 +62,11 @@ from decimal import Decimal
 from app import create_app
 from app.extensions import db
 from app.models.account import Account
-from app.models.loan_params import LoanParams
 from app.models.transfer import Transfer
 from app.models.user import User
 from app.services import (
     calendar_service,
     dashboard_service,
-    loan_loaders,
-    loan_payment_service,
     loan_posting_service,
     retirement_projection,
     savings_dashboard_service,
@@ -348,28 +345,22 @@ def _retirement(user_id):
     return _plain(_guard("retirement", _project))
 
 
-def _loans(user_id, scenario_id, accounts):
-    """Loan payment history and the confirmed split table, per loan account."""
+def _loans(scenario_id, accounts):
+    """The confirmed split table, per loan account.
+
+    It dumped the loan context's prepared payment list beside it, as
+    ``loan_context_payments``, until plan task plan#3388 deleted that list
+    (ruling R-R93): a baseline taken before that task carries the key and one
+    taken after does not.
+    """
     out = {}
     for account in accounts:
-        params = _guard(
-            f"loan_params:{account.id}",
-            lambda a=account: [
-                [str(p.dates.due_date), _money(p.amount), p.dates.is_confirmed]
-                for p in loan_payment_service.load_loan_context(
-                    a.id, derived_amount_basis(user_id, scenario_id),
-                    db.session.query(LoanParams)
-                    .filter(LoanParams.account_id == a.id).one(),
-                ).payments
-            ],
-        )
         history = _guard(
             f"loan_history:{account.id}",
             lambda a=account: loan_posting_service
             .confirmed_loan_payment_history(a.id, scenario_id, date(2026, 8, 12)),
         )
         out[str(account.id)] = {
-            "loan_context_payments": params,
             "confirmed_history": (
                 history if isinstance(history, dict)
                 else None if history is None
@@ -383,7 +374,6 @@ def _loans(user_id, scenario_id, accounts):
                 ]
             ),
         }
-    _ = user_id
     return out
 
 
@@ -472,28 +462,12 @@ def _dump_user(user_id):
         "savings": _savings(user_id),
         "investment": _investment(user_id, accounts),
         "retirement": _retirement(user_id),
-        "loans": _loans(user_id, scenario_id, accounts),
+        "loans": _loans(scenario_id, accounts),
         "transfer_settle": _transfer_settle(scenario_id),
-        # A LOAN's feed, dumped for loan accounts only since plan step
-        # recurrence:R16-c-2 (ruling R-R107), when it began taking the loan's
-        # params.  Before that it dumped EVERY account with a hard-coded due
-        # day of 1 -- wrong for a loan due the 22nd -- so a baseline taken
-        # before that step differs in its account set.
-        "payment_history": {
-            str(a.id): _guard(
-                f"payment_history:{a.id}",
-                lambda acc=a, params=params: [
-                    [str(p.dates.period_start), str(p.dates.due_date),
-                     _money(p.amount), p.dates.is_confirmed]
-                    for p in loan_payment_service.get_payment_history(
-                        acc.id, derived_amount_basis(user_id, scenario_id),
-                        params,
-                    )
-                ],
-            )
-            for a in accounts
-            if (params := loan_loaders.load_loan_params(a.id)) is not None
-        },
+        # A LOAN's priced payment feed was dumped here as ``payment_history``
+        # until plan task plan#3388 deleted the feed (ruling R-R93): a
+        # baseline taken before that task carries the key and one taken
+        # after does not.
     }
 
 

@@ -10,7 +10,7 @@ from app.extensions import db
 from app.models.passkey import Passkey
 from app.models.user import User
 from app.services import passkey_service
-from tests.test_services.test_passkey_service._helpers import T0, Clock, add
+from tests._passkeys import T0, Clock, add
 
 
 @pytest.fixture(name="clock")

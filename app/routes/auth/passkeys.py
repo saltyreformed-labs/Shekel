@@ -1,5 +1,5 @@
 """
-Shekel Budget App -- Auth route package: signing in with a passkey.
+Shekel Budget App -- Auth route package: signing in and re-confirming with a passkey.
 
 A passkey signs in on its own, with no password and no code (plan#2538,
 ruling plan#3465), in two requests, both reached before sign-in and so both
@@ -37,11 +37,26 @@ the query, so no sign-in honours a ``next`` today, and this one passes none:
 plan#2174 records that, and that ``_is_safe_redirect`` lets a ``next`` of
 ``/\\evil.com`` leave the site, so the step that revives ``/login``'s
 ``next`` revives this one's with it.
+
+**Re-confirming** (``/reauth``'s passkey door, beside its password and code,
+ruling plan#3541) is the same two requests for the signed-in account, behind
+the login gate: ``POST /reauth/passkey/options`` names the account's own
+passkeys (:func:`~app.services.passkey_service.re_confirm_options`), and
+``POST /reauth/passkey`` spends one of this door's tries, checks the answer
+(:func:`~app.services.passkey_service.complete_re_confirm`) and finishes as a
+password re-confirm does, through
+:func:`~app.routes.auth._helpers._complete_re_confirm`.  The request's
+command transaction holds the owner's lock from its start
+(``app.db_transaction``), so nothing here takes it.  As at sign-in, the
+strangers' lock is not asked, a refused passkey counts on no record, and a
+success clears no stranger's count (ruling plan#3469).  It honours the safe
+``next`` the password door does.
 """
 
 import logging
 
 from flask import (
+    abort,
     current_app,
     flash,
     jsonify,
@@ -53,12 +68,17 @@ from flask import (
 from flask_login import current_user
 
 from app.db_transaction import bind_sign_in_owner
+from app.exceptions import NotFoundError
 from app.rate_limits import limiter
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     _SIGN_IN_TRIES_PER_ADDRESS,
+    _complete_re_confirm,
     _complete_sign_in,
+    _is_safe_redirect,
+    _known_device,
     _landing_page,
+    _spend_a_try,
 )
 from app.services import passkey_service
 from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
@@ -66,6 +86,7 @@ from app.utils.log_events import (
     AUTH,
     EVT_PASSKEY_SIGN_IN,
     EVT_PASSKEY_SIGN_IN_FAILED,
+    EVT_REAUTH_FAILED,
     log_event,
 )
 
@@ -77,8 +98,15 @@ logger = logging.getLogger(__name__)
 #: before checking the answer, so a ceremony is completed once.
 _SIGN_IN_STATE_KEY = "_passkey_sign_in_state"
 
-#: The sign-in form's field carrying the device's answer: the JSON of
-#: ``navigator.credentials.get()``'s result, as ``passkey.js`` writes it.
+#: The session key holding the re-confirm ceremony in flight: the state
+#: :func:`~app.services.passkey_service.re_confirm_options` returned.  Its own
+#: key, so a sign-in's options never replace a re-confirm's, and taken out
+#: before the answer is checked, as the sign-in's is.
+_RE_CONFIRM_STATE_KEY = "_passkey_re_confirm_state"
+
+#: The passkey forms' field carrying the device's answer, the sign-in's and
+#: the re-confirm's: the JSON of ``navigator.credentials.get()``'s result, as
+#: ``passkey.js`` writes it.
 _CREDENTIAL_FIELD = "credential"
 
 
@@ -155,3 +183,72 @@ def passkey_sign_in():
         user_id=user_id, passkey_id=passkey_id,
     )
     return response
+
+
+@auth_bp.route("/reauth/passkey/options", methods=["POST"])
+def passkey_re_confirm_options():
+    """Begin the signed-in account's passkey re-confirm: keep its state, answer its options.
+
+    A POST, as the sign-in's options are, because it writes the session, so
+    the form token guards it.
+
+    Returns:
+        The options for ``navigator.credentials.get()``, as WebAuthn's JSON,
+        naming only the account's own passkeys, so the device offers no one
+        else's.  A 404 for an account holding none (one removed in another
+        tab since the page rendered): there is nothing to re-confirm with,
+        and ``passkey.js`` reads any refusal as a ceremony that cannot start.
+    """
+    try:
+        options, state = passkey_service.re_confirm_options(
+            current_user.id, origin=current_app.config["PASSKEY_ORIGIN"],
+        )
+    except NotFoundError:
+        abort(404)
+    flask_session[_RE_CONFIRM_STATE_KEY] = state
+    return jsonify(options)
+
+
+@auth_bp.route("/reauth/passkey", methods=["POST"])
+def passkey_re_confirm():
+    """Re-confirm the signed-in account by its passkey, or say why not.
+
+    One of this door's tries is spent first, as at the password door
+    (:func:`~app.routes.auth._helpers._spend_a_try`): this browser's own when
+    it is known, else the account's.  The door counts its own five, apart
+    from the password's, as each of the app's doors does.
+
+    Returns:
+        A redirect: to the safe ``next``, else the dashboard, carrying a known
+        browser's renewed cookie, or back to ``/reauth`` (its ``next`` kept)
+        with the refusal's sentence flashed.
+    """
+    # Out of the session whatever happens next, so a second submit of the
+    # same answer meets no ceremony in flight.
+    state = flask_session.pop(_RE_CONFIRM_STATE_KEY, None)
+    next_url = request.args.get("next")
+    safe_next = next_url if _is_safe_redirect(next_url) else None
+    device = _known_device(current_user)
+    # Past the limit this raises, and the 429 handler answers before the
+    # answer is checked.
+    _spend_a_try(current_user, device)
+    try:
+        passkey = passkey_service.complete_re_confirm(
+            current_user, request.form.get(_CREDENTIAL_FIELD, ""),
+            origin=current_app.config["PASSKEY_ORIGIN"], state=state,
+        )
+    except PasskeyRefused as refused:
+        # A refused passkey counts on no record (ruling plan#3469): nothing
+        # was written, so there is nothing to commit.
+        log_event(
+            logger, logging.WARNING, EVT_REAUTH_FAILED, AUTH,
+            "Step-up re-auth failed: passkey refused",
+            refusal=refused.refusal.value, user_id=current_user.id,
+            ip=request.remote_addr,
+        )
+        flash(str(refused), "danger")
+        return redirect(url_for("auth.reauth", next=safe_next))
+    return _complete_re_confirm(
+        current_user, safe_next, known=device is not None, checked=None,
+        passkey_id=passkey.id,
+    )

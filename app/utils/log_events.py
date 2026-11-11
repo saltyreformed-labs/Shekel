@@ -176,12 +176,14 @@ EVT_OTHER_SESSIONS_INVALIDATED = _register(
 )
 EVT_REAUTH_FAILED = _register(
     "reauth_failed", AUTH,
-    "A signed-in password or code check refused the person (/reauth, "
-    "/change-password or /mfa/disable).",
+    "A signed-in password, code or passkey check refused the person (/reauth, "
+    "/reauth/passkey, /change-password or /mfa/disable); a passkey's refusal "
+    "says why.",
 )
 EVT_REAUTH_SUCCESS = _register(
     "reauth_success", AUTH,
-    "Step-up re-authentication succeeded; fresh-login window restarted.",
+    "Step-up re-authentication succeeded; fresh-login window restarted.  "
+    "passkey_id names the passkey when one re-confirmed (plan#2538).",
 )
 EVT_MFA_LOGIN_SUCCESS = _register(
     "mfa_login_success", AUTH,

@@ -23,7 +23,9 @@ finished it: a password with no second factor, a password and a code, a
 password on a trusted device (plan#2173), or a passkey (plan#2538, in
 :mod:`~app.routes.auth.passkeys`), so the four cannot drift on what a
 signed-in session carries, what the browser holds afterwards (plan#2772) or
-where it lands.
+where it lands.  :func:`_complete_re_confirm` is the ONE completion of a
+re-confirm in the same way, whichever proof finished it: ``/reauth``'s
+password (and code), or a passkey (plan#2538).
 :func:`_verify_totp_with_replay_logging` (and its
 backup-code sibling :func:`_consume_backup_code`) is shared by
 ``/mfa/verify``, ``/mfa/disable``, and the step-up ``/reauth`` so all
@@ -56,10 +58,15 @@ from app.services.known_device_service import BrowserStanding
 from app.utils.device_cookie import device_token, device_tokens, set_device_cookie
 from app.utils.log_events import (
     AUTH,
+    EVT_REAUTH_SUCCESS,
     EVT_TOTP_REPLAY_REJECTED,
     log_event,
 )
-from app.utils.session_helpers import session_stamp, stamp_login_session
+from app.utils.session_helpers import (
+    session_stamp,
+    stamp_login_session,
+    stamp_reauth_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -212,8 +219,12 @@ def _known_device(user) -> KnownDevice | None:
 #: limited as that form is (ruling plan#3469).  Each door counts its own.
 _SIGN_IN_TRIES_PER_ADDRESS = "5 per 15 minutes"
 
-#: How many passwords or codes one counter lets a door check in its window:
-#: the code form's and re-confirm's alike (rulings plan#3023, plan#3071).
+#: How many passwords, codes or passkeys one counter lets a door check in its
+#: window: the code form's and re-confirm's (rulings plan#3023, plan#3071).
+#: Re-confirm has two doors, its password and, since plan#2538, its passkey,
+#: and each counts its own five, as :func:`_count_a_try` scopes every door's
+#: counters by its endpoint; a passkey cannot be guessed, so its five add no
+#: guesses at the password.
 _TRIES = "5 per 15 minutes"
 
 #: Where :func:`_spend_a_try` leaves, on ``g``, the counter this request's try
@@ -373,6 +384,85 @@ def _complete_sign_in(
     stamp_login_session(now, user.id)
     response = redirect(_landing_page(user, next_page))
     set_device_cookie(response, user.id, token)
+    return response
+
+
+def _complete_re_confirm(
+    user: User, safe_next: str | None, *,
+    known: bool, checked: guess_record_service.Held | None, **logged: int,
+) -> Response:
+    """Finish *user*'s re-confirm and return the redirect to where it lands.
+
+    The one completion of a re-confirm, called once its proof is in:
+    ``/reauth``'s password (and code, where the account has one), or a passkey
+    (plan#2538), so the two cannot drift on what a re-confirmed session
+    carries or what the browser holds afterwards.  A known browser's record
+    is renewed whichever proof it was
+    (:func:`~app.services.known_device_service.record_re_confirm`): a new
+    cookie and its own count cleared, so a stolen copy of the old cookie stops
+    working here, as at a sign-in (ruling plan#3070).  A stranger's browser
+    gets no cookie, having no record; its password clears the account's count
+    and lock if the record still holds what the checks saw, *checked* (ruling
+    plan#3007), and its passkey clears nothing (ruling plan#3469).
+    Everything the re-confirm wrote (the renewal, a passkey's last use) is
+    committed before the session is stamped and before the cookie rides the
+    response.  Then ``_fresh_login_at`` restarts and the request is activity
+    (:func:`~app.utils.session_helpers.stamp_reauth_session`); the session's
+    sign-in stamp and the record's thirty days do not move, because a
+    re-confirm is not a sign-in (ruling plan#3069).  It lands where a sign-in
+    lands the user (:func:`_landing_page`): an owner on the safe ``next`` or
+    the dashboard, and a companion on her own page always, never on the
+    owner's dashboard, which answers her 404.
+
+    The record is read again for the renewal, never handed in: with a code,
+    the code's commit has ended the transaction that read it, and a copy of
+    the cookie may have deleted its row since.  Under the owner's lock the
+    next transaction takes again, a record deleted in between is simply not
+    found: the browser gets nothing, and the account's count is not cleared in
+    its place.  So the caller says only whether the browser was *known*.
+
+    Args:
+        user: The signed-in :class:`~app.models.user.User` whose proof was
+            accepted.
+        safe_next: Where the re-confirm was asked for from, as the door read
+            it through :func:`_is_safe_redirect`, or ``None``.  Each door reads
+            its ``next`` once, so the page it renders, a refusal's redirect and
+            this one name the same place.
+        known: Whether this browser's record was found, under the owner's
+            lock, when the re-confirm's tries were spent.
+        checked: What the strangers' record of the account's email held when
+            a stranger's password was checked.  ``None`` for a known browser,
+            for a stranger whose checks found no record, and for a passkey,
+            which neither asks nor clears that record (ruling plan#3469): a
+            known proof refills no stranger's guesses.  Keyword-only with no
+            default, so no caller can forget it.
+        **logged: What the success event names beyond the user, a passkey's
+            id for one.
+
+    Returns:
+        A redirect to where the user lands, carrying the renewed device
+        cookie for a known browser.
+    """
+    # Both read before the commit expires the row, so this function reads
+    # nothing of it afterwards.
+    user_id = user.id
+    landing = _landing_page(user, safe_next)
+    token = None
+    if known:
+        token = known_device_service.record_re_confirm(
+            user_id, device_token(user_id),
+        )
+    else:
+        auth_service.clear_failed_attempts(checked)
+    db.session.commit()
+    stamp_reauth_session(datetime.now(timezone.utc))
+    log_event(
+        logger, logging.INFO, EVT_REAUTH_SUCCESS, AUTH,
+        "Step-up re-auth succeeded", user_id=user_id, **logged,
+    )
+    response = redirect(landing)
+    if token is not None:
+        set_device_cookie(response, user_id, token)
     return response
 
 

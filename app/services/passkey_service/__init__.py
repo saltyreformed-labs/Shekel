@@ -161,6 +161,11 @@ def re_confirm_options(
 ) -> tuple[dict[str, object], dict[str, str | int]]:
     """Begin a passkey re-confirm by *user_id*, listing only their passkeys.
 
+    An account holding none has no re-confirm to begin: options listing no
+    passkey would ask the device for any passkey of this site, another
+    account's on a shared device among them (WebAuthn reads an empty
+    ``allowCredentials`` so), and every answer would then be refused.
+
     Args:
         user_id: The signed-in account re-confirming.
         origin: The site's origin, from configuration.
@@ -168,9 +173,15 @@ def re_confirm_options(
     Returns:
         The options for ``navigator.credentials.get()``, as WebAuthn's JSON,
         and the state the route keeps for :func:`complete_re_confirm`.
+
+    Raises:
+        NotFoundError: *user_id* holds no passkey.
     """
+    credentials = _ceremony.descriptors(user_id)
+    if not credentials:
+        raise NotFoundError(f"User {user_id} holds no passkey to re-confirm with.")
     options, begun = _ceremony.server(origin).authenticate_begin(
-        credentials=_ceremony.descriptors(user_id),
+        credentials=credentials,
         user_verification=UserVerificationRequirement.REQUIRED,
     )
     return dict(options), _ceremony.issue(

@@ -25,7 +25,9 @@ from tests._passkeys import (
     ORIGIN,
     UP,
     UV,
+    Clock,
     SoftwareAuthenticator,
+    add,
     attestation_object,
     b64url,
     cbor_int,
@@ -33,7 +35,6 @@ from tests._passkeys import (
     cbor_text,
     client_data,
 )
-from tests.test_services.test_passkey_service._helpers import Clock, add
 
 _HUGE = 2**62
 

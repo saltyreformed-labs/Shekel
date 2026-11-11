@@ -17,6 +17,14 @@ Every field a refusal test needs to get wrong can be: the origin, the relying
 party id, the flags, the counter, the user handle, the ceremony's type, the
 key, the credential id.  The defaults are a correct Apple passkey: user
 present and verified, and a counter that stays at 0.
+
+**And the acts every passkey test shares**, the service's tests and the
+routes' alike: the service's clock set per act (:class:`Clock`), a passkey
+added through the add's three acts (:func:`add`), and, for a route test that
+runs on the real clock, one added a minute ago and committed
+(:func:`add_committed`) and read back afresh (:func:`passkey_row`), and a
+passkey form's options asked (:func:`ask_options`) and its answer posted
+(:func:`post_answer`) as ``passkey.js`` asks and posts them.
 """
 
 import base64
@@ -24,10 +32,19 @@ import hashlib
 import json
 import os
 import struct
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, mldsa, rsa
 from cryptography.hazmat.primitives.asymmetric import padding as rsa_padding
+from sqlalchemy import select
+
+from app.extensions import db
+from app.models.passkey import Passkey
+from app.services import passkey_service
+from tests._form_controls import rendered_form_controls
+from tests._test_helpers import freeze_today
 
 #: The origin the suite's configuration names (``TestConfig.PASSKEY_ORIGIN``),
 #: spelled out here so a moved setting fails a test rather than moving both.
@@ -400,3 +417,144 @@ class SoftwareAuthenticator:
             "response": response,
             "clientExtensionResults": {},
         }
+
+
+#: The moment each service case starts at.  Fixed, so no case depends on the
+#: day the suite runs; the service never reads the calendar.
+T0 = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+
+#: When :func:`add` adds a passkey unless told otherwise: a minute before
+#: :data:`T0`.  A kept passkey has signed in once, at its add (ruling
+#: plan#3525), and a challenge issued at or before a passkey's last use is
+#: refused, so a ceremony a case begins at T0 must be issued after the add.
+ADDED_AT = T0 - timedelta(minutes=1)
+
+#: The module whose clock the service reads: the package's one read of it.
+#: Named as text, so a clock that moved modules fails every case at once.
+_CLOCK_MODULE = "app.services.passkey_service._ceremony"
+
+
+class Clock:
+    """The service's clock, set to the moment each act names.
+
+    Attributes:
+        moment: The moment it is set to.
+    """
+
+    def __init__(self, monkeypatch):
+        """Hold *monkeypatch* and start at :data:`T0`."""
+        self._monkeypatch = monkeypatch
+        self.moment = T0
+        self.at(T0)
+
+    def at(self, moment: datetime) -> None:
+        """Freeze the service's clock at *moment* (UTC)."""
+        self.moment = moment
+        freeze_today(
+            self._monkeypatch, moment.date(),
+            modules=(_CLOCK_MODULE,),
+            at_time=moment.time(),
+        )
+
+
+def add(clock, user, authenticator=None, name="iPhone", *, at=ADDED_AT, **create):
+    """Add a passkey to *user* at *at* through all three acts; return it and its key.
+
+    The registration's options, its completion, and the sign-in by the new
+    passkey that keeps it, all at *at*.  *clock* is put back where it stood,
+    so the case goes on at its own moment.
+
+    Args:
+        clock: The case's :class:`Clock`.
+        user: The account adding it.
+        authenticator: The key to add, or ``None`` for a new one.
+        name: The name typed for it.
+        at: The moment of the add, which is the passkey's first use.
+        **create: Passed to :meth:`SoftwareAuthenticator.create`.
+
+    Returns:
+        The new passkey row and the authenticator holding its key.
+    """
+    authenticator = SoftwareAuthenticator() if authenticator is None else authenticator
+    resume = clock.moment
+    clock.at(at)
+    options, state = passkey_service.registration_options(user, origin=ORIGIN)
+    sign_in_options, sign_in_state = passkey_service.complete_registration(
+        user, json.dumps(authenticator.create(options, **create)), name,
+        origin=ORIGIN, state=state,
+    )
+    passkey = passkey_service.add_passkey(
+        user, json.dumps(authenticator.get(sign_in_options)),
+        origin=ORIGIN, state=sign_in_state,
+    )
+    clock.at(resume)
+    return passkey, authenticator
+
+
+def add_committed(user):
+    """Add a passkey to *user* through the service's three acts, a minute ago; commit.
+
+    For a route test, which runs on the real clock: a minute ago, by the
+    service's clock frozen for the add alone, so a ceremony the case runs now
+    is issued after the passkey's last use (the add's own sign-in, ruling
+    plan#3525).
+
+    Returns:
+        The passkey's id and the authenticator holding its key.
+    """
+    with pytest.MonkeyPatch.context() as frozen:
+        passkey, authenticator = add(
+            Clock(frozen), user, at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        )
+        passkey_id = passkey.id
+    db.session.commit()
+    return passkey_id, authenticator
+
+
+def passkey_row(passkey_id):
+    """Return the passkey *passkey_id*, read afresh."""
+    return db.session.execute(
+        select(Passkey).where(Passkey.id == passkey_id)
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+
+
+def ask_options(client, page, form, **request):
+    """Ask a passkey form's options at the URL it names, with its form token, as passkey.js does.
+
+    Args:
+        client: The browser asking.
+        page: The page's text, whose form token is sent.
+        form: The page's passkey form: its ``action`` and ``options_url``.
+        **request: Passed to the client's ``post``; any ``headers`` are sent
+            beside the token's.
+
+    Returns:
+        The options, as the server answered them.
+    """
+    token = rendered_form_controls(page, form.action)["csrf_token"][0]
+    headers = {"X-CSRFToken": token, **request.pop("headers", {})}
+    response = client.post(form.options_url, headers=headers, **request)
+    assert response.status_code == 200, response.get_data(as_text=True)
+    return response.get_json()
+
+
+def post_answer(client, page, form, answer, *, action=None, **request):
+    """Post a passkey form's controls with *answer* in ``credential``, as passkey.js does.
+
+    Args:
+        client: The browser posting.
+        page: The page's text, whose form controls are posted.
+        form: The page's passkey form: its ``action``.
+        answer: The device's answer, as a dict, or text posted as it is.
+        action: Where to post instead of the form's own ``action``, for a
+            case about what the route itself accepts.
+        **request: Passed to the client's ``post``.
+
+    Returns:
+        The response.
+    """
+    controls = rendered_form_controls(page, form.action)
+    assert controls["credential"] == [""], "the form renders the answer's field empty"
+    controls["credential"] = [answer if isinstance(answer, str) else json.dumps(answer)]
+    return client.post(action or form.action, data=controls, **request)

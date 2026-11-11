@@ -23,10 +23,11 @@ from marshmallow import ValidationError as MarshmallowValidationError
 from app.extensions import db
 from app.models.user import MfaConfig
 from app.schemas.validation import ChangePasswordSchema, ReauthSchema
-from app.services import auth_service, known_device_service
+from app.services import auth_service, known_device_service, passkey_service
 from app.exceptions import AuthError, NotFoundError, ValidationError
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
+    _complete_re_confirm,
     _first_validation_message,
     _is_safe_redirect,
     _known_device,
@@ -34,12 +35,10 @@ from app.routes.auth._helpers import (
     _totp_accepted_or_key_failure,
 )
 from app.utils.auth_helpers import log_refused_lookup
-from app.utils.device_cookie import device_token, set_device_cookie
 from app.utils.log_events import (
     AUTH,
     EVT_PASSWORD_CHANGED,
     EVT_REAUTH_FAILED,
-    EVT_REAUTH_SUCCESS,
     EVT_SESSIONS_INVALIDATED,
     EVT_TRUSTED_DEVICE_FORGOTTEN,
     log_event,
@@ -52,7 +51,6 @@ from app.utils.security_events import (
 )
 from app.utils.session_helpers import (
     stamp_password_change,
-    stamp_reauth_session,
     stamp_session_refresh,
 )
 
@@ -194,6 +192,12 @@ def reauth():
     :func:`~app.utils.session_helpers.stamp_reauth_session` and
     redirects to the validated ``next`` URL.
 
+    For an account holding a passkey the page offers it too, beside the
+    password and code, which stay (ruling plan#3541): its answer posts to
+    ``/reauth/passkey`` (:func:`~app.routes.auth.passkeys.passkey_re_confirm`),
+    and both doors finish through the one completion of a re-confirm,
+    :func:`~app.routes.auth._helpers._complete_re_confirm`.
+
     Verification mirrors the /login flow:
 
       * Password is verified through
@@ -234,31 +238,28 @@ def reauth():
     check this account faces has passed.  A stranger's re-confirm clears the
     account's count and lock if the record still holds what the read of the
     lock found, so a stranger's guess judged during these checks stands, and
-    gets no cookie: it has no record.  A known
-    browser's renews its record
-    (:func:`~app.services.known_device_service.record_re_confirm`): a new
-    cookie and its own count cleared, so a stolen copy of the old cookie
-    stops working here, as at a sign-in (ruling plan#3070).  The record's
-    thirty days do not move, and nor does the session's: a re-confirm is not
-    a sign-in (ruling plan#3069).  The strangers' count and lock are left
-    alone.  The record is read again for the renewal, after the code's commit
-    and under the owner's lock that the next transaction takes again: a record
-    a copy of the cookie deleted in between gets nothing, and the account's
-    count is not cleared in its place.
+    gets no cookie: it has no record.  A known browser's renews its record, a
+    new cookie and its own count cleared (ruling plan#3070), and leaves the
+    strangers' count and lock alone.  What the completion does, and why the
+    record is read again for the renewal, is
+    :func:`~app.routes.auth._helpers._complete_re_confirm`'s to say.
 
     The ``next`` parameter is validated through ``_is_safe_redirect``
     on every read (storage time and post-success redirect) so an
     attacker cannot stage an open-redirect via the step-up flow.
     ``fresh_login_required`` sends ``request.url``, which is absolute, so
-    ``_is_safe_redirect`` refuses it and the user lands on /dashboard to
-    re-issue their action, as does direct navigation to /reauth.  A relative
-    ``next`` is honoured.
+    ``_is_safe_redirect`` refuses it and the user lands where a sign-in lands
+    them, to re-issue their action, as does direct navigation to /reauth: the
+    one landing rule (``_landing_page``), so an owner lands on the dashboard
+    and a companion on her own page, never on the owner's dashboard, which
+    answers her 404.  An owner's relative ``next`` is honoured; a companion
+    always lands on her own page, as at sign-in.
     """
     next_url = request.args.get("next")
     safe_next = next_url if _is_safe_redirect(next_url) else None
 
     if request.method == "GET":
-        return render_template("auth/reauth.html", next=safe_next)
+        return _render_reauth_form(safe_next)
 
     # Schema validation rejects oversized/missing fields before bcrypt
     # is invoked.  Failures are reported as the same "Invalid password."
@@ -273,7 +274,7 @@ def reauth():
             user_id=current_user.id, ip=request.remote_addr,
         )
         flash("Invalid password.", "danger")
-        return render_template("auth/reauth.html", next=safe_next)
+        return _render_reauth_form(safe_next)
 
     device = _known_device(current_user)
     # A password is about to be checked: spend one of this browser's tries,
@@ -296,7 +297,7 @@ def reauth():
             user_id=current_user.id, ip=request.remote_addr,
         )
         flash(str(exc), "danger")
-        return render_template("auth/reauth.html", next=safe_next)
+        return _render_reauth_form(safe_next)
 
     mfa_config = (
         db.session.query(MfaConfig)
@@ -309,7 +310,7 @@ def reauth():
             mfa_config, totp_code, current_user.id,
         )
         if key_failure:
-            return render_template("auth/reauth.html", next=safe_next)
+            return _render_reauth_form(safe_next)
         if not accepted:
             auth_service.record_failed_attempt(current_user, device=device)
             log_event(
@@ -318,28 +319,34 @@ def reauth():
                 user_id=current_user.id, ip=request.remote_addr,
             )
             flash("Invalid authentication code.", "danger")
-            return render_template("auth/reauth.html", next=safe_next)
+            return _render_reauth_form(safe_next)
 
     # Every check has passed.  ``device`` is asked only whether it was None:
     # with two-factor, the code's commit has expired it, and a copy of this
     # cookie may have deleted its row since, so it is never read again here.
-    token = None
-    if device is None:
-        auth_service.clear_failed_attempts(checked)
-    else:
-        token = known_device_service.record_re_confirm(
-            current_user.id, device_token(current_user.id),
-        )
-        db.session.commit()
-    stamp_reauth_session(datetime.now(timezone.utc))
-    log_event(
-        logger, logging.INFO, EVT_REAUTH_SUCCESS, AUTH,
-        "Step-up re-auth succeeded", user_id=current_user.id,
+    return _complete_re_confirm(
+        current_user, safe_next, known=device is not None, checked=checked,
     )
-    response = redirect(safe_next or url_for("dashboard.page"))
-    if token is not None:
-        set_device_cookie(response, current_user.id, token)
-    return response
+
+
+def _render_reauth_form(safe_next: str | None) -> str:
+    """Render the re-confirm page, from each of ``/reauth``'s render sites.
+
+    It offers the passkey beside the password and code for an account holding
+    one (ruling plan#3541), asked afresh at each render, so a passkey removed
+    in another tab is no longer offered.
+
+    Args:
+        safe_next: The validated ``next`` the page's forms post back, or
+            ``None``.
+
+    Returns:
+        The rendered ``/reauth`` page.
+    """
+    return render_template(
+        "auth/reauth.html", next=safe_next,
+        passkey_offered=passkey_service.has_passkey(current_user.id),
+    )
 
 
 @auth_bp.route("/security-event/dismiss", methods=["POST"])

@@ -5,10 +5,10 @@ from datetime import timedelta
 
 import pytest
 
+from app.exceptions import NotFoundError
 from app.services import passkey_service
 from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
-from tests._passkeys import ORIGIN, unb64url
-from tests.test_services.test_passkey_service._helpers import ADDED_AT, T0, Clock, add
+from tests._passkeys import ADDED_AT, ORIGIN, T0, Clock, add, unb64url
 
 
 @pytest.fixture(name="clock")
@@ -42,6 +42,14 @@ def test_the_options_list_only_the_accounts_own_passkeys(user, second_user, cloc
     assert options["publicKey"]["userVerification"] == "required"
 
 
+def test_an_account_holding_none_begins_no_re_confirm(user, second_user, clock):
+    """Options naming no passkey would ask the device for anyone's: refused instead."""
+    add(clock, second_user["user"])
+
+    with pytest.raises(NotFoundError):
+        passkey_service.re_confirm_options(user.id, origin=ORIGIN)
+
+
 def test_the_accounts_passkey_re_confirms_and_records_its_use(user, clock):
     """Last used moves to the completion's moment."""
     passkey, authenticator = add(clock, user)
@@ -71,7 +79,12 @@ def test_another_accounts_handle_is_refused(user, second_user, clock):
 
 
 def test_another_accounts_passkey_is_refused(user, second_user, clock):
-    """A passkey of another account re-confirms nothing here, and its use is not recorded."""
+    """A passkey of another account re-confirms nothing here, and its use is not recorded.
+
+    The account holds a passkey of its own, as every account a re-confirm is
+    begun for does (an account holding none begins none, the case above).
+    """
+    add(clock, user)
     theirs, authenticator = add(clock, second_user["user"])
     options, state = passkey_service.re_confirm_options(user.id, origin=ORIGIN)
     with pytest.raises(PasskeyRefused) as caught:

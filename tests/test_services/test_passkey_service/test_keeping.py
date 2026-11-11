@@ -22,19 +22,15 @@ from tests._passkeys import (
     BS,
     ORIGIN,
     RP_ID,
+    T0,
     UP,
     UV,
+    Clock,
     SoftwareAuthenticator,
+    add,
     b64url,
 )
-from tests.test_services.test_passkey_service._helpers import (
-    T0,
-    Clock,
-    add,
-    add_row,
-    sign_in,
-    written_directly,
-)
+from tests.test_services.test_passkey_service._helpers import add_row, sign_in, written_directly
 
 _ONE_MICROSECOND = timedelta(microseconds=1)
 

@@ -107,8 +107,9 @@ def rate_limit_key() -> str:
     Anyone else counts against their address, which includes a signed-out
     visitor to a gated page: the default limits run before the login gate, so
     they spend their own count for that page and are then sent to sign in
-    (ruling plan#3009).  ``/reauth``, the one gated route with a limit of its
-    own, spends its tries inside its view
+    (ruling plan#3009).  Re-confirm's two doors, ``/reauth`` and
+    ``/reauth/passkey``, the gated routes with a limit of their own, spend
+    their tries inside their views
     (:func:`app.routes.auth._helpers._spend_a_try`), after the gate, so a
     signed-out visitor spends none of them.
 

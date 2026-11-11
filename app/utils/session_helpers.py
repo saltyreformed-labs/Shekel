@@ -397,7 +397,10 @@ def stamp_reauth_session(now: datetime) -> None:
     make ``/reauth`` a covert "promote my session past every prior
     invalidation point" button.
 
-    Use only on the ``/reauth`` success branch (commit C-10).  A sign-in
+    Use only on a re-confirm's success, the one completion both of its
+    doors share (``app.routes.auth._helpers._complete_re_confirm``: the
+    password at ``/reauth`` and the passkey at ``/reauth/passkey``; commit
+    C-10, plan#2538).  A sign-in
     (login, MFA verify) calls :func:`stamp_login_session` instead, and a
     password change :func:`stamp_password_change`.
 

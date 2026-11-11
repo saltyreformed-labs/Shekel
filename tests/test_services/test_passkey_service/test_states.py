@@ -15,8 +15,7 @@ import pytest
 
 from app.services import passkey_service
 from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
-from tests._passkeys import ORIGIN, SoftwareAuthenticator
-from tests.test_services.test_passkey_service._helpers import ADDED_AT, Clock, add
+from tests._passkeys import ADDED_AT, ORIGIN, Clock, SoftwareAuthenticator, add
 
 
 @pytest.fixture(name="clock")

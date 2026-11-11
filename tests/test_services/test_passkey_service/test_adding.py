@@ -28,14 +28,17 @@ from tests._passkeys import (
     MLDSA65,
     MLDSA87,
     OFFERED,
-    PS256,
-    RS256,
     ORIGIN,
+    PS256,
     RP_ID,
     RS1,
+    RS256,
+    T0,
     UP,
     UV,
+    Clock,
     SoftwareAuthenticator,
+    add,
     attestation_object,
     b64url,
     cbor_bytes,
@@ -45,13 +48,7 @@ from tests._passkeys import (
     padding,
     unb64url,
 )
-from tests.test_services.test_passkey_service._helpers import (
-    T0,
-    Clock,
-    add,
-    add_row,
-    written_directly,
-)
+from tests.test_services.test_passkey_service._helpers import add_row, written_directly
 
 #: A COSE key id member (label 2, RFC 9052 7.1) of 4,000 bytes: a member no
 #: key type's public key holds, which the add must not keep.

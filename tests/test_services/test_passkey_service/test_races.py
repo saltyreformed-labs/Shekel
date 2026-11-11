@@ -20,8 +20,7 @@ from app.models.user import User
 from app.services import passkey_service
 from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
 from tests._lock_waits import act_past_a_held_row
-from tests._passkeys import ORIGIN, SoftwareAuthenticator
-from tests.test_services.test_passkey_service._helpers import ADDED_AT, T0, Clock, add
+from tests._passkeys import ADDED_AT, ORIGIN, T0, Clock, SoftwareAuthenticator, add
 
 
 def test_one_answer_completed_twice_at_once_signs_in_once(app, bare_user, monkeypatch):

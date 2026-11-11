@@ -35,8 +35,9 @@ Module map:
 * :mod:`app.routes.auth.session_security` -- authenticated-session
   security (``change_password``, ``invalidate_sessions``, ``reauth``,
   ``dismiss_security_event``).
-* :mod:`app.routes.auth.passkeys` -- signing in with a passkey
-  (``passkey_sign_in_options``, ``passkey_sign_in``; plan#2538).
+* :mod:`app.routes.auth.passkeys` -- signing in and re-confirming with a
+  passkey (``passkey_sign_in_options``, ``passkey_sign_in``,
+  ``passkey_re_confirm_options``, ``passkey_re_confirm``; plan#2538).
 """
 
 # Re-export ``auth_bp`` from the leaf declaration module so consumers

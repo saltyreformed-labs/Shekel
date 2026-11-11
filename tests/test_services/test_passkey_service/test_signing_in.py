@@ -10,15 +10,22 @@ from app.extensions import db
 from app.models.passkey import Passkey
 from app.services import passkey_service
 from app.services.passkey_service import PasskeyRefusal, PasskeyRefused
-from tests._passkeys import BE, BS, ORIGIN, RP_ID, UP, UV, SoftwareAuthenticator, padding
-from tests._test_helpers import capture_sql_statements
-from tests.test_services.test_passkey_service._helpers import (
+from tests._passkeys import (
     ADDED_AT,
+    BE,
+    BS,
+    ORIGIN,
+    RP_ID,
     T0,
+    UP,
+    UV,
     Clock,
+    SoftwareAuthenticator,
     add,
-    sign_in,
+    padding,
 )
+from tests._test_helpers import capture_sql_statements
+from tests.test_services.test_passkey_service._helpers import sign_in
 
 _ONE_MICROSECOND = timedelta(microseconds=1)
 

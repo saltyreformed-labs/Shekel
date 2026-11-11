@@ -36,12 +36,17 @@ from sqlalchemy.exc import OperationalError
 from app import CONFIG_MAP, create_app
 from app.extensions import db
 from app.models.known_device import KnownDevice
-from app.models.passkey import Passkey
 from app.models.user import User
 from tests._form_controls import rendered_form_controls
 from tests._guess_records import record_of, set_record
 from tests._limited_app import limited_app, through_nginx
-from tests._passkeys import SoftwareAuthenticator
+from tests._passkeys import (
+    SoftwareAuthenticator,
+    add_committed,
+    ask_options,
+    passkey_row,
+    post_answer,
+)
 from tests._sign_in import browser_count, make_known
 from tests._test_helpers import (
     HeldOwnerKey,
@@ -53,7 +58,6 @@ from tests._test_helpers import (
     owner_lock_key,
 )
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
-from tests.test_services.test_passkey_service._helpers import Clock, add
 
 #: The sentence every refusal but a lapsed ceremony's says: one for a passkey
 #: no account holds, one that does not verify, one of a disabled account, so
@@ -104,54 +108,11 @@ def _page(client):
     return page, form
 
 
-def _options(client, page, form):
-    """Ask the options at the URL the form names, with its form token, as passkey.js does."""
-    token = rendered_form_controls(page, form.action)["csrf_token"][0]
-    response = client.post(form.options_url, headers={"X-CSRFToken": token})
-    assert response.status_code == 200, response.get_data(as_text=True)
-    return response.get_json()
-
-
-def _post(client, page, form, answer, **request_arguments):
-    """Post the passkey form's controls with *answer* in ``credential``, as passkey.js does."""
-    controls = rendered_form_controls(page, form.action)
-    assert controls["credential"] == [""], "the form renders the answer's field empty"
-    controls["credential"] = [answer if isinstance(answer, str) else json.dumps(answer)]
-    return client.post(form.action, data=controls, **request_arguments)
-
-
 def _sign_in(client, authenticator, **get):
     """Run a whole passkey sign-in through the page; return the form's response."""
     page, form = _page(client)
-    options = _options(client, page, form)
-    return _post(client, page, form, authenticator.get(options, **get))
-
-
-def _added(user):
-    """Add a passkey to *user* through the service's three acts, a minute ago; commit.
-
-    A minute ago, by the service's clock frozen for the add alone, so the
-    sign-in a case runs on the real clock is issued after the passkey's last
-    use (the add's own sign-in, ruling plan#3525).
-
-    Returns:
-        The passkey's id and the authenticator holding its key.
-    """
-    with pytest.MonkeyPatch.context() as frozen:
-        passkey, authenticator = add(
-            Clock(frozen), user, at=datetime.now(timezone.utc) - timedelta(minutes=1),
-        )
-        passkey_id = passkey.id
-    db.session.commit()
-    return passkey_id, authenticator
-
-
-def _passkey(passkey_id):
-    """Return the passkey, read afresh."""
-    return db.session.execute(
-        select(Passkey).where(Passkey.id == passkey_id)
-        .execution_options(populate_existing=True)
-    ).scalar_one()
+    options = ask_options(client, page, form)
+    return post_answer(client, page, form, authenticator.get(options, **get))
 
 
 def _signed_in_as(client):
@@ -173,7 +134,7 @@ def _refused_with(client, response):
 def _owner(seed_user):
     """The seed user, holding one passkey: ``(user, passkey_id, authenticator)``."""
     user = seed_user["user"]
-    passkey_id, authenticator = _added(user)
+    passkey_id, authenticator = add_committed(user)
     return user, passkey_id, authenticator
 
 
@@ -202,7 +163,7 @@ class TestThePage:
         """No credential is listed; the ceremony waits in the session for its answer."""
         page, form = _page(client)
 
-        options = _options(client, page, form)
+        options = ask_options(client, page, form)
 
         assert options == {"publicKey": {
             "challenge": options["publicKey"]["challenge"],
@@ -222,7 +183,7 @@ class TestASignIn:
     def test_a_passkey_signs_the_owner_in(self, client, owner, caplog):
         """The owner lands on the dashboard, signed in, the passkey's use recorded."""
         user, passkey_id, authenticator = owner
-        added_use = _passkey(passkey_id).last_used_at
+        added_use = passkey_row(passkey_id).last_used_at
 
         with caplog.at_level(logging.INFO):
             response = _sign_in(client, authenticator)
@@ -230,7 +191,7 @@ class TestASignIn:
         assert response.status_code == 302
         assert urlsplit(response.headers["Location"]).path == "/dashboard"
         assert _signed_in_as(client) == user.id
-        assert _passkey(passkey_id).last_used_at > added_use
+        assert passkey_row(passkey_id).last_used_at > added_use
         events = [
             (record.event, getattr(record, "passkey_id", None))
             for record in caplog.records if getattr(record, "event", None)
@@ -268,7 +229,7 @@ class TestASignIn:
     def test_a_companion_lands_on_her_page(self, client, seed_companion):
         """A companion's passkey signs her in to the companion view, as her password does."""
         companion = seed_companion["user"]
-        _, authenticator = _added(companion)
+        _, authenticator = add_committed(companion)
 
         response = _sign_in(client, authenticator)
 
@@ -279,15 +240,15 @@ class TestASignIn:
         """A second tab's answer, posted once the first signed in, lands where ``/login`` sends."""
         user, passkey_id, authenticator = owner
         page, form = _page(client)
-        options = _options(client, page, form)
+        options = ask_options(client, page, form)
         client.post("/login", data={"email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD})
-        used_before = _passkey(passkey_id).last_used_at
+        used_before = passkey_row(passkey_id).last_used_at
 
-        response = _post(client, page, form, authenticator.get(options))
+        response = post_answer(client, page, form, authenticator.get(options))
 
         assert urlsplit(response.headers["Location"]).path == "/dashboard"
         assert _signed_in_as(client) == user.id
-        assert _passkey(passkey_id).last_used_at == used_before
+        assert passkey_row(passkey_id).last_used_at == used_before
         with client.session_transaction() as session:
             assert "_passkey_sign_in_state" not in session
 
@@ -375,13 +336,13 @@ class TestARefusalNamesNothing:
         user, passkey_id, authenticator = owner
         forger = SoftwareAuthenticator(credential_id=authenticator.credential_id)
         forger.user_handle = authenticator.user_handle
-        used_before = _passkey(passkey_id).last_used_at
+        used_before = passkey_row(passkey_id).last_used_at
 
         with caplog.at_level(logging.WARNING):
             page = _refused_with(client, _sign_in(client, forger))
 
         assert _TRY_AGAIN in page
-        assert _passkey(passkey_id).last_used_at == used_before
+        assert passkey_row(passkey_id).last_used_at == used_before
         refusals = [
             (record.refusal, record.user_id) for record in caplog.records
             if getattr(record, "event", None) == "passkey_sign_in_failed"
@@ -402,11 +363,11 @@ class TestARefusalNamesNothing:
         """Removed between the options and the answer: the account is not found by it."""
         _, passkey_id, authenticator = owner
         page, form = _page(client)
-        options = _options(client, page, form)
-        db.session.delete(_passkey(passkey_id))
+        options = ask_options(client, page, form)
+        db.session.delete(passkey_row(passkey_id))
         db.session.commit()
 
-        shown = _refused_with(client, _post(client, page, form, authenticator.get(options)))
+        shown = _refused_with(client, post_answer(client, page, form, authenticator.get(options)))
 
         assert _TRY_AGAIN in shown
 
@@ -415,9 +376,9 @@ class TestARefusalNamesNothing:
     def test_an_answer_that_is_no_credential(self, client, answer):
         """An empty, unreadable or shapeless answer is refused alike."""
         page, form = _page(client)
-        _options(client, page, form)
+        ask_options(client, page, form)
 
-        shown = _refused_with(client, _post(client, page, form, answer))
+        shown = _refused_with(client, post_answer(client, page, form, answer))
 
         assert _TRY_AGAIN in shown
 
@@ -425,13 +386,13 @@ class TestARefusalNamesNothing:
         """The ceremony leaves the session at the first submit, so the second meets none."""
         user, _, authenticator = owner
         page, form = _page(client)
-        answer = authenticator.get(_options(client, page, form))
+        answer = authenticator.get(ask_options(client, page, form))
         assert _signed_in_as(client) is None
-        _post(client, page, form, answer)
+        post_answer(client, page, form, answer)
         assert _signed_in_as(client) == user.id
         client.post("/logout")
 
-        shown = _refused_with(client, _post(client, page, form, answer))
+        shown = _refused_with(client, post_answer(client, page, form, answer))
 
         assert _TOO_LONG in shown
 
@@ -447,10 +408,10 @@ class TestARefusalNamesNothing:
         key = authenticator if held else SoftwareAuthenticator()
         page, form = _page(client)
         other = client.application.test_client()
-        stray = key.get(_options(other, *_page(other)))
+        stray = key.get(ask_options(other, *_page(other)))
 
         response, statements = capture_sql_statements(
-            lambda: _post(client, page, form, stray),
+            lambda: post_answer(client, page, form, stray),
         )
 
         assert _TOO_LONG in _refused_with(client, response)
@@ -466,11 +427,11 @@ class TestTheOwnersLock:
         """The read before the lock loads the account by a join; the passkey is read under it."""
         user, _, authenticator = owner
         page, form = _page(client)
-        options = _options(client, page, form)
+        options = ask_options(client, page, form)
         answer = authenticator.get(options)
 
         response, statements = capture_sql_statements(
-            lambda: _post(client, page, form, answer),
+            lambda: post_answer(client, page, form, answer),
         )
 
         assert urlsplit(response.headers["Location"]).path == "/dashboard"
@@ -492,7 +453,7 @@ class TestTheOwnersLock:
 
     def test_a_companion_waits_on_her_owners_key(self, client, seed_user, seed_companion):
         """A companion acts on her owner's budget, so her sign-in takes the owner's key."""
-        _, authenticator = _added(seed_companion["user"])
+        _, authenticator = add_committed(seed_companion["user"])
 
         response, statements = capture_sql_statements(
             lambda: _sign_in(client, authenticator),
@@ -505,12 +466,12 @@ class TestTheOwnersLock:
         """Another transaction holding the owner's key blocks the sign-in."""
         user, _, authenticator = owner
         page, form = _page(client)
-        answer = authenticator.get(_options(client, page, form))
+        answer = authenticator.get(ask_options(client, page, form))
 
         with HeldOwnerKey(user.id):
             bound_lock_waits()
             with pytest.raises(OperationalError) as caught:
-                _post(client, page, form, answer)
+                post_answer(client, page, form, answer)
 
         assert_timed_out_on_owner_key(caught.value, user.id)
 
@@ -518,10 +479,10 @@ class TestTheOwnersLock:
         """The control: the same bound, nothing held."""
         user, _, authenticator = owner
         page, form = _page(client)
-        answer = authenticator.get(_options(client, page, form))
+        answer = authenticator.get(ask_options(client, page, form))
 
         bound_lock_waits()
-        _post(client, page, form, answer)
+        post_answer(client, page, form, answer)
 
         assert _signed_in_as(client) == user.id
 
@@ -553,7 +514,7 @@ class TestTheFormToken:
         browser = guarded.test_client()
         page, form = _page(browser)
 
-        response = _post(browser, page, form, authenticator.get(_options(browser, page, form)))
+        response = post_answer(browser, page, form, authenticator.get(ask_options(browser, page, form)))
 
         assert urlsplit(response.headers["Location"]).path == "/dashboard"
         assert _signed_in_as(browser) == user.id
@@ -599,14 +560,14 @@ class TestTheLimit:
         address = through_nginx("8.8.8.8")
         page, form = _page(browser)
         for attempt in range(_LIMIT):
-            response = _post(browser, page, form, "", **address)
+            response = post_answer(browser, page, form, "", **address)
             assert response.status_code == 302, f"try {attempt + 1} was not answered"
 
-        assert _post(browser, page, form, "", **address).status_code == 429
+        assert post_answer(browser, page, form, "", **address).status_code == 429
         other = rate_app.test_client()
         other_page, other_form = _page(other)
-        assert _post(
-            other, other_page, other_form, owner[2].get(_options(other, other_page, other_form)),
+        assert post_answer(
+            other, other_page, other_form, owner[2].get(ask_options(other, other_page, other_form)),
             **through_nginx("9.9.9.9"),
         ).status_code == 302
         assert _signed_in_as(other) == owner[0].id
@@ -620,8 +581,8 @@ class TestTheLimit:
         assert browser.post("/login", data={}, **address).status_code == 429
 
         page, form = _page(browser)
-        response = _post(
-            browser, page, form, owner[2].get(_options(browser, page, form)), **address,
+        response = post_answer(
+            browser, page, form, owner[2].get(ask_options(browser, page, form)), **address,
         )
 
         assert urlsplit(response.headers["Location"]).path == "/dashboard"

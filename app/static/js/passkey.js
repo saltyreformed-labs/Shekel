@@ -1,11 +1,14 @@
 /**
- * Shekel Budget App -- Signing In With a Passkey
+ * Shekel Budget App -- Signing In and Re-confirming With a Passkey
  *
- * A passkey signs in on its own (plan#2538): this module asks the server for
- * a sign-in's options, has the device sign them when the person unlocks it
+ * A passkey signs in on its own (plan#2538), and re-confirms a signed-in
+ * account before a sensitive change (/reauth, beside the password and code,
+ * ruling plan#3541).  For either, this module asks the server for the
+ * ceremony's options, has the device sign them when the person unlocks it
  * with Face ID, a fingerprint or its passcode, and posts the device's answer
- * in the sign-in form, which the server checks and answers with a redirect,
- * as the password form is answered.
+ * in the page's passkey form, which the server checks and answers with a
+ * redirect, as the password form is answered.  The two forms differ only in
+ * what FORMS below says of them.
  *
  * Two ways in, on the sign-in page:
  *
@@ -15,6 +18,10 @@
  *     webauthn");
  *   - the "Sign in with a passkey" button, which stops that ceremony and
  *     shows the device's own sheet.
+ *
+ * The re-confirm page has the button alone ("Re-confirm with your passkey"),
+ * and its options name the account's own passkeys, so the device offers no
+ * one else's: the server begins no re-confirm for an account holding none.
  *
  * Both use ONE set of options, fetched before either is needed: the server
  * keeps one ceremony per session, and Safari shows the passkey sheet only
@@ -26,14 +33,25 @@
  * life, so the device gives up before the server would refuse its answer.
  *
  * A challenge lives five minutes and a waiting autofill ceremony never gives
- * up of its own accord, so the options are fetched again once their timeout
- * has passed (or on return to a page that was hidden then).  The page's form
- * token lives an hour, so once a refresh is refused for it (a 400, which only
- * the form token's check answers there) the page reloads, which brings a new
- * token and new options.  So a page left open still signs in at the first
- * try.  What a refresh cannot help is a passkey that signed in on another
- * device since these options were fetched: a challenge older than its last
- * use is refused, once, and the retry has new options.
+ * up of its own accord, so the sign-in page fetches the options again once
+ * their timeout has passed (or on return to a page that was hidden then).
+ * The page's form token lives an hour, so once a refresh is refused for it
+ * (a 400, which only the form token's check answers there) the page reloads,
+ * which brings a new token and new options.  So a sign-in page left open
+ * still signs in at the first try.  What a refresh cannot help is a passkey
+ * that signed in on another device since these options were fetched: a
+ * challenge older than its last use is refused, once, and the retry has new
+ * options.
+ *
+ * The re-confirm page never fetches on a timer: it is signed in, so each
+ * request it sent would be the session's activity, and a page left open and
+ * unattended would never reach the twelve-hour idle sign-out (ruling
+ * plan#3474).  It fetches when the page opens, on return to a page that was
+ * hidden once the options in hand have lapsed (or none are held), and at a
+ * tap that finds them lapsed, which says so and fetches, so the next tap has
+ * them.  An options request the server
+ * redirected (to the sign-in page, once the session has ended) reloads the
+ * page, which then shows that page.
  *
  * WebAuthn wants bytes where its JSON carries unpadded base64url text, both
  * ways.  This module converts them itself rather than through
@@ -41,27 +59,60 @@
  * every browser or passkey manager has.
  *
  * No inline script (CSP): the page says everything by data-* attributes on
- * the sign-in form:
+ * its passkey form, data-passkey-sign-in or data-passkey-re-confirm:
  *
  *   <form data-passkey-sign-in data-options-url="...">
  *     <input name="csrf_token">       also sent with the options' request
  *     <input name="credential">       where the device's answer is written
- *     <button data-action="passkey-sign-in">
+ *     <button data-action="passkey-sign-in">   ("passkey-re-confirm")
  *     <div data-passkey-message hidden>   where a plain message is shown
  */
 
 (function () {
   "use strict";
 
-  /** What the person is told, in plain words, when a sign-in cannot go on. */
-  var MESSAGES = {
-    unsupported: "This browser cannot use a passkey. " +
-      "Please sign in with your email and password.",
-    cancelled: "The passkey sign-in did not finish. " +
-      "You can try again, or sign in with your email and password.",
-    failed: "The passkey sign-in could not start. " +
-      "Please try again, or sign in with your email and password."
-  };
+  /**
+   * The two passkey forms, and what each does that the other does not.
+   *
+   *   attribute  the form's own data-* attribute;
+   *   action     its button's data-action;
+   *   autofill   whether a ceremony waits on the email box's autofill (the
+   *              sign-in page's alone has the box);
+   *   timed      whether the options are fetched again on a timer: never on
+   *              a signed-in page, where a request is the session's activity;
+   *   messages   what the person is told, in plain words, when it cannot go
+   *              on.
+   */
+  var FORMS = [
+    {
+      attribute: "data-passkey-sign-in",
+      action: "passkey-sign-in",
+      autofill: true,
+      timed: true,
+      messages: {
+        unsupported: "This browser cannot use a passkey. " +
+          "Please sign in with your email and password.",
+        cancelled: "The passkey sign-in did not finish. " +
+          "You can try again, or sign in with your email and password.",
+        failed: "The passkey sign-in could not start. " +
+          "Please try again, or sign in with your email and password."
+      }
+    },
+    {
+      attribute: "data-passkey-re-confirm",
+      action: "passkey-re-confirm",
+      autofill: false,
+      timed: false,
+      messages: {
+        unsupported: "This browser cannot use a passkey. " +
+          "Please re-enter your password instead.",
+        cancelled: "Re-confirming with your passkey did not finish. " +
+          "You can try again, or re-enter your password.",
+        failed: "Your passkey could not be asked just then. " +
+          "Please try again, or re-enter your password."
+      }
+    }
+  ];
 
   /**
    * Return the bytes unpadded base64url *text* holds.
@@ -159,12 +210,13 @@
   }
 
   /**
-   * Wire one sign-in form: its options, its waiting ceremony and its button.
+   * Wire one passkey form: its options, any waiting ceremony and its button.
    *
-   * @param {HTMLFormElement} form  The form carrying data-passkey-sign-in.
+   * @param {HTMLFormElement} form  The form carrying kind.attribute.
+   * @param {Object} kind  Its entry in FORMS.
    */
-  function init(form) {
-    var button = form.querySelector('[data-action="passkey-sign-in"]');
+  function init(form, kind) {
+    var button = form.querySelector('[data-action="' + kind.action + '"]');
     var message = form.querySelector("[data-passkey-message]");
     var field = form.elements.namedItem("credential");
     var token = form.elements.namedItem("csrf_token").value;
@@ -266,6 +318,12 @@
         headers: { "X-CSRFToken": token, "Accept": "application/json" },
         credentials: "same-origin"
       }).then(function (response) {
+        if (response.redirected) {
+          // The signed-in page's session has ended: the login gate sent the
+          // request to sign in, and a reload shows that page.
+          window.location.reload();
+          throw new Error("passkey options were redirected");
+        }
         if (!response.ok) {
           if (response.status === 400 && arrived) {
             // The form token has lapsed: a reload brings a new one, and
@@ -283,7 +341,9 @@
         arrived = true;
         ready = { options: options, asked: asked };
         button.disabled = false;
-        window.setTimeout(refresh, options.publicKey.timeout);
+        if (kind.timed) {
+          window.setTimeout(refresh, options.publicKey.timeout);
+        }
         if (autofill) {
           wait();
         }
@@ -297,14 +357,14 @@
     button.addEventListener("click", function () {
       message.hidden = true;
       if (!supported()) {
-        say(MESSAGES.unsupported);
+        say(kind.messages.unsupported);
         return;
       }
       if (asking) {
         return;
       }
       if (ready === null || stale()) {
-        say(MESSAGES.failed);
+        say(kind.messages.failed);
         prepare();
         return;
       }
@@ -325,7 +385,7 @@
           asking = false;
           button.disabled = false;
           say(error && error.name === "NotAllowedError"
-            ? MESSAGES.cancelled : MESSAGES.failed);
+            ? kind.messages.cancelled : kind.messages.failed);
           // The same options serve the next try while they live: the
           // server's ceremony was never answered.
           if (stale()) {
@@ -340,6 +400,10 @@
       return;
     }
     document.addEventListener("visibilitychange", refresh);
+    if (!kind.autofill) {
+      prepare();
+      return;
+    }
     var offered = typeof PublicKeyCredential.isConditionalMediationAvailable === "function"
       ? PublicKeyCredential.isConditionalMediationAvailable()
       : Promise.resolve(false);
@@ -351,10 +415,12 @@
   }
 
   function initAll() {
-    var forms = document.querySelectorAll("form[data-passkey-sign-in]");
-    for (let i = 0; i < forms.length; i++) {
-      init(forms[i]);
-    }
+    FORMS.forEach(function (kind) {
+      var forms = document.querySelectorAll("form[" + kind.attribute + "]");
+      for (let i = 0; i < forms.length; i++) {
+        init(forms[i], kind);
+      }
+    });
   }
 
   if (document.readyState === "loading") {

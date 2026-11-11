@@ -13,8 +13,13 @@
         </div>
         <h5 class="text-center mb-3">Confirm your identity</h5>
         <p class="text-muted small text-center mb-4">
+          {% if passkey_offered %}
+          For your security, this action requires a recent confirmation.
+          Re-enter your password, or use your passkey, to continue.
+          {% else %}
           For your security, this action requires a recent password
           confirmation. Re-enter your password to continue.
+          {% endif %}
         </p>
 
         <form method="POST"
@@ -55,6 +60,28 @@
           </button>
         </form>
 
+        {% if passkey_offered %}
+        <div class="d-flex align-items-center my-3 text-body-secondary small">
+          <hr class="flex-grow-1 my-0"><span class="px-2">or</span><hr class="flex-grow-1 my-0">
+        </div>
+        {# A passkey re-confirm (plan#2538, ruling plan#3541): passkey.js asks
+           this page's options, has the device sign them, and posts its
+           answer in ``credential``, keeping the page's ``next``. #}
+        <form method="POST"
+              action="{{ url_for('auth.passkey_re_confirm', next=next) if next else url_for('auth.passkey_re_confirm') }}"
+              data-passkey-re-confirm
+              data-options-url="{{ url_for('auth.passkey_re_confirm_options') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="credential" value="">
+          <button type="button" class="btn btn-outline-primary w-100"
+                  data-action="passkey-re-confirm">
+            <i class="bi bi-person-lock" aria-hidden="true"></i> Re-confirm with your passkey
+          </button>
+          <div class="alert alert-warning small mt-3 mb-0" role="alert"
+               data-passkey-message hidden></div>
+        </form>
+        {% endif %}
+
         <div class="text-center mt-3">
           <a href="{{ url_for('dashboard.page') }}" class="small text-muted">
             Cancel and return to dashboard
@@ -68,4 +95,7 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/password_toggle.js') }}"></script>
+{% if passkey_offered %}
+<script src="{{ url_for('static', filename='js/passkey.js') }}"></script>
+{% endif %}
 {% endblock scripts %}

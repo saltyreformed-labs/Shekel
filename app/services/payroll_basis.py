@@ -43,10 +43,10 @@ from app.services.recurrence import (
     recurrence_spec,
     resolve,
 )
+from app.services.pay_banner import ForecastRaise, PayBanner, PayEvent, RecordedChange
 from app.services.salary_raises import (
     RaiseTerms,
     applications_between,
-    raise_banner,
     raise_pay,
     terms_of,
 )
@@ -263,7 +263,7 @@ class _InForce:
             carried the pay across, or ``None`` when it crossed none.
         raised: ``(landing day, raise)`` of every forecast application the
             walk raised the pay by, in the order it applied them: what a
-            paycheck's banner names (:meth:`PayrollBasis.pay_event_on`).
+            paycheck's banner names (:meth:`PayrollBasis.banner_on`).
     """
 
     rate: PayRate
@@ -318,7 +318,7 @@ def _priced_days(paid: PaidDays) -> "list[date]":
     only a rhythm of one or two days can hold such a period, a weekend, and
     with no weekday to share the pay over it pays its rate, as a paycheck no
     change reaches does.  The pricing (:meth:`PayrollBasis.base_pay_on`) and
-    the banner (:meth:`PayrollBasis.pay_event_on`) both read these days, so a
+    the banner (:meth:`PayrollBasis.banner_on`) both read these days, so a
     raise is announced on the paycheck that first PAYS a day of it (task
     plan#3122).
 
@@ -793,11 +793,26 @@ class PayrollBasis:
             rate,
         )
 
-    def pay_event_on(self, period) -> str:
-        """Return the banner of *period*'s paycheck: a recorded pay change, or its forecast raises.
+    def banner_on(self, period) -> PayBanner:
+        """Return *period*'s banner: its recorded pay change, and the raises it first pays.
+
+        **Every change the paycheck is the first to show, each its own
+        direction** (task plan#3168, finding plan#3118): the change a pay
+        entry recorded from its payday makes, when it makes one, then each
+        forecast raise the paycheck is the first to pay a day of, as
+        :class:`~app.services.pay_banner.PayBanner` states them.  It answered
+        with the recorded change alone until then, and with nothing for an
+        entry changing nothing, so a raise landing inside the pay period of a
+        paycheck where an entry is recorded was never announced.  Made-up:
+        $2,000.00 a paycheck, 5% from Wednesday 2027-03-03, and $2,000.00
+        re-recorded from 03-11, whose paycheck pays 02-20..03-05: the entry
+        changes nothing and 03-11 pays 03-03..03-05 at $2,100.00, so it badges
+        ``Merit +5%`` where it badged nothing, and no other paycheck badges
+        the raise.  A banner was a display string until this task, its
+        direction read back off its words (finding plan#1585).
 
         Ruling **R-SAL84** ("Banner the pay change") as ruling **plan#3091**
-        amends it: the paycheck where a recorded pay entry begins shows ``PAY
+        amends it: the paycheck where a recorded pay entry begins shows ``Pay
         +$X`` -- the entry against the pay in force the day before the entry
         opens, PAY WITH PAY.  It compared the paycheck's base with the
         paycheck before it until then, which once a paycheck is priced
@@ -805,10 +820,10 @@ class PayrollBasis:
         $2,000.00 a paycheck and 5% from Wednesday 2027-03-03, as
         :class:`BasePay` works it; the paycheck of 03-11 pays $2,030.00, and
         an entry of $2,100.00 recorded from 03-25, the first paycheck paid
-        wholly at the raise, would have read ``PAY +$70.00`` for a change of
+        wholly at the raise, would have read ``Pay +$70.00`` for a change of
         nothing.  Pay with pay it is $2,100.00 against the $2,100.00 in force
         on 03-05, the day before the entry's paycheck opens, and badges
-        nothing.  An entry changing nothing badges nothing.
+        nothing.  An entry changing nothing badges no change.
 
         **A forecast raise badges the first paycheck that PAYS a day of it**
         (ruling **plan#3092**, "where the pay first changes"; task plan#3122):
@@ -821,16 +836,16 @@ class PayrollBasis:
         banner cannot announce a raise the base beside it does not pay, nor
         miss one it does.  A raise dated on or before the day the paycheck's
         entry opens is inside the entry (ruling **plan#3091**), never
-        applied, and badges nothing.  Made-up: 5% from Wednesday 2027-03-03
-        badges 03-11, paying 02-20..03-05, and neither 02-25 nor 03-25; until
-        task plan#3101 it badged every paycheck dated in March, 03-11 and
-        03-25.  Until task plan#3122 it named a raise landing anywhere in the
-        pay period, so where periods run Sunday to Saturday a raise from a
-        Saturday badged the paycheck ending that day, which pays no day of
-        it, and not the next, which does.  **The banner follows the pay, not
-        the rate**: that Saturday's paycheck's rate is the new pay (the pay
-        in force on its last day, :meth:`base_pay_on`) while its base is
-        wholly the old.
+        applied, and is named only as the entry's own change.  Made-up: 5%
+        from Wednesday 2027-03-03 badges 03-11, paying 02-20..03-05, and
+        neither 02-25 nor 03-25; until task plan#3101 it badged every
+        paycheck dated in March, 03-11 and 03-25.  Until task plan#3122 it
+        named a raise landing anywhere in the pay period, so where periods
+        run Sunday to Saturday a raise from a Saturday badged the paycheck
+        ending that day, which pays no day of it, and not the next, which
+        does.  **The banner follows the pay, not the rate**: that Saturday's
+        paycheck's rate is the new pay (the pay in force on its last day,
+        :meth:`base_pay_on`) while its base is wholly the old.
 
         **The FIRST entry badges no pay change**: every paycheck before it is
         priced FROM it (R-SAL59), so there is no earlier recorded pay to
@@ -858,32 +873,49 @@ class PayrollBasis:
                 ``start_date``, the payday, alone.
 
         Returns:
-            The comma-joined labels, or ``""``.
+            The :class:`~app.services.pay_banner.PayBanner`; empty for a
+            paycheck that shows no change.
         """
         payday = period.start_date
-        recorded = [entry for entry in self._pay_list[1:] if entry.payday == payday]
-        if recorded:
-            after = self.pay_rate_on(recorded[0].opens)
-            before = self.pay_rate_on(recorded[0].opens - timedelta(days=1))
-            if before.periods_per_year == after.periods_per_year:
-                change = after.per_paycheck - before.per_paycheck
-                unit = ""
-            else:
-                change = after.annual - before.annual
-                unit = " a year"
-            if not change:
-                return ""
-            sign = "+" if change > 0 else "-"
-            return f"PAY {sign}${abs(change):,.2f}{unit}"
+        events: "list[PayEvent]" = [
+            change
+            for change in (
+                self._recorded_change(entry)
+                for entry in self._pay_list[1:] if entry.payday == payday
+            )
+            if change is not None
+        ]
         last = _priced_days(self._paid_days_of(payday))[-1]
         before = _priced_days(
             self._paid_days_of(previous_payday(self.calendar, payday)),
         )[-1]
-        return raise_banner(
-            raise_obj
+        events.extend(
+            ForecastRaise(raise_obj)
             for landed, raise_obj in self._in_force_on(last).raised
             if landed > before
         )
+        return PayBanner(tuple(events))
+
+    def _recorded_change(self, entry: _Entry) -> "RecordedChange | None":
+        """Return what *entry* changes: its pay against the pay before its paycheck opens.
+
+        Pay with pay (ruling **plan#3091**), per paycheck, or a year across a
+        change of count (ruling **R-SAL89**), as :meth:`banner_on` states.
+
+        Args:
+            entry: A pay entry after the first.
+
+        Returns:
+            The :class:`~app.services.pay_banner.RecordedChange`, or ``None``
+            for an entry changing nothing.
+        """
+        after = self.pay_rate_on(entry.opens)
+        before = self.pay_rate_on(entry.opens - timedelta(days=1))
+        if before.periods_per_year == after.periods_per_year:
+            change = RecordedChange(after.per_paycheck - before.per_paycheck, yearly=False)
+        else:
+            change = RecordedChange(after.annual - before.annual, yearly=True)
+        return None if change.change == ZERO else change
 
     def rhythm_changes_without_pay(self) -> "list[RhythmChangeWithoutPay]":
         """Return each change of rhythm whose pay is priced by carrying the yearly pay.

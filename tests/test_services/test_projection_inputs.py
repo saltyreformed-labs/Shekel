@@ -737,9 +737,9 @@ class TestLoadPayrollFeeds:
             # Non-vacuity for the raise path: the pricer the feed read priced
             # at least one walked paycheck with the raise's own label, the
             # first each July's application reaches, so the banner's path
-            # (``PayrollBasis.pay_event_on``) was walked.
+            # (``PayrollBasis.banner_on``) was walked.
             assert any(
-                pricing.for_profile(profile).at(period).period.raise_event
+                pricing.for_profile(profile).at(period).period.banner.events
                 for period in projected
             )
             # Non-vacuity for the cadence path: the ruled line was priced on

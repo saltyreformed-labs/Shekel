@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_money_macros.html" import money %}
+{% from "salary/_chip_macros.html" import next_raise_chip %}
 {% block title %}Salary -- Shekel{% endblock title %}
 
 {# Salary cockpit -- the section's single landing page (locked D2 "wide
@@ -116,16 +117,7 @@
         <div class="pulse-chip__label">Annual salary</div>
         <div class="pulse-chip__value font-mono">{{ money(chips.annual_salary, cents=false) }}</div>
       </div>
-      <div class="pulse-chip {{ 'sal-chip-up' if chips.next_raise is not none }}">
-        <div class="pulse-chip__label">Next raise</div>
-        {% if chips.next_raise is not none %}
-        <div class="pulse-chip__value">{{ chips.next_raise.label }}</div>
-        <div class="sal-chip__sub">{{ chips.next_raise.period_start.strftime('%b %Y') }}</div>
-        {% else %}
-        <div class="pulse-chip__value">--</div>
-        <div class="sal-chip__sub">none scheduled</div>
-        {% endif %}
-      </div>
+      {{ next_raise_chip(chips.next_raise) }}
       <div class="pulse-chip {{ 'sal-chip-up' if chips.third_paycheck is not none }}">
         <div class="pulse-chip__label">3rd paycheck</div>
         {% if chips.third_paycheck is not none %}

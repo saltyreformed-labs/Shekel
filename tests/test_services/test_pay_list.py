@@ -24,9 +24,10 @@ Each class pins one ruling on its own worked example, every figure made up;
   salary page names it; on a day a raise also lands, the change comes first;
 * **R-SAL84** / **R-SAL85** and **R-SAL89** ("Yearly pay across a
   seam"), as plan#3091 amends them: the paycheck where a recorded entry
-  begins badges ``PAY +/-$X`` against the pay in force the day before it
+  begins badges ``Pay +/-$X`` against the pay in force the day before it
   opens -- in yearly pay across a change of rhythm -- and a replaced forecast
-  raise badges nothing.
+  raise badges nothing; a raise the entry does not hold is named beside the
+  change, each in its own direction (task plan#3168, finding plan#3118).
 
 Built on a real :class:`~app.services.pay_calendar.PayCalendar` and a
 duck-typed profile, with the raise set handed in as
@@ -43,8 +44,8 @@ import pytest
 from app.enums import BusinessDayShiftEnum
 from app.services.pay_calendar import PayCalendar
 from app.services.pay_rhythm import Era, FixedDays, Rhythm
+from app.services.pay_banner import ForecastRaise, PayBanner, RecordedChange
 from app.services.payroll_basis import PayrollBasis, RhythmChangeWithoutPay
-from app.services.salary_cockpit_service import is_pay_cut
 from app.services.salary_raises import RaiseTerms
 
 _NONE = BusinessDayShiftEnum.NONE
@@ -159,9 +160,14 @@ def _pay(basis, payday):
     return basis.base_pay_on(payday).per_paycheck
 
 
+def _banner(basis, payday):
+    """The banner of *payday*'s paycheck, the value every surface reads."""
+    return basis.banner_on(_paycheck(basis, payday))
+
+
 def _badge(basis, payday):
-    """The banner of *payday*'s paycheck."""
-    return basis.pay_event_on(_paycheck(basis, payday))
+    """The words of *payday*'s banner, as the screens show them; ``""`` for none."""
+    return _banner(basis, payday).text
 
 
 _EVERY_JULY = (_percent(2026, 7, "0.03", recurring=True),)
@@ -414,7 +420,7 @@ class TestThePayChangeBadge:
     """R-SAL84 / R-SAL85, and yearly pay across a seam."""
 
     def test_a_recorded_raise_badges_its_change_and_the_replaced_forecast_badges_nothing(self):
-        """From 07-30 (opens 07-11): 'PAY +$72.10'; 08-13 nothing; 2027-07-15 the forecast.
+        """From 07-30 (opens 07-11): 'Pay +$72.10'; 08-13 nothing; 2027-07-15 the forecast.
 
         2,132.10 against the 2,060.00 in force on 07-10, the day before the
         entry opens (ruling plan#3091: pay with pay).  The entry holds July
@@ -424,7 +430,7 @@ class TestThePayChangeBadge:
         plan#3101.  An entry from 07-02,
         which opens 06-13, holds no July raise and the raise goes on reaching
         07-16 (``test_an_entry_before_a_raise_keeps_the_raise``), so 07-16
-        badges it: 'MERIT +3.00%'.  That case badged '' while an entry held
+        badges it: 'Merit +3%'.  That case badged '' while an entry held
         every raise through its payday (R-SAL59).
         """
         basis = _basis(
@@ -432,17 +438,17 @@ class TestThePayChangeBadge:
             [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 30), "2132.10")],
             _EVERY_JULY,
         )
-        assert _badge(basis, date(2026, 7, 30)) == "PAY +$72.10"
+        assert _badge(basis, date(2026, 7, 30)) == "Pay +$72.10"
         assert _badge(basis, date(2026, 8, 13)) == ""
         assert _badge(basis, date(2027, 7, 1)) == ""
-        assert _badge(basis, date(2027, 7, 15)) == "MERIT +3.00%"
+        assert _badge(basis, date(2027, 7, 15)) == "Merit +3%"
         before_the_raise = _basis(
             _biweekly(),
             [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 2), "2070.00")],
             _EVERY_JULY,
         )
-        assert _badge(before_the_raise, date(2026, 7, 2)) == "PAY +$70.00"
-        assert _badge(before_the_raise, date(2026, 7, 16)) == "MERIT +3.00%"
+        assert _badge(before_the_raise, date(2026, 7, 2)) == "Pay +$70.00"
+        assert _badge(before_the_raise, date(2026, 7, 16)) == "Merit +3%"
 
     def test_the_forecast_badges_where_no_entry_replaces_it(self):
         """No recorded change: July 2026's merit raise badges 07-16 alone.
@@ -456,17 +462,24 @@ class TestThePayChangeBadge:
         assert [
             _badge(basis, payday)
             for payday in (date(2026, 7, 2), date(2026, 7, 16), date(2026, 7, 30))
-        ] == ["", "MERIT +3.00%", ""]
+        ] == ["", "Merit +3%", ""]
 
     def test_a_recorded_cut_badges_a_minus_and_reads_as_a_cut(self):
-        """2,000.00 then 1,930.00 from 07-02: 'PAY -$70.00', which the screens show amber."""
+        """2,000.00 then 1,930.00 from 07-02: 'Pay -$70.00', a cut the value says is one.
+
+        1,930.00 - 2,000.00 = -70.00.  The screens show it amber because the
+        change says it lowers the pay, not because its words start with a
+        minus (finding plan#1585).
+        """
         basis = _basis(
             _biweekly(),
             [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 2), "1930.00")],
         )
-        badge = _badge(basis, date(2026, 7, 2))
-        assert badge == "PAY -$70.00"
-        assert is_pay_cut(badge)
+        banner = _banner(basis, date(2026, 7, 2))
+        assert banner == PayBanner((RecordedChange(Decimal("-70.00"), yearly=False),))
+        assert banner.text == "Pay -$70.00"
+        assert banner.cuts == banner
+        assert banner.increases == PayBanner()
 
     def test_the_first_entry_and_an_unchanged_entry_badge_nothing(self):
         """The opening payday has nothing before it; 2,000.00 re-recorded moves nothing."""
@@ -480,7 +493,7 @@ class TestThePayChangeBadge:
     def test_across_a_seam_the_same_yearly_pay_badges_nothing(self):
         """2,060.00 biweekly then 1,030.00 weekly: 53,560.00 a year either side.
 
-        A per-paycheck comparison announced 'PAY -$1,030.00', a cut.
+        A per-paycheck comparison announced 'Pay -$1,030.00', a cut.
         """
         basis = _basis(
             _biweekly_then_weekly(),
@@ -489,14 +502,19 @@ class TestThePayChangeBadge:
         assert _badge(basis, date(2027, 1, 7)) == ""
 
     def test_across_a_seam_a_raise_badges_in_yearly_pay(self):
-        """1,050.00 weekly = 54,600.00 against 53,560.00: 'PAY +$1,040.00 a year', not a cut."""
+        """1,050.00 weekly = 54,600.00 against 53,560.00: 'Pay +$1,040.00 a year', not a cut.
+
+        1,050.00 x 52 = 54,600.00 and 2,060.00 x 26 = 53,560.00: +1,040.00
+        a year.
+        """
         basis = _basis(
             _biweekly_then_weekly(),
             [(date(2026, 1, 8), "2060.00"), (date(2027, 1, 7), "1050.00")],
         )
-        badge = _badge(basis, date(2027, 1, 7))
-        assert badge == "PAY +$1,040.00 a year"
-        assert not is_pay_cut(badge)
+        banner = _banner(basis, date(2027, 1, 7))
+        assert banner == PayBanner((RecordedChange(Decimal("1040.00"), yearly=True),))
+        assert banner.text == "Pay +$1,040.00 a year"
+        assert banner.cuts == PayBanner()
 
 
     def test_a_first_entry_at_a_seam_badges_no_carry_rounding(self):
@@ -504,7 +522,7 @@ class TestThePayChangeBadge:
 
         The paycheck before it is that entry carried back, 4,333.33 x 12 / 26
         = 1,999.998 -> 2,000.00, so a yearly comparison read 51,999.96
-        against 52,000.00 and badged 'PAY -$0.04 a year', an amber cut no one
+        against 52,000.00 and badged 'Pay -$0.04 a year', an amber cut no one
         took (an adversarial review of this step): the first entry has no
         earlier recorded pay to compare with.
         """
@@ -520,6 +538,79 @@ class TestThePayChangeBadge:
         assert _pay(basis, date(2026, 12, 24)) == Decimal("2000.00")
         assert basis.base_pay_on(date(2027, 1, 7)).periods_per_year == Decimal("12")
         assert _badge(basis, date(2027, 1, 7)) == ""
+
+
+class TestABannerNamesEveryChange:
+    """A paycheck where an entry is recorded names the raises it first pays too (plan#3118).
+
+    Task plan#3168.  A 3% merit raise from Wednesday 2026-07-01 (made-up):
+    07-16 pays Saturday 06-27 through Friday 07-10, ten weekdays, the first
+    two before the raise, and 07-02, paying 06-13..06-26, none of it.  An
+    entry recorded from 07-16 opens 06-27, so it holds no raise dated after
+    that day and the walk raises it on 07-01.  The banner answered with the
+    recorded change alone until this task, and with nothing where the entry
+    changed nothing, so the raise was never announced.
+    """
+
+    _RAISE = _raise_on(date(2026, 7, 1))
+
+    def test_an_unchanged_entry_on_the_paycheck_a_raise_first_reaches_names_the_raise(self):
+        """2,000.00 re-recorded from 07-16: 'Merit +3%' there, where it badged nothing.
+
+        The entry against the 2,000.00 in force on 06-26 changes nothing, and
+        07-16 is priced under the raise: 2,000.00 x 2/10 + 2,060.00 x 8/10 =
+        400.00 + 1,648.00 = 2,048.00.  07-30 pays 07-11..07-24, all after the
+        raise, and names nothing.
+        """
+        basis = _basis(
+            _biweekly(),
+            [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 16), "2000.00")],
+            (self._RAISE,),
+        )
+        assert _pay(basis, date(2026, 7, 16)) == Decimal("2048.00")
+        assert _banner(basis, date(2026, 7, 16)) == PayBanner((ForecastRaise(self._RAISE),))
+        assert [
+            _badge(basis, payday)
+            for payday in (date(2026, 7, 2), date(2026, 7, 16), date(2026, 7, 30))
+        ] == ["", "Merit +3%", ""]
+
+    def test_a_recorded_cut_and_a_raise_each_keep_their_own_direction(self):
+        """1,900.00 recorded from 07-16: 'Pay -$100.00' a cut, 'Merit +3%' a raise, in that order.
+
+        1,900.00 - 2,000.00 = -100.00, and the raise lifts the entry:
+        1,900.00 x 1.03 = 1,957.00, so 07-16 pays 1,900.00 x 2/10 + 1,957.00 x
+        8/10 = 380.00 + 1,565.60 = 1,945.60.  The cut is named first: the
+        entry opens on the paycheck's first day, and the raise lands after.
+        """
+        basis = _basis(
+            _biweekly(),
+            [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 16), "1900.00")],
+            (self._RAISE,),
+        )
+        banner = _banner(basis, date(2026, 7, 16))
+        cut = RecordedChange(Decimal("-100.00"), yearly=False)
+        assert _pay(basis, date(2026, 7, 16)) == Decimal("1945.60")
+        assert banner == PayBanner((cut, ForecastRaise(self._RAISE)))
+        assert banner.text == "Pay -$100.00, Merit +3%"
+        assert banner.cuts == PayBanner((cut,))
+        assert banner.increases == PayBanner((ForecastRaise(self._RAISE),))
+
+    def test_a_recorded_increase_and_a_raise_are_both_increases(self):
+        """2,100.00 recorded from 07-16: 'Pay +$100.00, Merit +3%', no cut.
+
+        2,100.00 - 2,000.00 = +100.00; 2,100.00 x 1.03 = 2,163.00, so 07-16
+        pays 2,100.00 x 2/10 + 2,163.00 x 8/10 = 420.00 + 1,730.40 = 2,150.40.
+        """
+        basis = _basis(
+            _biweekly(),
+            [(date(2026, 1, 1), "2000.00"), (date(2026, 7, 16), "2100.00")],
+            (self._RAISE,),
+        )
+        banner = _banner(basis, date(2026, 7, 16))
+        assert _pay(basis, date(2026, 7, 16)) == Decimal("2150.40")
+        assert banner.text == "Pay +$100.00, Merit +3%"
+        assert banner.cuts == PayBanner()
+        assert banner.increases == banner
 
 
 class TestOnOneDayTheRhythmChangesFirst:

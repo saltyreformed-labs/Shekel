@@ -93,7 +93,7 @@ def previous_payday(calendar: PayCalendar, payday: date) -> date:
     readers (task plan#3122): :func:`days_paid_for` starts a paycheck's days
     the day after this one's end, and the engine's banner reads which days
     this one priced (:meth:`~app.services.payroll_basis.PayrollBasis
-    .pay_event_on`), so the two cannot disagree about which paycheck came
+    .banner_on`), so the two cannot disagree about which paycheck came
     first.  It is the calendar's own paycheck covering the day before
     *payday*; below the record, where the calendar holds none, it is the grid
     payday the plan puts just below *payday* (:func:`~._eras.grid_below_record`),

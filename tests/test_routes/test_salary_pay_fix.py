@@ -33,10 +33,13 @@ from unittest.mock import patch
 import pytest
 import sqlalchemy
 
+from app import ref_cache
+from app.enums import RaiseTypeEnum
 from app.extensions import db
 from app.models.ref import FilingStatus
 from app.models.salary_pay_entry import SalaryPayEntry
 from app.models.salary_profile import SalaryProfile
+from app.models.salary_raise import SalaryRaise
 from app.services import pay_era_write, pay_list_service
 from tests._salary_forms import create_through_the_form, rendered_page_form
 from tests._stub_period import stub_period_on
@@ -435,18 +438,24 @@ class TestACutReadsAsACut:
     The second entry is recorded through the Record door's rendered form
     (plan step salary:X-av-3b; planted through the model until that door
     existed).  Made-up: $2,000.00 from 2026-01-02, then $1,930.00 (a cut) or
-    $2,070.00 (an increase) from 2026-02-13, the fourth seeded payday.
+    $2,070.00 (an increase) from 2026-02-13, the fourth seeded payday, or
+    from 03-27, the next.  Every paycheck pays the two weeks ending six days
+    before it: 02-13 pays 01-24..02-06 and 03-27 pays 03-07..03-20.
     """
 
-    def _profile_changing_to(self, client, seed_user, seed_periods, amount):
-        """The profile, its first entry through the create form, the second through Record."""
+    def _profile_changing_to(self, client, seed_user, seed_periods, amount, payday=3):
+        """The profile, its first entry through the create form, the second through Record.
+
+        *payday* indexes ``seed_periods``: the fourth (02-13) unless a case
+        records from another.
+        """
         profile = create_through_the_form(
             client, seed_user, "2000.00", seed_periods[0].start_date.isoformat(),
         )
         record = f"/salary/{profile.id}/pay"
         controls = rendered_page_form(client, f"/salary/{profile.id}/edit", record)
         controls.update({
-            "payday": seed_periods[3].start_date.isoformat(), "amount": amount,
+            "payday": seed_periods[payday].start_date.isoformat(), "amount": amount,
         })
         assert client.post(record, data=controls).status_code == 302
         db.session.expire_all()
@@ -504,6 +513,114 @@ class TestACutReadsAsACut:
             page = response.get_data(as_text=True)
             assert "<strong>Pay cut:</strong> Pay -$70.00" in page
             assert "<strong>Raise:</strong>" not in page
+
+    @staticmethod
+    def _add_merit(profile, day):
+        """A one-time 2.5% merit raise from *day*, committed."""
+        db.session.add(SalaryRaise(
+            salary_profile_id=profile.id,
+            raise_type_id=ref_cache.raise_type_id(RaiseTypeEnum.MERIT),
+            effective_date=day,
+            percentage=Decimal("0.0250"),
+        ))
+        db.session.commit()
+
+    def test_a_cut_and_a_raise_on_one_paycheck_show_both_each_in_its_colour(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """02-13 holds the recorded cut and a raise from Monday 02-02: amber and green (plan#3118).
+
+        The entry opens on 01-24, so it holds no raise dated after it, and
+        02-13 is the first paycheck paying a day of 02-02's; 01-30 pays
+        01-10..01-23, none of it.  The banner named the cut alone until task
+        plan#3168, and the raise was announced nowhere.
+        """
+        with app.app_context():
+            profile = self._profile_changing_to(
+                auth_client, seed_user, seed_periods, "1930.00",
+            )
+            self._add_merit(profile, date(2026, 2, 2))
+            anatomy = auth_client.get(
+                f"/salary?profile={profile.id}&period={seed_periods[3].id}",
+            ).get_data(as_text=True)
+            assert "<strong>Pay cut:</strong> Pay -$70.00" in anatomy
+            assert "<strong>Raise:</strong> Merit +2.5%" in anatomy
+            ledger = auth_client.get(f"/salary/{profile.id}/projection").get_data(
+                as_text=True,
+            )
+            assert ledger.count('class="sal-row-cut"') == 1
+            assert (
+                '<span class="sal-badge-cut"><i class="bi bi-arrow-down" '
+                'aria-hidden="true"></i> Pay -$70.00</span>'
+            ) in ledger
+            assert '<span class="sal-badge-raise">Merit +2.5%</span>' in ledger
+            assert ledger.count("sal-badge-raise") == 1
+
+    @pytest.mark.parametrize("page", ["/salary?profile={id}", "/salary/{id}/projection"])
+    def test_the_next_raise_chip_names_a_coming_cut_in_amber(
+        self, app, auth_client, seed_user, seed_periods, page,
+    ):
+        """A cut recorded from 03-27, the next payday: "Next pay cut", amber, a down arrow (R-SAL85).
+
+        The chip named every banner "Next raise" in green until task
+        plan#3168.  With no raise beside the cut the chip is not the green
+        raise chip.
+        """
+        with app.app_context():
+            profile = self._profile_changing_to(
+                auth_client, seed_user, seed_periods, "1930.00", payday=6,
+            )
+            html = auth_client.get(page.format(id=profile.id)).get_data(as_text=True)
+            assert (
+                '<div class="pulse-chip">\n'
+                '  <div class="pulse-chip__label">Next pay cut</div>\n'
+                '  <div class="pulse-chip__value"><span class="sal-chip-cut">'
+                '<i class="bi bi-arrow-down" aria-hidden="true"></i> Pay -$70.00'
+                '</span></div>\n'
+                '  <div class="sal-chip__sub">Mar 2026</div>'
+            ) in html
+            assert "Next raise" not in html
+
+    @pytest.mark.parametrize("page", ["/salary?profile={id}", "/salary/{id}/projection"])
+    def test_the_next_raise_chip_keeps_an_increase_green(
+        self, app, auth_client, seed_user, seed_periods, page,
+    ):
+        """An increase recorded from 03-27: "Next raise", the green chip, no arrow, as before."""
+        with app.app_context():
+            profile = self._profile_changing_to(
+                auth_client, seed_user, seed_periods, "2070.00", payday=6,
+            )
+            html = auth_client.get(page.format(id=profile.id)).get_data(as_text=True)
+            assert (
+                '<div class="pulse-chip sal-chip-up">\n'
+                '  <div class="pulse-chip__label">Next raise</div>\n'
+                '  <div class="pulse-chip__value">Pay +$70.00</div>\n'
+                '  <div class="sal-chip__sub">Mar 2026</div>'
+            ) in html
+            assert "sal-chip-cut" not in html
+
+    def test_a_coming_cut_with_a_raise_names_both_each_in_its_colour(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """The cut from 03-27 and a raise from Monday 03-16 it first pays: amber beside green.
+
+        03-13 pays 02-21..03-06, none of the raise.  The chip says "Next pay
+        cut" for the cut it holds, and the raise keeps the green raise chip's
+        colour beside it.
+        """
+        with app.app_context():
+            profile = self._profile_changing_to(
+                auth_client, seed_user, seed_periods, "1930.00", payday=6,
+            )
+            self._add_merit(profile, date(2026, 3, 16))
+            html = auth_client.get(f"/salary?profile={profile.id}").get_data(as_text=True)
+            assert (
+                '<div class="pulse-chip sal-chip-up">\n'
+                '  <div class="pulse-chip__label">Next pay cut</div>\n'
+                '  <div class="pulse-chip__value"><span class="sal-chip-cut">'
+                '<i class="bi bi-arrow-down" aria-hidden="true"></i> Pay -$70.00'
+                '</span> Merit +2.5%</div>'
+            ) in html
 
 
 class TestTheRhythmNotice:

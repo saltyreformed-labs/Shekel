@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_money_macros.html" import money %}
 {% from "_nav_macros.html" import back_link %}
+{% from "salary/_chip_macros.html" import next_raise_chip %}
 {% block title %}Projection Ledger -- {{ profile.name }} -- Shekel{% endblock title %}
 
 {# The salary section's forward ledger (locked Gate A ruling 2,
@@ -23,16 +24,7 @@
 
 {# ── Summary framing: the events worth knowing without scanning ───── #}
 <div class="pulse-statrow mb-3">
-  <div class="pulse-chip {{ 'sal-chip-up' if projection_summary.next_raise is not none }}">
-    <div class="pulse-chip__label">Next raise</div>
-    {% if projection_summary.next_raise is not none %}
-    <div class="pulse-chip__value">{{ projection_summary.next_raise.label }}</div>
-    <div class="sal-chip__sub">{{ projection_summary.next_raise.period_start.strftime('%b %Y') }}</div>
-    {% else %}
-    <div class="pulse-chip__value">--</div>
-    <div class="sal-chip__sub">none scheduled</div>
-    {% endif %}
-  </div>
+  {{ next_raise_chip(projection_summary.next_raise) }}
   <div class="pulse-chip {{ 'sal-chip-up' if projection_summary.next_third is not none }}">
     <div class="pulse-chip__label">Next 3rd paycheck</div>
     {% if projection_summary.next_third is not none %}
@@ -74,9 +66,13 @@
     </thead>
     <tbody>
       {% for period, bd in projection_data %}
-      {% set has_banner = bd.period.raise_event|length > 0 %}
-      {% set is_cut = has_banner and bd.period.raise_event|pay_cut %}
-      <tr class="{{ ('sal-row-cut' if is_cut else 'sal-row-raise') if has_banner }}{{ ' sal-row-third' if bd.period.is_third_paycheck and not has_banner }}">
+      {# A row holding a cut is amber, any other banner's green (R-SAL85);
+         each change keeps its own badge, so a recorded cut and a raise the
+         paycheck is the first to pay show one amber and one green (task
+         plan#3168). #}
+      {% set banner = bd.period.banner %}
+      {% set has_banner = banner.events|length > 0 %}
+      <tr class="{{ ('sal-row-cut' if banner.cuts.events else 'sal-row-raise') if has_banner }}{{ ' sal-row-third' if bd.period.is_third_paycheck and not has_banner }}">
         <td>
           <a href="{{ url_for('salary.cockpit', profile=profile.id, period=period.period_id) }}">
             {{ period.label }}
@@ -85,8 +81,11 @@
         </td>
         <td class="text-end font-mono">{{ money(bd.earnings.annual_salary) }}</td>
         <td>
-          {% if has_banner %}
-          <span class="{{ 'sal-badge-cut' if is_cut else 'sal-badge-raise' }}">{% if is_cut %}<i class="bi bi-arrow-down" aria-hidden="true"></i> {% endif %}{{ bd.period.raise_event|raise_label }}</span>
+          {% if banner.cuts.events %}
+          <span class="sal-badge-cut"><i class="bi bi-arrow-down" aria-hidden="true"></i> {{ banner.cuts.text }}</span>
+          {% endif %}
+          {% if banner.increases.events %}
+          <span class="sal-badge-raise">{{ banner.increases.text }}</span>
           {% endif %}
         </td>
         <td class="text-end font-mono">{{ money(bd.earnings.gross_biweekly) }}</td>

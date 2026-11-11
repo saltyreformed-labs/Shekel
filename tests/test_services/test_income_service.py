@@ -1765,6 +1765,6 @@ class TestThePricerIsKeyedOnTheRaiseSet:
 
             # $26,000 a year is exactly $1,000.00 a paycheck over 26.
             assert after.earnings.gross_biweekly == before + Decimal("1000.00")
-            assert first_reached.period.raise_event == "CUSTOM +$26,000.00"
-            assert after.period.raise_event == ""
+            assert first_reached.period.banner.text == "Custom +$26,000.00"
+            assert after.period.banner.text == ""
 

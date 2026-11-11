@@ -31,6 +31,7 @@ from decimal import Decimal
 
 from app import ref_cache
 from app.enums import PaycheckLineKindEnum
+from app.services.pay_banner import PayBanner
 from app.services.pay_calendar import PayCadence
 from app.utils.money import ZERO, round_money
 
@@ -403,10 +404,13 @@ class PeriodInfo:
             widening the type did not also make it forgettable.
         is_third_paycheck: Whether this is the third paycheck starting in its
             calendar month, which is what a 24-per-year deduction skips.
-        raise_event: The banner of this paycheck, as
-            :meth:`~app.services.payroll_basis.PayrollBasis.pay_event_on`
-            composes it: a recorded pay change (``PAY +$X``) or the forecast
-            raises it is priced under, or ``""`` (ruling **R-SAL84**).
+        banner: The banner of this paycheck, as
+            :meth:`~app.services.payroll_basis.PayrollBasis.banner_on`
+            composes it: the change a pay entry recorded from its payday
+            makes and the forecast raises it is the first to pay, each with
+            its direction (ruling **R-SAL84**, task plan#3168).  A display
+            string until that task, which every surface read its direction
+            back off.
         cadence: The rhythm this paycheck was PRICED at -- the era in force
             on :attr:`payday` (:func:`~app.services.pay_calendar.cadence_on`),
             whose count multiplies :attr:`Earnings.base_biweekly` into
@@ -427,7 +431,7 @@ class PeriodInfo:
     payday: date
     period_id: "int | None"
     is_third_paycheck: bool = False
-    raise_event: str = ""
+    banner: PayBanner = field(default_factory=PayBanner)
     cadence: PayCadence = field(kw_only=True)
 
 

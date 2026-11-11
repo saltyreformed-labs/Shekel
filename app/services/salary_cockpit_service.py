@@ -12,9 +12,9 @@ JSON serialization boundary.
 
 The projection machinery is reused rather than re-derived (DRY): the
 "next raise", "next third paycheck", and per-period series all read the
-``raise_event`` string and ``is_third_paycheck`` flag the paycheck
-calculator already computed onto each breakdown's
-:class:`~app.services.paycheck_calculator.PeriodInfo`.
+``banner`` (a :class:`~app.services.pay_banner.PayBanner`) and
+``is_third_paycheck`` flag the paycheck calculator already computed onto each
+breakdown's :class:`~app.services.paycheck_calculator.PeriodInfo`.
 """
 
 from datetime import date
@@ -82,80 +82,6 @@ def _pct_of_gross(value: Decimal, gross: Decimal) -> Decimal:
     if gross <= ZERO:
         return ZERO
     return (value / gross * HUNDRED).quantize(_PCT_QUANTUM, rounding=ROUND_HALF_UP)
-
-
-def clean_raise_label(raw_label: str) -> str:
-    """Return a display-clean version of a calculator ``raise_event`` string.
-
-    :func:`app.services.salary_raises.raise_banner` emits raw
-    labels in exactly two shapes, joined with ``", "`` when several raises
-    first reach one paycheck: ``"{TYPE} +{pct}%"`` (percentage, e.g.
-    ``"MERIT +2.5000%"`` -- the trailing places follow the stored
-    ``Numeric(5, 4)`` precision) and ``"{TYPE} +${amount:,.2f}"`` (flat,
-    e.g. ``"COLA +$2,000.00"``).  Since plan step salary:X-av-3a
-    :meth:`~app.services.payroll_basis.PayrollBasis.pay_event_on` emits a
-    third, alone, for a recorded pay change (ruling **R-SAL84**):
-    ``"PAY +${amount:,.2f}"`` or ``"PAY -${amount:,.2f}"``, the one shape
-    carrying a minus, with a trailing ``" a year"`` when the change is
-    measured in yearly pay across a change of rhythm (kept verbatim here).
-    This cleaner reformats each event for display: the type word is
-    title-cased (``COLA`` -> ``Cola``, matching the app-wide
-    ``raise_type.name|title`` convention) and a percentage's
-    trailing zeros are trimmed (``+2.5000%`` -> ``+2.5%``,
-    ``+3.0000%`` -> ``+3%``).  Flat amounts keep their to-the-cent money
-    formatting verbatim.  Pure string manipulation on the emitter's own
-    Decimal-derived text -- no ``float``, no re-derivation.
-
-    Splitting on ``", "`` is safe against flat-amount thousands
-    separators: the emitter's join is comma-space while ``$2,000.00``'s
-    comma is always followed by a digit.
-
-    Args:
-        raw_label: The verbatim ``PeriodInfo.raise_event`` string; may be
-            empty (no raise event) or carry multiple comma-joined events.
-
-    Returns:
-        The cleaned display label, with the empty string passed through.
-    """
-    if not raw_label:
-        return ""
-    cleaned_events: list[str] = []
-    for event in raw_label.split(", "):
-        type_part, sep, amount_part = event.partition(" +")
-        if not sep:
-            type_part, sep, amount_part = event.partition(" -")
-        if not sep:
-            # Not an emitter shape; pass through untouched rather than
-            # mangling an unrecognised string.
-            cleaned_events.append(event)
-            continue
-        if amount_part.endswith("%"):
-            number = amount_part[:-1]
-            if "." in number:
-                number = number.rstrip("0").rstrip(".")
-            amount_part = f"{number}%"
-        cleaned_events.append(f"{type_part.title()}{sep}{amount_part}")
-    return ", ".join(cleaned_events)
-
-
-def is_pay_cut(raw_label: str | None) -> bool:
-    """Return whether a calculator ``raise_event`` string announces a pay CUT.
-
-    Ruling **R-SAL85** ("Green up, amber down"): a recorded pay change that
-    lowers base pay renders amber with a down arrow under "Pay cut:", while a
-    raise or a pay increase keeps the green "Raise:" banner.  The cut is the
-    one emitter shape carrying a minus (:func:`clean_raise_label` lists them),
-    and :meth:`~app.services.payroll_basis.PayrollBasis.pay_event_on` emits it
-    alone, never joined with a raise.
-
-    Args:
-        raw_label: The verbatim ``PeriodInfo.raise_event`` string, or
-            ``None``.
-
-    Returns:
-        ``True`` for ``"PAY -$..."``; ``False`` otherwise, empty included.
-    """
-    return bool(raw_label) and raw_label.startswith("PAY -")
 
 
 def _pay_rate(breakdown: PaycheckBreakdown) -> Decimal:
@@ -241,10 +167,14 @@ def base_regular_net(pairs: list[PeriodPair], idx: int) -> Decimal:
 def next_raise_after(pairs: list[PeriodPair], today: date) -> dict[str, object] | None:
     """Return the first paycheck after ``today`` that carries a banner.
 
-    Reads the calculator's ``raise_event`` string as it is: the engine
-    badges a raise on the one paycheck it first reaches (ruling
-    **plan#3092**, :meth:`~app.services.payroll_basis.PayrollBasis
-    .pay_event_on`), so the next banner is the next raise.  Until task
+    Reads the calculator's banner as it is: the engine badges a raise on the
+    one paycheck it first reaches (ruling **plan#3092**,
+    :meth:`~app.services.payroll_basis.PayrollBasis.banner_on`), so the next
+    banner is the next change to the pay.  **The chip names it in its own
+    direction** (ruling **R-SAL85**, task plan#3168): a banner holding a cut
+    is "Next pay cut", amber with a down arrow, and any raise beside it keeps
+    its green; the chip read none of it before that task, so a recorded cut
+    showed as a green "Next raise".  Until task
     plan#3111 this kept only the first of a run of equal labels, because the
     engine badged every paycheck of a raise's month; that collapse was a
     second spelling of "the first paycheck", and it hid a paycheck whose
@@ -258,14 +188,13 @@ def next_raise_after(pairs: list[PeriodPair], today: date) -> dict[str, object] 
         today: The reference date.
 
     Returns:
-        ``{"label": str, "period_start": date}`` for that paycheck (the
-        label display-cleaned via :func:`clean_raise_label`, e.g. ``"Merit
-        +2.5%"``), or ``None`` when no paycheck after ``today`` carries one.
+        ``{"banner": PayBanner, "period_start": date}`` for that paycheck, or
+        ``None`` when no paycheck after ``today`` carries one.
     """
     for period, breakdown in pairs:
-        if period.start_date > today and breakdown.period.raise_event:
+        if period.start_date > today and breakdown.period.banner.events:
             return {
-                "label": clean_raise_label(breakdown.period.raise_event),
+                "banner": breakdown.period.banner,
                 "period_start": period.start_date,
             }
     return None
@@ -324,7 +253,7 @@ def build_chips(
     Returns:
         A dict with keys ``gross`` (Decimal), ``annual_salary`` (Decimal),
         ``take_home_rate_pct`` (Decimal | None), ``next_raise`` (dict |
-        None: ``label`` + ``period_start``), and ``third_paycheck`` (dict |
+        None: ``banner`` + ``period_start``), and ``third_paycheck`` (dict |
         None: ``period_start`` + ``delta``).  Each "next" value is ``None``
         when the projection carries no such future event.
     """
@@ -515,11 +444,13 @@ def build_chart_series(pairs: list[PeriodPair], today: date) -> dict[str, object
     so raise steps read instantly: a third-paycheck period carries the BASE
     value (:func:`base_regular_net`) on the line, while its actual spiked
     net is emitted separately in ``thirds`` as a point event.  Raise
-    events are emitted in ``raises`` with display-cleaned labels
-    (:func:`clean_raise_label`), one for each windowed paycheck the
-    calculator badged: it badges a raise on the paycheck the raise first
-    reaches and nowhere else (ruling **plan#3092**), so one label per raise
-    is the engine's answer and not this function's.
+    events are emitted in ``raises`` with each banner's words
+    (:attr:`~app.services.pay_banner.PayBanner.text`), one for each
+    windowed paycheck the calculator badged: it badges a raise on the
+    paycheck the raise first reaches and nowhere else (ruling
+    **plan#3092**), so one label per raise is the engine's answer and not
+    this function's.  A mark is the words alone, a cut's carrying its minus,
+    so the chart reads no direction of its own.
 
     Args:
         pairs: The full ordered ``(period, breakdown)`` list.
@@ -541,10 +472,10 @@ def build_chart_series(pairs: list[PeriodPair], today: date) -> dict[str, object
         else:
             line_net = breakdown.earnings.net_pay
         periods_series.append({"start": period.start_date, "net": line_net})
-        if breakdown.period.raise_event:
+        if breakdown.period.banner.events:
             raises.append({
                 "start": period.start_date,
-                "label": clean_raise_label(breakdown.period.raise_event),
+                "label": breakdown.period.banner.text,
             })
     return {
         "periods": periods_series,

@@ -55,18 +55,19 @@
       some deductions (24/yr) are skipped this period.
     </div>
     {% endif %}
-    {% if raise_event %}
-    {# A recorded pay CUT (plan step salary:X-av-3a, R-SAL85) is amber with a
-       down arrow; a raise or a pay increase keeps the green banner. #}
-    {% if raise_event|pay_cut %}
+    {# A recorded pay CUT (R-SAL85) is amber with a down arrow; a raise or a
+       pay increase keeps the green banner.  A paycheck showing both, a
+       recorded cut and a raise it is the first to pay (task plan#3168),
+       shows both banners, each in its own colour. #}
+    {% if banner.cuts.events %}
     <div class="alert alert-warning py-2">
-      <i class="bi bi-arrow-down-circle"></i> <strong>Pay cut:</strong> {{ raise_event|raise_label }}
-    </div>
-    {% else %}
-    <div class="alert alert-success py-2">
-      <i class="bi bi-arrow-up-circle"></i> <strong>Raise:</strong> {{ raise_event|raise_label }}
+      <i class="bi bi-arrow-down-circle"></i> <strong>Pay cut:</strong> {{ banner.cuts.text }}
     </div>
     {% endif %}
+    {% if banner.increases.events %}
+    <div class="alert alert-success py-2">
+      <i class="bi bi-arrow-up-circle"></i> <strong>Raise:</strong> {{ banner.increases.text }}
+    </div>
     {% endif %}
 
     {# Composition spine: net kept + pre-tax + taxes + post-tax = gross,

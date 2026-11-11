@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_money_macros.html" import money %}
 {% from "salary/_chip_macros.html" import next_raise_chip %}
+{% from "_tax_rules_macros.html" import rules_year_phrase %}
 {% block title %}Salary -- Shekel{% endblock title %}
 
 {# Salary cockpit -- the section's single landing page (locked D2 "wide
@@ -17,7 +18,9 @@
    profile's stubs, so a screen cannot name a stub the engine did not use
    (plan step salary:S11-c-2c, rulings R-SAL100 and, for the words,
    R-SAL121, whose strip and card-foot sentences R-SAL122 amends to say
-   "used for pricing", and whose strip R-SAL126 rewords). #}
+   "used for pricing", and whose strip R-SAL126 rewords).  So is which
+   year's tax rules priced them (``composition.tax_rules``, plan step
+   salary:X-at-6), in the words of _tax_rules_macros.html. #}
 
 {% block content %}
 {% if empty_state == "no_profiles" %}
@@ -105,6 +108,13 @@
         taxes from your {{ composition.tax_stub_payday.strftime('%b %-d, %Y') }} pay stub
         {% else %}
         taxes from the tax formulas
+        {% endif %}
+        {# Which year's tax rules priced them, only when some part was
+           another year's: a paycheck on its own year's rules has nothing to
+           disclose (plan step salary:X-at-6, ruling R-SAL75).  The note
+           saying the app lacks the year is the card's, below. #}
+        {% if composition.tax_rules.substituted %}
+        &middot; {{ rules_year_phrase(composition.tax_rules, profile.state_code) }}
         {% endif %}
       </div>
     </div>

@@ -9,6 +9,7 @@ import pytest
 
 from app.services.paycheck_calculator import calculate_paycheck, project_salary
 from app.services.paycheck_calculator._calendar_questions import _get_cumulative_wages
+from tests._tax_configs import hand_built_law
 from tests._test_helpers import payroll_basis
 
 from ._helpers import (
@@ -553,11 +554,12 @@ class TestEarningLines:
         (cumulative 4815.38) owes nothing -- which is what a cumulative that
         left the earning out would get wrong.
         """
-        configs = {
-            "bracket_set": None,
-            "state_config": None,
-            "fica_config": FakeFicaRules(ss_wage_base="4700"),
-        }
+        configs = hand_built_law(
+            2026,
+            bracket_set=None,
+            state_config=None,
+            fica_config=FakeFicaRules(ss_wage_base="4700"),
+        )
         periods = [
             _period(start_date=date(2026, 1, 2), period_id=1),
             _period(start_date=date(2026, 1, 16), period_id=2),

@@ -46,6 +46,7 @@ from app.services.paycheck_calculator._calendar_questions import _get_cumulative
 from app.services.payroll_basis import PayrollBasis, RhythmChangeWithoutPay
 from app.services.salary_raises import RaiseTerms
 from app.utils.business_days import SATURDAY
+from tests._tax_configs import own_year_rules
 
 _NONE = BusinessDayShiftEnum.NONE
 
@@ -782,6 +783,7 @@ class TestTheRetirementGapReadsTheRate:
                 gross_biweekly=Decimal("2000.00"),
                 net_pay=Decimal("1600.00"),
             ),
+            taxes=paycheck_calculator.TaxLines(rules=own_year_rules(2027)),
         )
         return retirement_dashboard_service.compute_gap_net_biweekly(
             retirement_dashboard_service.GapInputs(

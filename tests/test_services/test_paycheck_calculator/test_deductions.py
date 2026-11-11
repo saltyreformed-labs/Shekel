@@ -7,6 +7,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from app.services.paycheck_calculator import calculate_paycheck
 from app.services.paycheck_calculator._lines import _inflation_years, _LineContext, _priced_lines
+from tests._tax_configs import hand_built_law
 from tests._test_helpers import payroll_basis
 
 from ._helpers import (
@@ -422,7 +423,9 @@ class TestDeductionAnnualCap:
             _period(start_date=date(2026, 1, 16), period_id=2),
             _period(start_date=date(2026, 1, 30), period_id=3),
         ]
-        configs = {"bracket_set": None, "state_config": None, "fica_config": None}
+        configs = hand_built_law(
+            2026, bracket_set=None, state_config=None, fica_config=None,
+        )
         nets = [
             calculate_paycheck(
             payroll_basis(profile, periods), p,

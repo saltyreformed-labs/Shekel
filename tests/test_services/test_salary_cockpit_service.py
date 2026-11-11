@@ -39,6 +39,8 @@ from app.services.paycheck_calculator import (
     TaxLines,
 )
 from app.services.salary_raises import RaiseTerms
+from app.services.tax_config_service import TaxLawBasis
+from tests._tax_configs import own_year_rules
 
 TODAY = date(2026, 6, 5)
 
@@ -103,7 +105,7 @@ def _pair(
     taxable="0", is_third=False, banner=PayBanner(),
     federal="0", state="0", ss="0", medicare="0",
     pre=(), post=(), taxable_lines=(), after_tax=(), cadence=_BIWEEKLY,
-    stub_payday=None,
+    stub_payday=None, rules=None,
 ):
     """Build a ``(period, breakdown)`` pair from plain values.
 
@@ -116,7 +118,9 @@ def _pair(
     paycheck was priced at (ruling R-SAL70); biweekly unless a case crosses
     an era change.  ``stub_payday`` is the payday of the pay stub the
     engine priced the four taxes from, ``None`` for the tax formulas (plan
-    step salary:S11-c-2c).
+    step salary:S11-c-2c).  ``rules`` is which year's tax rules priced them
+    (plan step salary:X-at-6): *start*'s own year's, every part, unless a
+    case says otherwise.
     """
     period = _fake_period(pid, start, end)
     breakdown = PaycheckBreakdown(
@@ -140,6 +144,7 @@ def _pair(
             federal=Decimal(federal), state=Decimal(state),
             social_security=Decimal(ss), medicare=Decimal(medicare),
             stub_payday=stub_payday,
+            rules=own_year_rules(start.year) if rules is None else rules,
         ),
         deductions=DeductionBreakdown(
             pre_tax=_priced(pre, PaycheckLineKindEnum.PRE_TAX_DEDUCTION),
@@ -356,6 +361,59 @@ class TestYearlyNetTotals:
         ]
 
 
+class TestSubstitutedTaxRules:
+    """substituted_tax_rules: one basis per tax year priced on another year's rules."""
+
+    def test_a_carried_year_and_two_substituted_ones(self):
+        """2026 on its own rules; 2027 and 2028 on 2026's: one basis each for the two.
+
+        Two 2027 paychecks carry equal bases built apart, so a year is one
+        entry by value, not by object; 2026 is on its own rules and is no
+        entry at all.  Ascending by tax year.
+        """
+        def on_2026s(tax_year):
+            return TaxLawBasis(
+                tax_year=tax_year, federal_year=2026, state_year=2026, fica_year=2026,
+            )
+
+        pairs = [
+            _pair(1, date(2026, 12, 4), date(2026, 12, 17), "52000", "2000", "1400"),
+            _pair(2, date(2027, 1, 1), date(2027, 1, 14), "52000", "2000", "1400",
+                  rules=on_2026s(2027)),
+            _pair(3, date(2027, 1, 15), date(2027, 1, 28), "52000", "2000", "1400",
+                  rules=on_2026s(2027)),
+            _pair(4, date(2028, 1, 14), date(2028, 1, 27), "52000", "2000", "1400",
+                  rules=on_2026s(2028)),
+        ]
+
+        assert svc.substituted_tax_rules(pairs) == [on_2026s(2027), on_2026s(2028)]
+
+    def test_the_years_come_back_ascending_whatever_order_the_pairs_are_in(self):
+        """A 2028 paycheck handed before a 2027 one: still 2027 first, then 2028.
+
+        The ledger's saved periods arrive payday ascending, so its pairs are
+        already in year order; the answer's order is the producer's own
+        contract, so a caller handing any order gets the same lines.
+        """
+        def on_2026s(tax_year):
+            return TaxLawBasis(
+                tax_year=tax_year, federal_year=2026, state_year=2026, fica_year=2026,
+            )
+
+        pairs = [
+            _pair(1, date(2028, 1, 14), date(2028, 1, 27), "52000", "2000", "1400",
+                  rules=on_2026s(2028)),
+            _pair(2, date(2027, 1, 1), date(2027, 1, 14), "52000", "2000", "1400",
+                  rules=on_2026s(2027)),
+        ]
+
+        assert svc.substituted_tax_rules(pairs) == [on_2026s(2027), on_2026s(2028)]
+
+    def test_every_paycheck_on_its_own_years_rules_is_no_entry(self):
+        """The shared scenario, all 2026 on 2026's own rules: nothing to say."""
+        assert svc.substituted_tax_rules(_scenario()) == []
+
+
 class TestBuildChips:
     """build_chips: focused-period hero figures + next-event chips."""
 
@@ -413,6 +471,22 @@ class TestBuildComposition:
         """No stub on or before the payday: the key is None, the formulas' answer."""
         comp = svc.build_composition(_scenario()[2][1])
         assert comp["tax_stub_payday"] is None
+
+    def test_names_the_rules_that_priced_the_taxes(self):
+        """The card carries the tax lines' own basis, the engine's answer (R-SAL75).
+
+        A 2028 paycheck priced on 2027's rules: the key is that very basis,
+        so the cockpit says "2028 on 2027's tax rules" off the paycheck.
+        """
+        rules = TaxLawBasis(
+            tax_year=2028, federal_year=2027, state_year=2027, fica_year=2027,
+        )
+        breakdown = _pair(
+            1, date(2028, 6, 1), date(2028, 6, 14), "52000", "2000", "1400",
+            rules=rules,
+        )[1]
+        comp = svc.build_composition(breakdown)
+        assert comp["tax_rules"] is rules
 
     def test_zero_gross_percentages_are_zero(self):
         """A zero-gross period yields 0% segments (no division by zero)."""

@@ -51,7 +51,8 @@ SOURCES = (
     "IRC sec. 24(h)(4) (credit for other dependents $500)",
     "SSA 2025 COLA fact sheet (Social Security wage base $176,100)",
     "IRC sec. 3101(a) and (b)(1) (Social Security 6.2%, Medicare 1.45%); "
-    "sec. 3102(f) (Additional Medicare 0.9% withheld on wages over $200,000)",
+    "sec. 3101(b)(2) (Additional Medicare 0.9%) and sec. 3102(f) (withheld "
+    "on wages over $200,000)",
     "N.C.G.S. 105-153.7(a) (North Carolina flat rate 4.25% for 2025)",
     "N.C.G.S. 105-153.5(a)(1) and (a1) (North Carolina standard and child "
     "deductions)",

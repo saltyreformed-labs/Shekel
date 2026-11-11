@@ -68,12 +68,12 @@ from app.schemas.validation._helpers import (
     form_payload,
 )
 from app.schemas.validation._recurrence import (
-    RECURRENCE_END_BOUND_KEY,
-    RECURRENCE_MAX_PER_MONTH_KEY,
     RECURRENCE_NEEDS_A_START,
-    RECURRENCE_REPEATS_ON_KEY,
-    RECURRENCE_STARTS_ON_KEY,
     end_bound_before_start_message,
+)
+from app.schemas.validation._recurrence_submission import (
+    RECURRENCE_STARTS_ON_KEY,
+    RECURRENCE_SUBMISSION_KEY,
 )
 from app.schemas.validation.accounts import (
     AccountCreateSchema,
@@ -193,11 +193,9 @@ from app.schemas.validation.transfers import (
 __all__ = [
     "EFFECTIVE_DATE_MAX",
     "EFFECTIVE_DATE_MIN",
-    "RECURRENCE_END_BOUND_KEY",
-    "RECURRENCE_MAX_PER_MONTH_KEY",
     "RECURRENCE_NEEDS_A_START",
-    "RECURRENCE_REPEATS_ON_KEY",
     "RECURRENCE_STARTS_ON_KEY",
+    "RECURRENCE_SUBMISSION_KEY",
     "end_bound_before_start_message",
     "form_payload",
     "AccountCreateSchema",

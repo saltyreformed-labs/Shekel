@@ -11,6 +11,7 @@ import pytest
 
 from app import ref_cache
 from app.enums import (
+    InterestAccrualConventionEnum,
     LedgerAccountClassEnum,
     LedgerAccountKindEnum,
     PostingKindEnum,
@@ -585,6 +586,9 @@ class TestALoansTermsAreReadAsTheyStand:
             assert loan.loan_params is None
             params = LoanParams(
                 account_id=loan.id, original_principal=Decimal("20000.00"),
+                interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+                    InterestAccrualConventionEnum.MONTHLY_1_12,
+                ),
                 term_months=60, origination_date=date(2026, 1, 15),
                 payment_day=15,
             )

@@ -1173,7 +1173,7 @@ class TestAClearedIntervalBoxCannotReCadenceARule:
     """Plan step **R7c-c**: an emptied "every ___" box is refused, not read as 1.
 
     **The defect this pins moved money, and the whole suite was blind to it.**
-    Every case in ``test_recurrence_form_helpers.py`` states ``interval_n``
+    Every case in ``test_recurrence_form_helpers/`` states ``interval_n``
     explicitly through ``validated_cadence(...)``, so nothing exercised the
     absence -- and the absence is what a browser produces: an ``<input
     type="number">`` cleared by the user submits ``""``, which

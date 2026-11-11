@@ -21,6 +21,7 @@ from app.services.paycheck_calculator import (
 from app.services.paycheck_calculator._calendar_questions import _month_ordinal
 from app.utils.money import ZERO
 from app.services.pay_calendar import PayCadence, PayCalendarError
+from tests._tax_configs import hand_built_law, own_year_rules
 from tests._test_helpers import payroll_basis
 
 from ._helpers import (
@@ -44,6 +45,7 @@ class TestPaycheckBreakdownProperties:
                 base_biweekly=Decimal("2307.69"),
                 gross_biweekly=Decimal("2307.69"),
             ),
+            taxes=TaxLines(rules=own_year_rules(2026)),
             deductions=DeductionBreakdown(
                 pre_tax=[
                     PricedLine(
@@ -69,6 +71,7 @@ class TestPaycheckBreakdownProperties:
                 base_biweekly=Decimal("2307.69"),
                 gross_biweekly=Decimal("2307.69"),
             ),
+            taxes=TaxLines(rules=own_year_rules(2026)),
             deductions=DeductionBreakdown(
                 post_tax=[
                     PricedLine(
@@ -99,6 +102,7 @@ class TestPaycheckBreakdownProperties:
                 state=Decimal("80.00"),
                 social_security=Decimal("143.08"),
                 medicare=Decimal("33.46"),
+                rules=own_year_rules(2026),
             ),
         )
         assert breakdown.taxes.total == Decimal("456.54")
@@ -113,6 +117,7 @@ class TestPaycheckBreakdownProperties:
                 base_biweekly=Decimal("2307.69"),
                 gross_biweekly=Decimal("2307.69"),
             ),
+            taxes=TaxLines(rules=own_year_rules(2026)),
         )
         assert breakdown.deductions.total_pre_tax == Decimal("0")
         assert breakdown.deductions.total_post_tax == Decimal("0")
@@ -135,6 +140,25 @@ class TestPaycheckBreakdownProperties:
             PricedLine(  # pylint: disable=missing-kwoa
                 "401k", Decimal("200.00"), None, None,
                 _timing_id("pre_tax_deduction"),
+            )
+
+    def test_tax_lines_without_their_rules_are_refused_at_construction(self):
+        """Tax lines must name the law that priced them, by keyword (plan step salary:X-at-6).
+
+        A salary page names which year's tax rules priced a paycheck off its
+        tax lines' ``rules`` (ruling R-SAL75), so lines built without one
+        would render a substituted year as a plain figure again (finding
+        N-235).  Refused where they are built, and a basis passed by POSITION
+        (after the stub's payday) is refused too.
+        """
+        with pytest.raises(TypeError, match="rules"):
+            # Pylint: ``missing-kwoa`` -- the omitted keyword IS the case under test.
+            TaxLines(Decimal("200.00"))  # pylint: disable=missing-kwoa
+        with pytest.raises(TypeError):
+            # Pylint: ``missing-kwoa`` / ``too-many-function-args`` -- the basis
+            # passed by position IS the case under test.
+            TaxLines(  # pylint: disable=missing-kwoa,too-many-function-args
+                ZERO, ZERO, ZERO, ZERO, None, own_year_rules(2026),
             )
 
 
@@ -280,11 +304,12 @@ class TestCalculatePaycheckPipeline:
             created_at=date(2026, 1, 1),
         )
         period = _period(start_date=date(2026, 1, 16), period_id=1)
-        configs = {
-            "bracket_set": None,
-            "state_config": nc_state_config,
-            "fica_config": standard_fica,
-        }
+        configs = hand_built_law(
+            2026,
+            bracket_set=None,
+            state_config=nc_state_config,
+            fica_config=standard_fica,
+        )
 
         result = calculate_paycheck(
             payroll_basis(profile, [period]), period,
@@ -299,11 +324,12 @@ class TestCalculatePaycheckPipeline:
             created_at=date(2026, 1, 1),
         )
         period = _period(start_date=date(2026, 1, 16), period_id=1)
-        configs = {
-            "bracket_set": simple_bracket_set,
-            "state_config": None,
-            "fica_config": standard_fica,
-        }
+        configs = hand_built_law(
+            2026,
+            bracket_set=simple_bracket_set,
+            state_config=None,
+            fica_config=standard_fica,
+        )
 
         result = calculate_paycheck(
             payroll_basis(profile, [period]), period,
@@ -318,11 +344,12 @@ class TestCalculatePaycheckPipeline:
             created_at=date(2026, 1, 1),
         )
         period = _period(start_date=date(2026, 1, 16), period_id=1)
-        configs = {
-            "bracket_set": simple_bracket_set,
-            "state_config": nc_state_config,
-            "fica_config": None,
-        }
+        configs = hand_built_law(
+            2026,
+            bracket_set=simple_bracket_set,
+            state_config=nc_state_config,
+            fica_config=None,
+        )
 
         result = calculate_paycheck(
             payroll_basis(profile, [period]), period,
@@ -338,11 +365,12 @@ class TestCalculatePaycheckPipeline:
             created_at=date(2026, 1, 1),
         )
         period = _period(start_date=date(2026, 1, 16), period_id=1)
-        configs = {
-            "bracket_set": None,
-            "state_config": None,
-            "fica_config": None,
-        }
+        configs = hand_built_law(
+            2026,
+            bracket_set=None,
+            state_config=None,
+            fica_config=None,
+        )
 
         result = calculate_paycheck(
             payroll_basis(profile, [period]), period,
@@ -752,11 +780,12 @@ class TestNegativeAndBoundaryPaths:
             created_at=date(2026, 1, 1),
         )
         period = _period(start_date=date(2026, 1, 16), period_id=1)
-        tax_configs = {
-            "bracket_set": simple_bracket_set,
-            "state_config": nc_state_config,
-            "fica_config": standard_fica,
-        }
+        tax_configs = hand_built_law(
+            2026,
+            bracket_set=simple_bracket_set,
+            state_config=nc_state_config,
+            fica_config=standard_fica,
+        )
 
         # ``round(365.2425 / 365) = 1``: the once-a-year cadence, DERIVED
         # rather than stated as a count (plan step R-F16).

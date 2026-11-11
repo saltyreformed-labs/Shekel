@@ -1,4 +1,5 @@
 {% from "_money_macros.html" import money %}
+{% from "_tax_rules_macros.html" import rules_sentence %}
 {# Paycheck anatomy: the composition card (the primary HTMX swap target for
    period stepping) plus the deductions bar-list card (an hx-swap-oob
    sibling, so stepping to a neighbouring period updates both at once).
@@ -145,6 +146,14 @@
         {% else %}
         Taxes from the tax formulas: no pay stub used for pricing is dated on or before this payday
         {% endif %}</span>
+      {# Which year's tax rules priced them (plan step salary:X-at-6, ruling
+         R-SAL75), off the engine's answer like the stub above, so it steps
+         with the card.  Only when some part was another year's: a paycheck
+         on its own year's rules has nothing to disclose. #}
+      {% if composition.tax_rules.substituted %}
+      <span><i class="bi bi-calendar2-x"></i>
+        {{ rules_sentence(composition.tax_rules, profile.state_code) }}</span>
+      {% endif %}
     </div>
   </div>
 </div>

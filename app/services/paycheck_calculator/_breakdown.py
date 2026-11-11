@@ -33,6 +33,7 @@ from app import ref_cache
 from app.enums import PaycheckLineKindEnum
 from app.services.pay_banner import PayBanner
 from app.services.pay_calendar import PayCadence
+from app.services.tax_config_service import TaxLawBasis
 from app.utils.money import ZERO, round_money
 
 
@@ -258,12 +259,35 @@ class TaxLines:
     row keeps the breakdown a plain value.  It rides on the TAX lines because
     it is their basis and only theirs: the deductions and the earnings are the
     paycheck lines' own on either path.
+
+    ``rules`` is which year's tax rules priced the four lines, since plan step
+    **salary:X-at-6** (ruling **R-SAL75**: "whatever prices a figure hands
+    back which year's rules ... it used; the paycheck ... carr[ies] that";
+    finding **N-235**): the
+    :class:`~app.services.tax_config_service.TaxLawBasis` of the law they
+    were priced on, which the resolver hands back with that law
+    (:func:`~app.services.tax_config_service.configs_by_year`).  On a
+    paycheck it is the basis of the set the paycheck was priced on, on either
+    path: a stub's taxes move by what the formulas price on that set.  That
+    is the paycheck's OWN tax year's because every production caller hands
+    the engine a by-year mapping (``income_service.ProfilePaychecks``); the
+    engine's one-set mode, which only unit tests use, would price and label
+    a paycheck on whatever single set it is handed, and plan#3476 deletes
+    it so nothing but the caller's discipline holds this.  The stub's
+    side is priced on the stub's own year's law (ruling **R-SAL77**), whose
+    basis no paycheck carries yet (plan#3423).  **REQUIRED and
+    keyword-only** (the :attr:`PricedLine.paycheck_line_kind_id` shape): a
+    default would let a constructor forget it, and a paycheck priced on
+    another year's rules would render as a plain figure again, the defect
+    N-235 names.  So nothing builds figures priced on no law as this value:
+    a pay stub's printed taxes are read by kind (``_stubs._printed_taxes``).
     """
     federal: Decimal = ZERO
     state: Decimal = ZERO
     social_security: Decimal = ZERO
     medicare: Decimal = ZERO
     stub_payday: date | None = None
+    rules: TaxLawBasis = field(kw_only=True)
 
     @property
     def total(self) -> Decimal:
@@ -445,10 +469,14 @@ class PaycheckBreakdown:
     :class:`DeductionBreakdown` (``deductions``).  Section totals live on
     the section that owns the data (``taxes.total``,
     ``deductions.total_pre_tax``, ``earnings.take_home_rate_pct``).
+
+    ``taxes`` is REQUIRED since plan step salary:X-at-6, when
+    :attr:`TaxLines.rules` became so: no default could build tax lines
+    without the law they were priced on.
     """
     period: PeriodInfo
     earnings: Earnings
-    taxes: TaxLines = field(default_factory=TaxLines)
+    taxes: TaxLines
     deductions: DeductionBreakdown = field(default_factory=DeductionBreakdown)
 
     @property

@@ -34,7 +34,7 @@ from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from app import ref_cache
-from app.enums import LoanAnchorSourceEnum
+from app.enums import InterestAccrualConventionEnum, LoanAnchorSourceEnum
 from app.exceptions import TrackingStartRefused, ValidationError
 from app.extensions import db
 from app.models.account import Account, AccountAnchorHistory
@@ -1836,6 +1836,9 @@ def _make_loan_account(seed_user, name="Helper Loan",
     params = LoanParams(
         account_id=account.id,
         original_principal=Decimal(original_principal),
+        interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        ),
         term_months=term_months,
         origination_date=origination_date,
         payment_day=1,

@@ -769,46 +769,6 @@ class TestMfaSetup:
                 f"changed; update the test only if the change was deliberate."
             )
 
-    def test_mfa_setup_replaces_previous_pending(
-        self, app, auth_client, seed_user
-    ):
-        """A second GET /mfa/setup overwrites the first pending secret.
-
-        Each visit must regenerate the secret so that an abandoned
-        setup row cannot persist with stale data, and so a fresh QR
-        scan after a typo always shows a usable code.  This also matches
-        the documented C-05 contract (each /mfa/setup call rewrites the
-        pending columns).
-        """
-        with app.app_context():
-            auth_client.get("/mfa/setup")
-            first_config = (
-                db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
-                .first()
-            )
-            first_ciphertext = first_config.pending_secret_encrypted
-            first_expiry = first_config.pending_secret_expires_at
-            assert first_ciphertext is not None
-
-            auth_client.get("/mfa/setup")
-            db.session.refresh(first_config)
-            second_ciphertext = first_config.pending_secret_encrypted
-            second_expiry = first_config.pending_secret_expires_at
-
-            assert second_ciphertext is not None
-            # Fernet ciphertexts include a fresh IV per encryption, so
-            # even encrypting the SAME plaintext under the SAME key
-            # produces different bytes.  The stronger property to
-            # verify is that the decrypted plaintexts differ -- the
-            # secret really was regenerated.
-            assert (
-                mfa_service.decrypt_secret(first_ciphertext)
-                != mfa_service.decrypt_secret(second_ciphertext)
-            ), "Second /mfa/setup must regenerate the secret, not reuse it."
-            # Expiry was extended to a fresh 15-minute window.
-            assert second_expiry >= first_expiry
-
     def test_mfa_setup_redirects_if_already_enabled(self, app, auth_client, seed_user):
         """GET /mfa/setup redirects if MFA is already enabled."""
         with app.app_context():

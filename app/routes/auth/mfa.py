@@ -349,21 +349,81 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     return response
 
 
+def _live_pending_ciphertext(mfa_config: MfaConfig | None) -> str | None:
+    """Return the pending setup's ciphertext while its window is open, or ``None``.
+
+    The ONE statement of when a setup is pending (ruling plan#3470), which
+    ``/mfa/setup`` and ``/mfa/confirm`` both read: the row holds a pending
+    secret and its expiry has not passed.  The expiry is
+    ``MFA_SETUP_PENDING_TTL`` from when the key was made, and the window is
+    open through its last instant: it closes once ``now`` is past it.
+
+    Args:
+        mfa_config: The signed-in user's two-factor row, or ``None``.
+
+    Returns:
+        The pending ``pending_secret_encrypted``, or ``None`` for no row, no
+        pending secret, or one whose window has closed.
+    """
+    if (
+        mfa_config is None
+        or mfa_config.pending_secret_encrypted is None
+        or mfa_config.pending_secret_expires_at is None
+        or mfa_config.pending_secret_expires_at < datetime.now(timezone.utc)
+    ):
+        return None
+    return mfa_config.pending_secret_encrypted
+
+
+def _readable_pending_secret(mfa_config: MfaConfig | None) -> str | None:
+    """Return the pending setup's secret, or ``None`` when there is none to show.
+
+    ``None`` when no setup is pending (:func:`_live_pending_ciphertext`) and
+    when its ciphertext does not decrypt: an ``InvalidToken`` (the key it was
+    written under was pruned since) or a ``RuntimeError`` (no key is set).
+    Either way ``/mfa/setup`` makes a new key, and with no key set that
+    attempt's own encrypt fails and says so to the user, so no failure is
+    hidden here.
+
+    Args:
+        mfa_config: The signed-in user's two-factor row, or ``None``.
+
+    Returns:
+        The plaintext base32 secret of the pending setup, or ``None``.
+    """
+    ciphertext = _live_pending_ciphertext(mfa_config)
+    if ciphertext is None:
+        return None
+    try:
+        return mfa_service.decrypt_secret(ciphertext)
+    except (RuntimeError, InvalidToken):
+        return None
+
+
 @auth_bp.route("/mfa/setup", methods=["GET"])
 def mfa_setup():
     """Display the MFA setup page with QR code and manual key.
 
-    Generates a fresh TOTP secret, encrypts it under the application's
-    Fernet/MultiFernet key, and persists the ciphertext on the user's
-    ``MfaConfig`` row in ``pending_secret_encrypted`` (paired with a
-    15-minute expiry in ``pending_secret_expires_at``) instead of in
-    the user's signed-but-unencrypted Flask session cookie.  See audit
-    finding F-031 / commit C-05.
+    **While a setup is pending, every load shows its key** (ruling
+    plan#3470): the same QR code and manual key until the pending secret's
+    window closes, ``MFA_SETUP_PENDING_TTL`` from when the key was made, and a
+    reload does not stretch it.  So a wrong code at ``/mfa/confirm`` (which
+    sends the user back here), a refresh, the login gate holding a companion
+    here, or the phone reloading the tab on the way back from the
+    authenticator app all show the key already scanned, and the entry made
+    from it keeps working.  Until that ruling each load made a new key, and
+    each of those reloads killed the entry just scanned.
 
-    Each visit overwrites any previous pending secret -- legitimate
-    re-visits after invalid-code retries get a new QR code, and a
-    stale pending row from an abandoned setup is replaced rather than
-    accumulated.
+    A new key is made only when none is pending, the pending one's window
+    has closed, or its ciphertext no longer decrypts
+    (:func:`_readable_pending_secret`).  It is a fresh TOTP secret, encrypted
+    under the application's Fernet/MultiFernet key and persisted on the
+    user's ``MfaConfig`` row in ``pending_secret_encrypted`` (paired with its
+    expiry in ``pending_secret_expires_at``) instead of in the user's
+    signed-but-unencrypted Flask session cookie.  See audit finding F-031 /
+    commit C-05.  Showing the pending key again shows it to no one new: the
+    page answers only the signed-in user it belongs to, who could start a
+    setup of their own anyway.
 
     If MFA is already enabled the user is redirected back to security
     settings.  If the encryption key is missing the user is redirected
@@ -371,12 +431,13 @@ def mfa_setup():
 
     **A GET that WRITES, and it says so** (plan step balance:X-i3).  Every
     other request method declares itself; this route is the one place where a
-    safe method genuinely records something, because the pending secret must
-    be persisted before the QR that encodes it can be shown.  It therefore
-    holds its write inside :func:`app.db_transaction.write_transaction` rather
-    than being exempted from the rule -- the block is a command, the rest of
-    the request is a query, and the row it stages cannot be created outside
-    the block because the surrounding transaction is read-only.
+    safe method genuinely records something, because a new pending secret
+    must be persisted before the QR that encodes it can be shown.  It
+    therefore holds its write inside :func:`app.db_transaction.write_transaction`
+    rather than being exempted from the rule -- the block is a command, the
+    rest of the request is a query, and the row it stages cannot be created
+    outside the block because the surrounding transaction is read-only.  A
+    load that shows the pending key writes nothing.
     """
     mfa_config = (
         db.session.query(MfaConfig)
@@ -387,33 +448,35 @@ def mfa_setup():
         flash("Two-factor authentication is already enabled.", "info")
         return redirect(url_for("auth.security"))
 
-    secret = mfa_service.generate_totp_secret()
-    # Encrypt before any DB mutation so a missing TOTP_ENCRYPTION_KEY
-    # leaves the database state untouched -- no orphan pending row, no
-    # half-initialized MfaConfig.  encrypt_secret() raises RuntimeError
-    # when the key is unset (see app/services/mfa_service.py:_build_fernet_list).
-    try:
-        encrypted_pending = mfa_service.encrypt_secret(secret)
-    except RuntimeError:
-        flash(
-            "MFA is not available. The server administrator must set "
-            "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
-            "danger",
-        )
-        return redirect(url_for("auth.security"))
+    secret = _readable_pending_secret(mfa_config)
+    if secret is None:
+        secret = mfa_service.generate_totp_secret()
+        # Encrypt before any DB mutation so a missing TOTP_ENCRYPTION_KEY
+        # leaves the database state untouched -- no orphan pending row, no
+        # half-initialized MfaConfig.  encrypt_secret() raises RuntimeError
+        # when the key is unset (see app/services/mfa_service.py:_build_fernet_list).
+        try:
+            encrypted_pending = mfa_service.encrypt_secret(secret)
+        except RuntimeError:
+            flash(
+                "MFA is not available. The server administrator must set "
+                "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
+                "danger",
+            )
+            return redirect(url_for("auth.security"))
 
-    # The row is CONSTRUCTED inside the block, not before it: opening the
-    # command rolls the query's snapshot back, and a pending instance staged
-    # ahead of that would be expunged with it.
-    with write_transaction():
-        if mfa_config is None:
-            mfa_config = MfaConfig(user_id=current_user.id)
-            db.session.add(mfa_config)
+        # The row is CONSTRUCTED inside the block, not before it: opening the
+        # command rolls the query's snapshot back, and a pending instance
+        # staged ahead of that would be expunged with it.
+        with write_transaction():
+            if mfa_config is None:
+                mfa_config = MfaConfig(user_id=current_user.id)
+                db.session.add(mfa_config)
 
-        mfa_config.pending_secret_encrypted = encrypted_pending
-        mfa_config.pending_secret_expires_at = (
-            datetime.now(timezone.utc) + MFA_SETUP_PENDING_TTL
-        )
+            mfa_config.pending_secret_encrypted = encrypted_pending
+            mfa_config.pending_secret_expires_at = (
+                datetime.now(timezone.utc) + MFA_SETUP_PENDING_TTL
+            )
 
     qr_data_uri = mfa_service.generate_qr_code_data_uri(
         mfa_service.get_totp_uri(secret, current_user.email)
@@ -455,22 +518,19 @@ def mfa_confirm():
         .filter_by(user_id=current_user.id)
         .first()
     )
-    # Single guard for "no usable pending secret".  Covers three cases
-    # that share the same user-facing recovery (start over): no row, a
-    # row with no pending columns set, or a row whose expiry has
+    # Single guard for "no usable pending secret", the one statement of a
+    # pending setup /mfa/setup reads too (_live_pending_ciphertext).  Covers
+    # three cases that share the same user-facing recovery (start over): no
+    # row, a row with no pending columns set, or a row whose expiry has
     # elapsed.  When the row had stale data we clear it in the same
     # commit so a request that races a fresh /mfa/setup GET does not
     # see the same expired ciphertext twice.
-    has_pending = (
-        mfa_config is not None
-        and mfa_config.pending_secret_encrypted is not None
-        and mfa_config.pending_secret_expires_at is not None
-    )
-    if not has_pending or (
-            mfa_config.pending_secret_expires_at
-            < datetime.now(timezone.utc)
-    ):
-        if has_pending:
+    ciphertext = _live_pending_ciphertext(mfa_config)
+    if ciphertext is None:
+        if (
+            mfa_config is not None
+            and mfa_config.pending_secret_encrypted is not None
+        ):
             mfa_config.pending_secret_encrypted = None
             mfa_config.pending_secret_expires_at = None
             db.session.commit()
@@ -478,7 +538,7 @@ def mfa_confirm():
         return redirect(url_for("auth.mfa_setup"))
 
     try:
-        secret = mfa_service.decrypt_secret(mfa_config.pending_secret_encrypted)
+        secret = mfa_service.decrypt_secret(ciphertext)
     except RuntimeError:
         # TOTP_ENCRYPTION_KEY is unset.  Sending the user back to
         # /mfa/setup would only loop them through the same failure

@@ -395,6 +395,27 @@ class TestSubstitutedTaxRules:
 
         assert svc.substituted_tax_rules(pairs) == [on_2026s(2027), on_2026s(2028)]
 
+    def test_the_years_come_back_ascending_whatever_order_the_pairs_are_in(self):
+        """A 2028 paycheck handed before a 2027 one: still 2027 first, then 2028.
+
+        The ledger's saved periods arrive payday ascending, so its pairs are
+        already in year order; the answer's order is the producer's own
+        contract, so a caller handing any order gets the same lines.
+        """
+        def on_2026s(tax_year):
+            return TaxLawBasis(
+                tax_year=tax_year, federal_year=2026, state_year=2026, fica_year=2026,
+            )
+
+        pairs = [
+            _pair(1, date(2028, 1, 14), date(2028, 1, 27), "52000", "2000", "1400",
+                  rules=on_2026s(2028)),
+            _pair(2, date(2027, 1, 1), date(2027, 1, 14), "52000", "2000", "1400",
+                  rules=on_2026s(2027)),
+        ]
+
+        assert svc.substituted_tax_rules(pairs) == [on_2026s(2027), on_2026s(2028)]
+
     def test_every_paycheck_on_its_own_years_rules_is_no_entry(self):
         """The shared scenario, all 2026 on 2026's own rules: nothing to say."""
         assert svc.substituted_tax_rules(_scenario()) == []

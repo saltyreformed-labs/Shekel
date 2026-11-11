@@ -10,7 +10,7 @@ that decides how far a stream is charged -- through its LAST event, a payment,
 an assertion or a projection alike.
 
 Pure: no database, no app context.  Every figure is stated by hand and checked
-against :func:`~app.utils.money.accrue_monthly_interest` /
+against :func:`~app.utils.money.installment_interest` /
 :func:`~app.utils.money.apply_payment_cash`, the ONE accrual and the ONE
 allocation (6% on $10,000.00 is $50.00 a month).
 """

@@ -220,7 +220,8 @@ class Law:
 
     Attributes:
         paycheck: The config set (``bracket_set`` / ``state_config`` /
-            ``fica_config``) of the paycheck's own tax year.
+            ``fica_config``, and the ``basis`` naming which year's rules
+            each is) of the paycheck's own tax year.
         paycheck_year: That year.
         by_year: ``{tax_year: config set}`` when the caller resolved the law
             per year, or ``None`` when it handed one year's set alone.
@@ -350,7 +351,10 @@ def priced_taxes(basis, pay: Pay, lines, law: Law) -> TaxLines:
 
     Returns:
         The :class:`~._breakdown.TaxLines`, naming the stub that priced
-        them, or ``None`` there for the formulas alone.
+        them, or ``None`` there for the formulas alone, and on either path
+        the basis of the PAYCHECK's own year's law as their ``rules`` (plan
+        step salary:X-at-6): the formulas' answer for the paycheck carries
+        it, and a stub's figures move by what that law prices.
     """
     formulas = _formulas(basis, pay, law.paycheck)
     stub = _pricing_stub(basis.profile.pay_stubs, pay.payday, _carried(lines))
@@ -366,14 +370,22 @@ def priced_taxes(basis, pay: Pay, lines, law: Law) -> TaxLines:
         law.for_stub(stub),
     )
     return TaxLines(
-        federal=_floored(printed.federal + formulas.federal - on_stub.federal),
-        state=_floored(printed.state + formulas.state - on_stub.state),
-        social_security=_floored(
-            printed.social_security + formulas.social_security
-            - on_stub.social_security
+        federal=_floored(
+            printed[WithholdingKindEnum.FEDERAL_INCOME]
+            + formulas.federal - on_stub.federal
         ),
-        medicare=_floored(printed.medicare + formulas.medicare - on_stub.medicare),
+        state=_floored(
+            printed[WithholdingKindEnum.STATE_INCOME] + formulas.state - on_stub.state
+        ),
+        social_security=_floored(
+            printed[WithholdingKindEnum.SOCIAL_SECURITY]
+            + formulas.social_security - on_stub.social_security
+        ),
+        medicare=_floored(
+            printed[WithholdingKindEnum.MEDICARE] + formulas.medicare - on_stub.medicare
+        ),
         stub_payday=stub.payday,
+        rules=formulas.rules,
     )
 
 
@@ -420,8 +432,17 @@ def _has_the_lines(stub, lines: frozenset) -> bool:
     return _carried(stub.line_amounts) == lines and not one_offs_change_taxes(stub.one_offs)
 
 
-def _printed_taxes(stub) -> TaxLines:
-    """Return the four taxes *stub* prints.
+def _printed_taxes(stub) -> dict[WithholdingKindEnum, Decimal]:
+    """Return the four taxes *stub* prints, by kind.
+
+    By kind rather than as :class:`~._breakdown.TaxLines` since plan step
+    salary:X-at-6: tax lines carry the law that priced them
+    (:attr:`~._breakdown.TaxLines.rules`), and a stub's printed figures were
+    priced on none of the app's.
+
+    Returns:
+        ``{kind: amount}`` over every :class:`~app.enums.WithholdingKindEnum`
+        member.
 
     Raises:
         ValueError: The stub lacks one of the four.  The entry door refuses
@@ -438,12 +459,7 @@ def _printed_taxes(stub) -> TaxLines:
                 f"{member.name} figure, so it cannot price a paycheck"
             )
         figures[member] = printed[kind_id]
-    return TaxLines(
-        federal=figures[WithholdingKindEnum.FEDERAL_INCOME],
-        state=figures[WithholdingKindEnum.STATE_INCOME],
-        social_security=figures[WithholdingKindEnum.SOCIAL_SECURITY],
-        medicare=figures[WithholdingKindEnum.MEDICARE],
-    )
+    return figures
 
 
 def _formulas(basis, pay: Pay, configs: dict) -> TaxLines:

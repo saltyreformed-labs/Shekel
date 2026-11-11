@@ -19,6 +19,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.enums import InterestAccrualConventionEnum
 from app.services.amortization_engine import RateChangeRecord
 from app.services.installment_calendar import monthly_due_date
 from app.services.rate_period_engine import (
@@ -41,6 +42,7 @@ def _fixed_loan_periods():
         is_arm=False,
         arm_first_adjustment_months=None,
         arm_adjustment_interval_months=None,
+        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
     )
     return build_rate_periods(
         terms=terms, rate_changes=None, recorded_period_pi=None,
@@ -57,6 +59,7 @@ def _arm_periods(rate_changes=None, recorded_period_pi=None):
         is_arm=True,
         arm_first_adjustment_months=60,
         arm_adjustment_interval_months=60,
+        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
     )
     return build_rate_periods(
         terms=terms,
@@ -161,6 +164,7 @@ class TestBuildRatePeriods:
             is_arm=True,
             arm_first_adjustment_months=None,
             arm_adjustment_interval_months=None,
+            convention=InterestAccrualConventionEnum.MONTHLY_1_12,
         )
         rate_changes = [
             RateChangeRecord(

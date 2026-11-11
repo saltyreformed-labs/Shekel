@@ -54,11 +54,7 @@ from flask_login import current_user
 
 from app.extensions import db
 from app.routes._redirect_target import RedirectTarget
-from app.schemas.validation import (
-    RECURRENCE_REPEATS_ON_KEY,
-    RECURRENCE_STARTS_ON_KEY,
-    end_bound_before_start_message,
-)
+from app.schemas.validation import end_bound_before_start_message
 from app.services import loan_loaders, planned_rows_books
 from app.services.cash_ledger import is_loan_payment_definition
 from app.services.balance_at import (
@@ -66,8 +62,8 @@ from app.services.balance_at import (
     is_standing_loan_payment,
 )
 from app.services.recurrence import (
-    EndBound,
-    end_bound_from_columns,
+    RecurrenceSpec,
+    RecurrenceSubmission,
     stored_cadence,
 )
 from app.services.definition_unarchive import UnarchiveScope
@@ -173,11 +169,9 @@ class RecurrenceFormContext:
     unchanged).
 
     Bundles the two inputs that
-    :func:`~app.routes._recurrence_form_helpers.recurrence_spec_from_form`,
-    :func:`~app.routes._recurrence_form_helpers.update_recurrence_rule_from_form`,
     :func:`~app.routes._recurrence_form_helpers.resolve_recurrence_rule_for_update`
-    and the two refusal entries below share verbatim: the form's closing
-    bound and the validation-error redirect target.  Collapsing the
+    and the refusal entries below share verbatim: what the form submitted
+    and the validation-error redirect target.  Collapsing the
     formerly-triplicated ``end_bound`` / ``redirect_endpoint`` /
     ``redirect_endpoint_kwargs`` signature tail into one object both removes
     the duplication and clears the per-helper ``too-many-arguments`` count.
@@ -199,30 +193,31 @@ class RecurrenceFormContext:
     entries that judge a stored definition.
 
     Attributes:
-        end_bound: When the recurrence STOPS, as the ONE value the submission
-            composed (:class:`~app.services.recurrence.EndBound`), or ``None``
-            when the form STATED NOTHING about it.
+        submission: What the form STATED, each recurrence field stated,
+            cleared or not mentioned
+            (:class:`~app.services.recurrence.RecurrenceSubmission`), as the
+            schema composed it and the route's settles -- a loan
+            destination's, a payroll line's -- completed it.
 
-            The two are different requests and the helpers act on them
-            differently -- a stated bound REPLACES the rule's, an absent one
-            leaves it alone -- which is the same present-versus-absent
-            distinction ``recurrence_unit`` turns on, and it is what lets a
-            form whose bound is derived (a loan payment) render the control
+            **The ONE home of the submitted closing bound since plan step
+            R7e**, which carried it here alone as ``end_bound`` (``None``
+            for "not stated") while every other field rode the payload as a
+            key whose PRESENCE each door tested.  A stated bound REPLACES the
+            rule's and an unmentioned one leaves it alone, which is what lets
+            a form whose bound is derived (a loan payment) render the control
             disabled and have the save mean "not mine to state" rather than
-            "ends never".  It carried the raw ``end_date`` until plan step
-            R7b-3, where a date was the only bound a form could state and the
-            distinction had nothing to express.
+            "ends never"; the submission states that distinction for every
+            field the same way (finding **D36**).
         redirect: Where to redirect on a recoverable validation failure
             (a start period that is not this user's).
     """
 
-    end_bound: EndBound | None
+    submission: RecurrenceSubmission
     redirect: RedirectTarget
 
 
 def refuse_inverted_window(
-    template: Any,
-    data: dict[str, Any],
+    reauthored: RecurrenceSpec | None,
     *,
     ctx: RecurrenceFormContext,
 ) -> Response | None:
@@ -231,8 +226,9 @@ def refuse_inverted_window(
     **The update door's half of a rule the schema can only half see** (plan
     step R7c-b).  ``require_end_bound_after_start`` compares the two values a
     SUBMISSION states; an update states at most one of them and keeps the
-    stored other, so the pair the save would actually write is invisible to it.
-    Two ordinary edits produce it and both were unhandled 500s:
+    stored other, so the pair the edit authors -- one bound submitted, the
+    other kept -- is invisible to it.  Two ordinary edits produce an
+    inverted one and both were unhandled 500s:
 
     * clearing "Starts on" while setting an earlier "Ends on" -- the cleared
       date box drops the key, the stored start is kept, and the new bound lands
@@ -241,24 +237,54 @@ def refuse_inverted_window(
       control, which no reviewer listed and which the schema cannot see at all
       because the bound is not in the payload.
 
-    **``ck_recurrence_rules_valid_window`` stands behind this since plan step
-    R7d-g**, and this door is still the one that can REPORT the mistake: the
-    constraint refuses the pair at the flush as an ``IntegrityError``, which
-    is a 500 and not a sentence, so the door grades the same pair first and
-    says so.  The CHECK was held back until R7d-g on a developer ruling
-    (2026-08-15): the columns carried DERIVED loan-payment windows beside
-    authored ones, and an empty derived window was a correct answer a
-    constraint could not tell from a user's mistake.  Nothing derived is
-    stored there now.  See
+    **``ck_recurrence_rules_valid_window`` stands behind both doors since plan
+    step R7d-g**, and it is neither door's way of saying no: it refuses an
+    inverted STORED pair at the flush as an ``IntegrityError``, which is a 500
+    and not a sentence.  This door grades the authored pair before any write;
+    the write door grades the pair it would store before its first assignment
+    (:class:`~app.services.recurrence.EmptyAuthoredWindowError`).  They are
+    different pairs, as the paragraphs below show.  The CHECK was held back
+    until R7d-g on a developer ruling (2026-08-15): the columns carried
+    DERIVED loan-payment windows beside authored ones, and an empty derived
+    window was a correct answer a constraint could not tell from a user's
+    mistake.  Nothing derived is stored there now.  See
     :func:`~app.schemas.validation.end_bound_before_start_message`, which both
     doors word the refusal with.
 
-    Reads the EFFECTIVE pair on both sides -- submitted where the form stated
-    it, stored where it did not -- which is the same present-versus-absent rule
-    :func:`update_recurrence_rule_from_form` applies when it writes them.  The
-    stored half is the owner's word for EVERY definition (plan step R7d-g), a
-    second recurring transfer into a loan included, so it is graded as
-    stated.  Until R7d-g it was read through the composed door's cache arm
+    **Grades the AUTHORED pair: the spec the re-point branch hands the write
+    door, not the pair that door stores** (plan step R7e).  The spec is
+    :meth:`~app.services.recurrence.RecurrenceSubmission.applied_to`'s --
+    each bound submitted where the form stated it, the rule's stored value
+    where it did not, in the one spelling of that merge -- and
+    :func:`~app.routes._recurrence_form_helpers.resolve_recurrence_rule_for_update`
+    computes it ONCE and hands the same value to this refusal and to
+    :func:`~app.services.recurrence.reauthor_rule`.  Until R7e this door
+    spelled the merge inline beside the writer's own spelling, so the two
+    read one spec only while the two spellings agreed.
+
+    **On a paycheck cadence the write door stores a different start, so it
+    grades a different pair** (``_resolution._first_occurrence``): the payday
+    of the paycheck HOSTING the authored date, which inside the schedule is
+    that date or up to a pay period EARLIER, and the owner's first payday for
+    a date before it.  Each door therefore refuses an edit the other admits,
+    and neither is redundant (both cases are in
+    ``tests/test_routes/test_recurrence_form_helpers/test_window.py``):
+
+    * a stop between the hosting payday and the typed start inverts the
+      authored pair and not the stored one, so of the two doors only THIS
+      one refuses it
+      (``test_a_stop_between_the_payday_and_the_typed_start_is_refused``).
+      An ordinary edit form posts the stored stop beside the start, and the
+      schema then refuses the pair first; this door is the one that refuses
+      a submission leaving the stop out;
+    * a start lifted onto the first payday, past the stop, inverts the stored
+      pair and not the authored one, so only the write door refuses it
+      (``test_a_cadence_switch_that_lifts_the_stored_start_past_the_stop_is_refused``).
+
+    The stored half of the merge is the owner's word for EVERY definition
+    (plan step R7d-g), a second recurring transfer into a loan included, so
+    it is graded as stated.  Until R7d-g it was read through the composed
+    door's cache arm
     (ruling **R-R56**), because the loan's standing payment stored the
     chokepoints' payoff there and a loan cleared before its first installment
     stored an INVERTED pair through the sync's own production door; that arm
@@ -266,40 +292,34 @@ def refuse_inverted_window(
     cannot invert (its closing bound is NULL, or an owner's stop the
     loan-params door refuses to move the start past).
 
-    The stored rule is NOT resolved here, deliberately.  The comparison needs
-    the two bound columns and the start, none of which decodes the cadence,
-    so a rule whose stored pattern the application no longer models still
-    reaches its repair save without this door raising on the way -- the same
-    property the render side states for its own read of the bound.
+    The stored CADENCE is not read on the way, deliberately: the merge reads
+    the rule with the STATED cadence, so a rule whose stored pattern the
+    application no longer models still reaches its repair save without this
+    door raising -- the same property the render side states for its own read
+    of the bound.
 
     Args:
-        template: The template being updated.  A template with no rule is
-            skipped: the create branch authors from a submission the schema has
+        reauthored: The spec the re-point branch hands the write door, or
+            ``None`` when the update re-points no rule (the template has
+            none, or the submission names no cadence) -- skipped, because
+            the create branch authors from a submission the schema has
             already compared.
-        data: The validated payload, NOT mutated -- the delegated helper pops
-            the recurrence keys afterwards and must still see them.
-        ctx: The form context, read for the submitted closing bound (``None``
-            when the form stated none) and for where a refusal sends the user.
+        ctx: The form context, read for where a refusal sends the user.
 
     Returns:
         * ``None`` -- the window is well-formed, or nothing this edit states
           can invert it.
         * :class:`Response` -- the refusal redirect, returned verbatim.
     """
-    rule = template.recurrence_rule
-    if rule is None or data.get("recurrence_unit") is None:
+    if reauthored is None:
         return None
-    starts_on = (
-        data[RECURRENCE_STARTS_ON_KEY] if RECURRENCE_STARTS_ON_KEY in data else rule.starts_on
-    )
-    bound = (
-        ctx.end_bound if ctx.end_bound is not None
-        else end_bound_from_columns(rule.end_date, rule.max_occurrences)
-    )
-    end_date = bound.columns().end_date
-    if starts_on is None or end_date is None or end_date >= starts_on:
+    end_date = reauthored.end_bound.columns().end_date
+    if end_date is None or end_date >= reauthored.starts_on:
         return None
-    flash(end_bound_before_start_message(end_date, starts_on), "danger")
+    flash(
+        end_bound_before_start_message(end_date, reauthored.starts_on),
+        "danger",
+    )
     return ctx.redirect.to_response()
 
 
@@ -526,11 +546,10 @@ def is_loan_payment_or_standing(template: Any, pass_ctx: BalanceContext) -> bool
 
 def refuse_recurrence_update(
     template: Any,
-    data: dict[str, Any],
     *,
     ctx: RecurrenceFormContext,
     pass_ctx: BalanceContext,
-    recurrence_submitted: bool,
+    reauthored: RecurrenceSpec | None,
 ) -> Response | None:
     """Return why this update's recurrence may not be applied, or ``None``.
 
@@ -555,10 +574,9 @@ def refuse_recurrence_update(
 
     Args:
         template: The template being updated.  Read only; not mutated.
-        data: The validated payload.  Read for PRESENCE before the delegated
-            helpers pop the recurrence keys; not mutated.
-        ctx: The form context: the submitted closing bound (``None`` when the
-            form stated none) and where a refusal sends the user.
+        ctx: The form context: the submission the rules read -- whether it
+            clears the cadence, whether it states a bound -- and where a
+            refusal sends the user.
         pass_ctx: The read pass.  Read for ONE fact, whether *template*'s
             bounds are the loan's (:func:`bounds_are_the_loans` -- the
             standing payment of the loan it pays into, or an archived
@@ -569,30 +587,28 @@ def refuse_recurrence_update(
             the 2026-08-16 ruling has it (a producer below the route takes the
             pass and never builds one); regeneration afterwards builds its own,
             as a writer must.
-        recurrence_submitted: Whether ``recurrence_unit`` is present at all,
-            read by the caller before this runs because the two of them share
-            it and a second ``in`` test is a second statement of "did the form
-            mention the recurrence".
+        reauthored: The spec the re-point branch hands the write door, or
+            ``None`` where it re-points nothing -- what the fourth rule
+            grades (:func:`refuse_inverted_window`).  Computed once by the
+            caller, which hands the same value to the write, so the rule
+            grades the AUTHORED pair the write is given.  The write door
+            grades the pair it would STORE, whose start on a paycheck cadence
+            is the payday hosting the typed date, so each refuses an edit the
+            other admits (see :func:`refuse_inverted_window`).
 
     Returns:
         * ``None`` -- the update may proceed.
         * :class:`Response` -- the refusal redirect, returned verbatim.
     """
-    clearing = (
-        recurrence_submitted
-        and data.get("recurrence_unit") is None
-        and template.recurs
-    )
+    submission = ctx.submission
+    clearing = submission.clears_the_recurrence and template.recurs
     # The opening bound's row is the date AND how it is read: a "repeating
     # on" choice states the start as surely as the date does (plan step
     # recurrence:R8-c), and the loan's standing payment reads its date by the
     # loan's contract day (ruling R-R96), so a crafted reading is refused here
-    # with a crafted date rather than ridden past on the date's absence.
-    states_a_bound = (
-        ctx.end_bound is not None
-        or RECURRENCE_STARTS_ON_KEY in data
-        or RECURRENCE_REPEATS_ON_KEY in data
-    )
+    # with a crafted date rather than ridden past on the date's absence --
+    # which is why ``states_a_bound`` counts a reading posted with no date.
+    states_a_bound = submission.states_a_bound
     # The standing identity -- is this the standing payment of the loan it
     # pays into -- is asked ONLY when a submission clears the recurrence or
     # states a bound: it is read off the pass's loan resolution, and on this
@@ -665,10 +681,7 @@ def refuse_recurrence_update(
         flash(UNREPAIRED_CADENCE_CANNOT_BE_CLEARED, "danger")
         return ctx.redirect.to_response()
 
-    inverted = refuse_inverted_window(template, data, ctx=ctx)
-    if inverted is not None:
-        return inverted
-    return None
+    return refuse_inverted_window(reauthored, ctx=ctx)
 
 
 @dataclass(frozen=True)

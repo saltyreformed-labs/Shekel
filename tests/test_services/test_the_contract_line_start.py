@@ -26,6 +26,8 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
+from app import ref_cache
+from app.enums import InterestAccrualConventionEnum
 from app.extensions import db as _db
 from app.models.loan_params import LoanParams
 from app.services import balance_at
@@ -77,6 +79,9 @@ def _params(origination=date(2026, 1, 1), payment_day=1, term=12):
         is_arm=False,
         arm_first_adjustment_months=None,
         arm_adjustment_interval_months=None,
+        interest_accrual_convention_id=ref_cache.interest_accrual_convention_id(
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        ),
     )
 
 

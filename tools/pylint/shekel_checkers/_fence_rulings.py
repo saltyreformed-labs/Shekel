@@ -865,6 +865,10 @@ _FENCED_MODULE_RULINGS = {
         # reason the ``row_valuation`` entry gives.
         "resolve_periods",
         "engine_terms",
+        # How the note accrues interest: the stored convention id read back as
+        # its enum member (plan step recurrence:R16-d) -- a contract term, the
+        # furthest thing from a balance.
+        "accrual_convention",
         # The latest anchor FACT (a user-asserted row plus its date) -- the
         # same ruling ``resolve_anchor`` carries on the cash side.
         "select_latest_anchor",

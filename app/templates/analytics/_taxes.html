@@ -1,4 +1,5 @@
 {% from "_money_macros.html" import money %}
+{% from "_tax_rules_macros.html" import rules_year_phrase, rules_note %}
 {# Taxes tab -- HTMX partial (T-P4), per the locked anatomy in
    docs/design/analytics_audit.md: hero band (refund hero + chips + YTD
    checkpoint card + assumptions card) over the derivation ledger, the
@@ -17,8 +18,17 @@
 
    Basis honesty: every figure on this tab is a MODELED estimate (the
    audit's "modeled, labeled, calibrated" cell); the caption and the
-   assumptions card carry the pay stubs that priced the estimate and the
-   measured-through anchor. #}
+   assumptions card carry the pay stubs that priced the estimate, the
+   measured-through anchor, and which year's tax rules priced it (the Tax
+   year row, plan step salary:X-at-5).
+
+   The state is the primary profile's (report.assumptions.filing.state_code),
+   never a literal: every label naming the state reads it (plan step
+   salary:X-at-5; the law lists the states the app supports, ruling
+   salary:R-SAL78).  So a second state needs no template change while every
+   active job is in one state; a household whose jobs are in two states is
+   its own step, plan#3362, because every state label and the liability
+   here are still the primary's. #}
 
 {# ── Header: title + year selector ─────────────────────────────── #}
 <div class="d-flex align-items-center justify-content-between mb-3">
@@ -49,6 +59,7 @@
 </div>
 
 {% else %}
+{% set state_code = report.assumptions.filing.state_code %}
 
 {# ── Hero band: refund hero + chips (read-only nw-sky vocabulary) ── #}
 <div class="pulse-canvas mb-3">
@@ -63,7 +74,7 @@
       {# "modeled after that date", not the dangling "modeled after"
          (P-AN18: the caption read as truncated). #}
       <div class="nw-hero__cap">
-        {{ year }} federal + NC combined &middot;
+        {{ year }} federal + {{ state_code }} combined &middot;
         {%- if report.withholding.measured_through %}
         withholding measured through {{ report.withholding.measured_through.strftime('%b %-d') }}, modeled after that date
         {%- else %}
@@ -80,7 +91,7 @@
         <div class="calendar-chip-cap">{{ "refund" if display.federal_is_refund else "owed" }}</div>
       </div>
       <div class="pulse-chip">
-        <div class="pulse-chip__label">NC state</div>
+        <div class="pulse-chip__label">{{ state_code }} state</div>
         <div class="pulse-chip__value font-mono {{ 'tax-refund' if display.state_is_refund else 'tax-owed' }}">
           {{ money(display.state_amount) }}
         </div>
@@ -92,7 +103,7 @@
       <div class="pulse-chip">
         <div class="pulse-chip__label">Effective rate</div>
         <div class="pulse-chip__value font-mono">{{ display.effective_pct }}%</div>
-        <div class="calendar-chip-cap">fed + NC combined, of Box 1 wages</div>
+        <div class="calendar-chip-cap">fed + {{ state_code }} combined, of Box 1 wages</div>
       </div>
       {% endif %}
       <div class="pulse-chip">
@@ -121,8 +132,20 @@
       <div class="card-header"><h6 class="mb-0">Assumptions</h6></div>
       <div class="card-body">
         <dl class="row mb-0 small tax-assumptions">
+          {# Which year's tax rules priced this tab (ruling R-SAL75, plan
+             step salary:X-at-5): the resolver's basis, carried on the
+             liability, so the tab never works the year out itself.  The
+             words are the salary pages' too, so they are spelled once, in
+             _tax_rules_macros.html, which says what each case prints and
+             why (plan step salary:X-at-6). #}
+          {% set rules_basis = report.liability.basis %}
           <dt class="col-6 fw-normal">Tax year</dt>
-          <dd class="col-6 text-end mb-1">{{ report.liability.tax_year }}</dd>
+          <dd class="col-6 text-end mb-1">
+            {{- rules_year_phrase(rules_basis, state_code) }}
+            {%- if rules_basis.substituted %}
+            <div class="text-muted">{{ rules_note(rules_basis) }}</div>
+            {%- endif -%}
+          </dd>
           <dt class="col-6 fw-normal">Filing status</dt>
           <dd class="col-6 text-end mb-1">{{ report.assumptions.filing.filing_status_name|replace('_', ' ')|title }}</dd>
           <dt class="col-6 fw-normal">Standard deduction</dt>
@@ -140,7 +163,7 @@
           {% endif %}
           <dt class="col-6 fw-normal">State</dt>
           <dd class="col-6 text-end mb-1">
-            {{ report.assumptions.filing.state_code }}
+            {{ state_code }}
             {%- if display.state_rate_pct is not none %} &middot; {{ display.state_rate_pct }}% flat
             {%- if report.liability.state.standard_deduction is not none %} after {{ money(report.liability.state.standard_deduction, cents=false) }}{% endif %}
             {%- else %} &middot; no state income tax priced{% endif %}
@@ -261,11 +284,11 @@
             </td>
           </tr>
           <tr>
-            <td>NC taxable base <small class="text-muted">(wages + other income, less pre-tax)</small></td>
+            <td>{{ state_code }} taxable base <small class="text-muted">(wages + other income, less pre-tax)</small></td>
             <td class="text-end font-mono">{{ money(report.liability.state.taxable_base) }}</td>
           </tr>
           <tr>
-            <td>NC tax
+            <td>{{ state_code }} tax
               {%- if display.state_rate_pct is not none %}
               <small class="text-muted">({{ display.state_rate_pct }}% after {{ money(report.liability.state.standard_deduction, cents=false) }} deduction
                 {%- if report.liability.state.child_deduction_total > 0 %} + {{ money(report.liability.state.child_deduction_total, cents=false) }} child deduction{% endif %})</small>
@@ -274,13 +297,13 @@
             <td class="text-end font-mono">{{ money(report.liability.state.liability) }}</td>
           </tr>
           <tr>
-            <td>NC withheld
+            <td>{{ state_code }} withheld
               <small class="text-muted">({{ money(report.withholding.measured.state) }} measured + {{ money(report.withholding.modeled.state) }} modeled)</small>
             </td>
             <td class="text-end font-mono">{{ money(report.withholding.total.state) }}</td>
           </tr>
           <tr class="tax-ledger-result">
-            <td>NC {{ "refund" if display.state_is_refund else "owed" }}</td>
+            <td>{{ state_code }} {{ "refund" if display.state_is_refund else "owed" }}</td>
             <td class="text-end font-mono fw-bold {{ 'tax-refund' if display.state_is_refund else 'tax-owed' }}">
               {{ money(display.state_amount) }}
             </td>

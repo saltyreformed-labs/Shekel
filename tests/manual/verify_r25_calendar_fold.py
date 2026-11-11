@@ -63,6 +63,7 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
 from app import create_app
+from app.enums import InterestAccrualConventionEnum
 from app.extensions import db
 from app.models.account import Account
 from app.models.loan_params import LoanParams
@@ -318,6 +319,7 @@ def pure_loan_engines():
                     is_arm=True,
                     arm_first_adjustment_months=first,
                     arm_adjustment_interval_months=interval,
+                    convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                 )
                 periods_digest.add([
                     (p.index, p.start_date, p.annual_rate, p.period_pi,
@@ -343,11 +345,13 @@ def pure_loan_engines():
                             amortization_engine.PeriodTerms(
                                 start_date=starting, annual_rate=Decimal("0.06"),
                                 monthly_pi=Decimal("386.66"),
+                                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                             ),
                             amortization_engine.PeriodTerms(
                                 start_date=add_months(starting, 7),
                                 annual_rate=Decimal("0.08"),
                                 monthly_pi=Decimal("402.10"),
+                                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                             ),
                         ],
                     ),
@@ -376,6 +380,7 @@ def pure_loan_engines():
                             start_date=origination,
                             annual_rate=Decimal("0.06"),
                             monthly_pi=Decimal("222.04"),
+                            convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                         )],
                     )
                 ))
@@ -386,6 +391,7 @@ def pure_loan_engines():
         for term in (12, 60, 360):
             refinance.add(_project_refinance(
                 Decimal("200000.00"), Decimal("0.05500"), term, nominal,
+                InterestAccrualConventionEnum.MONTHLY_1_12,
             ))
     print(refinance.line())
 
@@ -404,11 +410,13 @@ def pure_installment_price():
                     index=0, start_date=origination, annual_rate=Decimal("0.06"),
                     period_pi=Decimal("200.00"), start_month_index=0,
                     term_months_at_start=360,
+                    convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                 ),
                 rate_period_engine.RatePeriod(
                     index=1, start_date=add_months(origination, 25),
                     annual_rate=Decimal("0.07"), period_pi=Decimal("250.00"),
                     start_month_index=25, term_months_at_start=335,
+                    convention=InterestAccrualConventionEnum.MONTHLY_1_12,
                 ),
             ]
             for offset_days in (-10, 0, 9, 27, 33, 61, 760, 790):
@@ -496,7 +504,7 @@ def production_copy():
                               params, loan_loaders.load_rate_changes(params.account_id)),
                       ))}")
         print(f"LOAN {account.name} refinance="
-              f"{_project_refinance(Decimal('100000.00'), Decimal('0.05000'), 180, params.payment_day)}")
+              f"{_project_refinance(Decimal('100000.00'), Decimal('0.05000'), 180, params.payment_day, loan_resolver.accrual_convention(params))}")
 
     for label, derive in (("STATED", False), ("DERIVE", True)):
         db.session.begin_nested()

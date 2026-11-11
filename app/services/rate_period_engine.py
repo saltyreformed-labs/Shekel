@@ -8,11 +8,13 @@ plain values; every function returns plain data.
 ## Why this exists
 
 A conventional monthly-accrual mortgage (and an ARM inside any one of
-its fixed-rate periods) accrues interest as ``balance * annual_rate /
-12`` and is repaid by a level payment that is fixed for the whole
-period.  The level payment recasts ONLY at a rate adjustment, never
-month to month, and never because the borrower prepaid or because a
-displayed balance was corrected.  The earlier resolver modeled only
+its fixed-rate periods) accrues a twelfth of its annual rate each month,
+``balance * (annual_rate / 12)`` -- the ``MONTHLY_1_12`` convention, which
+every walk here charges through :func:`app.utils.money.installment_interest`
+-- and is repaid by a level payment that is fixed for the whole period.
+The level payment recasts ONLY at a rate adjustment, never month to
+month, and never because the borrower prepaid or because a displayed
+balance was corrected.  The earlier resolver modeled only
 the first ARM window and, past it, re-amortized the payment every
 month over a shrinking term -- the few-dollar "creep" the user
 reported.  This module replaces that with the correct model:
@@ -46,12 +48,14 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.enums import InterestAccrualConventionEnum
 from app.services.amortization_engine import (
     AmortizationRow,
     calculate_monthly_payment,
 )
+from app.services.installment_calendar import accrual_window
 from app.utils.dates import add_months, months_between
-from app.utils.money import accrue_monthly_interest, round_money
+from app.utils.money import installment_interest, round_money
 
 ZERO_MONEY = Decimal("0.00")
 
@@ -81,6 +85,15 @@ class RatePeriod:
         term_months_at_start: Contractual months remaining at the
             period start (``original term - start_month_index``); the
             denominator the level payment amortizes over.
+        convention: How the loan's interest accrues
+            (:class:`~app.enums.InterestAccrualConventionEnum`), the loan's own
+            from :attr:`LoanTerms.convention`, the same on every period.  It
+            rides the period because the period is what every walk already
+            holds when it charges interest: the replay through
+            :attr:`~app.services.loan_ledger.AccrualCharge.period`, the
+            projection through its
+            :class:`~app.services.amortization_engine.PeriodTerms` (plan step
+            recurrence:R16-d).
     """
 
     index: int
@@ -89,11 +102,22 @@ class RatePeriod:
     period_pi: Decimal
     start_month_index: int
     term_months_at_start: int
+    convention: InterestAccrualConventionEnum
 
 
 @dataclass(frozen=True)
-class LoanTerms:
+class LoanTerms:  # pylint: disable=too-many-instance-attributes
     """The immutable identity of a loan -- everything fixed at origination.
+
+    Pylint: ``too-many-instance-attributes`` (8/7) -- suppressed because this
+    is one cohesive value record, the facts the loan's note fixes at
+    origination, read as a unit by the period builder.  The eighth, the
+    accrual convention (plan step recurrence:R16-d), is one more fact of the
+    same note.  One split WOULD gain: the three ARM cadence fields as one
+    value, absent for a fixed loan, bring the record to six and delete the
+    guards :func:`_period_boundary_dates` keeps over their meaningless
+    combinations.  That changes the ARM path, so it is finding plan#3462,
+    owned by plan#2307, and not this step's.
 
     Bundled so the period builder takes one cohesive value object rather
     than a long parameter list, and so the same identity threads through
@@ -112,6 +136,13 @@ class LoanTerms:
             first rate adjustment (``None`` for a fixed-rate loan).
         arm_adjustment_interval_months: Months between subsequent
             adjustments (``None`` when only the first is modeled).
+        convention: How the note accrues interest
+            (:class:`~app.enums.InterestAccrualConventionEnum`), from
+            ``LoanParams.interest_accrual_convention_id`` through
+            :func:`app.services.loan_resolver.accrual_convention` -- the ONE
+            place it enters the loan's walks (finding **D52**).  No default:
+            a builder that forgets it is a ``TypeError``.  Every period
+            carries it (:attr:`RatePeriod.convention`).
     """
 
     origination_date: date
@@ -121,6 +152,7 @@ class LoanTerms:
     is_arm: bool
     arm_first_adjustment_months: int | None
     arm_adjustment_interval_months: int | None
+    convention: InterestAccrualConventionEnum
 
 
 def payment_number(origination_date: date, payment_date: date) -> int:
@@ -239,33 +271,48 @@ def _recorded_pi_at_date(
 
 def _amortize_forward(
     balance: Decimal,
-    annual_rate: Decimal,
-    level_payment: Decimal,
+    period: RatePeriod,
     months: int,
 ) -> Decimal:
-    """Walk ``months`` of level-payment amortization and return the balance.
+    """Walk ``months`` of *period*'s level-payment amortization and return the balance.
 
     Pure contractual walk used to find a period's start balance from
     the prior period's start balance (so an unrecorded recast P&I can
-    be derived).  Each month: ``interest = round_money(balance *
-    rate/12)``, ``principal = level_payment - interest``, ``balance =
-    round_money(balance - principal)``, floored at zero.  A zero rate
-    accrues no interest.
+    be derived).  Each month: the interest the period's convention
+    charges for that month (:func:`~app.utils.money.installment_interest`),
+    ``principal = period_pi - interest``, ``balance = round_money(balance
+    - principal)``, floored at zero.  A zero rate accrues no interest.
+
+    **Its months are the period's own, counted from its start** (plan step
+    recurrence:R16-d): month ``k`` is the window ending ``k`` months after
+    ``period.start_date``, through the one window helper
+    (:func:`~app.services.installment_calendar.accrual_window`) with that
+    start's day as the meant day.  The walk holds no payment day --
+    :class:`LoanTerms` carries none, and its step count is the whole months
+    between two boundaries -- so its windows are month-shaped rather than
+    installment-shaped.  Under ``MONTHLY_1_12``, which counts months, the two
+    charge the same; a convention that counts days is taught to the loan's
+    walks at plan#3355 (ruling plan#3345).
 
     Args:
         balance: Starting balance.
-        annual_rate: Annual rate (decimal fraction).
-        level_payment: The period's level P&I.
+        period: The :class:`RatePeriod` walked: its ``start_date``,
+            ``annual_rate``, level ``period_pi`` and ``convention``.
         months: Number of months to walk (``<= 0`` returns ``balance``).
 
     Returns:
         The balance after ``months`` payments, quantized to cents.
     """
-    for _ in range(max(0, months)):
+    for month in range(1, max(0, months) + 1):
         if balance <= 0:
             return ZERO_MONEY
-        interest = accrue_monthly_interest(balance, annual_rate)
-        principal = level_payment - interest
+        start, end = accrual_window(
+            add_months(period.start_date, month), period.start_date.day,
+        )
+        interest = installment_interest(
+            balance, period.annual_rate, start, end, period.convention,
+        )
+        principal = period.period_pi - interest
         if principal >= balance:
             return ZERO_MONEY
         balance = round_money(balance - principal)
@@ -392,6 +439,7 @@ def build_rate_periods(
             period_pi=period_pi,
             start_month_index=start_month_index,
             term_months_at_start=term_at_start,
+            convention=terms.convention,
         ))
         # Advance the contractual balance to the next period start so the
         # next period's derived recast amortizes the right remaining
@@ -401,7 +449,7 @@ def build_rate_periods(
                 start_date, boundaries[index + 1],
             )
             balance = _amortize_forward(
-                balance, annual_rate, period_pi, months_in_period,
+                balance, periods[-1], months_in_period,
             )
     return periods
 

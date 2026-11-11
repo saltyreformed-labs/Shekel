@@ -95,6 +95,7 @@ from ._payoff import (
 from ._periods import (
     ConfirmedLedgerView,
     LoanInputs,
+    accrual_convention,
     engine_terms,
     resolve_periods,
     select_latest_anchor,
@@ -109,6 +110,7 @@ __all__ = [
     "LoanInputs",
     "LoanState",
     "PayoffScenarios",
+    "accrual_convention",
     "compute_payoff_scenarios",
     "engine_terms",
     "resolve_loan",

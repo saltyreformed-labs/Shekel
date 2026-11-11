@@ -21,6 +21,7 @@ from decimal import Decimal
 
 from app.services.paycheck_calculator import calculate_paycheck, project_salary
 from app.services.paycheck_calculator._calendar_questions import _get_cumulative_wages
+from tests._tax_configs import hand_built_law
 from tests._test_helpers import payroll_basis
 
 from ._helpers import FakeDeduction, FakeFicaRules, FakeProfile, _period, _timing_id
@@ -188,11 +189,12 @@ class TestTheYearToDateCountsSocialSecurityWages:
             _period(start_date=date(2026, 1, 16), period_id=2),
             _period(start_date=date(2026, 1, 30), period_id=3),
         ]
-        configs = {
-            "bracket_set": simple_bracket_set,
-            "state_config": nc_state_config,
-            "fica_config": FakeFicaRules(ss_wage_base="5000"),
-        }
+        configs = hand_built_law(
+            2026,
+            bracket_set=simple_bracket_set,
+            state_config=nc_state_config,
+            fica_config=FakeFicaRules(ss_wage_base="5000"),
+        )
         breakdowns = project_salary(
             payroll_basis(_owner(_health(), pay_from=date(2026, 1, 2)), periods),
             periods, configs,

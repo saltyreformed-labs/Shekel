@@ -23,27 +23,41 @@ gradeable here -- it is the case the two compositions are supposed to disagree o
 (``test_loan_payoff_date_oracle.TestChargePerPeriodNotPerPayment``).
 
 **It still calls the production PRIMITIVES, and that is deliberate too.**  The
-oracle owns the COMPOSITION and nothing else: spelling
-:func:`~app.utils.money.accrue_monthly_interest` inline here would re-create the
+oracle owns the COMPOSITION and nothing else: spelling the interest of
+:func:`~app.utils.money.installment_interest` inline here would re-create the
 ``(b*r)/12`` against ``b*(r/12)`` association plan step X-au-g-2c-3c measured
 apart -- ``$565.37`` against ``$565.36`` over 500,000 randomised draws -- and the
 oracle would then be grading the producer on a formula neither of them uses.  So
 this is MORE independent than the pre-deletion arrangement (where the whole
-composition was a production call), not less.
+composition was a production call), not less.  What it does NOT take from
+production is the WINDOW: the composition charged one month by definition, so
+it names one (:data:`_ONE_MONTH`) rather than reading the window the producer
+derives (plan step recurrence:R16-d).
 """
 
 from datetime import date
 from decimal import Decimal
 
+from app.enums import InterestAccrualConventionEnum
+from app.services.installment_calendar import accrual_window
 from app.services.loan_ledger import AccrualCharge
 from app.services.rate_period_engine import RatePeriod
 from app.utils.money import (
     PaymentCashSplit,
-    accrue_monthly_interest,
     apply_payment_cash,
+    installment_interest,
 )
 
 _ZERO_MONEY = Decimal("0.00")
+
+#: The one month the retired composition charged per payment, as the window
+#: the one interest producer takes.  The composition was the ``MONTHLY_1_12``
+#: rule by construction (``balance * (rate / 12)`` a payment), and that
+#: convention counts the calendar months a window spans, so which month is
+#: named is immaterial: any one month charges the same.  Named here rather
+#: than read off a charge (``AccrualCharge.opens_on``) so the oracle prices
+#: no window the producer derived.
+_ONE_MONTH = (date(2000, 1, 1), date(2000, 2, 1))
 
 #: The synthetic term a hand-built :func:`rate_period` amortizes over.  Nothing
 #: the loan FOLD does reads it -- the fold takes the rate and the escrow -- so it
@@ -83,6 +97,7 @@ def rate_period(
         period_pi=period_pi,
         start_month_index=0,
         term_months_at_start=_SYNTHETIC_TERM_MONTHS,
+        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
     )
 
 
@@ -102,6 +117,11 @@ def accrual_charge(
         annual_rate: The rate the period accrues at.
         escrow: The escrow the period impounds.
 
+    Its window is the month before *on_date*, on *on_date*'s own day
+    (:func:`~app.services.installment_calendar.accrual_window`): a hand-stated
+    charge falls on the day it means, and the monthly convention charges that
+    one month.
+
     Returns:
         The :class:`~app.services.loan_ledger.AccrualCharge`.
     """
@@ -109,6 +129,7 @@ def accrual_charge(
         on_date=on_date,
         period=rate_period(annual_rate, start_date=on_date),
         escrow=escrow,
+        opens_on=accrual_window(on_date, on_date.day)[0],
     )
 
 
@@ -128,7 +149,8 @@ def charge_then_allocate(
 
     * **Loan already closed** (``balance <= 0``): no interest accrues and no
       escrow is due, so the entire cash is an overpayment routed to ``excess``.
-    * **Open loan**: ``interest = round_money(balance * (annual_rate / 12))``;
+    * **Open loan**: ``interest = round_money(balance * (annual_rate / 12))``,
+      one month under ``MONTHLY_1_12`` (:data:`_ONE_MONTH`);
       ``principal = cash - interest - monthly_escrow``; a principal that would
       overrun the balance caps to it, the remainder going to ``excess``.
 
@@ -146,6 +168,9 @@ def charge_then_allocate(
     return apply_payment_cash(
         cash,
         balance,
-        accrue_monthly_interest(balance, annual_rate),
+        installment_interest(
+            balance, annual_rate, *_ONE_MONTH,
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        ),
         monthly_escrow,
     )

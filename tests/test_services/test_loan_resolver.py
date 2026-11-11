@@ -24,6 +24,8 @@ from decimal import Decimal
 
 import pytest
 
+from app import ref_cache
+from app.enums import InterestAccrualConventionEnum
 from app.services import loan_resolver
 from app.services.amortization_engine import RateChangeRecord
 from app.services.loan_resolver import (
@@ -71,6 +73,13 @@ class FakeLoanParams:
     is_arm: bool = False
     arm_first_adjustment_months: int | None = None
     arm_adjustment_interval_months: int | None = None
+    # A real row's NOT NULL column (plan step recurrence:R16-d); every loan
+    # holds the list's one member, so the fake states it rather than each test.
+    interest_accrual_convention_id: int = field(
+        default_factory=lambda: ref_cache.interest_accrual_convention_id(
+            InterestAccrualConventionEnum.MONTHLY_1_12,
+        ),
+    )
 
 
 @dataclass

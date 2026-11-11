@@ -32,18 +32,23 @@ dump is never mistaken for a deploy's restore point.
    Aborts if `cosign` is missing; `--no-verify` is for emergencies only.
 3. **Migration pre-flight.** Lists `migrations/versions` in *both* images, reads the database's
    Alembic stamp, and refuses up front a target that cannot resolve it (an image older than the
-   database). It reports the revisions the target adds: a **migration-bearing** release. `--dry-run`
-   reports all of this without deploying.
+   database). It reports the revisions the target adds: a **migration-bearing** release. It also
+   asks the previous image for `scripts/owner_entrypoint.sh`, which the migrate service runs: an
+   image built before card plan#2166 has none, so it cannot run under these compose files, and a
+   failure is then not rolled back by a re-pin (2.3). `--dry-run` reports all of this without
+   deploying.
 4. **`pg_dump -Fc` of the whole database** into `~/shekel-backups/` (override with
    `SHEKEL_BACKUP_DIR`), written to a `.part` file and renamed only after `pg_restore -f /dev/null`
    decodes every data block of it (a table-of-contents read passes a truncated archive).
    **No dump, no deploy** -- a dump failure aborts *before* the pin is touched.
 5. Rewrites `SHEKEL_IMAGE_DIGEST` in `/opt/docker/shekel/.env` and `docker compose up -d app`.
-   Entrypoint step 3 runs the migrations, the reference seed, the three ledger hooks and the
-   audit-trigger check in ONE transaction: they commit together or not at all.
-6. Polls the container healthcheck for up to 4 minutes; ntfy ping either way.
-7. **On failure**, stops the new container, re-reads the stamp, and either re-pins the previous
-   digest or refuses (2.3).
+   Compose runs the one-shot migrate service first, from the same image, and starts the app only
+   once it exits 0. The deploy runs there: its step 3 runs the migrations, the reference seed, the
+   three ledger hooks and the audit-trigger check in ONE transaction, committed together or not at
+   all. A deploy that fails fails the `up`, with the app's new container created and not started.
+6. Polls the app container's healthcheck for up to 4 minutes; ntfy ping either way.
+7. **On failure**, stops the migrate container if it is still running the deploy, and the new app
+   container, re-reads the stamp, and either re-pins the previous digest or refuses (2.3).
 
 After a deploy, `deploy/verify_prod_deploy.sh <the deploy's start time>`, run from this checkout,
 checks production read-only: health, the login gate's redirects, and the log since the deploy. Its
@@ -63,74 +68,93 @@ sudo ln -sfn /home/josh/projects/Shekel/deploy/shekel-deploy.sh \
 
 A self-hosted install is the README's Quick Start: the image CI builds and signs on `main`, and the
 configuration files of the commit that image was built from. A release changes both, so an update
-takes both, by the README's Updating section. Migrations run on the new container's start. The
-README's steps check no signature; `deploy/README.md`'s `cosign verify` command does.
+takes both, by the README's Updating section. Migrations run in the migrate service, which
+`docker compose up` runs from the new image before it starts the app. The README's steps check no
+signature; `deploy/README.md`'s `cosign verify` command does.
 
 ### 2.3 Rolling Back
 
 **In production, `shekel-deploy`'s re-read stamp decides.**
 
-When the new image fails (compose rejects it, its container reports unhealthy, or it is not healthy
-within 4 minutes), `shekel-deploy` stops the new container, so its entrypoint can commit nothing
-more, then re-reads the database's Alembic stamp. That stamp, not the release, decides what happens:
+When the new image fails (compose rejects it, as it does when the deploy fails in the migrate
+service; its app container reports unhealthy; or it is not healthy within 4 minutes),
+`shekel-deploy` first stops the migrate container if it is still running the deploy, so step 3 can
+commit nothing more, and stops the new app container, so a failed release is not left serving. Then
+it re-reads the database's Alembic stamp. That stamp, not the release, decides what happens:
 
-- **The previous image can resolve the stamp.** The release migrated nothing, or entrypoint step 3
+- **The previous image can resolve the stamp.** The release migrated nothing, or the deploy's step 3
   failed and rolled back: since plan step `X-cv` the migrations, the reference seed, the ledger
   hooks and the audit-trigger check are ONE transaction, so a failure there leaves the stamp unmoved
-  even for a migration-bearing release. The script saves the failed container's log beside the dump
-  (its name with `.failed-container.log` for `.dump`) and re-pins the previous digest. After a
-  health failure it then waits for that image to be healthy; after a compose failure it does not
-  wait. Nothing is restored. When the previous image does not come up either, see below.
+  even for a migration-bearing release. The script saves the failed containers' logs beside the
+  dump, the migrate container's then the app's, in one file (the dump's name with
+  `.failed-container.log` for `.dump`), and re-pins the previous digest. After a health failure it
+  then waits for that image to be healthy; after a compose failure it does not wait. Nothing is
+  restored. When the previous image does not come up either, see below.
 - **The previous image cannot resolve the stamp.** Step 3 COMMITTED and something later failed (the
-  first-boot user seed, the static copy, or the app never became healthy). Re-pinning would give a
-  second dead container -- reproduced as `CommandError: Can't locate revision identified by ...`
-  (finding F-8) -- so the script **refuses**, leaves the pin at the new digest, saves the log, and
-  names the ways out:
+  deploy's step 4, the first user's seed; or the app's start, its static copy, or the app never
+  became healthy). Re-pinning would give a second failed deploy -- reproduced as
+  `CommandError: Can't locate revision identified by ...` (finding F-8) -- so the script
+  **refuses**, leaves the pin at the new digest, saves the logs, and names the ways out:
   1. **Start the new pin again**, offered when the new image resolves the stamp (it wrote it):
-     `cd /opt/docker/shekel && docker compose up -d app`. Nothing is restored and nothing is lost.
-     The right first move when the log shows a transient failure, such as a release that was only
-     slower than the health window.
+     `cd /opt/docker/shekel && docker compose up -d app`, which runs the deploy again first and then
+     starts the app. Nothing is restored and nothing is lost. The right first move when the log
+     shows a transient failure, such as a release that was only slower than the health window.
   2. **Restore the pre-deploy dump** and re-pin the previous digest (below). This discards
      everything written since the dump.
 - **The stamp could not be re-read** (the database container did not answer). The script claims
   nothing about a commit and leaves the pin. Once the database answers, roll back through
   `shekel-deploy <old-digest>`: its pre-flight reads the stamp and refuses up front, naming the
   restore, if the previous image cannot resolve it.
-- **The new container could not be stopped.** No stamp read is final, so the script refuses and
-  leaves the pin: `docker stop shekel-prod-app`, then `shekel-deploy <old-digest>`.
+- **The migrate container could not be stopped.** It may still be inside step 3, so no stamp read is
+  final: the script refuses and leaves the pin. `docker stop shekel-prod-migrate`, then
+  `shekel-deploy <old-digest>`. An app container that will not stop is a warning only (ruling
+  plan#3539): it runs no migration and cannot move the stamp, so the decision goes on, and the
+  output says it may still be serving the new image.
+- **The previous image cannot run under the compose files in place.** An image built before card
+  plan#2166 has no `scripts/owner_entrypoint.sh`, which the migrate service runs, so re-pinning it
+  would bring nothing up; the first release of that card is this case. The pre-flight asks, and
+  `--dry-run` says so. On a failure the script refuses and leaves the pin at the new digest, and the
+  way back it names is the compose files that image ran under as well as its digest, with what the
+  re-read stamp shows: whether that image resolves it or the dump must be restored first.
 
-**Read the saved log first** (the path is in the output and the ntfy alert). It names the step that
-failed, and whether a restart can clear it.
+**Read the saved log first** (the path is in the output and the ntfy alert). The migrate container's
+log comes first and names the deploy step that failed; the app's follows. Together they say whether
+a restart can clear it.
 
 **When the re-pinned previous image does not come up either.** After a health failure the script
-then ends `rollback container also unhealthy; manual intervention required` (it prints the same line
-when the re-pin's own `compose up` failed and usually nothing started, finding BAL-540;
-`docker compose ps` tells the two apart). The previous image knows the stamp's revision, so the
-migration level is not the cause; something both images meet is: schema drift the stamp does not
-record, the data, or the environment. Whether the dump can help turns on step 3. For a release since
-plan step `X-cv`: if the saved log has no `Database initialised: ONE transaction, committed.`, the
-failed release committed nothing past entrypoint steps 2 and 2b (idempotent schema and role
-provisioning, which every image re-runs on each boot), so the fault predates the deploy and the dump
-holds it too: restoring cannot help, and the fault is repaired in place. If step 3 did commit, what
-it wrote may be the fault, and restoring the dump (below) is a candidate. An image older than `X-cv`
-never prints that line and commits its seeds after step 3 (entrypoint steps 4 and 6), so for one the
-dump is a candidate either way. A previous container that crash-loops re-runs its entrypoint on
-every pass (an image older than plan step `X-cv` also commits its hooks and seeds each time). Docker
+then ends `rollback container also unhealthy; manual intervention required`. It prints the same line
+when the re-pin's own `compose up` failed and usually nothing started (finding BAL-540); after a
+compose failure it prints `WARN: revert compose up also failed; container state unknown.` instead.
+The re-pin's `up` runs the previous image's deploy in the migrate service first, so a fault both
+images meet in the deploy fails that `up` as well, with the app created and not started:
+`docker compose ps -a` shows `shekel-prod-migrate` exited with a nonzero code, and
+`docker logs shekel-prod-migrate` names the step. The previous image knows the stamp's revision, so
+the migration level is not the cause; something both images meet is: schema drift the stamp does not
+record, the data, or the environment. Whether the dump can help turns on step 3: if the saved log
+has no `Database initialised: ONE transaction, committed.`, the failed release committed nothing
+past the deploy's steps 1 and 2 (idempotent: the schemas and the web login's grants, which every
+deploy re-runs), so the fault predates the deploy and the dump holds it too: restoring cannot help,
+and the fault is repaired in place. If step 3 did commit, what it wrote may be the fault, and
+restoring the dump (below) is a candidate.
+
+An app whose deploy passed but whose own start fails crash-loops under `restart: unless-stopped`,
+each pass restarting gunicorn alone: since card plan#2166 the app's start runs no deploy. Docker
 waits between passes, from a tenth of a second up to about a minute, so `docker compose ps` may show
 it `Up` for seconds at a time with `(health: starting)` during a pass or `Restarting` during a wait.
 The tell is `docker inspect shekel-prod-app --format '{{.State.Status}} {{.RestartCount}}'`: a state
 of `restarting`, or a restart count that grows between two readings two minutes apart. Stop it
-before repairing and start it after:
+before repairing and start it after, with an `up` that runs the deploy again first:
 
 ```bash
 cd /opt/docker/shekel
-docker compose stop app      # it retries on its own under `restart: unless-stopped`
+docker compose stop app      # a crash-looping app retries on its own under `restart: unless-stopped`
 # ... repair what the saved log names ...
-docker compose up -d app
+docker compose up -d app     # the deploy, in the migrate service, then the app
 ```
 
 A missing audit trigger is the case the X-cv rehearsal measured: every image since C-13 counts them
-at start, so the release refuses and the re-pinned image refuses the same database. Since ruling
+at every deploy, since card plan#2166 in the migrate service, so the release's deploy refuses and
+the re-pinned image's deploy refuses the same database, and no app is left running. Since ruling
 `R-BAL129` the release's refusal names each audited table missing its trigger and, for a trigger
 dropped by hand, prints the statements that re-create them, each ending in `;`. Each has this form
 and runs as the database owner (the app role has DML only), between the stop and the start above:
@@ -148,16 +172,16 @@ docker exec shekel-prod-db psql -U shekel_user -d shekel -v ON_ERROR_STOP=1 \
 If the refusal names a table newly added to `AUDITED_TABLES`, its migration did not attach the
 trigger, and the migration is the fix. An image older than `R-BAL129` prints only a count, and its
 `flask db upgrade` advice does not re-create a dropped trigger. (Measured 2026-09-23 in the X-cv
-rehearsal's second pass, on a copy of production's data with one audit trigger dropped and the 6-3
-release image `876fbf5c5bf7` as the previous image: the release's saved log named
-`budget.transactions` and printed one statement; `docker compose ps` showed the crash-looping
-previous container as `Up 4 seconds (health: starting)` 51 seconds after the re-pin created it,
-after 5 restarts: its first pass ran 11 seconds and the next four about 8 seconds each, and the
-waits between them grew from 0.1 to 1.6 seconds, where an earlier rehearsal of the same image and
-fault ran 11 to 12 second passes with waits of at most a quarter of a second, so that container was
-up nearly all the time; the stop, that statement run through `psql` as printed, and the start above
-brought it up healthy in about 15 seconds, with the re-created trigger identical to the dropped one
-and no table changed.)
+rehearsal's second pass, before card plan#2166, when the app's own start ran the deploy, on a copy
+of production's data with one audit trigger dropped and the 6-3 release image `876fbf5c5bf7` as the
+previous image: the release's saved log named `budget.transactions` and printed one statement;
+`docker compose ps` showed the crash-looping previous container as `Up 4 seconds (health: starting)`
+51 seconds after the re-pin created it, after 5 restarts: its first pass ran 11 seconds and the next
+four about 8 seconds each, and the waits between them grew from 0.1 to 1.6 seconds, where an earlier
+rehearsal of the same image and fault ran 11 to 12 second passes with waits of at most a quarter of
+a second, so that container was up nearly all the time; the stop, that statement run through `psql`
+as printed, and the start above brought it up healthy in about 15 seconds, with the re-created
+trigger identical to the dropped one and no table changed.)
 
 **Restoring discards everything written since the dump was taken** -- minutes of real entries in a
 budgeting app. Capture the failed state first so that window stays recoverable.

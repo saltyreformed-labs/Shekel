@@ -43,6 +43,7 @@ from app.tax_law import (
     ladder,
 )
 from app.utils.db_errors import sqlstate_of
+from tests._repo_root import REPO_ROOT
 
 
 #: The ``app`` package's directory, read off the package's own import origin,
@@ -51,7 +52,7 @@ from app.utils.db_errors import sqlstate_of
 #: ``__file__``, this module's included: a test module moves (a split puts each
 #: part one directory deeper), and a path counted from where it sat then names
 #: another directory.  This module's two reads OUTSIDE ``app/`` (``migrations/``
-#: and ``scripts/``, below) still count up from it, and wait for its own split.
+#: and ``scripts/``, below) start from :data:`tests._repo_root.REPO_ROOT`.
 APP_PACKAGE_DIR = pathlib.Path(importlib.util.find_spec("app").origin).parent
 
 
@@ -2290,9 +2291,7 @@ def load_migration_module(filename):
     Returns:
         The loaded migration module object.
     """
-    versions_dir = (
-        pathlib.Path(__file__).resolve().parents[1] / "migrations" / "versions"
-    )
+    versions_dir = REPO_ROOT / "migrations" / "versions"
     path = versions_dir / filename
     spec = importlib.util.spec_from_file_location(path.stem, str(path))
     module = importlib.util.module_from_spec(spec)
@@ -2410,9 +2409,7 @@ def load_init_database_module():
         ``initialise_database`` (entrypoint step 3, ONE transaction since plan
         step ``balance:X-cv``) and the pieces it runs.
     """
-    script_path = (
-        pathlib.Path(__file__).resolve().parents[1] / "scripts" / "init_database.py"
-    )
+    script_path = REPO_ROOT / "scripts" / "init_database.py"
     saved = os.environ.get("DATABASE_URL_APP")
     spec = importlib.util.spec_from_file_location(
         script_path.stem, str(script_path),

@@ -1,4 +1,5 @@
 {% from "_form_macros.html" import form_card %}
+{% from "auth/_trusted_device.html" import device_summary %}
 
 {# The Security page's body (auth/security.html; ruling plan#3435): one
    form_card per concern (Change Password / Two-Factor Authentication /
@@ -77,8 +78,7 @@
   {% endcall %}
 
   {# Trusted devices (plan#2173, ruling plan#2406): the route hands each
-     live device as a row to display; the dates are stored UTC and shown as
-     display-timezone days by local_datetime. #}
+     live device as a row to display, and device_summary draws it. #}
   {% call form_card("Trusted Devices", "bi-laptop") %}
   <p class="text-muted small">
     Signing in on a trusted device takes your password but not a two-factor
@@ -93,18 +93,7 @@
     {% for device in trusted_devices %}
     <div class="list-group-item">
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-        <div>
-          <div class="fw-semibold">
-            {{ device.browser }}
-            {% if device.is_this_browser %}
-            <span class="flag-chip flag-chip--neutral ms-1">This browser</span>
-            {% endif %}
-          </div>
-          <div class="text-muted small">
-            Trusted {{ device.trusted_at | local_datetime }}; expires
-            {{ device.expires_at | local_datetime }}
-          </div>
-        </div>
+        <div>{{ device_summary(device) }}</div>
         <form method="POST"
               action="{{ url_for('auth.forget_trusted_device', device_id=device.id) }}"
               class="d-inline"

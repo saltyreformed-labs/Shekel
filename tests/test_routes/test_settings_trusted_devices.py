@@ -27,23 +27,12 @@ import sqlalchemy
 
 from app.extensions import db
 from app.models.known_device import KnownDevice
-from app.services import known_device_service
 from tests._csrf_tokens import without_csrf_tokens
 from tests._test_helpers import enable_mfa
+from tests._trusted_devices import (
+    CHROME_WINDOWS, FIREFOX_LINUX, SAFARI_IPHONE, is_trusted, move_trust_to, trust,
+)
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
-
-_FIREFOX_LINUX = (
-    "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
-)
-_SAFARI_IPHONE = (
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
-    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 "
-    "Safari/604.1"
-)
-_CHROME_WINDOWS = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-)
 
 #: The Security page, a page of its own since ruling plan#3435.
 _SECURITY_PAGE = "/security"
@@ -88,7 +77,7 @@ def _firefox_that_trusted_itself(app, secret):
     same one: strong session protection ends a session whose browser changes.
     """
     browser = app.test_client()
-    browser.environ_base["HTTP_USER_AGENT"] = _FIREFOX_LINUX
+    browser.environ_base["HTTP_USER_AGENT"] = FIREFOX_LINUX
     assert _asked_the_code(_password(browser))
     response = browser.post("/mfa/verify", data={
         "totp_code": _code(secret), "trust_device": "1",
@@ -100,42 +89,12 @@ def _firefox_that_trusted_itself(app, secret):
     return browser
 
 
-def _trust(user_id, user_agent):
-    """Trust a device for *user_id* through the service, committed; return its id."""
-    known_device_service.record_sign_in(
-        user_id, None, user_agent, now=datetime.now(timezone.utc), trust=True,
-    )
-    db.session.commit()
-    return db.session.execute(
-        sqlalchemy.select(sqlalchemy.func.max(KnownDevice.id))
-        .where(KnownDevice.user_id == user_id)
-    ).scalar_one()
-
-
-def _move_trust_to(device_id, instant):
-    """Set *device_id*'s ``trusted_at`` to *instant*, committed."""
-    db.session.execute(
-        sqlalchemy.update(KnownDevice)
-        .where(KnownDevice.id == device_id)
-        .values(trusted_at=instant)
-    )
-    db.session.commit()
-
-
 def _device_ids_of(user_id):
     """Return the ids of every device row *user_id* holds, live or dead."""
     return sorted(db.session.execute(
         sqlalchemy.select(KnownDevice.id)
         .where(KnownDevice.user_id == user_id)
     ).scalars())
-
-
-def _is_trusted(device_id):
-    """Return whether *device_id*'s row holds a trust, read fresh."""
-    return db.session.execute(
-        sqlalchemy.select(KnownDevice.trusted_at)
-        .where(KnownDevice.id == device_id)
-    ).scalar_one() is not None
 
 
 def _text(html):
@@ -174,12 +133,12 @@ class TestTheList:
         thirty days later at 03:00 UTC: again the evening before, Eastern.
         """
         user_id = seed_user["user"].id
-        older = _trust(user_id, _FIREFOX_LINUX)
+        older = trust(user_id, FIREFOX_LINUX)
         utc_day = datetime.now(timezone.utc).date() - timedelta(days=2)
-        _move_trust_to(older, datetime.combine(
+        move_trust_to(older, datetime.combine(
             utc_day, clock_time(3, 0), tzinfo=timezone.utc,
         ))
-        _trust(user_id, _SAFARI_IPHONE)
+        trust(user_id, SAFARI_IPHONE)
         # The display days: one before each UTC day, by the arithmetic above.
         trusted_day = utc_day - timedelta(days=1)
         expires_day = utc_day + timedelta(days=30) - timedelta(days=1)
@@ -203,7 +162,7 @@ class TestTheList:
         browser = _firefox_that_trusted_itself(
             app, enable_mfa(db.session, user_id),
         )
-        _trust(user_id, _SAFARI_IPHONE)
+        trust(user_id, SAFARI_IPHONE)
 
         page = browser.get(_SECURITY_PAGE).get_data(as_text=True)
 
@@ -219,13 +178,13 @@ class TestTheList:
     ):
         """An expired device and another user's are absent; the live one shows."""
         user_id = seed_user["user"].id
-        _trust(user_id, _FIREFOX_LINUX)
-        expired = _trust(user_id, _SAFARI_IPHONE)
-        _move_trust_to(
+        trust(user_id, FIREFOX_LINUX)
+        expired = trust(user_id, SAFARI_IPHONE)
+        move_trust_to(
             expired,
             datetime.now(timezone.utc) - timedelta(days=30, minutes=1),
         )
-        _trust(seed_second_user["user"].id, _CHROME_WINDOWS)
+        trust(seed_second_user["user"].id, CHROME_WINDOWS)
 
         page = auth_client.get(_SECURITY_PAGE).get_data(as_text=True)
 
@@ -326,8 +285,8 @@ class TestForgetting:
         (finding plan#3244; it refused two merge-queue runs on 2026-11-10).
         """
         user_id = seed_user["user"].id
-        mine = _trust(user_id, _FIREFOX_LINUX)
-        theirs = _trust(seed_second_user["user"].id, _CHROME_WINDOWS)
+        mine = trust(user_id, FIREFOX_LINUX)
+        theirs = trust(seed_second_user["user"].id, CHROME_WINDOWS)
         missing = max(mine, theirs) + 1
 
         theirs_response = auth_client.post(f"/trusted-devices/{theirs}/forget")
@@ -338,19 +297,19 @@ class TestForgetting:
         assert without_csrf_tokens(
             theirs_response.get_data(as_text=True),
         ) == without_csrf_tokens(missing_response.get_data(as_text=True))
-        assert _is_trusted(theirs)
-        assert _is_trusted(mine)
+        assert is_trusted(theirs)
+        assert is_trusted(mine)
         # The pair: the same URL, with the user's own device, routes and forgets.
         mine_response = auth_client.post(f"/trusted-devices/{mine}/forget")
         assert mine_response.status_code == 302
-        assert not _is_trusted(mine)
+        assert not is_trusted(mine)
 
     def test_the_forget_and_the_refusal_are_logged(
         self, auth_client, seed_user, seed_second_user, caplog,
     ):
         """``trusted_device_forgotten`` for a forget; the refusal's lookup event."""
-        mine = _trust(seed_user["user"].id, _FIREFOX_LINUX)
-        theirs = _trust(seed_second_user["user"].id, _CHROME_WINDOWS)
+        mine = trust(seed_user["user"].id, FIREFOX_LINUX)
+        theirs = trust(seed_second_user["user"].id, CHROME_WINDOWS)
 
         with caplog.at_level(logging.INFO):
             auth_client.post(f"/trusted-devices/{theirs}/forget")

@@ -21,16 +21,15 @@ as a trusting sign-in would make them.
 """
 
 import time
-from datetime import datetime, timezone
 
 import pyotp
 import sqlalchemy
 
 from app.extensions import db
-from app.models.known_device import KnownDevice
 from app.models.user import MfaConfig, User
-from app.services import auth_service, known_device_service, mfa_service
+from app.services import auth_service, mfa_service
 from tests._test_helpers import enable_mfa
+from tests._trusted_devices import SAFARI_IPHONE, is_trusted, trust
 from tests._two_factor_sign_in import (
     SEED_COMPANION_PASSWORD, sign_in_seed_companion_by_password,
 )
@@ -44,12 +43,6 @@ _CARDS = (
 
 #: Where a sign-in lands a companion: her own page.
 _HER_PAGE = "/companion/"
-
-_SAFARI_IPHONE = (
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
-    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 "
-    "Safari/604.1"
-)
 
 
 def _code(secret):
@@ -66,26 +59,6 @@ def _companion_with_two_factor(app, companion_id):
     browser = sign_in_seed_companion_by_password(app)
     secret = enable_mfa(db.session, companion_id)
     return browser, secret
-
-
-def _trust(user_id, user_agent):
-    """Trust a device for *user_id* through the service, committed; return its id."""
-    known_device_service.record_sign_in(
-        user_id, None, user_agent, now=datetime.now(timezone.utc), trust=True,
-    )
-    db.session.commit()
-    return db.session.execute(
-        sqlalchemy.select(sqlalchemy.func.max(KnownDevice.id))
-        .where(KnownDevice.user_id == user_id)
-    ).scalar_one()
-
-
-def _is_trusted(device_id):
-    """Return whether *device_id*'s row holds a trust, read fresh."""
-    return db.session.execute(
-        sqlalchemy.select(KnownDevice.trusted_at)
-        .where(KnownDevice.id == device_id)
-    ).scalar_one() is not None
 
 
 def _lands_on_the_security_page(browser, response):
@@ -251,7 +224,7 @@ class TestEveryReturnPathLandsOnAPageSheCanOpen:
         with app.app_context():
             companion_id = seed_companion["user"].id
             browser, _ = _companion_with_two_factor(app, companion_id)
-            device_id = _trust(companion_id, _SAFARI_IPHONE)
+            device_id = trust(companion_id, SAFARI_IPHONE)
             listed = browser.get("/security")
             assert f"/trusted-devices/{device_id}/forget".encode() in listed.data
 
@@ -259,7 +232,7 @@ class TestEveryReturnPathLandsOnAPageSheCanOpen:
 
             page = _lands_on_the_security_page(browser, response)
             assert b"Device forgotten." in page.data
-            assert not _is_trusted(device_id)
+            assert not is_trusted(device_id)
 
     def test_re_confirming_lands_her_on_her_own_page(self, app, seed_companion):
         """``/reauth`` lands a companion on her page, never the owner's dashboard."""

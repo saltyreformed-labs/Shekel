@@ -13,6 +13,7 @@ from flask_login import current_user
 from app import ref_cache, tax_law
 from app.enums import RoleEnum
 from app.exceptions import RequiredRecordMissing
+from app.routes._trusted_devices import forget_device_or_404, trusted_device_rows
 from app.utils.auth_helpers import fresh_login_required, require_owner
 from app.utils.digit_strings import parse_row_id
 
@@ -388,6 +389,7 @@ def _empty_section_context():
         "icon_choices": [],
         "active_companions": [],
         "inactive_companions": [],
+        "companion_devices": {},
         "edit_companion_id": None,
         "form_values": {},
         "pp_periods": [],
@@ -469,7 +471,8 @@ def _load_account_types_context():
 
 # --- Companion account management ----------------------------------------
 #
-# Companions are created, edited, deactivated, and reactivated here.
+# Companions are created, edited, deactivated, and reactivated here, and
+# their trusted devices forgotten.
 # Every route below applies two guards on top of the application's login
 # gate and the @require_owner decorator:
 #   1. Target user must have role_id == COMPANION.  This rejects any
@@ -508,7 +511,11 @@ def _load_companions_context(raw_edit_id):
 
     Returns:
         A dict with keys ``active_companions``, ``inactive_companions``,
-        ``edit_companion_id``, and ``form_values``.  The form_values
+        ``companion_devices``, ``edit_companion_id``, and ``form_values``.
+        ``companion_devices`` maps each active companion's id to her live
+        trusted devices, built by the one builder the Security page lists a
+        user's own with (ruling plan#3439); an inactive companion has none,
+        since deactivating her ended every trust.  The form_values
         dict pre-populates the edit form with the matching companion's
         email and display name when a valid ``edit`` id is supplied.
     """
@@ -544,6 +551,7 @@ def _load_companions_context(raw_edit_id):
     return {
         "active_companions": active,
         "inactive_companions": inactive,
+        "companion_devices": {c.id: trusted_device_rows(c.id) for c in active},
         "edit_companion_id": edit_id,
         "form_values": values,
     }
@@ -568,6 +576,7 @@ def _render_companions_section(errors=None, form_values=None,
         "errors": errors or {},
         "active_companions": ctx["active_companions"],
         "inactive_companions": ctx["inactive_companions"],
+        "companion_devices": ctx["companion_devices"],
         "edit_companion_id": edit_companion_id,
         "form_values": form_values or {},
     })
@@ -754,6 +763,40 @@ def companion_reactivate(companion_id):
 
     flash(
         f"Companion account '{companion.display_name}' reactivated.",
+        "success",
+    )
+    return redirect(url_for("settings.show", section="companions"))
+
+
+@settings_bp.route(
+    "/settings/companions/<int:companion_id>/devices/<int:device_id>/forget",
+    methods=["POST"],
+)
+@require_owner
+def companion_forget_device(companion_id, device_id):
+    """Forget one of a companion's trusted devices (ruling plan#3439).
+
+    The owner's Forget beside each device Settings > Companions lists for her:
+    the act a user's own Forget on their Security page runs
+    (:func:`~app.routes._trusted_devices.forget_device_or_404`), so only the
+    trust goes and her browser stays known, as when she forgets it herself.
+    Her next sign-in on it asks for her code again.
+
+    Another owner's companion, the owner's own id and any user who is not a
+    companion are refused by :func:`_load_companion_or_404` before a device is
+    looked up; a device of another user and an id no device holds are refused
+    by the act.  All are one 404, the security response rule.
+
+    No step-up re-auth, unlike the routes above that create, change or lock
+    out a companion's account, and for the reason the Security page's Forget
+    asks none: forgetting a device takes a privilege away and grants none.
+    """
+    companion = _load_companion_or_404(companion_id)
+    forget_device_or_404(companion.id, device_id)
+    flash(
+        f"Device forgotten. Signing in on it as "
+        f"{companion.display_name or companion.email} will ask for the "
+        f"two-factor code again.",
         "success",
     )
     return redirect(url_for("settings.show", section="companions"))

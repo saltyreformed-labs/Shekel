@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from flask import abort, flash, redirect, render_template, request, url_for
+from flask import flash, redirect, render_template, request, url_for
 from flask_login import current_user
 
 from marshmallow import ValidationError as MarshmallowValidationError
@@ -26,7 +26,8 @@ from app.models.known_device import TRUST_LIFETIME
 from app.models.user import MfaConfig
 from app.schemas.validation import ChangePasswordSchema, ReauthSchema
 from app.services import auth_service, known_device_service
-from app.exceptions import AuthError, NotFoundError, ValidationError
+from app.exceptions import AuthError, ValidationError
+from app.routes._trusted_devices import forget_device_or_404, trusted_device_rows
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     _first_validation_message,
@@ -36,8 +37,6 @@ from app.routes.auth._helpers import (
     _spend_a_try,
     _totp_accepted_or_key_failure,
 )
-from app.utils.auth_helpers import log_refused_lookup
-from app.utils.browser_label import browser_label
 from app.utils.device_cookie import device_token, set_device_cookie
 from app.utils.log_events import (
     AUTH,
@@ -45,7 +44,6 @@ from app.utils.log_events import (
     EVT_REAUTH_FAILED,
     EVT_REAUTH_SUCCESS,
     EVT_SESSIONS_INVALIDATED,
-    EVT_TRUSTED_DEVICE_FORGOTTEN,
     log_event,
 )
 from app.utils.security_events import (
@@ -61,39 +59,6 @@ from app.utils.session_helpers import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def trusted_device_rows(user_id: int) -> list[dict]:
-    """Return *user_id*'s live trusted devices as rows a template only displays.
-
-    The ONE builder of a trusted-device row (plan#2173, ruling plan#2406):
-    the browser's name read from its stored User-Agent, the two instants it
-    is dated by (stored UTC; the template's ``local_datetime`` filter shows
-    each as a display-timezone day), and whether it is the browser this page
-    is rendered on, judged against the list already read rather than by a
-    second lookup.
-
-    Args:
-        user_id: The ``auth.users.id`` whose devices to list.
-
-    Returns:
-        One dict per live device, most recently trusted first, with ``id``,
-        ``browser``, ``trusted_at``, ``expires_at`` and ``is_this_browser``.
-    """
-    devices = known_device_service.list_trusted_devices(user_id)
-    this_browser = known_device_service.device_named_by(
-        devices, device_token(user_id),
-    )
-    return [
-        {
-            "id": device.id,
-            "browser": browser_label(device.user_agent),
-            "trusted_at": device.trusted_at,
-            "expires_at": device.trust_expires_at,
-            "is_this_browser": device is this_browser,
-        }
-        for device in devices
-    ]
 
 
 @auth_bp.route("/security", methods=["GET"])
@@ -216,25 +181,15 @@ def forget_trusted_device(device_id):
     """Forget one of the signed-in user's trusted devices (ruling plan#2406).
 
     The next sign-in on that browser asks for the two-factor code again.  A
-    device of another user and an id no device holds are one 404, the
-    security response rule, and the refusal is logged the way every
-    owner-scoped lookup's is (:func:`~app.utils.auth_helpers.log_refused_lookup`):
-    the service looks the id up within the user's own devices, so it cannot
-    tell the two apart, and neither can the response.
+    device of another user and an id no device holds are one 404: the act,
+    its refusal and its record are the one the owner's Companions page runs
+    for a companion's device (:func:`~app.routes._trusted_devices.forget_device_or_404`).
 
     No step-up re-auth, as ``invalidate_sessions`` asks none: forgetting a
     device takes a privilege away and grants none.  No owner gate either:
     a device is its own user's, whatever their role.
     """
-    try:
-        known_device_service.forget_trust(current_user.id, device_id)
-    except NotFoundError:
-        log_refused_lookup("KnownDevice", device_id)
-        abort(404)
-    db.session.commit()
-    log_event(logger, logging.INFO, EVT_TRUSTED_DEVICE_FORGOTTEN, AUTH,
-              "Trusted device forgotten", user_id=current_user.id,
-              device_id=device_id)
+    forget_device_or_404(current_user.id, device_id)
     flash(
         "Device forgotten. Signing in on it will ask for your two-factor "
         "code again.",

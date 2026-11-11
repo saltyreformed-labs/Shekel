@@ -1,9 +1,11 @@
 {% from "_form_macros.html" import form_card %}
 
-{# Security section: one form_card per concern (Change Password /
-   Two-Factor Authentication / Trusted Devices / Sessions), replacing the
-   bare h5 + hr + fields anatomy (polish audit P-ST3; the missing Active
-   Sessions separator was P-ST6).  gap-3 spaces the stack. #}
+{# The Security page's body (auth/security.html; ruling plan#3435): one
+   form_card per concern (Change Password / Two-Factor Authentication /
+   Trusted Devices / Sessions), replacing the bare h5 + hr + fields anatomy
+   (polish audit P-ST3; the missing Active Sessions separator was P-ST6).
+   gap-3 spaces the stack.  Every user's, whatever their role: a companion
+   changes her own password here too (ruling plan#3437). #}
 <div class="d-flex flex-column gap-3">
 
   {% call form_card("Change Password", "bi-key") %}
@@ -71,7 +73,7 @@
   {% endcall %}
 
   {% call form_card("Two-Factor Authentication", "bi-shield-lock") %}
-  {% include "settings/_mfa_setup.html" %}
+  {% include "auth/_two_factor_card.html" %}
   {% endcall %}
 
   {# Trusted devices (plan#2173, ruling plan#2406): the route hands each

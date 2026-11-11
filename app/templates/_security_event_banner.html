@@ -21,10 +21,11 @@
     <div class="flex-grow-1">
       <strong>{{ copy.title }}</strong>
       <span class="ms-1">{{ copy.detail }}</span>
-      {# Settings link uses the same security section the user would
-         visit to react.  Rendered as a plain anchor (not a form button)
+      {# The link goes to the user's own Security page, where they would
+         react: an owner's or a companion's, since the banner shows to both
+         (ruling plan#3435).  Rendered as a plain anchor (not a form button)
          because clicking it does not change state. #}
-      <a class="alert-link ms-2" href="{{ url_for('settings.show', section='security') }}">
+      <a class="alert-link ms-2" href="{{ url_for('auth.security') }}">
         Review security settings
       </a>
     </div>

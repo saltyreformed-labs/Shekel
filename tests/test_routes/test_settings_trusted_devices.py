@@ -1,6 +1,8 @@
-"""Settings > Security lists the trusted devices, each one forgettable.
+"""The Security page lists the trusted devices, each one forgettable.
 
-Plan#2173, task plan#2411, ruling **plan#2406**.  The Security section shows a
+Plan#2173, task plan#2411, ruling **plan#2406**.  It was Settings > Security
+until ruling plan#3435 made Security a page of its own (``/security``), which
+is the page these tests read.  The Security page shows a
 "Trusted Devices" card: each live device of the signed-in user, named by its
 browser, with the day it was trusted and the day it expires in the display
 timezone, and the browser the page is rendered on marked.  Each row's form
@@ -43,7 +45,8 @@ _CHROME_WINDOWS = (
     "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 )
 
-_SECURITY_PAGE = "/settings?section=security"
+#: The Security page, a page of its own since ruling plan#3435.
+_SECURITY_PAGE = "/security"
 
 #: The day format the page shows, the ``local_datetime`` filter's default,
 #: spelled here as an oracle.
@@ -269,8 +272,10 @@ class TestTheTrustLength:
         the one rendered beside the card's opening sentence.
         """
         enable_mfa(db.session, seed_user["user"].id)
+        # Where the Security page reads the constant: its own route since
+        # ruling plan#3435 moved the page out of Settings.
         monkeypatch.setattr(
-            "app.routes.settings.TRUST_LIFETIME", timedelta(days=7),
+            "app.routes.auth.session_security.TRUST_LIFETIME", timedelta(days=7),
         )
 
         card = _text(_card(auth_client.get(_SECURITY_PAGE).get_data(as_text=True)))

@@ -680,7 +680,8 @@ class TestOneCountAcrossEveryDoor:
             user_id = seed_user["user"].id
             _set_lock_state(user_id, locked_for=timedelta(minutes=10))
 
-            response = stranger_client.get("/settings?section=security")
+            # The Security page, /security since ruling plan#3435.
+            response = stranger_client.get("/security")
 
             assert response.status_code == 200
             assert b"Two-Factor Authentication" in response.data

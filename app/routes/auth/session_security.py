@@ -1,7 +1,8 @@
 """
 Shekel Budget App -- Auth route package: session security.
 
-The authenticated-session security surface: password change,
+The authenticated-session security surface: the Security page itself
+(``/security``, every user's own, ruling plan#3435), password change,
 bulk session invalidation, forgetting one trusted device, step-up
 re-authentication (``/reauth``), and the security-event banner
 acknowledgement.  Each route registers
@@ -21,6 +22,7 @@ from flask_login import current_user
 from marshmallow import ValidationError as MarshmallowValidationError
 
 from app.extensions import db
+from app.models.known_device import TRUST_LIFETIME
 from app.models.user import MfaConfig
 from app.schemas.validation import ChangePasswordSchema, ReauthSchema
 from app.services import auth_service, known_device_service
@@ -30,10 +32,12 @@ from app.routes.auth._helpers import (
     _first_validation_message,
     _is_safe_redirect,
     _known_device,
+    _landing_page,
     _spend_a_try,
     _totp_accepted_or_key_failure,
 )
 from app.utils.auth_helpers import log_refused_lookup
+from app.utils.browser_label import browser_label
 from app.utils.device_cookie import device_token, set_device_cookie
 from app.utils.log_events import (
     AUTH,
@@ -59,6 +63,67 @@ from app.utils.session_helpers import (
 logger = logging.getLogger(__name__)
 
 
+def trusted_device_rows(user_id: int) -> list[dict]:
+    """Return *user_id*'s live trusted devices as rows a template only displays.
+
+    The ONE builder of a trusted-device row (plan#2173, ruling plan#2406):
+    the browser's name read from its stored User-Agent, the two instants it
+    is dated by (stored UTC; the template's ``local_datetime`` filter shows
+    each as a display-timezone day), and whether it is the browser this page
+    is rendered on, judged against the list already read rather than by a
+    second lookup.
+
+    Args:
+        user_id: The ``auth.users.id`` whose devices to list.
+
+    Returns:
+        One dict per live device, most recently trusted first, with ``id``,
+        ``browser``, ``trusted_at``, ``expires_at`` and ``is_this_browser``.
+    """
+    devices = known_device_service.list_trusted_devices(user_id)
+    this_browser = known_device_service.device_named_by(
+        devices, device_token(user_id),
+    )
+    return [
+        {
+            "id": device.id,
+            "browser": browser_label(device.user_agent),
+            "trusted_at": device.trusted_at,
+            "expires_at": device.trust_expires_at,
+            "is_this_browser": device is this_browser,
+        }
+        for device in devices
+    ]
+
+
+@auth_bp.route("/security", methods=["GET"])
+def security():
+    """Display the signed-in user's Security page (ruling plan#3435).
+
+    Each user's own sign-in: password, two-factor, trusted devices and
+    sessions.  No owner gate: every route the page posts to acts on the
+    signed-in user alone, and a companion manages her own here, her password
+    included (ruling plan#3437).  It lived in Settings, which is the
+    household's and the owner's alone, until that ruling.
+
+    Returns:
+        The rendered page.
+    """
+    mfa_config = (
+        db.session.query(MfaConfig)
+        .filter_by(user_id=current_user.id)
+        .first()
+    )
+    return render_template(
+        "auth/security.html",
+        mfa_enabled=mfa_config.is_enabled if mfa_config else False,
+        # How long a trusted device stays trusted, which the page states in
+        # its sentences: the one value, never a second spelling of it.
+        trust_days=TRUST_LIFETIME.days,
+        trusted_devices=trusted_device_rows(current_user.id),
+    )
+
+
 @auth_bp.route("/change-password", methods=["POST"])
 def change_password():
     """Process a password change request from the Security settings section."""
@@ -71,7 +136,7 @@ def change_password():
         change_data = ChangePasswordSchema().load(request.form)
     except MarshmallowValidationError as exc:
         flash(_first_validation_message(exc), "danger")
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     current_password = change_data["current_password"]
     new_password = change_data["new_password"]
@@ -120,7 +185,7 @@ def change_password():
     except ValidationError as e:
         flash(str(e), "danger")
 
-    return redirect(url_for("settings.show", section="security"))
+    return redirect(url_for("auth.security"))
 
 
 @auth_bp.route("/invalidate-sessions", methods=["POST"])
@@ -148,7 +213,7 @@ def invalidate_sessions():
         "forgotten.",
         "success",
     )
-    return redirect(url_for("settings.show", section="security"))
+    return redirect(url_for("auth.security"))
 
 
 @auth_bp.route("/trusted-devices/<int:device_id>/forget", methods=["POST"])
@@ -180,7 +245,27 @@ def forget_trusted_device(device_id):
         "code again.",
         "success",
     )
-    return redirect(url_for("settings.show", section="security"))
+    return redirect(url_for("auth.security"))
+
+
+def _render_reauth_form(safe_next: str | None):
+    """Render the re-confirm form, from its five render sites.
+
+    Its Cancel link goes where a sign-in lands this user (``_landing_page``):
+    the owner's dashboard, or a companion's own page, who reaches this form
+    from "Regenerate Backup Codes" on her Security page and whom the
+    dashboard answers 404 (plan#2407).
+
+    Args:
+        safe_next: The validated ``next`` the form posts back, or ``None``.
+
+    Returns:
+        The rendered ``/reauth`` page.
+    """
+    return render_template(
+        "auth/reauth.html", next=safe_next,
+        home=_landing_page(current_user, None),
+    )
 
 
 @auth_bp.route("/reauth", methods=["GET", "POST"])
@@ -250,15 +335,19 @@ def reauth():
     on every read (storage time and post-success redirect) so an
     attacker cannot stage an open-redirect via the step-up flow.
     ``fresh_login_required`` sends ``request.url``, which is absolute, so
-    ``_is_safe_redirect`` refuses it and the user lands on /dashboard to
-    re-issue their action, as does direct navigation to /reauth.  A relative
-    ``next`` is honoured.
+    ``_is_safe_redirect`` refuses it and the user lands where a finished
+    sign-in lands them, to re-issue their action, as does direct navigation
+    to /reauth: the one landing rule (``_landing_page``), so an owner lands
+    on the dashboard and a companion on her own page, never on the owner's
+    dashboard, which answers her 404 (plan#2407).  An owner's relative
+    ``next`` is honoured; a companion always lands on her own page, as at
+    sign-in.
     """
     next_url = request.args.get("next")
     safe_next = next_url if _is_safe_redirect(next_url) else None
 
     if request.method == "GET":
-        return render_template("auth/reauth.html", next=safe_next)
+        return _render_reauth_form(safe_next)
 
     # Schema validation rejects oversized/missing fields before bcrypt
     # is invoked.  Failures are reported as the same "Invalid password."
@@ -273,7 +362,7 @@ def reauth():
             user_id=current_user.id, ip=request.remote_addr,
         )
         flash("Invalid password.", "danger")
-        return render_template("auth/reauth.html", next=safe_next)
+        return _render_reauth_form(safe_next)
 
     device = _known_device(current_user)
     # A password is about to be checked: spend one of this browser's tries,
@@ -296,7 +385,7 @@ def reauth():
             user_id=current_user.id, ip=request.remote_addr,
         )
         flash(str(exc), "danger")
-        return render_template("auth/reauth.html", next=safe_next)
+        return _render_reauth_form(safe_next)
 
     mfa_config = (
         db.session.query(MfaConfig)
@@ -309,7 +398,7 @@ def reauth():
             mfa_config, totp_code, current_user.id,
         )
         if key_failure:
-            return render_template("auth/reauth.html", next=safe_next)
+            return _render_reauth_form(safe_next)
         if not accepted:
             auth_service.record_failed_attempt(current_user, device=device)
             log_event(
@@ -318,7 +407,7 @@ def reauth():
                 user_id=current_user.id, ip=request.remote_addr,
             )
             flash("Invalid authentication code.", "danger")
-            return render_template("auth/reauth.html", next=safe_next)
+            return _render_reauth_form(safe_next)
 
     # Every check has passed.  ``device`` is asked only whether it was None:
     # with two-factor, the code's commit has expired it, and a copy of this
@@ -336,7 +425,7 @@ def reauth():
         logger, logging.INFO, EVT_REAUTH_SUCCESS, AUTH,
         "Step-up re-auth succeeded", user_id=current_user.id,
     )
-    response = redirect(safe_next or url_for("dashboard.page"))
+    response = redirect(_landing_page(current_user, safe_next))
     if token is not None:
         set_device_cookie(response, current_user.id, token)
     return response
@@ -360,9 +449,9 @@ def dismiss_security_event():
     the banner's dismiss button targets the same URL with the same CSRF
     token; an HTMX request gets a 204 No Content swap directive that
     removes the banner element from the DOM, while a non-HTMX request
-    redirects back to the referring page (or the dashboard if no
-    referer is present) so users without JavaScript still see a sane
-    response.
+    redirects back to the referring page (or, with no usable referer,
+    where a sign-in lands the user) so users without JavaScript still
+    see a sane response.
 
     Acknowledgement is intentionally idempotent.  A user who clicks
     dismiss twice (double-click, retry on a flaky network) writes a
@@ -400,14 +489,18 @@ def dismiss_security_event():
     #   2. Run the candidate path through ``_is_safe_redirect`` so a
     #      ``\\evil.com`` or whitespace-prefixed path is rejected.
     #
-    # Either failure mode falls back to the dashboard.
+    # Either failure mode, and a request with no Referer, falls back to where
+    # a sign-in lands this user (``_landing_page``): the owner's dashboard,
+    # or a companion's own page, since the banner shows to her too and the
+    # dashboard answers her 404 (plan#2407).
+    home = _landing_page(current_user, None)
     referer = request.headers.get("Referer", "")
     parsed = urlparse(referer)
     if parsed.scheme and parsed.scheme.lower() not in ("http", "https"):
-        return redirect(url_for("dashboard.page"))
-    next_target = parsed.path or url_for("dashboard.page")
+        return redirect(home)
+    next_target = parsed.path or home
     if parsed.query:
         next_target = f"{next_target}?{parsed.query}"
     if not _is_safe_redirect(next_target):
-        next_target = url_for("dashboard.page")
+        next_target = home
     return redirect(next_target)

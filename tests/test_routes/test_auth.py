@@ -635,9 +635,8 @@ class TestSessionManagement:
             auth_client.post("/invalidate-sessions")
 
             # The current session should still work -- not redirected to login.
-            response = auth_client.get(
-                "/settings?section=security", follow_redirects=False
-            )
+            # The Security page is /security since ruling plan#3435.
+            response = auth_client.get("/security", follow_redirects=False)
             assert response.status_code == 200
 
     def test_stale_session_rejected(self, app, db, seed_user):
@@ -1191,7 +1190,8 @@ class TestMfaSetup:
         unsets ``TOTP_ENCRYPTION_KEY`` between request boundaries.  At
         confirm time the route's ``decrypt_secret`` call raises
         RuntimeError.  The route must (a) clear the unrecoverable
-        pending state, (b) redirect to ``/settings?section=security``
+        pending state, (b) redirect to the Security page (``/security``
+        since ruling plan#3435)
         rather than looping the user through /mfa/setup (which would
         also fail), and (c) NOT return a 500.
         """
@@ -2895,17 +2895,18 @@ class TestPasswordFormChrome:
     def test_security_panel_has_strength_meter_and_toggle(
         self, app, auth_client,
     ):
-        """The /settings security section exposes meter and toggle wiring.
+        """The Security page exposes meter and toggle wiring.
 
-        Mirror of the /register check for the change-password form.
+        Mirror of the /register check for the change-password form.  The page
+        is /security since ruling plan#3435 moved it out of Settings.
         """
         with app.app_context():
-            response = auth_client.get("/settings?section=security")
+            response = auth_client.get("/security")
             assert response.status_code == 200
             assert b"data-password-input" in response.data
             assert b'data-password-meter-for="new_password"' in response.data
             assert b"data-action=\"password-toggle\"" in response.data
-            # Scripts loaded only when the security section is active.
+            # Scripts loaded on the Security page, not on every page.
             assert b"vendor/zxcvbn/zxcvbn.js" in response.data
             assert b"js/password_strength.js" in response.data
             assert b"js/password_toggle.js" in response.data

@@ -25,30 +25,29 @@ from app.schemas.validation import (
     rhythm_to_wire,
 )
 from app.models.category import Category
-from app.models.known_device import TRUST_LIFETIME
 from app.models.ref import AccountType, AccountTypeCategory
-from app.models.user import MfaConfig, User, UserSettings
+from app.models.user import User, UserSettings
 from app.services import (
     account_resolver,
     account_service,
-    known_device_service,
     pay_period_gates,
     pay_period_locks,
     pay_schedule_service,
 )
 from app.services.auth_service import hash_password
 from app.services.pay_calendar import calendar_at_schedule
-from app.utils.browser_label import browser_label
 from app.utils.dates import display_today
-from app.utils.device_cookie import device_token
 
 logger = logging.getLogger(__name__)
 
 settings_bp = Blueprint("settings", __name__)
 
+# No "security": the Security page is every user's own and lives outside
+# Settings (``auth.security``, ruling plan#3435); ``show`` redirects the old
+# section link there.
 _VALID_SECTIONS = [
     "general", "categories", "pay-periods", "tax", "account-types",
-    "companions", "security",
+    "companions",
 ]
 
 
@@ -125,6 +124,11 @@ def show():
     # retirement page.
     if section == "retirement":
         return redirect(url_for("retirement.dashboard"))
+    # The Security section became a page of its own for every user, out of
+    # Settings (ruling plan#3435); old bookmarks and links land there, as the
+    # retired Retirement section's land on its page above.
+    if section == "security":
+        return redirect(url_for("auth.security"))
     if section not in _VALID_SECTIONS:
         section = "general"
     return render_settings_dashboard(section)
@@ -148,7 +152,6 @@ def _section_context(section):
         "tax": _load_tax_context,
         "account-types": _load_account_types_context,
         "companions": lambda: _load_companions_context(request.args.get("edit")),
-        "security": _load_security_context,
         "pay-periods": lambda: _load_pay_periods_context(current_user.id),
     }
     loader = loaders.get(section)
@@ -383,11 +386,6 @@ def _empty_section_context():
         "archived_categories": [],
         "group_names": [],
         "icon_choices": [],
-        "mfa_enabled": False,
-        # Not a default but the one value: how long a trusted device stays
-        # trusted, which the Security section states in its sentences.
-        "trust_days": TRUST_LIFETIME.days,
-        "trusted_devices": [],
         "active_companions": [],
         "inactive_companions": [],
         "edit_companion_id": None,
@@ -466,45 +464,6 @@ def _load_account_types_context():
             .all()
         ),
         "icon_choices": _ACCOUNT_TYPE_ICON_CHOICES,
-    }
-
-
-def _load_security_context():
-    """Load the security section: MFA's state and the live trusted devices.
-
-    Each trusted device (plan#2173, ruling plan#2406) is a row the template
-    only displays: the browser's name read from its stored User-Agent, the
-    two instants it is dated by (stored UTC; the template's
-    ``local_datetime`` filter shows each as a display-timezone day), and
-    whether it is the browser this page is rendered on, judged against the
-    list already read rather than by a second lookup.
-
-    Returns:
-        ``mfa_enabled``, and ``trusted_devices``: one dict per live device,
-        most recently trusted first, with ``id``, ``browser``, ``trusted_at``,
-        ``expires_at`` and ``is_this_browser``.
-    """
-    mfa_config = (
-        db.session.query(MfaConfig)
-        .filter_by(user_id=current_user.id)
-        .first()
-    )
-    devices = known_device_service.list_trusted_devices(current_user.id)
-    this_browser = known_device_service.device_named_by(
-        devices, device_token(current_user.id),
-    )
-    return {
-        "mfa_enabled": mfa_config.is_enabled if mfa_config else False,
-        "trusted_devices": [
-            {
-                "id": device.id,
-                "browser": browser_label(device.user_agent),
-                "trusted_at": device.trusted_at,
-                "expires_at": device.trust_expires_at,
-                "is_this_browser": device is this_browser,
-            }
-            for device in devices
-        ],
     }
 
 

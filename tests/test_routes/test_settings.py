@@ -444,9 +444,17 @@ class TestSettingsDashboard:
             assert b"TestItem" in resp.data
 
     def test_settings_dashboard_security_section(self, app, auth_client, seed_user):
-        """GET /settings?section=security renders the Security section."""
+        """GET /settings?section=security lands on the Security page.
+
+        Security is a page of its own for every user, out of Settings (ruling
+        plan#3435), and the old section link redirects there: it rendered the
+        section in place until that ruling.
+        """
         with app.app_context():
             resp = auth_client.get("/settings?section=security")
+            assert resp.status_code == 302
+            assert resp.headers["Location"] == "/security"
+            resp = auth_client.get(resp.headers["Location"])
             assert resp.status_code == 200
             assert b"Change Password" in resp.data
 

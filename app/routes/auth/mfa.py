@@ -384,7 +384,7 @@ def mfa_setup():
     )
     if mfa_config and mfa_config.is_enabled:
         flash("Two-factor authentication is already enabled.", "info")
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     secret = mfa_service.generate_totp_secret()
     # Encrypt before any DB mutation so a missing TOTP_ENCRYPTION_KEY
@@ -399,7 +399,7 @@ def mfa_setup():
             "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
             "danger",
         )
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     # The row is CONSTRUCTED inside the block, not before it: opening the
     # command rolls the query's snapshot back, and a pending instance staged
@@ -493,7 +493,7 @@ def mfa_confirm():
             "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
             "danger",
         )
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
     except InvalidToken:
         # The pending ciphertext is unreadable under the current Fernet
         # key list -- typically because the key it was written under has
@@ -549,7 +549,7 @@ def mfa_confirm():
             "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
             "danger",
         )
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     # Single ``now`` flows into both ``confirmed_at`` and the
     # security-event timestamp so an analyst correlating the audit
@@ -596,7 +596,7 @@ def regenerate_backup_codes():
     )
     if not mfa_config or not mfa_config.is_enabled:
         flash("Two-factor authentication is not enabled.", "danger")
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     codes = mfa_service.generate_backup_codes()
     mfa_config.backup_codes = mfa_service.hash_backup_codes(codes)
@@ -629,7 +629,7 @@ def mfa_disable():
     )
     if not mfa_config or not mfa_config.is_enabled:
         flash("Two-factor authentication is not enabled.", "info")
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     return render_template("auth/mfa_disable.html")
 
@@ -693,7 +693,7 @@ def mfa_disable_confirm():
     )
     if not mfa_config or not mfa_config.is_enabled:
         flash("Two-factor authentication is not enabled.", "danger")
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     # Same verifier as /mfa/verify underneath: emits
     # ``totp_replay_rejected`` on REPLAY and commits
@@ -705,7 +705,7 @@ def mfa_disable_confirm():
         mfa_config, totp_code, current_user.id,
     )
     if key_failure:
-        return redirect(url_for("settings.show", section="security"))
+        return redirect(url_for("auth.security"))
 
     if not accepted:
         auth_service.record_failed_attempt(current_user, device=device)
@@ -747,4 +747,4 @@ def mfa_disable_confirm():
     log_event(logger, logging.INFO, EVT_MFA_DISABLED, AUTH,
               "MFA disabled", user_id=current_user.id)
     flash("Two-factor authentication has been disabled.", "success")
-    return redirect(url_for("settings.show", section="security"))
+    return redirect(url_for("auth.security"))

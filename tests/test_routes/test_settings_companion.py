@@ -993,9 +993,14 @@ class TestSettingsRegression:
         assert b"General Settings" in resp.data
 
     def test_security_section_still_loads(self, auth_client):
-        """?section=security continues to render."""
-        resp = auth_client.get("/settings?section=security")
+        """?section=security still reaches the Security page.
+
+        Through a redirect since ruling plan#3435 moved Security out of
+        Settings to a page of its own.
+        """
+        resp = auth_client.get("/settings?section=security", follow_redirects=True)
         assert resp.status_code == 200
+        assert resp.request.path == "/security"
         assert b"Change Password" in resp.data
 
     def test_settings_update_still_works(self, auth_client, db, seed_user):

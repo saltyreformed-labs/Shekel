@@ -969,13 +969,13 @@ class TestAPurchaseIsMatchableToo:
 class TestATransferIsMatchedThroughItsService:
     """The kind the bank shows most, and the one that must not be touched directly.
 
-    **13 of 22 non-swipe one-to-one matches on the developer's own statement are
-    transfer shadows** -- the mortgage transfer, the Van Loan payment, the money
-    market moves -- and 9 of those carry a day the bank corrects.  So this is the
-    ordinary case rather than an exotic one, and it is the case that must go
-    through ``transfer_service``: ``CLAUDE.md``'s transfer invariant 4 admits no
-    direct mutation of a shadow, and ``transaction_service.settle_transaction``
-    REFUSES one outright.
+    **13 of 22 non-swipe one-to-one matches on the developer's own 2026-08-16
+    statement export were transfer shadows** -- the mortgage transfer, the Van
+    Loan payment, the money market moves -- and 9 of those carried a day the
+    bank corrects.  So this is the ordinary case rather than an exotic one, and
+    it must go through ``transfer_service``, as every write of a transfer does
+    (``CLAUDE.md``); ``transaction_service.settle_transaction`` REFUSED a shadow
+    until plan step balance:X-bi-6-5 (the shadows went at balance:X-bi-6-4d-2).
     """
 
     @staticmethod
@@ -1020,7 +1020,7 @@ class TestATransferIsMatchedThroughItsService:
         # **Its BOOKS open before the bootstrap period** (plan step X-f3c-2b,
         # ruling **R-HG**).  ``observed_on`` above puts the origination
         # ASSERTION on the period's first day, which is right -- and it puts
-        # the books there too, while the shadows this class matches settle on
+        # the books there too, while the transfers this class matches settle on
         # that same day.  An opening equity is its own day's CLOSING balance,
         # so those settles are inside it.
         open_books_before_the_first_assertion(db.session, destination)

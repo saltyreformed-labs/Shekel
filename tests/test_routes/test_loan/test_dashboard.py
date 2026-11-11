@@ -585,8 +585,9 @@ class TestLoanDashboardWithPayments:
     """Integration tests for payment-aware loan dashboard.
 
     Verifies that the dashboard and payoff calculator correctly load
-    payment history from shadow transactions and pass it to the
-    amortization engine.
+    payment history from the transfers into the loan, each read as its leg
+    on the loan account (the settled ones were shadow transactions until plan
+    step balance:X-bi-6-4b), and pass it to the amortization engine.
     """
 
     def test_dashboard_no_payments_backward_compat(
@@ -609,8 +610,9 @@ class TestLoanDashboardWithPayments:
     ):
         """Dashboard with confirmed transfer payments renders successfully.
 
-        A Paid transfer to the loan account creates a confirmed shadow
-        income transaction.  The dashboard should load it and pass it
+        A Paid transfer to the loan account is a confirmed payment, its leg
+        on the loan account (a confirmed shadow income transaction until plan
+        step balance:X-bi-6-4d-2).  The dashboard should load it and pass it
         to the engine without error.
         """
         acct = _create_mortgage(seed_user, db.session)
@@ -630,8 +632,8 @@ class TestLoanDashboardWithPayments:
     ):
         """Dashboard with projected (future) transfer payments renders.
 
-        Projected shadow transactions represent committed future payments
-        from recurring transfers.
+        Projected transfers to the loan account represent committed future
+        payments.
         """
         acct = _create_mortgage(seed_user, db.session)
         _create_transfer_to_loan(
@@ -670,8 +672,8 @@ class TestLoanDashboardWithPayments:
     ):
         """Payoff calculator extra payment mode works with payment history.
 
-        The calculator should not crash when shadow transactions exist
-        for the loan account.
+        The calculator should not crash when a settled payment into the
+        loan account exists.
         """
         acct = _create_mortgage(seed_user, db.session)
         _create_transfer_to_loan(

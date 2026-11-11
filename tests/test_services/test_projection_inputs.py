@@ -1104,12 +1104,12 @@ class TestAContributionIsValuedAndScreenedAtTheBoundary:
     periodic contribution, the YTD display, the engine seed, and the per-period
     timeline -- has to read the realized one, or the cap/limit accounting
     charges a different dollar than the growth engine actually applies.  The
-    realized figure is each side's payment RECORD, hanging off the transfer,
-    since plan step ``balance:X-bi-6-4d-2``, and a transfer is ONE row since
-    plan step ``balance:X-bi-6-4d-2`` (ruling R-BAL258): it had two shadow
-    rows, which carried the realized figure until the first step and nothing
-    after it.  :meth:`_contribution` settles through the transfer's door and
-    writes no shadow (ruling R-BAL167 class 4).
+    realized figure is the TRANSFER's own since plan step
+    ``balance:X-bi-6-4d-2``'s 4d-4 half (rulings R-BAL365, R-BAL366), where it
+    was each side's payment RECORD, and a transfer is ONE row since that step
+    (ruling R-BAL258): its two shadow rows carried the figure before it.
+    :meth:`_contribution` settles through the transfer's door and writes no
+    shadow (ruling R-BAL167 class 4).
 
     They live at this tier now because it is the only tier that can still fail:
     the projection module consumes a record carrying one ``amount`` field, so
@@ -1245,7 +1245,7 @@ class TestAContributionIsValuedAndScreenedAtTheBoundary:
     def test_periodic_contribution_uses_the_realized_actual(
         self, app, db, seed_user, seed_periods,
     ):
-        """One settled $500-estimated / $400-actual shadow -> average $400.
+        """One settled $500-estimated / $400-actual transfer -> average $400.
 
         The averaged periodic contribution over one period is the realized
         $400, NOT the estimated $500.
@@ -1276,8 +1276,8 @@ class TestAContributionIsValuedAndScreenedAtTheBoundary:
     ):
         """estimated $400 / actual $500 -> $500, the direction the cap must catch.
 
-        Symmetric to the under-contribution case: a settled shadow that came in
-        HIGHER than planned contributes its realized $500.  Summing
+        Symmetric to the under-contribution case: a settled transfer that came
+        in HIGHER than planned contributes its realized $500.  Summing
         ``estimated_amount`` would under-count it at $400 and let the annual
         limit accounting miss an over-contribution.
         """
@@ -1307,7 +1307,7 @@ class TestAContributionIsValuedAndScreenedAtTheBoundary:
     def test_ytd_and_seed_both_read_the_realized_actual(
         self, app, db, seed_user, seed_periods,
     ):
-        """Three settled $500-estimated / $400-actual shadows across 3 periods.
+        """Three settled $500-estimated / $400-actual transfers in 3 periods.
 
         ``ytd_contributions`` (<= current) = 3 x $400 = $1,200;
         ``ytd_contributions_seed`` (< current) = 2 x $400 = $800.  Summing
@@ -1388,7 +1388,7 @@ class TestAContributionIsValuedAndScreenedAtTheBoundary:
     def test_excluded_status_rows_are_dropped_not_zeroed(
         self, app, db, seed_user, seed_periods,
     ):
-        """A Cancelled shadow is ABSENT from the records, not present at $0.00.
+        """A Cancelled transfer is DROPPED from the records, not kept at $0.00.
 
         The ``status_contributes_to_balance`` screen the projection module used
         to apply four times now runs once, here.  Dropping and zeroing are NOT

@@ -1,8 +1,10 @@
 """Integration: a transfer's settle books ONE figure, whichever door asked.
 
 Plan step **X-f2-c3**, ruling **R-FA** applied to the transfer table.  FOUR
-doors can move a transfer into the settled band and exactly ONE of them froze
-an auto-derived loan payment's live payment-date cash:
+doors could move a transfer into the settled band and exactly ONE of them froze
+an auto-derived loan payment's live payment-date cash (the two shadow doors are
+the transfer's own, asked from a grid leg, since plan step balance:X-bi-6-1,
+ruling **R-BAL87**):
 
 * the grid's shadow "Mark Paid" (``routes/transactions/_shadow_mutations``) --
   it called ``loan_payment_service.live_loan_payment_amount`` itself;
@@ -18,19 +20,17 @@ holding a money rule is this arc's own root cause 1.
 ``update_transfer`` dispatches to it, so these grade the FIGURE at the service
 and then prove each door reaches it.
 
-**WHICH COLUMN the freeze writes stays ``actual_amount``, and that is a
-developer ruling (2026-08-12) rather than an oversight.**  Ruling **R-FH** says
-a derivation belongs in the row's OWN amount and finding **N-241** records that
-it does not go there; this branch BUILT that move and withdrew it, because two
-adversarial reviews measured it unsafe on today's schema -- a manual payment's
-base is ``estimated_amount``, so writing the freeze there compounds the standing
-extra across settle/revert cycles (`$1,599.10` -> `$1,699.10` -> `$1,799.10`),
-and a leftover ``actual_amount`` from a reverted settle would OUTRANK the frozen
-figure through ``COALESCE``.  Plan step **X-au-c**'s ``amount_source`` column is
-what makes the write idempotent and authoritative, so the move is that step's.
-These cases therefore assert ``actual_amount`` AND ``effective_amount``: the
-first is where the freeze lands today, the second is what the ledger books, and
-the second is the one that must never change.
+**WHICH COLUMN the freeze wrote stayed each shadow's ``actual_amount``, a
+developer ruling (2026-08-12)**: this branch BUILT ruling **R-FH**'s move to
+the row's OWN amount (finding **N-241**) and withdrew it, as two adversarial
+reviews measured it unsafe then -- a manual payment's base was
+``estimated_amount``, so a freeze written there compounded the standing extra
+across settle/revert cycles (`$1,599.10` -> `$1,699.10` -> `$1,799.10`), and a
+reverted settle's leftover ``actual_amount`` would have OUTRANKED it through
+``COALESCE``.  The shadows went at plan step balance:X-bi-6-4d-2, and a settled
+transfer's figure is the TRANSFER's own since its 4d-4 half (rulings
+**R-BAL365**, **R-BAL366**).  So these cases assert what the transfer records
+AND what the ledger books, and the second must never change.
 
 **The arithmetic is hand-computed and shown.**  Loan $200,000 / 6% / 360mo:
     P&I    = amortize(200000, 0.06, 360)  = 1,199.10
@@ -40,11 +40,10 @@ The template's dormant price series states a deliberately stale ``$1.00``, so
 a settle that books ``$1.00`` is a settle that missed the freeze and a settle
 that books ``$1,499.10`` is one that took it.
 
-**On production this changes `$0.00` today**: ``budget.loan_payment_settings``
-holds ZERO rows, so no live transfer is an auto-derived loan payment and all 17
-settled transfer shadows on Checking carry ``actual_amount = NULL``.  The route
-that writes that settings row (``routes/loan/payment_transfer.py``) is live, so
-the split opens on the next loan payment transfer created through the loan page.
+**On production this changed `$0.00` (measured 2026-08-12)**:
+``budget.loan_payment_settings`` held ZERO rows (the loan page's route writes
+one), so no live transfer was an auto-derived loan payment and all 17 settled
+transfer shadows on Checking carried ``actual_amount = NULL``.
 """
 
 import logging
@@ -200,10 +199,10 @@ class TestTheSettleFreezeIsTheSERVICEs:
     ):
         """One-click Paid books `$1,499.10`, not the stale `$1.00`.
 
-        The rule's whole point: an auto-derived loan payment's stored estimate
-        is the creation-time escrow, and what actually leaves checking is the
-        live P&I + escrow-as-of on the shadow's own DUE date -- the same figure
-        the genesis split subtracts, so ``cash == split`` holds by construction.
+        The rule's whole point: what leaves checking for an auto-derived loan
+        payment is the live P&I + escrow-as-of on the installment its due date
+        pays, not the creation-time escrow a shadow stored -- the figure the
+        genesis split subtracts, so ``cash == split`` holds by construction.
 
         Each side is read as the transfer and its side's record, where it was
         read off its twin row (ruling R-BAL167 class 1, plan step
@@ -276,18 +275,19 @@ class TestTheSettleFreezeIsTheSERVICEs:
     def test_an_ECHOED_prefill_is_not_written(
         self, app, db, seed_user, seed_periods,
     ):
-        """Submitting exactly what the row would book leaves the column NULL.
+        """Submitting exactly what the row would book is not recorded as typed.
 
         The reconcile panel PREFILLS its amount box, so every correctable row
-        on the form posts a figure whether the user touched it or not.  Writing
-        an untouched echo would populate a column that is NULL on all 17 settled
-        transfer shadows in production and destroy the only signal that says a
-        human read one off a statement.
+        on the form posts a figure whether the user touched it or not.  Taking
+        an untouched echo as typed would destroy the only signal that says a
+        human read one off a statement: the figure's source since plan step
+        X-au-c3, a column NULL on all 17 settled transfer shadows in production
+        before it (measured 2026-08-12).
 
         Graded on a NON-loan transfer, where the row books its own estimate:
-        the echo is the estimate, and the column must stay NULL.  Each side is
-        read as the transfer and its side's record, not its twin row (ruling
-        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
+        the echo is the estimate, recorded on the ``resolved`` source and never
+        as typed.  Each side is read as the transfer and its side's record, not
+        its twin row (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             xfer = _plain_transfer(seed_user, seed_periods)
@@ -390,14 +390,14 @@ class TestTheSettleFreezeIsTheSERVICEs:
     ):
         """The freeze is ONE-SHOT, and a stale tab must not move money.
 
-        ``done -> done`` is a legal identity transition, so a replayed POST from
-        a page left open reaches the service again.  The capture is gated on the
-        shadow still being Projected, and the dispatch runs BEFORE the status is
-        applied so a genuine first settle still sees that -- but a re-settle
-        resolves to nothing and the recorded cash stands, even after the loan's
-        escrow moves underneath it.  Each side is read as the transfer and its
-        side's record, not its twin row (ruling R-BAL167 class 1, plan step
-        balance:X-bi-6-4d-2).
+        ``done -> done`` is a legal identity transition, so a replayed POST
+        from a page left open reaches the service again.  The settle runs only
+        on a move INTO the settled band (its capture was gated on the shadow
+        being Projected until plan step X-au-g-2c-2), and a settled transfer
+        answers from its own figure, so a re-settle writes nothing and the
+        recorded cash stands, even after the loan's escrow moves underneath it.
+        Each side is read as the transfer and its side's record, not its twin
+        row (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             xfer = _derived_loan_transfer(seed_user, seed_periods)

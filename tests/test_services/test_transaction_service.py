@@ -932,10 +932,10 @@ class TestASettleBooksTheFreshestFigure:
     ):
         """An ordinary bill is not a candidate, so X-aq writes nothing.
 
-        The blast-radius control.  ``live_projected_net`` wants an income row
-        linked to an active profile and ``live_loan_transfer_amounts`` wants a
-        transfer shadow, so an expense on a plain template matches neither and
-        the settle is byte-identical to its pre-X-aq behaviour.
+        The blast-radius control.  X-aq's seams wanted a profile-linked income
+        row (``live_projected_net``, until plan step X-au-d) or a transfer
+        shadow (``live_loan_transfer_amounts``, until 2026-08-16); a plain
+        template's expense matches neither, so the settle is as before X-aq.
         """
         with app.app_context():
             template = _make_template(seed_user, is_envelope=False)

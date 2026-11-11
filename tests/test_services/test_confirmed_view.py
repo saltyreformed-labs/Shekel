@@ -235,7 +235,7 @@ class TestConfirmedViewGuards:
         """Scenario scoping holds: a what-if sees the anchors, never the payments.
 
         The baseline carries a settled $1,000 payment; a second scenario carries
-        none.  The walk is scenario-scoped through its settled-shadow query, so
+        none.  The walk is scenario-scoped through its settled-payment load, so
         the what-if folds the loan's ANCHORS alone -- $100,000, the trueup value,
         with no rows -- while the baseline's row is untouched.  (The posting
         reader returned ``None`` here, because the what-if had no postings at
@@ -1060,7 +1060,7 @@ class TestSplitInputsKeyOnTheDueDate:
 
         **$400.00 of escrow on ONE payment**, misattributed to principal.  The
         escrow half matters as much as the rate half because the CASH is built
-        from the same figure (``_shadow_live_amount``): if the two ends key on
+        from the same figure (``_installment_cash``): if the two ends key on
         different dates, the difference silently lands in principal.
         """
         with app.app_context():
@@ -1100,7 +1100,7 @@ class TestRawLoanTransactionIsInvisibleToTheWalk:
         Bypassing ruling D4's create guard with a direct settled-cash insert (the
         shape a pre-guard legacy row would be), a $300 transaction posts onto the
         loan's linked ledger.  The sum-of-postings counts it; the walk -- whose
-        payment set is transfer-linked shadows only -- cannot see it.  That is
+        payment set is the transfers into the loan -- cannot see it.  That is
         precisely why the shape is FORBIDDEN AT SOURCE (ruling R-E, shipped at
         step BG: both transaction-create routes, the recurrence-template form,
         and the salary-profile picker all refuse an amortizing account), which is

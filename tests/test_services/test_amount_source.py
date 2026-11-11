@@ -649,8 +649,8 @@ class TestWhichRulePricesARow:
 
         Making it flip the rule would force ``amount_source_id`` to be rewritten
         on every delete and restore -- a stored value beside a second writer,
-        which is the shape this arc removes.  102 of production's 330 transfer
-        shadows are soft-deleted, so the arm is ordinary rather than theoretical.
+        which is the shape this arc removes.  102 of 330 transfer shadows were
+        soft-deleted on the 2026-08-12 production clone: the arm is ordinary.
         """
         template = _priced_template(seed_user)
         txn = _template_row(seed_periods[0], template)
@@ -945,8 +945,8 @@ class TestWhatEachRuleAnswers:
 
         The two legs used to be stored at DIFFERENT figures so a resolver reading
         each shadow's own column would answer two numbers where one is right.
-        The declaration empties both columns instead, so such a resolver now
-        answers ``None`` twice -- the same discrimination, made structural.
+        The declaration emptied both columns instead, so such a resolver
+        answered ``None`` twice until plan step balance:X-bi-6-4d-2.
 
         **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_both_shadows_of_one_transfer_answer_the_same_figure``; ruling
@@ -1282,7 +1282,7 @@ class TestTheLoanPaymentRule:
         """One mode, one expression: the extra is added, never a different base.
 
         The defect this test exists for, reproduced by an adversarial review:
-        ``live_loan_transfer_amounts`` prices a manual payment from
+        ``live_loan_transfer_amounts`` priced a manual payment from
         ``shadow.estimated_amount + extra``, so a rule that used the live map
         whenever it had an entry answered ``$1,200.00 + $150.00`` with a standing
         extra and ``$1,300.00`` (the series) without one -- the same payment
@@ -1296,8 +1296,8 @@ class TestTheLoanPaymentRule:
         afterwards so the resolver could be watched ignoring it.  That producer
         is deleted, so what stands is the arithmetic it would have done --
         ``$1,200.00 + $150.00`` -- asserted against the column while the shadow
-        still holds one, and then contradicted by the resolver once the shadow
-        is derived.  The discrimination is the same and one producer shorter.
+        still held one, and then contradicted by the resolver once the shadow
+        was derived.  The discrimination was the same and one producer shorter.
 
         **The rival base is the TRANSFER's stored ``$1,250.00`` since plan
         step balance:X-bi-6-4d-2** -- ruling **R-BAL272**, the developer's
@@ -1936,7 +1936,7 @@ class TestTheBasisIsOneDerivationPerReadPass:
         "mirrors" the first's candidate filter -- kept in step by hand, which is
         the shape that eventually disagrees.  They became one method
         (``LoanPricing.live_cash``) at plan step X-au-c2b and NO method at plan
-        step X-au-g-2c-2: a derived shadow is priced by rule 4, so the settle
+        step X-au-g-2c-2: a derived payment is priced by rule 4, so the settle
         books what the display shows because both ask the resolver.
 
         The control is unchanged in kind and stronger in reach -- it now spans
@@ -2269,7 +2269,7 @@ class TestPricingReadsNoSTATUS:
     def test_a_loan_payment_prices_the_same_whatever_its_status(
         self, app, db, seed_user, seed_periods, status_enum,
     ):
-        """Rule 4 resolves the loan for a shadow no balance is counting.
+        """Rule 4 resolves the loan for a transfer no balance is counting.
 
         The repair (``LoanPricing.live_cash``) answered ``None`` for a
         Cancelled or Credit shadow, which was correct -- there is no stored

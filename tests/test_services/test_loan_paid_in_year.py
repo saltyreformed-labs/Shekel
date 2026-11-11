@@ -78,7 +78,7 @@ class TestPaidInYearChips:
 
         The chip producers fold the clock-free walk, so ``today`` does not move
         their answer; freezing keeps the settle wiring deterministic across CI
-        clocks (the settled shadows are what the fold reads).
+        clocks (the settled payments are what the fold reads).
         """
         freeze_today(monkeypatch, _FROZEN_TODAY)
 
@@ -269,7 +269,7 @@ class TestPaidInYearChips:
     ):
         """A settled-then-reverted payment folds nothing (it leaves the settled set).
 
-        The fold reads the SETTLED shadows; reverting a payment to Projected
+        The fold reads the SETTLED payments; reverting a payment to Projected
         removes it, so its 500.00 interest / 500.00 principal drops from the year
         cleanly, leaving 0.00 -- never a stranded figure.
         """

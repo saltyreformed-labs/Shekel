@@ -3,9 +3,10 @@
 Truncate deletes the schedule tail via a single bulk DELETE (PostgreSQL
 cascades its transactions and transfers).
 Two gates run first: the hard lock classifier (historical / settled /
-anchor / rule -- never overridable) and the broadened discard gate
-(hand-entered / override / Credit-Cancelled rows -- overridable with
-``confirm_discard``).
+holds a payment or purchase -- never overridable; its "anchor" reason went
+at ruling R-EO and its "rule" reason at plan step R7b-4) and the broadened
+discard gate (hand-entered / override / Credit-Cancelled rows --
+overridable with ``confirm_discard``).
 
 Because this is the highest-stakes operation in the feature, the suite
 carries all four disciplines: structural invariants after every
@@ -635,12 +636,14 @@ class TestTruncateDiscardGate:
             assert_pay_period_invariants(db.session, user_id)
 
     def test_recurring_transfer_needs_no_confirm(self, app, db, seed_user):
-        """A template transfer is regenerable; its shadows do not trip the gate.
+        """A template transfer is regenerable, so it does not trip the gate.
 
-        Transfer shadows always carry template_id IS NULL, so a naive
-        ``template_id IS NULL`` gate would falsely flag every recurring
-        transfer.  The refined predicate counts transfers on their own
-        table, so a template transfer needs no confirmation.
+        The discard gate counts a transfer once on its own table and asks it
+        what it asks a row (``pay_period_gates._regenerable``), so a template
+        transfer needs no confirmation.  Its two shadow rows carried
+        ``template_id IS NULL`` until plan step balance:X-bi-6-4d-2 deleted
+        them, so a naive ``template_id IS NULL`` gate would have flagged every
+        recurring transfer.
         """
         with app.app_context():
             periods = _future_periods(db.session, seed_user, count=4)

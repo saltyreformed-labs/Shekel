@@ -558,8 +558,10 @@ class TestBrokenLoanFailsLoud:
     The scalar ``balance_at.balance_at`` (C3b1) and the per-period map
     ``balance_at.balance_map`` (C3b3) both read
     :func:`~app.services.balance_at.positions`, which folds the loan's origination
-    anchor and settled shadows -- neither of which lives in the posting ledger --
-    so no stored posting is read and none can be missing (plan step E1, B-8).
+    anchor and settled payments (each a settled transfer's leg on the loan, its
+    income shadow until plan step balance:X-bi-6-4b) -- neither of which lives in
+    the posting ledger -- so no stored posting is read and none can be missing
+    (plan step E1, B-8).
     They answer the CORRECT balance the schedule-walk fallback could not; the
     fail-loud ``LoanLedgerNotOpenedError`` is retired.  The class name is kept for
     the B-21 finding its cash-degrade value assertion pins.
@@ -598,7 +600,7 @@ class TestBrokenLoanFailsLoud:
 
         The $240,000 loan originated 2024-09-01 and never paid.  The scalar folds
         the loan's SOURCE facts -- the synthesized origination anchor ($240,000)
-        plus its (empty) settled shadows -- and the loan owes $240,000.00, flat:
+        plus its (empty) settled payments -- and the loan owes $240,000.00, flat:
         the honest balance of a loan borrowed and never paid down.  Not the
         read-time outage the old fail-loud raised, and NOT the schedule-walk's
         phantom $236,544.21 paid down by installments never made.

@@ -1732,10 +1732,10 @@ class TestATransferIsALegOfItsParent:
         self, app, seed_user, seed_periods, db,
     ):
         """Both loaders' ``Transfer.is_deleted`` term (the review of leaf
-        X-bi-6-1b): nothing here re-checks in Python, and a deleted settled
-        transfer's leg would otherwise publish as a $0.00-versus-plan surprise
-        with its name on the list (its shadow's movement is excluded by the
-        record join, so the leg would read the $0.00 record)."""
+        X-bi-6-1b): nothing here re-checks in Python, so a deleted settled
+        transfer's leg would otherwise publish with its name on the list (a
+        $0.00-versus-plan surprise while shadows were born: the record join
+        excluded its shadow's movement, so the leg read the $0.00 record)."""
         with app.app_context():
             checking = seed_user["account"]
             savings = create_savings_account(
@@ -2560,28 +2560,28 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
             )
 
             assert report is not None
-            shadow = [
+            leg_rows = [
                 row for row in report.surprises.rows
                 if row.delta == Decimal("79.00")
             ]
-            assert len(shadow) == 1, (
-                "the settled derived shadow reaches the rendered report, and "
-                "before the fix this call raised AmountUnresolvable instead"
+            assert len(leg_rows) == 1, (
+                "the settled derived transfer's leg reaches the rendered "
+                "report, and before the fix this call raised AmountUnresolvable"
             )
-            assert shadow[0].estimated == Decimal("321.00")
+            assert leg_rows[0].estimated == Decimal("321.00")
 
     def test_a_template_priced_row_reads_the_version_for_its_own_due_date(
         self, app, db, seed_user, seed_periods,
     ):
         """The rule that prices 59 of production's 78 affected rows.
 
-        The transfer shadow above is rule 5.  Rule 3 -- a row generated from a
-        recurring definition, priced by that definition's dated series -- is a
-        different path (``_rule_within_definition`` -> ``_stated_amount`` ->
-        ``amount_as_of``) with refusal arms the transfer path never reaches, and
-        it is the DOMINANT shape among the settled rows the cutovers declared.
-        Raised by an adversarial review, which observed the first test covered
-        the minority shape.
+        The leg above is priced by its parent (rule 5 priced its shadow, which
+        went at balance:X-bi-6-4d-2).  Rule 3 -- a row of a recurring
+        definition, priced by its dated series -- is a different path
+        (``_rule_within_definition`` -> ``_stated_amount`` -> ``amount_as_of``)
+        with refusal arms the transfer path never reaches, and it is the
+        DOMINANT shape among the settled rows the cutovers declared.  An
+        adversarial review raised it: the first test covered the minority.
 
         It asserts the series is read on the ROW'S OWN DUE DATE and not at its
         newest version: the definition is re-priced to ``$200.00`` effective

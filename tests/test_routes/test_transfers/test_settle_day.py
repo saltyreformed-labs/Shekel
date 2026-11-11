@@ -36,14 +36,15 @@ from ._helpers import _create_savings_account, _create_transfer
 class TestTransferSettleDayEditDoor:
     """The transfer PATCH's settle-day correction (rulings R-ED / R-EG).
 
-    **This door is not a convenience twin of the transaction one.**  It is the
+    **This door is not a convenience twin of the transaction one.**  It was the
     ONLY correction path for the rows finding **N-181** names: all eight settled
     rows whose day the X-f1b backfill had to invent from a pay period's
-    ``start_date`` are transfer SHADOWS (four pairs, measured on the 2026-08-03
-    production clone), and a shadow's full-edit popover is the TRANSFER form --
-    ``routes/transactions/forms.get_full_edit`` redirects a shadow to it rather
-    than rendering the transaction popover.  Without this door X-f1c would close
-    N-181 in principle and zero rows in fact.
+    ``start_date`` were transfer SHADOWS (four pairs, measured on the 2026-08-03
+    production clone), and a shadow's full-edit popover was the TRANSFER form --
+    ``routes/transactions/forms.get_full_edit`` redirected a shadow to it until
+    plan step balance:X-bi-6-1, and the shadows went at plan step
+    balance:X-bi-6-4d-2.  Without this door X-f1c would have closed N-181 in
+    principle and zero rows in fact.  A grid leg's popover posts to it now.
     """
 
     @staticmethod

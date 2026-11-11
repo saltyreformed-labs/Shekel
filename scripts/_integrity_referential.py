@@ -121,11 +121,11 @@ def check_referential_integrity(session):
         # FK-14..16 are FK-05..07's TRANSFER twins (plan step
         # ``balance:X-bi-6-4c-4``, ruling **R-BAL160**).  A transfer's pay
         # period, scenario and category were graded only through its two
-        # shadow rows, which carry copies of them, and ``X-bi-6-4d`` stops
+        # shadow rows, which carried copies of them, and ``X-bi-6-4d`` stopped
         # writing shadows for new transfers: each key is asked of
-        # ``budget.transfers`` itself.  FK-05..07 keep reading every row of
-        # ``budget.transactions``, shadows included, because a shadow's own
-        # keys are that table's integrity for as long as the rows exist.
+        # ``budget.transfers`` itself.  FK-05..07 read every row of
+        # ``budget.transactions``, which held the shadows until plan step
+        # ``balance:X-bi-6-4d-2`` deleted them.
         ("FK-14", "Transfers in nonexistent pay periods", """
             SELECT tr.id, tr.name, tr.pay_period_id
             FROM budget.transfers tr

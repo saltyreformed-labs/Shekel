@@ -158,18 +158,18 @@ class TestReferentialIntegrity:
     def test_fk14_to_16_grade_a_transfers_OWN_keys(
         self, app, db, seed_user, seed_periods,
     ):
-        """FK-14..16 read ``budget.transfers``; FK-05..07 read its shadows.
+        """FK-14..16 read ``budget.transfers``; FK-05..07 never answer for one.
 
         Plan step ``balance:X-bi-6-4c-4`` (ruling **R-BAL160**): a transfer's
         pay period, scenario and category were graded only through the
-        copies its two shadow rows carry, which ``X-bi-6-4d`` stops writing
-        for new transfers.  The transfer's three keys are pointed at nothing
-        with the referential triggers off, its shadows left pointing at real
-        rows: each twin names the transfer once, and FK-05..07 -- which grade
-        the rows of ``budget.transactions`` -- stay clean, so neither family
-        is answering for the other.  The transfer carries a REAL category
-        first, so a clean FK-16 is graded on a key it resolves rather than on
-        a NULL it skips.
+        copies its two shadow rows carried, which ``X-bi-6-4d`` stopped
+        writing for new transfers; no shadow is born since plan step
+        ``balance:X-bi-6-4d-2``.  The transfer's three keys are pointed at
+        nothing with the referential triggers off: each twin names the
+        transfer once, and FK-05..07 -- which grade the rows of
+        ``budget.transactions`` -- stay clean, so neither family is answering
+        for the other.  The transfer carries a REAL category first, so a clean
+        FK-16 is graded on a key it resolves rather than on a NULL it skips.
         """
         # pylint: disable=import-outside-toplevel  -- the module convention.
         from app.services import transfer_service

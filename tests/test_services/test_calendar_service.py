@@ -107,9 +107,9 @@ def _add_transaction(
     since plan step balance:X-bi-7c this builder places a one-off through
     the producer (:func:`one_off_row_of`), dated on its paycheck's start
     unless *due_date* says otherwise -- a case that means an UNDATED row
-    builds a row no definition prices (a transfer shadow here; a CC payback
-    is the other, and the one production holds undated), the shapes left
-    undated since the family's cutover (plan step balance:X-bi-7d-2).
+    builds a row no definition prices (a CC payback, the one production holds
+    undated; a transfer shadow too until plan step balance:X-bi-6-4d-2), the
+    shapes undated since the family's cutover (plan step balance:X-bi-7d-2).
 
     Args:
         db_session: Active database session.
@@ -779,8 +779,8 @@ class TestTheCalendarReadsTheCashFlowSet:
 
         A $165.00 checking -> card payment due 04-08: on checking's calendar
         it is one expense (165.00 out, 0.00 in); on the card's it is one
-        income (165.00 in, 0.00 out).  Loading every member's rows without
-        the far-leg arm would put BOTH shadows on both calendars -- 165.00
+        income (165.00 in, 0.00 out).  Drawing a leg on every member endpoint
+        without the far-leg arm would put BOTH legs on both calendars -- 165.00
         in and 165.00 out on each -- the owner's own payment read as income.
         """
         with app.app_context():

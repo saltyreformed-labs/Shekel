@@ -591,9 +591,9 @@ class TestSettledMoneyRidesOnTheAssertionItFollowed:
         ledger held for the real account, while every projected balance on
         screen answered $5,644.27 -- the divergence was the finding.
 
-        The transfer reaches the fold as its SHADOW rows (Transfer Invariant 5),
-        exactly as it reaches the shipping projection; neither queries
-        ``Transfer``.
+        The transfer reaches the fold as each LEG's covering movement, read
+        with its transfer (Transfer Invariant 5); it reached it as its SHADOW
+        rows until plan step balance:X-bi-6-4a.
         """
         freeze_today(monkeypatch, date(2026, 4, 5))
         scenario = seed_user["scenario"]
@@ -1665,7 +1665,7 @@ class TestTheDriftOracleWalksFiftyTwoPeriods:
     2026-10-08, so the fixture is production-shaped only when read as "today is
     2026-10-08".  Nothing under test consults that clock: the walk takes none,
     the read's ``as_of`` is explicit, and neither live-override seam has a
-    candidate row here (no salary-linked template, no loan-payment shadow).
+    candidate row here (no salary-linked template, no loan-payment transfer).
     """
 
     def test_every_period_end_matches_the_independent_running_total(

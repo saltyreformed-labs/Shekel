@@ -56,10 +56,11 @@ class TestTheClosingBoundIsNeverWrittenByARoute:
     ):
         """Creating the recurring transfer bounds its START to the contract only.
 
-        The create-transfer POST writes the rule's first occurrence from the
-        loan's contract before generating any shadow (``bind_rule_to_loan``);
-        the closing bound is the door's derived payoff, years out for a
-        mortgage, and the column stays NULL.
+        The create-transfer POST authors the rule with its first occurrence
+        from the loan's contract (``loan_recurrence_sync.loan_cadence_start``;
+        ``bind_rule_to_loan`` until plan step R7d-g-3) before generating any
+        transfer; the closing bound is the door's derived payoff, years out
+        for a mortgage, and the column stays NULL.
         """
         from app.models.transfer_template import TransferTemplate  # pylint: disable=import-outside-toplevel
 

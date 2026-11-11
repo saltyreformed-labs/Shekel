@@ -433,7 +433,7 @@ def _budget_legs(
     net and the balance agree either way, which is exactly why the shape is
     pinned -- it is the only one that can tell the two rules apart, and without
     it this classification would be an untested claim
-    (``test_cash_period_view.py``:
+    (``test_cash_period_view/test_the_subtotals.py``:
     ``test_a_row_counts_on_its_TYPE_row_even_when_its_cash_leg_inverts``).
 
     Args:

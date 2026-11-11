@@ -429,7 +429,7 @@ class TestShorteningTheSchedulePastASettledDayGoesThrough:
     it 2026-08-11**, because the defect it named was not one: a settled row's
     cash day falling outside the reported window is absent from BOTH sides of
     ruling R-K's identity and reports as the ``period_timing`` remainder
-    (``test_cash_period_view.py``:
+    (``test_cash_period_view/test_the_identity.py``:
     ``test_a_settle_day_past_the_window_keeps_every_column_exact``).  What the
     refusal cost was real -- 5 of production's 61 truncation points blocked,
     with re-dating a settled row as the only way past.

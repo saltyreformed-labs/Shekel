@@ -191,7 +191,7 @@ class TestTheRecordedPostingDay:
         HERE as well would count the same ``$200.00`` twice.  WHICH assertion
         absorbs it -- none, until the owner declares a balance dated on or after
         01-23 -- is the walk's question about that movement, and
-        ``test_cash_walk.py`` is where it is graded.
+        ``test_cash_walk/`` is where it is graded.
 
         The mirror of this is the test below it, one day earlier, and the pair
         now answers the SAME on both sides of a boundary the reservation no

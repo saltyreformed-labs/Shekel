@@ -12,7 +12,7 @@ deletes for free.
 Every assertion here is at the **projected end balance** grain -- the figure the
 grid renders and the one production got wrong by ``-$4,001.42`` -- not at the
 walk grain underneath it.  The walk has its own controls
-(``test_cash_walk.py``, ``test_ledger_lines/test_an_accounts_corrections/test_the_walk.py``);
+(``test_cash_walk/``, ``test_ledger_lines/test_an_accounts_corrections/test_the_walk.py``);
 what those cannot
 show is that the seam, the entries-aware reservation and the anchor reset
 compose to a stable number, because each of the three is individually correct
@@ -124,7 +124,7 @@ class TestTheRuleCannotBeAskedAnyOtherWay:
     #: Every ordering shape a fifth answer could be spelled in.  ``==`` is
     #: deliberately absent: the dataclass defines it, it is not the coverage
     #: question, and two boundaries comparing equal is what the twin-statement
-    #: test in ``test_cash_walk.py`` asserts on.
+    #: test in ``test_cash_walk/`` asserts on.
     _ORDERINGS = (
         # "is this movement inside the balance", both operand orders
         ("day <= boundary", lambda day, boundary: day <= boundary),
@@ -437,7 +437,8 @@ class TestTheProjectionIgnoresTheOrderOfABookkeepingSession:
     reported ``-$4,021.37`` against a hand-computed ``-$19.95``.
 
     There is a control for this at WALK grain
-    (``test_cash_walk.py::test_both_same_day_settles_go_with_the_assertion_whatever_the_order``).
+    (``test_cash_walk/test_the_assertions.py``:
+    ``test_both_same_day_settles_go_with_the_assertion_whatever_the_order``).
     A walk-grain control cannot see the projection: the walk is one of four
     inputs to the rendered figure, and the defect was reported as a rendered
     figure.  This permutes the recording order of a session and asserts the

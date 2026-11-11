@@ -83,7 +83,7 @@ a settle day past the last reported end is absent from BOTH sides of ruling
 R-K's identity and cancels.  The money reports as a timing remainder -- the row
 ruling R-DH split out to carry precisely this -- and the balance is right
 either way: on that end date the bank had genuinely not taken it.  Pinned by
-``test_cash_period_view.py``'s
+``test_cash_period_view/test_the_identity.py``'s
 ``test_a_settle_day_past_the_window_keeps_every_column_exact``, and driven on a
 production CLONE: retiring 58 of 61 periods strands three real rows totalling
 ``$177.47`` and every surviving column reconciles to the cent.

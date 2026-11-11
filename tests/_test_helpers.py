@@ -3455,7 +3455,7 @@ def add_entry(  # pylint: disable=too-many-arguments,too-many-positional-argumen
 
     **The three bucket flags are parameters (plan step X-c2c2a).**  It built a
     DEBIT-only, outstanding entry until the per-row valuation tests moved to
-    ``test_cash_amounts.py``, which needs all three buckets of
+    ``test_cash_amounts/``, which needs all three buckets of
     ``cash_ledger._amounts._entry_checking_impact`` -- settled debit,
     outstanding debit, and credit.  Narrowness is why the helper had not
     displaced the hand-rolled copies it exists to prevent: seven suites still
@@ -5525,7 +5525,7 @@ def governing_opening_row(db_session, account):
     the same order :func:`app.services.cash_ledger.account_opening_fact` reads
     in Python and ``budget.account_books_opened_on`` reads in SQL, and
     ``TestTheTwoGoverningLookupsElectTheSameRow`` in
-    ``tests/test_services/test_books_boundary.py`` is what holds all three to
+    ``tests/test_services/test_books_boundary/`` is what holds all three to
     it.
 
     It answers with the ROW rather than through

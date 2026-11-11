@@ -7,7 +7,7 @@ this card writes, and the act that ACCEPTS the figure is plan step X-f3c-4.
 **What is graded here and what is graded one layer down.**  The service suites
 own the money -- ``tests/test_services/test_outstanding_difference.py`` owns
 the subtraction and its scope, and
-``tests/test_services/test_bank_agreement.py`` owns the span verdict and its
+``tests/test_services/test_bank_agreement/`` owns the span verdict and its
 four firing controls.  This file owns what a browser can reach: that the card
 renders on the page AND through its refresh fragment, that both mounts publish
 the same figures, that an account the question does not apply to gets no card

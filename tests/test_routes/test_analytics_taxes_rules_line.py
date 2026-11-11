@@ -11,8 +11,8 @@ pay periods, so its figures are zero, and that one seeds 2026's
 (``seed_periods``) only so the effective-rate chip, whose caption names the
 state, renders.
 
-Its own module rather than ``test_analytics.py``, which is already past the
-1,000-line ceiling (ruling R-IR; its split is plan#2000's).
+Its own module, written while ``test_analytics.py`` was past the 1,000-line
+ceiling (ruling R-IR); that module is the ``test_analytics/`` package since plan#3558.
 """
 
 import re

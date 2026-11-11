@@ -22,7 +22,7 @@ page an archived account links to from nowhere, which is **N-453**'s question
 and ``balance:X-f4``'s to answer.
 
 **What is graded here and what is graded one layer down.**  The service suite
-(``tests/test_services/test_opening_restatement.py``) owns the money: the
+(``tests/test_services/test_opening_restatement/``) owns the money: the
 append, ruling **R-EQ**'s did-this-change decision, both day bounds, and the
 posted ledger following.  This file owns what a browser can reach -- that both
 entrances exist, that the form POSTS what the door reads, that an owner cannot
@@ -405,7 +405,7 @@ class TestTheDoor:
         the door never reached: it re-synced its one account by id.*
 
         No other case anywhere in ``tests/`` archives an account and restates
-        it: ``test_opening_restatement.py`` mentions neither ``is_active`` nor
+        it: ``test_opening_restatement/`` mentions neither ``is_active`` nor
         archiving in any of its 27 cases, and every route case in this file
         restates an ACTIVE account.  A door that rendered fine and then refused,
         or silently no-opped, on an archived one would pass all of them.

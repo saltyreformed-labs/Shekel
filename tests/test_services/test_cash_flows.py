@@ -19,7 +19,7 @@ diffed against each other.
 
 Two questions this file does NOT answer, and their homes:
 
-* what one row is WORTH -- ``test_cash_amounts.py``;
+* what one row is WORTH -- ``test_cash_amounts/``;
 * which STARTING balance the reduction is added to, and how it rolls forward
   period after period -- the cash fold's (``balance_at._cash_fold``), graded
   in ``test_cash_fold.py`` (``TestTheOpeningEquityIsTheSeed``,
@@ -75,7 +75,7 @@ _ZERO = Decimal("0.00")
 # purchase below, so each one is OUTSTANDING unless its own test says
 # otherwise.  Stating the day rather than leaving it ``None`` keeps this file's
 # subject -- which rows are counted, and on which leg -- separate from
-# ``test_cash_amounts.py``'s -- what one row is worth.
+# ``test_cash_amounts/``'s -- what one row is worth.
 def _unreconciled(*rows):
     """The reduction's basis over *rows*, with no live producer and no override.
 
@@ -114,7 +114,7 @@ def _add_outstanding_purchases(db_session, seed_user, txn, entries):
             is left with a NULL ``settled_on`` -- not yet seen on a statement,
             and so OUTSTANDING -- which is the shape these reduction tests were
             written on: which BUCKET a purchase falls in is
-            ``test_cash_amounts.py``'s subject, not this file's.
+            ``test_cash_amounts/``'s subject, not this file's.
     """
     for amount, is_credit in entries:
         add_entry(

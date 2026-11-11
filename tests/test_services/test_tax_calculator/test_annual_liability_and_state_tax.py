@@ -5,8 +5,9 @@ the tax types priced.
 
 import pytest
 from decimal import Decimal
+from types import SimpleNamespace
 
-from app.enums import TaxTypeEnum
+from app.enums import FilingStatusEnum, TaxTypeEnum
 from app.services.tax_calculator import (
     AnnualFederalTax,
     W4Inputs,
@@ -16,6 +17,7 @@ from app.services.tax_calculator import (
 )
 from app.services.exceptions import InvalidDependentCountError, InvalidFilingStatusError
 from app.services.tax_config_service import StateTaxRules
+from app.tax_law import LAW
 
 from ._helpers import _FakeChildTier, _federal_2026_single, _FakeNCStateTaxRules, _federal_2026_mfj
 
@@ -203,6 +205,38 @@ class TestAnnualFederalLiability:
         """A None bracket set raises InvalidFilingStatusError (engine contract)."""
         with pytest.raises(InvalidFilingStatusError):
             calculate_annual_federal_liability(Decimal("110000.00"), None)
+
+    @pytest.mark.parametrize("children", [0, 2])
+    def test_the_laws_per_status_rules_are_refused_not_priced_creditless(self, children):
+        """Rules stating no credits raise, never price as a filer owed none.
+
+        Since plan step plan#3206 a year states its per-child credits once
+        (ruling plan#3340), so the law's per-status FederalRules carry none
+        and only the resolver's slice does.  Read with a default of zero,
+        2027's head-of-household rules priced $80,000 with two children at
+        $6,244.00 where the law says $1,644.00 (measured 2026-11-11).  The
+        credits are read on every call, so a filer with no children is
+        refused too.
+        """
+        rules = LAW.years[-1].federal[FilingStatusEnum.HEAD_OF_HOUSEHOLD]
+        with pytest.raises(AttributeError, match="no attribute 'child_credit_amount'"):
+            calculate_annual_federal_liability(
+                Decimal("80000.00"), rules, W4Inputs(qualifying_children=children),
+            )
+
+    def test_rules_stating_no_refundable_cap_are_refused(self):
+        """The refundable cap is read with no default too, so its absence raises."""
+        full = _federal_2026_single()
+        no_cap = SimpleNamespace(
+            standard_deduction=full.standard_deduction,
+            brackets=full.brackets,
+            child_credit_amount=full.child_credit_amount,
+            other_dependent_credit_amount=full.other_dependent_credit_amount,
+        )
+        with pytest.raises(AttributeError, match="no attribute 'child_credit_refundable_cap'"):
+            calculate_annual_federal_liability(
+                Decimal("80000.00"), no_cap, W4Inputs(qualifying_children=2),
+            )
 
     def test_negative_qualifying_children_raises(self):
         """Negative dependent counts raise, matching the withholding engine."""

@@ -24,9 +24,9 @@ from app.services.tax_config_service import (
     profile_tax_series,
 )
 from app.tax_law import TaxLaw
+from tests._made_up_federal import made_up_credits, made_up_federal
 from tests._test_helpers import (
     add_test_pay_stub,
-    made_up_federal,
     made_up_fica,
     made_up_state,
     made_up_year,
@@ -106,7 +106,8 @@ class TestTheFederalLineTakesTheFormulasDifferenceToo:
     ):
         """107.00 federal and 77.00 state on 02-13, priced from the 01-16 stub."""
         tax_law(TaxLaw(years=(made_up_year(
-            2026, federal=made_up_federal(), fica=made_up_fica(),
+            2026, federal=made_up_federal(), federal_credits=made_up_credits(),
+            fica=made_up_fica(),
             states={"NC": made_up_state(Decimal("0.0500"), Decimal("0.00"))},
         ),)))
         profile = make_salary_profile(
@@ -163,7 +164,8 @@ class TestEveryLineFloorsOnItsOwn:
             Medicare 0.00 +  21.75 -  23.20 =  -1.45 -> 0.00
         """
         tax_law(TaxLaw(years=(made_up_year(
-            2026, federal=made_up_federal(), fica=made_up_fica(),
+            2026, federal=made_up_federal(), federal_credits=made_up_credits(),
+            fica=made_up_fica(),
             states={"NC": made_up_state(Decimal("0.0500"), Decimal("0.00"))},
         ),)))
         profile = make_salary_profile(

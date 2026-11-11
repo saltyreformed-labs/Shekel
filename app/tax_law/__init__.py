@@ -25,7 +25,9 @@ at plan step salary:X-at-2.
 in :data:`LAW` below.  Its federal rules must cover every filing status, it
 states its per-child credits once for all of them (ruling plan#3340), and it
 must cite its sources, or importing it fails (:mod:`app.tax_law._types`); the
-bracket ladders are checked for gaps, and so are the years (none skipped).
+bracket ladders are checked for gaps and for rates that climb, a refundable
+child credit cap for staying within its credit, and the years for none
+skipped (``_types``' module docstring lists every check).
 Which year's law prices a given year is the resolver's rule,
 :func:`app.services.tax_config_service.resolve_tax_year`, not this package's.
 

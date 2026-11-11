@@ -84,6 +84,7 @@ from app.services.pay_calendar import (
     PayCalendar,
     saved_paydays_in_month_through,
 )
+from tests._made_up_federal import made_up_credits, made_up_federal
 from tests._test_helpers import (
     rhythm_of,
     counting_calls,
@@ -96,7 +97,6 @@ from tests._test_helpers import (
     make_transfer_template,
     payroll_basis,
     populate_in_a_fresh_pass,
-    made_up_federal,
     made_up_fica,
     made_up_state,
     made_up_year,
@@ -626,7 +626,8 @@ class TestThePaycheckSeesTheWholeSchedule:
         make_line_cadence_rule(db.session, deduction, 24)
         # The made-up federal, FICA and NC rules the three row seeders wrote.
         tax_law(TaxLaw(years=(made_up_year(
-            federal=made_up_federal(), fica=made_up_fica(),
+            federal=made_up_federal(), federal_credits=made_up_credits(),
+            fica=made_up_fica(),
             states={"NC": made_up_state(Decimal("0.0399"))},
         ),)))
         db.session.flush()

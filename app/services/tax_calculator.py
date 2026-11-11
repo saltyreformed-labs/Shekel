@@ -36,9 +36,10 @@ ZERO = Decimal("0")
 # are STATUTORY and, verified 2026-07 against the 2025 Schedule 8812
 # instructions, were NOT changed by OBBBA and are not inflation-indexed --
 # so they are module constants, not per-year figures in the tax law (unlike
-# the per-child ceiling, which each year of :mod:`app.tax_law` states on its
-# federal rules).  If a future law makes either parameter year-varying, move
-# it into the tax law then.
+# the per-child ceiling, which each year of :mod:`app.tax_law` states once
+# among its per-child credits, :class:`app.tax_law.FederalCredits`).  If a
+# future law makes either parameter year-varying, move it into the tax law
+# then.
 ACTC_EARNED_INCOME_RATE = Decimal("0.15")
 ACTC_EARNED_INCOME_FLOOR = Decimal("2500")
 
@@ -239,16 +240,22 @@ def _dependent_credits(bracket_set, qualifying_children, other_dependents):
     """Return the total annual W-4 Step 3 dependent credits.
 
     The child credit (per qualifying child under 17) plus the
-    other-dependent credit, read from the bracket set's
-    ``child_credit_amount`` / ``other_dependent_credit_amount`` (treated as
-    0 when unset).
+    other-dependent credit, read from the rules'
+    ``child_credit_amount`` / ``other_dependent_credit_amount``.
+
+    **Read with no default, so rules that state no credits raise
+    ``AttributeError``** rather than price as a filer owed none.  The law's
+    per-status :class:`app.tax_law.FederalRules` states none since plan step
+    plan#3206 (the year states them once, ruling plan#3340), and a default of
+    zero priced it with no credit at all: a 2027 head of household earning
+    $80,000 with two children owed $6,244.00 on it where the law says
+    $1,644.00 (measured 2026-11-11, plan#3206's review).  The resolver's
+    slice, :class:`app.services.tax_config_service.FederalTaxRules`, carries
+    them.  The withholding formula refuses the same rules the same way, on
+    ``withholding_rules``.
     """
-    child_credit_amount = Decimal(
-        str(getattr(bracket_set, "child_credit_amount", 0) or 0)
-    )
-    other_credit_amount = Decimal(
-        str(getattr(bracket_set, "other_dependent_credit_amount", 0) or 0)
-    )
+    child_credit_amount = Decimal(str(bracket_set.child_credit_amount))
+    other_credit_amount = Decimal(str(bracket_set.other_dependent_credit_amount))
     return (
         qualifying_children * child_credit_amount
         + other_dependents * other_credit_amount
@@ -509,8 +516,9 @@ def _refundable_actc(
     income).  Phase-outs (MAGI over 400k MFJ / 200k other) are NOT modeled.
 
     Args:
-        bracket_set: The bracket set exposing ``child_credit_refundable_cap``
-            (treated as 0 when unset, mirroring :func:`_dependent_credits`).
+        bracket_set: The rules exposing ``child_credit_refundable_cap``,
+            read with no default as :func:`_dependent_credits` reads the
+            credits (it says why).
         qualifying_children: W-4 Step 3 qualifying-children count.
         tax_before_credits: Marginal-bracket tax before dependent credits.
         total_credits: The total nonrefundable dependent credits (CTC + ODC).
@@ -519,9 +527,7 @@ def _refundable_actc(
     Returns:
         Decimal -- the refundable ACTC, quantised HALF_UP to two places.
     """
-    refundable_cap = Decimal(
-        str(getattr(bracket_set, "child_credit_refundable_cap", 0) or 0)
-    )
+    refundable_cap = Decimal(str(bracket_set.child_credit_refundable_cap))
     unused_credit = max(ZERO, total_credits - tax_before_credits)
     cap_leg = refundable_cap * qualifying_children
     earned_income_leg = ACTC_EARNED_INCOME_RATE * max(

@@ -160,7 +160,7 @@ class FederalRules:
     withholding_standard_deduction: Decimal | None = None
 
     def __post_init__(self):
-        """Refuse a negative amount, a broken or falling ladder, or a withholding copy."""
+        """Refuse a negative amount, a ladder broken or not climbing, or a withholding copy."""
         _require_amount(self.standard_deduction, "federal standard_deduction")
         _require_rungs(self.brackets, Bracket, "a bracket ladder")
         if [rung.sort_order for rung in self.brackets] != list(range(len(self.brackets))):

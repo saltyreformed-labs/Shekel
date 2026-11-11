@@ -53,7 +53,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from app import ref_cache, tax_law
-from app.enums import TaxTypeEnum
+from app.enums import FilingStatusEnum, TaxTypeEnum
 from app.exceptions import UnsupportedStateError
 from app.tax_law import Bracket, ChildDeductionTier, FicaRules
 
@@ -274,7 +274,9 @@ def profile_tax_series(profile) -> ProfileTaxSeries:
     )
 
 
-def _federal_rules(year_law, status) -> FederalTaxRules:
+def _federal_rules(
+    year_law: tax_law.TaxYearLaw, status: FilingStatusEnum,
+) -> FederalTaxRules:
     """Slice one year of the law's federal rules to one filing status.
 
     The status's standard deduction and ladder, with the year's per-child
@@ -301,7 +303,9 @@ def _federal_rules(year_law, status) -> FederalTaxRules:
     )
 
 
-def _state_rules(state_code, state_year, status) -> StateTaxRules:
+def _state_rules(
+    state_code: str, state_year: tax_law.StateYearLaw, status: FilingStatusEnum,
+) -> StateTaxRules:
     """Slice one state-year of the law to one filing status.
 
     Args:

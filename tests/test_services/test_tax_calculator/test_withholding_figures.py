@@ -2,11 +2,13 @@
 
 One set of federal rules, two formulas: a paycheck withholds on the figures the
 year's withholding documents print (Pub 15-T's standard deduction, the W-4's
-per-child credit), read through ``FederalRules.withholding_rules``, and the
+per-child credit), read through ``FederalTaxRules.withholding_rules``, and the
 filing-time liability prices on the return's.  The rules here are made up --
 each stated withholding figure differs from the return's so that a formula
-reading the wrong one cannot land on the right answer -- and are real
-:class:`app.tax_law.FederalRules`, so the producer under test is the law's own.
+reading the wrong one cannot land on the right answer -- and are a real
+:class:`app.services.tax_config_service.FederalTaxRules`, the one filing
+status's slice the resolver hands the calculator, so the producer under test
+is the resolver's own.
 """
 
 from decimal import Decimal
@@ -16,7 +18,8 @@ from app.services.tax_calculator import (
     calculate_annual_federal_liability,
     calculate_federal_withholding,
 )
-from app.tax_law import FederalRules, ladder
+from app.services.tax_config_service import FederalTaxRules
+from app.tax_law import ladder
 
 
 def _rules_stating_withholding_figures():
@@ -26,7 +29,7 @@ def _rules_stating_withholding_figures():
     14,000 and 2,000.  Both price on one ladder: 10% to 10,000, 12% to 40,000,
     22% above.
     """
-    return FederalRules(
+    return FederalTaxRules(
         standard_deduction=Decimal("15000.00"),
         child_credit_amount=Decimal("2200.00"),
         other_dependent_credit_amount=Decimal("500.00"),
@@ -88,7 +91,7 @@ class TestTheTwoFormulasReadTheirOwnFigures:
           per check = (4240 - 2200) / 26 = 2040 / 26 = 78.4615... -> 78.46
         """
         rules = _rules_stating_withholding_figures()
-        plain = FederalRules(
+        plain = FederalTaxRules(
             standard_deduction=rules.standard_deduction,
             child_credit_amount=rules.child_credit_amount,
             other_dependent_credit_amount=rules.other_dependent_credit_amount,

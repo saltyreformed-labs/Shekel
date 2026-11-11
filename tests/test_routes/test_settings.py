@@ -20,9 +20,9 @@ from app.models.account import Account
 from app.models.ref import AccountType
 from app.models.user import UserSettings
 from app.tax_law import TaxLaw
+from tests._made_up_federal import made_up_credits, made_up_federal
 from tests._test_helpers import (
     MADE_UP_SOURCES,
-    made_up_federal,
     made_up_fica,
     made_up_state,
     made_up_year,
@@ -747,6 +747,7 @@ class TestTheTaxRatesSectionShowsTheLawReadOnly:
         tax_law(TaxLaw(years=(made_up_year(
             2031,
             federal=made_up_federal(),
+            federal_credits=made_up_credits(),
             fica=made_up_fica(),
             states={"NC": made_up_state(Decimal("0.0612"))},
         ),)))
@@ -757,6 +758,7 @@ class TestTheTaxRatesSectionShowsTheLawReadOnly:
         assert "6.12%" in html            # the state rate
         assert "$176,100" in html         # the Social Security wage base
         assert "$11,600" in html          # a federal rung boundary
+        assert "Child Credit:</span> $2,000.00" in html  # the year's credits
         assert str(escape(MADE_UP_SOURCES[0])) in html  # autoescaped, as rendered
 
     def test_no_form_on_the_section_posts_anywhere(self, app, auth_client, seed_user):

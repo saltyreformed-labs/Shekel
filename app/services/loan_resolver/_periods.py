@@ -77,7 +77,7 @@ def _origination_rate(rate_changes: list | None) -> Decimal:
     return Decimal(str(earliest.interest_rate))
 
 
-def accrual_convention(loan_params) -> InterestAccrualConventionEnum:
+def accrual_convention(loan_params: LoanParams) -> InterestAccrualConventionEnum:
     """Return how *loan_params*'s note accrues interest, as the enum member.
 
     THE one reading of ``LoanParams.interest_accrual_convention_id`` (plan step
@@ -90,18 +90,37 @@ def accrual_convention(loan_params) -> InterestAccrualConventionEnum:
     (:func:`app.services.balance_at.loan_terms`) and the refinance
     calculator's hypothetical loan -- so the conversion is spelled once.
 
+    **An id that names no member is refused HERE**, where it is read: a
+    ``LoanParams`` built in memory without the column reads ``None``, and
+    handed on it would fail only at a walk's first charge, or never on a path
+    that charges nothing.  A row the database holds cannot reach the refusal
+    (the column is NOT NULL under a foreign key onto the list).  A
+    ``KeyError``, the :func:`app.ref_cache.ledger_class_is_debit_normal`
+    precedent for a lookup that drives logic, and not a ``ValueError``, which
+    the debt-strategy page's handlers turn into a form message.
+
     Args:
         loan_params: A LoanParams-shaped object exposing
             ``interest_accrual_convention_id``.
 
     Returns:
-        The member the id names; ``None`` only for an id the ref cache does
-        not hold, which the column's foreign key rules out and the producer
-        then refuses with ``KeyError`` at its first charge.
+        The member the id names.
+
+    Raises:
+        KeyError: When the id names no member: ``None``, or an id the ref
+            cache does not hold.  The message names the id read.
     """
-    return ref_cache.interest_accrual_convention_member(
-        loan_params.interest_accrual_convention_id,
-    )
+    convention_id = loan_params.interest_accrual_convention_id
+    member = ref_cache.interest_accrual_convention_member(convention_id)
+    if member is None:
+        raise KeyError(
+            f"interest_accrual_convention_id {convention_id!r} names no "
+            f"InterestAccrualConventionEnum member.  A loan row the database "
+            f"holds cannot (NOT NULL, a foreign key onto "
+            f"ref.interest_accrual_conventions), so a LoanParams built in "
+            f"memory must state the column."
+        )
+    return member
 
 
 def _loan_terms_from(loan_params, base_rate: Decimal) -> LoanTerms:

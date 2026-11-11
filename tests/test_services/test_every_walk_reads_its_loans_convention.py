@@ -167,6 +167,31 @@ class TestTheConventionEntersOnce:
         """A loan row holding ``monthly_1_12``'s id reads back as the member itself."""
         assert loan_resolver.accrual_convention(_params()) is _MONTHLY
 
+    @pytest.mark.parametrize(
+        "lacks", ["the-column", "a-listed-id"],
+    )
+    def test_an_id_naming_no_member_is_refused_where_it_is_read(self, lacks):
+        """``None`` (a row built without the column) and an id the list lacks are refused.
+
+        At the reading, before any period is built, with a message naming the
+        id read: not at a walk's first charge, and not never on a path that
+        charges nothing.
+        """
+        convention_id = (
+            None if lacks == "the-column"
+            else ref_cache.interest_accrual_convention_id(_MONTHLY) + 1
+        )
+        params = _params(interest_accrual_convention_id=convention_id)
+        refusal = (
+            f"interest_accrual_convention_id {convention_id!r} names no "
+            "InterestAccrualConventionEnum member"
+        )
+
+        with pytest.raises(KeyError, match=refusal):
+            loan_resolver.accrual_convention(params)
+        with pytest.raises(KeyError, match=refusal):
+            loan_resolver.resolve_periods(params, _origination_rate())
+
     def test_every_rate_period_carries_what_the_reading_answered(
         self, sentinel_convention,
     ):

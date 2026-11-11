@@ -9,13 +9,17 @@ words are what make that visible (finding N-235).  The words are
 The cockpit prints them in the two places it names the pay stub that priced
 the paycheck (ruling R-SAL100's placement): the hero caption gets the year
 phrase, and the "Where this paycheck goes" card's foot the phrase and the
-note.  Both only when some part was priced on another year's rules.
+note.  Both only when some part was priced on another year's rules.  The
+projection ledger prints the phrase and the note as one line above its table
+for each tax year whose paychecks were priced so.
 
 Every case installs a made-up law (ruling R-SAL80), so none moves when a real
 year is published.  ``seed_periods`` saves only 2026's paydays, and the
 cockpit reads saved periods, so the substituted year is 2026 under a law
 ending 2025.  Each case reads the hero caption and the card alone: the full
 page also carries the tax-law notice, whose words depend on today's date.
+The ledger's case reads the whole page for its one exact line, which the
+notice's words ("the 2027 tax rules") cannot match.
 """
 
 import re
@@ -186,3 +190,35 @@ class TestTheCockpitSaysWhichYearsRules:
                 f"Tax year {per_part}. Shekel doesn't have all of 2026's tax rules."
             )
             assert re.search(r"\bNC\b", hero + card) is None
+
+
+class TestTheProjectionLedgerSaysWhichYearsRules:
+    """One line above the ledger per tax year priced on another year's rules."""
+
+    def test_a_year_past_the_newest_has_its_line_and_a_carried_year_none(
+        self, app, auth_client, seed_user, seed_periods_52, tax_law,
+    ):
+        """Paydays through 2027 under a law ending 2026: a 2027 line, no 2026 line.
+
+        ``seed_periods_52`` saves 52 biweekly paydays from 2026-01-02, the last
+        2027-12-17, so the ledger holds both years.  2027's paychecks are on
+        2026's rules (ruling R-SAL76), one line for all of them, above the
+        table; 2026's are on their own and say nothing.
+        """
+        tax_law(_NC_TO_2026)
+        assert seed_periods_52[-1].start_date.year == 2027
+        with app.app_context():
+            profile = _create_profile(seed_user)
+
+            resp = auth_client.get(f"/salary/{profile.id}/projection")
+            assert resp.status_code == 200
+            html = resp.data.decode()
+            above_the_table = _visible(html[:html.index("<table")])
+
+            line = (
+                "Tax year 2027 on 2026's tax rules. "
+                "Shekel doesn't have 2027's tax rules."
+            )
+            assert above_the_table.count(line) == 1
+            assert _visible(html).count(line) == 1
+            assert "Tax year 2026" not in _visible(html)

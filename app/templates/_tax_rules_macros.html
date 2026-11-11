@@ -3,7 +3,7 @@
    salary:X-at-6).
 
    Usage:
-     {% from "_tax_rules_macros.html" import rules_year_phrase, rules_note %}
+     {% from "_tax_rules_macros.html" import rules_year_phrase, rules_note, rules_sentence %}
 
    Both read a TaxLawBasis (app/services/tax_config_service.py), the
    resolver's own answer carried on whatever was priced, so no screen works
@@ -28,7 +28,13 @@
    when some part was priced on the year's own rules (has_some_own_rules):
    2027 above, never 2028, whose rules the app holds none of.  It renders
    nothing for a basis that substituted nothing, so no caller can print the
-   claim about a year whose rules the app has. #}
+   claim about a year whose rules the app has.
+
+   ``rules_sentence`` is the two as one line of prose, "Tax year 2028 on
+   2027's tax rules. Shekel doesn't have 2028's tax rules.", for a page with
+   no "Tax year" label of its own to put the phrase beside: the cockpit's
+   "Where this paycheck goes" card and the projection ledger.  It too renders
+   nothing for a basis that substituted nothing. #}
 
 {%- macro rules_year_phrase(basis, state_code) -%}
 {{- basis.tax_year -}}
@@ -42,5 +48,11 @@
 {%- macro rules_note(basis) -%}
 {%- if basis.substituted -%}
 Shekel doesn't have {{ "all of " if basis.has_some_own_rules }}{{ basis.tax_year }}'s tax rules.
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro rules_sentence(basis, state_code) -%}
+{%- if basis.substituted -%}
+Tax year {{ rules_year_phrase(basis, state_code) }}. {{ rules_note(basis) }}
 {%- endif -%}
 {%- endmacro -%}

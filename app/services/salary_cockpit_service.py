@@ -25,6 +25,7 @@ from app.enums import PaycheckLineKindEnum
 from app.services import paycheck_line_kinds
 from app.services.pay_calendar import DerivedPeriod
 from app.services.paycheck_calculator import PaycheckBreakdown
+from app.services.tax_config_service import TaxLawBasis
 from app.utils.money import HUNDRED, ZERO, round_money
 
 # The net-pay staircase chart looks back this many pay periods before the
@@ -309,6 +310,32 @@ def yearly_net_totals(pairs: list[PeriodPair]) -> list[tuple[int, Decimal]]:
         year = period.start_date.year
         totals[year] = totals.get(year, ZERO) + breakdown.earnings.net_pay
     return [(year, totals[year]) for year in sorted(totals)]
+
+
+def substituted_tax_rules(pairs: list[PeriodPair]) -> list[TaxLawBasis]:
+    """Return each basis on which some paycheck was priced on another year's rules.
+
+    The projection ledger prints one line per tax year whose paychecks were
+    priced on rules other than their own (plan step salary:X-at-6, ruling
+    **R-SAL75**; finding **N-235**).  Each basis is read off a paycheck's own
+    tax lines (``taxes.rules``), the engine's answer, so the ledger never
+    works out a year itself.  One pricer resolves each tax year once, so every
+    paycheck of a year carries the same basis and a year is one line.
+
+    Args:
+        pairs: The full ordered ``(period, breakdown)`` list.
+
+    Returns:
+        The distinct substituted bases, ascending by ``tax_year``, so the
+        template groups nothing.  Empty when every paycheck was priced on its
+        own year's rules.
+    """
+    bases = dict.fromkeys(
+        breakdown.taxes.rules
+        for _period, breakdown in pairs
+        if breakdown.taxes.rules.substituted
+    )
+    return sorted(bases, key=lambda basis: basis.tax_year)
 
 
 def build_chips(

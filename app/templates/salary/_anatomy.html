@@ -1,5 +1,5 @@
 {% from "_money_macros.html" import money %}
-{% from "_tax_rules_macros.html" import rules_year_phrase, rules_note %}
+{% from "_tax_rules_macros.html" import rules_sentence %}
 {# Paycheck anatomy: the composition card (the primary HTMX swap target for
    period stepping) plus the deductions bar-list card (an hx-swap-oob
    sibling, so stepping to a neighbouring period updates both at once).
@@ -151,7 +151,7 @@
          on its own year's rules has nothing to disclose. #}
       {% if composition.tax_rules.substituted %}
       <span><i class="bi bi-calendar2-x"></i>
-        Tax year {{ rules_year_phrase(composition.tax_rules, profile.state_code) }}. {{ rules_note(composition.tax_rules) }}</span>
+        {{ rules_sentence(composition.tax_rules, profile.state_code) }}</span>
       {% endif %}
     </div>
   </div>

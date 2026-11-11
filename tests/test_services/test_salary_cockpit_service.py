@@ -367,6 +367,38 @@ class TestYearlyNetTotals:
         ]
 
 
+
+class TestSubstitutedTaxRules:
+    """substituted_tax_rules: one basis per tax year priced on another year's rules."""
+
+    def test_a_carried_year_and_two_substituted_ones(self):
+        """2026 on its own rules; 2027 and 2028 on 2026's: one basis each for the two.
+
+        Two 2027 paychecks carry equal bases built apart, so a year is one
+        entry by value, not by object; 2026 is on its own rules and is no
+        entry at all.  Ascending by tax year.
+        """
+        def on_2026s(tax_year):
+            return TaxLawBasis(
+                tax_year=tax_year, federal_year=2026, state_year=2026, fica_year=2026,
+            )
+
+        pairs = [
+            _pair(1, date(2026, 12, 4), date(2026, 12, 17), "52000", "2000", "1400"),
+            _pair(2, date(2027, 1, 1), date(2027, 1, 14), "52000", "2000", "1400",
+                  rules=on_2026s(2027)),
+            _pair(3, date(2027, 1, 15), date(2027, 1, 28), "52000", "2000", "1400",
+                  rules=on_2026s(2027)),
+            _pair(4, date(2028, 1, 14), date(2028, 1, 27), "52000", "2000", "1400",
+                  rules=on_2026s(2028)),
+        ]
+
+        assert svc.substituted_tax_rules(pairs) == [on_2026s(2027), on_2026s(2028)]
+
+    def test_every_paycheck_on_its_own_years_rules_is_no_entry(self):
+        """The shared scenario, all 2026 on 2026's own rules: nothing to say."""
+        assert svc.substituted_tax_rules(_scenario()) == []
+
 class TestBuildChips:
     """build_chips: focused-period hero figures + next-event chips."""
 

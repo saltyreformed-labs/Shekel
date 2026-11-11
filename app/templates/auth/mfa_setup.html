@@ -15,6 +15,15 @@
       continue to Shekel.
     </p>
     {% endif %}
+    {# No TOTP_ENCRYPTION_KEY, so no key can be made (plan#3514): the page
+       says so here, with no key, QR code or form, rather than redirecting to
+       a page the login gate refuses a companion held at setup. #}
+    {% if key_missing %}
+    <div class="alert alert-danger" role="alert">
+      MFA is not available. The server administrator must set
+      TOTP_ENCRYPTION_KEY before MFA can be enabled.
+    </div>
+    {% else %}
     <p class="text-muted">
       Setting up on this phone? Open your authenticator app (e.g. Google
       Authenticator, Authy, or 1Password) from the button below, with the key
@@ -56,6 +65,7 @@
         <i class="bi bi-shield-check"></i> Verify and Enable
       </button>
     </form>
+    {% endif %}
     {% endcall %}
   </div>
 </div>

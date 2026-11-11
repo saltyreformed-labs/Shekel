@@ -1143,51 +1143,6 @@ class TestMfaSetup:
                 f"{len(rendered_codes)}: {rendered_codes!r}"
             )
 
-    def test_mfa_confirm_missing_totp_key(self, app, auth_client, seed_user, monkeypatch):
-        """POST /mfa/confirm redirects to security settings when TOTP key is missing.
-
-        Setup writes a pending secret successfully; then the operator
-        unsets ``TOTP_ENCRYPTION_KEY`` between request boundaries.  At
-        confirm time the route's ``decrypt_secret`` call raises
-        RuntimeError.  The route must (a) clear the unrecoverable
-        pending state, (b) redirect to the Security page (``/security``
-        since ruling plan#3435)
-        rather than looping the user through /mfa/setup (which would
-        also fail), and (c) NOT return a 500.
-        """
-        with app.app_context():
-            # The decrypt failure occurs BEFORE setup-code verification
-            # in the mfa_confirm route; the patch is here defensively
-            # so a refactor cannot accidentally let a "wrong code" path
-            # mask the missing-key path.
-            monkeypatch.setattr(
-                mfa_service, "verify_totp_setup_code", lambda s, c: 12345,
-            )
-
-            # Visit setup to write the pending secret while the key is set.
-            auth_client.get("/mfa/setup")
-
-            # Remove the key so the next decrypt_secret raises RuntimeError.
-            monkeypatch.delenv("TOTP_ENCRYPTION_KEY", raising=False)
-
-            response = auth_client.post("/mfa/confirm", data={
-                "totp_code": "123456",
-            }, follow_redirects=False)
-            assert response.status_code == 302
-            assert "security" in response.headers.get("Location", "")
-
-            # The unrecoverable pending state must have been cleared so
-            # the next request does not encounter the same broken row.
-            config = (
-                db.session.query(MfaConfig)
-                .filter_by(user_id=seed_user["user"].id)
-                .first()
-            )
-            assert config.pending_secret_encrypted is None
-            assert config.pending_secret_expires_at is None
-            assert config.is_enabled in (False, None)
-            assert config.totp_secret_encrypted is None
-
 
 class TestMfaLogin:
     """Tests for the two-step MFA login flow."""

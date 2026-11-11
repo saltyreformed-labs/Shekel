@@ -382,7 +382,8 @@ def _readable_pending_secret(mfa_config: MfaConfig | None) -> str | None:
     when its ciphertext does not decrypt: an ``InvalidToken`` (the key it was
     written under was pruned since) or a ``RuntimeError`` (no key is set).
     Either way ``/mfa/setup`` makes a new key, and with no key set that
-    attempt's own encrypt fails and says so to the user, so no failure is
+    attempt's own encrypt raises too, and the setup page then says in place
+    that two-factor is unavailable until the key is set, so no failure is
     hidden here.
 
     Args:
@@ -431,8 +432,12 @@ def mfa_setup():
     setup of their own anyway.
 
     If MFA is already enabled the user is redirected back to security
-    settings.  If the encryption key is missing the user is redirected
-    with a flash explaining the operator-side prerequisite.
+    settings.  **If the encryption key is missing the page says so in place**
+    (plan#3514): a 200 naming the operator-side prerequisite, with no key, QR
+    code or form, and nothing written.  It once redirected to the Security
+    page with a flash, which the login gate refuses a companion it holds here,
+    so she was sent straight back, round and round, the flash never shown.
+    ``/mfa/confirm`` sends its own key failures here for the same reason.
 
     **A GET that WRITES, and it says so** (plan step balance:X-i3).  Every
     other request method declares itself; this route is the one place where a
@@ -460,15 +465,12 @@ def mfa_setup():
         # leaves the database state untouched -- no orphan pending row, no
         # half-initialized MfaConfig.  encrypt_secret() raises RuntimeError
         # when the key is unset (see app/services/mfa_service.py:_build_fernet_list).
+        # The page says so here, in place, never by a redirect: this is the
+        # one page a companion without two-factor is held at (plan#3514).
         try:
             encrypted_pending = mfa_service.encrypt_secret(secret)
         except RuntimeError:
-            flash(
-                "MFA is not available. The server administrator must set "
-                "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
-                "danger",
-            )
-            return redirect(url_for("auth.security"))
+            return render_template("auth/mfa_setup.html", key_missing=True)
 
         # The row is CONSTRUCTED inside the block, not before it: opening the
         # command rolls the query's snapshot back, and a pending instance
@@ -489,6 +491,7 @@ def mfa_setup():
     totp_uri = mfa_service.get_totp_uri(secret, current_user.email)
     return render_template(
         "auth/mfa_setup.html",
+        key_missing=False,
         totp_uri=totp_uri,
         qr_data_uri=mfa_service.generate_qr_code_data_uri(totp_uri),
         manual_key=secret,
@@ -514,9 +517,12 @@ def mfa_confirm():
         consumed/cleared.  Redirect to /mfa/setup with a flash.
       * Pending expiry has elapsed -- reject and clear the pending
         columns so the next /mfa/setup call starts cleanly.
-      * Encryption key is missing or the pending ciphertext does not
-        decrypt under any configured key -- redirect with a flash that
-        names the operator-side fix.
+      * Encryption key is missing, at the decrypt or at the promotion's
+        re-encrypt -- redirect to /mfa/setup, which says in place that the
+        operator must set it (plan#3514), never to a page the login gate
+        refuses a companion it holds at setup.
+      * The pending ciphertext does not decrypt under any configured key
+        -- clear it and redirect to /mfa/setup with a flash to start again.
       * Invalid TOTP code -- flash and redirect; pending state is
         retained until expiry so a typo does not force a re-scan.
     """
@@ -547,21 +553,16 @@ def mfa_confirm():
     try:
         secret = mfa_service.decrypt_secret(ciphertext)
     except RuntimeError:
-        # TOTP_ENCRYPTION_KEY is unset.  Sending the user back to
-        # /mfa/setup would only loop them through the same failure
-        # (encrypt_secret would raise RuntimeError too), so clear the
-        # pending state and bounce to the security settings page where
-        # the user can see the status and wait for the operator-side
-        # fix.  Mirrors the recovery path used in /mfa/disable.
+        # TOTP_ENCRYPTION_KEY is unset.  Clear the pending state it can no
+        # longer read and send the user to /mfa/setup, whose own encrypt
+        # fails the same way and which then says in place that the operator
+        # must set the key (plan#3514).  No flash: setup's page is the one
+        # place that says it, and a redirect anywhere else loops a companion
+        # the login gate holds at setup.
         mfa_config.pending_secret_encrypted = None
         mfa_config.pending_secret_expires_at = None
         db.session.commit()
-        flash(
-            "MFA is not available. The server administrator must set "
-            "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
-            "danger",
-        )
-        return redirect(url_for("auth.security"))
+        return redirect(url_for("auth.mfa_setup"))
     except InvalidToken:
         # The pending ciphertext is unreadable under the current Fernet
         # key list -- typically because the key it was written under has
@@ -611,13 +612,11 @@ def mfa_confirm():
     except RuntimeError:
         # decrypt_secret() succeeded above so MultiFernet was usable a
         # moment ago.  This branch is only hit if TOTP_ENCRYPTION_KEY
-        # was unset between the two calls -- defensive, not expected.
-        flash(
-            "MFA is not available. The server administrator must set "
-            "TOTP_ENCRYPTION_KEY before MFA can be enabled.",
-            "danger",
-        )
-        return redirect(url_for("auth.security"))
+        # was unset between the two calls -- defensive, not expected.  Sent
+        # to /mfa/setup, which says so in place (plan#3514), as the decrypt's
+        # key failure above is.  Nothing was written: the assignment above
+        # raised before it took.
+        return redirect(url_for("auth.mfa_setup"))
 
     # Single ``now`` flows into both ``confirmed_at`` and the
     # security-event timestamp so an analyst correlating the audit

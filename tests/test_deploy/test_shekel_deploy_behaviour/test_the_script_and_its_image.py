@@ -1,13 +1,15 @@
 """The script itself: its runs inherit no target from the test's environment, it is tracked in the
-repository, it names the migrate service as the compose file does, it finds its running-check
-through production's symlinks, it verifies only main's build in the new home, and it resolves the
-:latest tag to its first digest.
+repository, it names the migrate service as the compose file does, it finds its running-check and
+its own parts through production's symlinks, it verifies only main's build in the new home, and it
+resolves the :latest tag to its first digest.
 """
 
 from __future__ import annotations
 
 import re
 import shutil
+
+import pytest
 
 from tests._repo_root import REPO_ROOT
 from tests.test_deploy._compose import service
@@ -218,7 +220,26 @@ class TestTheRunningCheckIsReadFromTheScriptsCheckout:
     through ``readlink -f`` of itself.  Every other test here runs the
     repository's copy in place, which is that path's end; these pin the
     chain that starts it, and what a copy without the helper does.
+
+    Ruling plan#3544 split the script itself under 1,000 lines a file: its
+    entry sources its parts, ``deploy/_*.sh``, from beside itself the same
+    way, and a copy without one refuses the same way.
     """
+
+    def test_the_parts_the_tests_carry_are_the_ones_the_entry_sources(self):
+        """``_DEPLOY_PARTS`` is the set of files the entry's own directives name.
+
+        Each part is sourced under a ``# shellcheck source=`` directive, the
+        entry's statement of what it loads beside itself.  An empty glob would
+        give the parametrized refusal below no case and the control a copy
+        missing its parts, so the set is held to the entry's.
+        """
+        sourced = set(re.findall(
+            r"^# shellcheck source=(_[a-z_]+\.sh)$",
+            _DEPLOY_SCRIPT.read_text(encoding="utf-8"), re.MULTILINE,
+        ))
+        assert sourced == {part.name for part in _DEPLOY_PARTS}, sourced
+        assert sourced, "the entry sources no part beside itself"
 
     def test_production_s_two_symlinks_find_the_helper(self, stack, tmp_path):
         """Run through two symlinks, as production does, it deploys.
@@ -263,6 +284,35 @@ class TestTheRunningCheckIsReadFromTheScriptsCheckout:
             f"ERROR: {copy} cannot load "
             f"{copy.parent}/../scripts/_container_lib.sh" in result.stderr
         ), _said(result, calls)
+        assert calls == [], (
+            f"the script ran docker before stopping.  {_said(result, calls)}"
+        )
+        assert stack.pin == _OLD, _said(result, calls)
+
+    @pytest.mark.parametrize("missing", [part.name for part in _DEPLOY_PARTS])
+    def test_a_copy_without_one_of_its_parts_stops_before_touching_anything(
+        self, stack, tmp_path, missing,
+    ):
+        """The helper is beside it but one part is not: it refuses, naming both files.
+
+        The part's refusal is the helper's: nothing runs first, not the
+        startup report and not docker, so the line names the copy running.
+        """
+        copy = tmp_path / "partial" / "deploy" / "shekel-deploy.sh"
+        copy.parent.mkdir(parents=True)
+        shutil.copy2(_DEPLOY_SCRIPT, copy)
+        for part in _DEPLOY_PARTS:
+            if part.name != missing:
+                shutil.copy2(part, copy.parent / part.name)
+        helper = copy.parents[1] / "scripts" / "_container_lib.sh"
+        helper.parent.mkdir()
+        shutil.copy2(REPO_ROOT / "scripts" / "_container_lib.sh", helper)
+        result = stack.run(script=copy, health="healthy", **_NO_MIGRATIONS)
+        calls = stack.invocations
+        assert result.returncode == 1, _said(result, calls)
+        assert result.stdout == "", _said(result, calls)
+        assert f"ERROR: {copy} cannot load {copy.parent}/{missing}," in result.stderr, (
+            _said(result, calls))
         assert calls == [], (
             f"the script ran docker before stopping.  {_said(result, calls)}"
         )

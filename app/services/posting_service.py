@@ -720,9 +720,9 @@ def resync_all_cash_postings() -> tuple[int, int]:
     that line is the only evidence the one-time re-date happened.
 
     **The re-date is ONE-WAY, and that is a stated risk rather than a
-    discovered one.**  ``entrypoint.sh`` runs ``set -eEuo pipefail`` and calls
-    ``scripts/init_database.py``, so a failure here aborts the container
-    before anything commits -- the release's migrations included, since plan
+    discovered one.**  The deploy, ``scripts/deploy.sh``, runs ``set -eEuo
+    pipefail`` and calls ``scripts/init_database.py``, so a failure here ends
+    it before anything commits -- the release's migrations included, since plan
     step ``balance:X-cv`` runs them and the three deploy hooks in ONE
     transaction -- so the stamp is unmoved and ``deploy/shekel-deploy.sh``
     re-pins the previous image.  And if the healthcheck
@@ -858,11 +858,12 @@ def resync_all_cash_postings() -> tuple[int, int]:
     #
     # That refusal is right for a SINGLE write path, where a caller asking about
     # one transfer must not get a fabricated posting.  It is wrong for a batch
-    # self-heal that walks every row in the database and runs at container start
-    # (``scripts/init_database.py``): one repairable row would make the app
-    # unbootable for every user, and the operator could not even reach the
-    # screen that shows which row it was.  Skipping keeps the failure loud in
-    # the log and bounded to the family that caused it.
+    # self-heal that walks every row in the database and runs on every deploy
+    # (``scripts/init_database.py``), which the web server's start waits on: one
+    # repairable row would make the app unbootable for every user, and the
+    # operator could not even reach the screen that shows which row it was.
+    # Skipping keeps the failure loud in the log and bounded to the family that
+    # caused it.
     #
     # **Skipped WHOLE, under a SAVEPOINT** (the leaf-1 adversarial review of
     # plan step ``balance:X-bi-6-3``, finding 1).  The pair's door writes in

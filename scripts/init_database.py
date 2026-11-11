@@ -18,14 +18,15 @@ Detects fresh vs. existing databases and initializes accordingly:
   that pre-dates Commit C-13 picks up the rebuild migration on the
   next ``flask db upgrade`` and the GRANT block inside the migration
   applies once the ``shekel_app`` role has been provisioned by
-  ``scripts/init_db.sql``.
+  ``deploy/postgres/provision_roles.sh``, in the database container.
 
 Both paths then run the same sequence (ruling R-BAL122): the reference
 rows are seeded, ``ref_cache`` is loaded from them, the hooks run (an
 existing database only), and the audit triggers are counted -- the work
-entrypoint steps 4 and 7 used to do after this script had committed
-(:func:`_bring_to_release`).  The same sequence seeded every user's missing
-tax rows (its step 5; entrypoint step 6 before plan step balance:X-cv) until
+``entrypoint.sh``'s steps 4 and 7 did after this script had committed, until
+plan step balance:X-cv (:func:`_bring_to_release`).  The same sequence seeded
+every user's missing tax rows (its step 5; ``entrypoint.sh``'s step 6 before
+plan step balance:X-cv) until
 plan step salary:X-at-1 gave the tax law one home in the code
 (:mod:`app.tax_law`), which no deploy copies.
 
@@ -488,7 +489,7 @@ def _bring_to_release(connection):
     **Why the seed precedes the cache.**  ``ref_cache.init`` refuses a ref
     table that EXISTS without a row for one of its enum members.  A first
     boot's ref tables are empty until the seed fills them, so the cache read
-    that entrypoint step 4 made before seeding (``scripts/seed_ref_tables.py``
+    that ``entrypoint.sh``'s step 4 made before seeding (``scripts/seed_ref_tables.py``
     built the app with the eager init) stopped every new production install
     there, and every restart after it in step 3 (finding **BAL-536**).  On an
     existing database, reading the cache straight after the migrations also
@@ -501,7 +502,7 @@ def _bring_to_release(connection):
     (SELECT ...)`` that finds nothing) would quietly do nothing there and in a
     deploy alike; no gate sees that case.
 
-    Steps 2 and 5 were entrypoint steps 4 and 7 (the tax seed, entrypoint
+    Steps 2 and 5 were ``entrypoint.sh``'s steps 4 and 7 (the tax seed, its
     step 6 and then this sequence's step 5, was deleted at plan step
     salary:X-at-1), each run after step 3 had
     committed, so a failure in one left the release's stamp behind a dead
@@ -601,7 +602,10 @@ def _session_joined_to(connection):
 
 
 def initialise_database():
-    """Run entrypoint step 3 as ONE transaction and commit it once (plan step balance:X-cv).
+    """Run the deploy's step 3 as ONE transaction and commit it once (plan step balance:X-cv).
+
+    The deploy is ``scripts/deploy.sh``, the migrate service's command, and this is its
+    step 3.
 
     Ruling **R-BAL105**'s future step.  Before it the migrations committed in
     ``migrations/env.py``'s own transaction BEFORE the three deploy hooks ran,

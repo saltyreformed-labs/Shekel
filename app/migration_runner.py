@@ -4,7 +4,7 @@ Plan step ``balance:X-cv``, rulings **R-BAL114** (one runner) and **R-BAL120**
 (its home is here).
 
 **One spelling of "run the migrations".**  The deploy
-(``scripts/init_database.py``, entrypoint step 3) and the test-template build
+(``scripts/init_database.py``, step 3 of ``scripts/deploy.sh``) and the test-template build
 (``scripts/build_test_template.py``) both run the chain through this module, on
 a connection they hand over inside a transaction they opened, and nothing here
 commits it.  So every template build -- every CI run -- pushes the whole chain

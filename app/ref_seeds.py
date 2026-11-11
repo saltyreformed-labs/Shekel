@@ -12,8 +12,9 @@ Two exports:
   upsert routine that populates every ref-schema table to a
   byte-identical state on every call.  Used by the application
   factory's dev/test convenience seed (``app/__init__.py``), the
-  deploy (``scripts/init_database.py``, inside entrypoint step 3's one
-  transaction), the manual repair script (``scripts/seed_ref_tables.py``),
+  deploy (``scripts/init_database.py``, inside the one transaction of
+  ``scripts/deploy.sh``'s step 3), the manual repair script
+  (``scripts/seed_ref_tables.py``),
   the pytest fixture stack (``tests/conftest.py``), and the test
   template builder (``scripts/build_test_template.py``).
 
@@ -497,8 +498,8 @@ def _seed_account_types(
     name alone with no ORDER BY -- so a reseed could find the OWNER's row first
     and overwrite its flags with the seed's.  With ``has_revolving_credit``
     gating every card feature that would have made a user's "Credit Card" type
-    revolving at the next container start; the seed now writes only the row it
-    owns (the CC-1 adversarial review's finding 2).
+    revolving at the next deploy; the seed now writes only the row it owns (the
+    CC-1 adversarial review's finding 2).
 
     Args:
         session: SQLAlchemy session bound to the target database.

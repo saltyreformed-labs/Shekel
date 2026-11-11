@@ -215,8 +215,9 @@ def create_app(config_name=None, *, init_ref_cache=True):
     _register_static_versioning(app)
 
     # --- Create schemas & seed ref data (development convenience) --------
-    # In a container (production, development-container) the entrypoint
-    # runs the migrations and seeds the reference data instead.
+    # In a container (production, development-container) the deploy, the
+    # migrate service's ``scripts/deploy.sh``, runs the migrations and seeds
+    # the reference data instead.
     if config_name in ("development", "testing"):
         with app.app_context():
             _ensure_schemas()
@@ -718,8 +719,9 @@ def _ensure_schemas():
 def _seed_ref_tables():
     """Seed reference lookup tables if empty (dev/test only).
 
-    In production the deploy seeds inside entrypoint step 3's one
-    transaction (``scripts/init_database.py``).  Idempotent -- skips rows that
+    In production the deploy seeds inside its step 3's one transaction
+    (``scripts/init_database.py``, run by the migrate service's
+    ``scripts/deploy.sh``).  Idempotent -- skips rows that
     already exist.  Silently skips the entire seed if the tables
     haven't been created yet (e.g. first test-session run before
     ``create_all()``).
@@ -731,8 +733,8 @@ def _seed_ref_tables():
     tolerance of a SCHEMA BEHIND THE CODE is the only thing this
     wrapper contributes -- it handles the boot-time race where the
     factory runs the seed before a pending migration has created a
-    table or added a column (test setup, the development entrypoint,
-    ``flask db upgrade``).  It is read off the SQLSTATE
+    table or added a column (test setup, ``flask db upgrade``).  It is read
+    off the SQLSTATE
     (:func:`~app.utils.db_errors.is_schema_behind_code`), not the
     exception class, so a malformed statement, an absent privilege or a
     trigger's refusal propagates instead of being skipped as a schema

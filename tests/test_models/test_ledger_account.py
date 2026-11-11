@@ -1095,8 +1095,8 @@ class TestAuditTableRegistration:
 
     Per the coding standard "Every new table in auth, budget, or salary
     MUST be added to AUDITED_TABLES."  ``EXPECTED_TRIGGER_COUNT =
-    len(AUDITED_TABLES)`` drives the entrypoint health check, so a missing
-    entry would also fail the container start gate.
+    len(AUDITED_TABLES)`` drives the deploy's audit-trigger check, so a missing
+    entry would also fail the deploy's gate.
     """
 
     def test_table_registered(self):

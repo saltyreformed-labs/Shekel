@@ -168,8 +168,8 @@ def _load_rows(db_session, label, query_callable):
 
     A table or column the schema does not have yet means a migration
     that creates the ref table, or adds a column to it, is pending --
-    the bootstrap window during ``flask db upgrade`` and the development
-    entrypoint, which build the app before they migrate.  Catch it, roll
+    the bootstrap window during ``flask db upgrade``, which builds the app
+    before it migrates.  Catch it, roll
     the session back (a failed query poisons the transaction so
     subsequent queries would otherwise fail with "current transaction is
     aborted"), log loud, and return ``None`` so the caller can record the

@@ -119,8 +119,8 @@ def is_schema_behind_code(exc: DBAPIError) -> bool:
     The one test the two bootstrap tolerances apply
     (``app._seed_ref_tables`` and ``app.ref_cache._state._load_rows``),
     which can run before a pending migration has created a table or
-    added a column the models already name -- the development entrypoint
-    builds the app before it migrates, and so does ``flask db upgrade``.
+    added a column the models already name -- ``flask db upgrade`` builds
+    the app before it migrates.
     A table or column the schema does not have yet is the quirk they
     exist to absorb; every OTHER refusal -- a malformed query, an absent
     privilege, a trigger's ``RAISE`` -- is a real failure that must

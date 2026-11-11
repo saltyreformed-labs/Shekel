@@ -2402,8 +2402,8 @@ def load_init_database_module():
 
     Returns:
         The loaded ``init_database`` module object, exposing
-        ``initialise_database`` (entrypoint step 3, ONE transaction since plan
-        step ``balance:X-cv``) and the pieces it runs.
+        ``initialise_database`` (step 3 of the deploy, ``scripts/deploy.sh``, ONE
+        transaction since plan step ``balance:X-cv``) and the pieces it runs.
     """
     script_path = (
         pathlib.Path(__file__).resolve().parents[1] / "scripts" / "init_database.py"

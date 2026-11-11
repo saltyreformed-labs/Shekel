@@ -55,9 +55,9 @@ migration for existing databases, ``scripts/init_database.py`` for the
 fresh-DB path that stamps past the migration chain, and
 ``scripts/build_test_template.py`` for the test template) **plus one psql
 caller that cannot import this module**: ``scripts/init_db_role.sql``, which
-``entrypoint.sh`` re-runs on EVERY container start and whose blanket
-``GRANT ... ON ALL TABLES IN SCHEMA budget`` would otherwise silently
-re-grant ``UPDATE, DELETE`` on the ledger tables at each restart, undoing a
+the deploy (``scripts/deploy.sh``, step 2) re-runs on EVERY deploy and whose
+blanket ``GRANT ... ON ALL TABLES IN SCHEMA budget`` would otherwise silently
+re-grant ``UPDATE, DELETE`` on the ledger tables at each one, undoing a
 one-time migration.  That file carries the same targeted REVOKE in SQL form
 with a cross-reference here; a change to either MUST be mirrored in the
 other.
@@ -265,8 +265,8 @@ def apply_ledger_append_only_privileges(executor: Callable[[str], object]) -> No
         executor: Single-argument callable that accepts a SQL string and
             runs it.  Same contract as :func:`apply_posting_infrastructure`;
             must run with a role privileged to REVOKE (the owner role -- the
-            migration runner, the entrypoint, and the test-template builder
-            all do).
+            migration runner, the deploy, and the test-template builder all
+            do).
     """
     executor(_REVOKE_LEDGER_WRITE_SQL)
 

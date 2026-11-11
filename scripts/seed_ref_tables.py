@@ -9,9 +9,10 @@ for ref-table seeding across the application factory, the deploy, this
 script, the pytest fixture stack, and the test-template builder.  See
 audit finding H-002 for the rationale.
 
-The deploy no longer runs this script: entrypoint step 3
-(``scripts/init_database.py``) seeds inside its one transaction, before
-anything reads ``ref_cache`` (plan step balance:X-cv, ruling R-BAL122).
+The deploy no longer runs this script: its step 3
+(``scripts/init_database.py``, which ``scripts/deploy.sh`` runs in the
+migrate service) seeds inside its one transaction, before anything reads
+``ref_cache`` (plan step balance:X-cv, ruling R-BAL122).
 This is the operator's repair tool, and it builds the app WITHOUT the
 eager ``ref_cache.init`` (ruling R-BAL123, finding BAL-536): that init
 treats a missing row as fatal, so a tool that ran it first died on

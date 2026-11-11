@@ -51,15 +51,16 @@ docker compose \
     up -d db
 ```
 
-On a fresh deploy, also set the matching app-side env vars (already declared in
-`deploy/docker-compose.prod.yml`):
+On a fresh deploy, also set the matching env vars on the `app` and `migrate` services (already
+declared in `deploy/docker-compose.prod.yml`):
 
-- `DATABASE_URL` includes `?sslmode=require` so the SQLAlchemy engine refuses any plaintext
-  connection.
-- `DB_SSLMODE=require` makes `entrypoint.sh` apply the same posture to `DATABASE_URL_APP` (the
-  least-privilege role's URL).
-- `PGSSLMODE=require` covers every `psql` call in `entrypoint.sh` (schema bootstrap, role
-  provisioning). The audit-trigger check runs inside entrypoint step 3 over `DATABASE_URL`.
+- `DB_SSLMODE=require` adds `?sslmode=require` to the database URL each entrypoint builds
+  (`scripts/_entrypoint_lib.sh`), so neither engine accepts a plaintext connection: the web server's
+  `DATABASE_URL_APP` (`entrypoint.sh`) and the deploy's `DATABASE_URL`, the owner's
+  (`scripts/owner_entrypoint.sh`). The deploy's audit-trigger check runs over the owner's, inside
+  its step 3 (`scripts/init_database.py`).
+- `PGSSLMODE=require` covers every `psql` call in the deploy (`scripts/deploy.sh`: the schemas and
+  the web login's grants).
 
 Verify the channel encryption:
 

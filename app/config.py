@@ -26,9 +26,10 @@ load_dotenv()
 #
 # ``replaced_by_docker_secret`` is the placeholder the audit's Commit
 # C-38 runbook tells operators to leave in ``.env`` when migrating
-# to Docker secrets (Posture 2).  In steady-state Posture 2 the
-# entrypoint loader overwrites the env value with the real secret
-# from ``/run/secrets/secret_key`` before this check runs, so the
+# to Docker secrets (Posture 2).  In steady-state Posture 2 the web
+# server's entrypoint (``entrypoint.sh``, through ``_load_secret`` in
+# ``scripts/_entrypoint_lib.sh``) overwrites the env value with the real
+# secret from ``/run/secrets/secret_key`` before this check runs, so the
 # placeholder is not seen here.  But if the secret file is missing
 # or unreadable, the placeholder remains -- catching it here closes
 # the gap where the operator believes they are on Posture 2 but is
@@ -389,9 +390,10 @@ _VALKEY_STORE = "valkey+unix:///run/valkey/valkey.sock"
 #: The ACL user the app logs in to its store as (``deploy/valkey/users.acl``).
 _VALKEY_USER = "shekel"
 #: The variable the store's password arrives in, the source ``start.sh`` reads too.
-#: ``entrypoint.sh``'s ``_load_secret`` fills it from ``/run/secrets/valkey_password`` where
-#: that file is mounted (production, ``deploy/docker-compose.prod.yml``), as ``start.sh``
-#: reads the file first; each compose file sets it otherwise.
+#: ``entrypoint.sh`` fills it, through ``_load_secret`` (``scripts/_entrypoint_lib.sh``), from
+#: ``/run/secrets/valkey_password`` where that file is mounted (production,
+#: ``deploy/docker-compose.prod.yml``), as ``start.sh`` reads the file first; each compose file
+#: sets it otherwise.
 _VALKEY_PASSWORD = "VALKEY_PASSWORD"
 
 
@@ -438,12 +440,14 @@ class _ValkeyStore:
 def _runtime_database_uri(default: str | None = None) -> str | None:
     """Return the database URI the runtime app should connect under.
 
-    Production deploys provision two PostgreSQL roles:
+    Production provisions two PostgreSQL logins beside the superuser,
+    ``shekel_user``, whose password never leaves the database container
+    (``deploy/postgres/provision_roles.sh``; rulings plan#3412, plan#3413):
 
-    * ``shekel_user`` (owner) -- holds DDL rights and runs migrations,
-      seeds, and audit cleanup.  The owner URL is exposed as
-      ``DATABASE_URL`` so the entrypoint scripts and migration
-      tooling pick it up by default.
+    * ``shekel_owner`` (owner) -- owns every object and runs the
+      migrations, the seeds and the audit cleanup, in the migrate service,
+      whose entrypoint (``scripts/owner_entrypoint.sh``) exposes its URL as
+      ``DATABASE_URL``.
     * ``shekel_app`` (least-privilege) -- DML-only role with no
       ability to ``DROP TABLE``, ``ALTER TABLE``, or otherwise mutate
       the schema.  An attacker with RCE in the Gunicorn process
@@ -542,10 +546,10 @@ class DevContainerConfig(_ValkeyStore, DevConfig):
 
     Its own configuration rather than DevConfig deciding by what it is given, so no fallback
     exists: host ``flask run`` stays on DevConfig, always in memory (ruling plan#2619), and a
-    password in the host's environment changes nothing there.  The container runs the
-    entrypoint, which creates the schemas and seeds the reference rows as production's does,
-    so ``create_app``'s development arm, which does both for host ``flask run``, is not this
-    configuration's.
+    password in the host's environment changes nothing there.  The dev stack's migrate service
+    runs the deploy, which creates the schemas and seeds the reference rows as production's
+    does, so ``create_app``'s development arm, which does both for host ``flask run``, is not
+    this configuration's.
     """
 
 
@@ -599,7 +603,7 @@ class ProdConfig(_ValkeyStore, BaseConfig):
 
     DEBUG = False
     # Prefers DATABASE_URL_APP (least-privilege ``shekel_app`` role)
-    # when set, falling back to DATABASE_URL (owner ``shekel_user``).
+    # when set, falling back to DATABASE_URL (the owner's, where one is set).
     # ``__init__`` below rejects a missing URI.  The deploy builds
     # DeployConfig instead, which reads the owner's URL alone.  See
     # ``_runtime_database_uri`` for the full policy.

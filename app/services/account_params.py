@@ -15,8 +15,8 @@ first held the rule**:
    ``has_interest`` and ``has_parameters`` on an owner's own custom type, with
    no account row touched at all);
 4. :func:`app.ref_seeds.seed_reference_data`, which rewrites every BUILT-IN
-   type's flags in place on every container start -- so an edit to
-   ``ACCT_TYPE_SEEDS`` re-classes those accounts for every owner at deploy;
+   type's flags in place on every deploy -- so an edit to ``ACCT_TYPE_SEEDS``
+   re-classes those accounts for every owner at deploy;
 5. a data migration doing the same by hand, which has shipped both ways
    already: ``2c1115378030`` flipped ``has_interest`` on Money Market and CD
    and backfilled, at a `0.04500` default that ``E-12`` / ``HIGH-06`` later

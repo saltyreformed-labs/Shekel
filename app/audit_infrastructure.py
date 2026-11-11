@@ -26,7 +26,7 @@ REQUIRES adding a row to ``AUDITED_TABLES`` here AND running
 TRIGGER picks it up on the next ``flask db upgrade``.  The
 ``coding-standards.md`` "Schema Design" section documents this
 invariant; the deploy's trigger-count check
-(:func:`require_audit_triggers`) enforces it at container start.
+(:func:`require_audit_triggers`) enforces it at every deploy.
 """
 
 from __future__ import annotations
@@ -415,8 +415,8 @@ END;
 $$ LANGUAGE plpgsql
 """
 
-# Conditional GRANT block: if the ``shekel_app`` role exists (created
-# by ``scripts/init_db.sql`` in the production Docker entrypoint),
+# Conditional GRANT block: if the ``shekel_app`` role exists (made by
+# ``deploy/postgres/provision_roles.sh`` in the database container),
 # grant USAGE/SELECT/INSERT on the audit infrastructure so the
 # least-privilege app role can write audit_log rows through the
 # trigger and read them for forensic queries.  When the role does

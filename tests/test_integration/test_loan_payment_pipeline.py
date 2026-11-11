@@ -28,15 +28,15 @@ class TestLoanPaymentPipeline:
     """End-to-end integration test for the Section 5.1 payment pipeline.
 
     Exercises every layer: route -> transfer service -> generated
-    transfers -> loan dashboard -> balance calculator.  A passing test means the entire payment linkage
-    pipeline works correctly.
+    transfers -> loan dashboard -> balance calculator.  A passing test
+    means the entire payment linkage pipeline works correctly.
     """
 
-    def test_full_payment_pipeline(  # pylint: disable=too-many-locals,too-many-statements
+    def test_full_payment_pipeline(
         self, app, auth_client, seed_user, seed_periods, db,
     ):
         """Full pipeline: create transfer via route, verify the generated
-        transfers, verify payment query, verify balance calculator.
+        transfers, the loan dashboard and the balance calculator.
 
         Steps:
         1. Create a checking account (seed_user already has one) and a

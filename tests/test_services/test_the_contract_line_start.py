@@ -115,9 +115,10 @@ class TestTheLineStartsAfterTheViewsLastEvent:
 
         Walk 3 counted the two February records as two months and started
         the line on Apr 1.  The record's last event is February's due date,
-        so the line starts Mar 1 and runs at most 12 - 3 + 1 = 10 installments
-        (installment 3 of 12); the balance clears on the tenth, Dec 1 2026,
-        with the interest stated at :data:`_LINE_INTEREST`.
+        so the line starts Mar 1, installment 2 of 12 (Feb 1 is installment
+        1), and runs at most 12 - 2 + 1 = 11 installments; February's second
+        payment paid principal ahead, so the balance clears on the tenth, Dec 1
+        2026, with the interest stated at :data:`_LINE_INTEREST`.
         """
         view = ConfirmedLedgerView(
             balance=_AFTER_FEBRUARY, history_rows=[],

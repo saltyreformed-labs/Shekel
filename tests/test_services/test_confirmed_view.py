@@ -315,7 +315,7 @@ class TestAWithheldViewResolvesExactlyAsTheUnseededResolver:
     Every guard in :class:`TestConfirmedViewGuards` seeds the resolver from the
     loan's latest assertion.  This pins what that is WORTH: the resolution is byte-identical
     to calling the pure resolver with no seed at all, so a withheld view can never
-    be a wrong one -- it is the pre-read-switch behaviour, exactly.
+    be a wrong one: it is the resolver's own answer from the latest assertion.
 
     Kept from the deleted ``resolve_loan_seeded`` suite, whose version used a loan
     with no OPENING posting; finding B-12 retired that premise (such a loan now

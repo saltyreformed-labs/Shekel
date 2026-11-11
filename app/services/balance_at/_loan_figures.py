@@ -513,11 +513,14 @@ def _has_recorded_payment(account: Account, ctx: BalanceContext) -> bool:
     Read off the pass's facts walk (:meth:`BalanceContext.loan_walk`), the
     stream the loan's balance is folded from, so "a payment stands behind this
     loan" and the balance beside it come from one set of facts.  The walk holds
-    a payment from its settled day (ruling **R-R91**), so a pass pinned to an
-    earlier day counts only what had moved by that day, exactly as
-    :func:`_is_retired`'s fold does; on every production pass the bound drops
-    nothing, because the write doors refuse a future settle day (ruling
-    **R-EJ**).
+    a payment from the day it is visible (ruling **R-R91**), so a pass pinned
+    to an earlier day counts only what had happened by that day, exactly as
+    :func:`_is_retired`'s fold does.  A payment whose money moved is visible
+    from its settled day, which the write doors refuse in the future (ruling
+    **R-EJ**).  A ``$0.00`` close stores no settle day: it is visible from the
+    installment it skips (ruling **R-R107**), so one stated before that
+    installment counts from it, as the balance does, where the payment list
+    counted it the day it was stated.
 
     It read the confirmed half of the loan's payment LIST until plan step
     recurrence:R16-e (ruling **R-R93**), a second load of the same settled

@@ -140,9 +140,9 @@ class TestALoansPriceDoesNotReadItsOwnPayments:
     answered the right number.
 
     Measured on a production clone 2026-08-31 by
-    ``tests/manual/verify_loan_pricing_ignores_payment_feed.py``: both live
-    loans answer one figure (``1293.96`` and ``531.94``) across a FULL 29-record
-    feed, an EMPTY one, the confirmed 5 alone, and a DOUBLED 58.  *That harness
+    ``tests/manual/verify_loan_pricing_ignores_payment_feed.py``: each live
+    loan answers one figure across its FULL record feed, an EMPTY one, its
+    confirmed records alone, and the full feed DOUBLED.  *That harness
     fed the deleted producer each feed through* ``LoanInputs.payments``*, and
     went with that field at plan step recurrence:R16-e: the resolver takes no
     payment feed at all now.*

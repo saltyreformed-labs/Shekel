@@ -853,8 +853,8 @@ _FENCED_MODULE_RULINGS = {
         # interest.  Its balance field was DELETED at plan step D2a; the
         # schedule rows it carries are the sanctioned display class.
         "resolve_loan",
-        # The scenario composer: replayed history rows + projected forward
-        # slices (schedule ROWS and aggregate interest, no balance-at-T).
+        # The scenario composer: the confirmed view's history rows + projected
+        # forward slices (schedule ROWS and aggregate interest, no balance-at-T).
         "compute_payoff_scenarios",
         # Rate-period machinery: the period set and the projection's terms
         # off it -- contract terms, not balances.  The level P&I and the

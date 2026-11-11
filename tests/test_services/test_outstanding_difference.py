@@ -27,8 +27,8 @@ puts the two side by side on one day where they differ by ``$150.00``.
 **Measured against a producer that shares no code with this one.**  On a clone
 of the dev database migrated to head, 2026-09-01, the developer's Checking
 account answers ``$2,370.02`` -- ``$2,501.31`` asserted for 2026-08-18 against
-``$131.29`` of books -- and the persisted double-entry ledger, written by
-``account_posting_service``, independently carries ``$2,370.02`` of
+``$131.29`` of books -- and the persisted double-entry ledger, then written by
+``account_posting_service``, independently carried ``$2,370.02`` of
 ``account_trueup`` postings on that account's linked ledger account against
 ``-$2,370.02`` on ``Checking -- Opening`` equity.  That equity leg is finding
 **N-171**.

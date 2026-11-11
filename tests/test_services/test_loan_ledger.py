@@ -10,14 +10,15 @@ leaf's CALENDAR names left at pay-calendar plan step C2-d -- see
 ``TestTheFoldTakesNoCalendarAndThePackageHoldsNone`` for what replaced their
 tests, and ``test_pay_calendar_value.py`` for the rule that replaced them.
 
-**Hand-computed, deliberately.**  The fold and the posted ledger share the walk
-(that is the design: the postings are a PROJECTION of the fold), so grading the
-fold by comparing it to the ledger would be two readers of one walk agreeing --
-"two wrong implementations agreeing is not a proof" (plan Section 8).  Every
-expected balance below is arithmetic done here, in the docstring, from the loan's
-terms.  The exhaustive every-day parallel run against the shipping seam is step
-B2's job and a different question (is the posted cache faithful?); this is the
-reference's own.
+**Hand-computed, deliberately.**  The fold and the worked-out ledger share the
+walk (that is the design: the ledger's lines are a PROJECTION of the walk the fold
+samples), so grading the fold by comparing it to the ledger would be two readers
+of one walk agreeing -- "two wrong implementations agreeing is not a proof" (plan
+Section 8).  Every expected balance below is arithmetic done here, in the
+docstring, from the loan's terms.  The exhaustive every-day parallel run against
+the ledger's lines is step B2's job and a different question (does the read date
+and sign its lines as the fold does?  While the store was written it asked
+whether the posted cache was faithful); this is the reference's own.
 """
 
 from dataclasses import replace
@@ -457,10 +458,11 @@ class TestFoldCountsAnEventOnTheDayItHappened:
     """The one clock (step C2, ruling R-A): an event counts from the day it HAPPENED.
 
     A payment counts from its SETTLED date, an anchor from its OWN date -- the
-    same day each posting carries in ``entry_date``, so the fold and the shipping
-    readers agree by construction (B2).  These flipped the two tests that pinned
-    the pre-C2 boundary rules (a payment from its period start, an anchor from
-    ``LEAST(anchor_date, period.start)``, N-10).  See ``loan_ledger/_visible.py``.
+    same day each of the worked-out ledger's lines carries in ``entry_date``, so
+    the fold and the ledger agree by construction (B2).  These flipped the two
+    tests that pinned the pre-C2 boundary rules (a payment from its period
+    start, an anchor from ``LEAST(anchor_date, period.start)``, N-10).  See
+    ``loan_ledger/_visible.py``.
     """
 
     def test_a_payment_counts_from_its_SETTLED_date(
@@ -576,7 +578,7 @@ class TestFoldCountsAnEventOnTheDayItHappened:
 
 
 class TestFoldAgreesWithThePostedSum:
-    """A first parallel run: the fold reads SOURCE, the reader reads POSTINGS.
+    """A first parallel run: the fold reads SOURCE, the window reads the LINES.
 
     Narrow on purpose.  It proves the two answer alike on one shape's every day;
     making it exhaustive -- every generated shape, every day, plus real data --

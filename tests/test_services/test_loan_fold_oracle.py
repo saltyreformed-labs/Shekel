@@ -457,12 +457,13 @@ class TestTheWalkWorksOutTheLedgerOnce:
 class TestRawLoanTransactionIsTheOnlyDivergence:
     """N-11: the one shape where the reader is RIGHT and the fold is INCOMPLETE.
 
-    A raw settled transaction typed onto a loan account posts a cash leg the
-    sum-of-postings reader counts but the fold (transfer-shadows only) cannot
-    see, so the two diverge by its amount.  This is the one shape the fold does
-    not close on its own -- so ruling D4 forbids it at every source, making the
-    every-day equality above complete by construction.  Both halves are pinned:
-    the divergence is real, and the only user path to it is refused.
+    A raw settled transaction typed onto a loan account books a cash line the
+    suite's window over the worked-out lines counts but the fold (the loan's
+    anchors and the settled transfers into it) cannot see, so the two diverge by its
+    amount.  This is the one shape the fold does not close on its own -- so
+    ruling D4 forbids it at every source, making the every-day equality above
+    complete by construction.  Both halves are pinned: the divergence is real,
+    and the only user path to it is refused.
     """
 
     def test_a_forced_raw_loan_transaction_diverges_the_two_producers(

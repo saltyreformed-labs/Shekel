@@ -1,12 +1,12 @@
 """Service tests for the confirmed-ledger reporting statements (Step 5, C9).
 
 Hand-computed income statements and balance sheets over controlled fixtures,
-each produced through the REAL go-forward primitives (``create_account`` fires
-the opening sync; ``create_settled_cash_transaction`` /
-``create_settled_transfer`` settle through the status seam + posting builder),
-so every reconciled figure was posted exactly as production posts it.  The
-expected numbers are the test author's arithmetic over the seeded anchors and
-amounts, owing nothing to the reader under test.
+each produced through the REAL go-forward primitives (``create_account``
+records the opening; ``create_settled_cash_transaction`` /
+``create_settled_transfer`` settle through the status seam and
+``transfer_service``), so every settled figure is read off records the real
+doors wrote.  The expected numbers are the test author's arithmetic over the
+seeded anchors and amounts, owing nothing to the reader under test.
 
 Scope is the reporting SERVICE (``ledger_report_service``), which reads the
 ledger worked out from the records since plan task plan#2771: the reader
@@ -748,10 +748,11 @@ class TestDisplayLabels:
     def test_category_rename_reflected_live(self, app, db, seed_user):
         """Renaming a live category updates the line label (renames reflect).
 
-        A $100 Groceries expense posts to the "Family: Groceries" category
-        ledger account.  Renaming the category's item to "Snacks" makes the
-        income-statement line read the LIVE ``category.display_name`` -->
-        "Family: Snacks", not the "Family: Groceries" snapshot.
+        A $100 Groceries expense books on the Groceries category's line.
+        Renaming the category's item to "Snacks" makes the income-statement
+        line read the LIVE ``category.display_name`` --> "Family: Snacks", not
+        the "Family: Groceries" a stored chart row's name snapshot held (the
+        worked-out chart keeps no snapshot, ruling plan#2518).
         """
         with app.app_context():
             user_id = seed_user["user"].id

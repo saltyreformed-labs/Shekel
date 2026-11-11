@@ -221,8 +221,10 @@ class TestTheAccountCorrectionRuleNamesKeys:
         (``1,150.00 - 1,000.00``) and ``-150.00`` on its Interest Income
         counter, an INTEREST account's true-up being interest (ruling R-FO).
         The opening's own assertion, on the opening's day, is a true-up of
-        nothing (``1,000.00 - 1,000.00``): its key holds an empty target, so
-        an entry it once posted would reverse, and it names no counter.
+        nothing (``1,000.00 - 1,000.00``): its key holds an empty target, which
+        books no line (the stored ledger's reconcile reversed an entry it had
+        posted under that key to zero, until plan task plan#3133 deleted it),
+        and it names no counter.
         """
         with app.app_context():
             account = _opened_money_market(seed_user, "Keys Money Market")

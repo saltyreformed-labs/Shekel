@@ -115,9 +115,10 @@ def income_legs(
     **The single derivation of "which payments are settled, and in what
     order"** (plan step **balance:X-bl-2a**).  Every settled-payment consumer
     reaches this one -- the fold's event stream
-    (:func:`app.services.loan_ledger.loan_event_stream`), the ledger's
-    per-payment principal reader, the escrow forward-only guard, the resolver's
-    payment feed -- so no two of them can classify a payment differently.  It was
+    (:func:`app.services.loan_ledger.loan_event_stream`), the escrow
+    forward-only guard, the resolver's payment feed, and the stored ledger's
+    per-payment principal reader until plan step balance:X-bi-6-3's second leaf
+    deleted it -- so no two of them can classify a payment differently.  It was
     two narrowed queries and a third rule in
     ``loan_payment_service.get_payment_history``, which read ``txn.status.is_settled``
     where these filtered on ``settled_status_ids()``; the two agreed under a
@@ -196,18 +197,19 @@ def settled_income_legs(
     **R-BAL140**) -- each reading its covering movement as its ``record``, every
     side's loaded here in one statement
     (:func:`~app.services.transfer_legs.preload_side_records`, ruling
-    **plan#2136**: the walk's visible day, the posting probe and the
-    tracking-start refusal read each leg's record, where the grid's loader
-    that builds the legs reads none), and NOTHING ELSE.  Every settled-payment
-    consumer reads this ONE set, so no two can disagree on which payments are
-    settled: the fold's event stream
+    **plan#2136**: the walk's visible day and the tracking-start refusal read
+    each leg's record, as the loan posting probe did until plan task plan#3093
+    deleted it, where the grid's loader that builds the legs reads none), and
+    NOTHING ELSE.  Every settled-payment consumer reads this ONE set, so no two
+    can disagree on which payments are settled: the fold's event stream
     (:func:`app.services.loan_ledger.walk_loan_ledger`), the fold's display bound
-    (:func:`app.services.loan_ledger.confirmed_shadows_through`), the ledger's
-    per-payment principal reader, the asset contribution pass,
-    :func:`_settled_payment_due_dates` (the escrow forward-only guard's
-    boundary :func:`latest_settled_payment_due_date`, since finding N-34), and
-    the tracking-start refusal (``loan_anchor_service``, rulings **R-R114**,
-    **R-R115**, **R-BAL155**), which asks each leg the day its money moved.
+    (:func:`app.services.loan_ledger.confirmed_shadows_through`), the asset
+    contribution pass, :func:`_settled_payment_due_dates` (the escrow
+    forward-only guard's boundary :func:`latest_settled_payment_due_date`, since
+    finding N-34), and the tracking-start refusal (``loan_anchor_service``,
+    rulings **R-R114**, **R-R115**, **R-BAL155**), which asks each leg the day
+    its money moved.  The stored ledger's per-payment principal reader read it
+    too, until plan step balance:X-bi-6-3's second leaf deleted it.
     *A tracking-start guard that read this set's DUE dates was deleted at plan
     step ``recurrence:R20``; the refusal that returned at R16-c-2 reads the
     movement's day instead.*
@@ -241,12 +243,13 @@ def settled_income_legs(
       A pre-anchor payment is split and posted (its principal effect is later
       subsumed by the anchor correction), never silently dropped.
     * **No has-happened-yet UPPER bound.**  Settlement is the confirming event: the
-      Step-2 cash entry posts the moment a payment settles, so the split correction
-      must post in the SAME moment or the loan-linked ledger holds raw cash with no
-      interest / escrow backout from the payment's period start until the next loan
-      write (the 2026-07-02 adversarial review's H2 -- demonstrated as a ~$1,636
-      understatement on the real Mortgage).  The READERS apply their own bound, so
-      posting early changes when the fact is RECORDED, never when it is SHOWN.
+      Step-2 cash line books the moment a payment settles, so the split must book in
+      the SAME moment or the loan-linked ledger holds raw cash with no interest /
+      escrow backout.  (The 2026-07-02 adversarial review's H2 measured that gap on
+      the stored ledger, where it lasted from the payment's period start until the
+      next loan write: a ~$1,636 understatement on the real Mortgage.)  The READERS
+      apply their own bound, so admitting a payment the moment it settles changes
+      when the fact is RECORDED, never when it is SHOWN.
 
       **That bound is the payment's SETTLED day, not its pay period, on every
       reader** -- the fold's since step C2 (:func:`app.services.loan_ledger.payment_visible_on`),
@@ -294,9 +297,10 @@ def settled_income_legs(
     Raises:
         ValueError: When a transfer carries a status that is neither settled
             nor ``Projected``.  Named here because this view is the door the
-            fold's walk, the posting reader and the escrow forward-only guard
-            reach it through, so a broken status seed surfaces on every loan
-            surface at once rather than on one.
+            fold's walk and the escrow forward-only guard reach it through
+            (the stored ledger's posting reader did too, until plan step
+            balance:X-bi-6-3's second leaf), so a broken status seed surfaces
+            on every loan surface at once rather than on one.
     """
     return _settled_legs_by_account(
         [account_id], scenario_id, options=options,

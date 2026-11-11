@@ -579,7 +579,7 @@ class TestTheDaysItRefuses:
         ASSERTIONS (ruling **R-ER**) -- it exists because an assertion opens the
         modelled-return window -- and applying it here would make an account's
         books unopenable before the owner's calendar begins, which is the
-        common case for a real bank account.  The opening's journal entry needs
+        common case for a real bank account.  The opening's ledger line needs
         no period of its own: ``PayCalendar.filing_period`` CLAMPS a
         pre-calendar day onto the earliest period rather than refusing it.
         """
@@ -983,11 +983,11 @@ class TestThePostedLedgerFollows:
         defect R-FO exists to prevent.
 
         **This case replaced an app-wide trial-balance assertion that could not
-        fail** (adversarial review, 2026-08-31):
-        ``ck_account_postings_balanced`` is a deferred per-entry constraint, so
-        a single-legged emission aborts the door's own COMMIT and the sum is
-        identically zero whenever a commit succeeds.  It graded "the
-        restatement commits", which the case above already grades with figures.
+        fail** (adversarial review, 2026-08-31): while the door wrote the store,
+        ``ck_account_postings_balanced``, a deferred per-entry constraint, aborted
+        its COMMIT on a single-legged emission, so the sum was identically zero
+        whenever a commit succeeded.  It graded "the restatement commits", which
+        the case above already grades with figures.
         """
         with app.app_context():
             account = _cash_account(

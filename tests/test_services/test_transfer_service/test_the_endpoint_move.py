@@ -1,6 +1,6 @@
 """The edit door's ENDPOINT arm (plan step R10-b): moving a transfer's source or destination, the
-moves it refuses, and what a settled payment's move re-derives on the loan or account it leaves
-and on the one it reaches.
+moves it refuses, and where a settled payment's lines land when it moves, off the loan or account
+it leaves and onto the one it reaches.
 """
 
 from datetime import date
@@ -53,7 +53,7 @@ class TestMovingATransferBetweenAccounts:
     the endpoints' current names, its ``TestALegsDisplayProjections``.  A
     ledger case that reads the transfer reads the session's row after the
     update's own flush, as the reconcile inside the update did, and
-    :meth:`test_moving_a_settled_payment_ONTO_a_loan_reconciles_that_loan`'s
+    :meth:`test_moving_a_settled_payment_ONTO_a_loan_moves_its_relationship`'s
     relationship read is the firing control for a move that assigns the
     foreign key and not the relationship, which a re-read row cannot be: it
     loads the relationship by that column.
@@ -427,7 +427,7 @@ class TestMovingATransferBetweenAccounts:
             row = _reread(xfer.id)
             assert (row.from_account_id, row.to_account_id, row.amount) == before
 
-    def test_moving_a_settled_payment_off_a_loan_reconciles_the_loan_it_left(
+    def test_moving_a_settled_payment_off_a_loan_takes_its_lines_off_it(
         self, app, db, transfer_data
     ):
         """A settled payment moved off a loan takes its lines off the loan's own line.
@@ -486,10 +486,10 @@ class TestMovingATransferBetweenAccounts:
                 {ledger for ledger, net in posted.items() if net > 0}
             )
 
-    def test_moving_a_settled_payment_ONTO_a_loan_reconciles_that_loan(
+    def test_moving_a_settled_payment_ONTO_a_loan_moves_its_relationship(
         self, app, db, transfer_data
     ):
-        """The loan a payment JOINS is re-derived, not just the one it left.
+        """The relationship moves with the column to the loan a payment JOINS.
 
         **The firing control for assigning the RELATIONSHIP rather than the
         foreign key.**  The settle's auto-derived loan freeze asks which account

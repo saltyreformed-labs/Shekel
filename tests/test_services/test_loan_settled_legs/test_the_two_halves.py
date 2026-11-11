@@ -265,10 +265,10 @@ class TestTheSettledHalfComplementsThePlanHalf:
         delete takes nothing off and keeps it Paid
         (:func:`~app.utils.balance_predicates.delete_returns_to_plan`), and
         only the SETTLED half's own ``Transfer.is_deleted`` filter drops it.
-        That half is the view the loan walk, the posting reader and the
-        escrow guard read (:func:`~app.services.loan_loaders.income_legs`
-        names them), so a deleted close it kept would still book the 03-01
-        installment's whole charge as unpaid -- the split
+        That half is the view the loan walk and the escrow guard read
+        (:func:`~app.services.loan_loaders.income_legs` names them), so a
+        deleted close it kept would still book the 03-01 installment's whole
+        charge as unpaid -- the split
         :class:`TestAZeroDollarCloseIsDatedByTheInstallmentItSkips` reads on
         a live close -- for a payment its owner deleted.
 

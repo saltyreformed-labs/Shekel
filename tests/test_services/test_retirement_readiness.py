@@ -183,9 +183,10 @@ class TestBuildCountdown:
 def _build_scenario(db, seed_user, *, tax_rate=None, with_pension=True):
     """Seed a salary profile, a pension with a horizon, and a 401(k).
 
-    Returns the created account.  ``account_service.create_account`` anchors
-    against the current pay period (the ``seed_periods_today`` fixture makes
-    one exist), so the projection has a live current period.  With
+    Returns the created account.  The ``seed_periods_today`` fixture makes a
+    current pay period exist, so the projection has a live current period
+    (``account_service.create_account`` anchored against it until ruling R-EH,
+    and needs no period since ruling plan#3318).  With
     ``with_pension=False`` the horizon comes from the settings row instead
     (the meter-reconciliation test wants a zero-pension income mix).
     """

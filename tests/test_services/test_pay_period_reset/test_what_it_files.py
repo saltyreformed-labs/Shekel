@@ -24,7 +24,7 @@ from tests._test_helpers import (
 from ._helpers import _NEW_START, _seed_old_schedule
 
 
-# A configured loan for the genesis-resync regression (review M2 / R7):
+# A configured loan for the reset's genesis case (review M2 / R7):
 # origination $250,000, trued up to $100,000, so its genesis ledger nets
 # -(100000) = opening -250000 + true-up +150000.  Both anchor dates predate the
 # rebuilt schedule's 2026-06-05 start, so after reset every correction
@@ -125,7 +125,8 @@ class TestAResetFilesTheAccountOpenings:
     The wipe used to take the account's ``AccountAnchorHistory`` rows with it
     -- they carried a ``pay_period_id`` on a CASCADE FK -- and a
     ``_reanchor_accounts`` pass staged one fabricated origination row per
-    account for this re-sync to read.  The assertion carries no period now, so
+    account for the reset's account re-sync (deleted at plan task plan#3076)
+    to read.  The assertion carries no period now, so
     the wipe cannot reach it and the opening is worked out from the
     observations that were always there.  ``_reanchor_accounts`` is deleted;
     this docstring named it until X-f1c3c.
@@ -161,8 +162,9 @@ class TestAResetFilesTheAccountOpenings:
             # The opening correction books in the period CONTAINING the
             # assertion's own day (ruling R-EA: the period is DERIVED from the
             # day, never read beside it).  The containing period is resolved
-            # HERE from the dates, not by calling the resolver the writer
-            # calls, so the two cannot agree by sharing one implementation.
+            # HERE from the dates, not by ``PayCalendar.filing_period``, which
+            # the line files by, so the two cannot agree by sharing one
+            # implementation.
             #
             # A first version of this assertion only checked membership in the
             # set of all live periods -- true of any of the six, so it would

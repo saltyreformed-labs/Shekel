@@ -153,9 +153,10 @@ class TestASourceThatLeftHasNoLine:
     """Finding N-162 (plan#1356): a source that left the settled set drops out.
 
     A walk that re-derives one account cannot see a source that LEFT it,
-    because the walk reads only what is still there; the stored ledger needs
-    the reversal a door writes as the source leaves.  The worked-out read has
-    no store to reverse: it is the records each time it is read, so a source
+    because the walk reads only what is still there; the stored ledger needed
+    the reversal a door wrote as the source left, until plan step plan#2914
+    stopped the doors writing it.  The worked-out read has no store to
+    reverse: it is the records each time it is read, so a source
     that left reads as one that never settled -- its movement lines AND what
     it had done to every account's corrections.
     """

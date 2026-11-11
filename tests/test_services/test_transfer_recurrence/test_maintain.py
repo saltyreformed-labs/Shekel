@@ -156,8 +156,9 @@ class TestTransferMaintain:
 
         Clearing the recurrence leaves the rule naming no period at all, so
         every generated row is an orphan.  One holding nothing of the owner's
-        is removed -- through ``transfer_service.delete_transfer``, so the
-        ledger is reconciled first.  It read each row's two shadow rows gone
+        is removed -- through ``transfer_service.delete_transfer``, the
+        transfer service's delete door, which reconciled the stored ledger
+        first until plan step plan#2914.  It read each row's two shadow rows gone
         too until plan step ``balance:X-bi-6-4d-2``: a transfer stores no leg
         row since migration 82f7 (ruling **R-BAL167** class 1).
         """
@@ -647,8 +648,9 @@ class TestTransferMaintain:
         field written in a form the comparison cannot recognise -- a Decimal at
         a different scale, a date the door coerces, a value the service
         normalises on the way in -- would leave the pass writing the same row on
-        every edit forever, bumping its version counter and re-reconciling its
-        ledger each time, while every single-pass test stayed green.
+        every edit forever, bumping its version counter each time (and
+        re-reconciling its stored ledger, until plan task plan#3075), while
+        every single-pass test stayed green.
 
         This project has paid for that shape before: a producer correct on the
         first write and inverted on the repeat.

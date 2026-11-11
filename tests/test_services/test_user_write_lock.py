@@ -1,17 +1,18 @@
 """
 Shekel Budget App -- The per-user write lock, graded where it is taken (plan steps X-f1c3c, balance:X-bn)
 
-Grades the lock that serialises every posting-ledger reconcile, every anchor
-and opening compare-then-append, and every structural pay-period mutation for
-one owner (:mod:`app.services.user_write_lock`).
+Grades the lock that serialises every anchor and opening compare-then-append
+and every structural pay-period mutation for one owner
+(:mod:`app.services.user_write_lock`), as it serialised every posting-ledger
+reconcile until plan step plan#2914 stopped the doors and the deploy calling them.
 
-**What broke without it, measured.**  A reconcile is a read-modify-write:
-read what the ledger has posted, subtract it from what the account's facts
-say it should hold, write the difference.  With the interleave forced at the
-read, two concurrent true-ups on an account reconciled at ``$4,000.00`` both
-answered 200 and left the account's linked ledger at ``$1,000.00`` while its
-resolved assertion read ``$2,000.00``.  Both sides wrong; the trial balance
-still ``$0.00``, because the anchor-equity leg mirrors the error exactly, so
+**What broke without it, measured.**  A reconcile was a read-modify-write: it
+read what the ledger had posted, subtracted it from what the account's facts
+said it should hold, and wrote the difference.  With the interleave forced at
+the read, two concurrent true-ups on an account reconciled at ``$4,000.00``
+both answered 200 and left the account's linked ledger at ``$1,000.00`` while
+its resolved assertion read ``$2,000.00``.  Both sides wrong; the trial balance
+still ``$0.00``, because the anchor-equity leg mirrored the error exactly, so
 nothing failed loudly.  That forced-interleave probe cannot be kept as a test:
 once the lock exists the second request blocks at it, so the probe's own
 mechanism is what the fix removes.  These tests grade the lock instead.
@@ -147,9 +148,12 @@ def _read_after_the_lock(statements, table):
 def _checking_account(seed_user, name="Lock Probe Checking", balance="1500.00"):
     """Create and COMMIT a Checking account carrying one balance assertion.
 
-    A fresh account with a non-zero anchor is the smallest thing whose
-    reconcile writes: its opening correction is non-zero, so the save under
-    test does real read-modify-write work rather than short-circuiting.
+    A fresh account whose $1,500.00 assertion differs from the $1,750.00
+    :func:`_true_up` submits is the smallest thing whose save writes: the door
+    reads the governing assertion and appends (ruling R-EQ), so the save under
+    test does real read-modify-write work rather than short-circuiting.  (Its
+    non-zero opening correction gave the stored ledger's reconcile real work
+    too, until plan task plan#3076.)
     Built through the service, outside any request, so it takes no lock --
     which is the design: only a request's command transaction takes it.
 

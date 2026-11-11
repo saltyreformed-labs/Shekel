@@ -2203,9 +2203,9 @@ class TestTheBankCanCONFIRMADayThePanelOnlyBOUNDED:
         """The early return survives: only a WEAKER basis is worth writing.
 
         Without this arm the confirmation runs a full settle door on every
-        already-correct row of every accept -- a posting reconcile, a payback
-        sync and an optimistic-lock bump apiece, for a column that is already
-        right.
+        already-correct row of every accept -- a payback sync and an
+        optimistic-lock bump apiece (and a posting reconcile until plan task
+        plan#3097), for a column that is already right.
         """
         with app.app_context():
             made_on = seed_user["bootstrap_period"].start_date

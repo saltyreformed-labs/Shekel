@@ -338,7 +338,8 @@ class TestRegenerateWhenTheWholeScheduleIsRebuildable:
     locked, and never the rebuildable boundary.  The "keep NONE of them" arm
     therefore had no test at all, on the single most destructive branch in the
     module: it deletes every pay period the owner has, cascading their
-    transactions, their transfers and their journal entries.
+    transactions and their transfers (and their journal entries, until plan
+    task plan#3078 emptied the stored ledger's tables).
 
     ``bare_user`` has no bootstrap period, so a schedule built entirely on one
     side of today reaches each arm.

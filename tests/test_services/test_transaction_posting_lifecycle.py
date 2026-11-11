@@ -1,4 +1,4 @@
-"""Lifecycle tests for the transaction -> posting-ledger wiring (Step 3, Commit 6).
+"""Lifecycle tests for a transaction's ledger lines through its doors (Step 3, Commit 6).
 
 Commit 6 wired :func:`~app.services.posting_service.sync_transaction_postings`
 into every ordinary-transaction effect boundary -- the mark-done / PATCH /
@@ -10,25 +10,25 @@ ledger worked out from the records, which is what settling, editing,
 reverting, deleting and carrying forward a transaction still move (plan step
 plan#2914).
 
-The load-bearing wiring properties, each pinned by a test below:
+The load-bearing properties, each pinned by a test below (until plan task plan#3097
+the store's sync held the first and third by running LAST and gated):
 
-  * the reconcile runs LAST, after every effect field is applied -- so a manual
-    ``actual_amount`` posts the ACTUAL not the estimate, and a
-    settle-and-recategorize PATCH posts the NEW category (the 2.8b HIGH, both
+  * a manual ``actual_amount`` books the ACTUAL not the estimate, and a
+    settle-and-recategorize PATCH books the NEW category (the 2.8b HIGH, both
     directions);
   * a revert-and-recategorize PATCH leaves neither the OLD category nor the
     new ``category_id`` holding the row (the 2.8 CRITICAL), at the route level;
-  * the PATCH reconcile is gated, so a metadata-only edit posts nothing;
-  * an envelope posts its debit-only effect (``effective - Sigma(credit)``), and
+  * a metadata-only edit moves nothing;
+  * an envelope books its debit-only effect (``effective - Sigma(credit)``), and
     an entry mutation on a posted envelope moves its ledger figure;
   * every delete path (hard / soft, the settled-payback unmark, and a recursive
     payback chain) leaves the accounts where they were before the settle;
-  * carry-forward posts the confirmed effect of each envelope source it settles.
+  * each envelope source that carry-forward settles books its confirmed effect.
 
 After each mutation the per-account reconciliation invariant is asserted in
 its Build-Order Step 5 ABSOLUTE form: the account's worked-out net ``== opening
-anchor + settled_transfer_effect + posted_purchase_effect``.  The seed
-Checking carries its $1000.00 opening correction from fixture time, and every
+anchor + settled_transfer_effect + posted_purchase_effect``.  The read books
+the seed Checking's $1000.00 opening the day before its origination assertion, and every
 settle in this suite is stamped at SERVER now (the seam's ``db.func.now()``,
 including carry-forward's ``settle_from_entries`` default) -- after the
 origination assertion -- so the settled effects ride on top of the opening
@@ -132,10 +132,10 @@ def _assert_reconciles(scenario_id, *accounts):
     """Assert ledger == opening + settled-source effect (the absolute oracle).
 
     The per-account reconciliation invariant in its Step-5 ABSOLUTE form: the
-    net of an account's posting legs equals its opening anchor correction
-    (posted at fixture time; the origination row is each account's only
-    assertion here) plus the combined net effect of its settled, non-deleted
-    transfer shadows AND ordinary transactions.  Every settle in this suite
+    net of an account's ledger lines equals its opening anchor correction (its
+    opening equity, equal to the origination row's balance, the one assertion
+    here) plus the net effect of its settled, non-deleted transfers AND
+    ordinary transactions.  Every settle in this suite
     is stamped at server-now, after the assertion instant, so the effects
     ride on top of the opening.  Asserted from independent producers so any
     divergence between the ledger and the source rows fails loudly.
@@ -171,12 +171,12 @@ def _assert_reconciles(scenario_id, *accounts):
 
 
 # ---------------------------------------------------------------------------
-# mark-done route: settling posts the confirmed effect (last, after actuals)
+# mark-done route: settling books the confirmed effect, actuals included
 # ---------------------------------------------------------------------------
 
 
 class TestMarkDoneRoutePostsTransaction:
-    """The mark-done route auto-posts a settled transaction's cash split."""
+    """A transaction the mark-done route settles books its cash split."""
 
     def test_plain_expense_mark_done_posts(
         self, app, auth_client, seed_user, seed_periods,
@@ -246,10 +246,10 @@ class TestMarkDoneRoutePostsTransaction:
         """A manual ``actual_amount`` posts the ACTUAL, not the estimate (2.8b HIGH).
 
         Arithmetic: the row is estimated at 50 but settled with a manual actual
-        of 75.  The reconcile runs AFTER ``actual_amount`` is applied (the
-        transfer pattern -- post last), so it reads ``effective_amount`` = actual
-        = 75: cash leg -75.00, not -50.00.  Proves the reconcile is not fired at
-        the status flip (which would book the stale 50).
+        of 75, and the settle records its covering movement at that actual:
+        cash leg -75.00, not -50.00.  (The store's reconcile ran AFTER
+        ``actual_amount`` was applied, until plan task plan#3097, so that it was
+        not fired at the status flip, which would have booked the stale 50.)
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -281,7 +281,7 @@ class TestMarkDoneRoutePostsTransaction:
 
 
 class TestPatchPostingLifecycle:
-    """The inline-edit PATCH route reconciles after all fields, gated."""
+    """What the inline-edit PATCH route's fields move on the ledger."""
 
     def test_settle_and_recategorize_patch_posts_new_category(
         self, app, auth_client, seed_user, seed_periods,
@@ -290,11 +290,11 @@ class TestPatchPostingLifecycle:
 
         A Projected Groceries expense is settled and recategorized to Rent in
         ONE PATCH.  ``category_id`` is applied in the setattr loop and
-        ``status_id`` through the seam; the reconcile runs LAST and reads the
-        current ``category_id`` = Rent: cash -50.00 / Rent-Expense +50.00, with
-        the Groceries ledger never touched.  (The strict reconcile-AFTER-the-flip
-        ordering proof for a field applied *after* the seam is the
-        manual-``actual_amount`` test above, where ``actual`` is set post-seam;
+        ``status_id`` through the seam, and the read books the row's current
+        ``category_id`` = Rent: cash -50.00 / Rent-Expense +50.00, with the
+        Groceries ledger never touched.  (While the store's reconcile ran LAST,
+        until plan task plan#3097, its ordering proof for a field applied
+        *after* the seam was the manual-``actual_amount`` test above;
         ``category_id`` here is set pre-seam, so this pins the recategorize-on-
         settle OUTCOME rather than isolating that ordering.)
         """
@@ -329,7 +329,7 @@ class TestPatchPostingLifecycle:
     def test_revert_and_recategorize_reconciles(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """Revert+recategorize reverses the OLD category, not the new one (2.8 CRITICAL).
+        """Revert+recategorize clears the OLD category, not the new one (2.8 CRITICAL).
 
         A Paid Groceries expense (posted -50 / +50 Groceries) is reverted to
         Projected AND recategorized to Rent in ONE PATCH (the lock lifts on the
@@ -741,7 +741,7 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
     its envelope's close then books only what its purchases did not.  These
     grade the three things that makes true which nothing else does: a
     still-PROJECTED envelope can hold ledger legs; a re-category moves them; and
-    deleting either half reverses them rather than stranding them.
+    deleting either half takes them off with it.
     """
 
     def test_a_projected_envelopes_purchase_posts_on_its_own_day(
@@ -792,8 +792,8 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
 
         The counter leg is the parent's category (ruling **R-FM**), which makes
         a re-category of a still-PROJECTED envelope a ledger act -- a state that
-        did not exist before X-f3b, and one no door would have reconciled if the
-        purchase arm were not part of the transaction's own sync.
+        did not exist before X-f3b, and one the store's sync reconciled only through
+        its purchase arm, until plan task plan#3097 took the sync out of the doors.
 
         Asserted as a MOVE rather than as an addition: the old category's legs
         must net to zero afterwards, or the expense would be counted in two
@@ -830,13 +830,13 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
     def test_moving_the_parent_between_periods_re_files_its_purchases_legs(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """A posting carries its source row's BUDGET column, so a move re-files it.
+        """A line carries its source row's BUDGET column, so a move re-files it.
 
         The R2 attribution rule on the one row type that can now reach it: a
         PROJECTED envelope holds ledger legs once a purchase's bank posting day
         is recorded, and ``pay_period_id`` was NOT among the PATCH fields that
-        raise a reconcile -- justified by "a settled row's period cannot move
-        anyway", which was true while only a settled row held postings.
+        raised the store's reconcile (until plan task plan#3097), on "a settled
+        row's period cannot move anyway", true while only a settled row held them.
 
         Asserted as a MOVE: the old period must hold NOTHING for this purchase
         afterwards, or the same $40.00 would be attributed to two columns at
@@ -874,10 +874,10 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
                 linked_key(seed_user["account"])
             ] == Decimal("-40.00")
 
-    def test_deleting_a_purchase_reverses_its_leg_before_the_row_goes(
+    def test_deleting_a_purchase_takes_its_leg_off_with_the_row(
         self, app, seed_user, seed_periods,
     ):
-        """The reverse-before-delete discipline, on the purchase half.
+        """The purchase half: a deleted purchase's leg goes with the row.
 
         A purchase that posted its $40.00 leg is deleted: the ledger holds no
         line for it afterwards, and the account is whole again.
@@ -914,7 +914,7 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
 
 
 # ---------------------------------------------------------------------------
-# Delete: every path reverses the posted effect before the row leaves
+# Delete: every path takes the posted effect off with the row
 # ---------------------------------------------------------------------------
 
 
@@ -924,7 +924,7 @@ class TestDeleteReversesPostings:
     def test_hard_delete_adhoc_settled_reverses(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """Hard-deleting a Paid ad-hoc expense reverses its postings first.
+        """Hard-deleting a Paid ad-hoc expense takes its lines off with it.
 
         The $50 expense posts -50 / +50, and after the delete the read holds no
         line for it, so every account is back where it was.
@@ -958,7 +958,7 @@ class TestDeleteReversesPostings:
     def test_soft_delete_template_settled_reverses(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """Soft-deleting a Paid template row reverses its family's postings first.
+        """Soft-deleting a Paid template row takes its family's lines off.
 
         A template-linked envelope holds one $40 purchase the bank took
         (posted -40 / +40 by its own leg -- the close books nothing, ruling
@@ -1006,7 +1006,7 @@ class TestDeleteReversesPostings:
     def test_settled_payback_reversed_on_unmark_credit(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """Un-marking credit reverses a payback that was already settled.
+        """Un-marking credit takes off a payback that was already settled.
 
         Mark an $80 expense Credit (creating a Projected payback), settle that
         payback (posting -80 / +80 on the CC Payback account), then un-mark the
@@ -1044,7 +1044,7 @@ class TestDeleteReversesPostings:
     def test_recursive_payback_chain_reverses_on_source_delete(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """Deleting a source reverses a settled payback DEEP in the credit chain.
+        """Deleting a source takes off a settled payback DEEP in the credit chain.
 
         source -> payback1 -> payback2, with payback2 settled (posted -100 /
         +100 on CC Payback).  Deleting the source recurses through the chain, and
@@ -1083,12 +1083,12 @@ class TestDeleteReversesPostings:
 
 
 # ---------------------------------------------------------------------------
-# Carry-forward: each settled envelope source posts its confirmed effect
+# Carry-forward: each envelope source it settles books its confirmed effect
 # ---------------------------------------------------------------------------
 
 
 class TestCarryForwardPostsSettledSources:
-    """Carry-forward posts the confirmed effect of each envelope it settles."""
+    """Each envelope that carry-forward settles books its confirmed effect."""
 
     def test_carry_forward_posts_partially_spent_envelope(
         self, app, db, seed_user, seed_periods,

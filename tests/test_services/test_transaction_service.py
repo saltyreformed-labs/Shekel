@@ -577,7 +577,7 @@ class TestSettleTransactionTheVerb:
     def test_an_envelope_with_entries_ignores_a_supplied_actual(
         self, app, seed_user, seed_periods,
     ):
-        """sum(entries) wins over a caller-supplied actual, and posts.
+        """sum(entries) wins over a caller-supplied actual, and is what settles.
 
         The precedence half of act 1: an envelope's entries ARE the record of
         what it cost, so a caller offering a different figure is offering an
@@ -1128,7 +1128,7 @@ class TestApplyRequestedStatusTheDoorVerb:
         )
         return generate_row_of(template, period)
 
-    def test_a_status_change_reconciles_the_ledger(
+    def test_a_status_change_books_the_rows_effect(
         self, app, seed_user, seed_periods,
     ):
         """A settled status books the row's effect, in the same call.
@@ -1214,9 +1214,9 @@ class TestApplyRequestedStatusTheDoorVerb:
 
         Cancelled -> Paid is not in the transaction workflow: a cancelled row
         must be reprojected first, so the audit trail records both moves.  The
-        verb must refuse BEFORE it reconciles -- a reconcile run against a
-        status the state machine rejected would post an effect the row is not
-        entitled to.
+        verb must refuse BEFORE it records anything -- a covering movement
+        written for a status the state machine rejected would book an effect
+        the row is not entitled to.
         """
         with app.app_context():
             txn = self._plain_row(seed_user, seed_periods[0])
@@ -1679,8 +1679,8 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
 
         Hand arithmetic: the row settles at its $100.00 plan, so the cash
         account is $100.00 down.  The correction restates the figure as
-        $87.10, so the settled effect becomes -$87.10 -- the difference
-        re-posted, not a second full booking.
+        $87.10, so the settled effect becomes -$87.10 -- the figure restated,
+        not a second full booking.
 
         The settle day is preserved, because a figure correction moves no day
         and ruling **R-FL** releases the clearing link on the DAY alone.

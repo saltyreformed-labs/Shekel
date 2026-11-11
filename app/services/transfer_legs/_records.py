@@ -584,7 +584,7 @@ def movement_parent_loads() -> tuple:
     statement register folds every act on an account (leaf
     ``X-bi-6-4c-1``; the loan posting probe, ``loan_posting_service._sync``,
     named the transfer of every stale movement it found from leaf
-    ``X-bi-6-4d-1`` until plan task plan#3133 deleted it) -- and must not
+    ``X-bi-6-4d-1`` until plan task plan#3093 deleted it) -- and must not
     lazy-load one transfer per member:
     the movement's plan row, or its side's transfer, whose endpoints and
     status ride it (``lazy="joined"``).  Published HERE rather than spelled

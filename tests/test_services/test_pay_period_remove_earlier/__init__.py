@@ -8,11 +8,13 @@ the owner entered, changed or paid refuses the removal and is named, as does
 any entry the posted ledger booked in it, a pay stub on its payday, and money
 DATED inside it anywhere in the budget.  Ruling **R-PC114** (amending
 R-PC109's booked-entry clause): what the posted ledger booked in a removed
-paycheck is re-filed through Reset's two re-syncs.  Ruling **plan#2517**
+paycheck was re-filed through Reset's two re-syncs, until plan task plan#3076
+deleted them; the worked-out ledger files it by its day.  Ruling **plan#2517**
 (amending R-PC114): the removal is no longer refused when a booked total
-moves, because worked out from the records no total can.  Ruling **R-PC110**: at least one
-paycheck of the earliest pay rhythm always stays, and that rhythm's start
-moves UP to the new first paycheck (the reverse of R-PC105's move down).
+moves, because worked out from the records no total can.  Ruling **R-PC110**:
+at least one paycheck of the earliest pay rhythm always stays, and that
+rhythm's start moves UP to the new first paycheck (the reverse of R-PC105's
+move down).
 
 Nine contracts, one class each:
 

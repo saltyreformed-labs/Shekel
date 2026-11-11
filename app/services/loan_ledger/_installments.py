@@ -214,8 +214,9 @@ def payment_installments(
             :func:`app.services.loan_loaders.income_legs` for a transfer
             whose status it cannot place.  Named here because this function widened
             that refusal's reach: the partition is now also behind
-            ``walk_loan_ledger``, ``confirmed_shadows_through``, the posting
-            reader and the escrow forward-only guard, so a broken status seed
+            ``walk_loan_ledger``, ``confirmed_shadows_through`` and the escrow
+            forward-only guard (and the stored ledger's posting reader, until
+            plan step balance:X-bi-6-3's second leaf), so a broken status seed
             is loud on every loan surface rather than on one.
     """
     payments = income_legs(

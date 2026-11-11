@@ -93,8 +93,8 @@ class TestTheSettledHalfReadsTheLegOffItsTransfer:
             assert out_fact.pay_period_id == settled.pay_period_id
 
 
-class TestTheWritersParentIsTheLeg:
-    """Leaf ``balance:X-bi-6-4a``'s second half: the ledger writer's parent resolution.
+class TestAMovementsParentIsTheLeg:
+    """Leaf ``balance:X-bi-6-4a``'s second half: a movement's parent resolution.
 
     A reader holding a loaded movement asks ONE function what its parent is
     (``movement_parent``): the purchase doors' payment-record refusal,

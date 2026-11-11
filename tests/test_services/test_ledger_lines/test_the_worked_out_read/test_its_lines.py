@@ -165,8 +165,8 @@ class TestTheLinesAreTheRules:
 
         The two true-ups book ``+150.00`` and ``-150.00`` and share their
         source kind, paycheck and day, so their merged legs net to ``0.00``
-        on both the account and its Interest Income counter -- a key the
-        writer resolves and posts nothing under, and so no line here.
+        on both the account and its Interest Income counter -- ``$0.00``
+        lines the read drops (``ledger_lines._worked_out``), and so no line here.
         """
         with app.app_context():
             opened_on = _TODAY - timedelta(days=3)
@@ -194,8 +194,9 @@ class TestTheLinesAreTheRules:
     ):
         """An archived Savings keeps its $500.00 opening's two lines.
 
-        Archiving stops new activity and erases no posted fact, so the
-        writers' account set keeps archived accounts and so does this read.
+        Archiving stops new activity and erases no recorded fact, so the read
+        walks archived accounts too, as the stored ledger's writers' account
+        set did until plan task plan#3133 deleted it.
         """
         with app.app_context():
             account = create_account_of_type(

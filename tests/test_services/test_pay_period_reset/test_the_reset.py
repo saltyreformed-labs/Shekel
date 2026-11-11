@@ -206,7 +206,7 @@ class TestResetHappyPath:
     def test_the_door_leaves_the_rebuilt_schedule_EMPTY(
         self, app, db, seed_user,
     ):
-        """The door wipes, rebuilds, re-syncs -- and generates nothing.
+        """The door wipes and rebuilds -- and generates nothing.
 
         The door's half of ruling **R-R38**, over BOTH engines: the fixture
         seeds a transaction template AND a transfer template, because a door

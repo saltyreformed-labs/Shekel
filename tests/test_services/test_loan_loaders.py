@@ -3,7 +3,8 @@
 :mod:`app.services.loan_loaders` is the leaf layer every loan consumer loads
 through.  These tests pin its C11 centerpiece --
 :func:`~app.services.loan_loaders.load_loan_anchor_facts` -- the ONE anchor
-loader the genesis posting walk and every resolver-input builder share: the
+loader the loan walk (``loan_ledger``, whose genesis corrections the worked-out
+ledger books) and every resolver-input builder share: the
 origination anchor is SYNTHESIZED from the immutable :class:`LoanParams` and is
 ALWAYS the opening (step C1; the origination :class:`LoanAnchorEvent` write is
 retired), while stored ``tracking_start`` and ``user_trueup`` events load as

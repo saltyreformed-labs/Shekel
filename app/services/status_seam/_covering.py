@@ -339,7 +339,8 @@ def covered_cash_leg(row: PlanItem, account_id: int) -> Decimal:
     of a movement, its whole figure (for a transfer side's record, its
     transfer's) in its PARENT's direction (plan step
     ``X-bi-3b``, ruling **R-BAL35**), which is what the fact producer and the
-    ledger writer book for it.  This read ``-movement.amount`` for itself
+    worked-out ledger book for it (and the ledger writer did, until plan task
+    plan#3133).  This read ``-movement.amount`` for itself
     until that step, a second spelling stated rather than hidden because a
     spelling that agrees today is still two spellings (rule 14); one producer
     is what deleted it.

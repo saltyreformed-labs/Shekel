@@ -173,7 +173,7 @@ the removal act every entry its transfer holds
 (:func:`held_transfer_entries`), and for the loan posting probe
 (``loan_posting_service._sync``, ledger row **BAL-579**), which loaded the
 movements it resolved through :func:`movement_parent_loads` where it spelled
-that chain inline, until plan task plan#3133 deleted it.  The loan walk's
+that chain inline, until plan task plan#3093 deleted it.  The loan walk's
 refusal of an un-dated settle (``loan_ledger._visible.payment_visible_on``)
 stopped reaching a movement
 through a shadow at that leaf too: it named the shadow's ``transaction_id``

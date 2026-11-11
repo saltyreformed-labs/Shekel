@@ -176,7 +176,7 @@ class TestMobilePlanTab:
                 period.period_id: balance_at.GridColumn(
                     balance=balance,
                     income=Decimal("0"), expense=Decimal("0"),
-                    net=Decimal("0"), elsewhere=Decimal("0.00"),
+                    net=Decimal("0"),
                     period_timing=Decimal("0.00"),
                     book_vs_bank=Decimal("0.00"),
                     contribution=Decimal("0.00"), accrual=Decimal("0.00"),
@@ -196,7 +196,7 @@ class TestMobilePlanTab:
                 plan_matched_by_row_period={},
                 plan_columns=plan_columns,
                 plan_row_flags=balance_at.GridRowFlags(
-                    elsewhere=False, period_timing=False, book_vs_bank=False,
+                    period_timing=False, book_vs_bank=False,
                     contribution=False, accrual=False,
                 ),
                 low_balance_threshold=500,
@@ -356,7 +356,6 @@ class TestMobilePlanTab:
                         income=Decimal("0"),
                         expense=Decimal("1200"),
                         net=Decimal("-1200"),
-                        elsewhere=Decimal("0.00"),
                         period_timing=Decimal("0.00"),
                         book_vs_bank=Decimal("0.00"),
                         contribution=Decimal("0.00"),
@@ -364,7 +363,7 @@ class TestMobilePlanTab:
                     ),
                 },
                 plan_row_flags=balance_at.GridRowFlags(
-                    elsewhere=False, period_timing=False, book_vs_bank=False,
+                    period_timing=False, book_vs_bank=False,
                     contribution=False, accrual=False,
                 ),
                 low_balance_threshold=500,
@@ -432,7 +431,6 @@ class TestMobilePlanTab:
                         income=Decimal("2500"),
                         expense=Decimal("0"),
                         net=Decimal("2500"),
-                        elsewhere=Decimal("0.00"),
                         period_timing=Decimal("0.00"),
                         book_vs_bank=Decimal("0.00"),
                         contribution=Decimal("0.00"),
@@ -440,7 +438,7 @@ class TestMobilePlanTab:
                     ),
                 },
                 plan_row_flags=balance_at.GridRowFlags(
-                    elsewhere=False, period_timing=False, book_vs_bank=False,
+                    period_timing=False, book_vs_bank=False,
                     contribution=False, accrual=False,
                 ),
                 low_balance_threshold=500,
@@ -519,7 +517,6 @@ class TestMobilePlanTab:
                         income=Decimal("0"),
                         expense=Decimal("125"),
                         net=Decimal("-125"),
-                        elsewhere=Decimal("0.00"),
                         period_timing=Decimal("0.00"),
                         book_vs_bank=Decimal("0.00"),
                         contribution=Decimal("0.00"),
@@ -527,7 +524,7 @@ class TestMobilePlanTab:
                     ),
                 },
                 plan_row_flags=balance_at.GridRowFlags(
-                    elsewhere=False, period_timing=False, book_vs_bank=False,
+                    period_timing=False, book_vs_bank=False,
                     contribution=False, accrual=False,
                 ),
                 low_balance_threshold=500,

@@ -10,7 +10,7 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import StatusEnum, TxnTypeEnum
+from app.enums import CardPaymentModeEnum, StatusEnum, TxnTypeEnum
 from app.models.interest_params import InterestParams
 from app.services import balance_at
 from app.services.balance_at import _kernel as net_worth_kernel
@@ -18,7 +18,6 @@ from app.services.scenario_resolver import get_baseline_scenario
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._cash_fold import assembled_fold
 from app.services.balance_at._cash_periods import period_view_of
-from app.services.cash_flow_set import CashFlowSet
 from tests._test_helpers import (
     add_txn,
     all_periods,
@@ -27,11 +26,16 @@ from tests._test_helpers import (
     create_settled_transfer,
     create_transfer,
     current_pay_period,
-    derived_span,
     last_covered_day,
     make_investment_account,
     make_salary_profile,
     one_off_row_of,
+)
+
+from tests.test_services.test_card_payment_price import (
+    _card,
+    _spend,
+    _works_out,
 )
 
 from ._helpers import (
@@ -328,7 +332,7 @@ class TestASettledRowMovesEveryCashAnswerTogether:
             )
             db.session.commit()
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(hysa), bctx)
+            view = balance_at.grid_balance_view(hysa, bctx)
             cash = balance_at.cash_balance_map(hysa, bctx)
             current = current_pay_period(user_id)
 
@@ -451,40 +455,37 @@ class TestTheInterestChipAndTheBalanceAreOneWalk:
             )
 
 
-class TestTheSubtotalsAreThePaychecksAcrossTheSet:
-    """Plan step credit_card:CC-4-1's PRODUCER-side control for the fifth term.
+class TestTheSubtotalsAreTheBalanceAccountsOwn:
+    """Plan task plan#2932: the grid's totals are what leaves the balance account.
 
-    Developer ruling ``credit_card:R-CC16``: the grid reads the owner's
-    cash-flow set -- checking and its cards -- as ONE paycheck, so its
-    subtotals sum every member's rows while the Projected End Balance stays one
-    account's, and the identity gains ``elsewhere[p]``.  Ruling
-    ``credit_card:R-CC23``: a transfer between two members counts ONCE, from
-    the balance line's side.  ``TestTheRemainderOracleSeesEveryTerm`` grades
-    the term on hand-built columns; this class puts a figure in it through
-    :func:`~app.services.balance_at.grid_balance_view` itself.
+    Developer ruling plan#2926 (2026-11-05): "the grid's totals show what
+    leaves checking, so 'On other accounts' goes".  The grid still draws every
+    row of the owner's cash-flow set; its Total Income, Total Expenses and Net
+    Cash Flow are the balance account's OWN, so they are exactly
+    :func:`period_view_of` over that account's fold, and the identity is back
+    to its five terms.  From plan step CC-4-1 until this task the subtotals
+    summed every member's rows beside an ``elsewhere`` term.
 
-    **The fixture is the ruling's own worked example**, on the paycheck
-    ``seed_periods_today[6]``: the phone bill ``$45.00`` expected on the card,
-    the grocery envelope ``$500.00`` on checking, and the ``$165.00`` card
-    payment (checking -> card) in the same paycheck.  Hand-computed, with
-    checking as the balance line::
+    **The fixture is ruling R-CC23's worked example, kept**, on the paycheck
+    ``seed_periods_today[6]``: the phone bill ``$45.00`` on the card, the
+    grocery envelope ``$500.00`` on checking, and the ``$165.00`` card payment
+    (checking -> card) in the same paycheck.  Hand-computed, with checking as
+    the balance line::
 
         Total Income      0.00
-        Total Expenses  710.00   (500 grocery + 45 phone + 165 payment leg)
-        Net Cash Flow  -710.00
-        On other accts   45.00   (the card's expense less its income;
-                                  its payment leg is the FAR leg, excluded)
-        checking moves -665.00 = -710.00 + 45.00
+        Total Expenses  665.00   (500 grocery + 165 payment leg)
+        Net Cash Flow  -665.00
+        checking moves -665.00
 
-    and with the CARD as the balance line, the same paycheck seen from the
-    card::
+    (CC-4-1 read ``710.00`` and ``+45.00`` "On other accounts" here), and with
+    the CARD as the balance line::
 
-        Total Income    165.00   (the payment, now the near leg)
-        Total Expenses  545.00   (500 grocery + 45 phone)
-        Net Cash Flow  -380.00
-        On other accts  500.00   (checking's expense less its income; ITS
-                                  payment leg is now the far leg)
-        the card moves  120.00 = -380.00 + 500.00
+        Total Income    165.00   (the payment's leg into the card)
+        Total Expenses   45.00   (the phone bill)
+        Net Cash Flow   120.00
+        the card moves  120.00
+
+    (CC-4-1 read ``165.00`` / ``545.00`` and ``+500.00`` on other accounts).
 
     Every row is placed PROJECTED in a paycheck that opens after the pass's
     ``as_of`` (asserted, not assumed: the fixture's periods 0-3 are PAST, and
@@ -493,26 +494,16 @@ class TestTheSubtotalsAreThePaychecksAcrossTheSet:
     a hand delta on the row's own column would not see), so each row lands on
     its own day and the column's balance delta is exactly the rows'.
 
-    **What grades what.**  The identity oracle cannot grade the composition:
-    ``net`` and ``elsewhere`` are built from the same other-member legs, so
-    ``net + elsewhere`` is the balance account's own net ALGEBRAICALLY,
-    whatever those legs hold -- the leaf's adversarial review named this.  The
-    composition is graded two ways instead: the hand figures on the fixture
-    column, and
-    ``test_the_composition_is_each_members_own_cash_column_over_the_window``,
-    which reads every member's OWN column off :func:`period_view_of` (the
-    pre-CC-4-1 producer, an independent path) and checks every column of the
-    window against it.
+    **What grades what.**  The hand figures grade the fixture column; the
+    identity oracle grades the reconciliation on every column; and
+    ``test_every_column_is_the_accounts_own_cash_column`` grades the whole
+    window against :func:`period_view_of`, the producer the subtotals must
+    now be verbatim.
     """
 
     _PHONE = Decimal("45.00")
     _GROCERY = Decimal("500.00")
     _PAYMENT = Decimal("165.00")
-
-    @staticmethod
-    def _set(balance, other):
-        """The two-member set with *balance* on the line."""
-        return CashFlowSet(balance=balance, members=(balance, other))
 
     def _world(self, db, seed_user, periods):
         """Build the worked example; return ``(checking, card, paycheck)``."""
@@ -553,54 +544,50 @@ class TestTheSubtotalsAreThePaychecksAcrossTheSet:
     def test_checking_as_the_balance_line(
         self, app, db, seed_user, seed_periods_today,
     ):  # pylint: disable=unused-argument
+        """Checking's totals: the grocery and the payment, never the card's phone bill."""
         with app.app_context():
-            checking, card, paycheck = self._world(db, seed_user, seed_periods_today)
+            checking, _card, paycheck = self._world(db, seed_user, seed_periods_today)
             bctx = BalanceContext.build(seed_user["user"].id)
 
-            view = balance_at.grid_balance_view(self._set(checking, card), bctx)
+            view = balance_at.grid_balance_view(checking, bctx)
 
             column = view.columns[paycheck.id]
             assert column.income == Decimal("0.00")
-            assert column.expense == Decimal("710.00")
-            assert column.net == Decimal("-710.00")
-            assert column.elsewhere == Decimal("45.00")
+            # 500.00 grocery + 165.00 payment = 665.00.
+            assert column.expense == Decimal("665.00")
+            assert column.net == Decimal("-665.00")
             assert self._delta(view, paycheck) == Decimal("-665.00")
             _assert_grid_view_reconciles(view)
-            assert view.row_flags(
-                [derived_span(paycheck)],
-            ).elsewhere is True
 
     def test_the_card_as_the_balance_line(
         self, app, db, seed_user, seed_periods_today,
     ):  # pylint: disable=unused-argument
+        """The card's totals: its phone bill and the payment into it, never checking's grocery."""
         with app.app_context():
-            checking, card, paycheck = self._world(db, seed_user, seed_periods_today)
+            _checking, card, paycheck = self._world(db, seed_user, seed_periods_today)
             bctx = BalanceContext.build(seed_user["user"].id)
 
-            view = balance_at.grid_balance_view(self._set(card, checking), bctx)
+            view = balance_at.grid_balance_view(card, bctx)
 
             column = view.columns[paycheck.id]
             assert column.income == Decimal("165.00")
-            assert column.expense == Decimal("545.00")
-            assert column.net == Decimal("-380.00")
-            assert column.elsewhere == Decimal("500.00")
+            assert column.expense == Decimal("45.00")
+            # 165.00 in - 45.00 out = +120.00.
+            assert column.net == Decimal("120.00")
             assert self._delta(view, paycheck) == Decimal("120.00")
             _assert_grid_view_reconciles(view)
 
-    def test_a_settled_far_leg_is_excluded_too(
+    def test_a_settled_payment_counts_once_on_either_line(
         self, app, db, seed_user, seed_periods_today,
     ):  # pylint: disable=unused-argument
-        """The far leg of a PAID payment is a fact in the card's walk, keyed by its transfer.
+        """A PAID $80 payment is checking's expense and the card's income, each once.
 
-        A settled leg is its covering movement's fact, which names its
-        transfer (``CashSourceFact.transfer_id``, leaf ``X-bi-6-4a``; it was
-        reached by the shadow's ``transaction_id`` until then), so the seam's
-        exclusion is the same transfer id as the planned leg's.  Paid in the fixture paycheck: the
-        card's balance delta is the same ``+120.00`` and its income the same
-        ``165.00`` whether the payment is still projected or settled.
+        A settled leg is its covering movement's fact on its own account
+        (``CashSourceFact.transfer_id``, leaf ``X-bi-6-4a``), so each balance
+        line reads its own side and no exclusion is needed.
         """
         with app.app_context():
-            checking, card, paycheck = self._world(db, seed_user, seed_periods_today)
+            checking, card, _paycheck = self._world(db, seed_user, seed_periods_today)
             create_settled_transfer(
                 seed_user, db.session, checking, card, seed_periods_today[5],
                 amount=Decimal("80.00"),
@@ -608,26 +595,21 @@ class TestTheSubtotalsAreThePaychecksAcrossTheSet:
             db.session.commit()
             bctx = BalanceContext.build(seed_user["user"].id)
 
-            from_checking = balance_at.grid_balance_view(self._set(checking, card), bctx)
-            from_card = balance_at.grid_balance_view(self._set(card, checking), bctx)
+            from_checking = balance_at.grid_balance_view(checking, bctx)
+            from_card = balance_at.grid_balance_view(card, bctx)
 
             earlier = seed_periods_today[5].id
-            # Seen from checking, the paid $80 is checking's own expense leg
-            # in its paycheck and NOT the card's income; seen from the card,
-            # the reverse.
             assert from_checking.columns[earlier].expense == Decimal("80.00")
             assert from_checking.columns[earlier].income == Decimal("0.00")
-            assert from_checking.columns[earlier].elsewhere == Decimal("0.00")
             assert from_card.columns[earlier].income == Decimal("80.00")
             assert from_card.columns[earlier].expense == Decimal("0.00")
-            assert from_card.columns[earlier].elsewhere == Decimal("0.00")
             _assert_grid_view_reconciles(from_checking)
             _assert_grid_view_reconciles(from_card)
 
-    def test_a_transfer_with_one_endpoint_in_the_set_counts_from_that_endpoint(
+    def test_a_transfer_from_outside_the_set_is_the_cards_alone(
         self, app, db, seed_user, seed_periods_today,
     ):  # pylint: disable=unused-argument
-        """Savings -> card is the card's INCOME on the paycheck grid (R-CC23's kept case)."""
+        """Savings -> card is the card's income and no figure of checking's."""
         with app.app_context():
             checking, card, paycheck = self._world(db, seed_user, seed_periods_today)
             savings = create_savings_account(
@@ -640,87 +622,122 @@ class TestTheSubtotalsAreThePaychecksAcrossTheSet:
             db.session.commit()
             bctx = BalanceContext.build(seed_user["user"].id)
 
-            view = balance_at.grid_balance_view(self._set(checking, card), bctx)
+            from_checking = balance_at.grid_balance_view(checking, bctx)
+            from_card = balance_at.grid_balance_view(card, bctx)
 
-            column = view.columns[paycheck.id]
-            assert column.income == Decimal("300.00")
-            assert column.expense == Decimal("710.00")
-            # 45 phone - 300 from savings: the card's net budget is income.
-            assert column.elsewhere == Decimal("-255.00")
-            assert self._delta(view, paycheck) == Decimal("-665.00")
-            _assert_grid_view_reconciles(view)
+            mine = from_checking.columns[paycheck.id]
+            assert (mine.income, mine.expense) == (
+                Decimal("0.00"), Decimal("665.00"),
+            )
+            theirs = from_card.columns[paycheck.id]
+            # 165.00 from checking + 300.00 from savings = 465.00 in.
+            assert (theirs.income, theirs.expense) == (
+                Decimal("465.00"), Decimal("45.00"),
+            )
+            assert self._delta(from_checking, paycheck) == Decimal("-665.00")
+            assert self._delta(from_card, paycheck) == Decimal("420.00")
+            _assert_grid_view_reconciles(from_checking)
+            _assert_grid_view_reconciles(from_card)
 
-    def test_a_set_of_one_is_the_accounts_own_cash_column_unchanged(
+    def test_every_column_is_the_accounts_own_cash_column(
         self, app, db, seed_user, seed_periods_today,
     ):  # pylint: disable=unused-argument
-        """A set of one: checking's own columns, ``elsewhere`` zero, the row hidden.
+        """Every column of both lines is :func:`period_view_of` over that account, verbatim.
 
-        Compared column by column against the pre-CC-4-1 reading of the
-        subtotals -- :func:`period_view_of` over checking's own fold, which
-        is what the grid view read verbatim before the composition -- so the
-        single-account view is shown unchanged rather than assumed.  The
-        composition rounds each subtotal once over the composed legs where
-        the cash column carried them verbatim; equal here in every column,
-        which is the seam's cent-quantized premise measured rather than
-        quoted.
+        The independent path: the cash view the subtotals were composed from
+        until this task.  A view that still summed a card into checking's
+        totals, or read another member's fold, parts from it on the fixture
+        column.
         """
         with app.app_context():
-            checking, card, paycheck = self._world(db, seed_user, seed_periods_today)
-            del card
+            checking, card, _paycheck = self._world(db, seed_user, seed_periods_today)
             bctx = BalanceContext.build(seed_user["user"].id)
             window = bctx.reported_periods()
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(checking), bctx)
-            own = period_view_of(assembled_fold(checking, bctx), window)
+            for account in (checking, card):
+                view = balance_at.grid_balance_view(account, bctx)
+                own = period_view_of(assembled_fold(account, bctx), window)
+                for period in window:
+                    composed = view.columns[period.period_id]
+                    cash = own.columns[period.period_id]
+                    assert (
+                        composed.income, composed.expense, composed.net,
+                        composed.period_timing, composed.book_vs_bank,
+                        composed.balance,
+                    ) == (
+                        cash.income, cash.expense, cash.net,
+                        cash.period_timing, cash.book_vs_bank, cash.balance,
+                    ), (account.name, period.period_id)
 
-            for period in window:
-                composed = view.columns[period.period_id]
-                cash = own.columns[period.period_id]
-                assert (composed.income, composed.expense, composed.net) == (
-                    cash.income, cash.expense, cash.net,
-                ), period.period_id
-                assert composed.elsewhere == Decimal("0.00")
-            assert view.columns[paycheck.id].expense == Decimal("665.00")
-            assert view.row_flags(window).elsewhere is False
-            _assert_grid_view_reconciles(view)
 
-    def test_the_composition_is_each_members_own_cash_column_over_the_window(
-        self, app, db, seed_user, seed_periods_today,
-    ):  # pylint: disable=unused-argument
-        """Every column: the subtotals are the members' own columns summed, less the far leg.
+class TestACardPurchaseCountsOnce:
+    """Plan task plan#2932's own case: a purchase on the card and the payment that pays it off.
 
-        The independent path: each member's OWN :func:`period_view_of` column
-        (the pre-CC-4-1 producer) gives what that member budgets per period.
-        With the ``$165`` payment intra-set, the card's own column counts its
-        income leg and the composed view must not, so on the fixture paycheck
-        the composed income is the card's own income LESS ``$165`` and the
-        term is the card's own ``expense - income`` PLUS ``$165``; on every
-        other column the two agree exactly.  A composition that double-counted
-        a member, folded the wrong one, or leaked a far leg into another
-        period fails here where the identity oracle cannot see it.
-        """
-        with app.app_context():
-            checking, card, paycheck = self._world(db, seed_user, seed_periods_today)
-            bctx = BalanceContext.build(seed_user["user"].id)
-            window = bctx.reported_periods()
+    Rulings plan#2888 and plan#2910: a purchase on the card is the card's, and
+    the card's payment out of checking on the next payday after its date pays
+    it off.  Plan#2890's review measured the grid summing both into checking's
+    totals -- ``$800`` of groceries on the card dated Jan 3 in the Jan 2
+    paycheck read Total Expenses ``$800`` on Jan 2 (with ``$800`` "On other
+    accounts") and ``$800`` again on Jan 16 for the payment (its A2), and
+    bought Jan 14 with its row in the Jan 16 paycheck, ``$1,600`` on Jan 16
+    (its M-A).  Required, and asserted: what leaves checking, ``$0`` on Jan 2
+    and ``$800`` on Jan 16 (the review's A1, the shape the Credit-and-payback
+    rows gave).
 
-            view = balance_at.grid_balance_view(self._set(checking, card), bctx)
-            checking_own = period_view_of(assembled_fold(checking, bctx), window)
-            card_own = period_view_of(assembled_fold(card, bctx), window)
+    ``seed_periods``' paydays are Jan 2, Jan 16 and Jan 30 2026 onward; the
+    card closes on the 5th and falls due on the 27th; the payment works out
+    the card's whole balance each payday; the pass is held at Jan 1, ahead of
+    every row (the fixture of
+    :mod:`tests.test_services.test_card_payment_price`).
+    """
 
-            for period in window:
-                composed = view.columns[period.period_id]
-                mine = checking_own.columns[period.period_id]
-                theirs = card_own.columns[period.period_id]
-                far_income = (
-                    self._PAYMENT if period.period_id == paycheck.id
-                    else Decimal("0.00")
-                )
-                assert composed.income == mine.income + theirs.income - far_income, period.period_id
-                assert composed.expense == mine.expense + theirs.expense, period.period_id
-                assert composed.elsewhere == theirs.expense - theirs.income + far_income, period.period_id
-                assert composed.net == composed.income - composed.expense, period.period_id
-                assert composed.balance == mine.balance, period.period_id
+    @staticmethod
+    def _columns(account, user_id, periods):
+        """Return the grid's ``(expense, net)`` of *account* in each of the first three paychecks."""
+        ctx = BalanceContext.build(user_id, as_of=date(2026, 1, 1))
+        view = balance_at.grid_balance_view(account, ctx)
+        _assert_grid_view_reconciles(view)
+        return [
+            (view.columns[period.id].expense, view.columns[period.id].net)
+            for period in periods[:3]
+        ]
+
+    def test_bought_in_one_paycheck_and_paid_off_in_the_next(
+        self, seed_user, seed_periods,
+    ):
+        """$800 on the card Jan 3: checking reads $0 on Jan 2 and $800 on Jan 16, once."""
+        card = _card(seed_user)
+        _spend(seed_user, card, seed_periods[0], "800.00", date(2026, 1, 3))
+        _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE)
+        user_id = seed_user["user"].id
+
+        assert self._columns(seed_user["account"], user_id, seed_periods) == [
+            (Decimal("0.00"), Decimal("0.00")),
+            # The Jan 16 payment works out the $800 the card owes on Jan 15.
+            (Decimal("800.00"), Decimal("-800.00")),
+            (Decimal("0.00"), Decimal("0.00")),
+        ]
+        # The card's own line: the groceries in their paycheck, and the
+        # payment as its income on Jan 16 (an expense of -800.00 is not one).
+        card_view = balance_at.grid_balance_view(
+            card, BalanceContext.build(user_id, as_of=date(2026, 1, 1)),
+        )
+        assert card_view.columns[seed_periods[0].id].expense == Decimal("800.00")
+        assert card_view.columns[seed_periods[1].id].income == Decimal("800.00")
+
+    def test_bought_and_paid_off_in_one_paycheck(self, seed_user, seed_periods):
+        """Bought Jan 14 with its row in the Jan 16 paycheck: Jan 16 reads $800, not $1,600."""
+        card = _card(seed_user)
+        _spend(seed_user, card, seed_periods[1], "800.00", date(2026, 1, 14))
+        _works_out(seed_user, card, CardPaymentModeEnum.CARD_BALANCE)
+
+        assert self._columns(
+            seed_user["account"], seed_user["user"].id, seed_periods,
+        ) == [
+            (Decimal("0.00"), Decimal("0.00")),
+            (Decimal("800.00"), Decimal("-800.00")),
+            (Decimal("0.00"), Decimal("0.00")),
+        ]
 
 
 class TestTheContributionRowOnARealFeed:
@@ -780,7 +797,7 @@ class TestTheContributionRowOnARealFeed:
             periods = all_periods(user_id)
             account = self._401k_with_feed(db, seed_user, periods)
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(account), bctx)
+            view = balance_at.grid_balance_view(account, bctx)
 
             assert view.columns[periods[2].id].contribution == Decimal("0.00")
             assert view.columns[periods[3].id].contribution == self._EMPLOYEE
@@ -826,7 +843,7 @@ class TestTheContributionRowOnARealFeed:
                 match_cap_pct=Decimal("0.0600"),
             )
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(account), bctx)
+            view = balance_at.grid_balance_view(account, bctx)
 
             assert view.columns[periods[3].id].contribution == Decimal("400.00")
             _assert_grid_view_reconciles(view)
@@ -851,7 +868,7 @@ class TestTheContributionRowOnARealFeed:
             periods = all_periods(user_id)
             account = self._401k_with_feed(db, seed_user, periods)
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(account), bctx)
+            view = balance_at.grid_balance_view(account, bctx)
             previous = view.columns[periods[3].id]
             column = view.columns[periods[4].id]
             delta = column.balance - previous.balance

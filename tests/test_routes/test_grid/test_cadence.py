@@ -10,7 +10,6 @@ import pytest
 from app.extensions import db
 from app.models.user import UserSettings
 from app.models.ref import AccountType
-from app.services.cash_flow_set import CashFlowSet
 from app.services import template_amount_service
 from app.services import account_service, balance_at
 from app.services.pay_rhythm import FixedDays
@@ -55,7 +54,7 @@ class TestGridInterestAccrual:
         user_id = seed_user["user"].id
         current = current_pay_period(user_id)
         # Seam truth the route must render (current is the leftmost visible col).
-        view = balance_at.grid_balance_view(CashFlowSet.single(hysa), bctx)
+        view = balance_at.grid_balance_view(hysa, bctx)
         accrued = view.columns[current.id].balance
         interest = view.columns[current.id].accrual
 
@@ -196,7 +195,7 @@ class TestGridInterestAccrual:
         current = current_pay_period(user_id)
         # The seam builds the live map itself (ruling R-Q), so no override is
         # threaded here or by the route -- this IS the live figure.
-        live_view = balance_at.grid_balance_view(CashFlowSet.single(hysa), bctx)
+        live_view = balance_at.grid_balance_view(hysa, bctx)
         accrued_live = live_view.columns[current.id].balance
         # Sanity: the definition's $5,000 is reflected -- the balance clears
         # the $10,000 anchor + the deposit.

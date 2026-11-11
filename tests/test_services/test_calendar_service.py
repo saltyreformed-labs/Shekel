@@ -2156,7 +2156,7 @@ class TestBalanceContributingPredicate:
             db.session.commit()
 
             column = balance_at.grid_balance_view(
-                CashFlowSet.single(seed_user["account"]),
+                seed_user["account"],
                 BalanceContext.build(seed_user["user"].id),
             ).columns[p0.id]
             # 500.00 reservation + 200.00 confirmed cash leg; the Cancelled

@@ -6,7 +6,6 @@ from decimal import Decimal
 
 from app.extensions import db
 from app.models.investment_params import InvestmentParams
-from app.services.cash_flow_set import CashFlowSet
 from app.services import balance_at
 from app.services.balance_at import BalanceContext
 
@@ -162,7 +161,6 @@ class TestTheTwoRemainderRows:
             columns[periods[0].period_id] = balance_at.GridColumn(
                 balance=Decimal("3000.00"), income=Decimal("2400.00"),
                 expense=Decimal("1450.00"), net=Decimal("950.00"),
-                elsewhere=Decimal("0.00"),
                 period_timing=Decimal("-788.68"),
                 book_vs_bank=Decimal("0.00"),
                 contribution=Decimal("0.00"), accrual=Decimal("0.00"),
@@ -336,7 +334,7 @@ class TestTheTwoRemainderRows:
             current = calendar.period_containing(bctx.as_of)
             window = calendar.window(current.period_index, 6)
             card_window = [window[0]]
-            view = balance_at.grid_balance_view(CashFlowSet.single(retirement), bctx)
+            view = balance_at.grid_balance_view(retirement, bctx)
             # The shape this test needs: the window contributes, its first
             # column does not.
             assert view.row_flags(window).contribution is True
@@ -479,7 +477,6 @@ class TestTheContributionsRow:
             columns[periods[0].period_id] = balance_at.GridColumn(
                 balance=Decimal("3000.00"), income=Decimal("2400.00"),
                 expense=Decimal("1450.00"), net=Decimal("950.00"),
-                elsewhere=Decimal("0.00"),
                 period_timing=Decimal("0.00"),
                 book_vs_bank=Decimal("0.00"),
                 contribution=Decimal("181.59"), accrual=Decimal("0.00"),
@@ -686,7 +683,6 @@ class TestTheAccrualRowSignReachesItsStyling:
             columns[periods[0].period_id] = balance_at.GridColumn(
                 balance=Decimal("3000.00"), income=Decimal("2400.00"),
                 expense=Decimal("1450.00"), net=Decimal("950.00"),
-                elsewhere=Decimal("0.00"),
                 period_timing=Decimal("0.00"),
                 book_vs_bank=Decimal("0.00"),
                 contribution=Decimal("0.00"), accrual=Decimal("95.98"),

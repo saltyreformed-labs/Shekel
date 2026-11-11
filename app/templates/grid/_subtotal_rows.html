@@ -30,13 +30,13 @@
    The figures are computed in the balance-at seam with Decimal and passed
    in via ``columns``; this template only displays them.  They are the SAME
    GridColumn records the sticky footer's balance row reads, which is what
-   makes ``balance[p] - balance[p-1] == net[p] + elsewhere[p] +
-   period_timing[p] + book_vs_bank[p] + contribution[p] + accrual[p]`` a
-   property of one row set rather than an agreement between producers
-   (ruling R-K).  Since plan step CC-4-1 the three rows are the PAYCHECK's
-   across the owner's cash-flow set -- checking and its cards (ruling
-   credit_card:R-CC16) -- and the footer's "On other accounts" row is what
-   reconciles them with a one-account balance.
+   makes ``balance[p] - balance[p-1] == net[p] + period_timing[p] +
+   book_vs_bank[p] + contribution[p] + accrual[p]`` a property of one row set
+   rather than an agreement between producers (ruling R-K).  The three rows
+   are the balance account's own, what leaves it and what comes in
+   (developer ruling plan#2926, plan task plan#2932): a row drawn on a card
+   is the card's money, counted once, by the card's payment out of this
+   account.
 
    Expected context (* required):
      periods *    -- the visible `PeriodWindow` (plan step C2-f2b).

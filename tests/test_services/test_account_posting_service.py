@@ -34,7 +34,6 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.services.cash_flow_set import CashFlowSet
 from app.enums import (
     LedgerAccountKindEnum,
     PostingKindEnum,
@@ -2305,7 +2304,7 @@ class TestLedgerAgreesWithTheGridOnAssertionPeriods:
                 .order_by(PayPeriod.start_date)
                 .all()
             )
-            grid = balance_at.grid_balance_view(CashFlowSet.single(account), ctx)
+            grid = balance_at.grid_balance_view(account, ctx)
 
             compared = 0
             for period in periods:

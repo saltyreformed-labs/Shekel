@@ -34,22 +34,32 @@ is also a member -- is not a paycheck row.  A transfer with only
 one endpoint in the set (savings -> card) still shows from that endpoint, as a
 checking -> savings transfer always has.  Ruled against: showing both sides
 (Total Income carries the transfer); hiding EVERY transfer row on a non-balance
-member (hides a real planned act rather than a second view of one).  Worked on
-the ruling's example -- phone ``$45`` on the card, grocery ``$500`` on checking,
-a ``$165`` checking -> card payment in the same paycheck: Total Income ``$0``,
-Total Expenses ``$710``, Net Cash Flow ``-$710``, "On other accounts" ``+$45``,
-checking's balance moves ``-$665``.
+member (hides a real planned act rather than a second view of one).
+
+**The set decides which ROWS a screen draws, not what its totals count**
+(developer ruling plan#2926, 2026-11-05, which amends ``R-CC16`` and
+``R-CC23`` for the grid's totals; plan task plan#2932).  The grid's Total
+Income, Total Expenses and Net Cash Flow are the balance account's own -- what
+leaves it and what comes in -- so a bill on the card is drawn on the card's
+row, with its chip, and counted once, by the card's payment out of checking.
+From plan step CC-4-1 until that task the balance seam summed every member's
+rows into the grid's totals and reconciled them with the one account's balance
+through an "On other accounts" row, reading this module's far legs to keep the
+card's half of a checking -> card payment out; on the ruling's example above
+that read Total Expenses ``$710`` with ``+$45`` on other accounts.  Read off
+checking alone it is ``$665``, the ``$500`` grocery and the ``$165`` payment,
+and checking's balance moves by exactly that.  The far-leg query, the
+``others`` view of the set and the seam's composed subtotal went together,
+having no reader left.
 
 The rule's subject -- the transfers with both endpoints in the set -- is
-spelled TWICE, over the same two endpoint columns under the same membership
-test: the query :func:`_intra_set_transfers`, which the balance seam's
-composed subtotal reads (:func:`far_legs_of`), and :func:`leg_accounts_shown`'s
-in-memory test of a transfer its caller already holds, which decides the LEGS
-every display reader draws (a reader draws a transfer's legs from the parent
-rather than loading its shadow rows, and asks this module which of its two
-sides the set shows).  While the two stay one test, the cells a reader draws
-and the subtotal the seam sums agree about which rows are the paycheck's.
-Every display reader's rows are the set's OWN (:func:`own_rows_clause`) --
+spelled ONCE, by :func:`leg_accounts_shown`'s test of a transfer its caller
+already holds, which decides the LEGS every display reader draws (a reader
+draws a transfer's legs from the parent rather than loading its shadow rows,
+and asks this module which of its two sides the set shows).  It was spelled a
+second time, as a query the balance seam's composed subtotal read, until plan
+task plan#2932 deleted that subtotal.  Every display reader's rows are the
+set's OWN (:func:`own_rows_clause`) --
 every member's plan rows, less every shadow until plan step
 ``balance:X-bi-6-4d-2`` deleted them -- beside the LEGS of every
 transfer the set touches (:func:`touched_transfers_clause`, then
@@ -59,10 +69,7 @@ halves of one value (``PlanItems``) until it: the grid since leaf
 since leaf ``X-bi-6-1b``.  **The ROW spelling of the rule --
 ``paycheck_rows_clause``, every member's rows less the far-leg shadow through
 ``far_leg_clause`` -- was DELETED at ``X-bi-6-1b`` with its last reader**: a
-fence with no reader is deleted, not kept.  :func:`far_legs_of` read the
-SETTLED far-leg shadows for the balance seam's subtotal until leaf
-``X-bi-6-4a``, when the fold's facts came to name their transfer (ruling
-**R-BAL106**) and that read went: both halves are excluded by transfer id.
+fence with no reader is deleted, not kept.
 
 **A screen states its scope ONCE** (plan step **plan#2130**): it fills in a
 :class:`PlanScope` -- the set, the scenario, a :class:`Paychecks` or
@@ -73,7 +80,7 @@ in one place and answers one list, the rows by id then the sides.
 Services boundary (``CLAUDE.md``): no Flask symbol.  The clauses are built,
 never executed, here; the queries this module DOES run are
 :func:`load_plan_items`'s two (with the record pre-load a screen that reads
-records asks for) and :func:`far_legs_of`'s one for the seam.
+records asks for).
 """
 
 from collections.abc import Iterable
@@ -115,7 +122,8 @@ class CashFlowSet:
     """The owner's cash-flow accounts, and which one's balance line renders.
 
     Built by :func:`app.services.account_resolver.resolve_cash_flow_set`; read
-    by every plan-item reader and by the balance seam's grid view.  Frozen and
+    by every plan-item reader; the balance seam reads only its
+    :attr:`balance`, through the route (plan task plan#2932).  Frozen and
     total: :attr:`balance` is always a member of :attr:`members`, which is
     never empty.
 
@@ -148,11 +156,6 @@ class CashFlowSet:
         """The members' ``budget.accounts.id`` values, in member order."""
         return tuple(m.id for m in self.members)
 
-    @property
-    def others(self) -> tuple[Account, ...]:
-        """Every member but the balance account, in member order."""
-        return tuple(m for m in self.members if m.id != self.balance.id)
-
     def seen_from(self, balance: Account) -> "CashFlowSet":
         """The VIEW of this set behind *balance*'s line: the ``?account_id=`` rule.
 
@@ -184,38 +187,12 @@ class CashFlowSet:
     def single(cls, account: Account) -> "CashFlowSet":
         """The set of ONE account: its own rows behind its own balance line.
 
-        What every single-account reader of the grid view asks for -- the
-        cross-page equality tests, the anchor surfaces, the balance baseline
-        harness -- and the shape the resolver answers for an owner with no
-        card or for a balance line outside the set.  A legitimate set, not a
-        compatibility shim: ``elsewhere`` is ``0.00`` in every column and the
-        subtotals are the account's own.
+        The shape the resolver answers for an owner with no card or for a
+        balance line outside the set, and what :meth:`seen_from` answers for
+        the latter.  A legitimate set, not a compatibility shim: its rows are
+        that account's own.
         """
         return cls(balance=account, members=(account,))
-
-
-def _intra_set_transfers(cash_flow: CashFlowSet):
-    """Return the query of transfer ids with BOTH endpoints in the set.
-
-    The ONE spelling of the rule's subject.  Executed by :func:`far_legs_of`
-    (and, until leaf ``X-bi-6-1b`` deleted the row spelling, a subquery of
-    ``far_leg_clause``); a member's endpoints are the owner's accounts, so it
-    can name no other owner's transfer.
-
-    Args:
-        cash_flow: The set.
-
-    Returns:
-        A query of ``budget.transfers.id`` -- built, not executed.
-    """
-    member_ids = cash_flow.member_ids
-    return (
-        db.session.query(Transfer.id)
-        .filter(
-            Transfer.from_account_id.in_(member_ids),
-            Transfer.to_account_id.in_(member_ids),
-        )
-    )
 
 
 def own_rows_clause(cash_flow: CashFlowSet):
@@ -249,17 +226,16 @@ def leg_accounts_shown(cash_flow: CashFlowSet, transfer: Transfer) -> tuple[int,
     transfer with BOTH endpoints in the set shows once, from the balance
     line's side; one with a single endpoint in the set shows from that
     endpoint; one touching no member shows nowhere.  Stated over the two
-    endpoint columns rather than by executing :func:`_intra_set_transfers`,
-    because a caller holds the transfer already and the membership test is
-    the same predicate that query filters on.
+    endpoint columns of a transfer the caller already holds; it is the
+    rule's only spelling since plan task plan#2932 deleted the query the
+    balance seam's composed subtotal read.
 
     **The fourth arm is the rule's own gap, reproduced rather than decided
     here**: both endpoints in the set and the balance line on NEITHER -- a
     checking -> card B payment seen from card A's balance line, members
     ``(checking, A, B)``.  The row spelling dropped BOTH shadows there
     (each was a member row that is not the balance account, of an intra-set
-    transfer), so the payment was drawn nowhere on A's grid, and
-    :func:`far_legs_of` keeps both out of the subtotal the same way.  This
+    transfer), so the payment was drawn nowhere on A's grid.  This
     answers ``()`` for exactly that case, which is what the rows did; whether
     R-CC23 MEANS "nowhere" there is an open question for the developer,
     recorded at leaf ``balance:X-bi-6-1`` (its adversarial review found the
@@ -602,68 +578,4 @@ def _scoped(scope: PlanScope, model: type[_Parent]) -> Query[_Parent]:
         model.scenario_id == scope.scenario_id,
         model.is_deleted.is_(False),
         *scope.band.clauses(model),
-    )
-
-
-@dataclass(frozen=True)
-class FarLegs:
-    """The far legs of the set's intra-set transfers, by their transfer.
-
-    What the balance seam needs to keep its composed subtotal in step with the
-    items the readers draw (:func:`leg_accounts_shown`).  A member's budget legs
-    (:func:`~app.services.balance_at._cash_periods._budget_legs`) hold a
-    transfer two ways, and both are excluded by the TRANSFER's id: for a leg
-    on a NON-balance member, "far" is exactly "its transfer has both endpoints
-    in the set", so :attr:`transfer_ids` is every intra-set transfer, read off
-    ``budget.transfers`` alone.
-
-    * a STILL-PROJECTED transfer is a
-      :class:`~app.services.transfer_legs.TransferLeg` derived from its
-      parent (plan step X-bi-6a);
-    * a SETTLED one is a :class:`~app.services.cash_ledger.CashSourceFact`
-      whose :attr:`~app.services.cash_ledger.CashSourceFact.transfer_id` names
-      it (leaf ``X-bi-6-4a``, ruling **R-BAL106**).  It was keyed by the
-      SHADOW's ``transaction_id`` until then, read off the settled shadow
-      rows by a second query; a fact that names its transfer needs neither,
-      and a leg's money excluded by its transfer was excluded whatever its
-      shadow's status said.
-
-    **No shadow row is read** (Transfer Invariant 5: "no balance reader reads
-    a projected shadow row"), so nothing here moved when plan step
-    ``balance:X-bi-6-4d-2`` deleted the shadows.
-
-    Attributes:
-        transfer_ids: Every intra-set transfer's ``budget.transfers.id``.
-    """
-
-    transfer_ids: frozenset[int]
-
-    @classmethod
-    def none(cls) -> "FarLegs":
-        """The empty answer, for a set with nothing to exclude."""
-        return cls(transfer_ids=frozenset())
-
-
-def far_legs_of(cash_flow: CashFlowSet) -> FarLegs:
-    """Return the set's far legs -- one query, for the balance seam.
-
-    Issues nothing for a one-member set: it has no other member to hold a far
-    leg, so the answer is empty by construction rather than by a round trip.
-    The query filters on neither scenario nor soft-deletion, on purpose: the
-    seam's walk and plan are scenario-scoped and read live rows only, so an
-    id here that names a row they never hold excludes nothing, and a filter
-    would be a second statement of "which rows are live" beside theirs.
-
-    Args:
-        cash_flow: The set.
-
-    Returns:
-        The :class:`FarLegs`.
-    """
-    if not cash_flow.others:
-        return FarLegs.none()
-    return FarLegs(
-        transfer_ids=frozenset(
-            row.id for row in _intra_set_transfers(cash_flow).all()
-        ),
     )

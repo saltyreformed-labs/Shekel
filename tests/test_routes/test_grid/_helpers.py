@@ -109,7 +109,7 @@ def _summary_periods():
 
 
 def _summary_columns(
-    periods, *, elsewhere="0.00", period_timing="0.00", book_vs_bank="0.00",
+    periods, *, period_timing="0.00", book_vs_bank="0.00",
     contribution="0.00", accrual="0.00",
 ):
     """Return one hand-built GridColumn per period, all carrying the same figures.
@@ -129,7 +129,6 @@ def _summary_columns(
             income=Decimal("2400.00"),
             expense=Decimal("1450.00"),
             net=Decimal("950.00"),
-            elsewhere=Decimal(elsewhere),
             period_timing=Decimal(period_timing),
             book_vs_bank=Decimal(book_vs_bank),
             contribution=Decimal(contribution),
@@ -140,7 +139,7 @@ def _summary_columns(
 
 
 def _row_flags(
-    *, elsewhere=False, period_timing=False, book_vs_bank=False,
+    *, period_timing=False, book_vs_bank=False,
     contribution=False, accrual=False,
 ):
     """Return GridRowFlags with every arm explicit (no defaulted visibility).
@@ -152,7 +151,6 @@ def _row_flags(
     with the other off.
     """
     return balance_at.GridRowFlags(
-        elsewhere=elsewhere,
         period_timing=period_timing,
         book_vs_bank=book_vs_bank,
         contribution=contribution,

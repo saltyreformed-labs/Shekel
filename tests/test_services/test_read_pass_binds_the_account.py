@@ -46,7 +46,6 @@ import pytest
 
 from app.exceptions import ForeignAccountError
 from app.services import balance_at
-from app.services.cash_flow_set import CashFlowSet
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._cash_fold import assembled_fold
 from app.services.balance_at import _asset_fold
@@ -373,7 +372,7 @@ class TestThePublicSeamInheritsTheBinding:
         """The grid's whole column set."""
         ctx, account = foreign
         with pytest.raises(ForeignAccountError):
-            balance_at.grid_balance_view(CashFlowSet.single(account), ctx)
+            balance_at.grid_balance_view(account, ctx)
 
     def test_balance_map_refuses(self, db, foreign):
         # pylint: disable=unused-argument

@@ -10,7 +10,7 @@ from app.enums import AcctTypeEnum, TxnTypeEnum
 from app.models.paycheck_line import PaycheckLine
 from app.models.ref import CalcMethod, PaycheckLineKind
 from app.models.transaction_template import TransactionTemplate
-from app.services import balance_at, income_service, liability_sign, template_amount_service
+from app.services import balance_at, liability_sign, template_amount_service
 from app.services.projection_inputs import load_investment_params_for_accounts
 from app.services.scenario_resolver import get_baseline_scenario
 from app.services.balance_at import BalanceContext
@@ -312,22 +312,19 @@ def _assert_grid_view_reconciles(view):
     """Assert the view's rows reconcile to the cent, off the view alone.
 
     For every adjacent pair of periods the displayed balance delta must equal
-    the column's own net plus the "On other accounts" term plus BOTH remainders
-    plus BOTH modelled tiers -- ruling R-K's identity in the form ruling R-AH
-    measured, with ruling R-DH (f)'s split applied and ruling
-    ``credit_card:R-CC16``'s term (plan step CC-4-1)::
+    the column's own net plus BOTH remainders plus BOTH modelled tiers -- ruling
+    R-K's identity in the form ruling R-AH measured, with ruling R-DH (f)'s
+    split applied::
 
         balance[p] - balance[p-1]
-            == net[p] + elsewhere[p] + period_timing[p] + book_vs_bank[p]
+            == net[p] + period_timing[p] + book_vs_bank[p]
                + contribution[p] + accrual[p]
 
-    **The ELSEWHERE term is what lets a paycheck-wide net reconcile with a
-    one-account balance**: ``net`` sums every member of the owner's cash-flow
-    set (checking and its cards) and ``balance`` is one member's, so what the
-    paycheck budgets on the other members -- their expense less their income
-    -- is the term between them.  ``TestTheRemainderOracleSeesEveryTerm``
-    carries the control that a delta short its elsewhere term must not
-    reconcile, beside the two it already carried for the modelled tiers.
+    **The "On other accounts" term is gone** (plan task plan#2932, ruling
+    plan#2926): from plan step CC-4-1 ``net`` summed every member of the
+    owner's cash-flow set and an ``elsewhere`` term reconciled it with the one
+    account's balance; the subtotals are that account's own now, so the
+    identity is back in the form it had before.
 
     The CONTRIBUTION term is not decoration: dropping it breaks the identity on
     53 of 59 period pairs on the real Empower 401(k), worst $181.59 a column (a
@@ -358,14 +355,12 @@ def _assert_grid_view_reconciles(view):
     assert len(items) >= 2, "need >= 2 periods to reconcile a delta"
     for (_prev_id, prev), (pid, column) in zip(items, items[1:]):
         expected = (
-            column.net + column.elsewhere
-            + column.period_timing + column.book_vs_bank
+            column.net + column.period_timing + column.book_vs_bank
             + column.contribution + column.accrual
         )
         assert column.balance - prev.balance == expected, (
             f"period {pid}: balance delta "
             f"{column.balance - prev.balance} != net {column.net} + "
-            f"elsewhere {column.elsewhere} + "
             f"period_timing {column.period_timing} + book_vs_bank "
             f"{column.book_vs_bank} + contribution "
             f"{column.contribution} + accrual {column.accrual}"
@@ -374,7 +369,7 @@ def _assert_grid_view_reconciles(view):
 
 def _column(
     *, balance="0.00", income="0.00", expense="0.00", net="0.00",
-    elsewhere="0.00", period_timing="0.00", book_vs_bank="0.00",
+    period_timing="0.00", book_vs_bank="0.00",
     contribution="0.00", accrual="0.00",
 ):
     """Build one hand-specified :class:`GridColumn` for the flag tests.
@@ -402,7 +397,6 @@ def _column(
         income=Decimal(income),
         expense=Decimal(expense),
         net=Decimal(net),
-        elsewhere=Decimal(elsewhere),
         period_timing=Decimal(period_timing),
         book_vs_bank=Decimal(book_vs_bank),
         contribution=Decimal(contribution),

@@ -6,7 +6,6 @@ from decimal import Decimal
 
 import pytest
 
-from app.services.cash_flow_set import CashFlowSet
 from app.extensions import db
 from app.utils.dates import display_today
 from tests._test_helpers import (
@@ -440,7 +439,7 @@ class TestCheckingDetailCanonicalProducer:
             # PLAIN, so the two agree by construction -- which is exactly the
             # condition that made the previous spelling look harmless.
             grid_current_balance = balance_at.grid_balance_view(
-                CashFlowSet.single(account),
+                account,
                 BalanceContext.build(seed_user["user"].id),
             ).columns[current_period.id].balance
 

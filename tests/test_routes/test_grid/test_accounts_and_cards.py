@@ -25,85 +25,28 @@ from tests._test_helpers import (
     one_off_row_of,
 )
 
-from ._helpers import (
-    _summary_periods,
-    _summary_columns,
-    _row_flags,
-    _render_grid_footer,
-    _render_mobile_card,
-    _render_plan_recap,
-)
-
 
 class TestTheGridReadsCheckingAndItsCards:
-    """Plan step credit_card:CC-4-1: the paycheck grid across the owner's cash-flow set.
+    """Plan step credit_card:CC-4-1's rows, and plan task plan#2932's totals.
 
     Developer ruling ``credit_card:R-CC16``: a plan item's ``account_id`` is
     the account its money is expected to move through, so the phone bill that
-    is always paid by card is a row ON the card and the grid reads checking
-    and its cards as ONE paycheck -- the rows are every member's, the Total
-    Income / Expenses / Net rows are the paycheck's, the Projected End Balance
-    stays one account's, and the footer gains "On other accounts".  Ruling
-    ``credit_card:R-CC23``: a transfer between two members shows once, from
-    the balance line's side.
+    is always paid by card is a row ON the card and the grid draws checking's
+    and its cards' rows as ONE paycheck.  Ruling ``credit_card:R-CC23``: a
+    transfer between two members shows once, from the balance line's side.
+    Developer ruling plan#2926 (plan task plan#2932): the grid's Total Income,
+    Total Expenses and Net Cash Flow are the BALANCE account's own -- what
+    leaves it and what comes in -- so "On other accounts" is gone.
 
-    The first three tests render the three surfaces that carry the new row
-    against hand-built columns (the same shape ``TestTheTwoRemainderRows``
-    grades); the rest drive the live routes over the ruling's own worked
-    example -- phone ``$45`` on the card, grocery ``$500`` on checking, a
-    ``$165`` card payment in the same paycheck -- and read the figures the
-    seam's test hand-computed (``Total Expenses $710``, ``On other accounts
-    $45``, and from the card's side ``Total Income $165``).
+    The tests drive the live routes over R-CC23's worked example -- phone
+    ``$45`` on the card, grocery ``$500`` on checking, a ``$165`` card payment
+    in the same paycheck -- and read the figures the seam's test
+    hand-computed (from checking's side ``Total Expenses $665``; from the
+    card's side ``Total Income $165`` and ``Total Expenses $45``).  CC-4-1's
+    subtotals summed both accounts (``$710`` with ``$45`` on other accounts).
     """
 
     _ROW = "On other accounts"
-
-    def test_the_desktop_footer_renders_the_row_first_when_flagged(self, app):
-        """Above Period timing (it is the budget-side term), hidden on a zero flag."""
-        periods = _summary_periods()
-        with app.app_context():
-            shown = _render_grid_footer(
-                app, periods,
-                _summary_columns(periods, elsewhere="45.00", period_timing="-427.22"),
-                _row_flags(elsewhere=True, period_timing=True),
-            )
-            hidden = _render_grid_footer(
-                app, periods,
-                _summary_columns(periods, period_timing="-427.22"),
-                _row_flags(period_timing=True),
-            )
-
-        assert self._ROW in shown
-        assert "$45" in shown
-        assert shown.index(self._ROW) < shown.index("Period timing")
-        assert shown.index("Period timing") < shown.index("Projected End Balance")
-        assert self._ROW not in hidden
-        assert "bi-wallet2" not in hidden
-
-    def test_the_mobile_card_and_the_plan_recap_render_it_on_the_same_rule(self, app):
-        """Ruling R-P: every form factor explains its balance the same way."""
-        period = _summary_periods()[0]
-        columns = _summary_columns([period], elsewhere="45.00")
-        with app.app_context():
-            card = _render_mobile_card(
-                app, period, columns, _row_flags(elsewhere=True),
-            )
-            card_hidden = _render_mobile_card(
-                app, period, columns, _row_flags(),
-            )
-            recap = _render_plan_recap(
-                app, period, columns, _row_flags(elsewhere=True),
-            )
-            recap_hidden = _render_plan_recap(
-                app, period, columns, _row_flags(),
-            )
-
-        assert self._ROW in card
-        assert "$45" in card
-        assert card.index("Net Cash Flow") < card.index(self._ROW)
-        assert self._ROW not in card_hidden
-        assert "Elsewhere $45" in recap
-        assert "Elsewhere" not in recap_hidden
 
     @staticmethod
     def _world(seed_user, periods):
@@ -156,10 +99,10 @@ class TestTheGridReadsCheckingAndItsCards:
         row = html[start:html.index("</tr>", start)]
         return re.findall(r"-?\$[\d,]+(?:\.\d\d)?", row)
 
-    def test_the_page_shows_the_cards_row_and_the_paychecks_subtotals(
+    def test_the_page_shows_the_cards_row_and_the_balance_accounts_own_subtotals(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """The phone bill renders as a grid row; the subtotals sum both accounts.
+        """The phone bill renders as a grid row; the subtotals are checking's alone.
 
         ``periods=1&offset=2`` renders ONE column, the fixture paycheck
         (period 6: today sits in period 4, so an offset of two from the
@@ -177,22 +120,21 @@ class TestTheGridReadsCheckingAndItsCards:
         # The card's row is on the paycheck grid.
         assert f'id="txn-cell-{phone}"' in html
         assert "Phone on the card" in html
-        # The paycheck's subtotals across both accounts (the ruling's worked
-        # example), and the term that reconciles them with checking's balance.
+        # What leaves checking: the $500 grocery and the $165 payment; the
+        # card's $45 phone bill is drawn and counted on the card alone.
         assert self._figures(html, "Total Income") == ["$0"]
-        assert self._figures(html, "Total Expenses") == ["$710"]
-        assert self._figures(html, "Net Cash Flow") == ["-$710"]
+        assert self._figures(html, "Total Expenses") == ["$665"]
+        assert self._figures(html, "Net Cash Flow") == ["-$665"]
         footer = self._tfoot(html)
-        assert self._figures(footer, self._ROW) == ["$45"]
-        assert footer.index(self._ROW) < footer.index("Projected End Balance")
-        # Checking's balance line moves by the paycheck's net plus the term:
-        # -710 + 45 = -665 off the seeded $1,000.00 opening.
+        assert self._ROW not in footer
+        # Checking's balance line moves by its own net: -665 off the seeded
+        # $1,000.00 opening.
         assert self._figures(footer, "Projected End Balance") == ["$335"]
 
     def test_the_self_refresh_partials_agree_with_the_page(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """The balance row and the subtotal rows recompute the SAME set."""
+        """The balance row and the subtotal rows recompute the SAME figures."""
         with app.app_context():
             self._world(seed_user, seed_periods_today)
             page = auth_client.get("/grid?periods=1&offset=2").get_data(as_text=True)
@@ -203,15 +145,15 @@ class TestTheGridReadsCheckingAndItsCards:
                 "/grid/subtotal-rows?periods=1&offset=2",
             ).get_data(as_text=True)
 
-        assert self._figures(balance_row, self._ROW) == ["$45"]
-        assert self._figures(subtotal_rows, "Total Expenses") == ["$710"]
+        assert self._ROW not in balance_row
+        assert self._figures(subtotal_rows, "Total Expenses") == ["$665"]
         # The page's footer and the partial's are the same rendered rows.
         assert self._tfoot(page).strip() == balance_row.strip()
 
     def test_the_mobile_summary_partial_reads_the_set_too(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """``/grid/this-period-summary`` recomputes the SAME set for its one period."""
+        """``/grid/this-period-summary`` reads checking's own net for its one period."""
         with app.app_context():
             checking, card, paycheck, phone = self._world(seed_user, seed_periods_today)
             del checking, card, phone
@@ -226,16 +168,17 @@ class TestTheGridReadsCheckingAndItsCards:
         def bar(label):
             start = html.index(label)
             return re.findall(r"-?\$[\d,]+", html[start:html.index("</div>", start)])
-        assert bar("Net Cash Flow") == ["-$710"]
-        assert bar(self._ROW) == ["$45"]
+        assert bar("Net Cash Flow") == ["-$665"]
+        assert self._ROW not in html
 
     def test_an_override_naming_the_card_moves_the_balance_line_only(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
         """``?account_id=<card>``: the card's balance and header; the same paycheck's rows.
 
-        From the card's side the payment is the NEAR leg -- Total Income
-        ``$165`` -- and "On other accounts" is checking's ``$500``.
+        From the card's side the totals are the card's own: the payment in,
+        Total Income ``$165``, and the phone bill out, Total Expenses ``$45``;
+        checking's grocery is drawn and counted nowhere here.
         """
         with app.app_context():
             checking, card, paycheck, phone = self._world(seed_user, seed_periods_today)
@@ -247,10 +190,10 @@ class TestTheGridReadsCheckingAndItsCards:
         assert f'id="txn-cell-{phone}"' in html
         assert "Grocery" in html
         assert self._figures(html, "Total Income") == ["$165"]
-        assert self._figures(html, "Total Expenses") == ["$545"]
-        assert self._figures(html, "Net Cash Flow") == ["-$380"]
+        assert self._figures(html, "Total Expenses") == ["$45"]
+        assert self._figures(html, "Net Cash Flow") == ["$120"]
         footer = self._tfoot(html)
-        assert self._figures(footer, self._ROW) == ["$500"]
+        assert self._ROW not in footer
         # The card's line: -500 opening, then -45 + 165 = +120 -> -$380.
         assert self._figures(footer, "Projected End Balance") == ["-$380"]
 
@@ -277,7 +220,7 @@ class TestTheGridReadsCheckingAndItsCards:
     def test_an_owner_with_no_card_sees_no_row_and_the_same_subtotals(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """The pre-card grid: one member, the row hidden, checking's own figures."""
+        """The pre-card grid: one member, no such row, checking's own figures."""
         with app.app_context():
             paycheck = seed_periods_today[6]
             one_off_row_of(

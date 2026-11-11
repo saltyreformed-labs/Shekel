@@ -18,7 +18,6 @@ from app.services.pay_calendar import DerivedPeriod
 from app.services.scenario_resolver import get_baseline_scenario
 from app.utils.money import round_money
 from app.services.balance_at import BalanceContext
-from app.services.cash_flow_set import CashFlowSet
 from tests._test_helpers import (
     all_periods,
     make_appreciating_account,
@@ -51,7 +50,7 @@ class TestGridBalanceView:
             bctx = BalanceContext.build(user_id)
             account = seed_user["account"]
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(account), bctx)
+            view = balance_at.grid_balance_view(account, bctx)
             cash = balance_at.cash_balance_map(account, bctx)
 
             assert {
@@ -84,7 +83,7 @@ class TestGridBalanceView:
                 date(2024, 1, 1),
             )
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(mortgage), bctx)
+            view = balance_at.grid_balance_view(mortgage, bctx)
             cash = balance_at.cash_balance_map(mortgage, bctx)
 
             assert {
@@ -125,7 +124,7 @@ class TestGridBalanceView:
             )
             db.session.commit()
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(hysa), bctx)
+            view = balance_at.grid_balance_view(hysa, bctx)
             kc = balance_at.balance_map(hysa, bctx)
             cash = balance_at.cash_balance_map(hysa, bctx)
 
@@ -192,7 +191,7 @@ class TestGridBalanceView:
                 seed_user, db.session, periods[2], Decimal("10000.00"),
             )
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(inv), bctx)
+            view = balance_at.grid_balance_view(inv, bctx)
             cash = balance_at.cash_balance_map(inv, bctx)
             modelled = balance_at.balance_map(inv, bctx)
 
@@ -231,7 +230,7 @@ class TestGridBalanceView:
                 Decimal("0.03000"),
             )
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(prop), bctx)
+            view = balance_at.grid_balance_view(prop, bctx)
             cash = balance_at.cash_balance_map(prop, bctx)
             modelled = balance_at.balance_map(prop, bctx)
 
@@ -258,7 +257,7 @@ class TestGridBalanceView:
             user_id = seed_user["user"].id
             with pytest.raises(ValueError):
                 balance_at.grid_balance_view(
-                    CashFlowSet.single(seed_user["account"]), _no_baseline(user_id),
+                    seed_user["account"], _no_baseline(user_id),
                 )
 
     def test_an_interest_account_with_no_params_models_no_accrual(
@@ -293,7 +292,7 @@ class TestGridBalanceView:
             db.session.refresh(hysa)
 
             cash = balance_at.cash_balance_map(hysa, bctx)
-            view = balance_at.grid_balance_view(CashFlowSet.single(hysa), bctx)
+            view = balance_at.grid_balance_view(hysa, bctx)
 
             assert {
                 pid: column.balance for pid, column in _all_columns(view)
@@ -340,7 +339,7 @@ class TestGridBalanceView:
             db.session.commit()
             assert income_txn.estimated_amount is None
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(hysa), bctx)
+            view = balance_at.grid_balance_view(hysa, bctx)
             cash = balance_at.cash_balance_map(hysa, bctx)
             last = periods[-1].id
 
@@ -418,34 +417,13 @@ class TestGridRowFlags:
         ]
 
     def test_all_zero_window_renders_no_row(self):
-        """Every column zero -> all five rows hidden (the ordinary cash grid)."""
+        """Every column zero -> all four rows hidden (the ordinary cash grid)."""
         view = self._view({1: _column(), 2: _column()})
         flags = view.row_flags(self._periods(1, 2))
-        assert flags.elsewhere is False
         assert flags.period_timing is False
         assert flags.book_vs_bank is False
         assert flags.contribution is False
         assert flags.accrual is False
-
-    def test_the_elsewhere_row_is_asked_its_own_question(self):
-        """Plan step CC-4-1: "On other accounts" takes R-O's rule, per ROW.
-
-        Asserted in both directions like the two remainders: a card bill in one
-        column turns the row on for the window and no other row with it, and a
-        timing figure alone leaves it off.  A negative figure -- income
-        expected on a card, a refund -- is non-zero and renders.
-        """
-        card_bill = self._view({1: _column(), 2: _column(elsewhere="45.00")})
-        flags = card_bill.row_flags(self._periods(1, 2))
-        assert flags.elsewhere is True
-        assert flags.period_timing is False
-        assert flags.book_vs_bank is False
-
-        timing_only = self._view({1: _column(period_timing="10.00"), 2: _column()})
-        assert timing_only.row_flags(self._periods(1, 2)).elsewhere is False
-
-        card_refund = self._view({1: _column(elsewhere="-12.50")})
-        assert card_refund.row_flags(self._periods(1)).elsewhere is True
 
     def test_one_non_zero_column_renders_the_row_for_the_window(self):
         """A single non-zero column turns the row on for the whole window."""
@@ -625,25 +603,21 @@ class TestTheRemainderOracleSeesEveryTerm:
     # period pairs on the Empower 401(k) -- and $95.98 is the HYSA accrual this
     # file hand-derives elsewhere.
     _NET = "100.00"
-    # Ruling credit_card:R-CC23's worked example: the $45 phone bill expected
-    # on the card is budgeted in the paycheck's net and never leaves checking.
-    _ELSEWHERE = "45.00"
     _PERIOD_TIMING = "10.00"
     _BOOK_VS_BANK = "-4.00"
     _CONTRIBUTION = "181.59"
     _ACCRUAL = "95.98"
 
-    def _two_columns(self, *, contribution, elsewhere=_ELSEWHERE):
+    def _two_columns(self, *, contribution):
         """Return an opening column whose successor's delta is every term."""
         opening = _column(balance="1000.00")
         moved = _column(
             balance=str(
-                Decimal("1000.00") + Decimal(self._NET) + Decimal(elsewhere)
+                Decimal("1000.00") + Decimal(self._NET)
                 + Decimal(self._PERIOD_TIMING) + Decimal(self._BOOK_VS_BANK)
                 + Decimal(contribution) + Decimal(self._ACCRUAL)
             ),
             net=self._NET,
-            elsewhere=elsewhere,
             period_timing=self._PERIOD_TIMING,
             book_vs_bank=self._BOOK_VS_BANK,
             contribution=contribution,
@@ -674,7 +648,6 @@ class TestTheRemainderOracleSeesEveryTerm:
             income=moved.income,
             expense=moved.expense,
             net=moved.net,
-            elsewhere=moved.elsewhere,
             period_timing=moved.period_timing,
             book_vs_bank=moved.book_vs_bank,
             contribution=Decimal("0.00"),
@@ -705,7 +678,6 @@ class TestTheRemainderOracleSeesEveryTerm:
             income=moved.income,
             expense=moved.expense,
             net=moved.net,
-            elsewhere=moved.elsewhere,
             period_timing=moved.period_timing,
             book_vs_bank=moved.book_vs_bank,
             contribution=moved.contribution,
@@ -713,32 +685,6 @@ class TestTheRemainderOracleSeesEveryTerm:
         )
 
         with pytest.raises(AssertionError, match=r"\+ accrual "):
-            _assert_grid_view_reconciles(self._view(columns))
-
-    def test_dropping_the_elsewhere_term_breaks_the_identity(self):
-        """The control for the term plan step CC-4-1 added (ruling R-CC16).
-
-        The same shape as the contribution control: the ``$45.00`` the
-        paycheck budgets on the card stays in the balance delta and leaves the
-        column, which a five-term oracle would wave through.  The message must
-        name the term.
-        """
-        broken = self._two_columns(contribution=self._CONTRIBUTION)
-        columns = OrderedDict(broken.columns)
-        moved = columns[2]
-        columns[2] = balance_at.GridColumn(
-            balance=moved.balance,
-            income=moved.income,
-            expense=moved.expense,
-            net=moved.net,
-            elsewhere=Decimal("0.00"),
-            period_timing=moved.period_timing,
-            book_vs_bank=moved.book_vs_bank,
-            contribution=moved.contribution,
-            accrual=moved.accrual,
-        )
-
-        with pytest.raises(AssertionError, match=r"\+ elsewhere "):
             _assert_grid_view_reconciles(self._view(columns))
 
 
@@ -791,7 +737,7 @@ class TestTheViewIsBuiltOnOneAmountModel:
             )
             db.session.commit()
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(account), bctx)
+            view = balance_at.grid_balance_view(account, bctx)
             budgets = cash_ledger.amounts_by_key([income_txn], bctx.amounts())
 
             assert income_txn.estimated_amount is None
@@ -845,7 +791,7 @@ class TestTheRemainderIsWhatTheRowsCannotExplain:
             account = seed_user["account"]
             _seed_grid_activity(db, seed_user, periods)
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(account), bctx)
+            view = balance_at.grid_balance_view(account, bctx)
 
             assert view.columns
             moved = [
@@ -896,7 +842,7 @@ class TestTheRemainderIsWhatTheRowsCannotExplain:
             )
             db.session.commit()
 
-            view = balance_at.grid_balance_view(CashFlowSet.single(account), bctx)
+            view = balance_at.grid_balance_view(account, bctx)
 
             assert view.columns[periods[1].id].net == Decimal("-300.00")
             assert view.columns[periods[1].id].period_timing == Decimal(

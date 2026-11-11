@@ -12,14 +12,14 @@ Three subjects, each its own class: the resolver
 clause (:func:`~app.services.cash_flow_set.own_rows_clause`: every member's
 own rows and no shadow, since leaf ``balance:X-bi-6-1b`` the only row clause
 -- R-CC23's far leg is the LEG spelling's, ``leg_accounts_shown``, graded in
-``test_transfer_legs/test_the_grids_legs.py``; the far-leg query the balance
-seam reads is graded beside it here), and the orthogonal ``revolving`` filter
-the set is built on.
-The seam's composed subtotal and its "On other accounts" term are graded in
-``test_balance_at/test_cash_flow.py`` (``TestTheSubtotalsAreThePaychecksAcrossTheSet``),
-and the identity oracle they extend in ``test_balance_at/test_grid.py``
-(``TestTheRemainderOracleSeesEveryTerm``); the grid's render in
-``test_routes/test_grid/test_accounts_and_cards.py``.
+``test_transfer_legs/test_the_grids_legs.py``), and the orthogonal
+``revolving`` filter the set is built on.
+The set decides which rows the grid draws, not what its totals count (ruling
+plan#2926, plan task plan#2932): the grid's totals, the balance account's own,
+are graded in ``test_balance_at/test_cash_flow.py``
+(``TestTheSubtotalsAreTheBalanceAccountsOwn``, ``TestACardPurchaseCountsOnce``);
+the grid's render in ``test_routes/test_grid/test_accounts_and_cards.py``.
+The far-leg query the seam's composed subtotal read went with that subtotal.
 """
 
 from decimal import Decimal
@@ -39,18 +39,12 @@ from app.services.account_resolver import (
 )
 from app.services.cash_flow_set import (
     CashFlowSet,
-    FarLegs,
-    far_legs_of,
     own_rows_clause,
 )
-from app.services.cash_ledger import settled_cash_facts
 from tests._test_helpers import (
-    capture_sql_statements,
     create_account_of_type,
     create_loan_account,
     create_savings_account,
-    create_settled_transfer,
-    create_transfer,
     one_off_row_of,
 )
 
@@ -110,7 +104,6 @@ class TestResolveCashFlowSet:
             checking = seed_user["account"]
             assert cash_flow.balance.id == checking.id
             assert cash_flow.member_ids == (checking.id,)
-            assert cash_flow.others == ()
 
     @pytest.mark.usefixtures("seed_periods_today")
     def test_active_cards_join_the_set_after_the_primary_in_picker_order(
@@ -135,7 +128,6 @@ class TestResolveCashFlowSet:
 
             assert cash_flow.balance.id == checking.id
             assert cash_flow.member_ids == (checking.id, first.id, second.id)
-            assert [a.id for a in cash_flow.others] == [first.id, second.id]
 
     @pytest.mark.usefixtures("seed_periods_today", "bare_periods")
     def test_another_owners_card_is_not_a_member(
@@ -199,7 +191,6 @@ class TestResolveCashFlowSet:
 
             assert cash_flow.balance.id == card.id
             assert cash_flow.member_ids == (checking.id, card.id)
-            assert [a.id for a in cash_flow.others] == [checking.id]
 
     @pytest.mark.usefixtures("seed_periods_today")
     def test_an_override_outside_the_set_is_that_accounts_single_account_view(
@@ -367,103 +358,6 @@ class TestOwnRowsClause:
 
             assert grocery.id in loaded
             assert loaded == expected
-
-
-class TestFarLegsOf:
-    """The seam's reading of the same rule.
-
-    By transfer id, with no shadow read, and none for a set of one.
-    """
-
-    def test_answers_every_intra_set_transfer_and_the_paid_leg_names_it(
-        self, app, db, seed_user, seed_periods_today,
-    ):
-        """Both halves of a far leg are excluded by the TRANSFER's id.
-
-        Leaf ``balance:X-bi-6-4a`` (ruling **R-BAL106**): the planned half is
-        a leg derived from its transfer and the settled half a fact that names
-        its transfer (``CashSourceFact.transfer_id``), so the answer is every
-        intra-set transfer and nothing else -- the paid payment's money on the
-        card carries ``paid.id``, which is how the far test finds it.  It
-        answered the settled far-leg SHADOW ids beside the transfer ids until
-        that leaf; re-expressed with the developer's confirmation (rule 5,
-        2026-09-22), because the field it asserted is deleted.
-        """
-        with app.app_context():
-            checking = seed_user["account"]
-            card = _card(seed_user)
-            payment = create_transfer(
-                seed_user, db.session, checking, card, seed_periods_today[3],
-                amount=Decimal("165.00"),
-            )
-            paid = create_settled_transfer(
-                seed_user, db.session, checking, card, seed_periods_today[1],
-                amount=Decimal("80.00"),
-            )
-            # A transfer that is NOT intra-set never appears, whichever side.
-            savings = create_savings_account(
-                seed_user, db.session, "Savings", Decimal("5000.00"),
-            )
-            create_transfer(
-                seed_user, db.session, savings, card, seed_periods_today[3],
-                amount=Decimal("300.00"),
-            )
-            db.session.commit()
-
-            far = far_legs_of(resolve_cash_flow_set(seed_user["user"].id))
-
-            assert far == FarLegs(transfer_ids=frozenset({payment.id, paid.id}))
-            leg_facts = [
-                fact for fact in settled_cash_facts(
-                    card.id, seed_user["scenario"].id,
-                )
-                if fact.transfer_id is not None
-            ]
-            assert [(f.transfer_id, f.delta) for f in leg_facts] == [
-                (paid.id, Decimal("80.00")),
-            ]
-
-    def test_reads_transfers_alone_in_one_statement(
-        self, app, db, seed_user, seed_periods_today,
-    ):
-        """Invariant 5 by statement census, structurally: ONE read, of transfers.
-
-        Since leaf ``balance:X-bi-6-4a`` the settled half needs no shadow
-        read, so the producer issues exactly one statement and it touches
-        ``budget.transfers`` alone.  It asserted every ``budget.transactions``
-        read carried the settled-status filter (and that one happened) until
-        that leaf; re-expressed with the developer's confirmation (rule 5,
-        2026-09-22) as the stronger form of the same guarantee.
-        """
-        with app.app_context():
-            checking = seed_user["account"]
-            card = _card(seed_user)
-            create_transfer(
-                seed_user, db.session, checking, card, seed_periods_today[3],
-                amount=Decimal("165.00"),
-            )
-            db.session.commit()
-            cash_flow = resolve_cash_flow_set(seed_user["user"].id)
-
-            _far, statements = capture_sql_statements(
-                lambda: far_legs_of(cash_flow),
-            )
-
-            [(text, _params)] = statements
-            assert "budget.transfers" in text, text
-            assert "budget.transactions" not in text, text
-
-    @pytest.mark.usefixtures("seed_periods_today")
-    def test_a_set_of_one_issues_no_query(self, app, seed_user):
-        """A set of one has no far leg: ``FarLegs.none()``, and no statement issued."""
-        with app.app_context():
-            cash_flow = resolve_cash_flow_set(seed_user["user"].id)
-            assert cash_flow.others == ()
-            far, statements = capture_sql_statements(
-                lambda: far_legs_of(cash_flow),
-            )
-            assert far == FarLegs.none()
-            assert not statements
 
 
 class TestRevolvingFilter:

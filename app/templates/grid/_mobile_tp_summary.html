@@ -42,8 +42,8 @@
                      Missing this period's key -> the Projected Balance card
                      is omitted.
      period_row_flags -- (optional) GridRowFlags for THIS period alone.
-                     ``.elsewhere`` / ``.period_timing`` / ``.book_vs_bank`` / ``.contribution`` / ``.accrual``
-                     decide the five conditional bars.  Deliberately NOT the
+                     ``.period_timing`` / ``.book_vs_bank`` / ``.contribution`` / ``.accrual``
+                     decide the four conditional bars.  Deliberately NOT the
                      visible window's flags: this card is a one-period surface,
                      so ruling R-O's "at least one visible column" is "this
                      column", and the self-refresh endpoint has no window to
@@ -90,20 +90,6 @@
       {{ money(net, cents=false) }}
     </span>
   </div>
-
-  {%- if period_row_flags is defined and period_row_flags.elsewhere %}
-  {# --- On other accounts (ruling credit_card:R-CC16, plan step CC-4-1) ---
-       What this paycheck budgets on the owner's other cash-flow accounts (its
-       cards): counted in the section totals above, never paid by this
-       balance.  First of the reconciliation bars because it is the
-       budget-side term; the same seam visibility rule as the rest.  Inside
-       the block, with its whitespace control, so an owner with no card gets
-       the byte-identical summary. #}
-  <div class="d-flex justify-content-between align-items-center px-3 py-2 mb-3 rounded bg-surface-raised accrual-row reconciliation-row">
-    <span class="fw-bold small"><i class="bi bi-wallet2" aria-hidden="true"></i> On other accounts</span>
-    <span class="font-mono fw-bold">{{ money(col.elsewhere, cents=false) }}</span>
-  </div>
-  {%- endif %}
 
   {# --- Period timing (rulings R-O / R-P / R-DH (f)) ---
        Money budgeted to this period that moved in another, and money that

@@ -131,20 +131,13 @@
                 <span class="{{ 'balance-negative' if col.net < 0 else '' }}">
                   {{ money(col.net, cents=false) }}
                 </span>
-                {# The five conditional figures (rulings R-O / R-P / R-AH /
-                   R-DH (f); credit_card:R-CC16 for the first), on the seam's
-                   one visibility rule and in the order the rows render:
-                   Elsewhere is what the paycheck budgets on the owner's cards
-                   (counted in Net, never paid by this balance), Period
-                   timing and Book vs bank explain the part of the balance
-                   change the budget columns cannot, Contributions what
-                   payroll put in, and the modelled return what that money
-                   then earned.  Net + those five is the whole balance
-                   change. #}
-                {%- if plan_row_flags is defined and plan_row_flags.elsewhere %}
-                &middot;
-                Elsewhere {{ money(col.elsewhere, cents=false) }}
-                {%- endif %}
+                {# The four conditional figures (rulings R-O / R-P / R-AH /
+                   R-DH (f)), on the seam's one visibility rule and in the
+                   order the replay resolves them: Period timing and Book vs
+                   bank explain the part of the balance change the budget
+                   columns cannot, Contributions what payroll put in, and the
+                   modelled return what that money then earned.  Net + those
+                   four is the whole balance change. #}
                 {% if plan_row_flags is defined and plan_row_flags.period_timing %}
                 &middot;
                 Timing {{ money(col.period_timing, cents=false) }}

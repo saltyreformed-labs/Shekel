@@ -34,7 +34,6 @@ from app.services import (
     posting_service,
     reconcile_service,
 )
-from app.services.cash_flow_set import CashFlowSet
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
 from app.utils.dates import display_today, to_display_date
@@ -109,7 +108,7 @@ def _projected_end_balance(account, user_id, period):
     per call because a true-up between two reads must be visible to the second.
     """
     view = balance_at.grid_balance_view(
-        CashFlowSet.single(account), BalanceContext.build(user_id),
+        account, BalanceContext.build(user_id),
     )
     return view.columns[period.id].balance
 

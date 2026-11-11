@@ -10,7 +10,6 @@ from app.models.pay_period import PayPeriod
 from app.services import balance_at
 from app.services.recurrence import build_transient_rule, reauthor_rule, recurrence_spec
 from app.services.balance_at import BalanceContext
-from app.services.cash_flow_set import CashFlowSet
 from tests._test_helpers import all_periods, make_expense_template
 
 
@@ -93,7 +92,7 @@ class TestTheReadPassOwnsTheReportingDomain:
             assert list(balance_at.cash_balance_map(account, ctx)) == expected
             assert list(balance_at.balance_map(account, ctx)) == expected
             assert list(
-                balance_at.grid_balance_view(CashFlowSet.single(account), ctx).columns
+                balance_at.grid_balance_view(account, ctx).columns
             ) == expected
 
     def test_an_owner_with_no_pay_periods_gets_empty_maps_not_an_error(
@@ -114,7 +113,7 @@ class TestTheReadPassOwnsTheReportingDomain:
             assert len(ctx.reported_periods()) == 0
             assert balance_at.cash_balance_map(seed_user["account"], ctx) == {}
             assert balance_at.grid_balance_view(
-                CashFlowSet.single(seed_user["account"]), ctx,
+                seed_user["account"], ctx,
             ).columns == {}
 
 

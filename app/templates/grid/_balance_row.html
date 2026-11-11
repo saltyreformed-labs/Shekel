@@ -7,27 +7,22 @@
    rows in the <tbody> (added in Tasks 13-14).
 
    Ruling R-O seats the whole "how this balance is reached" chain here, in
-   one visual block: On other accounts, Period timing, Book vs bank, then
-   Contributions, then the modelled return, then Projected End Balance.
-   Reading top to bottom from the Net Cash Flow row above, that is the identity
+   one visual block: Period timing, Book vs bank, then Contributions, then the
+   modelled return, then Projected End Balance.  Reading top to bottom from the
+   Net Cash Flow row above, that is the identity
 
        balance[p] - balance[p-1]
-           == net[p] + elsewhere[p] + period_timing[p] + book_vs_bank[p]
+           == net[p] + period_timing[p] + book_vs_bank[p]
               + contribution[p] + accrual[p]
 
-   and it holds because all seven figures are one GridColumn -- the balance
-   account's valued row set grouped two ways, each other member's own row set
-   summed beside it, plus the two modelled tiers -- rather than separate
-   producers a test keeps in step (ruling R-K).
-
-   "On other accounts" is the first row because it is the BUDGET-side term
-   (developer ruling credit_card:R-CC16, plan step CC-4-1): the subtotals above
-   are the whole paycheck's across checking and its cards, the balance below is
-   one account's, and this row is what the paycheck budgets on the other
-   members -- the phone bill that is always paid by card.  It is positive for
-   an expense expected elsewhere (money the balance line does NOT lose), so
-   net + elsewhere is the balance account's own net, and the two timing terms
-   then explain the cash clock as before.
+   and it holds because all six figures are one GridColumn -- one valued row
+   set grouped two ways plus its two modelled tiers -- rather than separate
+   producers a test keeps in step (ruling R-K).  The subtotals above are the
+   balance account's own (developer ruling plan#2926, plan task plan#2932): a
+   row drawn on a card is the card's money, counted once, by the card's
+   payment out of this account.  An "On other accounts" row stood first in
+   this block from plan step CC-4-1 until that task, reconciling subtotals
+   that summed the cards' rows with a one-account balance.
 
    ROW ORDER is the MODEL's own (ruling R-AH): a contribution lands on its pay
    period's start_date and the day's accrual is then taken on the balance that
@@ -65,7 +60,7 @@
      columns   -- dict[period_id -> GridColumn]; a period absent from it
                   (only the user-with-no-accounts empty view) renders "--" for
                   the balance and blanks for the explanatory rows.
-     row_flags -- GridRowFlags for THIS window (.elsewhere / .period_timing /
+     row_flags -- GridRowFlags for THIS window (.period_timing /
                   .book_vs_bank / .contribution / .accrual).
      accrual_label -- the modelled-return row's per-kind heading, resolved in
                   the route from classify_account (ruling R-AI): "Interest" on
@@ -89,27 +84,6 @@
      it did not know about.  Summed into one figure they were unactionable --
      on the developer's own data the single row read -$4,588.69 in a column
      whose two halves were -$427.22 and -$4,161.47. #}
-  {%- if row_flags.elsewhere %}
-  {# Read-only "On other accounts" row (ruling credit_card:R-CC16): what this
-     paycheck budgets on the owner's other cash-flow accounts -- its cards --
-     which the Total Expenses row above counts and this balance never pays.
-     Conditional on the same R-O rule as the rows below it; an owner with no
-     card never sees it.  The block's whitespace control (the dash-suffixed
-     block tag) is what keeps the footer of such an owner byte-identical to
-     the one before the row existed, which is the regression standard plan
-     step CC-4-1 was held to. #}
-  <tr class="accrual-row reconciliation-row">
-    <td class="sticky-col">
-      <i class="bi bi-wallet2" aria-hidden="true"></i> On other accounts
-    </td>
-    {% for period in periods %}
-      {% set col = columns.get(period.period_id) %}
-      <td class="text-end font-mono{{ mstart(periods, loop.index0) }}">
-        {% if col is not none %}{{ money(col.elsewhere, cents=false) }}{% endif %}
-      </td>
-    {% endfor %}
-  </tr>
-  {%- endif %}
   {% if row_flags.period_timing %}
   <tr class="accrual-row reconciliation-row">
     <td class="sticky-col">

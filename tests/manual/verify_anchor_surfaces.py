@@ -65,7 +65,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # above; there is no import order that resolves ``app`` before it runs.
 # pylint: disable=wrong-import-position
 from app import create_app
-from app.services.cash_flow_set import CashFlowSet
 from app.extensions import db
 from app.models.account import Account
 from app.models.user import User
@@ -155,7 +154,7 @@ def _account_surfaces(account, balance_ctx):
         "grid_header_as_of": _plain(anchor.observed_on),
         "grid_view": _guarded(
             "grid_view",
-            lambda: balance_at.grid_balance_view(CashFlowSet.single(account), balance_ctx),
+            lambda: balance_at.grid_balance_view(account, balance_ctx),
         ),
         "reconcile_outstanding": _guarded(
             "reconcile_outstanding",

@@ -7,7 +7,6 @@ from decimal import Decimal
 from app.extensions import db
 from app.models.transaction_entry import TransactionEntry
 from app.models.ref import Status, TransactionType
-from app.services.cash_flow_set import CashFlowSet
 from app.services import balance_at
 from app.services.balance_at import BalanceContext
 
@@ -713,7 +712,7 @@ class TestGridPeriodSubtotalCanonical:
             # rows, so these columns ARE the ground truth the rendered HTML
             # reflects rather than a second producer that has to agree with it.
             columns = balance_at.grid_balance_view(
-                CashFlowSet.single(seed_user["account"]),
+                seed_user["account"],
                 BalanceContext.build(seed_user["user"].id),
             ).columns
             column = columns[target_period.id]

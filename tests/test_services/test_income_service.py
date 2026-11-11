@@ -33,7 +33,6 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.services.cash_flow_set import CashFlowSet
 from app.enums import RaiseTypeEnum
 from app.extensions import db
 from app.models.ref import FilingStatus, RaiseType, Status, TransactionType
@@ -555,7 +554,7 @@ class TestLiveIncomeThroughBalanceResolver:
 
             # The grid's income row reflects the live net.
             column = balance_at.grid_balance_view(
-                CashFlowSet.single(account), bctx,
+                account, bctx,
             ).columns[period.id]
             assert column.income == expected_net, (
                 f"GridColumn.income should be the profile's {expected_net}, "
@@ -608,7 +607,7 @@ class TestLiveIncomeThroughBalanceResolver:
             db.session.commit()
 
             column = balance_at.grid_balance_view(
-                CashFlowSet.single(account), bctx,
+                account, bctx,
             ).columns[period.id]
             assert column.income == Decimal("1234.56"), (
                 "a row that OWNS its figure must keep the user's amount, "

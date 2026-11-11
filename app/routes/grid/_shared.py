@@ -121,18 +121,20 @@ def _build_grid_view(cash_flow: CashFlowSet | None, balance_ctx):
     :class:`~app.services.balance_at.GridColumn` per period carrying every
     figure the grid renders for it -- the projected end balance, the income /
     expense / net subtotals, ruling R-K's two remainders ("Period timing" and
-    "Book vs bank", split at ruling R-DH (f)), the "On other accounts" term
-    (plan step CC-4-1), and
+    "Book vs bank", split at ruling R-DH (f)), and
     the two modelled tiers (the contribution and the accrual, rendered as their
     own conditional rows and labelled per kind by :func:`_accrual_row_label`).
 
-    **It takes the owner's CASH-FLOW SET, not an account** (developer ruling
-    ``credit_card:R-CC16``, plan step CC-4-1): the balance and the anchor are
-    the set's balance account's, and the subtotals are the paycheck's across
-    every member -- checking and its cards -- which the seam composes off each
-    member's own fold.  One producer call, still: the seam takes the set as
-    one value, so the columns and the reconciliation term come back as one
-    record per period and no route sums two views.
+    **Every figure is the set's BALANCE account's** (developer ruling
+    plan#2926; plan task plan#2932): the balance, the anchor and the
+    subtotals alike, so Total Expenses is what leaves that account and a bill
+    on a card counts once, through the card's payment.  The set is what every
+    caller holds, so it is what this takes; its other members decide which
+    ROWS the grid draws (:func:`~app.routes.grid._items.load_grid_items`), and
+    none of them reaches the seam.  From plan step CC-4-1 the seam took the
+    set and summed every member's rows into the subtotals beside an "On other
+    accounts" term, which counted a purchase on the card twice once the card's
+    payment paid it off from checking.
 
     **One producer pass, not three** (plan step X-c2b1, finding N-48).  The
     route used to call the balance producer once and the subtotal producer
@@ -184,7 +186,7 @@ def _build_grid_view(cash_flow: CashFlowSet | None, balance_ctx):
     if cash_flow is None:
         return balance_at.empty_grid_view(), None
     return (
-        balance_at.grid_balance_view(cash_flow, balance_ctx),
+        balance_at.grid_balance_view(cash_flow.balance, balance_ctx),
         cash_ledger.resolve_anchor(cash_flow.balance),
     )
 

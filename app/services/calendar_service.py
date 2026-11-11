@@ -934,8 +934,9 @@ def _compute_month_end_balance(
     whose own rows among the day cells it reconciles with -- the cells hold
     the whole set's rows since plan step CC-4-3, so the month's totals and
     this line can differ by what moves on the other members, a divergence
-    with no reconciling term yet (the grid's "On other accounts" is the
-    shape); the balance account can be any cash-flow kind via an explicit
+    with no reconciling term (the grid carried one, "On other accounts",
+    from plan step CC-4-1 until plan task plan#2932 made the grid's totals
+    the balance account's own); the balance account can be any cash-flow kind via an explicit
     ``account_id``.  This is the HIGH-02 / W-277
     fix: pre-remediation the calendar walked a separate code path
     that (a) selected the last pay period whose ``end_date`` was on or

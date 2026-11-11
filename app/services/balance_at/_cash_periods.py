@@ -35,7 +35,6 @@ from datetime import date
 from decimal import Decimal
 
 from app.models.transaction import Transaction
-from app.services.cash_flow_set import FarLegs
 from app.services.cash_ledger import (
     CashLedgerWalk,
     sum_projected,
@@ -279,51 +278,11 @@ def period_view_of(
         columns=_assemble_figures(
             window,
             period_balances(folded, window),
-            _budget_legs(folded.walk, folded.plan, window, FarLegs.none()),
+            _budget_legs(folded.walk, folded.plan, window),
             _cash_sums(folded, window),
             _assertion_sums(folded.corrections, window),
         ),
     )
-
-
-def paycheck_legs(
-    folded: AssembledCashFold, window: PeriodWindow, far: FarLegs,
-) -> "dict[int, tuple[Decimal, Decimal]]":
-    """Return a NON-balance member's budget legs -- the grid's composed subtotal.
-
-    The other half of ruling ``credit_card:R-CC16``'s composed subtotal (plan
-    step CC-4-1): the budget grid reads the owner's cash-flow set (checking
-    and its cards) as ONE paycheck, so its Total Income / Total Expenses / Net
-    Cash Flow rows sum every member's rows, while the Projected End Balance
-    stays ONE account's.  :func:`period_view_of` answers the balance account;
-    this answers each other member, off ITS OWN assembled fold -- the same
-    walk, plan and valuation :func:`_budget_legs` reads for the balance
-    account, so a card's ``$45`` phone bill is priced by the one reduction
-    every reader prices it by (rule 14: one walk per account, one producer
-    of a budget leg).
-
-    **It takes the far legs and drops them** (ruling ``credit_card:R-CC23``):
-    a transfer between two members shows on the paycheck grid ONCE, from the
-    balance line's side, so a card's leg of a checking -> card payment is
-    neither a leg the grid draws nor a figure this sums.  The exclusion is
-    the same ONE rule the readers' legs apply
-    (:func:`app.services.cash_flow_set.leg_accounts_shown`; its row spelling
-    ``far_leg_clause`` went at leaf ``balance:X-bi-6-1b``), answered once by
-    :func:`app.services.cash_flow_set.far_legs_of` and threaded here, so the
-    cells and the subtotal cannot disagree about which items are the
-    paycheck's.
-
-    Args:
-        folded: The member's :class:`~._cash_fold.AssembledCashFold`.
-        window: The reported periods.
-        far: The set's :class:`~app.services.cash_flow_set.FarLegs`.
-
-    Returns:
-        ``{period_id: (income, expense)}`` -- SIGNED, UNROUNDED, total over the
-        window, in the same contract as :func:`_budget_legs`; the grid view
-        sums them across members and rounds once at its boundary.
-    """
-    return _budget_legs(folded.walk, folded.plan, window, far)
 
 
 def _column_for(window: PeriodWindow, day: date) -> "int | None":
@@ -387,7 +346,6 @@ def _budget_legs(
     walk: CashLedgerWalk,
     plan: _CashPlan,
     window: PeriodWindow,
-    far: FarLegs,
 ) -> "dict[int, tuple[Decimal, Decimal]]":
     """Return ``{period_id: (income, expense)}`` on the BUDGET clock.
 
@@ -401,18 +359,13 @@ def _budget_legs(
     :class:`~app.services.cash_ledger.AmountBasis`, which is why the two
     groupings reconcile to the cent.
 
-    **Less the far legs** (ruling ``credit_card:R-CC23``, plan step CC-4-1):
-    *far* names the transfer legs this account holds as the NON-balance member
-    of a cash-flow set, which the paycheck grid shows from the balance line's
-    side and not from here.  Both halves are excluded by their TRANSFER's id:
-    a settled one is a fact naming it
-    (:attr:`~app.services.cash_ledger.CashSourceFact.transfer_id`, leaf
-    ``X-bi-6-4a``; its shadow's ``transaction_id`` until then), a
-    still-projected one a :class:`~app.services.transfer_legs.TransferLeg`
-    carrying it.  The balance account itself passes
-    :meth:`~app.services.cash_flow_set.FarLegs.none` -- every leg it holds is
-    the near side by definition -- so :func:`period_view_of`'s columns are
-    unchanged by the parameter.
+    **Every leg the account holds is its own** (plan task plan#2932).  From
+    plan step CC-4-1 this took the far legs of a cash-flow set's intra-set
+    transfers and left them out, because the grid then summed a card's legs
+    into checking's subtotals and a checking -> card payment would have
+    counted from both sides; the grid reads one account's subtotals now
+    (ruling plan#2926), so a transfer's leg on this account is this account's
+    money and nothing is excluded.
 
     **A partially-spent envelope therefore counts on BOTH sides of the split,
     and their sum is what the period costs** (ruling **R-FM**, plan step
@@ -440,7 +393,6 @@ def _budget_legs(
         walk: The account's walk -- its settled facts carry both clocks.
         plan: The account's :class:`~._cash_plan._CashPlan`.
         window: The reported periods.
-        far: The far legs to leave out, by their transfers.
 
     Returns:
         ``{period_id: (income, expense)}`` -- SIGNED, UNROUNDED (the caller
@@ -452,8 +404,6 @@ def _budget_legs(
     expense = _zeroed(window)
     for fact in walk.source_facts:
         if fact.pay_period_id not in income:
-            continue
-        if fact.transfer_id in far.transfer_ids:
             continue
         if fact.is_income:
             income[fact.pay_period_id] += fact.delta
@@ -473,11 +423,6 @@ def _budget_legs(
     )
     for txn in plan.rows:
         if txn.pay_period_id not in income:
-            continue
-        if (
-            isinstance(txn, TransferLeg)
-            and txn.transfer.id in far.transfer_ids
-        ):
             continue
         by_period[txn.pay_period_id].append(txn)
     for period_id, txns in by_period.items():

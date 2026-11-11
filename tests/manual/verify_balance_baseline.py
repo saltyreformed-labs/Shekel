@@ -98,7 +98,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # above; there is no import order that resolves ``app`` before it runs.
 # pylint: disable=wrong-import-position
 from app import create_app
-from app.services.cash_flow_set import CashFlowSet
 from app.extensions import db
 from app.models.account import Account
 from app.models.user import User
@@ -167,7 +166,7 @@ def _grid_columns(account, ctx):
     comparison needs it.  A shim with no stated end is how the deleted name
     survives its own deletion.
     """
-    view = balance_at.grid_balance_view(CashFlowSet.single(account), ctx)
+    view = balance_at.grid_balance_view(account, ctx)
     return {
         "columns": {
             str(period_id): {

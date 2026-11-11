@@ -471,7 +471,11 @@ def _build_baseline_less_owner(db):
     }
 
 
-register_seeded_state("baseline_less_owner", _build_baseline_less_owner)
+#: The world's name, which every marker below reads rather than spelling: a
+#: test carrying the marker then imports this registration wherever it sits.
+_BASELINE_LESS_OWNER = register_seeded_state(
+    "baseline_less_owner", _build_baseline_less_owner,
+)
 
 
 @pytest.fixture()
@@ -804,7 +808,7 @@ _SWEEP_IDS = [f"{rule}[{kind}]" if kind else rule
 _SWEPT_ENDPOINTS = frozenset(endpoint for endpoint, _, _ in _SWEEP_CASES)
 
 
-@pytest.mark.seeded_start_state("baseline_less_owner")
+@pytest.mark.seeded_start_state(_BASELINE_LESS_OWNER)
 class TestNoRouteCrashesWithoutABaseline:
     """The sweep: no GET route may 5xx for an owner with no baseline."""
 
@@ -1145,7 +1149,7 @@ class TestNoRouteCrashesWithoutABaseline:
         )
 
 
-@pytest.mark.seeded_start_state("baseline_less_owner")
+@pytest.mark.seeded_start_state(_BASELINE_LESS_OWNER)
 class TestTheHandlerItself:
     """The handler's own contract, exercised directly rather than inferred.
 

@@ -143,8 +143,13 @@ _WIDEST_WORKER_DB = f"{_TEST_DATABASE_PREFIX}_{_WIDEST_WORKER_ID}"
 def register_seeded_state(name, builder):
     """Register a named world tests may declare as their start state.
 
-    Called at import time by the module that defines the world, so a test
-    carrying the marker has always registered it by the time it runs.
+    Called at import time by the module that defines the world.  A marker in
+    that same module has always registered it by the time its test runs; a
+    marker anywhere else is reached only through an import of that module.  So
+    the defining module binds the name this returns, and every marker reads
+    that binding rather than spelling the string: a test carrying the marker
+    then imports the module that registers its world wherever the test sits,
+    a part of a split package included.
 
     Args:
         name: The name tests pass to ``@pytest.mark.seeded_start_state``.
@@ -152,6 +157,9 @@ def register_seeded_state(name, builder):
             ``db.session`` and returns plain data (ids, scalars) describing it.
             It must COMMIT nothing it does not want in the snapshot and must
             not depend on the wall clock beyond ``display_today()``.
+
+    Returns:
+        *name*, for the defining module to bind and its markers to read.
 
     Raises:
         ValueError: The name is already registered to a different builder, or
@@ -174,6 +182,7 @@ def register_seeded_state(name, builder):
             f"truncated names would collide. Shorten the world's name."
         )
     _SEEDED_STATE_BUILDERS[name] = builder
+    return name
 
 
 def _seeded_snapshot_name(name):

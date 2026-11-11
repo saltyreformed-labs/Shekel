@@ -32,10 +32,6 @@ from app.models.ref import Status
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services import status_seam, transaction_service
-# The leaf, imported for ONE control that spies on a private name the package
-# does not re-export -- see
-# ``test_the_live_figure_is_resolved_BEFORE_the_status_flip`` for why patching
-# the package attribute would grade nothing.
 from app.services.transaction_service import _settle
 from app.services.row_valuation import settled_contribution, settled_figure
 from app.services.cash_ledger import (

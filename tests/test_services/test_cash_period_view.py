@@ -1135,11 +1135,3 @@ class TestTheViewCarriesTheBasisItWasValuedOn:
 
         assert txn.estimated_amount is None
         assert view.columns[period.id].income == Decimal("4000.00")
-
-    # ``test_an_account_with_no_plan_carries_an_empty_map`` lived here until
-    # plan step X-au-d, and its SUBJECT is deleted with the field: it asserted
-    # that ``CashPeriodView.amount_overrides`` was ``{}`` rather than ``None``
-    # for an account with nothing planned, so that "the grid reads
-    # ``view.amount_overrides.get(...)`` per row" would not raise.  The grid
-    # had stopped reading it two plan steps earlier and nothing else ever did,
-    # so the field is gone and there is no mapping left to be empty.

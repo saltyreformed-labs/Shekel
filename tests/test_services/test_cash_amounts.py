@@ -72,7 +72,6 @@ is the arm that never moved.
 
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 import sqlalchemy.exc
@@ -87,6 +86,7 @@ from app.services.cash_ledger._amounts import (
 )
 from app.extensions import db
 from app.models.account import Account
+from tests._repo_root import REPO_ROOT
 from tests._test_helpers import (
     add_entry,
     add_txn,
@@ -735,7 +735,7 @@ class TestTheEntriesRelationshipIsNotASeam:
         package on this date, so the widening costs nothing and closes the
         larger surface.
         """
-        services = Path(__file__).resolve().parents[2] / "app" / "services"
+        services = REPO_ROOT / "app" / "services"
         packages = {
             name: sorted((services / name).rglob("*.py"))
             for name in ("cash_ledger", "balance_at")

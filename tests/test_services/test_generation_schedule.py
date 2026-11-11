@@ -84,6 +84,7 @@ from app.services.pay_calendar import (
     PayCalendar,
     saved_paydays_in_month_through,
 )
+from tests._repo_root import REPO_ROOT
 from tests._test_helpers import (
     rhythm_of,
     counting_calls,
@@ -1715,10 +1716,8 @@ class TestNoOrmPayPeriodEntersTheSeam:
         """
         # Pylint: ``import-outside-toplevel`` -- this census is the only user.
         import ast  # pylint: disable=import-outside-toplevel
-        import pathlib  # pylint: disable=import-outside-toplevel
 
-        root = pathlib.Path(__file__).resolve().parents[2]
-        tree = ast.parse((root / relative_path).read_text())
+        tree = ast.parse((REPO_ROOT / relative_path).read_text())
         found = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):

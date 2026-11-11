@@ -62,6 +62,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.models.transaction import Transaction
+from app.services.account_projection import is_revolving
 from app.services.cash_flow_set import (
     AttributionSpan,
     CashFlowSet,
@@ -169,10 +170,28 @@ def query_settled_expenses(
     names (ruling ``R-CC23``: once, from the balance line's side, when both
     endpoints are members), kept where it is the EXPENSE leg -- money that
     left, which is what spending is; the income leg on the far endpoint is
-    not spend, as the income shadow's type never was.  A card payment is
-    therefore one settled leg, on the balance account's side.  It was
+    not spend, as the income shadow's type never was.  It was
     ``Transaction.account_id == account_id``, then the paycheck-rows clause
     that carried the settled transfer-out shadow in as a row.
+
+    **A payment INTO A CARD is not spending, and is left out** (developer
+    ruling plan#2926, 2026-11-05: "the Spending report counts a purchase
+    once, as what was bought"; plan task plan#2932).  A purchase on the card
+    is a settled row on the card, a member of the set, so it is here at what
+    was bought and in its own category; the card's payment out of checking
+    pays that purchase off, and counting its expense leg too counted one
+    purchase twice -- ``$1,600`` for ``$800`` of groceries on the card and the
+    ``$800`` payment that paid it off (plan#2890's review, its R8).  So a leg
+    whose money goes to a revolving account (:func:`_pays_a_card`) is
+    dropped: the report reads Groceries ``$800`` and nothing for the
+    payment.  A transfer to any other account -- savings, a loan -- reads as
+    it always has.  It is dropped HERE rather than in the shared loader
+    because the dashboard's bills read the same legs and a payment due to
+    the card IS a bill there; and here rather than in the reductions below
+    it, because every figure the report states -- the total, the categories,
+    the surprises and the payment timing -- reads this one list, so it is
+    the one place the report says which items are spending.  The payment
+    timing therefore counts the purchase as its bill and not the payment.
 
     **Every side's record is pre-loaded** (``side_records``).  The timeliness
     metric (:func:`payment_timeliness_from_txns`) reads every settled item's
@@ -241,7 +260,7 @@ def query_settled_expenses(
         ``entries`` loaded, then the expense legs of the settled transfers,
         their records loaded.
     """
-    return load_plan_items(
+    items = load_plan_items(
         PlanScope(
             cash_flow=cash_flow,
             scenario_id=scenario_id,
@@ -261,6 +280,30 @@ def query_settled_expenses(
         ),
         side_records=True,
     )
+    return [item for item in items if not _pays_a_card(item)]
+
+
+def _pays_a_card(item: PlanItem) -> bool:
+    """Return True for a transfer leg whose money goes INTO a credit card.
+
+    The Spending report's one test of "this settled expense item pays a card
+    off rather than buying anything" (plan task plan#2932;
+    :func:`query_settled_expenses` says why).  Decided by the FAR side of the
+    transfer, the account the money leaves for: the loader keeps only a
+    transfer's expense leg, the side money leaves from, so the far side is
+    its ``to_account``, and a transfer out of a card is refused at the
+    transfer doors (``transfer_service._validation``).  A row is never a
+    payment: a purchase on the card is a row, and it is what was bought.
+
+    Args:
+        item: A row or a transfer leg from the settled expense load.
+
+    Returns:
+        True when *item* is a :class:`~app.services.transfer_legs.TransferLeg`
+        whose transfer goes to a revolving account
+        (:func:`~app.services.account_projection.is_revolving`).
+    """
+    return isinstance(item, TransferLeg) and is_revolving(item.transfer.to_account)
 
 
 def resolved_actual_amount(parent: PlanParent, basis: AmountBasis) -> Decimal:

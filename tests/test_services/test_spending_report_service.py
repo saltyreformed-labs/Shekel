@@ -1479,12 +1479,12 @@ class TestTheReportReadsTheCashFlowSet:
     ):
         """Ruling R-CC23 on the report: the far leg is not spending.
 
-        A settled $165.00 checking -> card payment is one settled expense,
-        checking's expense leg (the card's is its income leg and the far
-        leg).  A settled $40.00 card -> checking transfer is NO spending here:
-        checking's leg is income and the card's expense leg is the far leg.
-        spent_total = 165.00; without the far-leg arm the card's 40.00 leg
-        would count too, 205.00.
+        A settled $165.00 checking -> card payment is no spending (ruling
+        plan#2926, task plan#2932: it pays off what was bought on the card;
+        165.00 until then).  A settled $40.00 card -> checking transfer is NO
+        spending here: checking's leg is income and the card's expense leg is
+        the far leg.  spent_total = 0.00; without the far-leg arm the card's
+        40.00 leg would count, 40.00.
 
         The transfer doors refuse a transfer OUT of a card (plan step CC-10),
         so the $40.00 card -> checking transfer is the representable-but-
@@ -1543,7 +1543,7 @@ class TestTheReportReadsTheCashFlowSet:
                 BalanceContext.build(seed_user["user"].id), _pp_window(seed_periods[0]),
                 user_settings=None,
             )
-            assert report.hero.spent_total == Decimal("165.00")
+            assert report.hero.spent_total == Decimal("0.00")
 
     def test_the_default_reads_the_saved_default_grid_account(
         self, app, seed_user, seed_periods, db,

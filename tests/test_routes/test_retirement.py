@@ -3159,19 +3159,8 @@ class TestTheRailRegionIsSpelledOnce:
         assert 'document.getElementById("readiness-refresh")' in controls
 
 
-class TestTheRailSavesARaisesEndYear:
-    """The rail's end-year pair has a Save that writes the ROW (S3-f-3).
-
-    Plan step **salary:S3-f-3** (rulings **R-SAL22** and **R-SAL24**).  Each
-    recurring-raise row is a form posting the SAME two controls its what-if
-    sends to ``retirement.update_settings``, which resolves them against the
-    rows the rail lists, applies the ONE end-year rule, writes
-    ``salary.salary_raises.terminal_year`` and runs the regeneration every
-    salary write runs.  The cases post WHAT THE TEMPLATE EMITS
-    (``feedback_a_route_test_must_post_what_the_template_emits``): the first
-    reads the rendered row back and submits it verbatim; the rest vary one
-    control.
-    """
+class _TestTheRailSavesARaisesEndYearMembers:
+    """The rail-save helpers ``test_the_rails_lost_race.py`` reads as well."""
 
     @staticmethod
     def _seed_saveable_raise(
@@ -3237,6 +3226,21 @@ class TestTheRailSavesARaisesEndYear:
         rows = dict(re.findall(_RAISE_ROW_MARKUP, html, re.S))
         assert str(raise_id) in rows, f"no rendered row for raise {raise_id}"
         return rows[str(raise_id)]
+
+
+class TestTheRailSavesARaisesEndYear(_TestTheRailSavesARaisesEndYearMembers):
+    """The rail's end-year pair has a Save that writes the ROW (S3-f-3).
+
+    Plan step **salary:S3-f-3** (rulings **R-SAL22** and **R-SAL24**).  Each
+    recurring-raise row is a form posting the SAME two controls its what-if
+    sends to ``retirement.update_settings``, which resolves them against the
+    rows the rail lists, applies the ONE end-year rule, writes
+    ``salary.salary_raises.terminal_year`` and runs the regeneration every
+    salary write runs.  The cases post WHAT THE TEMPLATE EMITS
+    (``feedback_a_route_test_must_post_what_the_template_emits``): the first
+    reads the rendered row back and submits it verbatim; the rest vary one
+    control.
+    """
 
     def test_what_the_rail_emits_saved_back_writes_nothing(
         self, auth_client, seed_user, db, seed_periods_today,

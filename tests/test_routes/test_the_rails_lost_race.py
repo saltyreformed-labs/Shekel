@@ -15,8 +15,9 @@ handlers.  The case here loses a real race inside the real walk: it bumps the
 raise's version as the walk opens its schedule, after the rail has staged the
 end year and before anything flushes it.  It lives in its own file because
 ``test_retirement.py`` is past 1,000 lines; the seeding and reading helpers
-are that class's own, reached through its module so the class is not
-collected twice.
+are that class's, imported from the helper class it inherits them from
+(``_TestTheRailSavesARaisesEndYearMembers``), so no test class is collected
+twice.
 """
 
 import logging
@@ -25,11 +26,9 @@ from unittest.mock import patch
 import sqlalchemy
 
 from app.services.generation_schedule import GenerationSchedule
-from tests.test_routes import test_retirement
-
-#: The rail-save helpers, reached through the module: a ``Test*`` class bound
-#: to a name of this module would be collected here a second time.
-_SAVES = test_retirement.TestTheRailSavesARaisesEndYear
+from tests.test_routes.test_retirement import (
+    _TestTheRailSavesARaisesEndYearMembers as _SAVES,
+)
 
 
 def _a_race_lost_in_the_walk(session, raise_id: int):

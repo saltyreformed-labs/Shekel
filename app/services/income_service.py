@@ -138,6 +138,22 @@ class ProfilePaychecks:
     it issues no query now, and :meth:`at` still answers a payday nobody knew
     would be asked for without slicing the law again.
 
+    **It is the one home of "this profile's law for year Y" in a read pass**
+    (plan step salary:X-at-5, following ruling **R-IZ**: move the leaf) --
+    one per raise set the pass prices the profile under, as every pricer is
+    (:meth:`PaycheckPricing.for_profile`).
+    :meth:`law` resolves each tax year once and remembers it beside the
+    per-payday memo, and :meth:`over` prices every paycheck on that same set.
+    The Taxes tab's liability takes this pricer
+    (:func:`~app.services.tax_liability_service.compute_annual_liability`)
+    and reads :attr:`profile` and :meth:`law` off it, so the profile, its
+    law and its paychecks come from one object and cannot disagree.  Until
+    then the report resolved the primary profile's year itself, so one Taxes
+    tab request sliced the primary's law twice and resolved its year at least
+    twice (measured for one profile and 2026: two slices, two resolutions):
+    once in the report, and once in each :meth:`over` call that met an
+    unpriced payday, because the memo held paychecks rather than law.
+
     **This value issues no query of its own since plan step salary:X-at-1
     (the tax series was all of it, at construction); the PROFILE's reads need
     not happen at construction either, and an adversarial review of plan step
@@ -222,9 +238,48 @@ class ProfilePaychecks:
                 f"calendar its own owner is paid on, and pairing the two "
                 f"answers a plausible figure off the wrong schedule."
             )
+        self._profile = profile
         self._basis = PayrollBasis(profile, calendar, raise_terms)
         self._series = profile_tax_series(profile)
         self._by_payday: "dict[date, paycheck_calculator.PaycheckBreakdown]" = {}
+        self._law_by_year: "dict[int, dict[str, object]]" = {}
+
+    @property
+    def profile(self) -> SalaryProfile:
+        """The :class:`~app.models.salary_profile.SalaryProfile` this prices.
+
+        Published so a consumer that needs the profile's own inputs beside
+        its law -- the Taxes tab's liability reads its W-4 fields -- takes
+        them off the same object as the law, rather than holding the profile
+        and its pricer as two arguments that could name different profiles.
+
+        Returns:
+            The profile this pricer was built for.
+        """
+        return self._profile
+
+    def law(self, tax_year: int) -> dict[str, object]:
+        """Return the tax law that applies to *tax_year* for this profile.
+
+        Resolved once per year and remembered: the first ask picks the year
+        off the series sliced at construction
+        (:func:`~app.services.tax_config_service.configs_by_year`), and every
+        later ask -- this method or :meth:`over` -- returns that same set.
+
+        Args:
+            tax_year: The tax year whose rules are wanted.
+
+        Returns:
+            dict: Keys ``bracket_set``, ``state_config``, ``fica_config`` --
+                the applicable rules, each ``None`` only when the law
+                carries no year of that kind for the profile -- and
+                ``basis``, the
+                :class:`~app.services.tax_config_service.TaxLawBasis` naming
+                the year each was resolved on (ruling **R-SAL75**).
+        """
+        if tax_year not in self._law_by_year:
+            self._law_by_year.update(configs_by_year(self._series, (tax_year,)))
+        return self._law_by_year[tax_year]
 
     def over(
         self, periods,
@@ -298,10 +353,15 @@ class ProfilePaychecks:
                     # generated one cannot disagree for want of a bracket set
                     # -- and per pay stub year, each stub priced on its own
                     # payday's law (ruling R-SAL77, plan step salary:S11-c-2c).
-                    configs_by_year=configs_by_year(
-                        self._series,
-                        paycheck_calculator.tax_years_for(self._basis, unpriced),
-                    ),
+                    # Each year is read off :meth:`law`, so a year already
+                    # resolved this pass is not resolved again (plan step
+                    # salary:X-at-5).
+                    configs_by_year={
+                        year: self.law(year)
+                        for year in paycheck_calculator.tax_years_for(
+                            self._basis, unpriced,
+                        )
+                    },
                 )
             )
         return [self._by_payday[period.start_date] for period in periods]

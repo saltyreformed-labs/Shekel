@@ -51,7 +51,8 @@ def is_github_status(board_field: dict) -> bool:
 
 
 def hidden(board_field: dict) -> bool:
-    """Whether the plan view hides a board field: one storing a value, but Status."""
+    """Whether a declared view (``_board_views.DECLARED``) hides a board field: one storing a
+    value, but Status."""
     return stores_values(board_field) and not is_github_status(board_field)
 
 

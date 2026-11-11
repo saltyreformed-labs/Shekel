@@ -38,6 +38,12 @@ What it holds a card to (rulings ``balance:R-BAL136``, ``R-BAL138``,
   by a step or a finding alone, the work a branch builds (ruling plan#2506), and a Priority
   by a step, a finding or a question, what waits on work or on the developer's answer
   (ruling plan#2507); a clear, which writes none, any card may take.
+- a suggested Priority the change writes (:class:`_draft.Suggestion`) is held by a step at the
+  top level or a question (:func:`takes_suggestion`), never a finding (ruling plan#3226) nor a
+  leaf (ruling plan#3229); it is one of :data:`_fields.SUGGESTED_OPTIONS`, and its reason one
+  sentence of at most :data:`REASON_CAP` characters (rulings plan#3224, plan#3236).  That a
+  filing of such a card names one is the filing's rule (``_filing``), not this check's: a card
+  a person files by hand sets its Priority, or none, and suggests nothing.
 
 **Only what a change writes is graded** (``R-BAL136``: "rows nobody edits keep
 their text until they close").  A caller names the parts it writes in
@@ -58,7 +64,7 @@ from collections.abc import Collection
 
 from tools.ci.arcs import ARCS
 from tools.quill._draft import Draft, Owner
-from tools.quill._fields import EFFORT, FIELDS, PRIORITY
+from tools.quill._fields import EFFORT, FIELDS, PRIORITY, SUGGESTED_KINDS, SUGGESTED_OPTIONS
 from tools.quill._state import SHIPPABLE, may_own
 from tools.quill.setup_tracker import CARD_TYPES, TASK
 
@@ -72,6 +78,16 @@ RULING_CAP = 2000
 #: (measured 2026-10-04: 1,024 ASCII characters taken, 1,025 refused), is far
 #: above it.
 TITLE_CAP = 100
+#: A suggestion's reason: one sentence of at most this many characters, GitHub's own cap on a
+#: suggestion's rationale (its GraphQL schema, ``IssueFieldCreateOrUpdateInput.rationale``,
+#: read 2026-11-10: "Max 280 characters.").  Measured 2026-11-10 16:21 UTC on plan#3178 by
+#: ``_filing._suggest`` as quill's App: a reason of 280 ASCII characters taken and read back
+#: whole.  Measured 2026-11-10 19:28 UTC with the developer's token (``recorded/reasons.json``,
+#: ``test__suggestion_reasons.py``): GitHub counts characters, not bytes, so 280 holding two
+#: outside ASCII, 283 bytes, is taken, and 281 refused, "rationale is too long (maximum is
+#: 280)"; and it keeps a reason as written, a run of two spaces too.  A character outside the
+#: Basic Multilingual Plane, two in UTF-16, is not measured.
+REASON_CAP = 280
 
 #: The parts of a card a change can write, beside :data:`_fields.PRIORITY` and
 #: :data:`_fields.EFFORT`, the parts holding its Priority and Effort.
@@ -154,27 +170,60 @@ def normalized(body: str | None) -> str:
     return (body or "").replace("\r\n", "\n").strip()
 
 
-def _sentence_problems(text: str) -> list[str]:
-    """Why ``text`` is not one sentence of at most :data:`FINDING_CAP` characters."""
+def _sentence_problems(text: str, what: str, cap: int, source: str) -> list[str]:
+    """Why ``text`` is not one sentence of at most ``cap`` characters, ``what`` naming it
+    and ``source`` the cap's: a finding's text (:data:`FINDING_CAP`, R-BAL136) and a
+    suggestion's reason (:data:`REASON_CAP`, GitHub's) are each one."""
     problems = []
     if "\n" in text:
-        problems.append("a finding's text is one sentence, on one line")
+        problems.append(f"{what} is one sentence, on one line")
     if not _ENDS.search(text):
         problems.append(
-            f"a finding's text is one complete sentence, ending in '.', '!' or '?'; "
+            f"{what} is one complete sentence, ending in '.', '!' or '?'; "
             f"it ends {text[-40:]!r}"
         )
     elif found := _BREAK.search(text):
         problems.append(
-            f"a finding's text is ONE sentence; a second begins at "
+            f"{what} is ONE sentence; a second begins at "
             f"{text[found.end() - 1:][:40]!r}"
         )
-    if len(text) > FINDING_CAP:
-        problems.append(
-            f"a finding's text is at most {FINDING_CAP} characters (R-BAL136); it is "
-            f"{len(text)}"
-        )
+    if len(text) > cap:
+        problems.append(f"{what} is at most {cap} characters ({source}); it is {len(text)}")
     return problems
+
+
+def takes_suggestion(draft: Draft) -> bool:
+    """Whether the card ``draft`` describes takes a suggested Priority: one of
+    :data:`SUGGESTED_KINDS`, a step at the top level alone, the cards the Inbox lists while
+    they are on the board and hold no Priority (ruling plan#3231), a step split into smaller
+    steps leaving it; never a finding, whose owner step's Priority
+    decides (ruling plan#3226), nor a leaf, which its split step's ranks (ruling plan#3229).
+    The one spelling of that set, which the check holds a suggestion to and the filing
+    requires one of (``_filing``); GitHub, not quill, reads the Inbox's filter, so it spells
+    the set in the board's filter language, its kinds read from :data:`SUGGESTED_KINDS`
+    (``_board_views.INBOX``)."""
+    return draft.kind in SUGGESTED_KINDS and not (draft.kind == "step"
+                                                   and draft.owner is not None)
+
+
+def _suggestion_problems(draft: Draft) -> list[str]:
+    """Why a suggested Priority the change writes is not one the card may hold: it is held by
+    a card :func:`takes_suggestion` says takes one, is one of :data:`SUGGESTED_OPTIONS`, and
+    its reason is one sentence of at most :data:`REASON_CAP` characters (rulings plan#3224,
+    plan#3236); none when the change writes none."""
+    if (suggestion := draft.suggestion) is None:
+        return []
+    problems = []
+    if not takes_suggestion(draft):
+        held = ("leaf" if draft.kind == "step" else draft.kind) or "card with no type"
+        problems.append(f"a suggested Priority is held by a step at the top level or a question "
+                        f"alone (rulings plan#3226, plan#3229); this {held} would hold "
+                        f"{suggestion.priority!r}")
+    if suggestion.priority not in SUGGESTED_OPTIONS:
+        problems.append(f"a suggested Priority is one of {', '.join(SUGGESTED_OPTIONS)}; it is "
+                        f"{suggestion.priority!r}")
+    return problems + _sentence_problems(suggestion.why, "a suggestion's reason", REASON_CAP,
+                                         "GitHub's cap")
 
 
 def _ruling_problems(text: str) -> list[str]:
@@ -265,12 +314,13 @@ def _task_problems(draft: Draft, changed: Collection[str]) -> list[str]:
     its card's (rule 14); a title it writes is a short name; and a parent it sets
     is a LIVE step or finding, the piece of work it is part of (whether that is a step split
     into smaller steps, which is no work, is the caller's to refuse: it reads the steps
-    linked under it)."""
+    linked under it); and it takes no suggested Priority (:func:`takes_suggestion`)."""
     problems = []
     if draft.arc is not None:
         problems.append(f"a task holds no Arc: its arc is its card's; it holds {draft.arc!r}")
     problems += _title_problems(draft.title, changed)
     problems += _field_problems(draft, changed)
+    problems += _suggestion_problems(draft)
     owner = draft.owner
     if OWNER in changed and not (owner is not None and owner.kind in SHIPPABLE and owner.live):
         problems.append("a task is a sub-issue of a LIVE step or finding, the piece of work it "
@@ -283,8 +333,9 @@ def violations(draft: Draft, changed: Collection[str] = NEW_CARD) -> list[str]:
 
     ``changed``: the parts the change writes (:data:`TITLE`, :data:`BODY`,
     :data:`OWNER`, :data:`PRIORITY`, :data:`EFFORT`); only those are graded beyond the type
-    and the Arc.  A task (:data:`setup_tracker.TASK`) is held to its own rules
-    (:func:`_task_problems`).
+    and the Arc, and a suggested Priority the draft holds, which only a change writing one
+    holds (:attr:`_draft.Draft.suggestion`).  A task (:data:`setup_tracker.TASK`) is held to
+    its own rules (:func:`_task_problems`).
     """
     if draft.kind == TASK:
         return _task_problems(draft, changed)
@@ -296,11 +347,12 @@ def violations(draft: Draft, changed: Collection[str] = NEW_CARD) -> list[str]:
                         f"{'none' if draft.arc is None else repr(draft.arc)}")
     problems += _title_problems(draft.title, changed)
     problems += _field_problems(draft, changed)
+    problems += _suggestion_problems(draft)
     if OWNER in changed:
         problems += _owner_problems(draft)
     body = normalized(draft.body)
     if BODY in changed and draft.kind == "finding":
-        problems += _sentence_problems(body)
+        problems += _sentence_problems(body, "a finding's text", FINDING_CAP, "R-BAL136")
     elif BODY in changed and draft.kind == "ruling":
         problems += _ruling_problems(body)
     return problems

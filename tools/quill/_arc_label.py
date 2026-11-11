@@ -9,19 +9,23 @@ sync``'s pass would at its next run (:mod:`_relabel`).  ``label`` adds or remove
 :data:`setup_tracker.CHOSEN_LABELS`: never an arc label, which displays the Arc, nor quill's
 filing mark.  ``priority`` and ``effort`` set a card's Priority or Effort to one of its
 options (``setup_tracker.ISSUE_FIELDS``), or clear it, one function writing either
-(:func:`cmd_field`).  Each writes only what differs, each write printed as it lands, so the
-same command run again finishes one a failure cut short.  Each works on a ruling, whose title
+(:func:`cmd_field`), a Priority's set taking back quill's pending suggestion of one.  Each
+writes only what differs, each write printed as it lands, so the same command run again
+finishes one a failure cut short.  Each works on a ruling, whose title
 and text alone are the developer's words (R-BAL220), and on a closed card, and refuses a card
 still being filed (:func:`_filing_refusal`); ``arc`` and ``label`` refuse a task
 (:func:`_refusal`), ``priority`` and ``effort`` a value on a kind the check refuses it on
 (``check.HOLDERS``), and ``effort`` one on a step split into smaller steps, reading git only
-for a step with a step linked under it (ruling plan#2555, :func:`_split_refusal`).
+for a step with a step linked under it (ruling plan#2555, :func:`_split_refusal`), and
+``priority`` a clear that would leave a piece of a split step unranked (ruling plan#3304,
+:func:`_unranked_refusal`).
 
 Split out of the command module, which they would take past the 1,000 lines
 ``too-many-lines`` allows; their arguments are here too (:func:`add_parsers`).
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from tools.ci.arcs import ARCS
@@ -29,8 +33,16 @@ from tools.quill import _git
 from tools.quill._arcs import label_corrections, other_labels
 from tools.quill._command import _label, _one, card_number, with_closure
 from tools.quill._exits import Refused
-from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS
-from tools.quill._state import filing_unfinished, has_steps_under, is_container
+from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS, PRIORITY, PRIORITY_FIELD
+from tools.quill._next import is_piece, ranked
+from tools.quill._state import (
+    at_and_above,
+    filing_unfinished,
+    has_steps_under,
+    is_container,
+    leaves_below,
+)
+from tools.quill._suggestion import take_back
 from tools.quill._tracker import Card, Tracker
 from tools.quill.check import HOLDERS, Draft, violations
 from tools.quill.setup_tracker import CHOSEN_LABELS, ISSUE_FIELDS, TASK
@@ -126,15 +138,51 @@ def _split_refusal(tracker: Tracker, root: Path, card: Card) -> str | None:
             f"{EFFORT_FIELD} (ruling plan#2555){clear}")
 
 
+def _unranked_refusal(tracker: Tracker, root: Path, card: Card) -> str | None:
+    """Why ``card``'s Priority is not cleared: once it is, a piece of a split step still to build
+    (:func:`_next.is_piece`), ``card`` itself or one below it (:func:`_state.leaves_below`), would
+    hold no Priority at it or above (:func:`_next.ranked`, read over the cards as the clear would
+    leave them), and nothing would show it but ``quill next`` (ruling plan#3304); None when none
+    would.  Only a step of a split, linked under one or with one linked under it, ranks a piece,
+    so the cards around it and git are read for no other, nor for a card holding no Priority,
+    whose clear writes nothing."""
+    if card.priority is None or (card.parent is None and not has_steps_under(card)):
+        return None
+    cards = with_closure(tracker, {card.number: card})
+    shipped = _git.read(root).shipped.cards
+    cleared = {**cards, card.number: replace(cards[card.number], priority=None)}
+    left = [piece.number for piece in (cleared[card.number], *leaves_below(card, cards, shipped))
+            if is_piece(piece, cleared, shipped) and not ranked(cleared[piece.number], cleared)]
+    if not left:
+        return None
+    top = list(at_and_above(card, cards))[-1].number
+    give = "each of them its own" if top == card.number else f"plan#{top} one"
+    return (f"once {_label(card)}'s {PRIORITY_FIELD} is cleared, "
+            f"{', '.join(f'plan#{number}' for number in left)} would hold none, its own or a "
+            "step's above it, and a piece of a split step nothing ranks is refused (ruling "
+            f"plan#3304): give {give} first (`quill priority plan#N --to PRIORITY`), then clear "
+            "this one")
+
+
 def cmd_field(args, tracker: Tracker, root: Path) -> int:
     """``quill priority`` and ``quill effort``: set a card's Priority or Effort, the command's
     issue field (``_fields.FIELDS``, keyed by the command's name), to ``--to``, or with
     ``--clear`` clear it (:meth:`_tracker.Tracker.set_field`), after the check every written
     card passes on its type and Arc and on the kind that may hold the field
     (:func:`check.violations`, grading that part alone).  Refused, with nothing written, for
-    a card still being filed (:func:`_filing_refusal`), what the check refuses, and an Effort
-    on a step split into smaller steps (:func:`_split_refusal`), whose clear is still taken.
-    Written only when it differs from what the card holds."""
+    a card still being filed (:func:`_filing_refusal`), what the check refuses, an Effort
+    on a step split into smaller steps (:func:`_split_refusal`), whose clear is still taken,
+    and a Priority's clear that would leave a piece of a split step unranked
+    (:func:`_unranked_refusal`, ruling plan#3304).
+    Written only when it differs from what the card holds.
+
+    A Priority's set takes back quill's pending suggestion of one first
+    (:func:`_suggestion.take_back`, plan#2798): GitHub's API leaves it pending beside the value
+    written (measured 2026-11-10 on plan#3178), where a later Accept would overwrite it.  First,
+    so no failure leaves the two together; the same command run again takes back one that a
+    run cut short left, whether or not the value still differs.  A clear takes back none: it
+    decides nothing, and leaves the card holding no Priority, where its suggestion waits for
+    the developer, its reason with it, of which quill keeps no copy (ruling plan#3236)."""
     part = args.command
     field = FIELDS[part]
     card = _one(tracker, args.card)
@@ -147,7 +195,13 @@ def cmd_field(args, tracker: Tracker, root: Path) -> int:
         raise Refused("not written:\n  " + "\n  ".join(problems))
     if part == EFFORT and value is not None and (why := _split_refusal(tracker, root, card)):
         raise Refused(why)
+    if part == PRIORITY and value is None and (why := _unranked_refusal(tracker, root, card)):
+        raise Refused(why)
     held = getattr(card, part)
+    if (part == PRIORITY and value is not None
+            and (pending := take_back(tracker.suggestions, card)) is not None):
+        print(f"took back quill's suggested {field} {pending.suggestion.priority!r} on "
+              f"{_label(card)}: its {field} is decided")
     if held == value:
         holds = f"no {field}" if value is None else f"the {field} {value!r}"
         print(f"{_label(card)} holds {holds} already: not written")

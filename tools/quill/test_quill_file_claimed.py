@@ -63,7 +63,7 @@ def test_a_new_leaf_under_a_claimed_step_is_refused_until_the_claim_is_released(
     (ruling plan#1875) hold back a split until they are dropped
     (``test_quill_claim_finishing.py``)."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     claim(code, 1)
     capsys.readouterr()
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 1
@@ -81,7 +81,7 @@ def test_a_leaf_whose_link_failed_is_not_linked_under_a_step_claimed_since(code,
     it is refused, offering the drop that keeps plan#1 whole; dropped, plan#1 is still
     claimed and on the board."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, "add_child")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 2
     assert tracker.cards_by_number[2].parent is None
@@ -105,7 +105,7 @@ def test_a_leaf_reopened_after_sync_unlinked_it_never_splits_the_claimed_step(co
     refused, and once the claim is released it finishes the split.  The claim is another
     clone's, its git alone, as in the test above."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 2
     tracker.cards_by_number[2] = replace(tracker.cards_by_number[2], is_open=False,
@@ -133,7 +133,7 @@ def test_a_linked_leaf_is_not_finished_under_a_claim_made_as_its_link_landed(cod
     the re-run is refused and the leaf stays marked, never offered; its drop takes it out
     of the split, and plan#1 is whole again, on the board in its place, still claimed."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 2
     holder = _claimed_by_a_race(code, 1)
@@ -154,7 +154,7 @@ def test_a_finished_leaf_run_again_under_a_claim_writes_nothing_and_is_not_refus
     """A run that would write nothing has nothing to refuse: a leaf whose filing finished
     before plan#1 was claimed is filed already."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 0
     _claimed_by_a_race(code, 1)
     writes = list(tracker.writes)
@@ -167,7 +167,7 @@ def test_the_refusal_offers_no_drop_of_a_shipped_leaf(code, tmp_path, capsys):
     """Work git says shipped is never dropped, so a leaf whose link failed and that shipped
     meanwhile is offered only the release."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, "add_child")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 2
     ship(code, 2)
@@ -195,7 +195,7 @@ def test_sync_reports_a_claim_on_a_split_step_until_it_is_released(code, tmp_pat
     split step's claim names who holds it and how to release it; a plain step's claim is
     no report.  Released, the report is gone."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     tracker.add(3)
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 0
     holder = _claimed_by_a_race(code, 1)
@@ -223,7 +223,7 @@ def test_sync_reaches_a_claimed_split_step_no_listing_holds(code, tmp_path, caps
     claim still names it.  Neither listing holds plan#1 or its leaf, and no marker names
     either, so `sync` reads it because it is claimed."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 0
     assert run(tracker, code, "drop", "plan#2", "--why", "not needed") == 0
     assert run(tracker, code, "sync") == 0
@@ -242,7 +242,7 @@ def test_sync_names_the_drop_when_every_leaf_of_the_claimed_step_is_still_being_
     of plan#1 is still being filed, so it also names the drop that keeps plan#1 whole, as
     `quill file`'s refusal does -- until plan#2 ships, which no drop undoes."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 2
     holder = _claimed_by_a_race(code, 1)
@@ -264,7 +264,7 @@ def test_no_drop_is_offered_to_keep_whole_a_claimed_step_another_leaf_splits(cod
     claimed.  Dropping plan#3, still being filed, would not keep plan#1 whole, so neither
     the refusal of plan#3's re-run nor sync's REPORT offers it."""
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", True),), on_board=False)
+    tracker.add(1, priority="Medium", children=(Child(2, "step", True),), on_board=False)
     tracker.add(2, parent=1)
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Second")) == 2
@@ -283,7 +283,7 @@ def test_a_claim_whose_tip_holds_no_marker_is_named_so_everywhere(code, tmp_path
     The refusal, sync's REPORT on a split step and `quill show` each name it the one way,
     with the release that frees it."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 0
     tip = _commit(code, "work", parents=[_run(code, "rev-parse", tracking(DEV))])
     _run(code, "push", "--quiet", "origin", f"{tip}:refs/heads/card/1")
@@ -304,7 +304,7 @@ def test_the_claim_is_refused_before_an_unfinished_sibling_is(code, tmp_path, ca
     """Leaf C3 review LOW 9: under a claimed step with a leaf still being filed, a new leaf
     is refused for the claim first: releasing it is the first thing to settle."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 2
     holder = _claimed_by_a_race(code, 1)
@@ -320,7 +320,7 @@ def test_the_drop_that_keeps_a_claimed_step_whole_counts_only_its_leaves(code, t
     plan#1's only leaf: the refusal of plan#2's re-run and sync's REPORT both offer the
     drop that keeps plan#1 whole."""
     tracker = FakeTracker()
-    tracker.add(1)
+    tracker.add(1, priority="Medium")
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 2
     tracker.add(3, parent=1, labels=("balance", FILING), is_open=False,

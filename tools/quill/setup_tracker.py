@@ -8,17 +8,18 @@ lives (:class:`Place`: :data:`PLAN`, and :data:`REHEARSAL`, the throwaway one
 X-cx's migration was rehearsed on) and of its CONFIGURATION: the repository and
 its settings, the labels, the board, and the things only the web can set (the
 organization's issue types and issue fields, which need a scope the shared token
-does not carry; the board's automations and its view's sort, which the API cannot
-change, and its view's "Show hierarchy", which the API cannot even read; and
-quill's GitHub App).  The cards themselves are content, and their home is the
-tracker; nothing here names one.
+does not carry; the board's automations and its views' sorts and groupings, which the API
+cannot change, and the Plan view's "Show hierarchy", which the API cannot even read; and
+quill's GitHub App).  Its views, the Plan view and the Inbox, are declared in
+:mod:`_board_views`, which grades them; this module makes and corrects them.  The cards
+themselves are content, and their home is the tracker; nothing here names one.
 
 Run with no flag it changes nothing: it reads GitHub, prints one line per
 thing it checked, and exits 1 if anything differs.  A setting no API reads is an
 ``UNREAD`` line naming the page to look at, never a difference, since no run could
 ever pass it.  ``--apply`` makes what is missing and corrects what drifted, then
 reports what it could not fix (an issue type, an issue field, a board automation
-or a view's sort with the page to fix it on).
+or a view's sort or grouping with the page to fix it on).
 It DELETES only what nothing depends on: a label no issue or pull request
 carries, and a custom board field that stores a value per card while the
 board holds no card, archived ones counted.  Every other difference is
@@ -86,13 +87,13 @@ from urllib.parse import quote
 import requests
 
 from tools.ci.arcs import ARC_COLORS, ARCS
+from tools.quill import _board_views
 from tools.quill._arcs import ARC_FIELD, arc_verdict, card_arcs
 from tools.quill._board_fields import (
     GITHUB_STATUS_FIELD,
     STATUS_OPTIONS,
     hidden,
     is_github_status,
-    status_column,
     status_field_differences,
     stores_values,
 )
@@ -280,15 +281,6 @@ APP_LOGIN = "shekel-quill"
 #: What quill reads of the repositories a board is linked to (:func:`linked`).
 LINKED_REPOSITORIES = "repositories(first: 100) { totalCount nodes { nameWithOwner } }"
 
-#: The board's view: the open cards, unsorted, so it shows the drag order.
-VIEW_NAME = "Plan"
-VIEW_FILTER = "is:open"
-#: The column the view shows beside its cards, by the type GitHub gives the field: the Parent
-#: issue, where a leaf names the step it splits, since a split step is no row (ruling
-#: plan#1814).  Its "Show hierarchy", which nests each step's tasks under it, must be on too,
-#: but no API reads it (``ProjectV2View`` and ``updateProjectV2View`` hold no such setting,
-#: introspected 2026-10-26), so the check prints it as ``UNREAD``.
-VIEW_PARENT_COLUMN = "PARENT_ISSUE"
 #: The name GitHub gives a new board's one view (measured on the 09-24 demo board).
 GITHUB_DEFAULT_VIEW = "View 1"
 
@@ -298,11 +290,7 @@ _PROJECT_FIELDS = """
   fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType isIssueField }
     ... on ProjectV2SingleSelectField { options { name } } } }
   workflows(first: 50) { nodes { name enabled } }
-  views(first: 20) { nodes {
-    id number name filter layout sortByFields(first: 1) { totalCount }
-    groupByFields(first: 1) { totalCount } verticalGroupByFields(first: 1) { totalCount }
-    fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType isIssueField } } }
-  } }
+  """ + _board_views.VIEWS_READ + """
   items(first: 1, archivedStates: [ARCHIVED, NOT_ARCHIVED]) { totalCount }
 """
 
@@ -483,17 +471,6 @@ def is_tracker_issue(node: dict, place: Place) -> bool:
     return (node.get("repository") or {}).get("nameWithOwner") == place.full_name
 
 
-def _parent_column(fields: list[dict]) -> dict | None:
-    """The Parent issue field (:data:`VIEW_PARENT_COLUMN`) among a board's or a view's
-    ``fields``, or None."""
-    return next((f for f in fields if f and f["dataType"] == VIEW_PARENT_COLUMN), None)
-
-
-def _plan_views(project: dict) -> list[dict]:
-    """The board's views named :data:`VIEW_NAME`: one, on a board as declared."""
-    return [view for view in project["views"]["nodes"] if view["name"] == VIEW_NAME]
-
-
 def _is_card(item: dict) -> bool:
     """Whether a board item (``_BOARD_ITEMS``' node) is a card: an issue of the tracker."""
     return item["type"] == "ISSUE" and is_tracker_issue(item["content"] or {}, PLAN)
@@ -561,38 +538,7 @@ def board_differences(project: dict) -> list[str]:
         for workflow in project["workflows"]["nodes"]
         if workflow["enabled"]
     ]
-    views = _plan_views(project)
-    if not views:
-        differences.append(f"the board has no view named {VIEW_NAME!r}")
-    for view in views:
-        if view["filter"] != VIEW_FILTER:
-            differences.append(f"the {VIEW_NAME!r} view's filter is {view['filter']!r}")
-        if _parent_column(view["fields"]["nodes"]) is None:
-            differences.append(f"the {VIEW_NAME!r} view does not show the Parent issue column, "
-                               "where a leaf names the step it splits")
-        if status_column(view["fields"]["nodes"]) is None:
-            differences.append(f"the {VIEW_NAME!r} view does not show the {GITHUB_STATUS_FIELD} "
-                               "column, where quill shows each card's progress (ruling "
-                               "plan#1873)")
-        if view["sortByFields"]["totalCount"]:
-            differences.append(
-                f"the {VIEW_NAME!r} view is sorted, which hides the drag order: remove its "
-                f"sort at {project['url']}"
-            )
-        shown = [f["name"] for f in view["fields"]["nodes"] if hidden(f)]
-        if shown:
-            differences.append(f"the {VIEW_NAME!r} view shows stored fields {shown}")
-        if view["layout"] != "TABLE_LAYOUT":
-            differences.append(
-                f"the {VIEW_NAME!r} view is a {view['layout']}, whose columns are a stored "
-                f"field: make it a table at {project['url']}"
-            )
-        if view["groupByFields"]["totalCount"] or view["verticalGroupByFields"]["totalCount"]:
-            differences.append(
-                f"the {VIEW_NAME!r} view is grouped, which splits the drag order: remove its "
-                f"grouping at {project['url']}"
-            )
-    return differences
+    return differences + _board_views.differences(project)
 
 
 def check_repository(github: GitHub, apply: bool, report: Report) -> dict | None:
@@ -761,68 +707,71 @@ def _find_project(github: GitHub) -> tuple[str, dict | None]:
     return org_id, (_project(github, board_id) if board_id else None)
 
 
-def _apply_to_view(github: GitHub, project: dict, report: Report) -> None:
-    """Give the board its :data:`VIEW_NAME` view, filtered to open cards.
+def _apply_to_views(github: GitHub, project: dict, report: Report) -> None:
+    """Give the board each view :data:`_board_views.DECLARED` names, with its filter; its sort,
+    which the API cannot write, the check reports.
 
     A view someone made for another purpose is never renamed: only a board's
     lone view still carrying GitHub's default name becomes the plan view, and
-    any other board gets a new one.
+    each other declared view the board lacks is made.
     """
     views = project["views"]["nodes"]
-    named = _plan_views(project)
-    if named:
-        view = named[0]
-    elif len(views) == 1 and views[0]["name"] == GITHUB_DEFAULT_VIEW:
-        view = views[0]
-    else:
-        created = github.graphql(
-            "mutation($p: ID!, $name: String!) { createProjectV2View(input: {projectId: $p, "
-            "name: $name, layout: TABLE_LAYOUT}) { projectV2View { id } } }",
-            p=project["id"],
-            name=VIEW_NAME,
-        )
-        view = {"id": created["createProjectV2View"]["projectV2View"]["id"], "name": VIEW_NAME,
-                "filter": ""}
-        report.made(f"board view {VIEW_NAME!r}")
-    if (view["name"], view["filter"]) != (VIEW_NAME, VIEW_FILTER):
-        github.graphql(
-            "mutation($id: ID!, $name: String!, $filter: String!) { updateProjectV2View("
-            "input: {viewId: $id, name: $name, filter: $filter}) { clientMutationId } }",
-            id=view["id"],
-            name=VIEW_NAME,
-            filter=VIEW_FILTER,
-        )
-        report.made(f"board view {view['name']!r} -> {VIEW_NAME!r} ({VIEW_FILTER})")
+    fresh = len(views) == 1 and views[0]["name"] == GITHUB_DEFAULT_VIEW
+    for declared in _board_views.DECLARED:
+        if held := _board_views.named(project, declared):
+            view = held[0]
+        elif fresh and declared is _board_views.PLAN:
+            view = views[0]
+        else:
+            created = github.graphql(
+                "mutation($p: ID!, $name: String!) { createProjectV2View(input: {projectId: "
+                "$p, name: $name, layout: TABLE_LAYOUT}) { projectV2View { id } } }",
+                p=project["id"],
+                name=declared.name,
+            )
+            view = {"id": created["createProjectV2View"]["projectV2View"]["id"],
+                    "name": declared.name, "filter": ""}
+            report.made(f"board view {declared.name!r}")
+        if (view["name"], view["filter"]) != (declared.name, declared.filter):
+            github.graphql(
+                "mutation($id: ID!, $name: String!, $filter: String!) { updateProjectV2View("
+                "input: {viewId: $id, name: $name, filter: $filter}) { clientMutationId } }",
+                id=view["id"],
+                name=declared.name,
+                filter=declared.filter,
+            )
+            report.made(f"board view {view['name']!r} -> {declared.name!r} ({declared.filter})")
 
 
 def _set_view_columns(github: GitHub, project: dict, report: Report) -> None:
-    """Give the plan view its columns in one write: every stored field but Status hidden
-    (:func:`_board_fields.hidden`), its other columns kept, and the board's Parent issue field
-    (:data:`VIEW_PARENT_COLUMN`) and Status shown."""
+    """Give each declared view its columns in one write: every stored field but Status hidden
+    (:func:`_board_fields.hidden`), its other columns kept, and each column it declares shown
+    (:attr:`_board_views.View.columns`)."""
     board = project["fields"]["nodes"]
-    for view in _plan_views(project):
-        visible = [f for f in view["fields"]["nodes"] if f]
-        hide = [f["name"] for f in visible if hidden(f)]
-        show = [(name, column) for name, find in (("Parent issue", _parent_column),
-                                                  (GITHUB_STATUS_FIELD, status_column))
-                if (column := find(board)) is not None and find(visible) is None]
-        if not (hide or show):
-            continue
-        github.graphql(
-            "mutation($id: ID!, $fields: [ID!]!) { updateProjectV2View(input: {viewId: $id, "
-            "configuration: {visibleFieldIds: $fields}}) { clientMutationId } }",
-            id=view["id"],
-            fields=[f["id"] for f in [*visible, *(column for _, column in show)]
-                    if not hidden(f)],
-        )
-        if hide:
-            report.made(f"hid {hide} from the {VIEW_NAME!r} view")
-        for name, _ in show:
-            report.made(f"showed the {name} column in the {VIEW_NAME!r} view")
+    for declared in _board_views.DECLARED:
+        for view in _board_views.named(project, declared):
+            visible = [f for f in view["fields"]["nodes"] if f]
+            hide = [f["name"] for f in visible if hidden(f)]
+            show = [(column.name, found) for column in declared.columns
+                    if (found := column.find(board)) is not None
+                    and column.find(visible) is None]
+            if not (hide or show):
+                continue
+            github.graphql(
+                "mutation($id: ID!, $fields: [ID!]!) { updateProjectV2View(input: {viewId: "
+                "$id, configuration: {visibleFieldIds: $fields}}) { clientMutationId } }",
+                id=view["id"],
+                fields=[f["id"] for f in [*visible, *(found for _, found in show)]
+                        if not hidden(f)],
+            )
+            if hide:
+                report.made(f"hid {hide} from the {declared.name!r} view")
+            for name, _ in show:
+                report.made(f"showed the {name} column in the {declared.name!r} view")
 
 
 def _apply_to_board(github: GitHub, project: dict, repository: dict, report: Report) -> None:
-    """Make a board private, link it and name and filter its view; while it holds no
+    """Make a board private, link it and name and filter its views; while it holds no
     card, delete every custom field that stores a value per card."""
     if project["public"]:
         github.graphql(
@@ -839,7 +788,7 @@ def _apply_to_board(github: GitHub, project: dict, repository: dict, report: Rep
             r=repository["node_id"],
         )
         report.made(f"board linked to {REPO}")
-    _apply_to_view(github, project, report)
+    _apply_to_views(github, project, report)
     if project["items"]["totalCount"]:
         return
     for board_field in project["fields"]["nodes"]:
@@ -899,14 +848,11 @@ def check_board(github: GitHub, repository: dict | None, apply: bool, report: Re
         report.ok(
             f"board {PROJECT_TITLE!r} ({project['url']}): no stored field but GitHub's "
             f"{GITHUB_STATUS_FIELD}, holding exactly {', '.join(STATUS_OPTIONS)} and on no item "
-            f"that is no card, no automation on, no archived item, an unsorted {VIEW_NAME!r} "
-            f"table of open cards, ungrouped, showing {GITHUB_STATUS_FIELD} and the Parent "
-            "issue column and no other stored field"
+            f"that is no card, no automation on, no archived item, and its views: "
+            f"{_board_views.described()}"
         )
-    for view in _plan_views(project):
-        report.unread(f"the {VIEW_NAME!r} view's \"Show hierarchy\", which must be on so each "
-                      "step's tasks nest under it: no API reads it, so look at "
-                      f"{project['url']}/views/{view['number']}")
+    for line in _board_views.unread(project):
+        report.unread(line)
 
 
 def another_app(slug: str) -> str | None:

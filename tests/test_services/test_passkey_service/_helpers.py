@@ -1,8 +1,12 @@
 """Acts the passkey service tests share: a clock set per act, and a passkey added."""
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
+from app.extensions import db
+from app.models.passkey import Passkey
+from app.models.passkey_add import PasskeyAdd
 from app.services import passkey_service
 from tests._passkeys import ORIGIN, SoftwareAuthenticator
 from tests._test_helpers import freeze_today
@@ -93,3 +97,30 @@ def sign_in(authenticator, *, state=None, options=None, **get):
     response = json.dumps(authenticator.get(options, **get))
     user = passkey_service.sign_in_account(response)
     return passkey_service.complete_sign_in(user, response, origin=ORIGIN, state=state)
+
+
+def written_directly(user, *, at=T0):
+    """Write a passkey of *user*'s by the ORM, as no act of the service does; return it.
+
+    For a case about the count a completion reads: no add of an account can
+    keep a passkey while another of its adds is in flight (a newer add
+    replaces the older, ruling plan#3543), so a passkey that arrives
+    meanwhile is written here, as any other writer would leave it.
+    """
+    passkey = Passkey(
+        user_id=user.id, credential_id=os.urandom(16),
+        public_key=SoftwareAuthenticator().cose_key(), name="iPad",
+        created_at=at, last_used_at=at,
+    )
+    db.session.add(passkey)
+    db.session.flush()
+    return passkey
+
+
+def add_row(user):
+    """Return *user*'s add in flight, read afresh, or ``None``."""
+    return db.session.execute(
+        db.select(PasskeyAdd)
+        .where(PasskeyAdd.user_id == user.id)
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()

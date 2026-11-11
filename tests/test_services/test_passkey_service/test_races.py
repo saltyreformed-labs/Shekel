@@ -1,7 +1,7 @@
-"""Two acts at once: one answer completed twice, and two adds at the cap.
+"""Two acts at once: one answer completed twice, the cap counted past a held account, an add replaced.
 
 The owner's lock serialises an account's requests, but a companion whose
-owner is gone has none to take, so the two decisions that must not race take
+owner is gone has none to take, so the decisions that must not race take
 row locks of their own (the service's module docstring).  Each case holds the
 first act's row on a connection of its own, mid-transaction, runs the second
 act in a thread with its own session, and commits the first once the second
@@ -61,11 +61,12 @@ def test_one_answer_completed_twice_at_once_signs_in_once(app, bare_user, monkey
     assert refusal is PasskeyRefusal.REPLAYED
 
 
-def test_two_adds_at_nine_at_once_keep_ten(app, bare_user, monkeypatch):
-    """The first add holds the account's row and has written the tenth; the second waits, then is refused.
+def test_a_keeping_counts_what_the_accounts_lock_holder_wrote(app, bare_user, monkeypatch):
+    """A writer holds the account's row and has written the tenth; the keeping waits, then is refused.
 
-    The second add's registration completed at nine, before either kept a
-    passkey, so the race is between the two keepings, where the count binds.
+    No add of the account can be that writer while this one is in flight (a
+    newer add replaces it, ruling plan#3543), so the holder writes the tenth
+    by SQL: the keeping's count is ordered after whatever holds the account.
     """
     clock = Clock(monkeypatch)
     user = bare_user["user"]
@@ -115,6 +116,104 @@ def test_two_adds_at_nine_at_once_keep_ten(app, bare_user, monkeypatch):
     assert refusal is PasskeyRefusal.TOO_MANY
     db.session.expire_all()
     assert len(passkey_service.list_passkeys(user_id)) == 10
+
+
+def test_a_registration_completed_while_a_newer_add_replaces_it_completes_nothing(
+    app, bare_user, monkeypatch,
+):
+    """A newer add holds the account's add row, replacing it; the registration waits, then is refused.
+
+    The holder writes what :func:`_begin_add`'s conflict arm writes: a new
+    id, a new challenge, the passkey made emptied.  The registration's read
+    of its add is ``FOR UPDATE``, so it waits for the replacement and then
+    finds its add gone.  A read without the lock would see the row as it
+    stood, check the answer against it, and fail at its own write of a row
+    whose id had moved.
+    """
+    Clock(monkeypatch)
+    user = bare_user["user"]
+    authenticator = SoftwareAuthenticator()
+    options, state = passkey_service.registration_options(user, origin=ORIGIN)
+    response = json.dumps(authenticator.create(options))
+    user_id = user.id
+    db.session.commit()
+
+    def registration():
+        """The older add's registration, in a session of its own."""
+        try:
+            passkey_service.complete_registration(
+                db.session.get(User, user_id), response, "iPhone",
+                origin=ORIGIN, state=state,
+            )
+        except PasskeyRefused as refused:
+            return refused.refusal
+        return None
+
+    holder = db.engine.connect()
+    try:
+        holder.execute(
+            text(
+                "UPDATE auth.passkey_adds SET"
+                " id = nextval(pg_get_serial_sequence('auth.passkey_adds', 'id')),"
+                " challenge = :challenge, issued_at = :at, credential_id = NULL,"
+                " public_key = NULL, sign_count = NULL, name = NULL"
+                " WHERE user_id = :user_id"
+            ),
+            {"challenge": b"\x05" * 32, "at": T0, "user_id": user_id},
+        )
+        refusal = act_past_a_held_row(app, holder, registration)
+    finally:
+        holder.close()
+    assert refusal is PasskeyRefusal.EXPIRED
+
+
+def test_an_add_begun_while_a_keeping_holds_the_account_counts_what_it_kept(
+    app, bare_user, monkeypatch,
+):
+    """A keeping holds the account's row and has written the tenth; a newer add's options wait, then refuse.
+
+    So the device is never asked to make an eleventh: the options count
+    under the account's lock, after the keeping that held it.
+    """
+    clock = Clock(monkeypatch)
+    user = bare_user["user"]
+    for _ in range(9):
+        add(clock, user)
+    user_id = user.id
+    db.session.commit()
+
+    def options():
+        """The newer add's options, in a session of its own."""
+        try:
+            passkey_service.registration_options(
+                db.session.get(User, user_id), origin=ORIGIN,
+            )
+        except PasskeyRefused as refused:
+            return refused.refusal
+        return None
+
+    holder = db.engine.connect()
+    try:
+        holder.execute(
+            text("SELECT id FROM auth.users WHERE id = :id FOR NO KEY UPDATE"),
+            {"id": user_id},
+        )
+        holder.execute(
+            text(
+                "INSERT INTO auth.passkeys"
+                " (user_id, credential_id, public_key, sign_count, name,"
+                " created_at, last_used_at)"
+                " VALUES (:user_id, :credential_id, :public_key, 0, 'iPhone', :at, :at)"
+            ),
+            {
+                "user_id": user_id, "credential_id": b"\x0d" * 16,
+                "public_key": SoftwareAuthenticator().cose_key(), "at": T0,
+            },
+        )
+        refusal = act_past_a_held_row(app, holder, options)
+    finally:
+        holder.close()
+    assert refusal is PasskeyRefusal.TOO_MANY
 
 
 def test_a_completion_reads_the_passkey_afresh_over_a_stale_copy(bare_user, monkeypatch):

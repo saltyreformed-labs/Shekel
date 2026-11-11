@@ -62,7 +62,6 @@ _DEFAULT_PORTS = {"https": 443, "http": 80}
 _STATE_CEREMONY = "ceremony"
 _STATE_CHALLENGE = "challenge"
 _STATE_ISSUED_AT = "issued_at"
-_STATE_USER_ID = "user_id"
 
 
 class Ceremony(Enum):
@@ -84,18 +83,19 @@ class Ceremony(Enum):
 
 
 class Issued(NamedTuple):
-    """A ceremony's state as this package issued it.
+    """A ceremony in flight: what its answer must answer, and since when.
+
+    A sign-in's and a re-confirm's are read from the state the route keeps
+    (:func:`read_state`); an add's from its row in ``auth.passkey_adds``
+    (:mod:`._adding`).
 
     Attributes:
         challenge: The challenge, as base64url text.
         issued_at: When it was issued.
-        user_id: The account an add was begun for; ``None`` for a sign-in or
-            a re-confirm.
     """
 
     challenge: str
     issued_at: datetime
-    user_id: int | None
 
 
 def now() -> datetime:
@@ -196,32 +196,88 @@ def user_handle(user_id: int) -> bytes:
     return user_id.to_bytes(_USER_HANDLE_BYTES, "big")
 
 
-def issue(
-    begun: Mapping[str, object], ceremony: Ceremony,
-    *, user_id: int | None, issued_at: datetime,
-) -> dict[str, str | int]:
-    """Return the state the route keeps for the ceremony fido2 just began.
+def make_state(ceremony: Ceremony, **fields: str | int) -> dict[str, str | int]:
+    """Return a state the route keeps: *fields*, under the name of *ceremony*.
+
+    The one place a state is given its ceremony's name, which
+    :func:`refuse_unless_named` reads.
 
     Args:
-        begun: What fido2's ``register_begin`` or ``authenticate_begin``
-            returned beside the options.
-        ceremony: Which ceremony it is.
-        user_id: The account an add is begun for, or ``None``.
+        ceremony: Which ceremony the state is for.
+        **fields: What else the state holds, as text and integers, which a
+            session keeps as they are.
+
+    Returns:
+        The state.
+    """
+    return {_STATE_CEREMONY: ceremony.value, **fields}
+
+
+def refuse_unless_named(
+    state: Mapping[str, str | int] | None, ceremony: Ceremony,
+) -> Mapping[str, str | int]:
+    """Return *state*, refusing none or one of another ceremony's as no state at all.
+
+    A state of another ceremony is refused as no state: this ceremony is not
+    in flight, whatever else is.
+
+    Args:
+        state: What :func:`make_state` returned, as the route kept it, or
+            ``None`` when it kept none (a second submit, a session that
+            ended).
+        ceremony: The ceremony being completed.
+
+    Returns:
+        *state*.
+
+    Raises:
+        PasskeyRefused: ``EXPIRED``.
+    """
+    if state is None or state.get(_STATE_CEREMONY) != ceremony.value:
+        raise PasskeyRefused(PasskeyRefusal.EXPIRED)
+    return state
+
+
+def expired(issued_at: datetime, moment: datetime) -> bool:
+    """Return whether a challenge issued at *issued_at* is dead at *moment*.
+
+    The one statement of the challenge's lifetime: it is dead at exactly
+    :data:`CHALLENGE_LIFETIME`.
+
+    Args:
+        issued_at: When the challenge was issued.
+        moment: The completion's moment.
+
+    Returns:
+        True once it is :data:`CHALLENGE_LIFETIME` old or older.
+    """
+    return moment >= issued_at + CHALLENGE_LIFETIME
+
+
+def issue(
+    begun: Mapping[str, object], ceremony: Ceremony, *, issued_at: datetime,
+) -> dict[str, str | int]:
+    """Return the state the route keeps for the sign-in or re-confirm fido2 just began.
+
+    An add keeps its challenge on the server instead (:mod:`._adding`).
+
+    Args:
+        begun: What fido2's ``authenticate_begin`` returned beside the
+            options.
+        ceremony: ``SIGN_IN`` or ``RE_CONFIRM``.
         issued_at: The moment of the act issuing it (:func:`now`).
 
     Returns:
-        The ceremony, the challenge and the moment it was issued, and
-        *user_id* where one is given: plain text and an integer, which a
-        session keeps as they are.
+        The ceremony, the challenge and the moment it was issued, as plain
+        text.
     """
-    state: dict[str, str | int] = {
-        _STATE_CEREMONY: ceremony.value,
-        _STATE_CHALLENGE: begun["challenge"],
-        _STATE_ISSUED_AT: issued_at.isoformat(),
-    }
-    if user_id is not None:
-        state[_STATE_USER_ID] = user_id
-    return state
+    return make_state(
+        ceremony,
+        **{
+            _STATE_CHALLENGE: begun["challenge"],
+            _STATE_ISSUED_AT: issued_at.isoformat(),
+        },
+    )
 
 
 def read_state(
@@ -229,30 +285,25 @@ def read_state(
 ) -> Issued:
     """Return the *ceremony* *state* names, refusing none, another's or an expired one.
 
-    A state of another ceremony is refused as no state at all: this
-    ceremony is not in flight, whatever else is.
-
     Args:
-        state: What :func:`issue` returned, as the route kept it, or ``None``
-            when it kept none (a second submit, a session that ended).
+        state: What :func:`issue` returned, as the route kept it, or ``None``.
         moment: The completion's moment.
-        ceremony: The ceremony being completed.
+        ceremony: ``SIGN_IN`` or ``RE_CONFIRM``.
 
     Returns:
         The issued ceremony.
 
     Raises:
         PasskeyRefused: ``EXPIRED``, when there is no state of *ceremony*'s
-            or the challenge is :data:`CHALLENGE_LIFETIME` old or older.
+            (:func:`refuse_unless_named`) or its challenge is
+            :data:`CHALLENGE_LIFETIME` old or older.
     """
-    if state is None or state.get(_STATE_CEREMONY) != ceremony.value:
-        raise PasskeyRefused(PasskeyRefusal.EXPIRED)
+    named = refuse_unless_named(state, ceremony)
     issued = Issued(
-        challenge=state[_STATE_CHALLENGE],
-        issued_at=datetime.fromisoformat(state[_STATE_ISSUED_AT]),
-        user_id=state.get(_STATE_USER_ID),
+        challenge=named[_STATE_CHALLENGE],
+        issued_at=datetime.fromisoformat(named[_STATE_ISSUED_AT]),
     )
-    if moment >= issued.issued_at + CHALLENGE_LIFETIME:
+    if expired(issued.issued_at, moment):
         raise PasskeyRefused(PasskeyRefusal.EXPIRED)
     return issued
 

@@ -19,6 +19,17 @@ from tests._passkeys import (
     AT,
     BE,
     BS,
+    EDDSA,
+    ES256,
+    ES256K,
+    ES384,
+    ES512,
+    MLDSA44,
+    MLDSA65,
+    MLDSA87,
+    OFFERED,
+    PS256,
+    RS256,
     ORIGIN,
     RP_ID,
     RS1,
@@ -34,7 +45,29 @@ from tests._passkeys import (
     padding,
     unb64url,
 )
-from tests.test_services.test_passkey_service._helpers import T0, Clock, add
+from tests.test_services.test_passkey_service._helpers import (
+    T0,
+    Clock,
+    add,
+    add_row,
+    written_directly,
+)
+
+#: A COSE key id member (label 2, RFC 9052 7.1) of 4,000 bytes: a member no
+#: key type's public key holds, which the add must not keep.
+_A_KEY_ID = ((cbor_int(2), cbor_bytes(b"\x00" * 4000)),)
+
+#: Each offered algorithm's private member's label, which an authenticator
+#: must never send and the add must never keep: ``d`` of an EC2 or OKP key
+#: (RFC 9053, 7.1, 7.2), ``d`` of an RSA key (RFC 8230, 4), ``priv`` of an AKP
+#: key (the ML-DSA draft).
+_PRIVATE_LABEL = {
+    ES256: -4, ES384: -4, ES512: -4, ES256K: -4, EDDSA: -4,
+    PS256: -3, RS256: -3, MLDSA44: -2, MLDSA65: -2, MLDSA87: -2,
+}
+
+#: A label no COSE key type assigns.
+_UNASSIGNED_LABEL = -70
 
 
 @pytest.fixture(name="clock")
@@ -101,15 +134,28 @@ class TestTheOptions:
         ] == [first.credential_id, second.credential_id]
 
     def test_the_options_and_the_state_are_plain_json(self, user, clock):
-        """The route hands one to the browser and keeps the other in its session."""
+        """The route hands one to the browser and keeps the other in its session.
+
+        The state names the ceremony and the add's row, and nothing of what
+        the row holds (ruling plan#3543): the challenge and its moment are
+        the row's, and the passkey made is empty until the registration.
+        """
         options, state = passkey_service.registration_options(user, origin=ORIGIN)
+        row = add_row(user)
         assert json.loads(json.dumps(options)) == options
-        assert state == {
-            "ceremony": "registration",
-            "challenge": options["publicKey"]["challenge"],
-            "issued_at": T0.isoformat(),
-            "user_id": user.id,
-        }
+        assert state == {"ceremony": "registration", "add": row.id}
+        assert b64url(row.challenge) == options["publicKey"]["challenge"]
+        assert row.issued_at == T0
+        assert (row.credential_id, row.public_key, row.sign_count, row.name) == (
+            None, None, None, None,
+        )
+
+    def test_the_options_offer_these_ten_algorithms(self, user, clock):
+        """fido2's list, pinned: the add keeps a key of each, trimmed (``TestTheKey``)."""
+        options, _ = passkey_service.registration_options(user, origin=ORIGIN)
+        assert [
+            each["alg"] for each in options["publicKey"]["pubKeyCredParams"]
+        ] == list(OFFERED)
 
     def test_an_account_holding_ten_is_refused_before_the_device_is_asked(self, user, clock):
         """The eleventh's options are refused, so no device makes a key Shekel would not keep."""
@@ -192,6 +238,45 @@ class TestTheChallenge:
         assert str(refusal.__cause__) == "Wrong challenge in response."
 
 
+class TestTheAddInFlight:
+    """Ruling plan#3543: one row per account, replaced by a newer add, its registration answered once."""
+
+    def test_a_newer_add_replaces_the_older_under_a_new_id(self, user, clock):
+        """Two adds begun: one row, the newer's, and the older's state completes nothing."""
+        options, older = passkey_service.registration_options(user, origin=ORIGIN)
+        _, newer = passkey_service.registration_options(user, origin=ORIGIN)
+        assert older["add"] != newer["add"]
+        assert add_row(user).id == newer["add"]
+        refusal = _refusal(user, SoftwareAuthenticator().create(options), state=older)
+        assert refusal.refusal is PasskeyRefusal.EXPIRED
+
+    def test_the_registrations_state_completes_once(self, user, clock):
+        """The same registration completed twice: the second finds it done."""
+        authenticator = SoftwareAuthenticator()
+        options, state = passkey_service.registration_options(user, origin=ORIGIN)
+        response = authenticator.create(options)
+        _completed(user, response, state=state)
+        refusal = _refusal(user, response, state=state)
+        assert refusal.refusal is PasskeyRefusal.EXPIRED
+
+    def test_an_expired_registration_is_refused_and_its_add_deleted(self, user, clock):
+        """Five minutes after the options: refused, and the row is gone."""
+        options, state = passkey_service.registration_options(user, origin=ORIGIN)
+        clock.at(T0 + timedelta(minutes=5))
+        refusal = _refusal(user, SoftwareAuthenticator().create(options), state=state)
+        assert refusal.refusal is PasskeyRefusal.EXPIRED
+        assert add_row(user) is None
+
+    def test_another_accounts_expired_add_is_left_as_it_was(self, user, second_user, clock):
+        """Refused as expired, plan#3533's order, but not deleted: it is not this account's."""
+        other = second_user["user"]
+        options, state = passkey_service.registration_options(other, origin=ORIGIN)
+        clock.at(T0 + timedelta(minutes=5))
+        refusal = _refusal(user, SoftwareAuthenticator().create(options), state=state)
+        assert refusal.refusal is PasskeyRefusal.EXPIRED
+        assert add_row(other).id == state["add"]
+
+
 class TestTheCeremony:
     """fido2's checks, each refusing an answer wrong in exactly that way."""
 
@@ -258,6 +343,58 @@ class TestTheKey:
         refusal = _refusal(user, authenticator.create(options, cose_key=off_curve), state=state)
         assert refusal.refusal is PasskeyRefusal.UNUSABLE_KEY
         assert isinstance(refusal.__cause__, ValueError)
+
+    @pytest.mark.parametrize("kty", [1, 3])
+    def test_a_key_type_that_is_not_its_algorithms_is_refused(self, user, clock, kty):
+        """An ES256 key labelled OKP or RSA: no key type's members can be told from it."""
+        authenticator = SoftwareAuthenticator()
+        options, state = passkey_service.registration_options(user, origin=ORIGIN)
+        response = authenticator.create(options, cose_key=authenticator.cose_key(kty=kty))
+        refusal = _refusal(user, response, state=state)
+        assert refusal.refusal is PasskeyRefusal.UNUSABLE_KEY
+
+    @pytest.mark.parametrize("algorithm", OFFERED)
+    def test_a_padded_key_of_every_offered_algorithm_is_kept_trimmed(
+        self, user, clock, algorithm,
+    ):
+        """Padded by a 4,000-byte key id, a private member and an unassigned label: kept as its
+        key type, algorithm and public members alone.
+
+        The add's sign-in is verified against the trimmed key, so a member
+        the trim dropped that a sign-in needs would refuse the add here.
+        The software authenticator writes its members in canonical CBOR
+        order, so the trimmed key is its unpadded encoding byte for byte.
+        """
+        authenticator = SoftwareAuthenticator(algorithm=algorithm)
+        padded = authenticator.cose_key(extra=_A_KEY_ID + (
+            (cbor_int(_PRIVATE_LABEL[algorithm]), cbor_bytes(b"\x11" * 32)),
+            (cbor_int(_UNASSIGNED_LABEL), cbor_bytes(b"\x22" * 8)),
+        ))
+        passkey, _ = add(clock, user, authenticator, cose_key=padded)
+        assert passkey.public_key == authenticator.cose_key()
+
+    def test_the_add_holds_the_key_trimmed(self, user, clock):
+        """Trimmed before it is held, not only before it is kept."""
+        authenticator = SoftwareAuthenticator()
+        options, state = passkey_service.registration_options(user, origin=ORIGIN)
+        _completed(
+            user, authenticator.create(options, cose_key=authenticator.cose_key(extra=_A_KEY_ID)),
+            state=state,
+        )
+        assert add_row(user).public_key == authenticator.cose_key()
+
+    def test_an_ml_dsa_87_key_with_a_1023_byte_id_is_added(self, user, clock):
+        """The largest key fido2 offers and the longest id WebAuthn allows: no size bound.
+
+        2,602 bytes of key and 1,023 of id, which the session's cookie could
+        not have carried (ruling plan#3543's question measured 3,872 to 5,164
+        bytes of cookie for such a key); the state the route keeps is the
+        ceremony's name and the add's id.
+        """
+        authenticator = SoftwareAuthenticator(algorithm=MLDSA87, credential_id=b"\x07" * 1023)
+        passkey, _ = add(clock, user, authenticator)
+        assert passkey.credential_id == b"\x07" * 1023
+        assert passkey.public_key == authenticator.cose_key()
 
     def test_a_coordinate_that_is_not_bytes_is_refused(self, user, clock):
         """An ES256 key whose x is a number: its verify raises TypeError while building the key."""
@@ -395,11 +532,17 @@ class TestTheEleventh:
     """Ruling plan#3472: up to ten, asked again when the registration completes."""
 
     def test_an_eleventh_completed_after_its_options_is_refused(self, user, clock):
-        """Options made at nine; a tenth added meanwhile; the eleventh's registration refuses."""
+        """Options made at nine; a tenth written meanwhile; the eleventh's registration refuses.
+
+        No add of the account can keep a tenth while this one is in flight (a
+        newer add replaces it, ruling plan#3543), so the tenth is written
+        directly (:func:`written_directly`): the count at the registration
+        binds whatever wrote it.
+        """
         for _ in range(9):
             add(clock, user)
         options, state = passkey_service.registration_options(user, origin=ORIGIN)
-        add(clock, user)
+        written_directly(user)
         refusal = _refusal(user, SoftwareAuthenticator().create(options), state=state)
         assert refusal.refusal is PasskeyRefusal.TOO_MANY
         assert len(passkey_service.list_passkeys(user.id)) == 10

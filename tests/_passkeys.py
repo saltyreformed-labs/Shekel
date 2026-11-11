@@ -1,9 +1,10 @@
 """A software authenticator for the passkey tests (plan#2538).
 
 It does what a phone does in a passkey ceremony, from ``cryptography`` alone:
-an EC P-256 key (COSE algorithm -7, ES256) makes a credential for the options
-the service sent, and signs real ``authenticatorData`` and ``clientDataJSON``
-for a sign-in.  Each response is the JSON a browser's ``toJSON()`` writes,
+a key of any algorithm the options offer (:data:`OFFERED`; an EC P-256 key,
+COSE algorithm -7, ES256, by default, as an Apple passkey's is) makes a
+credential for the options the service sent, and signs real
+``authenticatorData`` and ``clientDataJSON`` for a sign-in.  Each response is the JSON a browser's ``toJSON()`` writes,
 binary as unpadded base64url text, which is what the service reads.
 
 **Its encodings are its own, not fido2's.**  The COSE key, the attestation
@@ -25,7 +26,8 @@ import os
 import struct
 
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, mldsa, rsa
+from cryptography.hazmat.primitives.asymmetric import padding as rsa_padding
 
 #: The origin the suite's configuration names (``TestConfig.PASSKEY_ORIGIN``),
 #: spelled out here so a moved setting fails a test rather than moving both.
@@ -46,6 +48,51 @@ ED = 0x80
 #: never offer.
 ES256 = -7
 RS1 = -65535
+
+#: The other COSE algorithm ids the options offer (IANA's COSE Algorithms
+#: registry).
+EDDSA = -8
+ES384 = -35
+ES512 = -36
+ES256K = -47
+PS256 = -37
+RS256 = -257
+MLDSA44 = -48
+MLDSA65 = -49
+MLDSA87 = -50
+
+#: Every algorithm the registration options offer, in their order (fido2's
+#: default list), spelled out so a change to it fails a test.
+OFFERED = (ES256, EDDSA, ES384, ES512, PS256, RS256, ES256K, MLDSA44, MLDSA65, MLDSA87)
+
+#: COSE key types (IANA's COSE Key Types registry).
+_OKP = 1
+_EC2 = 2
+_RSA = 3
+_AKP = 7
+
+#: Each EC algorithm's curve, its COSE curve id, its coordinates' length in
+#: bytes and its hash (RFC 9053, 2.1 and 7.1; RFC 8812 for secp256k1).
+_EC = {
+    ES256: (ec.SECP256R1, 1, 32, hashes.SHA256),
+    ES384: (ec.SECP384R1, 2, 48, hashes.SHA384),
+    ES512: (ec.SECP521R1, 3, 66, hashes.SHA512),
+    ES256K: (ec.SECP256K1, 8, 32, hashes.SHA256),
+}
+
+#: Each ML-DSA algorithm's key class (FIPS 204).
+_ML_DSA = {
+    MLDSA44: mldsa.MLDSA44PrivateKey,
+    MLDSA65: mldsa.MLDSA65PrivateKey,
+    MLDSA87: mldsa.MLDSA87PrivateKey,
+}
+
+#: Ed25519's COSE curve id (RFC 9053, 7.2).
+_ED25519 = 6
+
+#: The bits of the RSA keys made, the least RS256 and PS256 keys are made with.
+_RSA_BITS = 2048
+_RSA_EXPONENT = 65537
 
 
 def b64url(data: bytes) -> str:
@@ -134,6 +181,7 @@ class SoftwareAuthenticator:
     """One passkey, held in software: its key, its credential id, its counter.
 
     Attributes:
+        algorithm: The COSE algorithm its key signs by.
         credential_id: The id it names the passkey by.
         user_handle: The handle the registration options named, kept and
             returned at each sign-in as a discoverable passkey does.
@@ -142,36 +190,81 @@ class SoftwareAuthenticator:
             passkeys never count, so the default is False.
     """
 
-    def __init__(self, *, counts: bool = False, credential_id: bytes | None = None):
+    def __init__(
+        self, *, counts: bool = False, credential_id: bytes | None = None,
+        algorithm: int = ES256,
+    ):
         """Make a new key and credential id.
 
         Args:
             counts: Whether the counter rises at each signature.
             credential_id: The id to use, or ``None`` for 16 random bytes.
+            algorithm: The COSE algorithm of the key, one of :data:`OFFERED`.
         """
-        self._key = ec.generate_private_key(ec.SECP256R1())
+        self.algorithm = algorithm
+        if algorithm in _EC:
+            self._key = ec.generate_private_key(_EC[algorithm][0]())
+        elif algorithm == EDDSA:
+            self._key = ed25519.Ed25519PrivateKey.generate()
+        elif algorithm in (PS256, RS256):
+            self._key = rsa.generate_private_key(_RSA_EXPONENT, _RSA_BITS)
+        else:
+            self._key = _ML_DSA[algorithm].generate()
         self.credential_id = os.urandom(16) if credential_id is None else credential_id
         self.user_handle: bytes | None = None
         self.counter = 0
         self.counts = counts
 
     def public_numbers(self) -> ec.EllipticCurvePublicNumbers:
-        """Return the public key's curve point, for a test that builds a key of its own."""
+        """Return an EC key's curve point, for a test that builds a key of its own."""
         return self._key.public_key().public_numbers()
 
-    def cose_key(self, alg: int = ES256) -> bytes:
-        """Return the public key as a COSE EC2 key (RFC 9052, section 7.1).
+    def _key_members(self) -> tuple[int, list[tuple[bytes, bytes]]]:
+        """Return the key's COSE key type and its public members, encoded (RFC 9053, 7)."""
+        public = self._key.public_key()
+        if self.algorithm in _EC:
+            _, curve, size, _ = _EC[self.algorithm]
+            numbers = public.public_numbers()
+            return _EC2, [
+                (cbor_int(-1), cbor_int(curve)),
+                (cbor_int(-2), cbor_bytes(numbers.x.to_bytes(size, "big"))),
+                (cbor_int(-3), cbor_bytes(numbers.y.to_bytes(size, "big"))),
+            ]
+        if self.algorithm == EDDSA:
+            return _OKP, [
+                (cbor_int(-1), cbor_int(_ED25519)),
+                (cbor_int(-2), cbor_bytes(public.public_bytes_raw())),
+            ]
+        if self.algorithm in (PS256, RS256):
+            numbers = public.public_numbers()
+            return _RSA, [
+                (cbor_int(-1), cbor_bytes(
+                    numbers.n.to_bytes((numbers.n.bit_length() + 7) // 8, "big"),
+                )),
+                (cbor_int(-2), cbor_bytes(
+                    numbers.e.to_bytes((numbers.e.bit_length() + 7) // 8, "big"),
+                )),
+            ]
+        return _AKP, [(cbor_int(-1), cbor_bytes(public.public_bytes_raw()))]
+
+    def cose_key(
+        self, alg: int | None = None, *, kty: int | None = None,
+        extra: tuple[tuple[bytes, bytes], ...] = (),
+    ) -> bytes:
+        """Return the public key as a COSE key (RFC 9052, section 7), its members in canonical order.
 
         Args:
-            alg: The algorithm id to label it with.
+            alg: The algorithm id to label it with, or ``None`` for its own.
+            kty: The key type to label it with, or ``None`` for its own.
+            extra: Encoded members to append after its own, for a test of a
+                key an authenticator padded.
         """
-        numbers = self.public_numbers()
+        key_type, members = self._key_members()
         return cbor_map([
-            (cbor_int(1), cbor_int(2)),      # kty: EC2
-            (cbor_int(3), cbor_int(alg)),    # alg
-            (cbor_int(-1), cbor_int(1)),     # crv: P-256
-            (cbor_int(-2), cbor_bytes(numbers.x.to_bytes(32, "big"))),
-            (cbor_int(-3), cbor_bytes(numbers.y.to_bytes(32, "big"))),
+            (cbor_int(1), cbor_int(key_type if kty is None else kty)),
+            (cbor_int(3), cbor_int(self.algorithm if alg is None else alg)),
+            *members,
+            *extra,
         ])
 
     def _next_counter(self) -> int:
@@ -270,8 +363,21 @@ class SoftwareAuthenticator:
         )
 
     def sign(self, message: bytes) -> bytes:
-        """Return this key's ECDSA signature over *message* (DER, SHA-256)."""
-        return self._key.sign(message, ec.ECDSA(hashes.SHA256()))
+        """Return this key's signature over *message*, as its algorithm signs (RFC 9053, 2)."""
+        if self.algorithm in _EC:
+            return self._key.sign(message, ec.ECDSA(_EC[self.algorithm][3]()))
+        if self.algorithm == PS256:
+            return self._key.sign(
+                message,
+                rsa_padding.PSS(
+                    mgf=rsa_padding.MGF1(hashes.SHA256()),
+                    salt_length=rsa_padding.PSS.MAX_LENGTH,
+                ),
+                hashes.SHA256(),
+            )
+        if self.algorithm == RS256:
+            return self._key.sign(message, rsa_padding.PKCS1v15(), hashes.SHA256())
+        return self._key.sign(message)
 
     def assertion(
         self, client_data_json: bytes, auth_data: bytes, user_handle: bytes | None,

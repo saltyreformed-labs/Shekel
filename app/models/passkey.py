@@ -14,8 +14,9 @@ account, so it cannot be phished, is step plan#3542, and the one statement of
 
 **What the row stores is what verifying a signature needs, and no more.**
 The credential's id, which the browser sends back to name the key; its public
-key, as the COSE bytes the authenticator gave (RFC 9052), from which the
-signature is checked; the signature counter; the name the user gave it; when
+key, as COSE bytes (RFC 9052) trimmed to its key type, its algorithm and
+that type's public members (ruling plan#3543), from which the signature is
+checked; the signature counter; the name the user gave it; when
 it was added; and when it last signed Shekel in, which is never empty because
 a passkey is kept only once it has signed in (ruling plan#3525).  Nothing
 derivable is stored

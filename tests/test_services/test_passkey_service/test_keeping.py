@@ -26,9 +26,15 @@ from tests._passkeys import (
     UV,
     SoftwareAuthenticator,
     b64url,
-    unb64url,
 )
-from tests.test_services.test_passkey_service._helpers import T0, Clock, add, sign_in
+from tests.test_services.test_passkey_service._helpers import (
+    T0,
+    Clock,
+    add,
+    add_row,
+    sign_in,
+    written_directly,
+)
 
 _ONE_MICROSECOND = timedelta(microseconds=1)
 
@@ -82,9 +88,9 @@ class TestTheSignInAsked:
 
     def test_the_sign_in_names_no_passkey_and_the_person_must_be_verified(self, user, clock):
         """A sign-in's options exactly: no allowCredentials, so the device must find the passkey."""
-        options, state = _registered(user, SoftwareAuthenticator())
+        options, _ = _registered(user, SoftwareAuthenticator())
         assert options["publicKey"] == {
-            "challenge": state["challenge"],
+            "challenge": b64url(add_row(user).challenge),
             "timeout": 270_000,
             "rpId": RP_ID,
             "userVerification": "required",
@@ -100,9 +106,11 @@ class TestTheSignInAsked:
         )
         assert sign_in_options["publicKey"]["challenge"] != options["publicKey"]["challenge"]
 
-    def test_the_state_holds_the_new_passkey_as_plain_json(self, user, clock):
-        """The challenge, the completion's moment and the account, beside the passkey's id,
-        key, counter and name: the key the keeping will verify by."""
+    def test_the_add_holds_the_new_passkey_and_the_state_names_it(self, user, clock):
+        """The add's row moves on to the sign-in: its challenge, the completion's moment, and the
+        passkey's id, key, counter and name, the key the keeping will verify by.  The state the
+        route keeps names the ceremony and the row, as plain JSON, and none of it (ruling plan#3543).
+        """
         authenticator = SoftwareAuthenticator()
         options, state = passkey_service.registration_options(user, origin=ORIGIN)
         clock.at(T0 + timedelta(seconds=10))
@@ -110,18 +118,16 @@ class TestTheSignInAsked:
             user, json.dumps(authenticator.create(options)), "  Josh's iPhone  ",
             origin=ORIGIN, state=state,
         )
+        row = add_row(user)
+        assert sign_in_state == {"ceremony": "add_sign_in", "add": state["add"]}
         assert json.loads(json.dumps(sign_in_state)) == sign_in_state
-        key = sign_in_state.pop("public_key")
-        assert cbor.decode(unb64url(key)) == cbor.decode(authenticator.cose_key())
-        assert sign_in_state == {
-            "ceremony": "add_sign_in",
-            "challenge": sign_in_options["publicKey"]["challenge"],
-            "issued_at": (T0 + timedelta(seconds=10)).isoformat(),
-            "user_id": user.id,
-            "credential_id": b64url(authenticator.credential_id),
-            "sign_count": 0,
-            "name": "Josh's iPhone",
-        }
+        assert row.id == state["add"]
+        assert b64url(row.challenge) == sign_in_options["publicKey"]["challenge"]
+        assert row.issued_at == T0 + timedelta(seconds=10)
+        assert row.credential_id == authenticator.credential_id
+        assert row.public_key == authenticator.cose_key()
+        assert row.sign_count == 0
+        assert row.name == "Josh's iPhone"
 
 
 class TestKeptOnlyAfterBoth:
@@ -162,7 +168,7 @@ class TestKeptOnlyAfterBoth:
         """Registered at 1, its sign-in at 2: kept at 2."""
         authenticator = SoftwareAuthenticator(counts=True)
         options, state = _registered(user, authenticator)
-        assert state["sign_count"] == 1
+        assert add_row(user).sign_count == 1
         assert _kept(user, authenticator.get(options), state=state).sign_count == 2
 
     def test_the_tenth_is_kept(self, user, clock):
@@ -220,7 +226,7 @@ class TestTheNewPasskeyMustSign:
         assert str(refusal.__cause__) == "Invalid signature."
 
     def test_another_key_signing_under_the_new_credential_id_is_refused(self, user, clock):
-        """The key comes from the state, so an impostor naming the new id cannot sign it in."""
+        """The key comes from the add's row, so an impostor naming the new id cannot sign it in."""
         device = SoftwareAuthenticator()
         options, state = _registered(user, device)
         impostor = SoftwareAuthenticator(credential_id=device.credential_id)
@@ -228,6 +234,20 @@ class TestTheNewPasskeyMustSign:
         refusal = _refusal(user, impostor.get(options), state=state)
         assert refusal.refusal is PasskeyRefusal.NOT_VERIFIED
         assert str(refusal.__cause__) == "Invalid signature."
+
+
+    def test_the_new_passkey_answering_another_challenge_is_not_verified(self, user, clock):
+        """The add in flight, and its new passkey signing a sign-in's challenge: fido2's check.
+
+        So the keeping verifies against the add's own challenge, from its
+        row, never one the answer carries.
+        """
+        authenticator = SoftwareAuthenticator()
+        _, state = _registered(user, authenticator)
+        other_options, _ = passkey_service.sign_in_options(origin=ORIGIN)
+        refusal = _refusal(user, authenticator.get(other_options), state=state)
+        assert refusal.refusal is PasskeyRefusal.NOT_VERIFIED
+        assert str(refusal.__cause__) == "Wrong challenge in response."
 
 
 class TestTheSignInIsChecked:
@@ -324,6 +344,15 @@ class TestTheChallenge:
         refusal = _refusal(user, authenticator.get(sign_in_options), state=sign_in_state)
         assert refusal.refusal is PasskeyRefusal.EXPIRED
 
+    def test_an_expired_sign_in_is_refused_and_its_add_deleted(self, user, clock):
+        """Refused at its lifetime, and the row is gone (flushed with the refusal)."""
+        authenticator = SoftwareAuthenticator()
+        options, state = _registered(user, authenticator)
+        clock.at(T0 + timedelta(minutes=5))
+        refusal = _refusal(user, authenticator.get(options), state=state)
+        assert refusal.refusal is PasskeyRefusal.EXPIRED
+        assert add_row(user) is None
+
     def test_five_minutes_less_a_microsecond_is_kept(self, user, clock):
         """The last instant it lives, counted from the registration's completion, not its options."""
         authenticator = SoftwareAuthenticator()
@@ -348,17 +377,21 @@ class TestTheChallenge:
 
 
 class TestOneAddsStateCompletesNoOther:
-    """Two adds in flight: the state of one keeps only its own passkey, by its own challenge."""
+    """Two adds begun: the newer replaces the older (ruling plan#3543), whose state keeps nothing."""
 
     def test_the_other_adds_passkey_is_refused(self, user, clock):
-        """State of the first add, answer by the second's passkey to the second's sign-in."""
+        """State of the first add, answer by the second's passkey to the second's sign-in.
+
+        The first add is gone, so its state names no add in flight: refused as
+        expired, and the second's passkey is not kept by the first's state.
+        """
         first, second = SoftwareAuthenticator(), SoftwareAuthenticator()
         _, first_state = _registered(user, first)
         second_options, _ = _registered(user, second)
         refusal = _refusal(user, second.get(second_options), state=first_state)
-        assert refusal.refusal is PasskeyRefusal.NOT_THE_NEW_PASSKEY
+        assert refusal.refusal is PasskeyRefusal.EXPIRED
 
-    def test_its_own_passkey_answering_the_other_adds_challenge_is_not_verified(
+    def test_its_own_passkey_answering_the_other_adds_challenge_is_refused(
         self, user, clock,
     ):
         """State of the first add, answer by the first's passkey to the second's sign-in."""
@@ -366,22 +399,54 @@ class TestOneAddsStateCompletesNoOther:
         _, first_state = _registered(user, first)
         second_options, _ = _registered(user, second)
         refusal = _refusal(user, first.get(second_options), state=first_state)
-        assert refusal.refusal is PasskeyRefusal.NOT_VERIFIED
-        assert str(refusal.__cause__) == "Wrong challenge in response."
+        assert refusal.refusal is PasskeyRefusal.EXPIRED
+
+    def test_the_newer_adds_own_state_keeps_its_passkey(self, user, clock):
+        """The control: the add that replaced the older one completes."""
+        first, second = SoftwareAuthenticator(), SoftwareAuthenticator()
+        _registered(user, first)
+        second_options, second_state = _registered(user, second)
+        passkey = _kept(user, second.get(second_options), state=second_state)
+        assert passkey.credential_id == second.credential_id
 
 
 class TestKeptOnce:
     """The keeping's own statement is the answer that binds: one credential, one row, ten at most."""
 
     def test_the_same_sign_in_completed_twice_keeps_one(self, user, clock):
-        """A second submit of the answer with its state: refused as already added."""
+        """A second submit of the answer with its state: the add was used (ruling plan#3543)."""
         authenticator = SoftwareAuthenticator()
         options, state = _registered(user, authenticator)
         response = authenticator.get(options)
         _kept(user, response, state=state)
         refusal = _refusal(user, response, state=state)
-        assert refusal.refusal is PasskeyRefusal.ALREADY_ADDED
+        assert refusal.refusal is PasskeyRefusal.EXPIRED
         assert len(passkey_service.list_passkeys(user.id)) == 1
+
+    def test_the_keeping_deletes_the_add(self, user, clock):
+        """Kept: the account holds no add in flight."""
+        authenticator = SoftwareAuthenticator()
+        options, state = _registered(user, authenticator)
+        _kept(user, authenticator.get(options), state=state)
+        assert add_row(user) is None
+
+    def test_an_adds_answer_replayed_after_its_passkey_is_removed_keeps_nothing(
+        self, user, clock,
+    ):
+        """Kept, removed, then the add's answer and state sent again within five minutes.
+
+        The replay plan#3533's review measured (its ``PROBE4``): with the add
+        in the state alone, this kept the removed passkey again.
+        """
+        authenticator = SoftwareAuthenticator()
+        options, state = _registered(user, authenticator)
+        response = authenticator.get(options)
+        passkey = _kept(user, response, state=state)
+        passkey_service.remove_passkey(user.id, passkey.id)
+        clock.at(T0 + timedelta(seconds=30))
+        refusal = _refusal(user, response, state=state)
+        assert refusal.refusal is PasskeyRefusal.EXPIRED
+        assert passkey_service.list_passkeys(user.id) == []
 
     def test_a_credential_another_account_kept_meanwhile_is_refused(self, user, second_user, clock):
         """Two devices naming one credential id, each registered before either was kept.
@@ -402,12 +467,18 @@ class TestKeptOnce:
         assert passkey_service.list_passkeys(user.id) == []
 
     def test_an_eleventh_signed_after_a_tenth_was_kept_is_refused(self, user, clock):
-        """Registered at nine; a tenth kept meanwhile; the eleventh's sign-in refuses."""
+        """Registered at nine; a tenth written meanwhile; the eleventh's sign-in refuses.
+
+        No add can keep a tenth while this one is in flight (a newer add
+        replaces it, ruling plan#3543), so the tenth is written directly
+        (:func:`written_directly`): the count at the keeping binds whatever
+        wrote it.
+        """
         for _ in range(9):
             add(clock, user)
         authenticator = SoftwareAuthenticator()
         options, state = _registered(user, authenticator)
-        add(clock, user)
+        written_directly(user)
         refusal = _refusal(user, authenticator.get(options), state=state)
         assert refusal.refusal is PasskeyRefusal.TOO_MANY
         assert len(passkey_service.list_passkeys(user.id)) == 10

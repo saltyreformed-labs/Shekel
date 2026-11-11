@@ -49,8 +49,10 @@ leaves to its caller, each a step of the Web Authentication specification:
 * **A new passkey signs in once before it is kept** (ruling plan#3525), so
   adding is two ceremonies: :func:`complete_registration` keeps nothing and
   asks the device to sign in with the new passkey as a sign-in does, and
-  only that sign-in keeps it (:func:`add_passkey`).  :mod:`._adding` says
-  why.
+  only that sign-in keeps it (:func:`add_passkey`).  Between them the add
+  waits on the server, one row per account, used once (ruling plan#3543),
+  and its key is trimmed to what a sign-in verifies by.  :mod:`._adding`
+  says why.
 
 **What the browser sent is read first**, by :mod:`._responses`, because fido2
 would allocate a buffer as large as any number a stranger puts where it
@@ -66,8 +68,8 @@ companion whose owner is gone has no owner to lock, so the two decisions that
 must not race take row locks of their own, after it: a completion reads the
 passkey ``FOR UPDATE``, so two completions of one answer cannot both read it
 before either moves its ``last_used_at``; and the add's keeping locks the
-account's own row before it counts, so two adds at once cannot both pass the
-cap.
+account's own row before it counts, then reads the add's row ``FOR UPDATE``,
+so two keepings at once cannot both pass the cap or both keep one add.
 
 **The clock is the process's**, read by :func:`._ceremony.now` alone, once per
 act, and a challenge an act issues is issued at that same reading.
@@ -150,7 +152,7 @@ def sign_in_options(*, origin: str) -> tuple[dict[str, object], dict[str, str | 
     """
     options, begun = _ceremony.sign_in_ceremony(origin)
     return options, _ceremony.issue(
-        begun, Ceremony.SIGN_IN, user_id=None, issued_at=_ceremony.now(),
+        begun, Ceremony.SIGN_IN, issued_at=_ceremony.now(),
     )
 
 
@@ -172,7 +174,7 @@ def re_confirm_options(
         user_verification=UserVerificationRequirement.REQUIRED,
     )
     return dict(options), _ceremony.issue(
-        begun, Ceremony.RE_CONFIRM, user_id=None, issued_at=_ceremony.now(),
+        begun, Ceremony.RE_CONFIRM, issued_at=_ceremony.now(),
     )
 
 

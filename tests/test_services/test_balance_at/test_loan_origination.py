@@ -226,9 +226,9 @@ class TestLoanNotYetOriginated:
         origination event simply has not happened yet.
 
         The SCHEDULE must survive: it is what the projection walks once
-        the loan closes, and filtering the anchor out of ``_replay_from_anchor``
-        (rather than the balance following the events) would have collapsed it
-        to nothing.
+        the loan closes, and filtering the anchor out of the old anchor replay
+        (``_replay_from_anchor``, which walk 3's deletion takes; rather than the
+        balance following the events) would have collapsed it to nothing.
         """
         with app.app_context():
             periods = seed_periods
@@ -677,12 +677,14 @@ class TestBrokenLoanFailsLoud:
         So under the old reader this loan reads as owing $239,761.08 --
         ``is_retired`` False and a REAL payoff date -- while its page shows
         $0.00.  Under D2a both follow the fold: retired, paid off, no forward
-        payoff to date.  The replay figure is pinned in-test so the divergence
-        (the control's teeth) is proven, not assumed.
+        payoff to date.  The fold's hand-worked $0.00 is the control's teeth:
+        the replay's $239,761.08 is a different figure.  The replay's own
+        balance was also asserted in-test until plan task plan#3393 deleted its
+        suite assembly (ruling plan#3383).
         """
         # pylint: disable=import-outside-toplevel
         from tests._test_helpers import (
-            clear_loan_ledger, create_settled_transfer, unseeded_replay_balance,
+            clear_loan_ledger, create_settled_transfer,
         )
 
         with app.app_context():
@@ -705,15 +707,6 @@ class TestBrokenLoanFailsLoud:
             # Re-break the cache: settling re-synced the loan's postings.
             clear_loan_ledger(acct.id)
             db.session.commit()
-
-            # The control's teeth: the money-blind replay genuinely diverges.
-            # The suite's ONE assembly of it, on the AMOUNT-FREE feed since plan
-            # step balance:X-bl-2b -- the replay reads three dates per payment
-            # and no figure.
-            replayed = unseeded_replay_balance(
-                acct.id, seed_user["scenario"].id, date.today(),
-            )
-            assert replayed == Decimal("239761.08")
 
             bctx = BalanceContext.build(seed_user["user"].id)
             # The fold: the whole cash paid the loan off.

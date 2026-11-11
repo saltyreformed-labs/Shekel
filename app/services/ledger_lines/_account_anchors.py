@@ -55,16 +55,16 @@ account's anchor columns, which left that resolver with no caller at all, so it
 is DELETED and one rule remains.
 
 One limit does survive, and it belongs to the ledger rather than to a
-disagreement.  An entry's ``pay_period_id`` and its ``entry_date`` are NOT "two
-columns that cannot drift": whenever no period contains the day, the entry is
-filed in a period its own date falls outside, by construction and deliberately
--- the alternative is a correction filed under no paycheck at all, which every
-per-period reader would then be unable to place; the ``NOT NULL`` on
-``journal_entries.pay_period_id`` EXPRESSES that rather than causing it (ruling
-**pay_calendar:R-PC53**).  What the derivation buys is that
-the drift is a function of the CALENDAR rather than of which clock a writer
-happened to read, and that it self-heals the moment the containing period
-exists.
+disagreement.  A correction's day and the paycheck a reader files it in are
+NOT "two facts that cannot drift": whenever no period contains the day, the
+correction is filed in a period its own date falls outside, by construction
+and deliberately -- the alternative is a correction filed under no paycheck at
+all, which every per-period reader would then be unable to place (ruling
+**pay_calendar:R-PC53**; the ``NOT NULL`` on ``journal_entries.pay_period_id``
+expressed the same requirement while the stored ledger was written).  What
+the derivation buys is that the drift is a function of the CALENDAR rather
+than of which clock a writer happened to read, and that it self-heals the
+moment the containing period exists.
 
 **What that replaced, and the two ways it was wrong** (finding N-161).  The
 key was ``(source kind, entry date)`` with the period carried alongside it in

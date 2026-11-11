@@ -11,7 +11,7 @@ reads a stored ledger row:
   opening / true-up paired with what the walk had computed just before it).
 
 **They lived in the loan POSTING package until plan task plan#3133** (its
-``_display`` module), which deletes that package's writers with the rest of
+``_display`` module), which deleted that package's writers with the rest of
 the stored ledger's and moved these two out first: a home named for postings
 held no reader of one.  This module is named for what they read.
 

@@ -69,8 +69,8 @@ class LoanAnchorFact:
     """One dated balance assertion for a loan, as plain data.
 
     The single anchor shape BOTH anchor consumers walk (the read switch's
-    final commit): the genesis posting walk derives its opening / true-up
-    corrections from these, and the loan resolver's replay fallback consumes
+    final commit): the loan walk (``loan_ledger.walk_loan_ledger``) derives
+    its opening / true-up corrections from these, and the loan resolver's replay fallback consumes
     them as its duck-typed anchor events (it reads ``anchor_date`` /
     ``anchor_balance`` / ``created_at`` / ``event_id``, all here).  Three
     provenances:

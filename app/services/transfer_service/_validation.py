@@ -155,13 +155,13 @@ def _reject_transfer_out_of_loan(from_account: Account) -> None:
 
     A transfer OUT of a loan (the loan as ``from_account``) is not a modeled
     operation.  The amortization engine only projects payments INTO a loan, and
-    the loan's posting ledger assumes every transfer leg on a loan is a
-    payment IN: the
-    per-payment interest / escrow split, the genesis reader's income-only
-    history walk, and the reconciliation oracle's superseding invariant
-    (``linked == settled_income_cash - per_loan_corrections``) all rest on it.
-    A disbursement would instead post a raw cash movement onto the loan's linked
-    ledger with no split correction and misproject every forward balance, so it
+    the loan's ledger assumes every transfer leg on a loan is a payment IN:
+    the per-payment interest / escrow split the worked-out ledger books
+    (:mod:`app.services.ledger_lines._loan_payments`) and the loan walk it
+    reads rest on it, as the stored ledger's genesis reader and reconciliation
+    oracle did while they stood.  A disbursement would instead book a raw cash
+    movement onto the loan's own line with no split correction and misproject
+    every forward balance, so it
     is forbidden at BOTH doors that can put a transfer on a source account --
     :func:`app.services.transfer_service.create_transfer`, and, since plan step
     R10-b, :func:`._endpoints._resolve_endpoints`, which is where an update

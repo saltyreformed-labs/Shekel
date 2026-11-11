@@ -167,9 +167,12 @@ class JournalEntry(UserScopedMixin, CreatedAtMixin, db.Model):
     # the entry's date through ``PayCalendar.filing_period`` (ruling
     # **balance:R-EA**).
     #
-    # **Read this column back; never recompute it at read time.**  The reconcile
-    # targets a reversal at the period its postings landed in, which is what the
-    # stored value records.  R-PC53 states why that matters and what actually
+    # **Read this column back; never recompute it at read time** -- while the
+    # store was written.  The reconcile targeted a reversal at the period its
+    # postings landed in, which is what the stored value records; no door has
+    # written or reconciled this table since plan task plan#3133, migration
+    # ``d913d743c78c`` emptied it, and X-ew's third leaf (plan#2516) drops it.
+    # R-PC53 states why that mattered and what actually
     # holds the value against rewriting -- in short, the ``shekel_app`` role has
     # no ``UPDATE`` on this table (migration ``e3c23fadb21d``) while the owner
     # role, and therefore any migration, does.

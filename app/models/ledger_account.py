@@ -35,8 +35,8 @@ Twelve kinds coexist in one table:
 * **category** (``account_id`` NULL, ``category_id`` set, ``is_owner_bucket``
   False, ``loan_account_id`` NULL) -- one Income or Expense ledger account
   per budget category per accounting class: the per-category chart of
-  accounts the cash-posting step (Build-Order Step 3) books an ordinary
-  transaction's counter-leg into.  ``name`` snapshots the category's
+  accounts the cash-posting step (Build-Order Step 3) booked an ordinary
+  transaction's counter-leg into, until plan task plan#3097.  ``name`` snapshots the category's
   ``display_name`` ("Group: Item") at creation, so renaming the budgeting
   category never rewrites posted history; the ``category_id`` link still
   enables live reporting grouping while the category exists.  A ``Category``
@@ -152,14 +152,14 @@ deliberately-accepted trust contract the (un-CHECKed) ``class_id`` carries.
 No door writes a row since.
 
 **Reconciliation of orphans** (a forward note for Build-Order Step 8's
-oracle).  An orphan still holds the immutable postings made while its
-category was live, but the transactions that produced them now read
-``category_id IS NULL`` (``transactions.category_id`` is itself SET NULL on
-category delete).  So the counter-leg reconciliation must follow the
-postings' movement linkage on the journal entries (``transaction_entry_id``,
-whose movement names the row that posted to which ledger account), NOT a
-``category_id`` match (the category
-is gone): that formulation reconciles an orphan against exactly the
+oracle, moot since migration ``d913d743c78c`` emptied the table).  An orphan
+held the immutable postings made while its category was live, but the
+transactions that produced them read ``category_id IS NULL``
+(``transactions.category_id`` is itself SET NULL on category delete).  So
+the counter-leg reconciliation had to follow the postings' movement linkage
+on the journal entries (``transaction_entry_id``, whose movement names the
+row that posted to which ledger account), NOT a ``category_id`` match (the
+category is gone): that formulation reconciled an orphan against exactly the
 transactions whose legs landed on it, and the fallback against the
 still-uncategorized remainder.
 
@@ -183,8 +183,9 @@ carry a ``name``.
 plan task plan#3133) and
 ``kind_id``, ``account_id`` and ``loan_account_id`` are intrinsic, a linked
 row's ``name`` stays NULL (the display name lives on ``account.name``), and its
-``class_id`` follows the account's type when a re-type crosses the
-Asset/Liability boundary (ruling plan#2785).  The table
+``class_id`` followed the account's type when a re-type crossed the
+Asset/Liability boundary (ruling plan#2785) until plan task plan#3076 deleted
+that re-class.  The table
 therefore uses :class:`CreatedAtMixin` (no ``updated_at``).  Unlike the
 append-only ledger tables (``journal_entries`` / ``account_postings``) it
 carries no ORM immutability guards: a ledger account is a directory entry
@@ -194,15 +195,17 @@ that is disposed of -- never corrected -- when its real account is deleted.
 permanent account delete takes its linked row and its per-account counter rows
 with it, and each row's legs go by ``account_postings.ledger_account_id``'s
 CASCADE (ruling plan#2784, which deleted the route guard that kept an account
-holding postings off that path).  **That can leave a single leg in the store,
-and this is why it is allowed.**  A correction books both legs on the account's
-own rows, so its entry loses both.  A movement's entry has its other leg on a
-category or on the owner's Transfers in transit, and it outlives the movement
-with ``journal_entries.transaction_entry_id`` SET NULL, so that leg stays,
-single, beside its reversal's.  The balanced trigger has no DELETE
-arm and the running app holds no DELETE on the journal, so nothing refuses it
-and nothing could remove the entry; no reader or deploy hook reads a leg no
-movement links, and X-ew's third leaf (plan#2516) deletes the store.  The
+holding postings off that path).  **That could leave a single leg in the
+store while it was written, and this is why it was allowed.**  A correction
+booked both legs on the account's own rows, so its entry lost both.  A
+movement's entry had its other leg on a category or on the owner's Transfers
+in transit, and it outlived the movement with
+``journal_entries.transaction_entry_id`` SET NULL, so that leg stayed, single,
+beside its reversal's.  The balanced trigger has no DELETE arm and the running
+app holds no DELETE on the journal, so nothing refused it and nothing could
+remove the entry; no reader or deploy hook read a leg no movement linked.  The
+store holds no row since migration ``d913d743c78c`` emptied it, and X-ew's
+third leaf (plan#2516) deletes it.  The
 relationship to
 :class:`~app.models.account.Account` is
 deliberately one-directional (no backref): ``Account`` has no awareness

@@ -105,7 +105,11 @@ that the column has TWO halves and ledger row **P18**'s premise -- that it
 merely materialises ``entry_date`` -- fits neither as stated: a source-linked
 entry COPIES its source row's own period, and an anchor correction DERIVES its
 period through this method (ruling **balance:R-EA**).  A DROP would have
-deleted this method, so it stays.
+deleted this method, so it stayed.  *No writer stamps that column since plan
+task plan#3133, and X-ew's third leaf (plan#2516) drops its table; the method
+stays because the reader that windows the worked-out ledger by paycheck files
+each line through it* (:meth:`app.services.ledger_lines.LedgerLine
+.filed_period_id`, finding plan#2875).
 
 **A WINDOW is a VIEW, and the type is what makes that structural** (ledger row
 **P14**).  A period's end is its successor's payday, so deriving a calendar from

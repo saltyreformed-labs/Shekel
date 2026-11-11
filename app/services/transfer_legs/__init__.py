@@ -134,10 +134,10 @@ predicates, the reference cache and the date arithmetic, and no service.
 hand the cash fold, the ledger oracle and the savings metric each paid
 transfer's covering movement with its transfer and side, and since that
 leaf's second half the ledger books every transfer movement under its LEG:
-the stored ledger's writer through :func:`movement_parent`, over a family
-loader here (``transfer_family_movements``, deleted at plan task plan#3155
-once that writer had gone), and the worked-out ledger under the leg
-:func:`recorded_transfer_legs` hands it.  For THOSE readers this
+the worked-out ledger under the leg :func:`recorded_transfer_legs` hands it,
+as the stored ledger's writer did through :func:`movement_parent` over a
+family loader here (``transfer_family_movements``) until plan task plan#3133
+deleted the writer and plan task plan#3155 the loader.  For THOSE readers this
 module is the one place a transfer's movement is reached (through a shadow
 row until plan step ``balance:X-bi-6-4d-2``, by its side link since), and so
 it is since leaf ``X-bi-6-4c-2`` for the reconcile panel

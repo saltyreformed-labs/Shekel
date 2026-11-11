@@ -440,8 +440,7 @@ def scenarios_with_loan_payments(loan_account_id: int) -> list[int]:
     """Return the scenarios that carry a payment for a loan.
 
     The distinct ``scenario_id`` set over the live transfers INTO the loan,
-    which the tracking-start door, its one caller outside the stored ledger's
-    writers, reads the money days of
+    which the tracking-start door, its one caller, reads the money days of
     (``loan_anchor_service._earliest_payment_moved_on``, rulings **R-R114**,
     **R-R115**): a tracking start is a fact of the loan ACCOUNT and re-bases
     its walk in every scenario the loan has a payment in, so a payment in any

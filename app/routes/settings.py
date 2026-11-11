@@ -35,9 +35,11 @@ from app.services import (
     pay_period_locks,
     pay_schedule_service,
 )
+from app.services import mfa_service
 from app.services.auth_service import hash_password
 from app.services.pay_calendar import calendar_at_schedule
 from app.utils.dates import display_today
+from app.utils.log_events import AUTH, EVT_MFA_RESET, log_event
 
 logger = logging.getLogger(__name__)
 
@@ -471,8 +473,8 @@ def _load_account_types_context():
 
 # --- Companion account management ----------------------------------------
 #
-# Companions are created, edited, deactivated, and reactivated here, and
-# their trusted devices forgotten.
+# Companions are created, edited, deactivated, and reactivated here, their
+# trusted devices forgotten and their two-factor reset.
 # Every route below applies two guards on top of the application's login
 # gate and the @require_owner decorator:
 #   1. Target user must have role_id == COMPANION.  This rejects any
@@ -797,6 +799,52 @@ def companion_forget_device(companion_id, device_id):
         f"Device forgotten. Signing in on it as "
         f"{companion.display_name or companion.email} will ask for the "
         f"two-factor code again.",
+        "success",
+    )
+    return redirect(url_for("settings.show", section="companions"))
+
+
+@settings_bp.route(
+    "/settings/companions/<int:companion_id>/reset-two-factor",
+    methods=["POST"],
+)
+@require_owner
+@fresh_login_required()
+def companion_reset_two_factor(companion_id):
+    """Reset a companion's two-factor, for a lost or replaced phone (ruling plan#3441).
+
+    The one reset act ``scripts/reset_mfa.py`` runs too
+    (:func:`~app.services.mfa_service.reset_two_factor`): her secret and
+    backup codes are cleared, every session of hers ends and every trusted
+    device of hers is forgotten.  Every companion must have two-factor
+    (ruling plan#3434), so at her next sign-in the login gate holds her at
+    setup until she enrols her authenticator again.
+
+    A re-confirmed password first, as the other doors that change a
+    companion's account ask.  A companion with nothing to reset (her
+    two-factor never set up, or already reset) is told so and nothing is
+    written: the button shows only while hers is on, so that is a page left
+    open across a reset.
+
+    Args:
+        companion_id: The ``auth.users.id`` of the owner's companion; another
+            owner's companion or a user who is not a companion is a 404
+            (:func:`_load_companion_or_404`).
+    """
+    companion = _load_companion_or_404(companion_id)
+    name = companion.display_name or companion.email
+    if not mfa_service.reset_two_factor(companion):
+        flash(f"{name} has no two-factor authentication to reset.", "info")
+        return redirect(url_for("settings.show", section="companions"))
+    db.session.commit()
+    log_event(
+        logger, logging.WARNING, EVT_MFA_RESET, AUTH,
+        "MFA reset by the owner", user_id=current_user.id,
+        reset_user_id=companion.id,
+    )
+    flash(
+        f"Two-factor authentication reset for {name}. They are signed out "
+        f"everywhere and will set it up again the next time they use Shekel.",
         "success",
     )
     return redirect(url_for("settings.show", section="companions"))

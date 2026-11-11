@@ -28,12 +28,12 @@ import pyotp
 import pytest
 import sqlalchemy
 
-from app import ref_cache
-from app.enums import RoleEnum
 from app.extensions import db
 from app.models.known_device import KnownDevice
-from app.models.user import User, UserSettings
-from app.services.auth_service import hash_password
+from tests._companions import (
+    COMPANIONS_PAGE, another_owners_companion, companion_row,
+    landed_on_companions, text_of,
+)
 from tests._csrf_tokens import without_csrf_tokens
 from tests._test_helpers import enable_mfa
 from tests._trusted_devices import (
@@ -43,9 +43,6 @@ from tests._two_factor_sign_in import (
     SEED_COMPANION_EMAIL, SEED_COMPANION_PASSWORD,
 )
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
-
-#: Settings > Companions, where the owner manages each companion.
-_COMPANIONS = "/settings?section=companions"
 
 #: The day format the page shows, the ``local_datetime`` filter's default,
 #: spelled here as an oracle.
@@ -59,21 +56,6 @@ _ASKED_NEXT_TIME = "They will be asked to set it up the next time they use Sheke
 def _forget_url(companion_id, device_id):
     """Return the owner's Forget URL for one of a companion's devices."""
     return f"/settings/companions/{companion_id}/devices/{device_id}/forget"
-
-
-def _text(html):
-    """Return *html*'s text: tags dropped, whitespace collapsed."""
-    return " ".join(re.sub(r"<[^>]+>", " ", html).split())
-
-
-def _her_row(page, email=SEED_COMPANION_EMAIL):
-    """Return the HTML of the active companion's row that names *email*."""
-    rows = [
-        row for row in page.split('<div class="list-group-item">')[1:]
-        if email in row and "/deactivate" in row
-    ]
-    assert len(rows) == 1, f"expected one active row for {email}, found {len(rows)}"
-    return rows[0]
 
 
 def _device_entries(row):
@@ -129,29 +111,13 @@ def _her_firefox_that_trusted_itself(app, secret):
     return browser
 
 
-def _another_owners_companion(owner_id):
-    """Create a companion linked to *owner_id*, committed; return her id."""
-    companion = User(
-        email="foreign@shekel.local",
-        password_hash=hash_password("foreignpass12"),
-        display_name="Foreign Companion",
-        role_id=ref_cache.role_id(RoleEnum.COMPANION),
-        linked_owner_id=owner_id,
-    )
-    db.session.add(companion)
-    db.session.flush()
-    db.session.add(UserSettings(user_id=companion.id))
-    db.session.commit()
-    return companion.id
-
-
 class TestHerTwoFactor:
     """Her row says whether her two-factor is set up."""
 
     @pytest.mark.usefixtures("seed_companion")
     def test_without_it_the_row_says_she_will_be_asked(self, auth_client):
         """Not set up, and when she sets it up; no device list."""
-        row = _text(_her_row(auth_client.get(_COMPANIONS).get_data(as_text=True)))
+        row = text_of(companion_row(auth_client.get(COMPANIONS_PAGE).get_data(as_text=True)))
 
         assert _NOT_SET_UP in row
         assert _ASKED_NEXT_TIME in row
@@ -163,7 +129,7 @@ class TestHerTwoFactor:
         """On, and no trusted devices yet."""
         enable_mfa(db.session, seed_companion["user"].id)
 
-        row = _text(_her_row(auth_client.get(_COMPANIONS).get_data(as_text=True)))
+        row = text_of(companion_row(auth_client.get(COMPANIONS_PAGE).get_data(as_text=True)))
 
         assert "Two-factor on" in row
         assert "No trusted devices." in row
@@ -196,10 +162,10 @@ class TestHerDevices:
         trusted_day = utc_day - timedelta(days=1)
         expires_day = utc_day + timedelta(days=30) - timedelta(days=1)
 
-        row = _her_row(auth_client.get(_COMPANIONS).get_data(as_text=True))
+        row = companion_row(auth_client.get(COMPANIONS_PAGE).get_data(as_text=True))
 
         entries = _device_entries(row)
-        texts = [_text(entry) for entry in entries]
+        texts = [text_of(entry) for entry in entries]
         assert len(entries) == 2
         assert texts[0].startswith("Safari on iPhone")
         assert texts[1].startswith("Firefox on Linux")
@@ -228,9 +194,9 @@ class TestHerDevices:
         )
         trust(seed_user["user"].id, CHROME_WINDOWS)
 
-        page = auth_client.get(_COMPANIONS).get_data(as_text=True)
+        page = auth_client.get(COMPANIONS_PAGE).get_data(as_text=True)
 
-        texts = [_text(entry) for entry in _device_entries(_her_row(page))]
+        texts = [text_of(entry) for entry in _device_entries(companion_row(page))]
         assert len(texts) == 1
         assert texts[0].startswith("Firefox on Linux")
         assert "Safari on iPhone" not in page
@@ -256,9 +222,9 @@ class TestHerDevices:
         assert _path(owner) not in ("/login", "/mfa/verify"), owner.headers
         trust(companion_id, SAFARI_IPHONE)
 
-        row = _her_row(browser.get(_COMPANIONS).get_data(as_text=True))
+        row = companion_row(browser.get(COMPANIONS_PAGE).get_data(as_text=True))
 
-        texts = [_text(entry) for entry in _device_entries(row)]
+        texts = [text_of(entry) for entry in _device_entries(row)]
         assert len(texts) == 2
         assert texts[0].startswith("Safari on iPhone")
         assert "This browser" not in texts[0]
@@ -277,21 +243,18 @@ class TestTheOwnerForgetsOne:
         kept = trust(companion_id, FIREFOX_LINUX)
         forgotten = trust(companion_id, SAFARI_IPHONE)
         owners = trust(seed_user["user"].id, CHROME_WINDOWS)
-        row = _her_row(auth_client.get(_COMPANIONS).get_data(as_text=True))
+        row = companion_row(auth_client.get(COMPANIONS_PAGE).get_data(as_text=True))
         # What the page's own form posts to, not a hand-built URL.
         action = _forget_action(_device_entries(row)[0])
         assert action == _forget_url(companion_id, forgotten)
 
         response = auth_client.post(action, follow_redirects=True)
 
-        assert response.status_code == 200
-        assert response.request.path == "/settings"
-        assert response.request.args.get("section") == "companions"
-        page = response.get_data(as_text=True)
+        page = landed_on_companions(response)
         assert (
             "Device forgotten. Signing in on it as Companion User will ask "
             "for the two-factor code again."
-        ) in _text(page)
+        ) in text_of(page)
         assert not is_trusted(forgotten)
         assert is_trusted(kept)
         assert is_trusted(owners)
@@ -300,7 +263,7 @@ class TestTheOwnerForgetsOne:
             sqlalchemy.select(sqlalchemy.func.count()).select_from(KnownDevice)
             .where(KnownDevice.id == forgotten)
         ).scalar_one() == 1
-        texts = [_text(entry) for entry in _device_entries(_her_row(page))]
+        texts = [text_of(entry) for entry in _device_entries(companion_row(page))]
         assert len(texts) == 1
         assert texts[0].startswith("Firefox on Linux")
 
@@ -319,7 +282,7 @@ class TestTheOwnerForgetsOne:
         browser.post("/logout")
         assert _path(_her_password(browser)) == "/companion/"
         browser.post("/logout")
-        row = _her_row(auth_client.get(_COMPANIONS).get_data(as_text=True))
+        row = companion_row(auth_client.get(COMPANIONS_PAGE).get_data(as_text=True))
         (entry,) = _device_entries(row)
 
         assert auth_client.post(_forget_action(entry)).status_code == 302
@@ -353,7 +316,7 @@ class TestTheRefusals:
         self, auth_client, seed_companion, seed_second_user,
     ):
         """Refused, and her trust kept; the owner's own companion's URL routes."""
-        foreign = _another_owners_companion(seed_second_user["user"].id)
+        foreign = another_owners_companion(seed_second_user["user"].id)
         theirs = trust(foreign, SAFARI_IPHONE)
         companion_id = seed_companion["user"].id
         mine = trust(companion_id, FIREFOX_LINUX)

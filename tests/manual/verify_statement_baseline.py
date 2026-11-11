@@ -31,7 +31,9 @@ uncompilable on HEAD reports every line moved and grades nothing.  So the
 report fields that step ADDS are read through :func:`getattr` with a default,
 and section lines are keyed by LABEL rather than by ``ledger_account_id`` --
 a chart row minted by the new code has an id the old side never had, which
-would diff as a moved line even where the money did not move.
+would diff as a moved line even where the money did not move.  The day
+picker's read is bridged by its own signature across finding plan#2875,
+which took its calendar source away (:func:`_lines_on_this_side`).
 
 **What a clean diff does and does not prove.**  Identical output means no
 statement figure moved; it does not mean either figure is right.  X-f3d's own
@@ -59,10 +61,12 @@ This file is deliberately outside pytest's collection (``pytest.ini`` sets
 populated database chosen by the operator, not the seeded test template.
 """
 
+import inspect
 import json
 import pathlib
 import sys
 from decimal import Decimal
+from functools import partial
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so ``app`` is not importable when this is run as
@@ -159,6 +163,31 @@ def _balance_sheet(user_id, as_of):
     }
 
 
+def _lines_on_this_side(user_id, scenario_id):
+    """Return *user_id*'s worked-out lines in *scenario_id*, asked as this side asks.
+
+    Finding plan#2875 (57d2e0ee3) took the read's ``calendar_source`` away,
+    and plan#2915's proof runs this copy on a base without that commit too,
+    the commit before this leaf's merge (``run_statements_on_dump``'s "one
+    instrument, two apps"), where the read requires one.  So whether to pass
+    it is read off the read's own signature, the way
+    ``verify_generation_pass``'s ``_CF_KW`` reads its door's and
+    ``cf_argument`` builds the keyword from it.  It is handed by keyword, so
+    the value lands in the parameter the check found by name, and through a
+    splat, so the call names no argument the other side's read lacks: this
+    directory's E/F gate lints each tree against its own ``app``, and refuses
+    a call naming one there (``unexpected-keyword-arg``, or
+    ``too-many-function-args`` for a third positional).  Where the read asks,
+    it gets what that side's callers handed it, the owner's calendar bound and
+    asked only when a correction is to be filed
+    (``tests/_ledger_reads.scenario_lines`` there).
+    """
+    asks_a_calendar = {
+        "calendar_source": partial(calendar_for, user_id),
+    } if "calendar_source" in inspect.signature(worked_out_lines).parameters else {}
+    return worked_out_lines(user_id, scenario_id, **asks_a_calendar)
+
+
 def _ledger_days(user_id, scenario_id):
     """Return every civil day the ledger could attribute a source into, ascending.
 
@@ -182,7 +211,7 @@ def _ledger_days(user_id, scenario_id):
     which costs one statement and proves the window really is empty on both
     sides.
     """
-    lines = worked_out_lines(user_id, scenario_id)
+    lines = _lines_on_this_side(user_id, scenario_id)
     settled = db.session.execute(db.text("""
         SELECT DISTINCT t.settled_on
         FROM budget.transactions t

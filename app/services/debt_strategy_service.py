@@ -25,8 +25,10 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.enums import InterestAccrualConventionEnum
+from app.services.installment_calendar import accrual_window
 from app.utils.dates import add_months
-from app.utils.money import accrue_monthly_interest, round_money
+from app.utils.money import installment_interest, round_money
 
 # Constants for Decimal arithmetic -- avoids constructing these per call.
 ZERO = Decimal("0.00")
@@ -59,6 +61,10 @@ class DebtAccount:
         minimum_payment: Standard monthly P&I payment.  Must be >= 0.
             Active debts (principal > 0) require minimum_payment > 0,
             enforced by _validate_inputs before the algorithm runs.
+        convention: How the debt's interest accrues
+            (:class:`~app.enums.InterestAccrualConventionEnum`), the loan's own
+            (:attr:`app.services.balance_at.LoanTerms.convention`, plan step
+            recurrence:R16-d).  No default.
     """
 
     account_id: int
@@ -66,6 +72,7 @@ class DebtAccount:
     current_principal: Decimal
     interest_rate: Decimal
     minimum_payment: Decimal
+    convention: InterestAccrualConventionEnum
 
     def __post_init__(self):
         """Validate field types and constraints at construction time.
@@ -101,6 +108,11 @@ class DebtAccount:
             raise TypeError(
                 f"minimum_payment must be a Decimal, "
                 f"got {type(self.minimum_payment).__name__}"
+            )
+        if not isinstance(self.convention, InterestAccrualConventionEnum):
+            raise TypeError(
+                f"convention must be an InterestAccrualConventionEnum member, "
+                f"got {self.convention!r}"
             )
         if self.current_principal < 0:
             raise ValueError(
@@ -464,16 +476,17 @@ class _SimulationState:
         )
 
 
-def _accrue_interest(state: _SimulationState) -> None:
+def _accrue_interest(state: _SimulationState, window: tuple[date, date]) -> None:
     """Accrue one month of interest on all active debts.
 
     Modifies state.balances and state.interest_totals in place.
 
-    Charges through :func:`~app.utils.money.accrue_monthly_interest`, the ONE
-    monthly-accrual primitive -- the same call
+    Charges through :func:`~app.utils.money.installment_interest`, the ONE
+    interest producer, under each debt's own convention -- the same call
     ``amortization_engine._projection``, ``rate_period_engine`` and the loan
-    fold make, so this simulation and the loan surfaces accrue byte-identically
-    by construction.
+    replay make, so this simulation and the loan surfaces accrue
+    byte-identically by construction (plan step recurrence:R16-d moved all
+    five onto it from ``accrue_monthly_interest``, which it deleted).
 
     **It was a FIFTH inline spelling until this step, and the two were not the
     same function.**  It computed ``round_money(balance * rate / 12)``, which
@@ -487,7 +500,7 @@ def _accrue_interest(state: _SimulationState) -> None:
 
     **Its docstring also claimed "Matches the amortization engine's interest
     calculation convention", and that was FALSE about a named component**: that
-    engine calls the primitive (``_projection.py`` imports and calls
+    engine called the primitive (``_projection.py`` imported and called
     ``accrue_monthly_interest``), so the copy asserted conformance to a
     convention it did not implement.  A misstated formula is caught by reading
     the code beside it; a false conformance claim tells the reader the question
@@ -500,12 +513,17 @@ def _accrue_interest(state: _SimulationState) -> None:
     Args:
         state: The simulation working state; balances and interest_totals
             are updated in place.
+        window: The ``(start, end)`` month this step charges for: the
+            simulation's month ending ``month`` months after its start
+            (:func:`_simulate_month`).
     """
+    window_start, window_end = window
     for i, debt in enumerate(state.sorted_debts):
         if state.balances[i] <= ZERO:
             continue
-        interest = accrue_monthly_interest(
-            state.balances[i], debt.interest_rate,
+        interest = installment_interest(
+            state.balances[i], debt.interest_rate, window_start, window_end,
+            debt.convention,
         )
         state.balances[i] += interest
         state.interest_totals[i] += interest
@@ -610,6 +628,7 @@ def _simulate_month(
     state: _SimulationState,
     month: int,
     extra_pool: Decimal,
+    start_date: date,
 ) -> Decimal:
     """Run one month of the simulation against ``state``.
 
@@ -618,6 +637,15 @@ def _simulate_month(
     month-end balance on its timeline.  All mutations land on ``state``
     in place.
 
+    **Month ``m`` charges for the calendar month ending ``m`` months after
+    the start** (plan step recurrence:R16-d): the window
+    ``[add_months(start, m - 1), add_months(start, m))``, through the one
+    window helper (:func:`~app.services.installment_calendar.accrual_window`)
+    with the start's day as the meant day -- the same months the payoff
+    dates are counted in (:func:`_build_result`).  A debt carries no payment
+    day, so the months are the simulation's own; under ``MONTHLY_1_12``,
+    which counts months, any one-month window charges the same.
+
     Args:
         state: The simulation working state, updated in place.
         month: Current month number (1-indexed).
@@ -625,6 +653,7 @@ def _simulate_month(
             user's extra_monthly plus minimums freed by prior payoffs).
             Capped-minimum surplus from this month is added on top before
             the cascade.
+        start_date: The simulation's start, whose months the steps count.
 
     Returns:
         Total minimum payments freed by debts paid off this month (from
@@ -632,7 +661,9 @@ def _simulate_month(
         the caller's extra_pool for subsequent months.
     """
     # Step 1: Accrue one month of interest on all active debts.
-    _accrue_interest(state)
+    _accrue_interest(
+        state, accrual_window(add_months(start_date, month), start_date.day),
+    )
 
     # Step 2: Apply minimum payments.  Track surplus from capped
     # minimums (available this month) and freed minimums (available
@@ -712,7 +743,7 @@ def calculate_strategy(request: StrategyRequest) -> StrategyResult:
         if all(b <= ZERO for b in state.balances):
             final_month = month - 1
             break
-        extra_pool += _simulate_month(state, month, extra_pool)
+        extra_pool += _simulate_month(state, month, extra_pool, start_date)
     else:
         # for-loop exhausted without break -- horizon reached if any
         # debts still have a positive balance.

@@ -12,19 +12,17 @@ corrected from the single filer's $201,775 at plan step salary:X-at-7, finding
 where its withholding documents print other figures than the return's).  On
 2026-11-10 neither prints one: the Pub 15-T draft irs.gov posts is still 2026's,
 and the draft Form W-4 (2027), created 2026-06-10, shows placeholders for its
-Step 3 child credit and its standard deductions.  Re-verify against both when
-the IRS posts them final.
+Step 3 child credit and its standard deductions.  Step plan#3353 re-checks
+against both when the IRS posts them final.
 
 **North Carolina's 2027 rate is fixed by statute, not by a revenue trigger.**
 S.L. 2026-41 sec. 44.1(a) (approved 2026-07-07) rewrote N.C.G.S.
 105-153.7(a): 3.99% in 2026, 3.49% in 2027 through 2029.  It also struck the
 trigger rows for the 2027 through 2034 tax years from subsection (a1), so no
 revenue test can move 2027's rate.  North Carolina's standard and child
-deductions are the enacted, unindexed tables in
-:mod:`app.tax_law._north_carolina`: S.L. 2026-31 and S.L. 2026-41 amend
-N.C.G.S. 105-153.5, but neither touches the standard deduction in (a)(1) or
-the child deduction in (a1).  Re-verify the deductions against the 2027
-Form D-401 instructions when NCDOR posts them.
+deductions are the unindexed tables in :mod:`app.tax_law._north_carolina`,
+graded there; step plan#3349 re-checks them against the 2027 Form D-401
+instructions when NCDOR posts them.
 """
 
 from decimal import Decimal

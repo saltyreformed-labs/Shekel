@@ -8,6 +8,8 @@ from decimal import Decimal
 
 import pytest
 
+from tests._tax_configs import hand_built_law
+
 from ._helpers import (
     _period,
     FakeBracket,
@@ -47,12 +49,20 @@ def standard_fica():
 
 @pytest.fixture
 def simple_tax_configs(simple_bracket_set, nc_state_config, standard_fica):
-    """Combined tax config dict."""
-    return {
-        "bracket_set": simple_bracket_set,
-        "state_config": nc_state_config,
-        "fica_config": standard_fica,
-    }
+    """2026's combined tax config dict, shaped as the resolver hands one back.
+
+    Most periods here are 2026's.  A case that hands a 2027 period this set
+    (``test_fica_and_the_year.py``) prices it on 2026's rules, and its tax
+    lines' ``rules`` say 2026, unsubstituted: the one-set mode prices and
+    labels a paycheck on whatever set it is handed, which plan#3476 deletes.
+    No such case reads the label.
+    """
+    return hand_built_law(
+        2026,
+        bracket_set=simple_bracket_set,
+        state_config=nc_state_config,
+        fica_config=standard_fica,
+    )
 
 
 @pytest.fixture

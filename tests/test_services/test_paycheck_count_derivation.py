@@ -40,7 +40,7 @@ from app.services.balance_at import BalanceContext
 from app.services.balance_at._inputs import _contribution_inputs_for_accounts
 from app.services.pay_calendar import PayCadence, PayCalendar, PayCalendarError
 from app.services.payroll_basis import PayrollBasis
-from app.services.tax_config_service import load_tax_configs_for_year
+from tests._tax_configs import tax_configs_for
 from app.services.tax_report_service import compute_tax_report
 
 from tests._test_helpers import (
@@ -260,7 +260,7 @@ class TestTheCountIsTheSchedule:
 
             calendar = _calendar(cadence_days, count, user_id=user_id)
             periods = list(calendar.saved())
-            configs = load_tax_configs_for_year(profile, 2026)
+            configs = tax_configs_for(profile, 2026)
 
             breakdowns = paycheck_calculator.project_salary(
                 PayrollBasis(profile, calendar), periods, configs,

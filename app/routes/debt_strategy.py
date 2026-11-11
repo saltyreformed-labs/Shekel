@@ -172,6 +172,7 @@ def _load_debt_accounts(user_id):
             current_principal=current_owed,
             interest_rate=terms.current_rate,
             minimum_payment=terms.monthly_payment,
+            convention=terms.convention,
         ))
 
     return debt_accounts, has_arm

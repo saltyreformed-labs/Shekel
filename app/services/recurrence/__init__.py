@@ -175,6 +175,11 @@ What lives where
   keyed on different things: the picker's labels are per closed-set pattern
   and die with the form at plan step R7b, while this one is a function of the
   two-axis meaning and is what survives.
+* ``_submission`` -- what one recurrence form submission STATES, each field
+  stated, cleared or not mentioned (:data:`UNSET`), and the one merge of it
+  onto a stored rule (plan step R7e, finding **D36**).  Its own module because
+  it is the form's half of the write door's vocabulary: the schema composes
+  it, every door reads it, and nothing here reads the wire.
 
 Plan step R3 built the forward occurrence engine here, step R4a pointed the
 old ``match_periods`` adapter at it (gated by
@@ -284,6 +289,12 @@ from app.services.recurrence._resolution import (
     resolve,
 )
 from app.services.recurrence._row_date import compute_due_date
+from app.services.recurrence._submission import (
+    UNSET,
+    RecurrenceSubmission,
+    SubmittedCadence,
+    Unset,
+)
 from app.services.recurrence._picker import (
     CadenceOption,
     EndBoundOption,
@@ -313,6 +324,7 @@ __all__ = [
     "INDEFINITE",
     "NEVER_ENDS",
     "UNREADABLE_CADENCE_MESSAGE",
+    "UNSET",
     "AuthorableCadence",
     "BooksWalk",
     "BoundReading",
@@ -346,9 +358,12 @@ __all__ = [
     "RecurrenceResolutionError",
     "EmptyAuthoredWindowError",
     "RecurrenceSpec",
+    "RecurrenceSubmission",
     "ResolvedRecurrence",
     "RuleReading",
     "SelectedCadence",
+    "SubmittedCadence",
+    "Unset",
     "WeekdayReading",
     "author_rule",
     "authorable_cadences",

@@ -10,7 +10,7 @@ from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingKindEnum
 from app.extensions import db as _db
 from app.services.ledger_lines import LOAN_KINDS
-from app.utils.money import accrue_monthly_interest
+from app.utils.money import installment_interest
 from tests import _ledger_reads
 from tests._ledger_reads import trial_balance
 from tests._stored_ledger import (
@@ -247,16 +247,18 @@ class TestOracleIsNotVacuous:
             ).state.monthly_payment
 
             # Inject $10 of phantom interest into the WALK's accrual only.  The
-            # module binding ``_replay.accrue_monthly_interest`` is patched -- it
+            # module binding ``_replay.installment_interest`` is patched -- it
             # was ``_split``'s until plan step X-au-g-2c-3b-2 moved the accrual
-            # onto the shared replay, and only the BINDING moved; the resolver's
-            # ``rate_period_engine.accrue_monthly_interest`` is a DISTINCT import
+            # onto the shared replay, and ``accrue_monthly_interest`` until plan
+            # step recurrence:R16-d, and only the BINDING moved; the resolver's
+            # ``rate_period_engine.installment_interest`` is a DISTINCT import
             # and stays honest, so the two diverge by exactly $10.
             monkeypatch.setattr(
                 "app.services.loan_ledger._replay"
-                ".accrue_monthly_interest",
-                lambda balance, rate: (
-                    accrue_monthly_interest(balance, rate) + Decimal("10.00")
+                ".installment_interest",
+                lambda balance, rate, start, end, convention: (
+                    installment_interest(balance, rate, start, end, convention)
+                    + Decimal("10.00")
                 ),
             )
 

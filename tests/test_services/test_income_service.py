@@ -52,7 +52,7 @@ from app.services import (
     income_service,
     paycheck_calculator,
 )
-from app.services.tax_config_service import load_tax_configs_for_year
+from tests._tax_configs import hand_built_law, tax_configs_for
 from app.tax_law import FicaRules, TaxLaw
 from app.services.balance_at import BalanceContext
 from tests._test_helpers import (
@@ -539,7 +539,7 @@ class TestLiveIncomeThroughBalanceResolver:
             db.session.commit()
             assert row.estimated_amount is None
 
-            tax_configs = load_tax_configs_for_year(
+            tax_configs = tax_configs_for(
                 profile, period.start_date.year,
             )
             breakdowns = paycheck_calculator.project_salary(
@@ -894,7 +894,7 @@ class TestLiveProjectedNetUsesPerYearTaxConfigs:
                 for bd in paycheck_calculator.project_salary(
                     payroll_basis(profile, _derived(user_id)),
                     _derived(user_id),
-                    load_tax_configs_for_year(profile, 2027),
+                    tax_configs_for(profile, 2027),
                 )
             }[period_2027.id]
             net_2026_rate = {
@@ -902,7 +902,7 @@ class TestLiveProjectedNetUsesPerYearTaxConfigs:
                 for bd in paycheck_calculator.project_salary(
                     payroll_basis(profile, _derived(user_id)),
                     _derived(user_id),
-                    load_tax_configs_for_year(profile, 2026),
+                    tax_configs_for(profile, 2026),
                 )
             }[period_2027.id]
             # The two state rates genuinely diverge, so the test cannot
@@ -1035,12 +1035,14 @@ class TestTheProjectionDoesNotMoveWhenTheCalendarYearTURNS:
             basis = payroll_basis(profile, derived)
             resolved = paycheck_calculator.calculate_paycheck(
                 basis, derived_2027,
-                load_tax_configs_for_year(profile, 2027),
+                tax_configs_for(profile, 2027),
             )
             # The three ``None``s the retired rule produced on 2027-01-01.
             unresolved = paycheck_calculator.calculate_paycheck(
                 basis, derived_2027,
-                {"bracket_set": None, "state_config": None, "fica_config": None},
+                hand_built_law(
+                    2027, bracket_set=None, state_config=None, fica_config=None,
+                ),
             )
 
             # $104,000 / 26 = $4,000.00 gross, no pre-tax deductions, so each

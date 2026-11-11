@@ -71,7 +71,8 @@ _SETTINGS_FIELDS = {
 # reload.  Spelled here because the readiness what-if's REFUSAL is the rail
 # too, and that request targets the readiness card, so its 422 is retargeted
 # at this selector (plan step salary:S3-f-4, ruling **R-SAL33**).  The four
-# spellings are held together by ``tests/test_routes/test_retirement.py``'s
+# spellings are held together by
+# ``tests/test_routes/test_retirement/test_the_rail_probes.py``'s
 # ``TestTheRailRegionIsSpelledOnce``.
 _RAIL_REGION = "#assumptions-region"
 

@@ -9,12 +9,13 @@ row, logged by the route as a conflict at INFO.  It is not a failure of the
 regeneration, so the service logs it at INFO too, with the table that lost,
 and nothing is logged as an error.
 
-``test_retirement.TestTheRailSavesARaisesEndYear``'s own race case replaces the
-whole regeneration with a stub that raises, so it never reaches the service's
-handlers.  The case here loses a real race inside the real walk: it bumps the
-raise's version as the walk opens its schedule, after the rail has staged the
-end year and before anything flushes it.  It lives in its own file because
-``test_retirement.py`` is past 1,000 lines; the seeding and reading helpers
+``test_retirement/test_the_rail_saves.py``'s ``TestTheRailSavesARaisesEndYear``
+has its own race case, which replaces the whole regeneration with a stub that
+raises, so it never reaches the service's handlers.  The case here loses a
+real race inside the real walk: it bumps the raise's version as the walk opens
+its schedule, after the rail has staged the end year and before anything
+flushes it.  It was written in its own file while ``test_retirement.py`` was
+past 1,000 lines (a package since plan#3565); the seeding and reading helpers
 are that class's, imported from the helper class it inherits them from
 (``_TestTheRailSavesARaisesEndYearMembers``), so no test class is collected
 twice.
@@ -26,7 +27,7 @@ from unittest.mock import patch
 import sqlalchemy
 
 from app.services.generation_schedule import GenerationSchedule
-from tests.test_routes.test_retirement import (
+from tests.test_routes.test_retirement._helpers import (
     _TestTheRailSavesARaisesEndYearMembers as _SAVES,
 )
 

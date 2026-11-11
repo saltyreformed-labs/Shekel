@@ -393,8 +393,10 @@ class TestTheGrossContractIsDocumented:
         the yearly figure is pay x paychecks a year rather than the salary
         typed (R-SAL59), and each raise step rounds to the cent (R-SAL60).
         """
-        from app.services.payroll_basis import (  # pylint: disable=import-outside-toplevel
+        from app.services.pay_rate import (  # pylint: disable=import-outside-toplevel
             BasePay,
+        )
+        from app.services.payroll_basis import (  # pylint: disable=import-outside-toplevel
             PayrollBasis,
         )
 

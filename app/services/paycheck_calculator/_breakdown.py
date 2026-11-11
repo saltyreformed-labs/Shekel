@@ -323,7 +323,7 @@ class Earnings:
         annual_salary: The yearly figure on the payday: the paycheck's pay
             RATE, the pay in force on the last day it pays for, times the
             paychecks a year of the rhythm in force on it
-            (:attr:`~app.services.payroll_basis.BasePay.annual`; ruling
+            (:attr:`~app.services.pay_rate.BasePay.annual`; ruling
             **R-SAL59**, plan step salary:X-av-3a -- the post-raise annual
             salary the rate was divided from until then).  It was
             :attr:`base_biweekly` times the count until task plan#3100, when

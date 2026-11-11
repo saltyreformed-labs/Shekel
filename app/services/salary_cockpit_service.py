@@ -90,7 +90,7 @@ def _pay_rate(breakdown: PaycheckBreakdown) -> Decimal:
     The rate's yearly figure over the paychecks a year it is paid at
     (:attr:`~app.services.paycheck_calculator.Earnings.annual_salary` and
     :attr:`~app.services.paycheck_calculator.PeriodInfo.cadence`, both the
-    engine's :class:`~app.services.payroll_basis.BasePay` rate).  The engine's
+    engine's :class:`~app.services.pay_rate.BasePay` rate).  The engine's
     yearly figure is the per-paycheck rate times the count, exactly, so the
     cent this rounds to is that rate.
 

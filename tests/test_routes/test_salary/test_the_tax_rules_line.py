@@ -28,6 +28,7 @@ from html import unescape
 
 from app.enums import WithholdingKindEnum
 from app.extensions import db
+from app.services.tax_config_service import TaxLawBasis
 from app.tax_law import TaxLaw
 from tests._test_helpers import add_test_pay_stub, made_up_state, made_up_year
 
@@ -63,11 +64,15 @@ def _hero_caption(html):
     return _visible(match.group(1))
 
 
+def _card_html(html):
+    """Return the HTML of the "Where this paycheck goes" card."""
+    start = html.index('id="anatomy-composition"')
+    return html[start:html.index('<div class="card" id="anatomy-lines"')]
+
+
 def _card(html):
     """Return the visible text of the "Where this paycheck goes" card."""
-    start = html.index('id="anatomy-composition"')
-    end = html.index('<div class="card" id="anatomy-lines"')
-    return _visible(html[start:end])
+    return _visible(_card_html(html))
 
 
 def _cockpit(auth_client, period):
@@ -152,14 +157,17 @@ class TestTheCockpitSaysWhichYearsRules:
             profile = _create_profile(seed_user)
 
             html = _cockpit(auth_client, seed_periods[5])
-            fragment = _card(_fragment(auth_client, profile, seed_periods[3]))
+            fragment = _fragment(auth_client, profile, seed_periods[3])
 
-            for text in (_hero_caption(html), _card(html), fragment):
+            for text in (_hero_caption(html), _card(html), _card(fragment)):
                 assert "tax rules" not in text
                 assert "Shekel doesn't have" not in text
-            # The card's sentence opens "Tax year", so an unguarded one shows
-            # here even with the note empty; the hero's would end in "· 2026".
-            assert "Tax year" not in _card(html) + fragment
+            # The card's sentence renders nothing here by itself, so what the
+            # card's own guard keeps out is markup the visible text cannot
+            # show: the empty line and its icon.  An unguarded hero would end
+            # in "· 2026".
+            for card in (_card_html(html), _card_html(fragment)):
+                assert "bi-calendar2-x" not in card
             assert _hero_caption(html).endswith("taxes from the tax formulas")
 
     def test_a_year_without_its_state_names_each_part_and_the_profiles_state(
@@ -222,3 +230,28 @@ class TestTheProjectionLedgerSaysWhichYearsRules:
             assert above_the_table.count(line) == 1
             assert _visible(html).count(line) == 1
             assert "Tax year 2026" not in _visible(html)
+
+
+class TestTheWordsSayNothingOfAYearOnItsOwnRules:
+    """The macros' own contract, rendered directly: every caller guards before it."""
+
+    def test_a_basis_that_substituted_nothing_has_no_note_and_no_sentence(self, app):
+        """2026 on 2026's rules: the phrase is the bare year; the note and sentence are empty.
+
+        Every page guards or filters before calling the note and the
+        sentence, so no route test reaches their own guard; it is what keeps
+        a future caller from printing "Shekel doesn't have 2026's tax rules"
+        about a year whose rules the app has.
+        """
+        own = TaxLawBasis(
+            tax_year=2026, federal_year=2026, state_year=2026, fica_year=2026,
+        )
+        template = app.jinja_env.from_string(
+            '{% from "_tax_rules_macros.html" import rules_year_phrase, '
+            'rules_note, rules_sentence %}'
+            "[{{ rules_year_phrase(basis, 'NC') }}]"
+            "[{{ rules_note(basis) }}]"
+            "[{{ rules_sentence(basis, 'NC') }}]"
+        )
+
+        assert template.render(basis=own) == "[2026][][]"

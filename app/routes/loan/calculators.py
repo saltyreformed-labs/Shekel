@@ -16,6 +16,7 @@ from decimal import Decimal, ROUND_CEILING
 from flask import render_template, request
 from flask_login import current_user
 
+from app.enums import InterestAccrualConventionEnum
 from app.routes.loan._bp import loan_bp
 from app.routes.loan._helpers import (
     _load_loan_account,
@@ -344,8 +345,12 @@ def payoff_calculate(account_id):
 
 
 def _project_refinance(
-    refi_principal, refi_rate, refi_term, payment_day, convention,
-):
+    refi_principal: Decimal,
+    refi_rate: Decimal,
+    refi_term: int,
+    payment_day: int,
+    convention: InterestAccrualConventionEnum,
+) -> tuple[Decimal, Decimal, date]:
     """Project a hypothetical refinance schedule and summarize it.
 
     Commit 7 of the amortization-engine split: a pure forward projection

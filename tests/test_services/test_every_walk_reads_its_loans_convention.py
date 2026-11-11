@@ -10,7 +10,10 @@ the replay's charges, and the payoff strategy's debts.
 and named ``MONTHLY_1_12`` itself would pass any test that only compared
 members.  Each test here replaces the one reading with a SENTINEL that passes
 every type check (a ``MagicMock`` specced on the enum) and asserts the
-sentinel is what arrives, so a hardcoded member anywhere on the path fails.
+sentinel is what arrives, so a member hardcoded anywhere between the reading
+and the producer fails: each of the reading's three callers -- the resolver's
+terms, the balance seam's terms (the payoff strategy's page) and the refinance
+calculator's hypothetical loan -- is driven here.
 
 **Where it arrives is the one interest producer**
 (:func:`app.utils.money.installment_interest`), spied on in every module that
@@ -114,8 +117,9 @@ def _sentinel_convention(monkeypatch):
 
 @dataclass(frozen=True)
 class _Call:
-    """What one walk handed the producer: the window and the convention."""
+    """What one walk handed the producer: the balance, the window and the convention."""
 
+    balance: Decimal
     start: date
     end: date
     convention: object
@@ -139,7 +143,7 @@ def _producer_calls(monkeypatch, sentinel_convention):
     def spy_for(walk: str):
         """The producer, recording into *walk*'s list first."""
         def spy(balance, annual_rate, start, end, convention):
-            calls[walk].append(_Call(start, end, convention))
+            calls[walk].append(_Call(balance, start, end, convention))
             return installment_interest(
                 balance, annual_rate, start, end,
                 _MONTHLY if convention is sentinel_convention else convention,
@@ -408,6 +412,44 @@ class TestEveryWalkHandsTheProducerTheLoansConvention:
         assert b"Van" in resp.data
         assert producer_calls["strategy"]
         assert producer_calls["replay"]
+        assert all(
+            call.convention is sentinel_convention
+            for calls in producer_calls.values() for call in calls
+        )
+
+    def test_the_refinance_prices_its_hypothetical_loan_under_it(
+        self, auth_client, seed_user, db, seed_periods_today,
+        producer_calls, sentinel_convention,
+    ):
+        """The refinance calculator: the hypothetical loan keeps the refinanced loan's convention.
+
+        The form asks for a new rate and term, never a new accrual rule, so
+        the new loan's projection charges under what the stored loan reads
+        back as.  Refinanced into $123,456.78 over 120 months at 5%: by hand
+        r = 0.05 / 12 and the level payment is 123,456.78 x r / (1 - (1 +
+        r)^-120) = $1,309.45, which the page shows, and the new loan's first
+        row is the one projection call opening on that principal (the $25,000
+        loan's own walks never hold it).  Every call the page made, the
+        current loan's and the new loan's alike, carried the sentinel.
+        """
+        account = create_loan_account(
+            seed_user, db.session, name="Van", principal=Decimal("25000.00"),
+            rate=Decimal("0.05500"), term=60, origination_date=date(2025, 1, 1),
+            payment_day=15,
+        )
+        db.session.commit()
+
+        resp = auth_client.post(f"/accounts/{account.id}/loan/refinance", data={
+            "new_rate": "5.0", "new_term_months": "120",
+            "new_principal": "123456.78",
+        })
+
+        assert resp.status_code == 200
+        assert b"$1,309.45" in resp.data
+        assert [
+            call.balance for call in producer_calls["projection"]
+            if call.balance == Decimal("123456.78")
+        ] == [Decimal("123456.78")]
         assert all(
             call.convention is sentinel_convention
             for calls in producer_calls.values() for call in calls

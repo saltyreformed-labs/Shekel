@@ -435,6 +435,82 @@ class TestYearlyPayCarries:
         ]
 
 
+class TestEachChangeOfCountIsNamedOnce:
+    """A change is named on the side its pay is carried, and only a change of count (task plan#3575).
+
+    Before the first entry every paycheck is that entry carried to its own
+    count (R-SAL59), so each stretch of a rhythm whose count is not the
+    entry's is named "before" the change that ends it.  Until task plan#3575
+    only the FIRST change was looked at for that, and a change before the
+    first entry was also named "from" it, so the notices could name a change
+    keeping the count, twice.
+    """
+
+    def test_a_new_phase_before_the_change_of_count_is_not_named(self):
+        """Every two weeks, a new phase of it from 2026-07-02, then weekly from 2027-01-07: one notice.
+
+        The one entry is $1,000.00 weekly from 2027-01-07, so both
+        every-two-weeks stretches pay 1,000.00 x 52 / 26 = 2,000.00 from the
+        yearly 1,000.00 x 52 = 52,000.00.  The count changes on 2027-01-07
+        alone; 2026-07-02 keeps it.  The page said "changes on 2026-07-02"
+        twice, before and from, until task plan#3575 (the card's review).
+        """
+        calendar = _calendar(
+            [date(2026, 1, 8) + timedelta(days=14 * step) for step in range(13)]
+            + [date(2026, 7, 2) + timedelta(days=14 * step) for step in range(14)]
+            + [date(2027, 1, 7) + timedelta(days=7 * step) for step in range(40)],
+            (
+                _era(date(2026, 1, 8), 14), _era(date(2026, 7, 2), 14),
+                _era(date(2027, 1, 7), 7),
+            ),
+        )
+        basis = _basis(calendar, [(date(2027, 1, 7), "1000.00")])
+        assert _pay(basis, date(2026, 6, 25)) == Decimal("2000.00")
+        assert _pay(basis, date(2026, 7, 2)) == Decimal("2000.00")
+        assert _pay(basis, date(2027, 1, 7)) == Decimal("1000.00")
+        assert basis.rhythm_changes_without_pay() == [
+            RhythmChangeWithoutPay(
+                date(2027, 1, 7), Decimal("2000.00"), Decimal("52000.00"),
+                before_the_change=True,
+            ),
+        ]
+
+    def test_each_rhythm_before_the_first_entry_is_named_by_the_change_ending_it(self):
+        """Weekly, every two weeks from 2026-04-02, every 28 days from 07-09: two notices, both before.
+
+        The one entry is $2,600.00 every 28 days (13 a year) from
+        2026-07-09: the yearly 2,600.00 x 13 = 33,800.00.  Carried back, the
+        every-two-weeks paychecks pay 33,800.00 / 26 = 1,300.00 and the weekly
+        ones 33,800.00 / 52 = 650.00.  Each stretch is named by the change
+        ending it: 04-02 at 650.00 and 07-09 at 1,300.00.  Until task
+        plan#3575 the second read "changes on 2026-04-02 and no pay is
+        recorded from then", at 1,300.00, and 07-09 was not named.
+        """
+        calendar = _calendar(
+            [date(2026, 1, 1) + timedelta(days=7 * step) for step in range(13)]
+            + [date(2026, 4, 2) + timedelta(days=14 * step) for step in range(7)]
+            + [date(2026, 7, 9) + timedelta(days=28 * step) for step in range(15)],
+            (
+                _era(date(2026, 1, 1), 7), _era(date(2026, 4, 2), 14),
+                _era(date(2026, 7, 9), 28),
+            ),
+        )
+        basis = _basis(calendar, [(date(2026, 7, 9), "2600.00")])
+        assert _pay(basis, date(2026, 3, 26)) == Decimal("650.00")
+        assert _pay(basis, date(2026, 6, 25)) == Decimal("1300.00")
+        assert _pay(basis, date(2026, 7, 9)) == Decimal("2600.00")
+        assert basis.rhythm_changes_without_pay() == [
+            RhythmChangeWithoutPay(
+                date(2026, 4, 2), Decimal("650.00"), Decimal("33800.00"),
+                before_the_change=True,
+            ),
+            RhythmChangeWithoutPay(
+                date(2026, 7, 9), Decimal("1300.00"), Decimal("33800.00"),
+                before_the_change=True,
+            ),
+        ]
+
+
 class TestAChangeIsNamedByItsFirstPaycheck:
     """The notice names the first paycheck paid at the new rhythm (finding plan#1587).
 

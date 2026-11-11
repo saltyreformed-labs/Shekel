@@ -135,11 +135,12 @@ class RhythmChangeWithoutPay:
     count -- and the salary page says so rather than believing the figure
     silently.
 
-    **And the first rhythm, when no pay is recorded at it** (task plan#3171,
-    finding plan#1586): every paycheck before the first entry is priced from
-    it (ruling **R-SAL59**), so when the first entry is dated after a change
-    of count, the paychecks before the change are that entry's yearly pay
-    carried BACK to the earlier count, and the page names that change too:
+    **And a rhythm before the first entry, when no pay is recorded at it**
+    (tasks plan#3171 and plan#3575, finding plan#1586): every paycheck before
+    the first entry is priced from it (ruling **R-SAL59**), so when the first
+    entry is dated after a change of count, the paychecks of each rhythm
+    before it paid at another count are that entry's yearly pay carried BACK
+    to their count, and the page names the change ending each such rhythm:
     :attr:`before_the_change`.
 
     Attributes:
@@ -148,13 +149,13 @@ class RhythmChangeWithoutPay:
             change.
         per_paycheck: The carried pay: at the new rhythm, in force from the
             first day its first paycheck pays for; or, before the change, at
-            the first rhythm, in force on every day before it.
+            the rhythm before it, in force on the last day before it.
         carried_annual: The yearly pay carried across: the pay just before
             the change times the paychecks a year it was paid at; before the
             change, the first entry's yearly pay.
-        before_the_change: ``True`` when the carried pay is the first
-            rhythm's, before the change; ``False`` when it is the new
-            rhythm's, from the change on.
+        before_the_change: ``True`` when the carried pay is the rhythm's
+            before the change, carried back from the first entry; ``False``
+            when it is the new rhythm's, from the change on.
     """
 
     first_payday: date
@@ -926,48 +927,62 @@ class PayrollBasis:
         """Return each change of rhythm whose pay is priced by carrying the yearly pay.
 
         Ruling **R-SAL82**: the salary page names a change of rhythm no pay is
-        recorded from.  A change keeping the count (a new phase at the same
-        rhythm) carries nothing and is not named.  The change takes effect on
-        the first day its first paycheck pays for (:attr:`_seams`), and it
-        carries when no entry opens on that day.  **Each is named by that
-        paycheck's payday**, the first paycheck paid at the new rhythm, saved
-        or projected (task plan#3171, finding plan#1587): it was the era's
-        first PLANNED payday until then, which a record paid a day early or
-        late is not, while the walk prices that record at the new rhythm.
-        Made-up: biweekly records 01-02 and 01-16, and weekly from 02-02,
-        recorded as paid on 02-01 or on 02-03; the notice said 02-02.
+        recorded from.  **Each change of COUNT is named at most once, on the
+        side its pay is carried** (task plan#3575); a change keeping the count
+        (a new phase at the same rhythm) carries nothing and is not named.  A
+        change takes effect on the first day its first paycheck pays for
+        (:attr:`_seams`), and the day the first entry opens decides the side:
 
-        **The first rhythm too, when its pay is carried** (finding
-        plan#1586): every paycheck before the first entry is priced from it
-        (ruling **R-SAL59**), carried to each day's count, so a first entry
-        dated after a change of count prices the earlier rhythm's paychecks
-        by carrying its yearly pay BACK.  That change is named by the same
-        payday, :attr:`RhythmChangeWithoutPay.before_the_change` set, with the
-        pay in force on the last day before it.  Before this task no notice
-        named it, because a change was looked for only from the change on.
+        * **after it, the pay FROM the change** is carried when no entry opens
+          on the change's day: the walk carries the pay in force across it
+          (R-SAL82);
+        * **on or before it, the pay BEFORE the change** is carried, when the
+          rhythm before it is paid at another count than the first entry's
+          (finding plan#1586): every paycheck before the first entry is
+          priced from it, carried to each day's count (ruling **R-SAL59**).
+          :attr:`RhythmChangeWithoutPay.before_the_change` is set, with the
+          pay in force on the last day before the change; each such stretch
+          of a rhythm is named by the change ending it.
+
         Made-up: $1,000.00 weekly from 2027-01-07, after every-two-weeks
         paychecks: those pay $1,000.00 x 52 / 26 = $2,000.00 from the yearly
-        $52,000.00.
+        $52,000.00, named before 2027-01-07.  With a new phase of every two
+        weeks from 2026-07-02 as well, the change named is still 2027-01-07's:
+        until task plan#3575 the stretch before the first entry was looked for
+        at the first change alone, and a change before the first entry was
+        also named "from" it, so the page named 2026-07-02, which keeps the
+        count, twice.
+
+        **Each is named by that paycheck's payday**, the first paycheck paid
+        at the new rhythm, saved or projected (task plan#3171, finding
+        plan#1587): it was the era's first PLANNED payday until then, which a
+        record paid a day early or late is not, while the walk prices that
+        record at the new rhythm.  Made-up: biweekly records 01-02 and 01-16,
+        and weekly from 02-02, recorded as paid on 02-01 or on 02-03; the
+        notice said 02-02.
 
         Returns:
-            One :class:`RhythmChangeWithoutPay` per such change, oldest
-            first, the first rhythm's ahead of its change's own; empty for an
-            owner with one rhythm.
+            One :class:`RhythmChangeWithoutPay` per change of count whose pay
+            is carried, oldest first; empty for an owner with one rhythm.
         """
+        first_opens = self._pay_list[0].opens
         changes = []
-        if self._seams:
-            first = self._seams[0]
-            before = self._in_force_on(first.first - timedelta(days=1))
-            if before.carried is not None:
-                changes.append(RhythmChangeWithoutPay(
-                    first.payday, before.rate.per_paycheck, before.carried[1],
-                    before_the_change=True,
-                ))
         for seam in self._seams:
-            in_force = self._in_force_on(seam.first)
-            if in_force.carried is not None and in_force.carried[0] == seam.first:
+            at = self._in_force_on(seam.first)
+            if seam.first > first_opens:
+                if at.carried is not None and at.carried[0] == seam.first:
+                    changes.append(RhythmChangeWithoutPay(
+                        seam.payday, at.rate.per_paycheck, at.carried[1],
+                    ))
+                continue
+            before = self._in_force_on(seam.first - timedelta(days=1))
+            if (
+                before.carried is not None
+                and before.rate.periods_per_year != at.rate.periods_per_year
+            ):
                 changes.append(RhythmChangeWithoutPay(
-                    seam.payday, in_force.rate.per_paycheck, in_force.carried[1],
+                    seam.payday, before.rate.per_paycheck, before.carried[1],
+                    before_the_change=True,
                 ))
         return changes
 

@@ -234,12 +234,12 @@ def _salaried_deduction(seed_user, account, amount):
     deduction naming it is funded by that deduction's own profile.  Without
     the link the employer half models nothing at all (the developer's
     2026-09-04 ruling), so a case asserting an employer figure would assert
-    ``$0.00`` and pass for the wrong reason.  The profile pays
-    ``$94,425.24 / 26 = $3,631.74`` a paycheck, which is the gross those cases
+    ``$0.00`` and pass for the wrong reason.  The profile pays a made-up
+    ``$78,500.00 / 26 = $3,019.23`` a paycheck, which is the gross those cases
     size a percentage off.
     """
     profile = make_salary_profile(
-        seed_user, db.session, pay=Decimal("3631.74"),  # $94,425.24 a year / 26
+        seed_user, db.session, pay=Decimal("3019.23"),  # $78,500.00 a year / 26, made up
     )
     db.session.flush()
     deduction = PaycheckLine(
@@ -861,16 +861,17 @@ class TestTheContributionTier:
     ):
         """The real Empower shape: 5% of gross, and no deduction at all.
 
-        Hand-computed.  A flat-percentage employer does not read the employee
-        amount, so with zero deductions the account still receives
-        ``round(3631.74 * 0.05) = $181.59`` every payday.  On the production
-        401(k) that is $9,624.27 over the horizon, which is why the contribution
-        tier is not dead code even though ruling R-R measured both EMPLOYEE
-        feeds empty.
+        Hand-computed on a made-up $3,019.23 paycheck.  A flat-percentage
+        employer does not read the employee amount, so with zero deductions the
+        account still receives ``round(3019.23 * 0.05) = round(150.9615) =
+        $150.96`` every payday.  The production 401(k) has this shape, and its
+        employer money ($9,624.27 over the horizon on the owner's real pay, as
+        17ead4c59 recorded it on 2026-07-26) is why the contribution tier is
+        not dead code even though ruling R-R measured both EMPLOYEE feeds empty.
 
         The opening is asserted on period 0's first day, so period 0's own
         payday (01-02) is NOT strictly after it and contributes nothing (ruling
-        R-Z); period 1's payday (01-16) is, and contributes $181.59.
+        R-Z); period 1's payday (01-16) is, and contributes $150.96.
 
         **The account NAMES the job that funds it** (ruling **R-SAL5**, plan
         step **salary:R14-b**), which is what makes this shape modellable at
@@ -889,7 +890,7 @@ class TestTheContributionTier:
         params = _params_for(account)
         params.employer_flat_percentage = Decimal("0.0500")
         profile = make_salary_profile(
-            seed_user, db.session, pay=Decimal("3631.74"),  # $94,425.24 a year / 26
+            seed_user, db.session, pay=Decimal("3019.23"),  # $78,500.00 a year / 26, made up
         )
         db.session.flush()
         params.salary_profile_id = profile.id
@@ -901,7 +902,7 @@ class TestTheContributionTier:
             feed=_feed_for(seed_user, account, params),
         )
         assert columns[seed_periods[0].id].contribution == Decimal("0.00")
-        assert columns[seed_periods[1].id].contribution == Decimal("181.59")
+        assert columns[seed_periods[1].id].contribution == Decimal("150.96")
 
     def test_a_deduction_lands_on_the_payday_and_earns_its_own_period(
         self, seed_user, seed_periods,
@@ -1025,17 +1026,22 @@ class TestTheContributionTier:
     ):
         """Ruling R-R consequence (a): the match reads BOTH feeds' total.
 
-        A 50% match capped at 6% of a $3,631.74 gross, with a $200.00 deduction
-        and a $300.00 recorded transfer in the same period.  Hand-computed: the
-        matchable salary is ``round(3631.74 * 0.06) = $217.90``, the resolved
-        employee total is ``200.00 + 300.00 = $500.00``, the matched amount is
-        ``min(500.00, 217.90) = $217.90`` and the employer contributes
-        ``round(217.90 * 0.50) = $108.95``.  The modelled CONTRIBUTION event is
-        therefore ``200.00 + 108.95 = $308.95`` -- the deduction and the match,
-        never the recorded transfer, which the cash tier already carries.
+        A 50% match capped at 6% of a made-up $3,019.23 gross, with a $100.00
+        deduction and a $300.00 recorded transfer in the same period.
+        Hand-computed: the matchable salary is ``round(3019.23 * 0.06) =
+        round(181.1538) = $181.15``, the resolved employee total is
+        ``100.00 + 300.00 = $400.00``, the matched amount is
+        ``min(400.00, 181.15) = $181.15`` and the employer contributes
+        ``round(181.15 * 0.50) = round(90.575) = $90.58`` (half up).  The
+        modelled CONTRIBUTION event is therefore ``100.00 + 90.58 = $190.58``
+        -- the deduction and the match, never the recorded transfer, which the
+        cash tier already carries.
 
-        With the recorded half ignored the match would size off $200.00 alone
-        and pay ``round(200.00 * 0.50) = $100.00``, so the two answers differ.
+        With the recorded half ignored the match would size off $100.00 alone
+        and pay ``round(100.00 * 0.50) = $50.00``, so the two answers differ.
+        **The deduction must sit under the cap for that to hold** (ruling
+        plan#3553): at $200.00 it alone exceeds $181.15, both readings pay
+        $90.58, and the case stops catching the defect it names.
         """
         account = _401k(
             seed_user, seed_periods[0], Decimal("20000.00"),
@@ -1043,7 +1049,7 @@ class TestTheContributionTier:
             employer_type="match", match_pct=Decimal("0.5000"),
             match_cap_pct=Decimal("0.0600"),
         )
-        _salaried_deduction(seed_user, account, "200.00")
+        _salaried_deduction(seed_user, account, "100.00")
         create_settled_transfer(
             seed_user, db.session, seed_user["account"], account,
             seed_periods[1], amount=Decimal("300.00"),
@@ -1058,7 +1064,7 @@ class TestTheContributionTier:
             account, ctx, seed_periods[:2], params=_params_for(account),
             feed=feed,
         )
-        assert columns[seed_periods[1].id].contribution == Decimal("308.95")
+        assert columns[seed_periods[1].id].contribution == Decimal("190.58")
 
     # pylint: disable-next=protected-access
     def test_a_LINKED_feed_pricing_zero_folds_exactly_as_NO_feed_does(
@@ -1410,7 +1416,7 @@ class TestThePerPeriodIdentity:
         # the 2026-09-04 ruling models no employer money and this shape would
         # be missing the contribution it is here to mix in.
         profile = make_salary_profile(
-            seed_user, db.session, pay=Decimal("3631.74"),  # $94,425.24 a year / 26
+            seed_user, db.session, pay=Decimal("3019.23"),  # $78,500.00 a year / 26, made up
         )
         db.session.flush()
         params.salary_profile_id = profile.id

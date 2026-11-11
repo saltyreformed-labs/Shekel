@@ -95,7 +95,7 @@ def _profile(seed_user, name="S3-c") -> SalaryProfile:
         name=name,
     )
     db.session.add(profile)
-    start_test_pay_list(profile, Decimal("3525.96"))  # $91,675.00 a year / 26
+    start_test_pay_list(profile, Decimal("3019.23"))  # $78,500.00 a year / 26, made up
     db.session.commit()
     return profile
 

@@ -91,9 +91,12 @@
 # so the previous image refuses the same database and this script ends
 # "rollback container also unhealthy" (docs/runbook/2_deployment.md s.2.3 names the repair).
 # The re-read stamp is still the only question; since X-cv it is read only
-# after the target image's container has been STOPPED, and FOR SHARE, so a
-# step 3 still in flight cannot commit behind the read
-# (`stop_failed_container`, `db_stamped_revisions`).  Before
+# once nothing that could still commit is running -- since card plan#2166 the
+# migrate container, where step 3 runs, is STOPPED if it is -- and FOR SHARE,
+# so a step 3 still in flight cannot commit behind the read
+# (`stop_failed_container`, `db_stamped_revisions`).  The failed new app is
+# stopped too, so a failed release is never left serving, but it cannot move
+# the stamp, so a stop of it that fails only warns (ruling plan#3539).  Before
 # re-pinning, the failed deploy's and app's logs are saved beside the dump,
 # because re-pinning recreates both containers and `docker logs` then shows
 # the previous image instead (`save_failed_container_log`).
@@ -254,8 +257,6 @@ FAILED_LOG_PATH=""
 # The pre-flight's answer; false until it asks, so a path that reached a
 # failure without it would refuse rather than re-pin.
 OLD_RUNS_HERE=false
-# The container `stop_failed_container` could not stop, for the refusal.
-UNSTOPPED=""
 
 # shellcheck disable=SC2329 ## invoked indirectly, by the `trap ... EXIT`
 # immediately below; shellcheck does not follow trap handlers.
@@ -488,9 +489,9 @@ fi
 # deploy's step 3 COMMITTED its migrations before something later failed --
 # has no working rollback, so it gets the refusal instead of a second dead
 # container.  A step-3 failure left the stamp unmoved (plan step X-cv) and
-# re-pins below.  The container is stopped before the stamp is read, and the
-# read waits for any commit it already sent, so a step 3 still in flight cannot
-# commit behind the read (ruling R-BAL115).
+# re-pins below.  A migrate container still running the deploy is stopped
+# before the stamp is read, and the read waits for any commit it already sent,
+# so a step 3 still in flight cannot commit behind the read (ruling R-BAL115).
 # shellcheck disable=SC2310 ## boolean predicate, failure is the branch.
 if ! stop_failed_container; then
     refuse_unstoppable "${new_short} did not report healthy within ${HEALTH_TIMEOUT_S}s."

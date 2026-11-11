@@ -1,6 +1,6 @@
 """A failed deploy: the re-pin a migration-bearing release refuses and a pure revert keeps, a
-step-3 refusal rolled back with its log saved, the stamp read once the target is stopped, and
-the refusal saying only what the stamp shows.
+step-3 refusal rolled back with its log saved, the failed app stopped and the stamp read once
+the deploy is, and the refusal saying only what the stamp shows.
 """
 
 from __future__ import annotations
@@ -234,25 +234,27 @@ class TestAStep3RefusalRollsBack:
         assert stack.pin == _OLD, _said(result, calls)
 
 
-class TestTheStampIsReadOnceTheTargetIsStopped:
-    """Plan step balance:X-cv, rulings R-BAL115 and R-BAL119: the re-read is final.
+class TestAFailedNewAppIsStopped:
+    """Ruling plan#3539: a failed new app is stopped, so a failed release is never left serving.
 
-    A container running the TARGET image may still be inside entrypoint step 3,
-    whose one transaction can commit the new stamp after the script has read
-    the old one, and the re-pin would then meet finding F-8's second dead
-    container.  So on both failure paths that container is stopped first, and
-    the ruled order is pinned: stop, read the stamp, save the log, re-pin.  A
-    container that does not run the target (absent, or the previous one that
-    compose failed before replacing) cannot move the stamp and is left alone.
+    Since card plan#2166 the app runs no migration: the deploy, step 3 with it,
+    runs in the migrate container, whose stop the stamp read's finality rests
+    on (rulings R-BAL115 and R-BAL119, ``TestARunningDeployIsStoppedBeforeTheRead``).
+    The app container running the TARGET image is still stopped on both
+    failure paths, before the stamp is re-read, so an unhealthy or slow
+    release is not left serving when the rollback is refused.  One that will
+    not stop cannot move the stamp, so it is a warning and the decision goes
+    on.  A container that does not run the target (absent, or the previous one
+    that compose failed before replacing) is left alone.
     """
 
     @_FAILURE_PATHS
     def test_it_stops_then_reads_then_saves_then_re_pins(self, stack, failure):
-        """Both failure paths run the four steps in the ruled order.
+        """Both failure paths stop the app, read the stamp, save the logs and re-pin, in order.
 
-        And the re-read asks FOR SHARE, so it waits for a COMMIT the stopped
-        container had already sent (the stub cannot model the lock, so this
-        pins that the question is asked that way).
+        And the re-read asks FOR SHARE, so it waits for a COMMIT a stopped
+        deploy had already sent (the stub cannot model the lock, so this pins
+        that the question is asked that way).
         """
         result = stack.run(**failure, **_STEP_3_ROLLED_BACK)
         calls = stack.invocations
@@ -306,28 +308,48 @@ class TestTheStampIsReadOnceTheTargetIsStopped:
         assert stack.pin == _OLD, _said(result, calls)
 
     @_FAILURE_PATHS
-    def test_a_target_container_that_will_not_stop_refuses_the_re_pin(
+    def test_a_failed_app_that_will_not_stop_warns_and_the_rollback_goes_on(
         self, stack, failure,
     ):
-        """Its step 3 may still commit, so no read is final: the pin stays, loudly.
+        """It cannot move the stamp: a warning, then the read and the re-pin as usual.
 
-        No stamp is read after the failed stop, and nothing is re-pinned.  The
-        refusal names the roll-back through this script, whose pre-flight asks
-        the stamp question again once the container is down.
+        The stamp is read after the failed stop, and a stamp the previous image
+        resolves is re-pinned, whose ``compose up`` replaces the container.
         """
         result = stack.run(stop_rc="1", **failure, **_STEP_3_ROLLED_BACK)
         output = result.stdout + result.stderr
         calls = stack.invocations
-        assert result.returncode == 1
-        assert "REFUSING to roll back" in output
-        assert "could not be stopped" in output
-        assert stack.pin == _NEW
+        assert "REFUSING to roll back" not in output, _said(result, calls)
         assert (
-            _last_stamp_read(calls, result)
-            < _position(calls, "stop probe-app", result)
+            f"WARN: could not stop probe-app; it may still be serving {_NEW_SHORT}."
+            in _as_read(output)
         ), _said(result, calls)
+        assert (
+            _position(calls, "stop probe-app", result)
+            < _last_stamp_read(calls, result)
+        ), _said(result, calls)
+        assert stack.pin == _OLD, _said(result, calls)
+        assert len(_compose_ups(calls, result)) == 2, _said(result, calls)
+
+    def test_a_failed_app_that_will_not_stop_still_meets_the_stamp_s_refusal(
+        self, stack,
+    ):
+        """The warning decides nothing: a stamp the previous image cannot resolve still refuses.
+
+        The refusal is the stamp's, naming the revision, never the
+        unstoppable-container one, and the pin stays at the new digest.
+        """
+        result = stack.run(stop_rc="1", health="unhealthy", **_MIGRATION_BEARING)
+        output = result.stdout + result.stderr
+        calls = stack.invocations
+        refusal = _as_read(_refusal(output))
+        assert result.returncode == 1, _said(result, calls)
+        assert "could not stop probe-app" in _as_read(output), _said(result, calls)
+        assert "could not be stopped" not in refusal, _said(result, calls)
+        assert "has no migration script for that revision" in refusal, (
+            _said(result, calls))
+        assert stack.pin == _NEW, _said(result, calls)
         assert len(_compose_ups(calls, result)) == 1, _said(result, calls)
-        assert f"{_DEPLOY_SCRIPT} {_OLD}" in _flat(output)
 
 
 class TestARunningDeployIsStoppedBeforeTheRead:

@@ -263,46 +263,51 @@ preflight_migrations() {
     fi
 }
 
-# shellcheck disable=SC2034,SC2154 ## new_digest and new_short: the entry's;
-# UNSTOPPED: read by refuse_unstoppable; see this file's header.
+# shellcheck disable=SC2154 ## new_digest and new_short: the entry's; see this
+# file's header.
 stop_failed_container() {
-    # Make the stamp read that follows FINAL (plan step balance:X-cv, rulings
-    # R-BAL115 and R-BAL119).  A container running the TARGET image may still
-    # be inside entrypoint step 3, whose one transaction could commit the new
-    # stamp after it is read, so that container is stopped first: once stopped
-    # it can start no NEW commit, and a COMMIT it had already sent is what the
-    # read's FOR SHARE waits for (`db_stamped_revisions`).  It runs
-    # `restart: unless-stopped`, so a manual stop holds.
+    # Stop what a failed deploy left running, before the stamp is re-read.
     #
-    # Only the target image's container, told apart by IMAGE ID, not by the
-    # reference spelling the compose file happens to use.  An absent container
-    # moves nothing, and on the compose-failure path compose can fail BEFORE
-    # replacing the running previous container, which cannot move the stamp and
-    # is still serving: stopping either would buy no finality, only downtime.
-    # A target whose ID cannot be read is no reason to skip the stop, so the
-    # container is stopped then: downtime is the cheaper error.
-    #
-    # Returns 1 when a target-image container could not be stopped.  That is
-    # the one case whose read is not final, and the caller refuses to re-pin
-    # on it.  A container whose image cannot be read counts as absent: if the
-    # daemon is down, the stamp read after this fails too, which already
-    # refuses.  Stated, not closed: a failure of this one inspect that the
-    # daemon recovers from before the read skips the stop, and that read is
-    # then as final as every read was before X-cv.
-    #
-    # The migrate container first.  Since card plan#2166 the deploy, step 3
-    # with it, runs there, and a `compose up` that failed with the deploy
-    # still running leaves it running.  A one-shot that is running is inside
-    # a deploy, whatever image it runs, so it is stopped then; it runs
+    # The migrate container, so the read that follows is FINAL (plan step
+    # balance:X-cv, rulings R-BAL115 and R-BAL119).  Since card plan#2166 the
+    # deploy, step 3 with it, runs there, and step 3's one transaction could
+    # commit the new stamp after it is read: a `compose up` that failed with
+    # the deploy still running leaves it running.  A one-shot that is running
+    # is inside a deploy, whatever image it runs, so it is stopped: once
+    # stopped it can start no NEW commit, and a COMMIT it had already sent is
+    # what the read's FOR SHARE waits for (`db_stamped_revisions`).  It runs
     # `restart: "no"`, so the stop holds.  One that has exited can commit
     # nothing and is left as it is, its log intact.
+    #
+    # Returns 1 when the migrate container could not be stopped.  That is the
+    # one case whose read is not final, and the caller refuses to re-pin on it
+    # (`refuse_unstoppable`).  A container whose state cannot be read counts
+    # as not running (`container_running`): if the daemon is down, the stamp
+    # read after this fails too, which already refuses.  Stated, not closed: a
+    # failure of that one inspect that the daemon recovers from before the
+    # read skips the stop, and that read is then as final as every read was
+    # before X-cv.
+    #
+    # Then the app container running the TARGET image, so a failed release is
+    # never left serving (ruling plan#3539): an app that came up unhealthy, or
+    # slower than the health window, is stopped, and a refused rollback leaves
+    # it so.  It runs no migration and cannot move the stamp, so a stop that
+    # fails is a warning, and the decision goes on.  It runs `restart:
+    # unless-stopped`, so a manual stop holds.
+    #
+    # Only the target image's app, told apart by IMAGE ID, not by the
+    # reference spelling the compose file happens to use.  On the
+    # compose-failure path compose can fail BEFORE replacing the running
+    # previous container, which still serves a release that did not fail:
+    # stopping it would buy only downtime.  An absent container needs no stop.
+    # A target whose ID cannot be read is no reason to leave a failed release
+    # serving, so the container is stopped then: downtime is the cheaper error.
     local running target
     # shellcheck disable=SC2310 ## boolean predicate; see image_listing_or_die.
     if container_running "$MIGRATE_CONTAINER"; then
         log "stopping ${MIGRATE_CONTAINER}, still running the deploy, so the stamp read is final ..."
         if ! docker stop "$MIGRATE_CONTAINER" >/dev/null; then
             log "could not stop ${MIGRATE_CONTAINER}."
-            UNSTOPPED="$MIGRATE_CONTAINER"
             return 1
         fi
     fi
@@ -316,11 +321,10 @@ stop_failed_container() {
         log "${CONTAINER_NAME} runs another image than ${new_short}; left running."
         return 0
     fi
-    log "stopping ${CONTAINER_NAME} (running ${new_short}, or an image whose ID could not be read) so the stamp read is final ..."
+    log "stopping ${CONTAINER_NAME} (running ${new_short}, or an image whose ID could not be read) so the failed release is not left serving ..."
     if ! docker stop "$CONTAINER_NAME" >/dev/null; then
-        log "could not stop ${CONTAINER_NAME}."
-        UNSTOPPED="$CONTAINER_NAME"
-        return 1
+        log "WARN: could not stop ${CONTAINER_NAME}; it may still be serving ${new_short}."
+        log "      It runs no migration, so the stamp it cannot move is read as usual."
     fi
     return 0
 }

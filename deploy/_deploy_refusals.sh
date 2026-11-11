@@ -57,8 +57,9 @@ refuse_to_repin() {
     # previous image's deploy against the restored database before it starts
     # the app.  `stop_failed_container` has usually stopped the app already,
     # but not on every path here -- a daemon that could not be asked leaves
-    # both the container and the stamp unread -- so the instruction stays
-    # first and unconditional.
+    # both the container and the stamp unread, and a stop that failed only
+    # warned (ruling plan#3539) -- so the instruction stays first and
+    # unconditional.
     local why="$1"
     save_failed_container_log
     local failed_log="${FAILED_LOG_PATH:-not saved; docker logs ${MIGRATE_CONTAINER} and ${CONTAINER_NAME}, or Loki}"
@@ -204,33 +205,35 @@ refuse_layout() {
 }
 
 refuse_unstoppable() {
-    # Ruling R-BAL119's refusal: the target image's container could not be
-    # stopped, so its entrypoint step 3 may still commit a migration and no
-    # stamp read is final yet.  Re-pinning on such a read can produce the F-8
-    # pair of dead containers, so the pin stays and the operator re-runs the
-    # decision once the container is down -- through this script's own
-    # pre-flight, the one place that question is asked before anything is
-    # written, which refuses up front and names the restore if the previous
-    # image cannot resolve the stamp.
+    # Ruling R-BAL119's refusal: the migrate container, still running the
+    # deploy, could not be stopped, so its step 3 may still commit a
+    # migration and no stamp read is final yet.  Re-pinning on such a read can
+    # produce the F-8 pair of dead containers, so the pin stays and the
+    # operator re-runs the decision once the container is down -- through this
+    # script's own pre-flight, the one place that question is asked before
+    # anything is written, which refuses up front and names the restore if the
+    # previous image cannot resolve the stamp.  The app container never
+    # reaches here: it cannot move the stamp, so a stop of it that fails is a
+    # warning (ruling plan#3539, `stop_failed_container`).
     local why="$1"
     log ""
     log "REFUSING to roll back."
     log "  ${why}"
     log ""
-    log "  ${UNSTOPPED} could not be stopped, and it may be running"
+    log "  ${MIGRATE_CONTAINER} could not be stopped, and it may be running"
     log "  ${new_short}'s deploy, whose step 3 may still commit a migration:"
     log "  the stamp cannot be read as final.  The pin is left at ${new_short}."
     log ""
     log "  Stop it, then roll back through this script, whose pre-flight"
     log "  re-reads the stamp and refuses up front if ${old_short} cannot"
     log "  resolve it:"
-    log "    docker stop ${UNSTOPPED}"
+    log "    docker stop ${MIGRATE_CONTAINER}"
     log "    $0 ${old_digest}"
     log ""
     log "  Pre-deploy dump:"
     log "    ${DUMP_PATH}"
 
     ntfy_notify 5 "Shekel deploy FAILED, rollback REFUSED" \
-        "${new_short} did not come up and its container could not be stopped, so the stamp read would not be final. Pin left at ${new_short}. Stop ${UNSTOPPED}, then run: shekel-deploy ${old_digest}. Dump: ${DUMP_PATH}"
+        "${new_short} did not come up and its deploy (${MIGRATE_CONTAINER}) could not be stopped, so the stamp read would not be final. Pin left at ${new_short}. Stop ${MIGRATE_CONTAINER}, then run: shekel-deploy ${old_digest}. Dump: ${DUMP_PATH}"
     exit 1
 }

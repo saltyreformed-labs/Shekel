@@ -35,6 +35,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.enums import InterestAccrualConventionEnum
 from app.services.amortization_engine._projection import (
     _apply_contractual_payment,
 )
@@ -124,6 +125,7 @@ class TestEveryWalkAllocatesThroughTheOneRule:
             period = RatePeriod(
                 index=0, start_date=ORIGINATION, annual_rate=rate,
                 period_pi=cash, start_month_index=0, term_months_at_start=360,
+                convention=InterestAccrualConventionEnum.MONTHLY_1_12,
             )
             row = _replay_payment_row(balance, period, PAY_DATE, ORIGINATION)
             parts = apply_payment_cash(cash, balance, interest, ZERO)

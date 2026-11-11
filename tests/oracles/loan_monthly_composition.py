@@ -35,6 +35,8 @@ composition was a production call), not less.
 from datetime import date
 from decimal import Decimal
 
+from app.enums import InterestAccrualConventionEnum
+from app.services.installment_calendar import accrual_window
 from app.services.loan_ledger import AccrualCharge
 from app.services.rate_period_engine import RatePeriod
 from app.utils.money import (
@@ -83,6 +85,7 @@ def rate_period(
         period_pi=period_pi,
         start_month_index=0,
         term_months_at_start=_SYNTHETIC_TERM_MONTHS,
+        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
     )
 
 
@@ -102,6 +105,11 @@ def accrual_charge(
         annual_rate: The rate the period accrues at.
         escrow: The escrow the period impounds.
 
+    Its window is the month before *on_date*, on *on_date*'s own day
+    (:func:`~app.services.installment_calendar.accrual_window`): a hand-stated
+    charge falls on the day it means, and the monthly convention charges that
+    one month.
+
     Returns:
         The :class:`~app.services.loan_ledger.AccrualCharge`.
     """
@@ -109,6 +117,7 @@ def accrual_charge(
         on_date=on_date,
         period=rate_period(annual_rate, start_date=on_date),
         escrow=escrow,
+        opens_on=accrual_window(on_date, on_date.day)[0],
     )
 
 

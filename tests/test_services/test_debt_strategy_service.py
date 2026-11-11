@@ -13,16 +13,15 @@ from decimal import Decimal
 
 import pytest
 
+from app.enums import InterestAccrualConventionEnum
 from app.utils.money import (
     MONTHS_PER_YEAR,
     accrue_monthly_interest,
     round_money,
 )
 from app.services.debt_strategy_service import (
-    AccountPayoff,
     DebtAccount,
     StrategyRequest,
-    StrategyResult,
     calculate_strategy,
     STRATEGY_AVALANCHE,
     STRATEGY_CUSTOM,
@@ -45,6 +44,7 @@ def _debt(account_id, name, principal, rate, minimum):
         current_principal=Decimal(principal),
         interest_rate=Decimal(rate),
         minimum_payment=Decimal(minimum),
+        convention=InterestAccrualConventionEnum.MONTHLY_1_12,
     )
 
 
@@ -642,6 +642,27 @@ class TestValidation:
                 custom_order=[],
                 start_date=FIXED_START,
             ))
+
+    @pytest.mark.parametrize(
+        "not_a_member", [1, None, "monthly_1_12"],
+        ids=["a-stored-id", "none", "the-members-name"],
+    )
+    def test_a_debt_without_a_convention_member_is_refused(self, not_a_member):
+        """A debt states how it accrues as the enum member, or is not built.
+
+        The three values a caller could hand over by mistake -- the loan row's
+        id, the cache's answer for an unknown id, the row's name -- are each
+        refused at construction rather than at the first month's charge.
+        """
+        with pytest.raises(TypeError, match="convention must be an"):
+            DebtAccount(
+                account_id=1,
+                name="Debt",
+                current_principal=Decimal("1000.00"),
+                interest_rate=Decimal("0.12"),
+                minimum_payment=Decimal("100.00"),
+                convention=not_a_member,
+            )
 
 
 class TestResultStructure:

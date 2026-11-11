@@ -16,6 +16,8 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from app import ref_cache
+from app.enums import InterestAccrualConventionEnum
 from app.services.amortization_engine import (
     AmortizationRow,
     PaymentDates,
@@ -75,6 +77,33 @@ def _origination_rate(rate_changes: list | None) -> Decimal:
     return Decimal(str(earliest.interest_rate))
 
 
+def accrual_convention(loan_params) -> InterestAccrualConventionEnum:
+    """Return how *loan_params*'s note accrues interest, as the enum member.
+
+    THE one reading of ``LoanParams.interest_accrual_convention_id`` (plan step
+    recurrence:R16-d, finding **D52**): the stored id becomes the
+    :class:`~app.enums.InterestAccrualConventionEnum` member the one interest
+    producer (:func:`app.utils.money.installment_interest`) takes.  The
+    resolver's terms read it here (:func:`_loan_terms_from`), and so do the
+    two readers that hold a loan's params outside the resolver's periods --
+    the payoff strategy's terms
+    (:func:`app.services.balance_at.loan_terms`) and the refinance
+    calculator's hypothetical loan -- so the conversion is spelled once.
+
+    Args:
+        loan_params: A LoanParams-shaped object exposing
+            ``interest_accrual_convention_id``.
+
+    Returns:
+        The member the id names; ``None`` only for an id the ref cache does
+        not hold, which the column's foreign key rules out and the producer
+        then refuses with ``KeyError`` at its first charge.
+    """
+    return ref_cache.interest_accrual_convention_member(
+        loan_params.interest_accrual_convention_id,
+    )
+
+
 def _loan_terms_from(loan_params, base_rate: Decimal) -> LoanTerms:
     """Build the rate-period engine's :class:`LoanTerms` from a LoanParams.
 
@@ -84,14 +113,16 @@ def _loan_terms_from(loan_params, base_rate: Decimal) -> LoanTerms:
     (see :func:`_origination_rate`) since DH-#56 retired the
     ``LoanParams.interest_rate`` column; the :class:`RateHistory`-layered
     rate changes override it per period.  The ARM cadence columns drive
-    the fixed-rate period boundaries.
+    the fixed-rate period boundaries, and the accrual convention
+    (:func:`accrual_convention`) rides every period the terms build.
 
     Args:
         loan_params: A LoanParams-shaped object exposing
             ``origination_date``, ``original_principal``,
             ``term_months``, ``is_arm``,
-            ``arm_first_adjustment_months``, and
-            ``arm_adjustment_interval_months``.
+            ``arm_first_adjustment_months``,
+            ``arm_adjustment_interval_months`` and
+            ``interest_accrual_convention_id``.
         base_rate: The origination annual rate (decimal fraction) the
             caller resolved from the loan's earliest rate-change record.
 
@@ -110,6 +141,7 @@ def _loan_terms_from(loan_params, base_rate: Decimal) -> LoanTerms:
         arm_adjustment_interval_months=getattr(
             loan_params, "arm_adjustment_interval_months", None,
         ),
+        convention=accrual_convention(loan_params),
     )
 
 
@@ -175,7 +207,7 @@ def _terms_from_periods(periods: list[RatePeriod]) -> list[PeriodTerms]:
 
     One :class:`~app.services.amortization_engine.PeriodTerms` per
     :class:`~app.services.rate_period_engine.RatePeriod`, carrying the
-    period's start date, rate, and level P&I verbatim -- the rate-period
+    period's start date, rate, level P&I and accrual convention verbatim -- the rate-period
     engine stays the single producer of those figures and
     ``project_forward`` consumes them unchanged, so the schedule's
     projected rows and the loan card cannot diverge (DH-#1).  The full
@@ -195,6 +227,7 @@ def _terms_from_periods(periods: list[RatePeriod]) -> list[PeriodTerms]:
             start_date=period.start_date,
             annual_rate=period.annual_rate,
             monthly_pi=period.period_pi,
+            convention=period.convention,
         )
         for period in periods
     ]

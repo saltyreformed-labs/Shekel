@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.enums import InterestAccrualConventionEnum
 from app.services.installment_calendar import due_in_following_month
 from app.utils.dates import clamped_day, month_ordinal, months_between
 from app.utils.money import (
@@ -409,11 +410,18 @@ class PeriodTerms:
         monthly_pi: Level P&I (principal + interest, no escrow) held
             constant for the span.  Must be >= 0 (zero only for the
             degenerate already-paid-off span).
+        convention: How the loan's interest accrues
+            (:class:`~app.enums.InterestAccrualConventionEnum`), mapped from
+            the period's :attr:`~app.services.rate_period_engine.RatePeriod.convention`
+            -- or, for the refinance calculator's hypothetical loan, the
+            convention of the loan it refinances.  No default (plan step
+            recurrence:R16-d).
     """
 
     start_date: date
     annual_rate: Decimal
     monthly_pi: Decimal
+    convention: InterestAccrualConventionEnum
 
     def __post_init__(self):
         """Validate terms fields at construction time.
@@ -422,8 +430,10 @@ class PeriodTerms:
         results deep in the projection loop.
 
         Raises:
-            TypeError: If ``start_date`` is not a date or either money
-                field is not a Decimal.
+            TypeError: If ``start_date`` is not a date, either money
+                field is not a Decimal, or ``convention`` is not an
+                :class:`~app.enums.InterestAccrualConventionEnum` member
+                (the stored id or ``None`` handed over by mistake).
             ValueError: If ``annual_rate`` or ``monthly_pi`` is negative.
         """
         if not isinstance(self.start_date, date):
@@ -448,6 +458,11 @@ class PeriodTerms:
         if self.monthly_pi < 0:
             raise ValueError(
                 f"monthly_pi must be >= 0, got {self.monthly_pi}"
+            )
+        if not isinstance(self.convention, InterestAccrualConventionEnum):
+            raise TypeError(
+                f"convention must be an InterestAccrualConventionEnum member, "
+                f"got {self.convention!r}"
             )
 
 

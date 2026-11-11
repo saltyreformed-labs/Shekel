@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.enums import InterestAccrualConventionEnum
 from app.services.amortization_engine import (
     AmortizationRow,
     PaymentDates,
@@ -84,6 +85,15 @@ class RatePeriod:
         term_months_at_start: Contractual months remaining at the
             period start (``original term - start_month_index``); the
             denominator the level payment amortizes over.
+        convention: How the loan's interest accrues
+            (:class:`~app.enums.InterestAccrualConventionEnum`), the loan's own
+            from :attr:`LoanTerms.convention`, the same on every period.  It
+            rides the period because the period is what every walk already
+            holds when it charges interest: the replay through
+            :attr:`~app.services.loan_ledger.AccrualCharge.period`, the
+            projection through its
+            :class:`~app.services.amortization_engine.PeriodTerms` (plan step
+            recurrence:R16-d).
     """
 
     index: int
@@ -92,6 +102,7 @@ class RatePeriod:
     period_pi: Decimal
     start_month_index: int
     term_months_at_start: int
+    convention: InterestAccrualConventionEnum
 
 
 @dataclass(frozen=True)
@@ -130,8 +141,15 @@ class ScheduleReplay:
 
 
 @dataclass(frozen=True)
-class LoanTerms:
+class LoanTerms:  # pylint: disable=too-many-instance-attributes
     """The immutable identity of a loan -- everything fixed at origination.
+
+    Pylint: ``too-many-instance-attributes`` (8/7) -- suppressed because this
+    is one cohesive value record, the facts the loan's note fixes at
+    origination, read as a unit by the period builder.  The eighth, the
+    accrual convention (plan step recurrence:R16-d), is one more fact of the
+    same note; splitting the record would fragment one concept for no design
+    gain.
 
     Bundled so the period builder takes one cohesive value object rather
     than a long parameter list, and so the same identity threads through
@@ -150,6 +168,13 @@ class LoanTerms:
             first rate adjustment (``None`` for a fixed-rate loan).
         arm_adjustment_interval_months: Months between subsequent
             adjustments (``None`` when only the first is modeled).
+        convention: How the note accrues interest
+            (:class:`~app.enums.InterestAccrualConventionEnum`), from
+            ``LoanParams.interest_accrual_convention_id`` through
+            :func:`app.services.loan_resolver.accrual_convention` -- the ONE
+            place it enters the loan's walks (finding **D52**).  No default:
+            a builder that forgets it is a ``TypeError``.  Every period
+            carries it (:attr:`RatePeriod.convention`).
     """
 
     origination_date: date
@@ -159,6 +184,7 @@ class LoanTerms:
     is_arm: bool
     arm_first_adjustment_months: int | None
     arm_adjustment_interval_months: int | None
+    convention: InterestAccrualConventionEnum
 
 
 @dataclass(frozen=True)
@@ -521,6 +547,7 @@ def build_rate_periods(
             period_pi=period_pi,
             start_month_index=start_month_index,
             term_months_at_start=term_at_start,
+            convention=terms.convention,
         ))
         # Advance the contractual balance to the next period start so the
         # next period's derived recast amortizes the right remaining

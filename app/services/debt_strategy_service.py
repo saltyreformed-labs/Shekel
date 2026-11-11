@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from app.enums import InterestAccrualConventionEnum
 from app.utils.dates import add_months
 from app.utils.money import accrue_monthly_interest, round_money
 
@@ -59,6 +60,10 @@ class DebtAccount:
         minimum_payment: Standard monthly P&I payment.  Must be >= 0.
             Active debts (principal > 0) require minimum_payment > 0,
             enforced by _validate_inputs before the algorithm runs.
+        convention: How the debt's interest accrues
+            (:class:`~app.enums.InterestAccrualConventionEnum`), the loan's own
+            (:attr:`app.services.balance_at.LoanTerms.convention`, plan step
+            recurrence:R16-d).  No default.
     """
 
     account_id: int
@@ -66,6 +71,7 @@ class DebtAccount:
     current_principal: Decimal
     interest_rate: Decimal
     minimum_payment: Decimal
+    convention: InterestAccrualConventionEnum
 
     def __post_init__(self):
         """Validate field types and constraints at construction time.
@@ -101,6 +107,11 @@ class DebtAccount:
             raise TypeError(
                 f"minimum_payment must be a Decimal, "
                 f"got {type(self.minimum_payment).__name__}"
+            )
+        if not isinstance(self.convention, InterestAccrualConventionEnum):
+            raise TypeError(
+                f"convention must be an InterestAccrualConventionEnum member, "
+                f"got {self.convention!r}"
             )
         if self.current_principal < 0:
             raise ValueError(

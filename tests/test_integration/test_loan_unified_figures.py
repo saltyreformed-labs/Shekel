@@ -751,21 +751,14 @@ def test_a_generated_rows_extra_is_paid_once_in_the_plan(
         db.session.commit()
 
         ctx = BalanceContext.build(seed_user["user"].id, as_of=as_of)
-        # Every generated row, priced through the amount model as the forward
-        # plan prices it, at P&I + extra (rule 4).  The contract's P&I is the
-        # hand-worked figure in this file's header, amortize(300000, 0.06,
-        # 360).  *Both were read off the loan's payment list and its
-        # ``contractual_pi`` until plan task plan#3388 deleted the two.*
+        # Each generated row priced as the plan prices it: P&I + extra (rule 4),
+        # the P&I the header's amortize(300000, 0.06, 360) (the deleted list's
+        # until plan task plan#3388).
         contractual_pi = Decimal("1798.65")
-        generated = (
-            db.session.query(Transfer)
-            .filter(
-                Transfer.transfer_template_id == template.id,
-                Transfer.is_deleted.is_(False),
-            )
-            .order_by(Transfer.due_date)
-            .all()
-        )
+        generated = db.session.query(Transfer).filter(
+            Transfer.transfer_template_id == template.id,
+            Transfer.is_deleted.is_(False),
+        ).order_by(Transfer.due_date).all()
         assert generated, "the definition generated no row"
         basis = ctx.amounts()
         for row in generated:
@@ -775,8 +768,7 @@ def test_a_generated_rows_extra_is_paid_once_in_the_plan(
             installment.due_date: installment
             for installment in balance_at.loan_installments(account, ctx)
         }
-        first = generated[0]
-        installment = by_due[first.due_date]
+        installment = by_due[generated[0].due_date]
         # Paid ONCE: the installment's cash is the row's, nothing rides on
         # top, and the principal is that cash less the month's interest.
         assert installment.cash == contractual_pi + extra

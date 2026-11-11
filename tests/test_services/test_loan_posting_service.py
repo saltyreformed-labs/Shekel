@@ -2280,10 +2280,7 @@ class TestSyncLoanAnchorCorrections:
         $100,000 trueup), so the loan owes 100000 - 1507.51 = 98492.49.  With
         the opening (-250000) and true-up (+150000) added, the loan-linked net is
         (1507.51 payment nets) - 100000 = -98492.49, proving the
-        from-origination sum-of-postings lands on the trued-up balance.  It was
-        named ``test_opening_payments_trueup_reproduce_resolver_balance`` after
-        the old schedule replay it once matched, until plan task plan#3393
-        (ruling plan#3383); the figure was always worked by hand.
+        from-origination sum-of-postings lands on the trued-up balance.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -2787,9 +2784,7 @@ class TestPostedLoanBalanceSums:
         100000 - 1507.51 = 98492.49
         (``test_opening_payments_trueup_net_to_the_hand_worked_balance`` proves
         the same figure against ``account_net``); the reader negates the same
-        linked net to the same figure.  It was named
-        ``test_running_balance_reproduces_the_resolver_balance`` until plan task
-        plan#3393 (ruling plan#3383).
+        linked net to the same figure.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id

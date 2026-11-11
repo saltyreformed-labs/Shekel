@@ -863,10 +863,9 @@ class TestLoanPaymentWindowResolver:
         with app.app_context():
             loan = self._current_loan(seed_user, db.session)
             params = load_loan_params(loan.id)
-            # amortize(12000.00, 0.05, 24): r = 0.05 / 12, (1 + r)^24 =
-            # 1.104941, 12000 * r * 1.104941 / 0.104941 = 526.46.  Stated by
-            # hand since plan task plan#3388 deleted
-            # ``loan_payment_service.compute_contractual_pi``, which derived it.
+            # amortize(12000.00, 0.05, 24): r = 0.05 / 12, (1 + r)^24 = 1.104941,
+            # 12000 * r * 1.104941 / 0.104941 = 526.46, by hand since plan task
+            # plan#3388 deleted compute_contractual_pi, which derived it.
             contractual_pi = Decimal("526.46")
             tpl = make_loan_payment_template(
                 db.session, seed_user, loan,

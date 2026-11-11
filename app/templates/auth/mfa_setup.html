@@ -16,9 +16,21 @@
     </p>
     {% endif %}
     <p class="text-muted">
-      Scan the QR code below with your authenticator app (e.g. Google Authenticator,
-      Authy, or 1Password), then enter the 6-digit code to verify.
+      Setting up on this phone? Open your authenticator app (e.g. Google
+      Authenticator, Authy, or 1Password) from the button below, with the key
+      already filled in. On a computer, scan the QR code with your phone
+      instead. Then enter the 6-digit code it shows to verify.
     </p>
+
+    {# The otpauth:// URI the QR code encodes, which a phone hands to its
+       authenticator app (ruling plan#3442).  Coming back from the app may
+       reload this page; it shows the same key while the setup is pending
+       (ruling plan#3470), so the entry just added keeps working. #}
+    <div class="d-grid my-3">
+      <a class="btn btn-outline-primary" href="{{ totp_uri }}">
+        <i class="bi bi-box-arrow-up-right"></i> Open in my authenticator app
+      </a>
+    </div>
 
     <div class="text-center my-3">
       <img src="{{ qr_data_uri }}" alt="TOTP QR Code" class="mw-px-200">

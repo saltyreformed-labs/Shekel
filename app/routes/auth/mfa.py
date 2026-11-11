@@ -402,7 +402,12 @@ def _readable_pending_secret(mfa_config: MfaConfig | None) -> str | None:
 
 @auth_bp.route("/mfa/setup", methods=["GET"])
 def mfa_setup():
-    """Display the MFA setup page with QR code and manual key.
+    """Display the MFA setup page: its app link, QR code and manual key.
+
+    Three ways to put one key in the authenticator app: on the phone itself,
+    the "Open in my authenticator app" link opens the app with the key filled
+    in (ruling plan#3442); from a computer, the QR code; and by hand, the
+    manual key.  The link and the QR code carry the one ``otpauth://`` URI.
 
     **While a setup is pending, every load shows its key** (ruling
     plan#3470): the same QR code and manual key until the pending secret's
@@ -478,12 +483,14 @@ def mfa_setup():
                 datetime.now(timezone.utc) + MFA_SETUP_PENDING_TTL
             )
 
-    qr_data_uri = mfa_service.generate_qr_code_data_uri(
-        mfa_service.get_totp_uri(secret, current_user.email)
-    )
+    # The one provisioning URI, built once and handed to both ways in (ruling
+    # plan#3442): the QR code a computer's page shows for a phone to scan, and
+    # the "Open in my authenticator app" link a phone's page follows itself.
+    totp_uri = mfa_service.get_totp_uri(secret, current_user.email)
     return render_template(
         "auth/mfa_setup.html",
-        qr_data_uri=qr_data_uri,
+        totp_uri=totp_uri,
+        qr_data_uri=mfa_service.generate_qr_code_data_uri(totp_uri),
         manual_key=secret,
     )
 

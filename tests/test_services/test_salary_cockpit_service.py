@@ -367,7 +367,6 @@ class TestYearlyNetTotals:
         ]
 
 
-
 class TestSubstitutedTaxRules:
     """substituted_tax_rules: one basis per tax year priced on another year's rules."""
 
@@ -419,6 +418,7 @@ class TestSubstitutedTaxRules:
     def test_every_paycheck_on_its_own_years_rules_is_no_entry(self):
         """The shared scenario, all 2026 on 2026's own rules: nothing to say."""
         assert svc.substituted_tax_rules(_scenario()) == []
+
 
 class TestBuildChips:
     """build_chips: focused-period hero figures + next-event chips."""

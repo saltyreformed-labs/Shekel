@@ -5,7 +5,7 @@
    Usage:
      {% from "_tax_rules_macros.html" import rules_year_phrase, rules_note, rules_sentence %}
 
-   Both read a TaxLawBasis (app/services/tax_config_service.py), the
+   All three read a TaxLawBasis (app/services/tax_config_service.py), the
    resolver's own answer carried on whatever was priced, so no screen works
    the year out itself: the Taxes tab hands them its liability's basis, and
    the salary pages a paycheck's tax lines' ``rules``.

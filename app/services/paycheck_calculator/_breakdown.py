@@ -266,8 +266,13 @@ class TaxLines:
     :class:`~app.services.tax_config_service.TaxLawBasis` of the law they
     were priced on, which the resolver hands back with that law
     (:func:`~app.services.tax_config_service.configs_by_year`).  On a
-    paycheck it is the paycheck's OWN tax year's on either path: a stub's
-    taxes move by what the formulas price on this year's law.  The stub's
+    paycheck it is the basis of the set the paycheck was priced on, on either
+    path: a stub's taxes move by what the formulas price on that set.  That
+    is the paycheck's OWN tax year's because every production caller hands
+    the engine a by-year mapping (``income_service.ProfilePaychecks``); the
+    engine's one-set mode, which only unit tests use, would price and label
+    a paycheck on whatever single set it is handed, and plan#3476 deletes
+    it so nothing but the caller's discipline holds this.  The stub's
     side is priced on the stub's own year's law (ruling **R-SAL77**), whose
     basis no paycheck carries yet (plan#3423).  **REQUIRED and
     keyword-only** (the :attr:`PricedLine.paycheck_line_kind_id` shape): a

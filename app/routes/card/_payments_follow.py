@@ -252,6 +252,9 @@ def _maintain_every_repeat(
                 key=lambda choice: choice.due_date,
             ),
             change_sentence=door.change_sentence,
+            # Every payment listed carries the page's one question, its due
+            # date; a card's terms change asks nothing about an account.
+            asks_follow=True,
             action_url=door.action_url,
             cancel_url=url_for(door.back.endpoint, **door.back.kwargs),
         )

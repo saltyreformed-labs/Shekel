@@ -17,6 +17,12 @@ update routes (each supplying its own :class:`RecurrenceConflictKind`):
   echoing the submitted edit as hidden inputs so Apply re-runs it.
 * :func:`parse_conflict_decisions` / :func:`apply_conflict_decisions` -- read
   the chooser's per-instance keep/use decisions back and act on them.
+* :func:`choices_asked` / :func:`parse_account_decisions` /
+  :func:`move_the_rows_asked` -- the ACCOUNT half of a bill's edit (ruling
+  **plan#3230**, task plan#3237): a save that moves a bill to another account
+  asks, for each unpaid row changed by hand, "Move to <account>" or "Keep on
+  <account>", on the same page as the price when both changed.  Which rows
+  are asked is :mod:`app.routes._recurrence_account_question`'s.
 
 Split out of ``_recurrence_form_helpers`` when that module reached the
 1,000-line cap (plan step R2e-1).  The seam is the one that module's own
@@ -29,7 +35,7 @@ because it consumes Flask ``flash`` / ``render_template`` / ``request`` /
 ``url_for``; ``CLAUDE.md::Architecture`` keeps services isolated from Flask
 globals.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -39,6 +45,11 @@ from flask_login import current_user
 
 from app.exceptions import RecurrenceConflict
 from app.extensions import db
+from app.routes._recurrence_account_question import (
+    AccountQuestion,
+    AskedAccount,
+    account_question,
+)
 from app.services import template_amount_service
 from app.services.balance_at import BalanceContext
 from app.services.cash_ledger import stated_price
@@ -58,6 +69,11 @@ from app.utils.digit_strings import parse_row_id
 
 _CONFLICT_APPLY_MARKER = "conflict_apply"
 _CONFLICT_DECISION_PREFIX = "conflict_decision_"
+# The account half's radios (ruling plan#3230) carry the SAME two values as
+# the price half's, "use" meaning Move: the page's "Keep all" and "Follow the
+# template for all" then set both halves of every row
+# (``static/js/conflict_chooser.js`` selects radios by value).
+_ACCOUNT_DECISION_PREFIX = "conflict_account_"
 _DECISION_KEEP = "keep"
 _DECISION_USE = "use"
 
@@ -83,6 +99,11 @@ class ConflictChoice:
         is_deleted_conflict: ``True`` when the conflict is a soft-deleted
             instance (Keep leaves it deleted; Use restores it), ``False``
             for an overridden one.
+        account: What the page asks about the row's ACCOUNT when a bill's
+            edit moved it (ruling **plan#3230**, :class:`AskedAccount`), or
+            ``None`` when it asks nothing about it -- every row of a page
+            that is not a bill's account move, and on one that is, a deleted
+            row or a row already on the bill's new account.
     """
 
     row_id: int
@@ -91,6 +112,7 @@ class ConflictChoice:
     name: str
     your_amount: Decimal
     is_deleted_conflict: bool
+    account: AskedAccount | None = None
 
 
 def parse_conflict_decisions(form) -> dict[int, str] | None:
@@ -112,9 +134,43 @@ def parse_conflict_decisions(form) -> dict[int, str] | None:
     """
     if form.get(_CONFLICT_APPLY_MARKER) is None:
         return None
+    return _decisions_under(form, _CONFLICT_DECISION_PREFIX)
+
+
+def parse_account_decisions(form) -> dict[int, str]:
+    """Parse the chooser's per-row ACCOUNT decisions from its Apply POST.
+
+    The account half of a bill's edit (ruling **plan#3230**): ``"use"`` is
+    "Move to <the bill's new account>", ``"keep"`` is "Keep on <its
+    account>".  Read only on an Apply (:func:`parse_conflict_decisions`
+    answered a map), and every surviving id is re-checked against the rows
+    the question was asked of (:func:`move_the_rows_asked`) before any is
+    moved, so a hand-crafted id cannot reach a row.
+
+    Args:
+        form: The request form (a ``MultiDict``).
+
+    Returns:
+        The ``{row_id: "keep" | "use"}`` map, possibly empty.
+    """
+    return _decisions_under(form, _ACCOUNT_DECISION_PREFIX)
+
+
+def _decisions_under(form, prefix: str) -> dict[int, str]:
+    """Return the well-formed ``{row_id: "keep" | "use"}`` decisions named under *prefix*.
+
+    Malformed ids or values are dropped.
+
+    Args:
+        form: The request form (a ``MultiDict``).
+        prefix: The radio group's name prefix.
+
+    Returns:
+        The decision map, possibly empty.
+    """
     decisions: dict[int, str] = {}
     for key in form:
-        if not key.startswith(_CONFLICT_DECISION_PREFIX):
+        if not key.startswith(prefix):
             continue
         value = form.get(key)
         if value not in (_DECISION_KEEP, _DECISION_USE):
@@ -122,7 +178,7 @@ def parse_conflict_decisions(form) -> dict[int, str] | None:
         # The shared rule rather than a fourth local ``int()`` (plan step
         # X-ae): this one never crashed, but it read ``decision_١٠٦`` as row
         # 106 -- a spelling the chooser's own template cannot emit.
-        row_id = parse_row_id(key[len(_CONFLICT_DECISION_PREFIX):])
+        row_id = parse_row_id(key[len(prefix):])
         if row_id is None:
             continue
         decisions[row_id] = value
@@ -292,6 +348,10 @@ class RecurrenceConflictKind:
             shape since plan step X-au-f (ruling **R-JD**); the transfer side
             carried a fourth, ``new_amount=``, until then, and both took the
             owner's id rather than the read pass until ruling **R-BAL253**.
+            Its actions are "keep", "update" (use) and, on the transaction
+            side alone, "move" (ruling **plan#3230**): only a bill's edit asks
+            the account question (:attr:`PreEditTemplateState.account_id`), so
+            the transfer resolver is never handed it.
         update_endpoint: The kind's update-route endpoint, resolved with the
             template id for the chooser's Apply action.
     """
@@ -326,7 +386,7 @@ class ConflictChooserContext:
 
     Attributes:
         choices: The conflicted rows, already shaped and ordered
-            (:func:`build_conflict_choices`).
+            (:func:`build_conflict_choices`, :func:`choices_asked`).
         template_name: The edited template's new name (framing sentence).
         new_amount: The price the edit stated, as of *effective_from*: the
             framing sentence's figure, because the definition's price did
@@ -334,7 +394,12 @@ class ConflictChooserContext:
             NEWEST stated price until plan step X-bp, which is a different
             figure whenever a later price is scheduled.  It is NOT the "Use"
             side's figure for either kind -- "use" hands a row back to its
-            definition (ruling **R-JD**).
+            definition (ruling **R-JD**).  ``None`` when the edit stated no
+            new price and the page asks only about the account (ruling
+            **plan#3230**).
+        moved_to: The name of the account a bill's edit moved it to, when
+            the page asks whether its rows changed by hand move too (ruling
+            **plan#3230**); ``None`` when it asks no account question.
         effective_from: The edit's effective date (framing sentence).
         action_url: Where Apply posts (the same update endpoint).
         cancel_url: Where Cancel returns (the list), abandoning the edit.
@@ -351,7 +416,8 @@ class ConflictChooserContext:
 
     choices: "list[ConflictChoice]"
     template_name: str
-    new_amount: Decimal
+    new_amount: Decimal | None
+    moved_to: str | None
     effective_from: date
     action_url: str
     cancel_url: str
@@ -371,7 +437,10 @@ def render_chooser_page(page: str, form, **framing: Any) -> str:
             or a page extending it that frames another question.
         form: The submitted edit form, echoed so Apply reproduces it.
         **framing: What *page* renders besides the form's machinery: the
-            rows, where Apply and Cancel go, and the sentences around them.
+            rows, where Apply and Cancel go, the sentences around them, and
+            ``asks_follow`` -- whether its rows carry the page's
+            keep-or-follow question, which a bill's edit that moved only its
+            account does not (ruling **plan#3230**).
 
     Returns:
         The rendered chooser page HTML.
@@ -383,6 +452,7 @@ def render_chooser_page(page: str, form, **framing: Any) -> str:
         echo=echo,
         apply_marker=_CONFLICT_APPLY_MARKER,
         decision_prefix=_CONFLICT_DECISION_PREFIX,
+        account_prefix=_ACCOUNT_DECISION_PREFIX,
         decision_keep=_DECISION_KEEP,
         decision_use=_DECISION_USE,
         **framing,
@@ -406,6 +476,9 @@ def render_recurrence_conflict_chooser(ctx: ConflictChooserContext, form) -> str
         choices=ctx.choices,
         template_name=ctx.template_name,
         new_amount=ctx.new_amount,
+        moved_to=ctx.moved_to,
+        # The price question is asked exactly when the edit stated a price.
+        asks_follow=ctx.new_amount is not None,
         effective_from=ctx.effective_from,
         action_url=ctx.action_url,
         cancel_url=ctx.cancel_url,
@@ -513,10 +586,85 @@ class PreEditTemplateState:
             transfer template's single generated Transfer is an ordinary
             auto-generated row, so sweeping on a rename would silently delete
             it.
+        account_id: The account a TRANSACTION definition was paid from or
+            into before the edit, which the account question compares with
+            the one the edit leaves (ruling **plan#3230**,
+            :func:`account_question`).  ``None`` at the transfer doors: a
+            transfer definition names two accounts, and task plan#3237 asks
+            no account question of one.
     """
 
     series: tuple[tuple[date, Decimal], ...]
     had_recurrence_rule: bool
+    account_id: int | None
+
+
+def choices_asked(
+    conflict: RecurrenceConflict, kind: RecurrenceConflictKind,
+    calendar: PayCalendar, question: AccountQuestion | None, *, asks_price: bool,
+) -> list[ConflictChoice]:
+    """Return the chooser's rows for a bill's edit: what it asks of each.
+
+    When the edit stated a new price, every conflicted row is listed for the
+    price question, as before ruling **plan#3230**; when it only moved the
+    account, only the rows the account question is asked of are.  Each row
+    the account question is asked of carries its :class:`AskedAccount`.
+
+    Args:
+        conflict: The regeneration's conflict.
+        kind: The per-kind config.
+        calendar: The pass's calendar (:func:`build_conflict_choices`).
+        question: :func:`account_question`'s answer; when *asks_price* is
+            ``False`` it is not ``None`` and asks about at least one row,
+            since the page then asks nothing else.
+        asks_price: Whether the edit changed the definition's price history.
+
+    Returns:
+        The rows, oldest due date first.
+    """
+    listed = conflict if asks_price else RecurrenceConflict(
+        overridden=list(question.asked),
+    )
+    choices = build_conflict_choices(listed, kind, calendar)
+    if question is None:
+        return choices
+    return [
+        replace(choice, account=question.asked.get(choice.row_id))
+        for choice in choices
+    ]
+
+
+def move_the_rows_asked(
+    kind: RecurrenceConflictKind, question: AccountQuestion | None,
+    decisions: dict[int, str], ctx: BalanceContext,
+) -> None:
+    """Move the rows the owner answered "Move to" for, through the kind's resolver.
+
+    Only ids the question offered to move (:meth:`AccountQuestion.movable`)
+    are acted on, so a crafted form can neither move a row the page did not
+    ask about nor one the new account's books would count twice.  The move
+    itself is the engine's (``resolve_fn(..., "move", ...)``), which
+    ownership-checks each id and reads the account off the row's own
+    definition.  Run BEFORE the price answers
+    (:func:`apply_conflict_decisions`): a row moved and handed back for its
+    price is then its definition's whole and drops its hold, while one kept
+    where it is keeps its hold (``definition_unarchive.UseRestore``).
+
+    Args:
+        kind: The per-kind config.
+        question: :func:`account_question`'s answer; ``None`` moves nothing.
+        decisions: :func:`parse_account_decisions`' map.
+        ctx: The edit's read pass.
+    """
+    if question is None:
+        return
+    movable = question.movable()
+    moving = [
+        row_id for row_id, choice in decisions.items()
+        if choice == _DECISION_USE and row_id in movable
+    ]
+    if moving:
+        kind.resolve_fn(moving, "move", ctx)
 
 
 def regenerate_or_conflict_chooser(
@@ -534,21 +682,27 @@ def regenerate_or_conflict_chooser(
     ``kind.regenerate_fn``.  When the edit collides with
     hand-edited (override / soft-deleted) upcoming instances the regeneration
     raises; the branch then depends on the submit and on whether this edit
-    changed the definition's PRICE HISTORY (the chooser only offers a
-    keep-vs-use AMOUNT decision):
+    changed the definition's PRICE HISTORY, or moved a bill's ACCOUNT (ruling
+    **plan#3230**, :func:`~app.routes._recurrence_account_question.account_question`):
+    the chooser asks a keep-vs-use AMOUNT question of every conflicted row
+    when the price changed, and a move-vs-keep ACCOUNT question of each live
+    row changed by hand that the move would leave behind, one page for both:
 
-      * Apply (chooser decisions present): resolve each conflicted instance
-        per the user's keep/use choice, then return ``None`` so the caller
-        commits the edit together with the resolutions.  What "use" DOES is
-        the same for both kinds since plan step X-au-f: the row is handed
-        back to its definition and priced from the series on its own due date
-        (ruling **R-JD**).
+      * Apply (chooser decisions present): move each row the owner answered
+        "Move to" for (:func:`move_the_rows_asked`), then resolve each
+        conflicted instance per the user's keep/use choice, then return
+        ``None`` so the caller commits the edit together with the
+        resolutions.  What "use" DOES is the same for both kinds since plan
+        step X-au-f: the row is handed back to its definition and priced from
+        the series on its own due date (ruling **R-JD**); a bill's row kept
+        on another account keeps its hold (ruling **plan#3230**).
       * First submit of an edit that changed the price history (the template
-        STILL recurs, and its series differs from ``before.series``): render
-        the chooser, naming the price the edit stated as of
-        *effective_from*, ROLL BACK the pending edit (nothing is persisted),
-        and return the chooser :class:`~flask.Response` for the caller to
-        return.
+        STILL recurs, and its series differs from ``before.series``) or moved
+        a bill with rows changed by hand to ask about: render the chooser,
+        naming the price the edit stated as of *effective_from* and the
+        account it moved to, ROLL BACK the pending edit (nothing is
+        persisted), and return the chooser :class:`~flask.Response` for the
+        caller to return.
       * Any other conflicting edit -- a rename / rule / flag change, or an
         edit to a definition whose amount is WORKED OUT (a salary profile's
         paycheck, a derive-mode loan payment), whose series the amount's
@@ -633,8 +787,9 @@ def regenerate_or_conflict_chooser(
     Returns:
         The chooser response to short-circuit to, or ``None`` to proceed to
         commit (no scenario, a template that neither has nor had a recurrence
-        rule, no conflict, an edit that stated no new price, an edit that
-        cleared the recurrence, or a conflict already resolved from Apply).
+        rule, no conflict, an edit that stated no new price and moved no
+        bill's account over a row changed by hand, an edit that cleared the
+        recurrence, or a conflict already resolved from Apply).
     """
     # ONE read pass for the edit: it pins the owner, the day and the baseline
     # scenario, and its calendar is the one derivation the regeneration
@@ -654,28 +809,38 @@ def regenerate_or_conflict_chooser(
             template, schedule, ctx.scenario_id, effective_from=effective_from,
         )
     except RecurrenceConflict as conflict:
+        # The account half (ruling plan#3230), asked of the rows the pass
+        # held back, stated once for the page and the Apply alike.
+        question = account_question(
+            template, before.account_id, conflict.overridden, kind.model, ctx,
+        )
+        # **A conflict is not automatically a QUESTION** (plan step R10-a,
+        # adversarial review).  The price question asks one thing -- keep
+        # this instance's amount or hand it back to the template -- and
+        # ``build_conflict_choices`` builds its rows from ``overridden`` and
+        # ``deleted`` alone.  A RETAINED row has no such question: the pass
+        # already left it untouched.  Without the first operand a
+        # retained-only conflict rendered the chooser over an EMPTY list and
+        # then rolled the edit back below, so an ordinary amount change
+        # silently did nothing and said "some upcoming instances were
+        # hand-edited" over no instances.  The account question asks only
+        # when it has a row to ask about; an empty one still names the move
+        # on a page the price opens.
+        asks_price = bool(conflict.overridden or conflict.deleted) and (
+            template_amount_service.series_image(template) != before.series
+        )
+        asks_account = question is not None and bool(question.asked)
         if decisions is not None:
+            move_the_rows_asked(
+                kind, question, parse_account_decisions(request.form), ctx,
+            )
             apply_conflict_decisions(
                 kind=kind,
                 conflict=conflict,
                 decisions=decisions,
                 ctx=ctx,
             )
-        elif (
-            # **A conflict is not automatically a QUESTION** (plan step R10-a,
-            # adversarial review).  The chooser asks one thing -- keep this
-            # instance's amount or move it to the template's -- and
-            # ``build_conflict_choices`` builds its rows from ``overridden``
-            # and ``deleted`` alone.  A RETAINED row has no such question: the
-            # pass already left it untouched.  Without this arm a
-            # retained-only conflict rendered the chooser over an EMPTY list
-            # and then rolled the edit back below, so an ordinary amount
-            # change silently did nothing and said "some upcoming instances
-            # were hand-edited" over no instances.
-            (conflict.overridden or conflict.deleted)
-            and definition_recurs(template)
-            and template_amount_service.series_image(template) != before.series
-        ):
+        elif definition_recurs(template) and (asks_price or asks_account):
             chooser = render_recurrence_conflict_chooser(
                 ConflictChooserContext(
                     # Built HERE, before the rollback below, because this is
@@ -684,8 +849,9 @@ def regenerate_or_conflict_chooser(
                     # ``kind.regenerate_fn`` just resolved against, never a
                     # second derivation of it (the shape of ledger row
                     # **P68**, closed by C2-f3c; **P69** is its open sibling).
-                    choices=build_conflict_choices(
-                        conflict, kind, ctx.calendar(),
+                    choices=choices_asked(
+                        conflict, kind, ctx.calendar(), question,
+                        asks_price=asks_price,
                     ),
                     template_name=template.name,
                     # The price the edit STATED, as of the date it stated it
@@ -699,7 +865,8 @@ def regenerate_or_conflict_chooser(
                             f"{type(template).__name__} {template.id}'s price "
                             f"from {effective_from.isoformat()}"
                         ),
-                    ),
+                    ) if asks_price else None,
+                    moved_to=None if question is None else question.moved_to.name,
                     effective_from=effective_from,
                     action_url=url_for(
                         kind.update_endpoint, template_id=template.id,

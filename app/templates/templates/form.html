@@ -57,9 +57,11 @@
             day (today's when blank or when the amount is worked out and has
             no box; `_recurrence_common.rows_this_pass_may_maintain`). Settled
             and cancelled rows are immutable; a row whose amount or paycheck was
-            changed by hand is skipped (`is_override`, which a typed note does
-            not set); and a moved row leaves its purchases where their money
-            moved (ruling R-CC36). -#}
+            changed by hand (`is_override`, which a typed note does not set) is
+            listed on the conflict chooser before anything saves, to move or
+            keep (ruling plan#3230, `_recurrence_account_question`); and a
+            moved row leaves its purchases where their money moved (ruling
+            R-CC36). -#}
         {%- set pays_into = (template.transaction_type_id if template else default_txn_type_id) == TXN_TYPE_INCOME %}
         {%- set dated_by_its_box = not (form_amount and form_amount.worked_out_by) %}
         <div class="col">
@@ -84,8 +86,10 @@
             {%- else %}
             Changing this moves the unpaid entries from today's paycheck onward.
             {%- endif %}
-            Entries already paid, received or cancelled stay where they are, and so
-            do entries whose amount or paycheck you changed by hand. Purchases
+            Entries already paid, received or cancelled stay where they are. If
+            you changed an entry's amount or paycheck by hand, the Confirm
+            recurring change page lists it before anything is saved and asks
+            whether it moves too. Purchases
             already recorded stay on the account they were paid from.
           </div>
         </div>

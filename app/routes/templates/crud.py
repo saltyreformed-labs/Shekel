@@ -431,6 +431,10 @@ def update_template(template_id):
     before = PreEditTemplateState(
         series=template_amount_service.series_image(template),
         had_recurrence_rule=template.recurs,
+        # The account the bill is on before the save: the chooser asks
+        # whether its rows changed by hand move when the save moves it
+        # (ruling plan#3230).
+        account_id=template.account_id,
     )
 
     # Re-point, rebuild, or clear the recurrence rule from the update payload

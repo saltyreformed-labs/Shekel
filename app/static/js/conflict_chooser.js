@@ -3,9 +3,11 @@
  *
  * The chooser (recurrence_conflict_chooser.html) lets the user keep or
  * replace each hand-edited upcoming instance. This adds the two bulk
- * buttons: "Keep all" / "Use new value for all" set every per-instance
- * radio to the matching value at once. No money, no network -- it only
- * flips radios the user could flip by hand.
+ * buttons: "Keep all" / "Follow the template for all" set every per-instance
+ * radio to the matching value at once. A bill's account radios (ruling
+ * plan#3230: "Keep on" / "Move to") carry the same two values, "use" being
+ * Move, so each button sets both halves of every row. No money, no network --
+ * it only flips radios the user could flip by hand.
  *
  * No-ops on every other page (the [data-conflict-chooser] root is absent).
  */

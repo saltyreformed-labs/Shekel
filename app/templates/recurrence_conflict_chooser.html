@@ -34,10 +34,22 @@
      echo             -- {field: value} of the original edit form, re-emitted
                          so Apply reproduces the identical edit (csrf excluded;
                          a fresh token is issued below).
+     moved_to         -- the name of the account a bill's edit moved it to,
+                         when the page asks whether its rows changed by hand
+                         move too (ruling plan#3230); None otherwise.  Each
+                         row asked carries ``choice.account`` (AskedAccount:
+                         the account it is on, and the day the new account's
+                         books open when they would hold it, so no move is
+                         offered).  ``new_amount`` is None on a page asking
+                         only about the account.
+     asks_follow      -- whether the rows carry the keep-or-follow question
+                         (the price here): False on that account-only page.
      action_url       -- where Apply posts (the update endpoint).
      cancel_url       -- where Cancel returns (the list).
-     apply_marker / decision_prefix / decision_keep / decision_use
-                      -- field-name constants, single-sourced from the helper.
+     apply_marker / decision_prefix / account_prefix / decision_keep /
+     decision_use     -- field-name constants, single-sourced from the helper.
+                         The account radios carry the same two values ("use"
+                         is Move), so the bulk buttons set both halves.
 
    A page asking another question extends this one and overrides the blocks
    holding its words, so the form's machinery stays in one place
@@ -52,7 +64,15 @@
           {% block chooser_heading %}Some upcoming instances were hand-edited{% endblock chooser_heading %}</h5>
       </div>
       <div class="card-body">
-        {% block chooser_lead %}
+        {#- Whether any row offers "Move to": a row asked about its account
+            whose new books would not count it twice.  Display logic only. -#}
+        {%- set offer = namespace(moves=false, accounts=false) %}
+        {%- for choice in choices if choice.account is not none %}
+        {%- set offer.accounts = true %}
+        {%- if choice.account.books_open_on is none %}{% set offer.moves = true %}{% endif %}
+        {%- endfor %}
+        {% block chooser_lead scoped %}
+        {% if moved_to is none %}
         <p>
           You changed <strong>{{ template_name }}</strong> to
           <span class="font-mono">{{ money(new_amount) }}</span>,
@@ -61,6 +81,34 @@
           Choose which to keep and which to hand back to this recurring
           definition, which prices each one on its own due date.
         </p>
+        {% else %}
+        <p>
+          {% if new_amount is not none %}
+          You changed <strong>{{ template_name }}</strong> to
+          <span class="font-mono">{{ money(new_amount) }}</span> and moved it to
+          <strong>{{ moved_to }}</strong>,
+          {% else %}
+          You moved <strong>{{ template_name }}</strong> to
+          <strong>{{ moved_to }}</strong>,
+          {% endif %}
+          effective {{ effective_from.strftime('%b %d, %Y') }}.
+          You changed the instances below by hand on the grid, so nothing has
+          been saved yet.
+          {% if new_amount is not none %}
+          For each, keep its amount or hand it back to this recurring
+          definition, which prices it on its own due date.
+          {% endif %}
+          {% if offer.moves and new_amount is none %}
+          Move each one to {{ moved_to }} or keep it where it is; either way it
+          keeps the change you made by hand.
+          {% elif offer.moves %}
+          Where the page offers it, also move it to {{ moved_to }} or keep it
+          where it is: that choice does not undo the change you made by hand.
+          {% elif offer.accounts %}
+          Each stays on the account it is on, for the reason shown beside it.
+          {% endif %}
+        </p>
+        {% endif %}
         {% endblock chooser_lead %}
 
         <form method="POST" action="{{ action_url }}">
@@ -71,15 +119,17 @@
           <input type="hidden" name="{{ field }}" value="{{ value }}">
           {% endfor %}
 
-          {% block bulk_actions %}
+          {% block bulk_actions scoped %}
+          {% if asks_follow or offer.moves %}
           <div class="d-flex justify-content-end gap-2 mb-2">
             <button type="button" class="btn btn-sm btn-outline-secondary"
                     data-conflict-bulk="{{ decision_keep }}">Keep all</button>
             <button type="button" class="btn btn-sm btn-outline-primary"
                     data-conflict-bulk="{{ decision_use }}">
-              {% block follow_all_label %}Follow the template for all{% endblock follow_all_label %}
+              {% block follow_all_label %}{% if asks_follow %}Follow the template for all{% else %}Move all to {{ moved_to }}{% endif %}{% endblock follow_all_label %}
             </button>
           </div>
+          {% endif %}
           {% endblock bulk_actions %}
 
           <ul class="list-group mb-3">
@@ -96,6 +146,8 @@
                 {% endif %}
               </span>
               {% block choice_decision scoped %}
+              <span class="d-flex flex-wrap gap-2">
+              {% if asks_follow %}
               <span class="btn-group btn-group-sm" role="group"
                     aria-label="Decision for {{ choice.due_date.strftime('%b %d, %Y') if choice.due_date else 'this instance' }}">
                 <input type="radio" class="btn-check" autocomplete="off"
@@ -115,6 +167,35 @@
                   {% block follow_label scoped %}Follow the template{% endblock follow_label %}
                 </label>
               </span>
+              {% endif %}
+              {# The account half (ruling plan#3230): asked of a live row
+                 changed by hand that the bill's move would leave behind. #}
+              {% if choice.account is not none %}
+              {% if choice.account.books_open_on is not none %}
+              <span class="text-muted small">
+                Stays on {{ choice.account.on_account }}: {{ choice.account.books }} books
+                open {{ choice.account.books_open_on.strftime('%b %d, %Y') }},
+                so moving it there would count it twice.
+              </span>
+              {% else %}
+              <span class="btn-group btn-group-sm" role="group"
+                    aria-label="Account for {{ choice.due_date.strftime('%b %d, %Y') if choice.due_date else 'this instance' }}">
+                <input type="radio" class="btn-check" autocomplete="off"
+                       name="{{ account_prefix }}{{ choice.row_id }}"
+                       id="stay-{{ choice.row_id }}" value="{{ decision_keep }}" checked>
+                <label class="btn btn-outline-secondary" for="stay-{{ choice.row_id }}">
+                  Keep on {{ choice.account.on_account }}
+                </label>
+                <input type="radio" class="btn-check" autocomplete="off"
+                       name="{{ account_prefix }}{{ choice.row_id }}"
+                       id="move-{{ choice.row_id }}" value="{{ decision_use }}">
+                <label class="btn btn-outline-primary" for="move-{{ choice.row_id }}">
+                  Move to {{ moved_to }}
+                </label>
+              </span>
+              {% endif %}
+              {% endif %}
+              </span>
               {% endblock choice_decision %}
             </li>
             {% endfor %}
@@ -126,6 +207,12 @@
             Your other upcoming instances already follow this recurring
             definition, so each is worth what it states on that instance's own
             due date. Nothing here changes them.
+            {% if moved_to is not none %}
+            They move to {{ moved_to }} with it.
+            {% if new_amount is not none %}
+            A deleted instance you bring back returns on {{ moved_to }}.
+            {% endif %}
+            {% endif %}
             Settled history is never touched.
           </p>
           {% endblock chooser_note %}

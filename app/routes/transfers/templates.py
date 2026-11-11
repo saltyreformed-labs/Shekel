@@ -562,6 +562,9 @@ def update_transfer_template(template_id):
     before = PreEditTemplateState(
         series=template_amount_service.series_image(template),
         had_recurrence_rule=template.recurs,
+        # A transfer names two accounts; the chooser asks no account question
+        # of one (task plan#3237).
+        account_id=None,
     )
 
     # Route-boundary FK ownership (commit C-27 / F-043), asked BEFORE anything

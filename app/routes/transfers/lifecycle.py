@@ -297,6 +297,8 @@ def unarchive_transfer_template(template_id):
             PreEditTemplateState(
                 series=template_amount_service.series_image(template),
                 had_recurrence_rule=True,
+                # A transfer names two accounts; no account question is asked.
+                account_id=None,
             ),
             display_today(),
             redirect=_LIST,

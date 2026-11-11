@@ -751,7 +751,12 @@ class UseRestore(NamedTuple):
             moving money, and a pass from today retires it once its own paycheck has
             ended.  A row its rule no longer names loses the hold, so the terms door's
             second pass retires it (``routes/card/_payments_follow``).  Decided under
-            R-BAL207.
+            R-BAL207.  **A bill's row on another account than its definition's keeps
+            its hold too** (ruling **plan#3230**, task plan#3237): the owner kept it
+            there when the bill moved, or brought it back where it sat, and "use"
+            answers its price, not its account; without the hold the next pass
+            moves it unasked.  A transfer's two accounts are not asked about
+            (:func:`sits_off_its_definitions_account`).
     """
 
     handed_back: tuple
@@ -843,12 +848,44 @@ def restored_by_use(
         notice=" ".join(notices) or None,
         keep_their_hold=frozenset(
             row.id for row in handed_back
-            if date_left_by_a_move(row, ctx.calendar())
-            and row.occurs_on in {
-                placement.occurrence
-                for placement in read_definition(row.template, ctx).placements
-            }
+            if sits_off_its_definitions_account(row)
+            or (
+                date_left_by_a_move(row, ctx.calendar())
+                and row.occurs_on in {
+                    placement.occurrence
+                    for placement in read_definition(row.template, ctx).placements
+                }
+            )
         ),
+    )
+
+
+def sits_off_its_definitions_account(row: Transaction | Transfer) -> bool:
+    """Whether *row* is a bill's row on another account than its definition's.
+
+    **The one statement of it** (ruling **plan#3230**, task plan#3237), read by
+    every reader of the account half of a bill's edit: the rows the chooser
+    asks about (``routes._recurrence_account_question``), the rows the
+    engine's "move" moves and the deleted rows its "use" brings back on the
+    bill's account (``recurrence_engine._conflicts``), and the rows "use"
+    leaves held where the owner kept them (:attr:`UseRestore.keep_their_hold`).
+    It compares the two account COLUMNS, which an edit's write sets before any
+    relationship is refreshed.
+
+    **A transfer's row answers ``False``**: its definition names two accounts,
+    and task plan#3237 asks no account question of a transfer, so its "use"
+    is unchanged.
+
+    Args:
+        row: A row of the owner's.
+
+    Returns:
+        ``True`` for a :class:`~app.models.transaction.Transaction` naming a
+        definition whose account is not its own.
+    """
+    return (
+        isinstance(row, Transaction) and row.template is not None
+        and row.account_id != row.template.account_id
     )
 
 
@@ -911,6 +948,7 @@ __all__ = [
     "rows_held_where_they_sit",
     "rows_of",
     "scope_holding_nothing_back",
+    "sits_off_its_definitions_account",
     "stays_deleted_notice",
     "unarchive_scope",
     "unarchive_scope_on",

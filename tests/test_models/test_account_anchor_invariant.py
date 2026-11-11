@@ -341,12 +341,17 @@ _PRODUCTION_TREES = ("app", "scripts")
 #: rulings **R-IS** / **R-JN**).  The owner's declaration is
 #: ``stage_anchor_true_up`` (ruling **R-ES**: the owner's write lock, the
 #: R-EQ did-this-change compare and the shared log line are properties of
-#: that door); the bank's placement is ``record_statement``, which solves the
-#: day from the file's lines and writes the level naming the import, keyed to
-#: the file's own claim.  A third writer is what this gate exists to catch.
+#: that door); the bank's placement is ``record_parsed``, the ONE recording
+#: walk, which solves the day from the statement's lines and writes the level
+#: naming the import, keyed to the source's own claim.  It was
+#: ``record_statement`` until ruling **bank_import:R-BI30** (plan step
+#: ``bank_import:X-f6b-2``) split that door into the upload's reading and the
+#: walk every source shares, so the upload door and the bank feed's sync
+#: reach this one writer.  Two writers, one per kind of row, as before.  A
+#: third writer is what this gate exists to catch.
 _WRITERS = frozenset({
     ("app/services/anchor_service.py", "stage_anchor_true_up"),
-    ("app/services/statement_import/_record.py", "record_statement"),
+    ("app/services/statement_import/_record.py", "record_parsed"),
 })
 
 _MODEL = "AccountAnchorHistory"

@@ -572,8 +572,9 @@ def release_anchors_from(account_id: int, day: date, import_id: int) -> int:
     **An anchor is a conclusion drawn from the lines recorded at or before its
     own day, so a write that changes those lines takes the conclusion with
     it.**  Both doors that change them call this:
-    :func:`~._record.record_statement` with the earliest day it freshly
-    recorded, and :func:`~._undo.delete_import` with the earliest day whose
+    :func:`~._record.record_parsed`, the recording walk every source shares,
+    with the earliest day it freshly recorded, and
+    :func:`~._undo.delete_import` with the earliest day whose
     lines it is about to remove.  Which levels go is :func:`resting_on`'s
     answer over :func:`~._balance.standing_bank_levels`; this function only
     writes.

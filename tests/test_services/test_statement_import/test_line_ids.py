@@ -9,12 +9,14 @@ would mean a second line under a held id are refused, with a sentence, and
 write nothing; and the id is free again once every import showing its line
 is gone.
 
-**The file is a stand-in, the door is real.**  The one shipped adapter
+**The statement is built, the walk is real.**  The one shipped adapter
 (SECU's CSV) carries no id, so no CSV bytes can state one; each case that
-needs an id replaces the plan's parse with a :class:`ParsedStatement` stating
-it (``_plan.parse_statement``, monkeypatched for that one call) and runs
-everything after the parse -- the identity check, both id refusals, the
-reconciliation, the writer -- unchanged.  Two cases reach the pairing step
+needs an id hands a :class:`ParsedStatement` stating it to
+:func:`record_parsed`, the recording walk every source reaches (ruling
+**bank_import:R-BI30**), so everything after the read -- the identity check,
+both id refusals, the reconciliation, the writer -- runs unchanged.  Until
+that ruling split the door, no door took a parsed statement, and each case
+monkeypatched the plan's parse instead.  Two cases reach the pairing step
 directly, the allowance ``test_sightings`` takes, because the shape they
 grade (a line only ANOTHER source shows) needs a second source no file can
 name.
@@ -22,6 +24,7 @@ name.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 from decimal import Decimal
 
@@ -38,17 +41,17 @@ from app.models.statement_import import (
 )
 from app.services.statement_import import (
     ParsedStatement,
+    Provenance,
     StatementLine,
     StatementLineIdMoved,
     StatementLineIdsShareALine,
     bank_daily_movements,
     delete_import,
-    record_statement,
+    record_parsed,
 )
-# Pylint: protected-access -- the parse is replaced on the plan module, where
-# the door reads it, and the pairing step is a private collaboration of the
-# door; a test of the RULE reaches into both, the allowance ``test_sightings``
-# takes.
+# Pylint: protected-access -- the pairing step is a private collaboration of
+# the door, and a test of the RULE reaches into it, the allowance
+# ``test_sightings`` takes.
 from app.services.statement_import import _plan  # pylint: disable=protected-access
 from tests.test_services.test_statement_match._builders import (
     a_bank_line,
@@ -73,24 +76,24 @@ def _line(external_id, *, day=_OCT_8, amount=_COFFEE, description="COFFEE"):
     )
 
 
-def _record(monkeypatch, seed_user, lines, name="feed.dat"):
-    """Record *lines* through the door, as one file stating them.
+def _record(seed_user, lines, name="feed.dat"):
+    """Record *lines* through the recording walk, as one statement stating them.
 
-    The parse is the only thing replaced, and only for this call; the file
-    answers for the days its lines span, as a CSV export does.
+    The statement answers for the days its lines span, as a CSV export does.
     """
     days = [line.posted_on for line in lines]
-    parsed = ParsedStatement(
-        external_account_id=build.ACCOUNT_IDENTITY, lines=lines,
-        declared_start=min(days), declared_end=max(days),
+    return record_parsed(
+        seed_user["account"].id,
+        seed_user["user"].id,
+        Provenance(
+            source=_SECU, file_name=name,
+            file_digest=hashlib.sha256(name.encode()).hexdigest(),
+        ),
+        ParsedStatement(
+            external_account_id=build.ACCOUNT_IDENTITY, lines=lines,
+            declared_start=min(days), declared_end=max(days),
+        ),
     )
-    with monkeypatch.context() as patch:
-        patch.setattr(_plan, "parse_statement", lambda source, payload: parsed)
-        return record_statement(
-            account_id=seed_user["account"].id,
-            user_id=seed_user["user"].id,
-            source=_SECU, file_name=name, payload=name.encode(),
-        )
 
 
 def _undo(seed_user, outcome):
@@ -121,31 +124,31 @@ class TestTheWriterRecordsEachIdOnce:
     """``_record._source_id_of`` -- one row per id, on the line it names."""
 
     def test_a_fresh_lines_id_is_recorded_on_that_line(
-        self, app, db, seed_user, monkeypatch,
+        self, app, db, seed_user,
     ):
         """The fresh half: the line, its sighting, and its id."""
-        _record(monkeypatch, seed_user, [_line("TRN-881")])
+        _record(seed_user, [_line("TRN-881")])
 
         assert _lines(db) == [(_OCT_8, Decimal(_COFFEE))]
         assert _ids(db) == [("TRN-881", _OCT_8)]
 
     def test_a_re_import_under_the_same_id_writes_no_second_row(
-        self, app, db, seed_user, monkeypatch,
+        self, app, db, seed_user,
     ):
         """The held half paired by its id records a sighting and no id."""
-        _record(monkeypatch, seed_user, [_line("TRN-881")], name="one.dat")
-        again = _record(monkeypatch, seed_user, [_line("TRN-881")], name="two.dat")
+        _record(seed_user, [_line("TRN-881")], name="one.dat")
+        again = _record(seed_user, [_line("TRN-881")], name="two.dat")
 
         assert (again.line_count, again.recorded_count) == (1, 0)
         assert db.session.query(StatementLineSighting).count() == 2
         assert _ids(db) == [("TRN-881", _OCT_8)]
 
     def test_a_new_id_paired_by_WORDING_gives_the_line_a_second_id(
-        self, app, db, seed_user, monkeypatch,
+        self, app, db, seed_user,
     ):
         """The held half paired by wording records the id the file states for it."""
-        _record(monkeypatch, seed_user, [_line("TRN-881")], name="one.dat")
-        _record(monkeypatch, seed_user, [_line("TRN-999")], name="two.dat")
+        _record(seed_user, [_line("TRN-881")], name="one.dat")
+        _record(seed_user, [_line("TRN-999")], name="two.dat")
 
         assert _lines(db) == [(_OCT_8, Decimal(_COFFEE))]
         assert _ids(db) == [("TRN-881", _OCT_8), ("TRN-999", _OCT_8)]
@@ -155,7 +158,7 @@ class TestTheIdStaysWithItsLine:
     """Ruling **plan#2233**: undoing one import does not free an id another import's line keeps."""
 
     def test_a_re_dated_id_is_REFUSED_after_its_import_is_undone(
-        self, app, db, seed_user, monkeypatch,
+        self, app, db, seed_user,
     ):
         """The ruling's own example, end to end.
 
@@ -176,7 +179,7 @@ class TestTheIdStaysWithItsLine:
         staged, the allowance the pairing cases below take; the record, the
         undo and the refusal are the real doors.
         """
-        first = _record(monkeypatch, seed_user, [_line("TRN-881")])
+        first = _record(seed_user, [_line("TRN-881")])
         theirs = an_import(seed_user)
         theirs.source_id = _another_source(db)
         a_sighting(
@@ -191,7 +194,7 @@ class TestTheIdStaysWithItsLine:
         } == {theirs.source_id}
 
         with pytest.raises(StatementLineIdMoved) as caught:
-            _record(monkeypatch, seed_user, [_line("TRN-881", day=_OCT_9)])
+            _record(seed_user, [_line("TRN-881", day=_OCT_9)])
 
         assert caught.value.recorded == (_OCT_8, Decimal(_COFFEE))
         assert "delete every import that shows it" in str(caught.value)
@@ -205,7 +208,7 @@ class TestTheIdStaysWithItsLine:
         assert _lines(db) == [(_OCT_8, Decimal(_COFFEE))]
 
     def test_the_id_is_FREE_once_every_import_showing_its_line_is_undone(
-        self, app, db, seed_user, monkeypatch,
+        self, app, db, seed_user,
     ):
         """When no other import shows the line, the undo frees the id with it.
 
@@ -213,12 +216,12 @@ class TestTheIdStaysWithItsLine:
         together, and the next file stating the id on another day records it
         fresh.
         """
-        first = _record(monkeypatch, seed_user, [_line("TRN-881")])
+        first = _record(seed_user, [_line("TRN-881")])
         _undo(seed_user, first)
         assert _lines(db) == []
         assert _ids(db) == []
 
-        _record(monkeypatch, seed_user, [_line("TRN-881", day=_OCT_9)])
+        _record(seed_user, [_line("TRN-881", day=_OCT_9)])
 
         assert _lines(db) == [(_OCT_9, Decimal(_COFFEE))]
         assert _ids(db) == [("TRN-881", _OCT_9)]
@@ -321,7 +324,7 @@ class TestTwoIdsOneLine:
     """``StatementLineIdsShareALine`` -- the other shape meaning a second line under a held id."""
 
     def test_a_file_stating_both_ids_of_one_line_as_two_lines_is_refused(
-        self, app, db, seed_user, monkeypatch,
+        self, app, db, seed_user,
     ):
         """Refused with a sentence, and nothing is written.
 
@@ -333,13 +336,12 @@ class TestTwoIdsOneLine:
         ``TRN-881``, and this recorded the second coffee silently, with
         ``TRN-999`` on two lines.
         """
-        _record(monkeypatch, seed_user, [_line("TRN-881")], name="one.dat")
-        _record(monkeypatch, seed_user, [_line("TRN-999")], name="two.dat")
+        _record(seed_user, [_line("TRN-881")], name="one.dat")
+        _record(seed_user, [_line("TRN-999")], name="two.dat")
         sightings = db.session.query(StatementLineSighting).count()
 
         with pytest.raises(StatementLineIdsShareALine) as caught:
-            _record(
-                monkeypatch, seed_user,
+            _record(seed_user,
                 [_line("TRN-881"), _line("TRN-999")], name="three.dat",
             )
 

@@ -18,7 +18,8 @@ The public surface, and what each piece is for:
 
 * :class:`StatementLine` -- the ONE normalized line shape every adapter
   produces, so everything downstream of a parser is source-independent.
-* :func:`supported_sources` / :func:`parse_statement` -- the adapter registry.
+* :func:`supported_sources` / :func:`parse_statement` -- the FILE adapter
+  registry: what the upload form offers and how it reads what was uploaded.
 * :func:`group_key` / :func:`pair_by_statement` / :func:`fresh_ordinals` -- the
   identity rule, which needs no id of the source's own.  A line's STORED key is
   ``(account, posted_on, amount, ordinal)``; the ordinal is a SURROGATE this app
@@ -27,14 +28,18 @@ The public surface, and what each piece is for:
   ``bank_import:X-f6a-4``).
 * :func:`verify_running_balance` -- the self-check a source with a running
   balance affords, and the reason the CSV was chosen over the OFX.
-* :func:`plan_statement` -- that door's DECISION, every refusal included,
-  returned as a :class:`StatementPlan` and read without performing it: what a
-  file WOULD add, for a reader deriving the reconcile's acts on a copy before
-  any of them (plan step ``balance:X-bk-2``, plan#1192).
-* :func:`record_statement` -- the one write door, performing that plan and
-  returning :class:`ImportOutcome`.  A placed figure is a LEVEL row naming the import
-  (plan step ``balance:X-bj-1``), and :func:`bank_levels` is the one read of
-  which levels stand and which a release has withdrawn.
+* :func:`plan_statement` -- the upload door's DECISION, every refusal
+  included, returned as a :class:`StatementPlan` and read without performing
+  it: what a file WOULD add, for a reader deriving the reconcile's acts on a
+  copy before any of them (plan step ``balance:X-bk-2``, plan#1192).
+* :func:`record_statement` -- the UPLOAD door: read the file, then
+  :func:`record_parsed`, the ONE recording walk, which takes what a source
+  stated (a :class:`ParsedStatement`) and the act's :class:`Provenance`,
+  performs the decision and returns :class:`ImportOutcome` (ruling
+  **R-BI30**: reading is the upload's, recording is everyone's).  A placed
+  figure is a LEVEL row naming the import (plan step ``balance:X-bj-1``), and
+  :func:`bank_levels` is the one read of which levels stand and which a
+  release has withdrawn.
 * :class:`StatementImportError` and its subclasses -- every refusal the
   import door can raise, each refusing the whole file; a route catches the
   base and renders its message.  They stood in :mod:`app.exceptions` until
@@ -119,7 +124,7 @@ from ._reads import (
     recorded_span,
 )
 from ._plan import StatementPlan, plan_statement
-from ._record import ImportOutcome, record_statement
+from ._record import ImportOutcome, Provenance, record_parsed, record_statement
 from ._undo import ImportRemoval, delete_import
 
 __all__ = [
@@ -135,6 +140,7 @@ __all__ = [
     "ImportRemovalPreview",
     "ImportRemoval",
     "KeyedLine",
+    "Provenance",
     "RecordedRun",
     "RecordedSpan",
     "SourceOption",
@@ -166,6 +172,7 @@ __all__ = [
     "ParsedStatement",
     "parse_statement",
     "recent_lines",
+    "record_parsed",
     "record_statement",
     "recorded_opening_before",
     "record_identity",

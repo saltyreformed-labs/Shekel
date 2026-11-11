@@ -1,10 +1,19 @@
-"""The ONE door that records what a statement said.
+"""The ONE walk that records what a statement said, behind two doors.
 
-Everything it can refuse, it refuses BEFORE it INSERTS a row: the file is
-parsed, its running-balance chain verified, its account identity reconciled and
+Everything it can refuse, it refuses BEFORE it INSERTS a row: the statement is
+read, its running-balance chain verified, its account identity reconciled and
 its lines compared against what is already recorded, and only then is anything
 staged.  So a refused import writes no new line without depending on the
 rollback.
+
+**Reading is the upload's; recording is everyone's** (ruling **R-BI30**, plan
+step ``bank_import:X-f6b-2``).  :func:`record_statement` reads an uploaded
+file with its source's adapter and hands what it stated to
+:func:`record_parsed`, the walk from the running-balance check on; the bank
+feed's sync hands the same walk what its reader read off Bridge's answer.
+One recording walk, and a source that is not a file needs no place in the
+file parsers' table to reach it: the upload form offers what that table
+holds, so nothing has to keep the feed off the form.
 
 **The claim is about the SESSION too, and it was not until plan step
 ``bank_import:X-gd-1``.**  The reconciliation walks group by group, and the
@@ -23,9 +32,9 @@ is about to be refused -- and the older claim is what it restores.
 **The DECISION is another module's** (:mod:`._plan`, plan step
 ``balance:X-bk-2``, plan#1192): every refusal, the pairing of each line
 against what its source already sighted, and the balance's resolution,
-returned as a :class:`~._plan.StatementPlan` before anything is staged -- the
-order the opening paragraph states, made a module boundary.  This one
-performs the plan.
+returned as a :class:`~._plan.StatementPlan` by :func:`~._plan.plan_parsed`
+before anything is staged -- the order the opening paragraph states, made a
+module boundary.  This one performs the plan.
 
 **A re-import writes NOTHING onto a recorded line** (plan step
 ``bank_import:X-f6b-1b``, ruling **R-BI16**).  Every fact a source states
@@ -69,11 +78,12 @@ from app.models.statement_import import (
     StatementLineSighting,
 )
 
+from ._adapters import parse_statement
 from ._anchor import ImportedBalance, release_anchors_from
 from ._identity import record_identity
-from ._line import KeyedLine, StatementLine
+from ._line import KeyedLine, ParsedStatement, StatementLine
 from ._merchants import resolve_merchants
-from ._plan import _Reconciled, plan_statement
+from ._plan import _Reconciled, plan_parsed
 
 
 @dataclass(frozen=True)
@@ -130,6 +140,32 @@ class ImportOutcome:
         arithmetic itself is a caller that can do it backwards.
         """
         return self.line_count - self.recorded_count
+
+
+@dataclass(frozen=True)
+class Provenance:
+    """Where an import ACT came from, as ``budget.statement_imports`` records it.
+
+    Ruling **R-BI30** (plan step ``bank_import:X-f6b-2``): the recording walk
+    takes what a source STATED -- a :class:`~._line.ParsedStatement` -- and
+    the source and provenance of the act.  The three facts are ONE value
+    rather than three more parameters, because a public door taking six is
+    the shape this project answers with a parameter object.  The upload door
+    builds it from the file; the feed's sync builds one per run it records.
+
+    Attributes:
+        source: Which adapter read the statement, or the bank feed.
+        file_name: What the act is called -- the uploaded file's own name, or
+            the feed's name for the window it recorded.  Cut to the column
+            at the row, as the uploaded name always was.
+        file_digest: SHA-256 of the bytes the source answered, hex, so a
+            re-import of the identical answer is visible as an identical
+            digest.
+    """
+
+    source: StatementSourceEnum
+    file_name: str
+    file_digest: str
 
 
 def _merchant_words(reconciled: _Reconciled) -> "set[str]":
@@ -334,16 +370,13 @@ def record_statement(
     file_name: str,
     payload: bytes,
 ) -> ImportOutcome:
-    """Record what a statement said, once.
+    """Record what an UPLOADED statement said, once.
 
-    The whole import: its decision, every refusal included, is
-    :func:`plan_statement`'s, and only after it returns does anything get
-    staged -- this performs that plan.
-
-    **Re-importing an overlapping span records a SIGHTING of every line it
-    already holds and records the ACT** (ruling **R-BI10**).  The line stays
-    one line; this import's window now also vouches for its days; and the
-    receipt's ``recorded_count`` reports honestly that it added nothing.
+    **The upload door, and only the reading is its own** (ruling **R-BI30**,
+    plan step ``bank_import:X-f6b-2``): the file is read by its source's
+    adapter, and everything after that is :func:`record_parsed`, the ONE
+    recording walk.  This door's signature is the one the statements route
+    calls.
 
     Args:
         account_id: The account the user chose.  The CALLER has already proven
@@ -372,8 +405,74 @@ def record_statement(
             this source holds on one.
         StatementLineConflict: This source restates a line's wording.
     """
-    plan = plan_statement(account_id, user_id, source, payload)
-    parsed, source_id = plan.parsed, plan.source_id
+    parsed = parse_statement(source, payload)
+    return record_parsed(
+        account_id,
+        user_id,
+        Provenance(
+            source=source,
+            file_name=file_name,
+            file_digest=hashlib.sha256(payload).hexdigest(),
+        ),
+        parsed,
+    )
+
+
+def record_parsed(
+    account_id: int,
+    user_id: int,
+    provenance: Provenance,
+    parsed: ParsedStatement,
+) -> ImportOutcome:
+    """Record what a source STATED, once.
+
+    The recording walk: its decision, every refusal included, is
+    :func:`~._plan.plan_parsed`'s, and only after it returns does anything
+    get staged -- this performs that plan.  Every source reaches here -- the
+    upload door through :func:`record_statement`, the bank feed's sync with
+    what its reader read off Bridge's answer -- so the record is written one
+    way (ruling **R-BI30**).
+
+    **Re-importing an overlapping span records a SIGHTING of every line it
+    already holds and records the ACT** (ruling **R-BI10**).  The line stays
+    one line; this import's window now also vouches for its days; and the
+    receipt's ``recorded_count`` reports honestly that it added nothing.
+
+    **A statement with NO line is recorded**: the act, its declared window
+    (which is what coverage reads, ruling **R-BAL71**) and its claim, and the
+    level when the claim is placed.  The plan is total over an empty list
+    (:func:`~._plan.plan_parsed` says how), the merchant pass and the
+    staging write nothing, the release below is guarded by the fresh half,
+    and the receipt reads ``(0, 0)`` off the same aggregate as always.
+
+    Args:
+        account_id: The account the statement is recorded into.  Ownership
+            is the caller's to have proven, as :func:`record_statement`
+            says.
+        user_id: Who performed the import.
+        provenance: The source, and the act's name and digest.
+        parsed: What the source stated: its account, its lines in
+            CHRONOLOGICAL order, the window it declares and its claim.
+
+    Returns:
+        The :class:`ImportOutcome`.
+
+    Raises:
+        StatementParseError: The statement states one of its own ids twice,
+            or a running balance on only some of its lines.
+        StatementIntegrityError: Its running balances do not follow from its
+            own lines.
+        StatementBalanceUnexplained: It states a balance that no day it
+            covers reconciles with what is already known.
+        StatementAccountMismatch: It is for a different account.
+        StatementLineIdMoved: This source restates a line's day or amount
+            under an id it already holds.
+        StatementLineIdsShareALine: It states, as two lines, two ids this
+            source holds on one.
+        StatementLineConflict: This source restates a line's wording.
+    """
+    plan = plan_parsed(account_id, user_id, provenance.source, parsed)
+    source_id = plan.source_id
     reconciled, balance = plan.reconciled, plan.balance
 
     # Every refusal is now behind us, so this is the first write.
@@ -386,8 +485,8 @@ def record_statement(
         account_id=account_id,
         user_id=user_id,
         source_id=source_id,
-        file_name=file_name[:255],
-        file_digest=hashlib.sha256(payload).hexdigest(),
+        file_name=provenance.file_name[:255],
+        file_digest=provenance.file_digest,
         declared_start=parsed.declared_start,
         declared_end=parsed.declared_end,
         # The bank's OWN claim, verbatim.  The claim and the day it is FOR

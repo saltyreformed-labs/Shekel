@@ -101,14 +101,19 @@ class TestTheFeedSourceRow:
         assert isinstance(_feed_source_id(), int)
 
     def test_the_upload_form_neither_offers_nor_accepts_it(self, app, db):
-        """FIRING CONTROL for ``available_sources``' intersection, and THE
-        ALARM for the sync leaf: the row exists, no upload parser reads it,
-        so the form must leave it out AND the upload schema must refuse it
-        submitted by hand.  Both read ``_adapters._PARSERS``; the day a feed
-        reader is registered there, this fails, and the right repair is the
-        registry's file-source / feed-source distinction, never removing
-        this test.  Asserted against the row's presence in the same test, so
-        it cannot pass merely because the seed is missing.
+        """FIRING CONTROL for ``available_sources``' intersection: the row
+        exists, no upload parser reads it, so the form must leave it out AND
+        the upload schema must refuse it submitted by hand.  Both read
+        ``_adapters._PARSERS``, the FILE parsers.  It was the alarm for the
+        sync leaf, and ruling **R-BI30** answered it structurally rather than
+        with a file-source / feed-source flag on the table: the recording
+        walk takes what a source stated (``record_parsed``), so the feed's
+        reader takes Bridge's answer rather than bytes and has no entry in
+        the table and needs none.  This test stays as the pin of a state no
+        table can now reach; the day a feed reader is registered in
+        ``_PARSERS``, it fails, and the repair is to take it out again, never
+        to remove this test.  Asserted against the row's presence in the same
+        test, so it cannot pass merely because the seed is missing.
         """
         names = {
             name for (name,) in db.session.execute(

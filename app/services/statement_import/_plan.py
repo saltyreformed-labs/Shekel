@@ -4,10 +4,20 @@ The first half of the record door, split from :mod:`._record` by plan step
 ``balance:X-bk-2`` (plan#1192, task plan#2372) when the door's decision became
 a public read of its own (:func:`plan_statement`) and the one module stood
 past pylint's 1,000-line ceiling.  The seam is the door's own: everything
-here READS, and :func:`~._record.record_statement` writes only after
-:func:`plan_statement` has returned, so a refused import writes nothing and
+here READS, and :func:`~._record.record_parsed` writes only after
+:func:`plan_parsed` has returned, so a refused import writes nothing and
 a caller that only needs the decision -- the reconcile's act sheet, derived on
 a production copy before any act -- performs none of the writes.
+
+**The decision takes what a source STATED, and reading the bytes is the
+upload's** (ruling **R-BI30**, plan step ``bank_import:X-f6b-2``).
+:func:`plan_parsed` decides over a :class:`~._line.ParsedStatement`, however
+it was read; :func:`plan_statement` is the upload's read of the same
+decision, the file read by its source's adapter first.  The bank feed's
+reader reads Bridge's answer, not a file, and reaches
+the same decision through :func:`~._record.record_parsed` -- one decision
+for every source, and no source that is not a file needs a place in the
+file parsers' table to reach it.
 
 **What a file states about a line is that SOURCE's sighting of it** (plan
 step ``bank_import:X-f6b-1``, ruling **R-BI10**).  A line is the bank's fact
@@ -603,16 +613,18 @@ class StatementPlan:
     """What importing one file WOULD do, decided before anything is written.
 
     **Every refusal the import can raise is behind it**, so it is the whole
-    of the import's DECISION: :func:`record_statement` performs exactly the
-    plan :func:`plan_statement` returns, and a reader that must know what an
-    import would add without performing it -- the reconcile's act sheet (plan
-    step ``balance:X-bk-2``, plan#1192), which is derived on a copy before
-    any act -- reads the same plan.  So "which lines would this file add" has
-    one producer, and the sheet does not restate the import's four-step
-    pairing (:func:`_pair_group`) to guess at it.
+    of the import's DECISION: :func:`~._record.record_parsed` performs
+    exactly the plan :func:`plan_parsed` returns, and a reader that must know
+    what an import would add without performing it -- the reconcile's act
+    sheet (plan step ``balance:X-bk-2``, plan#1192), which is derived on a
+    copy before any act -- reads the same plan.  So "which lines would this
+    file add" has one producer, and the sheet does not restate the import's
+    four-step pairing (:func:`_pair_group`) to guess at it.
 
     Attributes:
-        parsed: What the file states (:func:`~._adapters.parse_statement`).
+        parsed: What the source states -- a file read by
+            :func:`~._adapters.parse_statement`, or a run the bank feed's
+            reader read off Bridge's answer.
         source_id: Its ``ref.statement_sources`` row.
         identity_is_new: Whether the account's identity at this source is
             still to be RECORDED -- a first import from it.
@@ -640,20 +652,16 @@ def plan_statement(
     source: StatementSourceEnum,
     payload: bytes,
 ) -> StatementPlan:
-    """Decide what importing *payload* into *account_id* would do, writing nothing.
+    """Decide what importing the file *payload* into *account_id* would do, writing nothing.
 
-    The import's refusals, in the order they have to happen: parse, verify
-    the file against itself, reconcile the account identity, refuse a
-    repeated, moved or line-sharing id, compare against what is already
-    recorded, and resolve the file's balance -- an unexplained balance
-    refuses the file rather than being discovered after its lines are
-    staged.  Every step
-    reads; none stages a row, so the session is exactly as it was however
-    this returns or raises.
+    **The upload's read of the decision** (ruling **R-BI30**): the file is
+    read by *source*'s adapter, and everything after that is
+    :func:`plan_parsed`'s, the one decision every source shares.
 
     Args:
         account_id: The account the file is for.  The caller has already
-            proven *user_id* owns it, as :func:`record_statement`'s has.
+            proven *user_id* owns it, as
+            :func:`~._record.record_statement`'s has.
         user_id: Its owner.
         source: Which adapter reads the bytes.
         payload: The file's raw bytes.
@@ -675,7 +683,62 @@ def plan_statement(
             this source holds on one.
         StatementLineConflict: This source restates a line's wording.
     """
-    parsed = parse_statement(source, payload)
+    return plan_parsed(
+        account_id, user_id, source, parse_statement(source, payload),
+    )
+
+
+def plan_parsed(
+    account_id: int,
+    user_id: int,
+    source: StatementSourceEnum,
+    parsed: ParsedStatement,
+) -> StatementPlan:
+    """Decide what recording what *source* STATED into *account_id* would do, writing nothing.
+
+    The import's refusals after the read, in the order they have to happen:
+    verify the statement against itself, reconcile the account identity,
+    refuse a repeated, moved or line-sharing id, compare against what is
+    already recorded, and resolve the statement's balance -- an unexplained
+    balance refuses the statement rather than being discovered after its
+    lines are staged.  Every step reads; none stages a row, so the session is
+    exactly as it was however this returns or raises.
+
+    **A statement with NO line is decided like any other** (ruling
+    **R-BAL71**: coverage is the declared window, so a feed sync over a quiet
+    window covers what it asked for and may state a balance).  The CSV
+    adapter refuses an empty file, so no upload reaches this arm; every step
+    is total over an empty list -- the chain and the id checks have nothing
+    to walk, :func:`_reconcile` decides an empty partition, and
+    :func:`~._anchor.resolve_anchor` places a stated balance on a candidate
+    day without reading a line.
+
+    Args:
+        account_id: The account the statement is for.  The caller has
+            already proven *user_id* owns it.
+        user_id: Its owner.
+        source: The source that stated it -- the adapter that read a file,
+            or the bank feed.
+        parsed: What the source stated: its account, its lines in
+            CHRONOLOGICAL order, the window it declares and its claim.
+
+    Returns:
+        The :class:`StatementPlan`.
+
+    Raises:
+        StatementParseError: The statement states one of its own ids twice,
+            or a running balance on only some of its lines.
+        StatementIntegrityError: Its running balances do not follow from its
+            own lines.
+        StatementBalanceUnexplained: It states a balance that no day it
+            covers reconciles with what is already known.
+        StatementAccountMismatch: It is for a different account.
+        StatementLineIdMoved: This source restates a line's day or amount
+            under an id it already holds.
+        StatementLineIdsShareALine: It states, as two lines, two ids this
+            source holds on one.
+        StatementLineConflict: This source restates a line's wording.
+    """
     verify_running_balance(parsed.lines)
 
     source_id = ref_cache.statement_source_id(source)

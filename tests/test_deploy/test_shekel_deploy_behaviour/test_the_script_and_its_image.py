@@ -1,6 +1,7 @@
 """The script itself: its runs inherit no target from the test's environment, it is tracked in the
-repository, it finds its running-check through production's symlinks, it verifies only main's
-build in the new home, and it resolves the :latest tag to its first digest.
+repository, it names the migrate service as the compose file does, it finds its running-check
+through production's symlinks, it verifies only main's build in the new home, and it resolves the
+:latest tag to its first digest.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ import re
 import shutil
 
 from tests._repo_root import REPO_ROOT
+from tests.test_deploy._compose import service
 
 from ._helpers import _DEPLOY_SCRIPT, _OLD, _NEW, _said, _NO_MIGRATIONS, _BUILT_BY
 
@@ -182,6 +184,27 @@ class TestOnlyMainsBuildInTheNewHomeVerifies:
         assert {
             san: re.search(regexp, san) is not None for san in cases
         } == cases, regexp
+
+
+class TestTheMigrateServiceIsTheComposeFiles:
+    """Card plan#2166: the migrate service, as the script names it, is ``docker-compose.yml``'s.
+
+    The script stops the migrate container by name, saves its log, and asks
+    the previous image for the entrypoint that service runs.  Each default is
+    a second spelling of a fact the compose file states, so it is held to it.
+    """
+
+    def test_the_container_and_the_entrypoint_are_the_compose_file_s(self):
+        """``MIGRATE_CONTAINER`` and ``MIGRATE_ENTRYPOINT`` default to the service's own."""
+        defaults = dict(re.findall(
+            r'^(MIGRATE_CONTAINER|MIGRATE_ENTRYPOINT)="\$\{SHEKEL_\w+:-([^}]+)\}"$',
+            _DEPLOY_SCRIPT.read_text(encoding="utf-8"), re.MULTILINE,
+        ))
+        migrate = service("migrate")
+        assert defaults == {
+            "MIGRATE_CONTAINER": migrate["container_name"],
+            "MIGRATE_ENTRYPOINT": migrate["entrypoint"][0],
+        }, defaults
 
 
 class TestTheRunningCheckIsReadFromTheScriptsCheckout:

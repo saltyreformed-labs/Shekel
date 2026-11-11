@@ -1,6 +1,6 @@
-"""The pre-flight's classification: a migration-bearing release named, a target older than the
-database refused up front, an empty listing refused, and a listing larger than a pipe read whole
-by each caller.
+"""The pre-flight's classification: a migration-bearing release named, a previous image the
+compose files cannot run named, a target older than the database refused up front, an empty
+listing refused, and a listing larger than a pipe read whole by each caller.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from ._helpers import (
     _refusal,
     _NEW_SHORT,
     _PAST_A_PIPE,
+    _NO_MIGRATIONS,
+    _as_read,
 )
 
 
@@ -101,6 +103,53 @@ class TestAListingLargerThanAPipeIsReadWhole:
         assert "cannot resolve that revision either" not in refusal, (
             _said(result, calls)
         )
+
+
+class TestThePreflightAsksWhetherThePreviousImageRunsHere:
+    """Card plan#2166: a re-pin is a recovery only under compose files the image can run.
+
+    The migrate service runs ``scripts/owner_entrypoint.sh`` from the app's
+    image, which an image built before the card does not hold, so the
+    pre-flight asks the CURRENT image for it and the dry run reports the
+    answer.  The first release of the card is the case it is absent.
+    """
+
+    def test_an_image_that_runs_here_keeps_the_rollback_claim(self, stack):
+        """The probe answers yes: the ordinary claim, and no other."""
+        result = stack.run(dry_run=True, **_NO_MIGRATIONS)
+        output = _as_read(result.stdout + result.stderr)
+        assert result.returncode == 0, output
+        assert "runs under the compose files in place, so the rollback applies as usual" in (
+            output)
+        assert "CANNOT run" not in output
+
+    def test_an_image_that_cannot_run_here_is_named_and_no_rollback_claimed(
+        self, stack,
+    ):
+        """The probe answers no: the dry run says a failure is refused, and changes nothing."""
+        result = stack.run(dry_run=True, old_layout_rc="1", **_NO_MIGRATIONS)
+        output = _as_read(result.stdout + result.stderr)
+        assert result.returncode == 0, output
+        assert (
+            f"{_OLD[7:19]} CANNOT run under the compose files in place: their migrate "
+            "service runs /home/shekel/app/scripts/owner_entrypoint.sh" in output
+        ), output
+        assert "A failure is NOT rolled back by re-pinning it" in output, output
+        assert "rollback applies" not in output, output
+        assert stack.pin == _OLD
+        assert stack.dumps == []
+
+    def test_a_probe_docker_cannot_answer_stops_before_the_dump(self, stack):
+        """docker fails the probe itself: no guess, no dump, no pin written."""
+        result = stack.run(old_layout_rc="125", **_NO_MIGRATIONS)
+        calls = stack.invocations
+        output = _as_read(result.stdout + result.stderr)
+        assert result.returncode == 1, _said(result, calls)
+        assert "could not ask the CURRENT image" in output, _said(result, calls)
+        assert "docker run exited 125" in output, _said(result, calls)
+        assert stack.pin == _OLD, _said(result, calls)
+        assert stack.dumps == [], _said(result, calls)
+        assert not any(c.startswith("compose") for c in calls), _said(result, calls)
 
 
 class TestTheDowngradeCaseTheOldDesignCalledSAFE:

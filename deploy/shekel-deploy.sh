@@ -46,11 +46,19 @@
 # moment it is saved.  Check out the revision you mean to deploy from.
 #
 # ── F-8, and what this script does about it ────────────────────────
-# Plan step R-F8, ruling R-R14.  Migrations run at entrypoint step 3, BEFORE
-# the health check, so a failed deploy can leave the database stamped at a
-# revision the other image's Alembic tree does not contain.  That image then
-# dies at step 3 too, and re-pinning it turns one dead container into two --
-# reproduced on revision d4a71f6e30bb as `CommandError: Can't locate revision`.
+# Plan step R-F8, ruling R-R14.  Migrations run at step 3 of the deploy
+# (scripts/deploy.sh), BEFORE the health check, so a failed deploy can leave
+# the database stamped at a revision the other image's Alembic tree does not
+# contain.  That image's deploy then dies at step 3 too, and re-pinning it
+# turns one dead container into two -- reproduced on revision d4a71f6e30bb as
+# `CommandError: Can't locate revision`.
+#
+# Since card plan#2166 the deploy runs in the MIGRATE service, a one-shot from
+# the app's image that `docker compose up -d app` runs, and waits on, before it
+# starts the app: a deploy that fails fails the `up`, leaving the app's new
+# container created and not started.  The app's own entrypoint runs no
+# migration.  So "step 3" below is the migrate container's, and its log is the
+# one that says why a deploy failed.
 #
 # THE QUESTION IS NOT "does this release add migrations".  That is directional,
 # and it gets the rollback case backwards: deploying an OLDER image adds
@@ -68,15 +76,15 @@
 #     leaves the stamp untouched, so it still rolls back automatically -- 6 of
 #     the last 10 releases were pure digest reverts.
 #
-# Since plan step balance:X-cv, entrypoint step 3 is ONE transaction: the
+# Since plan step balance:X-cv, the deploy's step 3 is ONE transaction: the
 # migrations, the reference seed, the three deploy hooks and the audit-trigger
 # check in `scripts/init_database.py` commit together or not at all.  So a
 # failure INSIDE step 3 -- a migration that errors, a hook that refuses, a
 # missing audit trigger -- leaves the stamp where it was, and this
 # script re-pins the previous image even for a migration-bearing release.
-# Only a failure AFTER step 3 has committed (a later entrypoint step, or the
-# health check) leaves the new stamp, and that is the case the refusal still
-# meets.  A re-pin is not a recovery when the fault is in something both
+# Only a failure AFTER step 3 has committed (the deploy's step 4, the first
+# user's seed, or the health check) leaves the new stamp, and that is the
+# case the refusal still meets.  A re-pin is not a recovery when the fault is in something both
 # images meet: a missing audit trigger is counted by every image since C-13,
 # so the previous image refuses the same database and this script ends
 # "rollback container also unhealthy" (docs/runbook.md s.2.3 names the repair).
@@ -84,9 +92,15 @@
 # after the target image's container has been STOPPED, and FOR SHARE, so a
 # step 3 still in flight cannot commit behind the read
 # (`stop_failed_container`, `db_stamped_revisions`).  Before
-# re-pinning, the failed container's log is saved beside the dump, because
-# re-pinning recreates the container and `docker logs` then shows the previous
-# image instead (`save_failed_container_log`).
+# re-pinning, the failed deploy's and app's logs are saved beside the dump,
+# because re-pinning recreates both containers and `docker logs` then shows
+# the previous image instead (`save_failed_container_log`).
+#
+# A re-pin is a recovery only when the previous image can run under the
+# compose files in place.  The first release of card plan#2166 is the case it
+# cannot: an image built before it has no scripts/owner_entrypoint.sh, which
+# the migrate service runs.  The pre-flight asks, and a failure then refuses
+# rather than re-pins (`image_runs_this_layout`, `refuse_layout`).
 #
 # Shekel's prod image is pinned in /opt/docker/shekel/.env via
 # SHEKEL_IMAGE_DIGEST (the compose override consumes it as
@@ -126,6 +140,11 @@ SHEKEL_DIR="${SHEKEL_DIR:-/opt/docker/shekel}"
 ENV_FILE="${SHEKEL_ENV_FILE:-${SHEKEL_DIR}/.env}"
 COMPOSE_SERVICE="${SHEKEL_COMPOSE_SERVICE:-app}"
 CONTAINER_NAME="${SHEKEL_CONTAINER_NAME:-shekel-prod-app}"
+# The migrate service's container (its container_name in docker-compose.yml),
+# where the deploy runs, and the entrypoint that service runs, read from the
+# image by the pre-flight.
+MIGRATE_CONTAINER="${SHEKEL_MIGRATE_CONTAINER:-shekel-prod-migrate}"
+MIGRATE_ENTRYPOINT="${SHEKEL_MIGRATE_ENTRYPOINT:-/home/shekel/app/scripts/owner_entrypoint.sh}"
 IMAGE_REPO="${SHEKEL_IMAGE_REPO:-ghcr.io/saltyreformed-labs/shekel}"
 MOVING_TAG="${SHEKEL_MOVING_TAG:-latest}"
 
@@ -312,6 +331,31 @@ image_listing_or_die() {
     printf '%s\n' "$listing"
 }
 
+image_runs_this_layout() {
+    # 0 when the image holds the migrate service's entrypoint, so it can run
+    # under the compose files in place; 1 when it does not.  The migrate
+    # service runs MIGRATE_ENTRYPOINT from the app's image (card plan#2166),
+    # and an image built before that card has none: its migrate container
+    # cannot start, so its `up` fails and its app is never started.
+    #
+    # Run as the listing is, with the entrypoint replaced, so nothing boots.
+    # `test` answers 1 for a file that is absent or not executable; any other
+    # status is docker's own (125 from the daemon, 126 or 127 for the shell)
+    # and answers nothing, so it stops the run as a failed listing does.
+    local digest="$1" role="$2" status=0
+    docker run --rm --entrypoint /bin/sh "${IMAGE_REPO}@${digest}" -c \
+        "test -x '${MIGRATE_ENTRYPOINT}'" || status=$?
+    case "$status" in
+        0) return 0 ;;
+        1) return 1 ;;
+        *)
+            die "could not ask the ${role} image (${digest}) whether it holds
+   ${MIGRATE_ENTRYPOINT} (docker run exited ${status}).  Whether a failure can
+   be rolled back rests on that answer, so this script will not guess it."
+            ;;
+    esac
+}
+
 db_stamped_revisions() {
     # Echo the Alembic revision(s) the database is currently stamped at.
     # This row is the authority: `CommandError: Can't locate revision` names
@@ -399,10 +443,21 @@ preflight_migrations() {
     # shellcheck disable=SC2310 ## boolean predicate, failure is the branch.
     if ! image_resolves_revisions "$NEW_MIGRATIONS" "$STAMPED_REVISIONS"; then
         die "the TARGET image cannot resolve the revision this database is
-   stamped at, so it would die at entrypoint step 3 exactly as the previous
-   image does in finding F-8.  This is what deploying an image OLDER than the
-   database looks like.  A genuine downgrade means restoring a dump taken at
-   or before that revision FIRST, then deploying this digest."
+   stamped at, so its deploy would die at step 3, in the migrate service,
+   exactly as the previous image does in finding F-8.  This is what deploying
+   an image OLDER than the database looks like.  A genuine downgrade means
+   restoring a dump taken at or before that revision FIRST, then deploying
+   this digest."
+    fi
+
+    # Whether a re-pin of the previous image could bring anything up under
+    # the compose files in place: asked here, before anything is written, so
+    # the dry-run reports it and a failure is never met by a doomed re-pin.
+    # shellcheck disable=SC2310 ## boolean predicate; see image_listing_or_die.
+    if image_runs_this_layout "$old" "CURRENT"; then
+        OLD_RUNS_HERE=true
+    else
+        OLD_RUNS_HERE=false
     fi
 }
 
@@ -430,7 +485,23 @@ stop_failed_container() {
     # refuses.  Stated, not closed: a failure of this one inspect that the
     # daemon recovers from before the read skips the stop, and that read is
     # then as final as every read was before X-cv.
+    #
+    # The migrate container first.  Since card plan#2166 the deploy, step 3
+    # with it, runs there, and a `compose up` that failed with the deploy
+    # still running leaves it running.  A one-shot that is running is inside
+    # a deploy, whatever image it runs, so it is stopped then; it runs
+    # `restart: "no"`, so the stop holds.  One that has exited can commit
+    # nothing and is left as it is, its log intact.
     local running target
+    # shellcheck disable=SC2310 ## boolean predicate; see image_listing_or_die.
+    if container_running "$MIGRATE_CONTAINER"; then
+        log "stopping ${MIGRATE_CONTAINER}, still running the deploy, so the stamp read is final ..."
+        if ! docker stop "$MIGRATE_CONTAINER" >/dev/null; then
+            log "could not stop ${MIGRATE_CONTAINER}."
+            UNSTOPPED="$MIGRATE_CONTAINER"
+            return 1
+        fi
+    fi
     running=$(docker inspect --format '{{.Image}}' "$CONTAINER_NAME" 2>/dev/null || true)
     if [ -z "$running" ]; then
         log "no ${CONTAINER_NAME} container to stop."
@@ -444,6 +515,7 @@ stop_failed_container() {
     log "stopping ${CONTAINER_NAME} (running ${new_short}, or an image whose ID could not be read) so the stamp read is final ..."
     if ! docker stop "$CONTAINER_NAME" >/dev/null; then
         log "could not stop ${CONTAINER_NAME}."
+        UNSTOPPED="$CONTAINER_NAME"
         return 1
     fi
     return 0
@@ -456,10 +528,10 @@ repin_is_safe() {
     # question whose answer decides whether re-pinning recovers or kills.
     # Asked after `stop_failed_container` too, and read FOR SHARE, so the
     # answer cannot change behind it.
-    # It also distinguishes the failure cases for free -- a container that
-    # never started, or whose entrypoint step 3 failed (one transaction since
-    # plan step balance:X-cv), migrated nothing that stuck, so the stamp is
-    # unchanged and the ordinary rollback still applies.
+    # It also distinguishes the failure cases for free -- a deploy that never
+    # started, or whose step 3 failed (one transaction since plan step
+    # balance:X-cv), migrated nothing that stuck, so the stamp is unchanged
+    # and the ordinary rollback still applies.
     #
     # STAMPED_REVISIONS becomes what the re-read found, or EMPTY when it found
     # nothing: the pre-flight's value describes the database before the
@@ -549,38 +621,65 @@ ${reason}"
 }
 
 save_failed_container_log() {
-    # Write the failed container's log beside the pre-deploy dump, BEFORE a
-    # re-pin recreates the container.  Sets FAILED_LOG_PATH.
+    # Write the failed deploy's and app's logs beside the pre-deploy dump,
+    # BEFORE a re-pin recreates their containers.  Sets FAILED_LOG_PATH.
     #
     # Re-pinning runs `docker compose up -d` with the previous digest, which
-    # REPLACES the container, and `docker logs` then shows the previous image
-    # booting.  The failed run's own log is the one that says why it failed --
-    # an init_database refusal names what to repair (plan step balance:X-cv made
-    # such a refusal an automatic rollback) -- so it is kept as a file the
-    # output and the ntfy alert can name.  Loki holds it too, but the operator
-    # holding this script's output should not need to know that.
+    # REPLACES both containers, and `docker logs` then shows the previous
+    # image.  The failed run's own logs are the ones that say why it failed:
+    # the migrate container's carries the deploy's -- an init_database refusal
+    # names what to repair (plan step balance:X-cv made such a refusal an
+    # automatic rollback) -- and the app's carries what came after it.  Both
+    # go in one file the output and the ntfy alert can name, the migrate
+    # container's first, as it ran first.  Loki holds them too, but the
+    # operator holding this script's output should not need to know that.
     #
     # Best effort, and deliberately so: the rollback does not wait on it past
-    # the timeout.  A failure to save is logged and leaves FAILED_LOG_PATH
-    # empty.
+    # the timeout.  A log that cannot be read is logged, and the file keeps
+    # the other; when neither can be read the file is removed and
+    # FAILED_LOG_PATH left empty.
     FAILED_LOG_PATH="${DUMP_PATH%.dump}.failed-container.log"
-    # The file's first line names the image the container ran: on the compose
-    # path `compose up` may have failed before recreating it, and then this is
-    # the PREVIOUS image's log, which the header makes visible.  Bounded, so a
-    # hung daemon cannot hold the rollback.
-    local image
-    image=$(docker inspect --format '{{.Config.Image}}' "$CONTAINER_NAME" 2>/dev/null || true)
-    if {
-        printf '# docker logs %s (image: %s)\n' "$CONTAINER_NAME" "${image:-unknown}"
-        timeout 30 docker logs "$CONTAINER_NAME" 2>&1
-    } >"$FAILED_LOG_PATH"; then
-        log "failed container's log saved: ${FAILED_LOG_PATH}"
-    else
+    local saved=0 container
+    : >"$FAILED_LOG_PATH" || {
+        FAILED_LOG_PATH=""
+        log "WARN: could not write the failed containers' logs beside the dump;"
+        log "      they are in Loki (Grafana) only."
+        return 0
+    }
+    for container in "$MIGRATE_CONTAINER" "$CONTAINER_NAME"; do
+        # shellcheck disable=SC2310 ## best effort; its status is the branch.
+        if append_container_log "$container"; then
+            saved=$((saved + 1))
+        else
+            log "WARN: could not save ${container}'s log before the container"
+            log "      is recreated; it is in Loki (Grafana) only."
+        fi
+    done
+    if [ "$saved" -eq 0 ]; then
         rm -f "$FAILED_LOG_PATH"
         FAILED_LOG_PATH=""
-        log "WARN: could not save ${CONTAINER_NAME}'s log before the container"
-        log "      is recreated; it is in Loki (Grafana) only."
+        return 0
     fi
+    log "failed containers' logs saved: ${FAILED_LOG_PATH}"
+}
+
+append_container_log() {
+    # Append one container's log to FAILED_LOG_PATH under a header naming the
+    # image it ran: on the compose path `compose up` may have failed before
+    # recreating a container, and then its log is the PREVIOUS image's, which
+    # the header makes visible.  Bounded, so a hung daemon cannot hold the
+    # rollback.  A log that cannot be read leaves only its header and a line
+    # saying so, and returns 1.
+    local container="$1" image status=0
+    image=$(docker inspect --format '{{.Config.Image}}' "$container" 2>/dev/null || true)
+    {
+        printf '# docker logs %s (image: %s)\n' "$container" "${image:-unknown}"
+        timeout 30 docker logs "$container" 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then
+            printf '# docker logs %s exited %s: no log saved\n' "$container" "$status"
+        fi
+    } >>"$FAILED_LOG_PATH" || return 1
+    [ "$status" -eq 0 ]
 }
 
 refuse_to_repin() {
@@ -591,8 +690,8 @@ refuse_to_repin() {
     #
     #   * STAMPED_REVISIONS holds a stamp the previous image cannot resolve and
     #     the NEW image can: the new image's step 3 COMMITTED, and the
-    #     container failed later (a later entrypoint step, or the health
-    #     check).  Starting it again restores nothing and loses nothing, which
+    #     deploy failed later (its step 4, the first user's seed, or the
+    #     health check).  Starting it again restores nothing and loses nothing, which
     #     is the recovery when the failure was transient: a release that was
     #     only slower than the health check allowed (the container's own
     #     healthcheck turning unhealthy, or HEALTH_TIMEOUT_S running out)
@@ -606,32 +705,34 @@ refuse_to_repin() {
     #     database answers, the rollback goes through this script, whose
     #     pre-flight asks the stamp question again before writing anything.
     #
-    # The failed container's log is saved first, as on the re-pin paths: the
-    # restore below ends in a `compose up` that recreates the container, and
+    # The failed containers' logs are saved first, as on the re-pin paths: the
+    # restore below ends in a `compose up` that recreates both containers, and
     # `docker logs` then shows the previous image.
     #
-    # In the restore sequence the first instruction is to STOP the container,
-    # and that ordering is not cosmetic: the app runs `restart: unless-stopped`
-    # and re-runs `alembic upgrade head` on every start, so an operator who
-    # begins with pg_restore is restoring underneath a container that is
-    # concurrently migrating.  `stop_failed_container` has usually stopped it
-    # already, but not on every path here -- a daemon that could not be asked
-    # leaves both the container and the stamp unread -- so the instruction
-    # stays first and unconditional.
+    # In the restore sequence the first instruction is to STOP the app, and
+    # that ordering is not cosmetic: a live app writes, so an operator who
+    # begins with pg_restore is restoring underneath requests that write.  The
+    # app restarting runs no deploy (only an `up` runs the migrate service,
+    # which is `restart: "no"`), and the sequence's closing `up` runs the
+    # previous image's deploy against the restored database before it starts
+    # the app.  `stop_failed_container` has usually stopped the app already,
+    # but not on every path here -- a daemon that could not be asked leaves
+    # both the container and the stamp unread -- so the instruction stays
+    # first and unconditional.
     local why="$1"
     save_failed_container_log
-    local failed_log="${FAILED_LOG_PATH:-not saved; docker logs ${CONTAINER_NAME}, or Loki}"
+    local failed_log="${FAILED_LOG_PATH:-not saved; docker logs ${MIGRATE_CONTAINER} and ${CONTAINER_NAME}, or Loki}"
     log ""
     log "REFUSING to roll back."
     log "  ${why}"
     log ""
     if [ -z "$STAMPED_REVISIONS" ]; then
         log "  The stamp could not be re-read after the failure, so whether"
-        log "  ${new_short}'s entrypoint step 3 committed its migrations is"
-        log "  UNKNOWN, and re-pinning ${old_short} blind could make a second dead"
-        log "  container.  The pin is left at ${new_short}."
+        log "  ${new_short}'s step 3, in the migrate service, committed its"
+        log "  migrations is UNKNOWN, and re-pinning ${old_short} blind could make a"
+        log "  second dead container.  The pin is left at ${new_short}."
         log ""
-        log "  Failed container's log: ${failed_log}"
+        log "  Failed containers' logs: ${failed_log}"
         log ""
         log "  Once the database answers, roll back through this script, whose"
         log "  pre-flight reads the stamp and refuses up front, naming the"
@@ -643,25 +744,26 @@ refuse_to_repin() {
         log "  Pre-deploy dump:"
         log "    ${DUMP_PATH}"
         ntfy_notify 5 "Shekel deploy FAILED, rollback REFUSED" \
-            "${new_short} did not come up and the stamp could not be re-read, so whether its migrations committed is unknown. Pin left at ${new_short}. Once the database answers, run: shekel-deploy ${old_digest}. Dump: ${DUMP_PATH}. Failed container's log: ${failed_log}"
+            "${new_short} did not come up and the stamp could not be re-read, so whether its migrations committed is unknown. Pin left at ${new_short}. Once the database answers, run: shekel-deploy ${old_digest}. Dump: ${DUMP_PATH}. Failed containers' logs: ${failed_log}"
         exit 1
     fi
     local stamped_line restart_hint=""
     stamped_line=$(printf '%s' "$STAMPED_REVISIONS" | tr '\n' ' ')
     log "  Database is now stamped at: ${stamped_line}"
-    log "  ${old_short} has no migration script for that revision, so it would"
-    log "  die at entrypoint step 3."
+    log "  ${old_short} has no migration script for that revision, so its deploy"
+    log "  would die at step 3, in the migrate service."
     # shellcheck disable=SC2310 ## boolean predicate, failure is the branch.
     if image_resolves_revisions "$NEW_MIGRATIONS" "$STAMPED_REVISIONS"; then
-        log "  ${new_short}'s step 3 COMMITTED its migrations, and the container"
-        log "  then failed later (a later entrypoint step, or the health check)."
+        log "  ${new_short}'s step 3 COMMITTED its migrations, and the deploy then"
+        log "  failed later (its step 4, the first user's seed, or the health check)."
         log "  The pin is left at ${new_short}."
         if [ -n "$ADDED_REVISIONS" ]; then
             log "  Migrations this release added:"
             printf '%s\n' "$ADDED_REVISIONS" | sed 's/^/    /'
         fi
         log ""
-        log "  Read the failed container's log first -- it says which step failed:"
+        log "  Read the failed containers' logs first -- the migrate container's"
+        log "  says which deploy step failed:"
         log "    ${failed_log}"
         log ""
         log "  If the log shows a failure a restart can clear -- the release was"
@@ -676,7 +778,7 @@ refuse_to_repin() {
         log "  ${new_short} cannot resolve that revision either, so its step 3"
         log "  did not write it: something other than this deploy moved the"
         log "  stamp.  The pin is left at ${new_short}; restoring the dump is the"
-        log "  way back.  The failed container's log: ${failed_log}"
+        log "  way back.  The failed containers' logs: ${failed_log}"
     fi
     log ""
     log "  Pre-deploy dump:"
@@ -691,7 +793,7 @@ refuse_to_repin() {
     log ""
     log "  Then, to restore and return to ${old_short}:"
     log "    cd ${SHEKEL_DIR}"
-    log "    docker compose stop ${COMPOSE_SERVICE}   # FIRST: it re-migrates on every restart"
+    log "    docker compose stop ${COMPOSE_SERVICE}   # FIRST: a live app writes during the restore"
     log "    docker exec -i ${DB_CONTAINER} pg_restore -U ${DB_USER} \\"
     log "        -d ${DB_NAME} --clean --if-exists \\"
     log "        --single-transaction --exit-on-error <'${DUMP_PATH}'"
@@ -707,7 +809,57 @@ refuse_to_repin() {
     log "        -c '\\dt budget.*'"
 
     ntfy_notify 5 "Shekel deploy FAILED, rollback REFUSED" \
-        "${new_short} did not come up and ${old_short} cannot resolve the schema the database is now at (${stamped_line}), so re-pinning cannot work. Pin left at ${new_short}. Read the failed container's log (${failed_log}) first.${restart_hint} Before any restore, run: docker compose stop ${COMPOSE_SERVICE} (it re-migrates on every restart). Dump: ${DUMP_PATH}"
+        "${new_short} did not come up and ${old_short} cannot resolve the schema the database is now at (${stamped_line}), so re-pinning cannot work. Pin left at ${new_short}. Read the failed containers' logs (${failed_log}) first.${restart_hint} Before any restore, run: docker compose stop ${COMPOSE_SERVICE} (a live app writes during the restore). Dump: ${DUMP_PATH}"
+    exit 1
+}
+
+refuse_layout() {
+    # The pre-flight found that the previous image cannot run under the
+    # compose files in place (`image_runs_this_layout`): their migrate service
+    # runs an entrypoint it does not hold, so a re-pin would fail its `up` and
+    # leave nothing serving.  The first release of card plan#2166 is this
+    # case.  So the pin stays at the new digest, and the way back is named:
+    # the compose files the previous image ran under as well as its digest,
+    # which this script does not hold.  The stamp is re-read as on every
+    # failure path, for the one more thing the way back turns on: whether the
+    # previous image resolves it, or the dump must be restored first.
+    local why="$1" resolved=false stamped_line
+    # shellcheck disable=SC2310 ## the answer selects the text; both continue.
+    if repin_is_safe; then
+        resolved=true
+    fi
+    stamped_line=$(printf '%s' "$STAMPED_REVISIONS" | tr '\n' ' ')
+    save_failed_container_log
+    local failed_log="${FAILED_LOG_PATH:-not saved; docker logs ${MIGRATE_CONTAINER} and ${CONTAINER_NAME}, or Loki}"
+    log ""
+    log "REFUSING to roll back."
+    log "  ${why}"
+    log ""
+    log "  ${old_short} cannot run under the compose files in place: their migrate"
+    log "  service runs ${MIGRATE_ENTRYPOINT}, which ${old_short} does not hold,"
+    log "  so re-pinning it would bring nothing up.  The pin is left at ${new_short}."
+    log ""
+    log "  Failed containers' logs: ${failed_log}"
+    log ""
+    log "  Going back to ${old_short} takes the compose files it ran under as well"
+    log "  as its digest (${old_digest}); this script changes the digest alone."
+    if $resolved; then
+        log "  The database is stamped at ${stamped_line}, which ${old_short}"
+        log "  resolves, so it needs no restore."
+    elif [ -z "$STAMPED_REVISIONS" ]; then
+        log "  The stamp could not be re-read, so whether ${old_short} resolves it is"
+        log "  UNKNOWN: read it before going back, and restore the dump first if"
+        log "  ${old_short} has no migration script for it."
+    else
+        log "  The database is stamped at ${stamped_line}, which ${old_short} has no"
+        log "  migration script for, so the dump must be restored before it starts."
+    fi
+    log ""
+    log "  Pre-deploy dump:"
+    log "    ${DUMP_PATH}"
+
+    ntfy_notify 5 "Shekel deploy FAILED, rollback REFUSED" \
+        "${new_short} did not come up, and ${old_short} cannot run under the compose files in place (no ${MIGRATE_ENTRYPOINT}), so re-pinning cannot work. Pin left at ${new_short}. Going back takes ${old_short}'s compose files as well as its digest. Failed containers' logs: ${failed_log}. Dump: ${DUMP_PATH}"
     exit 1
 }
 
@@ -725,21 +877,21 @@ refuse_unstoppable() {
     log "REFUSING to roll back."
     log "  ${why}"
     log ""
-    log "  ${CONTAINER_NAME} could not be stopped, and it may be running"
-    log "  ${new_short}'s entrypoint step 3, which may still commit a migration:"
+    log "  ${UNSTOPPED} could not be stopped, and it may be running"
+    log "  ${new_short}'s deploy, whose step 3 may still commit a migration:"
     log "  the stamp cannot be read as final.  The pin is left at ${new_short}."
     log ""
     log "  Stop it, then roll back through this script, whose pre-flight"
     log "  re-reads the stamp and refuses up front if ${old_short} cannot"
     log "  resolve it:"
-    log "    docker stop ${CONTAINER_NAME}"
+    log "    docker stop ${UNSTOPPED}"
     log "    $0 ${old_digest}"
     log ""
     log "  Pre-deploy dump:"
     log "    ${DUMP_PATH}"
 
     ntfy_notify 5 "Shekel deploy FAILED, rollback REFUSED" \
-        "${new_short} did not come up and its container could not be stopped, so the stamp read would not be final. Pin left at ${new_short}. Stop ${CONTAINER_NAME}, then run: shekel-deploy ${old_digest}. Dump: ${DUMP_PATH}"
+        "${new_short} did not come up and its container could not be stopped, so the stamp read would not be final. Pin left at ${new_short}. Stop ${UNSTOPPED}, then run: shekel-deploy ${old_digest}. Dump: ${DUMP_PATH}"
     exit 1
 }
 
@@ -782,6 +934,11 @@ STAMPED_REVISIONS=""
 DUMP_PATH=""
 DUMP_PART=""
 FAILED_LOG_PATH=""
+# The pre-flight's answer; false until it asks, so a path that reached a
+# failure without it would refuse rather than re-pin.
+OLD_RUNS_HERE=false
+# The container `stop_failed_container` could not stop, for the refusal.
+UNSTOPPED=""
 
 # shellcheck disable=SC2329 ## invoked indirectly, by the `trap ... EXIT`
 # immediately below; shellcheck does not follow trap handlers.
@@ -924,15 +1081,25 @@ preflight_migrations "$old_digest" "$new_digest"
 if [ -n "$ADDED_REVISIONS" ]; then
     log "MIGRATION-BEARING release: the target adds these revisions --"
     printf '%s\n' "$ADDED_REVISIONS" | sed 's/^/    /'
-    log "  Entrypoint step 3 runs them, the seeds, the deploy hooks and the"
-    log "  audit-trigger check in ONE transaction, so a failure there leaves the"
-    log "  stamp where ${old_short} can resolve it and the rollback applies."
+    log "  The deploy's step 3, in the migrate service, runs them, the seeds,"
+    log "  the deploy hooks and the audit-trigger check in ONE transaction, so"
+    log "  a failure there leaves the stamp where ${old_short} can resolve it."
     log "  If step 3 COMMITS and a later step or the health check then fails,"
     log "  re-pinning ${old_short} will NOT work.  This script re-reads the stamp"
     log "  after a failure and refuses rather than making a second dead container."
 else
     log "the target adds no migrations, so a failure leaves the schema where"
-    log "${old_short} can still resolve it and the rollback applies as usual."
+    log "${old_short} can still resolve it."
+fi
+if $OLD_RUNS_HERE; then
+    log "${old_short} runs under the compose files in place, so the rollback"
+    log "applies as usual."
+else
+    log "${old_short} CANNOT run under the compose files in place: their migrate"
+    log "  service runs ${MIGRATE_ENTRYPOINT}, which ${old_short} does not hold."
+    log "  A failure is NOT rolled back by re-pinning it: this script refuses,"
+    log "  leaves the pin at ${new_short} and names the way back, which takes the"
+    log "  compose files ${old_short} ran under as well as its digest."
 fi
 
 # ── Dry-run exit ───────────────────────────────────────────────────
@@ -958,15 +1125,21 @@ log "docker compose up -d $COMPOSE_SERVICE ..."
 # shellcheck disable=SC2310 ## deliberate: a boolean predicate, and its
 # own failure is the branch being taken -- not an error to propagate.
 if ! compose_up; then
-    # `docker compose up -d` reporting failure USUALLY means the container
-    # never started, so nothing migrated -- but it also covers one that
-    # started and exited having reached entrypoint step 3.  Rather than guess
-    # from the exit status, ask the database: if the stamp is still something
-    # ${old_short} can resolve, the ordinary revert is correct.  Asked once a
-    # target-image container is stopped, so the answer is final.
+    # `docker compose up -d` reporting failure USUALLY means the deploy
+    # failed in the migrate service, which the app waits on, and then the
+    # app's new container was created and never started.  A failure inside
+    # the deploy's step 3 migrated nothing; one after it (step 4, the first
+    # user's seed) leaves the new stamp; and the `up` can fail with the
+    # deploy still running.  Rather than guess from the exit status, ask the
+    # database: if the stamp is still something ${old_short} can resolve, the
+    # ordinary revert is correct.  Asked once a container that could still
+    # commit is stopped, so the answer is final.
     # shellcheck disable=SC2310 ## boolean predicate, failure is the branch.
     if ! stop_failed_container; then
         refuse_unstoppable "docker compose up rejected ${new_short}."
+    fi
+    if ! $OLD_RUNS_HERE; then
+        refuse_layout "docker compose up rejected ${new_short}."
     fi
     # shellcheck disable=SC2310 ## boolean predicate, failure is the branch.
     if ! repin_is_safe; then
@@ -978,7 +1151,7 @@ if ! compose_up; then
     # shellcheck disable=SC2310 ## deliberate: the WARN is the handling.
     compose_up || log "WARN: revert compose up also failed; container state unknown."
     ntfy_notify 5 "Shekel deploy FAILED (compose)" \
-        "compose up rejected ${new_short}; reverted to ${old_short}. Failed container's log: ${FAILED_LOG_PATH:-in Loki only}"
+        "compose up rejected ${new_short}; reverted to ${old_short}. Failed containers' logs: ${FAILED_LOG_PATH:-in Loki only}"
     exit 1
 fi
 
@@ -995,7 +1168,7 @@ fi
 
 # ── Rollback ───────────────────────────────────────────────────────
 # The F-8 fork.  A stamp the previous image cannot resolve -- a release whose
-# entrypoint step 3 COMMITTED its migrations before something later failed --
+# deploy's step 3 COMMITTED its migrations before something later failed --
 # has no working rollback, so it gets the refusal instead of a second dead
 # container.  A step-3 failure left the stamp unmoved (plan step X-cv) and
 # re-pins below.  The container is stopped before the stamp is read, and the
@@ -1004,6 +1177,9 @@ fi
 # shellcheck disable=SC2310 ## boolean predicate, failure is the branch.
 if ! stop_failed_container; then
     refuse_unstoppable "${new_short} did not report healthy within ${HEALTH_TIMEOUT_S}s."
+fi
+if ! $OLD_RUNS_HERE; then
+    refuse_layout "${new_short} did not report healthy within ${HEALTH_TIMEOUT_S}s."
 fi
 # shellcheck disable=SC2310 ## boolean predicate, failure is the branch.
 if ! repin_is_safe; then
@@ -1018,9 +1194,9 @@ write_env_digest "$old_digest"
 if compose_up && wait_healthy; then
     log "rollback healthy. Failed digest: $new_digest"
     log "pre-deploy dump kept at: ${DUMP_PATH}"
-    log "failed container's log: ${FAILED_LOG_PATH:-in Loki only}"
+    log "failed containers' logs: ${FAILED_LOG_PATH:-in Loki only}"
     ntfy_notify 5 "Shekel deploy FAILED, rolled back" \
-        "${new_short} did not become healthy. Reverted to ${old_short}. Failed container's log: ${FAILED_LOG_PATH:-in Loki only}"
+        "${new_short} did not become healthy. Reverted to ${old_short}. Failed containers' logs: ${FAILED_LOG_PATH:-in Loki only}"
     exit 1
 fi
 
@@ -1032,7 +1208,7 @@ fi
 # refuses; docs/runbook.md s.2.3.  Also reached when the re-pin's own
 # `compose up` failed and usually nothing started (finding BAL-540).
 log "pre-deploy dump kept at: ${DUMP_PATH}"
-log "failed container's log: ${FAILED_LOG_PATH:-in Loki only}"
+log "failed containers' logs: ${FAILED_LOG_PATH:-in Loki only}"
 ntfy_notify 5 "Shekel deploy FAILED, rollback UNHEALTHY" \
-    "Neither ${new_short} nor rollback ${old_short} is healthy. Container needs manual attention. Dump: ${DUMP_PATH}. Failed container's log: ${FAILED_LOG_PATH:-in Loki only}"
+    "Neither ${new_short} nor rollback ${old_short} is healthy. Container needs manual attention. Dump: ${DUMP_PATH}. Failed containers' logs: ${FAILED_LOG_PATH:-in Loki only}"
 die "rollback container also unhealthy; manual intervention required."

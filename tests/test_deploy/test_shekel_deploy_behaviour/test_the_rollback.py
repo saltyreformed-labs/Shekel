@@ -22,6 +22,7 @@ from ._helpers import (
     _FAILURE_PATHS,
     _refusal,
     _NEW_SHORT,
+    _as_read,
 )
 
 
@@ -113,7 +114,7 @@ class TestTheOrdinaryRollbackSurvives:
 class TestAStep3RefusalRollsBack:
     """Plan step balance:X-cv: a step-3 refusal re-pins, and its log is kept.
 
-    Entrypoint step 3 is one transaction, so a migration-bearing release whose
+    The deploy's step 3 is one transaction, so a migration-bearing release whose
     deploy hook refuses leaves the stamp where the previous image can resolve
     it.  The script's direction-free question then answers "re-pin" with no
     change of its own -- and re-pinning RECREATES the container, so the failed
@@ -189,8 +190,48 @@ class TestAStep3RefusalRollsBack:
         output = result.stdout + result.stderr
         assert stack.pin == _OLD
         assert "could not save probe-app's log" in output
-        assert "failed container's log: in Loki only" in output
+        assert "could not save probe-migrate's log" in output
+        assert "failed containers' logs: in Loki only" in output
         assert list(stack.backup_dir.glob("*.failed-container.log")) == []
+
+    def test_the_saved_file_holds_the_deploy_s_log_then_the_app_s(self, stack):
+        """The migrate container's log, which names the refusal, comes first.
+
+        Since card plan#2166 the deploy runs in the migrate service, so its
+        log, not the app's, says why step 3 failed.  Each log sits under a
+        header naming its container, in the order they ran.
+        """
+        result = stack.run(
+            health="unhealthy", migrate_log=_REFUSAL_LINE,
+            container_log="fake app log", **_STEP_3_ROLLED_BACK,
+        )
+        calls = stack.invocations
+        saved = sorted(stack.backup_dir.glob("*.failed-container.log"))
+        assert len(saved) == 1, _said(result, calls)
+        text = saved[0].read_text(encoding="utf-8")
+        migrate_at = text.index("# docker logs probe-migrate (image: ")
+        app_at = text.index("# docker logs probe-app (image: ")
+        assert migrate_at < text.index(_REFUSAL_LINE) < app_at, text
+        assert app_at < text.index("fake app log"), text
+        assert f"failed containers' logs saved: {saved[0]}" in result.stdout, (
+            _said(result, calls))
+
+    def test_one_log_that_cannot_be_read_keeps_the_other(self, stack):
+        """The migrate container's log fails: the file keeps the app's, and says so."""
+        result = stack.run(
+            health="unhealthy", migrate_logs_rc="1", container_log="fake app log",
+            **_STEP_3_ROLLED_BACK,
+        )
+        output = result.stdout + result.stderr
+        calls = stack.invocations
+        saved = sorted(stack.backup_dir.glob("*.failed-container.log"))
+        assert len(saved) == 1, _said(result, calls)
+        text = saved[0].read_text(encoding="utf-8")
+        assert "# docker logs probe-migrate exited 1: no log saved" in text, text
+        assert "fake app log" in text, text
+        assert "could not save probe-migrate's log" in output, _said(result, calls)
+        assert "could not save probe-app's log" not in output, _said(result, calls)
+        assert stack.pin == _OLD, _said(result, calls)
 
 
 class TestTheStampIsReadOnceTheTargetIsStopped:
@@ -287,6 +328,119 @@ class TestTheStampIsReadOnceTheTargetIsStopped:
         ), _said(result, calls)
         assert len(_compose_ups(calls, result)) == 1, _said(result, calls)
         assert f"{_DEPLOY_SCRIPT} {_OLD}" in _flat(output)
+
+
+class TestARunningDeployIsStoppedBeforeTheRead:
+    """Card plan#2166: the migrate container, where step 3 now runs, is stopped first.
+
+    ``docker compose up -d app`` runs the migrate service and waits for it, so
+    a ``up`` that fails with the deploy still running leaves that container
+    inside step 3, whose one transaction may yet commit.  It is stopped before
+    the stamp is read, whatever image it runs; one that has exited can commit
+    nothing and is left alone.
+    """
+
+    def test_a_deploy_still_running_is_stopped_before_the_stamp_read(self, stack):
+        """Stop the migrate container, then read the stamp, then re-pin."""
+        result = stack.run(
+            compose_rc="1", migrate_running="true", **_STEP_3_ROLLED_BACK,
+        )
+        calls = stack.invocations
+        stopped_at = _position(calls, "stop probe-migrate", result)
+        assert stopped_at < _last_stamp_read(calls, result), _said(result, calls)
+        assert _compose_ups(calls, result)[0] < stopped_at, _said(result, calls)
+        assert stack.pin == _OLD, _said(result, calls)
+
+    @_FAILURE_PATHS
+    def test_an_exited_migrate_container_is_not_stopped(self, stack, failure):
+        """A deploy that has ended can commit nothing: no stop, and its log is saved."""
+        result = stack.run(migrate_log=_REFUSAL_LINE, **failure, **_STEP_3_ROLLED_BACK)
+        calls = stack.invocations
+        assert "stop probe-migrate" not in calls, _said(result, calls)
+        assert "logs probe-migrate" in calls, _said(result, calls)
+        assert stack.pin == _OLD, _said(result, calls)
+
+    def test_a_migrate_container_that_will_not_stop_refuses_the_re_pin(
+        self, stack,
+    ):
+        """Its step 3 may still commit, so no read is final: the pin stays, loudly.
+
+        The refusal names the container that would not stop and the way back
+        through this script, and no stamp is read after the failed stop.
+        """
+        result = stack.run(
+            compose_rc="1", migrate_running="true", migrate_stop_rc="1",
+            **_STEP_3_ROLLED_BACK,
+        )
+        output = result.stdout + result.stderr
+        calls = stack.invocations
+        assert result.returncode == 1, _said(result, calls)
+        assert "REFUSING to roll back" in output, _said(result, calls)
+        assert "probe-migrate could not be stopped" in _flat(output), (
+            _said(result, calls))
+        assert "docker stop probe-migrate" in output, _said(result, calls)
+        assert stack.pin == _NEW, _said(result, calls)
+        assert (
+            _last_stamp_read(calls, result)
+            < _position(calls, "stop probe-migrate", result)
+        ), _said(result, calls)
+        assert len(_compose_ups(calls, result)) == 1, _said(result, calls)
+
+
+class TestAPreviousImageThatCannotRunHereIsNotRePinned:
+    """Card plan#2166: a re-pin is a recovery only under compose files the image can run.
+
+    The migrate service runs ``scripts/owner_entrypoint.sh`` from the app's
+    image, and an image built before the card has none, so re-pinning one
+    fails its ``up`` and leaves nothing serving.  The first release of the
+    card is that case: a failure is refused, the pin stays at the new digest,
+    and the way back names the compose files as well as the digest, and
+    whether the stamp it re-reads needs the dump restored first.
+    """
+
+    @_FAILURE_PATHS
+    def test_it_refuses_and_names_the_compose_files(self, stack, failure):
+        """An unmoved stamp: refused, one ``up``, the logs saved, no restore needed."""
+        result = stack.run(old_layout_rc="1", **failure, **_NO_MIGRATIONS)
+        output = result.stdout + result.stderr
+        calls = stack.invocations
+        refusal = _as_read(_refusal(output))
+        assert result.returncode == 1, _said(result, calls)
+        assert stack.pin == _NEW, _said(result, calls)
+        assert len(_compose_ups(calls, result)) == 1, _said(result, calls)
+        assert "cannot run under the compose files in place" in refusal
+        assert "/home/shekel/app/scripts/owner_entrypoint.sh" in refusal
+        assert "takes the compose files it ran under as well as its digest" in refusal
+        assert f"stamped at 0002, which {_OLD[7:19]} resolves, so it needs no restore" in (
+            refusal)
+        saved = sorted(stack.backup_dir.glob("*.failed-container.log"))
+        assert len(saved) == 1, _said(result, calls)
+        assert str(saved[0]) in refusal, _said(result, calls)
+
+    def test_a_stamp_it_cannot_resolve_names_the_restore(self, stack):
+        """The target's step 3 committed: the dump must be restored before it starts."""
+        result = stack.run(
+            health="unhealthy", old_layout_rc="1", **_MIGRATION_BEARING,
+        )
+        refusal = _as_read(_refusal(result.stdout + result.stderr))
+        assert stack.pin == _NEW
+        assert (
+            f"stamped at 0003, which {_OLD[7:19]} has no migration script for, "
+            "so the dump must be restored before it starts" in refusal
+        ), refusal
+        assert str(stack.dumps[0]) in refusal
+
+    def test_an_unread_stamp_is_named_unknown(self, stack):
+        """The re-read fails: whether a restore is needed is not claimed."""
+        result = stack.run(
+            health="unhealthy", old_layout_rc="1", stamp_reread_rc="1",
+            **_MIGRATION_BEARING,
+        )
+        refusal = _as_read(_refusal(result.stdout + result.stderr))
+        assert stack.pin == _NEW
+        assert "The stamp could not be re-read" in refusal, refusal
+        assert "UNKNOWN" in refusal, refusal
+        assert "needs no restore" not in refusal, refusal
 
 
 class TestTheRefusalSaysOnlyWhatTheStampShows:

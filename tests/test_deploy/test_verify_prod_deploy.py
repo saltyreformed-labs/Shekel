@@ -1,7 +1,7 @@
 """``deploy/verify_prod_deploy.sh`` is DRIVEN against a scripted ``docker``.
 
 Card X-cx L9a moved the coordinator's post-deploy check into the repository,
-beside the script whose work it grades.  As ``test_shekel_deploy_behaviour.py``
+beside the script whose work it grades.  As ``test_shekel_deploy_behaviour/``
 does for the deploy, these observe OUTCOMES -- the exit status, the verdict
 line and the calls made -- with a stub ``docker`` first on ``PATH``, so no
 daemon is needed and no test here is ``@pytest.mark.docker``: CI and a local

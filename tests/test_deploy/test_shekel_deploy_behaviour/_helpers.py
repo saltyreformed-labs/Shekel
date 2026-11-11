@@ -88,6 +88,17 @@ def _write_fake_docker(bin_dir: pathlib.Path) -> None:
             exit 0
             ;;
         run)
+            # Whether the previous image holds the migrate service's
+            # entrypoint (FAKE_OLD_LAYOUT_RC: 0 it does, 1 it does not, else
+            # docker failing); the target always does.
+            case "$*" in
+            *owner_entrypoint*)
+                case "$*" in
+                *{_OLD[7:19]}*) exit "$FAKE_OLD_LAYOUT_RC" ;;
+                esac
+                exit 0
+                ;;
+            esac
             # The migration pre-flight: one line per migration file, read from
             # a FILE, since the regression's listing is larger than one
             # environment string may be (128 KiB, MAX_ARG_STRLEN).
@@ -105,6 +116,12 @@ def _write_fake_docker(bin_dir: pathlib.Path) -> None:
             for arg in "$@"; do
                 case "$arg" in
                 *State.Running*)
+                    # The migrate container's running-check: whether a
+                    # deploy is still running there.
+                    if [ "${{@: -1}}" = "$FAKE_MIGRATE_CONTAINER" ]; then
+                        printf '%s\\n' "$FAKE_MIGRATE_RUNNING"
+                        exit 0
+                    fi
                     # FAKE_DB_INSPECT_RC models a container docker cannot find.
                     [ "$FAKE_DB_INSPECT_RC" != "0" ] && exit "$FAKE_DB_INSPECT_RC"
                     printf '%s\\n' "$FAKE_DB_RUNNING"
@@ -123,7 +140,9 @@ def _write_fake_docker(bin_dir: pathlib.Path) -> None:
         stop)
             # Stopping the failed container before the stamp is re-read
             # (plan step balance:X-cv).  FAKE_STOP_RC models a daemon that
-            # refuses.
+            # refuses, and FAKE_MIGRATE_STOP_RC one that refuses the migrate
+            # container.
+            [ "$2" = "$FAKE_MIGRATE_CONTAINER" ] && exit "$FAKE_MIGRATE_STOP_RC"
             exit "$FAKE_STOP_RC"
             ;;
         exec)
@@ -131,8 +150,8 @@ def _write_fake_docker(bin_dir: pathlib.Path) -> None:
                 case "$arg" in
                 psql)
                     # public.alembic_version.  The stamp ADVANCES once the
-                    # deploy has run, which is what a migration at entrypoint
-                    # step 3 does and what makes the post-failure re-read
+                    # deploy has run, which is what a migration at the
+                    # deploy's step 3 does and what makes the post-failure re-read
                     # mean something.  FAKE_STAMP_REREAD_RC models a re-read
                     # that fails (finding BAL-535).
                     if grep -q '^compose' "$FAKE_LOG"; then
@@ -187,9 +206,15 @@ def _write_fake_docker(bin_dir: pathlib.Path) -> None:
             exit 0
             ;;
         logs)
-            # The failed container's log, which the script saves beside the
-            # dump before a re-pin recreates the container (plan step
-            # balance:X-cv).  FAKE_LOGS_RC models a container with none.
+            # The failed containers' logs, which the script saves beside the
+            # dump before a re-pin recreates them (plan step balance:X-cv).
+            # FAKE_LOGS_RC and FAKE_MIGRATE_LOGS_RC model a container with
+            # none.
+            if [ "$2" = "$FAKE_MIGRATE_CONTAINER" ]; then
+                [ "$FAKE_MIGRATE_LOGS_RC" != "0" ] && exit "$FAKE_MIGRATE_LOGS_RC"
+                printf '%s\\n' "$FAKE_MIGRATE_LOG"
+                exit 0
+            fi
             [ "$FAKE_LOGS_RC" != "0" ] && exit "$FAKE_LOGS_RC"
             printf '%s\\n' "$FAKE_CONTAINER_LOG"
             exit 0
@@ -279,6 +304,11 @@ class _Stack:
             repo_digests: str | None = None,
             image_inspect_rc: str = "0",
             db_inspect_rc: str = "0",
+            migrate_running: str = "false",
+            migrate_stop_rc: str = "0",
+            migrate_log: str = "fake migrate log",
+            migrate_logs_rc: str | None = None,
+            old_layout_rc: str = "0",
             script: pathlib.Path | None = None,
             args: list[str] | None = None,
             ) -> subprocess.CompletedProcess:
@@ -318,6 +348,16 @@ class _Stack:
             image_inspect_rc: Exit status for that inspect.
             db_inspect_rc: Exit status for the database container's
                 running-check (non-zero: docker cannot find it).
+            migrate_running: Whether the migrate container is still running
+                the deploy (``true``/``false``).
+            migrate_stop_rc: Exit status for ``docker stop`` of the migrate
+                container.
+            migrate_log: What ``docker logs`` prints for the migrate container.
+            migrate_logs_rc: Exit status for that ``docker logs``; defaults
+                to *logs_rc*, so a run whose logs fail fails both.
+            old_layout_rc: Exit status of the probe for the migrate service's
+                entrypoint in the CURRENT image: ``0`` it holds it, ``1`` it
+                does not, anything else docker failing.
             script: The script to run, a symlink or copy; defaults to the
                 repository's ``deploy/shekel-deploy.sh``.
             args: The script's arguments, given whole; when absent they are
@@ -348,6 +388,7 @@ class _Stack:
             "SHEKEL_BACKUP_DIR": str(self.backup_dir),
             "SHEKEL_CONTAINER_NAME": "probe-app",
             "SHEKEL_DB_CONTAINER": "probe-db",
+            "SHEKEL_MIGRATE_CONTAINER": "probe-migrate",
             "SHEKEL_NTFY_TOKEN_FILE": str(self.root / "no-token"),
             "SHEKEL_HEALTH_TIMEOUT_S": "1",
             "SHEKEL_HEALTH_INTERVAL_S": "1",
@@ -379,6 +420,14 @@ class _Stack:
                 else target_image_id
             ),
             "FAKE_STOP_RC": stop_rc,
+            "FAKE_MIGRATE_CONTAINER": "probe-migrate",
+            "FAKE_MIGRATE_RUNNING": migrate_running,
+            "FAKE_MIGRATE_STOP_RC": migrate_stop_rc,
+            "FAKE_MIGRATE_LOG": migrate_log,
+            "FAKE_MIGRATE_LOGS_RC": (
+                logs_rc if migrate_logs_rc is None else migrate_logs_rc
+            ),
+            "FAKE_OLD_LAYOUT_RC": old_layout_rc,
             "FAKE_STAMP_REREAD_RC": stamp_reread_rc,
         })
         if args is None:
@@ -406,6 +455,22 @@ def _flat(text: str) -> str:
         The same text with every run of whitespace reduced to one space.
     """
     return " ".join(text.split())
+
+
+def _as_read(text: str) -> str:
+    """Return *text* as the operator reads it: one line of prose.
+
+    Every line the script logs carries its ``[shekel-deploy]`` prefix, so a
+    sentence wrapped across two lines has one inside it; the prefix is dropped
+    before the wrapping is joined.
+
+    Args:
+        text: Captured stdout/stderr.
+
+    Returns:
+        The text without its prefixes, every run of whitespace one space.
+    """
+    return _flat(text.replace("[shekel-deploy] ", ""))
 
 
 def _said(result: subprocess.CompletedProcess, calls: list[str]) -> str:
@@ -475,7 +540,7 @@ _DOWNGRADE = {
 }
 
 
-#: A migration-bearing release whose entrypoint step 3 ROLLED BACK (plan step
+#: A migration-bearing release whose deploy's step 3 ROLLED BACK (plan step
 #: balance:X-cv): the target adds revisions, but its migrations and deploy
 #: hooks are one transaction, so a refusal there leaves the stamp unmoved.
 _STEP_3_ROLLED_BACK = {
